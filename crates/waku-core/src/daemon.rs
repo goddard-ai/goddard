@@ -29,7 +29,6 @@ use waku_protocol::custom_commands::CustomCommand;
 #[cfg(test)]
 use waku_protocol::event_from_wire;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
-use waku_protocol::routing::RoutePolicyView;
 use waku_protocol::{decode_enum, event_to_wire};
 
 /// How many fully hydrated transcripts the daemon keeps resident.
@@ -118,8 +117,6 @@ pub struct WakuBackend {
     pairing: Arc<crate::pairing::PairingService>,
     /// The `USER`-derived label share friends and pairers both see.
     our_name: String,
-    /// The hot-reloading view of the user's `route-policy.json`.
-    route_policy: crate::route_policy::PolicyStore,
     /// Scheduled automations — definitions, run history, and the tick that
     /// dispatches them whether or not a client is attached.
     automations: Arc<AutomationService>,
@@ -156,8 +153,6 @@ impl WakuBackend {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "Goddard".to_owned());
         let usage_rates_dir = data_dir.clone();
-        let route_policy =
-            crate::route_policy::PolicyStore::open(data_dir.join("route-policy.json"));
         let automations = Arc::new(
             AutomationService::open(data_dir.join("automations.json"))
                 .context("could not load Goddard automations")?,
@@ -189,7 +184,6 @@ impl WakuBackend {
             daemon_address: Arc::new(Mutex::new(None)),
             exposed_port: Arc::new(Mutex::new(None)),
             usage_rates_dir,
-            route_policy,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             share: Arc::new(crate::share::ShareService::new(
                 share_dir.clone(),
@@ -1135,10 +1129,9 @@ impl Backend for WakuBackend {
                 last_used,
             } => {
                 let settings = self.settings.get();
-                let policy = self.route_policy.get();
                 let run = crate::routing::route_task(
                     settings.eval.as_ref(),
-                    &policy,
+                    &settings.route_classes,
                     &prompt,
                     project.as_deref(),
                     &candidates,
@@ -1156,22 +1149,6 @@ impl Backend for WakuBackend {
                 record.resolved_model = target.model;
                 record.reason = Some("user-override".to_owned());
                 crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
-                Ok(ResponsePayload::Ack)
-            }
-            Command::GetRoutePolicy => {
-                let policy = self.route_policy.get();
-                Ok(ResponsePayload::RoutePolicy {
-                    view: RoutePolicyView {
-                        path: self.route_policy.path().to_path_buf(),
-                        valid: !policy.is_default,
-                        hash: policy.hash.clone(),
-                        classes: policy.classes_raw.clone(),
-                        default: policy.default_raw.clone(),
-                    },
-                })
-            }
-            Command::SetRouteClassTarget { class, target } => {
-                self.route_policy.set_class_target(class, &target)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::LoadUsageHistory {
@@ -2920,14 +2897,14 @@ impl WakuBackend {
             }
         }
         // Named subagents ride the launch with the runtime: the fixed roster
-        // resolves its models through the route policy's tier table, so
+        // resolves its models through the same class map routing uses, so
         // routing and subagents share one user-editable map. Drivers without
         // an injection channel simply ignore it. Still experimental —
         // injected only when the opt-in is on.
         if daemon_settings.subagents_enabled {
             options.subagents = Some(crate::subagents::spec_for(
                 provider,
-                &self.route_policy.get(),
+                &daemon_settings.route_classes,
             ));
         }
         // Auto-mode permission review rides the same BYOK evaluation backend
@@ -3812,8 +3789,6 @@ fn handle_driver_command(
         | Command::TestEvalConnection { .. }
         | Command::RouteTask { .. }
         | Command::RecordRouteOverride { .. }
-        | Command::GetRoutePolicy
-        | Command::SetRouteClassTarget { .. }
         | Command::LoadUsageHistory { .. }
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }

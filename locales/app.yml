@@ -765,33 +765,29 @@ routing.class_general_description:
 routing.class_demanding:
   en: Demanding tasks
 routing.class_demanding_description:
-  en: Subtle, high-stakes, or long-horizon work — routed to the strongest tier.
-routing.tiers:
-  en: Tiers
-routing.tier_fast:
-  en: Fast tier
-routing.tier_default:
-  en: Default tier
-routing.tier_heavy:
-  en: Heavy tier
-routing.session_tier_fast:
-  en: Fast · your provider
-routing.session_tier_default:
-  en: Default · your provider
-routing.session_tier_heavy:
-  en: Heavy · your provider
+  en: Subtle, high-stakes, or long-horizon work — routed to the strongest combo.
 routing.providers:
   en: Providers
 routing.provider_default:
   en: default
 routing.last_used:
   en: Last used
+routing.last_used_description:
+  en: Keep whatever provider/model was used last
+routing.effort_default:
+  en: Default
+routing.suggest_defaults:
+  en: Suggest from recent usage
+routing.suggesting:
+  en: Suggesting…
+routing.suggest_done:
+  en: Suggestions applied — edit any class to adjust
+routing.suggest_no_history:
+  en: Not enough recent model usage to suggest from
+routing.suggest_empty:
+  en: Jev returned no usable suggestions
 routing.in_progress:
   en: Routing task…
-routing.policy_valid:
-  en: In effect
-routing.policy_invalid:
-  en: Invalid — using defaults
 daemon.not_configured:
   en: Not configured
 daemon.status:

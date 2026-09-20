@@ -2,28 +2,19 @@
 import type { EvalBackend } from "./EvalBackend";
 import type { RouteTarget } from "./RouteTarget";
 import type { TaskClass } from "./TaskClass";
-import type { TaskFamily } from "./TaskFamily";
 
 /**
  * The outcome of one routing decision — what the session starts on and why.
  * Kept on the session so the UI can explain the route after the fact.
  */
-export type RouteDecision = { target: RouteTarget, family?: TaskFamily | null, class?: TaskClass | null, needsPlanning?: boolean | null,
-/**
- * Confidence the backend reported for the family answer, 0–1.
- */
-familyConfidence?: number | null,
+export type RouteDecision = { target: RouteTarget, class?: TaskClass | null,
 /**
  * Confidence the backend reported for the class answer, 0–1.
  */
 classConfidence?: number | null,
 /**
- * Why this target won: "policy", "low-confidence", "eval-failed",
- * "eval-unconfigured", "default", "target-ineligible", and friends.
+ * Why this target won: "class-map", "class-unmapped",
+ * "low-class-confidence", "eval-failed", "eval-unconfigured",
+ * "model-ineligible", "provider-ineligible", and friends.
  */
-reason: string,
-/**
- * Hash of the policy document the decision was made under, matching the
- * decision log so a route can be traced back to its policy.
- */
-policyHash: string, backend?: EvalBackend | null, evalLatencyMs?: number | null, };
+reason: string, backend?: EvalBackend | null, evalLatencyMs?: number | null, };

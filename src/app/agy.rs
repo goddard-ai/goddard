@@ -129,6 +129,7 @@ impl Waku {
                         project,
                         workspace,
                         None,
+                        None,
                         session_id,
                         next_turn_count,
                         sync_default_branch,
@@ -183,6 +184,7 @@ impl Waku {
             worktree_restored,
             driver: _,
             route_decision: _,
+            turn_effort: _,
         } = prepared;
         let workspace_changed = self.state.session_mut(session_id).is_some_and(|session| {
             let changed = session.workspace != workspace;

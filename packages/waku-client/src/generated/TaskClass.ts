@@ -2,6 +2,6 @@
 
 /**
  * How much of a model the task deserves. `general` is the unmarked middle;
- * `routine` routes cheap/fast, `demanding` routes to the strongest tier.
+ * `routine` routes cheap/fast, `demanding` routes to the strongest model.
  */
 export type TaskClass = "routine" | "general" | "demanding";

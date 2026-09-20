@@ -20,7 +20,7 @@ use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
 };
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
-use crate::routing::{RouteCandidate, RouteDecision, RoutePolicyView, RouteTarget, TaskClass};
+use crate::routing::{RouteCandidate, RouteDecision, RouteTarget};
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
 use crate::usage::PlanUsage;
@@ -308,9 +308,10 @@ pub enum Command {
     /// pane. Carries the full settings so unsaved field edits can be tested;
     /// the daemon makes one minimal call and writes no decision log record.
     TestEvalConnection { settings: EvalSettings },
-    /// Route a new session's first prompt: evaluate the task, resolve the
-    /// routing policy against `candidates`, and answer with the provider and
-    /// model to start on. `last_used` backs the policy's `last_used` default.
+    /// Route a new session's first prompt: evaluate the task into a class,
+    /// resolve the daemon's class map against `candidates`, and answer with
+    /// the provider, model, and effort to start on. `last_used` is the
+    /// fallback route when no class entry applies.
     RouteTask {
         prompt: String,
         /// Lightweight project context for the classifier — the project
@@ -352,16 +353,6 @@ pub enum Command {
     /// Re-run the OAuth browser flow for an integration whose credential is
     /// missing or was revoked.
     StartIntegrationAuth { id: String },
-    /// Read the effective routing policy for the settings surface.
-    GetRoutePolicy,
-    /// Update one class-level target in the user's routing policy document,
-    /// preserving every other key. The JSON file stays the source of truth.
-    SetRouteClassTarget {
-        class: TaskClass,
-        /// "tier:fast" | "tier:default" | "tier:heavy" | "provider:model" |
-        /// "provider".
-        target: String,
-    },
     LoadComposerDrafts,
     SaveComposerDrafts {
         drafts: ComposerDrafts,
@@ -956,9 +947,6 @@ pub enum ResponsePayload {
     },
     RouteDecision {
         decision: RouteDecision,
-    },
-    RoutePolicy {
-        view: RoutePolicyView,
     },
     BlobStored {
         reference: String,

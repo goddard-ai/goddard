@@ -9,6 +9,7 @@ use crate::computer_use::ComputerAppGrant;
 use crate::custom_commands::CustomCommand;
 use crate::eval::EvalSettings;
 use crate::model::ProviderKind;
+use crate::routing::RouteClassMap;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(default)]
@@ -52,6 +53,11 @@ pub struct DaemonSettings {
     /// default path rather than erroring.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval: Option<EvalSettings>,
+    /// The user's model-routing map: which provider/model/effort each task
+    /// class starts on. Classes absent here leave routed sessions on their
+    /// `last_used` default.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub route_classes: RouteClassMap,
     /// Experimental opt-in for project memory: the daemon maintains a
     /// `.goddard/memory/` store per project, distills finished turns into it
     /// in the background, and injects it into each session's first prompt.
@@ -93,6 +99,7 @@ impl Default for DaemonSettings {
             project_map_enabled: default_experiment_enabled(),
             provider_binary_overrides: HashMap::new(),
             eval: None,
+            route_classes: RouteClassMap::new(),
             memory_experiment_enabled: default_experiment_enabled(),
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),

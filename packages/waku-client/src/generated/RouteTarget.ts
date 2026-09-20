@@ -3,6 +3,7 @@ import type { ProviderKind } from "./ProviderKind";
 
 /**
  * A concrete route: provider plus an optional model (`None` = the
- * provider's own default).
+ * provider's own default) and an optional reasoning effort (`None` = the
+ * user's remembered traits for the resolved model).
  */
-export type RouteTarget = { provider: ProviderKind, model?: string | null, };
+export type RouteTarget = { provider: ProviderKind, model?: string | null, effort?: string | null, };

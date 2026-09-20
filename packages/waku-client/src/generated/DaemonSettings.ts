@@ -4,6 +4,8 @@ import type { CustomCommand } from "./CustomCommand";
 import type { EvalSettings } from "./EvalSettings";
 import type { IntegrationSetting } from "./IntegrationSetting";
 import type { ProviderKind } from "./ProviderKind";
+import type { RouteClassTarget } from "./RouteClassTarget";
+import type { TaskClass } from "./TaskClass";
 import type { JsonValue } from "./serde_json/JsonValue";
 
 export type DaemonSettings = { computer_use_enabled: boolean,
@@ -53,6 +55,12 @@ project_map_enabled: boolean, provider_binary_overrides: { [key in ProviderKind]
  * default path rather than erroring.
  */
 eval?: EvalSettings | null,
+/**
+ * The user's model-routing map: which provider/model/effort each task
+ * class starts on. Classes absent here leave routed sessions on their
+ * `last_used` default.
+ */
+route_classes?: { [key in TaskClass]?: RouteClassTarget },
 /**
  * Experimental opt-in for project memory: the daemon maintains a
  * `.goddard/memory/` store per project, distills finished turns into it

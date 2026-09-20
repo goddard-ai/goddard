@@ -857,6 +857,10 @@ struct PreparedSubmission {
     /// starts and on route-RPC failures (which fall back to the draft's own
     /// provider).
     route_decision: Option<waku_protocol::routing::RouteDecision>,
+    /// A routed session's per-turn effort answer — `Some` when Jev moved the
+    /// session off its current effort with enough confidence. Applied ahead
+    /// of the prompt so the live driver retunes first.
+    turn_effort: Option<String>,
 }
 
 /// Everything needed to start a provider process, captured while the session
@@ -2000,8 +2004,12 @@ pub struct Waku {
     route_class_list: ListState,
     route_class_scrollbar: Rc<ScrollbarState>,
     /// The class whose target picker is open — routes `enter` and the
-    /// empty-query reveal to the right policy slot.
+    /// empty-query reveal to the right class slot.
     route_class_picker: Option<waku_protocol::routing::TaskClass>,
+    /// A "suggest defaults" evaluation is in flight on the Jev page.
+    route_suggest_pending: bool,
+    /// The last suggestion's outcome, rendered as the card's status line.
+    route_suggest_result: Option<Result<(), String>>,
     /// Focus for the picker's no-providers state. The panel takes focus on
     /// open so `escape` has a focused descendant to dispatch up from, and
     /// normally that is the filter field — which the empty state does not
@@ -2195,14 +2203,6 @@ pub struct Waku {
     /// Generation guard for the while-open presence re-probe loop — a new
     /// loop (or leaving the page) retires the previous one.
     friends_probe_generation: Cell<u64>,
-    /// GetRoutePolicy answers (and SetRouteClassTarget write+refreshes)
-    /// landing for the settings surface's routing section.
-    route_policy_tx: Sender<Result<waku_protocol::routing::RoutePolicyView, String>>,
-    route_policy_events: Receiver<Result<waku_protocol::routing::RoutePolicyView, String>>,
-    /// The newest policy view the settings page has; `None` until a fetch
-    /// answers, which also covers "routing not supported yet".
-    route_policy: Option<waku_protocol::routing::RoutePolicyView>,
-    route_policy_pending: bool,
     /// Turn-status-marker evaluations answered by the daemon, keyed by turn.
     /// Runtime-only: the decision log is the durable record of these calls.
     turn_status_markers: HashMap<Uuid, waku_protocol::eval::Evaluation>,
@@ -4304,7 +4304,6 @@ impl Waku {
         let (automations_tx, automations_events) = unbounded();
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
-        let (route_policy_tx, route_policy_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
         #[cfg(target_os = "macos")]
         if state.computer_use_experiment_enabled {
@@ -5270,6 +5269,8 @@ impl Waku {
                     .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
                 route_class_scrollbar: ScrollbarState::new(),
                 route_class_picker: None,
+                route_suggest_pending: false,
+                route_suggest_result: None,
                 model_picker_empty_focus,
                 branch_picker_mode: BranchPickerMode::Browse,
                 branch_picker_highlight: None,
@@ -5333,10 +5334,6 @@ impl Waku {
                 friend_session_lists: HashMap::new(),
                 friend_session_closed_tx,
                 friend_session_closed_events,
-                route_policy_tx,
-                route_policy_events,
-                route_policy: None,
-                route_policy_pending: false,
                 turn_status_markers: HashMap::new(),
                 pending_status_marker_turns: HashMap::new(),
                 status_marker_in_flight: HashSet::new(),

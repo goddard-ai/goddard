@@ -82,14 +82,11 @@ pub struct EvalDecisionRecord {
     pub resolved_provider: Option<waku_protocol::model::ProviderKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_effort: Option<String>,
     /// The deterministic reason chain that produced the route.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// Hash of the policy document the decision was made under.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy_hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
 }
@@ -111,9 +108,8 @@ impl EvalDecisionRecord {
             session_id: None,
             resolved_provider: None,
             resolved_model: None,
+            resolved_effort: None,
             reason: None,
-            policy_hash: None,
-            family: None,
             class: None,
         }
     }
@@ -122,12 +118,9 @@ impl EvalDecisionRecord {
     pub fn complete(&mut self, decision: &waku_protocol::routing::RouteDecision) {
         self.resolved_provider = Some(decision.target.provider);
         self.resolved_model = decision.target.model.clone();
+        self.resolved_effort = decision.target.effort.clone();
         self.reason = Some(decision.reason.clone());
-        self.family = decision.family.map(|family| family.id().to_owned());
         self.class = decision.class.map(|class| class.id().to_owned());
-        if self.policy_hash.is_none() {
-            self.policy_hash = Some(decision.policy_hash.clone());
-        }
         if self.latency_ms.is_none() {
             self.latency_ms = decision.eval_latency_ms;
         }

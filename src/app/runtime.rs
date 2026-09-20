@@ -284,6 +284,7 @@ pub(super) fn prepare_submission(
     project: Project,
     workspace: SessionWorkspace,
     driver_start: Option<routing::SessionStartPlan>,
+    turn_route: Option<routing::TurnRoutePlan>,
     session_id: Uuid,
     turn_count: usize,
     sync_default_branch: bool,
@@ -408,6 +409,11 @@ pub(super) fn prepare_submission(
     .err()
     .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error));
 
+    // A routed session's turn-level effort check rides the same boundary as
+    // the first turn's full route: one bounded daemon round trip, answered
+    // before the prompt goes out so the driver can retune first.
+    let turn_effort = turn_route.and_then(routing::TurnRoutePlan::evaluate);
+
     // Process startup can synchronously resolve executables, bind sockets,
     // and spawn children. It belongs behind the same animated preparation
     // boundary as Git work, otherwise the last spinner frame visibly freezes
@@ -433,6 +439,7 @@ pub(super) fn prepare_submission(
         worktree_restored,
         driver,
         route_decision,
+        turn_effort,
     })
 }
 
@@ -4858,6 +4865,7 @@ impl Waku {
                         project,
                         workspace,
                         Some(routing::SessionStartPlan::Direct(driver_start)),
+                        None,
                         session_id,
                         next_turn_count,
                         sync_default_branch,
@@ -4901,6 +4909,7 @@ impl Waku {
             worktree_restored,
             driver,
             route_decision: _,
+            turn_effort: _,
         } = prepared;
         if !self
             .state
@@ -5512,6 +5521,13 @@ impl Waku {
                 )
             }
         });
+        // A started session that came through Auto keeps its model but
+        // re-decides effort every turn: the same evaluation call, scoped to
+        // the effort ladder, applied only when confident. Hidden nudges are
+        // not user input and skip the check.
+        let turn_route = (self.runtimes.contains_key(&session_id) && !hidden)
+            .then(|| self.route_turn_plan_for_session(session, submission.human_prompt()))
+            .flatten();
         // Busy is visible before any Git work begins. The separate transient
         // set keeps this non-cancellable phase visually distinct from a
         // connecting provider, whose runtime already has a working Stop path.
@@ -5639,6 +5655,7 @@ impl Waku {
                         project,
                         workspace,
                         session_start,
+                        turn_route,
                         session_id,
                         next_turn_count,
                         sync_default_branch,
@@ -5715,6 +5732,7 @@ impl Waku {
             worktree_restored,
             driver: prepared_driver,
             route_decision,
+            turn_effort,
         } = prepared;
         // The turn began at accept time; it must still be the untouched one
         // this preparation belongs to. Cancellation is blocked while the
@@ -5745,11 +5763,15 @@ impl Waku {
         // the decision record itself.
         if let Some(decision) = route_decision {
             let target = decision.target.clone();
-            let (effort, tier, window) = target
+            let (remembered_effort, tier, window) = target
                 .model
                 .as_deref()
                 .map(|model| self.state.model_traits_for(target.provider, model))
                 .unwrap_or_default();
+            // The route's own effort wins; the remembered triple is the
+            // fallback for targets that name none — same rule the start
+            // request applied.
+            let effort = target.effort.clone().or(remembered_effort);
             let provider_changed = self
                 .state
                 .session_mut(session_id)
@@ -5871,6 +5893,35 @@ impl Waku {
         let mut failed_to_start = false;
         match driver {
             Ok(driver) => {
+                // A routed session's per-turn effort answer lands ahead of
+                // its prompt: the session records it and the live driver
+                // retunes, so the turn runs at the effort Jev chose. A driver
+                // that cannot retune keeps the previous effort — a per-turn
+                // hint is never worth a restart.
+                if let Some(effort) = turn_effort {
+                    let previous = self
+                        .state
+                        .session_mut(session_id)
+                        .map(|session| {
+                            let previous = session.reasoning_effort.clone();
+                            session.reasoning_effort = Some(effort);
+                            session.updated_at = unix_time();
+                            previous
+                        })
+                        .flatten();
+                    let applied = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .map(|session| self.session_options(session))
+                        .is_some_and(|options| driver.apply_options(options));
+                    if !applied {
+                        if let Some(session) = self.state.session_mut(session_id) {
+                            session.reasoning_effort = previous;
+                        }
+                    }
+                }
                 // The first prompt after a move into a worktree warns the
                 // resumed thread that its recorded paths now name a stale
                 // checkout. Provider-facing only — the transcript keeps the
@@ -5972,7 +6023,6 @@ impl Waku {
             | self.drain_automations_events(cx)
             | self.drain_review_events(cx)
             | self.drain_friend_session_closed_events(cx)
-            | self.drain_route_policy_events()
             | self.drain_status_marker_events()
         {
             cx.notify();

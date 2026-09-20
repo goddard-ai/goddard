@@ -100,11 +100,10 @@ impl Waku {
             self.ensure_daemon_discovery();
         }
         if page == SettingsPage::Jev {
-            // The page renders from the daemon's settings mirror and the
-            // fetched policy view — both may be missing on a first visit, so
-            // warm them here rather than mid-render.
+            // The page renders from the daemon's settings mirror, which may
+            // be missing on a first visit — warm it here rather than
+            // mid-render.
             self.seed_eval_inputs(cx);
-            self.request_route_policy(cx);
         }
         // The sidebar's search field holds real focus for the whole settings
         // visit, so landing on any page — from the sidebar, the palette, or a

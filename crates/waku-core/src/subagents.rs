@@ -9,9 +9,9 @@
 //! for OpenCode, an extension file for Pi, a session instruction entry for
 //! the adopted OpenCode 2 service, and a thread-start hint for Codex.
 //!
-//! The roster is fixed — `goddard-explore` plus one agent per routing tier —
-//! and tier agents resolve their model (and optional effort) through the
-//! route policy's `tiers` table for the session's provider, so routing and
+//! The roster is fixed — `goddard-explore` plus one agent per task class —
+//! and class agents resolve their model (and optional effort) through the
+//! user's routing class map for the session's provider, so routing and
 //! subagents share one user-editable model map.
 
 use std::path::{Path, PathBuf};
@@ -19,8 +19,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde_json::{Value, json};
 use waku_protocol::model::{ProviderKind, SubagentDef, SubagentSpec};
-
-use crate::route_policy::{RoutePolicy, Tier};
+use waku_protocol::routing::{RouteClassMap, TaskClass};
 
 /// Agent names carrying this prefix are Goddard-defined; the transcript's
 /// background-work rows attribute their runs to us with no extra plumbing.
@@ -46,11 +45,11 @@ fn default_explore() -> SubagentDef {
     }
 }
 
-/// The prompt/description baseline for each routing tier. The roster is
+/// The prompt/description baseline for each class's agent. The roster is
 /// fixed, so these are the only personalities an agent can carry.
-fn tier_baseline(tier: Tier) -> (String, String, bool) {
-    match tier {
-        Tier::Fast => (
+fn class_baseline(class: TaskClass) -> (String, String, bool) {
+    match class {
+        TaskClass::Routine => (
             "Read-only lookups, search, and quick questions — the cheap pass \
              for anything answerable without edits."
                 .into(),
@@ -63,7 +62,7 @@ fn tier_baseline(tier: Tier) -> (String, String, bool) {
                 .into(),
             true,
         ),
-        Tier::Default => (
+        TaskClass::General => (
             "Focused implementation work: edits, refactoring, and tests. \
              Delegate bounded coding tasks here."
                 .into(),
@@ -75,7 +74,7 @@ fn tier_baseline(tier: Tier) -> (String, String, bool) {
                 .into(),
             false,
         ),
-        Tier::Heavy => (
+        TaskClass::Demanding => (
             "Deep analysis: architecture, debugging, and security review. \
              Reserve this for the hardest problems."
                 .into(),
@@ -90,28 +89,27 @@ fn tier_baseline(tier: Tier) -> (String, String, bool) {
 }
 
 /// The agent set for one session launch: the built-in `goddard-explore` plus
-/// `goddard-fast`, `goddard-default`, and `goddard-heavy`. Each tier agent
-/// resolves its model and effort through the route policy's `tiers` table
-/// for the session's provider; a tier the policy leaves unmapped keeps the
-/// provider's default model.
-pub(crate) fn spec_for(provider: ProviderKind, policy: &RoutePolicy) -> SubagentSpec {
+/// `goddard-fast`, `goddard-default`, and `goddard-heavy`. Each class agent
+/// resolves its model and effort through the user's routing class map — an
+/// entry applies only when it names this session's provider, so a class
+/// mapped elsewhere keeps the provider's default model.
+pub(crate) fn spec_for(provider: ProviderKind, classes: &RouteClassMap) -> SubagentSpec {
     let mut agents = vec![default_explore()];
-    for (tier, slug) in [
-        (Tier::Fast, "fast"),
-        (Tier::Default, "default"),
-        (Tier::Heavy, "heavy"),
+    for (class, slug) in [
+        (TaskClass::Routine, "fast"),
+        (TaskClass::General, "default"),
+        (TaskClass::Demanding, "heavy"),
     ] {
-        let (description, prompt, read_only) = tier_baseline(tier);
-        let target = policy
-            .tiers
-            .get(&provider)
-            .and_then(|table| table.get(&tier));
+        let (description, prompt, read_only) = class_baseline(class);
+        let target = classes
+            .get(&class)
+            .filter(|entry| entry.provider == provider);
         agents.push(SubagentDef {
             name: format!("{NAME_PREFIX}{slug}"),
             description,
             prompt,
             read_only,
-            model: target.map(|entry| entry.model.clone()),
+            model: target.and_then(|entry| entry.model.clone()),
             effort: target.and_then(|entry| entry.effort.clone()),
         });
     }
@@ -349,13 +347,23 @@ pub(crate) fn write_pi_extension(directory: &Path) -> anyhow::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waku_protocol::routing::RouteClassTarget;
+
+    fn classes(pairs: &[(TaskClass, RouteClassTarget)]) -> RouteClassMap {
+        pairs.iter().cloned().collect()
+    }
+
+    fn entry(provider: ProviderKind, model: Option<&str>, effort: Option<&str>) -> RouteClassTarget {
+        RouteClassTarget {
+            provider,
+            model: model.map(str::to_owned),
+            effort: effort.map(str::to_owned),
+        }
+    }
 
     #[test]
     fn default_agents_carry_the_attribution_prefix() {
-        let spec = spec_for(
-            ProviderKind::Claude,
-            &crate::route_policy::shipped_default_policy(),
-        );
+        let spec = spec_for(ProviderKind::Claude, &RouteClassMap::new());
         assert!(!spec.agents.is_empty());
         assert!(
             spec.agents
@@ -366,10 +374,7 @@ mod tests {
 
     #[test]
     fn routing_hint_names_every_agent() {
-        let spec = spec_for(
-            ProviderKind::Claude,
-            &crate::route_policy::shipped_default_policy(),
-        );
+        let spec = spec_for(ProviderKind::Claude, &RouteClassMap::new());
         let hint = routing_hint(&spec).expect("a populated spec yields a hint");
         for agent in &spec.agents {
             assert!(hint.contains(&agent.name));
@@ -379,11 +384,8 @@ mod tests {
 
     #[test]
     fn claude_definitions_mark_read_only_agents() {
-        let json = claude_agents_json(&spec_for(
-            ProviderKind::Claude,
-            &crate::route_policy::shipped_default_policy(),
-        ))
-        .expect("agents serialize");
+        let json = claude_agents_json(&spec_for(ProviderKind::Claude, &RouteClassMap::new()))
+            .expect("agents serialize");
         let value: Value = serde_json::from_str(&json).unwrap();
         let explore = &value["goddard-explore"];
         assert!(!explore["prompt"].as_str().unwrap().is_empty());
@@ -398,11 +400,8 @@ mod tests {
 
     #[test]
     fn opencode_definitions_are_subagent_mode_and_deny_writes() {
-        let json = opencode_config_json(&spec_for(
-            ProviderKind::Claude,
-            &crate::route_policy::shipped_default_policy(),
-        ))
-        .expect("config serializes");
+        let json = opencode_config_json(&spec_for(ProviderKind::Claude, &RouteClassMap::new()))
+            .expect("config serializes");
         let value: Value = serde_json::from_str(&json).unwrap();
         let explore = &value["agent"]["goddard-explore"];
         assert_eq!(explore["mode"], "subagent");
@@ -410,17 +409,18 @@ mod tests {
     }
 
     #[test]
-    fn tier_agents_resolve_models_through_the_route_policy() {
-        let policy = crate::route_policy::parse_policy(
-            r#"{"version": 1,
-                "classes": {"routine": "tier:fast", "general": "tier:default", "demanding": "tier:heavy"},
-                "tiers": {"claude": {
-                    "fast": {"model": "claude-haiku-4-5", "effort": "low"},
-                    "heavy": "claude-opus-5"
-                }}}"#,
-        )
-        .unwrap();
-        let spec = spec_for(ProviderKind::Claude, &policy);
+    fn class_agents_resolve_models_through_the_class_map() {
+        let classes = classes(&[
+            (
+                TaskClass::Routine,
+                entry(ProviderKind::Claude, Some("claude-haiku-4-5"), Some("low")),
+            ),
+            (
+                TaskClass::Demanding,
+                entry(ProviderKind::Claude, Some("claude-opus-5"), None),
+            ),
+        ]);
+        let spec = spec_for(ProviderKind::Claude, &classes);
         let names: Vec<&str> = spec
             .agents
             .iter()
@@ -440,13 +440,13 @@ mod tests {
         assert!(spec.agents[1].read_only);
         assert_eq!(
             spec.agents[2].model, None,
-            "an unmapped tier keeps the provider default"
+            "an unmapped class keeps the provider default"
         );
         assert_eq!(spec.agents[3].model.as_deref(), Some("claude-opus-5"));
         assert!(!spec.agents[3].read_only);
 
-        // A provider with no tiers entry leaves every tier agent unmapped.
-        let codex = spec_for(ProviderKind::Codex, &policy);
+        // A class entry naming another provider applies nowhere on this one.
+        let codex = spec_for(ProviderKind::Codex, &classes);
         assert!(codex.agents.iter().all(|agent| agent.model.is_none()));
     }
 

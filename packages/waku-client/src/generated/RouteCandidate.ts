@@ -4,7 +4,6 @@ import type { ProviderKind } from "./ProviderKind";
 /**
  * One provider the router may pick, with the model ids the app knows are
  * available on it. An empty `models` means the provider's catalog is
- * unknown — a concrete target for it is accepted but a tier always resolves
- * to that provider's own default.
+ * unknown — a configured model for it is accepted sight unseen.
  */
 export type RouteCandidate = { provider: ProviderKind, models: Array<string>, };

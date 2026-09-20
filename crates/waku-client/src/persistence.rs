@@ -1249,6 +1249,10 @@ pub struct PersistedState {
     /// `settings.json`.
     #[serde(skip)]
     pub eval: Option<waku_protocol::eval::EvalSettings>,
+    /// The user's class-level routing map (provider/model/effort per task
+    /// class). Daemon-owned; mirrored so the Jev page can read and edit it.
+    #[serde(skip)]
+    pub route_classes: waku_protocol::routing::RouteClassMap,
     /// Experimental opt-in for MCP integrations. Daemon-owned; mirrored here
     /// so clients can render the pane.
     #[serde(default = "default_experiment_enabled")]
@@ -1384,6 +1388,7 @@ impl PersistedState {
             memory_experiment_enabled: default_experiment_enabled(),
             project_map_enabled: default_experiment_enabled(),
             eval: None,
+            route_classes: Default::default(),
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
@@ -1585,6 +1590,7 @@ impl PersistedState {
             project_map_enabled: self.project_map_enabled,
             custom_commands: self.custom_commands.clone(),
             eval: self.eval.clone(),
+            route_classes: self.route_classes.clone(),
             integrations_enabled: self.integrations_enabled,
             integrations: self.integrations.clone(),
             integrations_proxy_token: self.integrations_proxy_token.clone(),
@@ -1609,6 +1615,7 @@ impl PersistedState {
         self.project_map_enabled = settings.project_map_enabled;
         self.custom_commands = settings.custom_commands;
         self.eval = settings.eval;
+        self.route_classes = settings.route_classes;
         self.integrations_enabled = settings.integrations_enabled;
         self.integrations = settings.integrations;
         self.integrations_proxy_token = settings.integrations_proxy_token;

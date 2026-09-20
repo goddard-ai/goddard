@@ -1,6 +1,9 @@
 //! Auto model routing: a draft whose model selection is Auto asks the
-//! daemon's evaluation model to classify its first prompt, and the daemon's
-//! routing policy resolves that classification to a concrete provider/model.
+//! daemon's evaluation model to classify its first prompt, and the daemon
+//! resolves that classification through the user's class map to a concrete
+//! provider/model/effort. Subsequent turns re-evaluate only the reasoning
+//! effort — a confident answer retunes the live session before the prompt
+//! is sent.
 //!
 //! This file is the app-side seam. [`RouteStartPlan`] snapshots everything
 //! the resolved provider's start request needs while probes and settings are
@@ -14,9 +17,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::anyhow;
+use serde_json::json;
 use uuid::Uuid;
+use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 use waku_protocol::model::{ProviderKind, ProviderResumeCursor, RuntimeMode};
-use waku_protocol::routing::{RouteCandidate, RouteDecision, RouteTarget, TaskClass};
+use waku_protocol::routing::{RouteCandidate, RouteDecision, RouteTarget};
 
 use super::runtime::start_driver;
 use super::*;
@@ -125,7 +130,7 @@ impl RouteStartPlan {
             .model
             .clone()
             .or_else(|| self.preferred_models.get(&provider).cloned().flatten());
-        let (reasoning_effort, service_tier, context_window) = model
+        let (remembered_effort, service_tier, context_window) = model
             .as_deref()
             .map(|model| {
                 waku_client::persistence::remembered_model_traits_for(
@@ -135,6 +140,9 @@ impl RouteStartPlan {
                 )
             })
             .unwrap_or_default();
+        // The route's own effort wins; the remembered triple is the fallback
+        // for targets — last-used, provider defaults — that name none.
+        let reasoning_effort = target.effort.clone().or(remembered_effort);
         // A preset belongs to its provider: a route that stays keeps it, a
         // route that moved providers drops it — the same rule `choose_model`
         // applies on a provider switch. DeepSeek alone has presets, so only
@@ -164,6 +172,84 @@ impl RouteStartPlan {
             event_wake: self.event_wake.clone(),
             daemon: self.daemon.clone(),
         })
+    }
+}
+
+/// A subsequent turn's effort evaluation: the prompt is scored against the
+/// session model's effort ladder, and a confident answer retunes the live
+/// driver before the prompt is sent. Snapshots what the eval needs while the
+/// session is still on the UI thread.
+pub(super) struct TurnRoutePlan {
+    session_id: Uuid,
+    /// The user-visible prompt text the evaluator sees.
+    prompt: String,
+    /// The session's resolved model — the effort ladder's owner.
+    model: String,
+    /// The model's supported effort ids, in catalog order.
+    efforts: Vec<String>,
+    /// The effort in effect now — the sticky default Jev must beat.
+    current_effort: Option<String>,
+    daemon: waku_client::DaemonSupervisor,
+}
+
+/// How sure the evaluator must be before a turn may move the session off its
+/// current effort. Below it the answer is advisory only.
+const TURN_EFFORT_CONFIDENCE: f64 = 0.7;
+
+const TURN_EFFORT_INSTRUCTIONS: &str = "Which reasoning effort does this turn deserve? \
+Answer with the effort that best fits the request's difficulty — but treat the current \
+effort as the default: only pick a different level when the task clearly warrants more \
+or less reasoning than usual.";
+
+impl TurnRoutePlan {
+    /// The effort this turn should run at — `None` keeps the session's
+    /// current setting. Never fails hard: an unanswered call, an
+    /// unconfident answer, or an unknown effort id all leave the effort
+    /// alone.
+    pub(super) fn evaluate(self) -> Option<String> {
+        let state = json!({
+            "task": self.prompt,
+            "model": self.model,
+            "currentEffort": self.current_effort,
+        });
+        let questions = BTreeMap::from([(
+            "effort".to_owned(),
+            EvalQuestion::Choice {
+                instructions: TURN_EFFORT_INSTRUCTIONS.to_owned(),
+                criteria: self
+                    .efforts
+                    .iter()
+                    .map(|effort| (effort.clone(), None))
+                    .collect(),
+            },
+        )]);
+        let payload = self
+            .daemon
+            .client()
+            .request(
+                Uuid::nil(),
+                self.session_id,
+                waku_client::Command::Evaluate {
+                    state,
+                    questions,
+                    feature: Some("route-effort".to_owned()),
+                },
+            )
+            .ok()?;
+        let waku_client::ResponsePayload::Evaluation { evaluation } = payload else {
+            return None;
+        };
+        let Some(EvalAnswer::Choice {
+            choice, confidence, ..
+        }) = evaluation.answers.get("effort")
+        else {
+            return None;
+        };
+        if confidence.unwrap_or(0.0) < TURN_EFFORT_CONFIDENCE {
+            return None;
+        }
+        (self.efforts.contains(choice) && self.current_effort.as_ref() != Some(choice))
+            .then(|| choice.clone())
     }
 }
 
@@ -254,6 +340,7 @@ impl Waku {
             last_used: Some(RouteTarget {
                 provider: self.state.last_provider,
                 model: self.state.last_model.clone(),
+                effort: self.state.last_reasoning_effort.clone(),
             }),
             daemon,
             event_wake: self.event_wake_tx.clone(),
@@ -272,100 +359,43 @@ impl Waku {
         })
     }
 
-    /// Fetch the daemon's routing policy for the settings surface. The answer
-    /// lands through the event pump like every other async daemon result.
-    pub(super) fn request_route_policy(&mut self, cx: &mut Context<Self>) {
-        if self.route_policy_pending {
-            return;
+    /// A subsequent turn's effort evaluation: the routed session's prompt is
+    /// scored against the session model's effort ladder, and a confident
+    /// answer retunes the live driver before the prompt is sent. Built on
+    /// the UI thread; `evaluate` runs inside `prepare_submission`.
+    pub(super) fn route_turn_plan_for_session(
+        &self,
+        session: &AgentSession,
+        prompt: String,
+    ) -> Option<TurnRoutePlan> {
+        // Only sessions started through Auto keep deciding effort per turn —
+        // a manual pick clears `route_decision` and owns its effort again.
+        if session.route_decision.is_none() || self.state.eval.is_none() {
+            return None;
         }
-        self.route_policy_pending = true;
-        let tx = self.route_policy_tx.clone();
-        let event_wake = self.event_wake_tx.clone();
-        let daemon = self.daemon.client();
-        cx.background_executor()
-            .spawn(async move {
-                let result = daemon
-                    .request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::GetRoutePolicy,
-                    )
-                    .map_err(|error| format!("{error:#}"))
-                    .and_then(|payload| match payload {
-                        waku_client::ResponsePayload::RoutePolicy { view } => Ok(view),
-                        _ => Err("the daemon returned an invalid route policy response".into()),
-                    });
-                if tx.send(result).is_ok() {
-                    signal_event_pump(&event_wake);
-                }
-            })
-            .detach();
-    }
-
-    /// Write one class-level target into the policy document, then refresh
-    /// the cached view — the file stays the source of truth, so a failed
-    /// write simply leaves the previous view on screen.
-    pub(super) fn set_route_class_target(
-        &mut self,
-        class: TaskClass,
-        target: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.route_policy_pending = true;
-        let tx = self.route_policy_tx.clone();
-        let event_wake = self.event_wake_tx.clone();
-        let daemon = self.daemon.client();
-        cx.background_executor()
-            .spawn(async move {
-                let result = daemon
-                    .request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::SetRouteClassTarget { class, target },
-                    )
-                    .map_err(|error| format!("{error:#}"))
-                    .and_then(|payload| match payload {
-                        waku_client::ResponsePayload::Ack => daemon
-                            .request(
-                                Uuid::nil(),
-                                Uuid::nil(),
-                                waku_client::Command::GetRoutePolicy,
-                            )
-                            .map_err(|error| format!("{error:#}"))
-                            .and_then(|payload| match payload {
-                                waku_client::ResponsePayload::RoutePolicy { view } => Ok(view),
-                                _ => {
-                                    Err("the daemon returned an invalid route policy response"
-                                        .into())
-                                }
-                            }),
-                        _ => Err("the daemon returned an invalid route policy response".into()),
-                    });
-                if tx.send(result).is_ok() {
-                    signal_event_pump(&event_wake);
-                }
-            })
-            .detach();
-    }
-
-    /// Land fetched policy views. Drained by the event pump; a write that
-    /// failed leaves the previous view in place and surfaces nothing — the
-    /// dropdown simply stays on the file's last-known value.
-    pub(super) fn drain_route_policy_events(&mut self) -> bool {
-        let mut changed = false;
-        while let Ok(result) = self.route_policy_events.try_recv() {
-            self.route_policy_pending = false;
-            match result {
-                Ok(view) => {
-                    changed |= self.route_policy.as_ref() != Some(&view);
-                    self.route_policy = Some(view);
-                }
-                Err(error) => {
-                    eprintln!("Goddard: route policy request failed: {error}");
-                }
-            }
+        let daemon = self.daemons.daemon_for_session(session.id)?;
+        let model = self.model_metadata_for_session(session)?;
+        let efforts: Vec<String> = model
+            .reasoning_efforts
+            .iter()
+            .map(|option| option.id.clone())
+            .collect();
+        if efforts.len() < 2 {
+            return None;
         }
-        changed
+        Some(TurnRoutePlan {
+            session_id: session.id,
+            prompt,
+            model: model.id.clone(),
+            efforts,
+            // What Jev compares against: the session's explicit effort, else
+            // the effort the model would launch with.
+            current_effort: session
+                .reasoning_effort
+                .clone()
+                .or_else(|| model.default_reasoning_effort.clone()),
+            daemon,
+        })
     }
 
     /// Log that the user replaced an Auto-routed model by hand — the decision
@@ -381,7 +411,11 @@ impl Waku {
         let Some(daemon) = self.daemon_for_session(session_id) else {
             return;
         };
-        let target = RouteTarget { provider, model };
+        let target = RouteTarget {
+            provider,
+            model,
+            effort: None,
+        };
         cx.background_executor()
             .spawn(async move {
                 // The override is telemetry: a lost record must not disturb

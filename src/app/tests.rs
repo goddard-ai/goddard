@@ -3032,8 +3032,8 @@ fn only_opencode_providers_offer_an_explicit_reasoning_default_reset() {
 }
 
 #[test]
-fn route_class_rows_lead_with_aliases_then_providers_then_models() {
-    use super::settings::route_class_rows;
+fn route_class_rows_lead_with_last_used_then_providers_then_models() {
+    use super::settings::{RouteClassRow, route_class_rows};
     use crate::model::{ProviderModel, ProviderProbe};
 
     let probe = ProviderProbe {
@@ -3043,34 +3043,30 @@ fn route_class_rows_lead_with_aliases_then_providers_then_models() {
         models: vec![ProviderModel::new("claude-sonnet-5", "Claude Sonnet 5")],
         agent_presets: Vec::new(),
     };
-    let targets = |query: &str| {
+    let kinds = |query: &str| {
         route_class_rows(&[probe.clone()], &[], query)
             .iter()
-            .map(|row| row.target())
+            .map(|row| match row {
+                RouteClassRow::LastUsed => "last-used".to_owned(),
+                RouteClassRow::ProviderDefault(provider) => provider.id().to_owned(),
+                RouteClassRow::Model(provider, model) => {
+                    format!("{}:{}", provider.id(), model.id)
+                }
+            })
             .collect::<Vec<_>>()
     };
 
-    // Session tiers lead — the aliases the shipped defaults use — then the
-    // global tiers, the provider's own default, and its catalog models at
-    // `provider:model` granularity.
+    // The unmapped route leads, then the provider's own default and its
+    // catalog models.
     assert_eq!(
-        targets(""),
-        [
-            "session:tier:fast",
-            "session:tier:default",
-            "session:tier:heavy",
-            "tier:fast",
-            "tier:default",
-            "tier:heavy",
-            "claude",
-            "claude:claude-sonnet-5",
-        ]
+        kinds(""),
+        ["last-used", "claude", "claude:claude-sonnet-5"]
     );
 
     // The same token rule as the model picker: "claude" keeps the provider's
-    // rows and drops the tiers.
-    assert_eq!(targets("claude"), ["claude", "claude:claude-sonnet-5"]);
-    assert_eq!(targets("sonnet"), ["claude:claude-sonnet-5"]);
+    // rows and drops the unmapped lead.
+    assert_eq!(kinds("claude"), ["claude", "claude:claude-sonnet-5"]);
+    assert_eq!(kinds("sonnet"), ["claude:claude-sonnet-5"]);
 }
 
 #[test]

@@ -21,7 +21,6 @@ import type { ProviderSessionForkRequest } from "./ProviderSessionForkRequest";
 import type { RouteCandidate } from "./RouteCandidate";
 import type { RouteTarget } from "./RouteTarget";
 import type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
-import type { TaskClass } from "./TaskClass";
 import type { UsageWindow } from "./UsageWindow";
 import type { UserInputAnswer } from "./UserInputAnswer";
 import type { WireComputerToolRequest } from "./WireComputerToolRequest";
@@ -65,12 +64,7 @@ feature?: string | null, } | { "type": "testEvalConnection", settings: EvalSetti
  * Lightweight project context for the classifier — the project
  * name only; filesystem drilling is deliberately out of scope.
  */
-project?: string | null, candidates: Array<RouteCandidate>, lastUsed?: RouteTarget | null, } | { "type": "recordRouteOverride", sessionId: string, target: RouteTarget, } | { "type": "listIntegrations" } | { "type": "connectIntegration", id: string, variantId: string, providers: Array<ProviderKind>, apiKey?: string | null, } | { "type": "setIntegrationProviders", id: string, providers: Array<ProviderKind>, } | { "type": "disconnectIntegration", id: string, } | { "type": "startIntegrationAuth", id: string, } | { "type": "getRoutePolicy" } | { "type": "setRouteClassTarget", class: TaskClass,
-/**
- * "tier:fast" | "tier:default" | "tier:heavy" | "provider:model" |
- * "provider".
- */
-target: string, } | { "type": "loadComposerDrafts" } | { "type": "saveComposerDrafts", drafts: ComposerDrafts, generation: number, } | { "type": "applyComposerDraftChanges", changes: Array<ComposerDraftChange>, } | { "type": "storeBlob", mimeType: string, bytes: string, } | { "type": "importAttachment", name: string, upload: AttachmentUpload, } | { "type": "importPathAttachment", path: string, } | { "type": "readBlob", reference: string, } | { "type": "readAttachment", reference: string, path: string, } | { "type": "sweepBlobs" } | { "type": "forkSessionFromResponse", turnCount: number, } | { "type": "rewindSessionToMessage", turnCount: number, } | { "type": "forkProviderSession", request: ProviderSessionForkRequest, } | { "type": "workspace", operation: WorkspaceOperation, } | { "type": "openTerminal", cwd: string, cols: number, rows: number, } | { "type": "writeTerminal", data: string, } | { "type": "resizeTerminal", cols: number, rows: number, } | { "type": "closeTerminal" } | { "type": "closeSession" } | { "type": "agentCreateSession",
+project?: string | null, candidates: Array<RouteCandidate>, lastUsed?: RouteTarget | null, } | { "type": "recordRouteOverride", sessionId: string, target: RouteTarget, } | { "type": "listIntegrations" } | { "type": "connectIntegration", id: string, variantId: string, providers: Array<ProviderKind>, apiKey?: string | null, } | { "type": "setIntegrationProviders", id: string, providers: Array<ProviderKind>, } | { "type": "disconnectIntegration", id: string, } | { "type": "startIntegrationAuth", id: string, } | { "type": "loadComposerDrafts" } | { "type": "saveComposerDrafts", drafts: ComposerDrafts, generation: number, } | { "type": "applyComposerDraftChanges", changes: Array<ComposerDraftChange>, } | { "type": "storeBlob", mimeType: string, bytes: string, } | { "type": "importAttachment", name: string, upload: AttachmentUpload, } | { "type": "importPathAttachment", path: string, } | { "type": "readBlob", reference: string, } | { "type": "readAttachment", reference: string, path: string, } | { "type": "sweepBlobs" } | { "type": "forkSessionFromResponse", turnCount: number, } | { "type": "rewindSessionToMessage", turnCount: number, } | { "type": "forkProviderSession", request: ProviderSessionForkRequest, } | { "type": "workspace", operation: WorkspaceOperation, } | { "type": "openTerminal", cwd: string, cols: number, rows: number, } | { "type": "writeTerminal", data: string, } | { "type": "resizeTerminal", cols: number, rows: number, } | { "type": "closeTerminal" } | { "type": "closeSession" } | { "type": "agentCreateSession",
 /**
  * Any provider Waku can drive.
  */
