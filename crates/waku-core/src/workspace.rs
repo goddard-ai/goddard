@@ -746,7 +746,7 @@ fn commit_diff(cwd: &Path, sha: &str) -> anyhow::Result<ReviewDiffData> {
 /// `/dev/null`-vs-file form, where exit status 1 still means success (the
 /// files differed).
 fn file_diff_output(cwd: &Path, args: &[&str], no_index: bool) -> anyhow::Result<String> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args([
             "-c",
             "core.quotePath=false",
@@ -851,7 +851,7 @@ fn branch_base(cwd: &Path) -> anyhow::Result<String> {
 }
 
 fn index_tree(cwd: &Path) -> anyhow::Result<String> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["write-tree"])
         .current_dir(cwd)
         .output()
@@ -870,7 +870,7 @@ fn index_tree(cwd: &Path) -> anyhow::Result<String> {
 }
 
 fn diff_output(cwd: &Path, range: &DiffRange, modes: &[&str]) -> anyhow::Result<String> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args([
             "-c",
             "core.quotePath=false",
@@ -894,7 +894,7 @@ fn diff_output(cwd: &Path, range: &DiffRange, modes: &[&str]) -> anyhow::Result<
 }
 
 fn ensure_repository(cwd: &Path) -> anyhow::Result<()> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(cwd)
         .output()
@@ -907,7 +907,7 @@ fn ensure_repository(cwd: &Path) -> anyhow::Result<()> {
 }
 
 fn resolve(cwd: &Path, revision: &str) -> Option<String> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--verify", &format!("{revision}^{{commit}}")])
         .current_dir(cwd)
         .output()
@@ -924,7 +924,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
         .output()
@@ -953,7 +953,7 @@ mod tests {
     use uuid::Uuid;
 
     fn git_ok(cwd: &Path, args: &[&str]) {
-        let output = crate::command_env::plain_command("git")
+        let output = crate::command_env::search_path_command("git")
             .args(args)
             .current_dir(cwd)
             .output()

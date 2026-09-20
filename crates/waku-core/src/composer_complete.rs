@@ -793,7 +793,7 @@ pub fn list_project_files(root: &Path, cap: usize) -> Vec<FileEntry> {
 }
 
 fn git_listed_files(root: &Path, cap: usize) -> Option<Vec<String>> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .arg("-C")
         .arg(root)
         .args([

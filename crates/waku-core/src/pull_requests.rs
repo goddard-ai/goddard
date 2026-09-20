@@ -27,7 +27,7 @@ const PULL_REQUEST_REPO_LIST_LIMIT: &str = "100";
 const PULL_REQUEST_LIST_FIELDS: &str = "number,title,url,state,isDraft,author,headRefName,baseRefName,createdAt,updatedAt,reviewDecision,statusCheckRollup,additions,deletions";
 
 pub fn list(cwd: &Path, head_branch: &str) -> anyhow::Result<Option<Vec<PullRequestSummary>>> {
-    let output = crate::command_env::plain_command("gh")
+    let output = crate::command_env::search_path_command("gh")
         .args([
             "pr",
             "list",
@@ -117,7 +117,7 @@ pub fn view(cwd: &Path, number: u64) -> anyhow::Result<Option<PullRequestDetail>
 /// and fork pull requests alike, and the force prefix lets a re-fetch move
 /// the branch forward on a repeat run.
 pub fn fetch_head(cwd: &Path, number: u64, branch: &str) -> anyhow::Result<()> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["fetch", "origin"])
         .arg(format!("+pull/{number}/head:{branch}"))
         .current_dir(cwd)

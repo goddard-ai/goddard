@@ -19,7 +19,7 @@ use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef, WorkItemQueryS
 /// "host could not answer" signal — spawn failure or non-zero exit, whatever
 /// the CLI's own wording for it.
 pub(crate) fn gh_output(cwd: &Path, args: &[&OsStr]) -> Option<Output> {
-    let output = crate::command_env::plain_command("gh")
+    let output = crate::command_env::search_path_command("gh")
         .args(args)
         .current_dir(cwd)
         .output()
@@ -37,7 +37,7 @@ pub(crate) fn gh_write(cwd: &Path, args: &[&OsStr]) -> anyhow::Result<()> {
 /// `gh_write` for writes that answer on stdout — `gh issue create` prints
 /// the new issue's URL.
 pub(crate) fn gh_write_output(cwd: &Path, args: &[&OsStr]) -> anyhow::Result<String> {
-    let output = crate::command_env::plain_command("gh")
+    let output = crate::command_env::search_path_command("gh")
         .args(args)
         .current_dir(cwd)
         .output()
@@ -78,7 +78,7 @@ pub fn resolve_repo(cwd: &Path) -> (Option<GitHubRepoRef>, GitHubAvailability) {
         OsStr::new("--json"),
         OsStr::new("nameWithOwner,url,defaultBranchRef"),
     ];
-    let result = crate::command_env::plain_command("gh")
+    let result = crate::command_env::search_path_command("gh")
         .args(args)
         .current_dir(cwd)
         .output();

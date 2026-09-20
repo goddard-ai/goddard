@@ -839,7 +839,7 @@ mod tests {
     use super::*;
 
     fn run_git(cwd: &Path, args: &[&str]) {
-        let output = crate::command_env::plain_command("git")
+        let output = crate::command_env::search_path_command("git")
             .args(args)
             .current_dir(cwd)
             .output()

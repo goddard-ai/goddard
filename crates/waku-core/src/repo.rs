@@ -20,7 +20,7 @@ pub use waku_protocol::workspace::{BranchDeleteFailure, RepoBranch, RepoWorktree
 pub fn list_worktrees(cwd: &Path) -> anyhow::Result<Option<Vec<RepoWorktree>>> {
     // `worktree list` resolves the repository from anywhere inside it,
     // including a linked worktree, and reports the main checkout first.
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["worktree", "list", "--porcelain"])
         .current_dir(cwd)
         .output()
@@ -122,7 +122,7 @@ fn enrich_worktree(entry: &mut RepoWorktree) {
 /// `git -C <path> <args>` trimmed stdout, `None` on any failure — the
 /// per-worktree degradation `enrich_worktree` relies on.
 fn worktree_stdout(path: &Path, args: &[&str]) -> Option<String> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .arg("-C")
         .arg(path)
         .args(args)
@@ -172,7 +172,7 @@ pub fn list_repo_branches(cwd: &Path) -> anyhow::Result<Option<Vec<RepoBranch>>>
     // NUL-separated fields keep commit subjects and worktree paths safe to
     // split; `%(upstream:track)` carries the `[ahead N, behind M]` counts.
     const FORMAT: &str = "%(refname)%00%(objectname)%00%(upstream:short)%00%(upstream:track)%00%(committerdate:unix)%00%(subject)%00%(worktreepath)";
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["for-each-ref", &format!("--format={FORMAT}")])
         .args(["refs/heads", "refs/remotes"])
         .current_dir(cwd)
@@ -259,7 +259,7 @@ fn upstream_counts(track: &str) -> (Option<u64>, Option<u64>) {
 /// `git fetch --prune <remote>`: refresh one remote's tracking refs and drop
 /// the ones it deleted. Git's own stderr propagates as the error.
 pub fn fetch_remote(cwd: &Path, remote: &str) -> anyhow::Result<()> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["fetch", "--prune"])
         .arg(remote)
         .current_dir(cwd)
@@ -283,7 +283,7 @@ pub fn delete_branches(
     let flag = if force { "-D" } else { "-d" };
     let mut failures = Vec::new();
     for name in names {
-        let output = crate::command_env::plain_command("git")
+        let output = crate::command_env::search_path_command("git")
             .args(["branch", flag, "--"])
             .arg(name)
             .current_dir(cwd)
@@ -313,7 +313,7 @@ pub fn repair_worktrees(cwd: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
         .cloned()
         .collect();
     if !existing.is_empty() {
-        let output = crate::command_env::plain_command("git")
+        let output = crate::command_env::search_path_command("git")
             .arg("worktree")
             .arg("repair")
             .args(&existing)
@@ -324,7 +324,7 @@ pub fn repair_worktrees(cwd: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
             bail!("{}", command_error(&output));
         }
     }
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["worktree", "repair"])
         .current_dir(cwd)
         .output()
@@ -338,7 +338,7 @@ pub fn repair_worktrees(cwd: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
 /// `git worktree prune`: drop registrations whose directories were deleted
 /// outside the app.
 pub fn prune_worktrees(cwd: &Path) -> anyhow::Result<()> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["worktree", "prune"])
         .current_dir(cwd)
         .output()
@@ -366,7 +366,7 @@ mod tests {
     use uuid::Uuid;
 
     fn run_git(cwd: &Path, args: &[&str]) {
-        let output = crate::command_env::plain_command("git")
+        let output = crate::command_env::search_path_command("git")
             .args(args)
             .current_dir(cwd)
             .output()

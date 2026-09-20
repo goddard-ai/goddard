@@ -27,7 +27,7 @@ const NOTIFICATIONS_PER_PAGE: usize = 50;
 /// The `gh` credential check, mapped onto the same availability model the
 /// repo-level surfaces report.
 fn auth_token() -> Result<String, GitHubAvailability> {
-    let output = crate::command_env::plain_command("gh")
+    let output = crate::command_env::search_path_command("gh")
         .args(["auth", "token"])
         .stdin(Stdio::null())
         .output();
@@ -137,7 +137,7 @@ pub fn mark_all_read() -> anyhow::Result<()> {
 /// `gh api` for the writes: they need no response headers, and the CLI
 /// already owns auth, host, and error wording.
 fn gh_api(args: &[&str]) -> anyhow::Result<()> {
-    let output = crate::command_env::plain_command("gh")
+    let output = crate::command_env::search_path_command("gh")
         .arg("api")
         .args(args)
         .stdin(Stdio::null())

@@ -25,7 +25,7 @@ pub use waku_protocol::git::{BranchEntry, BranchSnapshot, RemoteFileRef, Upstrea
 /// Inspect local branches and which worktree, if any, currently owns each.
 /// `Ok(None)` means `cwd` is not inside a Git repository.
 pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
-    let repository_output = crate::command_env::plain_command("git")
+    let repository_output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(cwd)
         .output()
@@ -129,7 +129,7 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
 /// The checked-out branch's upstream short name (e.g. `origin/main`), or
 /// `None` for a detached HEAD or a branch with no upstream configured.
 fn upstream_name(cwd: &Path) -> Option<String> {
-    crate::command_env::plain_command("git")
+    crate::command_env::search_path_command("git")
         .args([
             "rev-parse",
             "--abbrev-ref",
@@ -151,7 +151,7 @@ fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
     let name = upstream_name(cwd)?;
     // `--left-right --count @{upstream}...HEAD` reports the upstream-only
     // count first — how far the checkout trails — then the HEAD-only count.
-    let counts = crate::command_env::plain_command("git")
+    let counts = crate::command_env::search_path_command("git")
         .args(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
         .current_dir(cwd)
         .output()
@@ -178,7 +178,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
     // the blob URL's trailing segment — and doubles as the untracked
     // filter: a path the index has never seen cannot sit in any commit.
     // `:(literal)` keeps glob characters in the name from expanding.
-    let listed = crate::command_env::plain_command("git")
+    let listed = crate::command_env::search_path_command("git")
         .args([
             "ls-files",
             "--full-name",
@@ -222,7 +222,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
                 .flatten()
                 .filter(|branch| !branch.is_empty())?;
             let refname = format!("refs/remotes/origin/{current}");
-            let exists = crate::command_env::plain_command("git")
+            let exists = crate::command_env::search_path_command("git")
                 .args(["rev-parse", "--verify", "--quiet", &refname])
                 .current_dir(cwd)
                 .output()
@@ -239,7 +239,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
             if current.is_some() {
                 return None;
             }
-            let contained = crate::command_env::plain_command("git")
+            let contained = crate::command_env::search_path_command("git")
                 .args(["for-each-ref", "--contains", "HEAD", "refs/remotes/origin"])
                 .current_dir(cwd)
                 .output()
@@ -260,7 +260,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
     // Full refname in the check: a short `origin/foo` is ambiguous if a
     // local branch shares the name. Require a blob — a path that resolves
     // to a tree is a directory the file button never targets.
-    let object_type = crate::command_env::plain_command("git")
+    let object_type = crate::command_env::search_path_command("git")
         .args(["cat-file", "-t", &format!("{refname}:{repo_path}")])
         .current_dir(cwd)
         .output()
@@ -281,7 +281,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
 /// `git remote get-url` exits 2 for a missing remote rather than 1, so this
 /// cannot share `optional_stdout`'s exit-code handling.
 pub(crate) fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["remote", "get-url", remote])
         .current_dir(cwd)
         .output()
@@ -296,7 +296,7 @@ pub(crate) fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<Stri
 }
 
 fn worktree_line_counts(cwd: &Path) -> (u64, u64) {
-    let tracked = crate::command_env::plain_command("git")
+    let tracked = crate::command_env::search_path_command("git")
         .args(["diff", "--numstat", "HEAD", "--"])
         .current_dir(cwd)
         .output()
@@ -332,7 +332,7 @@ fn numstat_line_counts(output: &[u8]) -> (u64, u64) {
 /// source that opens when it is clicked. Bounds keep generated trees from
 /// turning a background metadata refresh into unbounded work.
 fn untracked_line_additions(repository: &Path) -> u64 {
-    let Ok(output) = crate::command_env::plain_command("git")
+    let Ok(output) = crate::command_env::search_path_command("git")
         .args([
             "ls-files",
             "--others",
@@ -415,7 +415,7 @@ fn path_from_git_bytes(path: &[u8]) -> PathBuf {
 }
 
 pub fn checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSnapshot> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["switch", "--"])
         .arg(branch)
         .current_dir(cwd)
@@ -432,7 +432,7 @@ pub fn create_and_checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSna
     if branch.is_empty() {
         bail!("enter a branch name");
     }
-    let validation = crate::command_env::plain_command("git")
+    let validation = crate::command_env::search_path_command("git")
         .args(["check-ref-format", "--branch"])
         .arg(branch)
         .current_dir(cwd)
@@ -441,7 +441,7 @@ pub fn create_and_checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSna
     if !validation.status.success() {
         bail!("{}", command_error(&validation));
     }
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["switch", "-c"])
         .arg(branch)
         .current_dir(cwd)
@@ -462,7 +462,7 @@ pub fn reset_to_base(cwd: &Path, base: &str) -> anyhow::Result<BranchSnapshot> {
     if !crate::worktree::is_linked_worktree(cwd) {
         bail!("{} is not a linked worktree", cwd.display());
     }
-    let detach = crate::command_env::plain_command("git")
+    let detach = crate::command_env::search_path_command("git")
         .args(["switch", "--detach", "HEAD"])
         .current_dir(cwd)
         .output()
@@ -475,7 +475,7 @@ pub fn reset_to_base(cwd: &Path, base: &str) -> anyhow::Result<BranchSnapshot> {
 }
 
 fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
         .output()
@@ -487,7 +487,7 @@ fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
 }
 
 fn optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
         .output()
@@ -518,7 +518,7 @@ mod tests {
     use uuid::Uuid;
 
     fn run_git(cwd: &Path, args: &[&str]) {
-        let output = crate::command_env::plain_command("git")
+        let output = crate::command_env::search_path_command("git")
             .args(args)
             .current_dir(cwd)
             .output()
@@ -699,7 +699,7 @@ mod tests {
     /// HEAD, and `local_branch` tracks it when `track` is set. The remote
     /// itself must exist or `@{upstream}` cannot resolve `branch.*.merge`.
     fn fake_origin(repository: &Path, remote_branch: &str, track: Option<&str>) {
-        let has_remote = crate::command_env::plain_command("git")
+        let has_remote = crate::command_env::search_path_command("git")
             .args(["remote", "get-url", "origin"])
             .current_dir(repository)
             .output()

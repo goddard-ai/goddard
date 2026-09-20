@@ -53,13 +53,32 @@ const SHELL_ENV_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 /// this.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     let program = program.as_ref();
-    let search_path = child_search_path(Path::new(program));
     let mut command = plain_command(program);
     command.envs(shell_environment());
-    if let Some(search_path) = search_path {
+    apply_search_path(&mut command, program);
+    command
+}
+
+/// [`plain_command`] plus only the search-path `PATH` — none of the login
+/// shell's other variables. A tool that spawns helpers by name still
+/// resolves them the way the user's terminal does: `git` finds `git-lfs`,
+/// credential helpers, `core.sshCommand`, and signing programs, and `gh`
+/// itself resolves from an install the GUI `PATH` predates. Variables like
+/// `GIT_DIR` or a stale `SSH_AUTH_SOCK` cannot leak in and redirect the
+/// operation, which the full [`command`] environment would risk.
+pub fn search_path_command(program: impl AsRef<OsStr>) -> Command {
+    let program = program.as_ref();
+    let mut command = plain_command(program);
+    apply_search_path(&mut command, program);
+    command
+}
+
+/// `PATH` must be set after any `envs` call so the search path wins over a
+/// `PATH` the shell environment happens to carry.
+fn apply_search_path(command: &mut Command, program: &OsStr) {
+    if let Some(search_path) = child_search_path(Path::new(program)) {
         command.env("PATH", search_path);
     }
-    command
 }
 
 /// Inject the agent surface into a provider launch: the session's scoped

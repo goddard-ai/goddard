@@ -520,7 +520,7 @@ fn carry_state(worktree: &Path, snapshot: &str) -> anyhow::Result<()> {
 }
 
 fn add_detached(repository: &Path, path: &Path, base_ref: &str) -> anyhow::Result<()> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["worktree", "add", "--detach"])
         .arg(path)
         .arg(base_ref)
@@ -537,7 +537,7 @@ fn add_detached(repository: &Path, path: &Path, base_ref: &str) -> anyhow::Resul
 /// detaching, restoring a worktree the user had placed on a branch. The
 /// branch must be verified first: a missing name would silently create one.
 fn add_branch(repository: &Path, path: &Path, branch: &str) -> anyhow::Result<()> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["worktree", "add"])
         .arg(path)
         .arg(branch)
@@ -554,7 +554,7 @@ fn add_branch(repository: &Path, path: &Path, branch: &str) -> anyhow::Result<()
 /// non-zero both for absent refs and for ambiguous ones, which both mean
 /// "cannot restore from this".
 fn ref_is_commit(repository: &Path, reference: &str) -> anyhow::Result<bool> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--verify", &format!("{reference}^{{commit}}")])
         .current_dir(repository)
         .output()
@@ -674,7 +674,7 @@ fn local_default_branch(repository: &Path) -> Option<String> {
 }
 
 fn local_branch_exists(repository: &Path, branch: &str) -> anyhow::Result<bool> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(["show-ref", "--verify", "--quiet"])
         .arg(format!("refs/heads/{branch}"))
         .current_dir(repository)
@@ -688,7 +688,7 @@ fn local_branch_exists(repository: &Path, branch: &str) -> anyhow::Result<bool> 
 }
 
 fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
         .output()
@@ -700,7 +700,7 @@ fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
 }
 
 fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
-    let output = crate::command_env::plain_command("git")
+    let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
         .output()
@@ -740,7 +740,7 @@ mod tests {
     use super::*;
 
     fn run_git(cwd: &Path, args: &[&str]) {
-        let output = crate::command_env::plain_command("git")
+        let output = crate::command_env::search_path_command("git")
             .args(args)
             .current_dir(cwd)
             .output()
