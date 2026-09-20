@@ -871,6 +871,13 @@ impl Waku {
     ) -> Option<Uuid> {
         let (session_id, project_id) = self.workspace_subject();
         if session_id.is_some() || !self.big_picture.is_open() {
+            // An existing draft keeps routing to its project's owner —
+            // claiming here also repairs drafts made before ownership was
+            // recorded.
+            if let (Some(session_id), Some(project_id)) = (session_id, project_id) {
+                self.daemons
+                    .claim_session(session_id, self.daemons.project_owner(project_id));
+            }
             return session_id;
         }
         let project_id = project_id?;
@@ -886,6 +893,8 @@ impl Waku {
         let mut session = self.state.new_session(project_id, self.state.last_provider);
         session.runtime_mode = runtime_mode;
         let session_id = session.id;
+        self.daemons
+            .claim_session(session_id, self.daemons.project_owner(project_id));
         self.state.push_session(session);
         self.save();
         cx.notify();
@@ -923,6 +932,10 @@ impl Waku {
                 self.state.push_session(session);
                 id
             });
+        // Reused and fresh drafts alike route to the project's daemon —
+        // claiming also repairs drafts made before ownership was recorded.
+        self.daemons
+            .claim_session(draft_id, self.daemons.project_owner(project_id));
         self.activate_session(draft_id, cx);
         // A draft typed against the page's previous project follows the
         // switch into the new project's empty slot — the composer's project
