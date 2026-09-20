@@ -4237,6 +4237,16 @@ impl Waku {
                         search,
                         cx,
                         |this, enabled, cx| this.set_memory_experiment_enabled(enabled, cx),
+                    ))
+                    .children(self.experiment_card(
+                        "sandbox-experiment-toggle",
+                        "experiments.sandbox_title",
+                        "experiments.sandbox_description",
+                        self.state.sandbox_experiment_enabled,
+                        theme,
+                        search,
+                        cx,
+                        |this, enabled, cx| this.set_sandbox_experiment_enabled(enabled, cx),
                     )),
             )
             .into_any_element()
@@ -4394,6 +4404,24 @@ impl Waku {
 
     fn set_memory_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.memory_experiment_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The sandbox experiment opt-in is daemon-owned like subagents. Turning
+    /// it off also clears remembered environment intent — a draft or
+    /// `last_sandboxed` must not keep claiming the VM once the surface that
+    /// chose it is hidden.
+    fn set_sandbox_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.sandbox_experiment_enabled = enabled;
+        if !enabled {
+            self.state.last_sandboxed = false;
+            if let Some(session) = self.composer_session_mut()
+                && !session.has_started()
+            {
+                session.sandboxed = false;
+            }
+        }
         self.save();
         cx.notify();
     }

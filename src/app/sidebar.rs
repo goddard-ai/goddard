@@ -4813,8 +4813,9 @@ impl Waku {
             && !self.automations_page
             && self.projects_page.is_none()
             && !self.notifications.open;
-        let sandboxed =
-            session_surface && session.is_some_and(|session| session.sandboxed);
+        let sandboxed = session_surface
+            && session.is_some_and(|session| session.sandboxed)
+            && self.state.sandbox_experiment_enabled;
         let left_window_controls = (!self.sidebar_visible)
             .then(|| {
                 self.render_client_window_controls(

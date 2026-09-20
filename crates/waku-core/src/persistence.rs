@@ -631,6 +631,8 @@ impl PersistedState {
             integrations_enabled: cfg!(debug_assertions),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
+            // The sandbox experiment postdates the document the same way.
+            sandbox_experiment_enabled: cfg!(debug_assertions),
             extra: self.daemon_settings_extra.clone(),
         }
     }

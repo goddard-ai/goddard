@@ -1257,6 +1257,10 @@ pub struct PersistedState {
     /// so clients can render the pane.
     #[serde(default = "default_experiment_enabled")]
     pub integrations_enabled: bool,
+    /// Experimental opt-in for the sandbox environment surface. Daemon-owned;
+    /// mirrored here so clients can gate the environment choice.
+    #[serde(default = "default_experiment_enabled")]
+    pub sandbox_experiment_enabled: bool,
     /// Connected integrations. Daemon-owned; mirrored in memory so a client
     /// `UpdateSettings` round-trips them instead of wiping the list. Writes
     /// go through the integration commands.
@@ -1392,6 +1396,7 @@ impl PersistedState {
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
+            sandbox_experiment_enabled: default_experiment_enabled(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -1412,7 +1417,7 @@ impl PersistedState {
     pub fn new_session(&self, project_id: Uuid, provider: ProviderKind) -> AgentSession {
         let mut session = AgentSession::new(project_id, provider);
         session.runtime_mode = self.last_runtime_mode;
-        session.sandboxed = self.last_sandboxed;
+        session.sandboxed = self.last_sandboxed && self.sandbox_experiment_enabled;
         // An Auto pick carries to the next draft like the provider/model do;
         // the seeded provider/model stay as the route's last-used hint.
         session.auto_route = self.last_auto_route && self.model_router_enabled;
@@ -1594,6 +1599,7 @@ impl PersistedState {
             integrations_enabled: self.integrations_enabled,
             integrations: self.integrations.clone(),
             integrations_proxy_token: self.integrations_proxy_token.clone(),
+            sandbox_experiment_enabled: self.sandbox_experiment_enabled,
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -1619,6 +1625,7 @@ impl PersistedState {
         self.integrations_enabled = settings.integrations_enabled;
         self.integrations = settings.integrations;
         self.integrations_proxy_token = settings.integrations_proxy_token;
+        self.sandbox_experiment_enabled = settings.sandbox_experiment_enabled;
         self.daemon_settings_extra = settings.extra;
     }
 
@@ -3083,6 +3090,32 @@ mod tests {
         restored.model_router_enabled = false;
         let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
         assert!(!session.auto_route);
+    }
+
+    #[test]
+    fn sandbox_pick_seeds_the_next_draft() {
+        let mut state = PersistedState::empty();
+        state.sandbox_experiment_enabled = true;
+        state.last_sandboxed = true;
+
+        let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
+        assert!(session.sandboxed);
+
+        // Without the experiment the remembered flag cannot arm a draft.
+        state.sandbox_experiment_enabled = false;
+        let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
+        assert!(!session.sandboxed);
+    }
+
+    #[test]
+    fn sandbox_experiment_flag_mirrors_daemon_settings() {
+        let mut state = PersistedState::empty();
+        state.sandbox_experiment_enabled = true;
+
+        let mut mirror = PersistedState::empty();
+        mirror.sandbox_experiment_enabled = false;
+        mirror.apply_daemon_settings(state.daemon_settings());
+        assert!(mirror.sandbox_experiment_enabled);
     }
 }
 

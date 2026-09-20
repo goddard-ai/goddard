@@ -83,4 +83,11 @@ integrations?: Array<IntegrationSetting>,
  * Bearer that agents present to the daemon's local MCP proxy. Minted
  * lazily; local-only, it authorizes proxy access and nothing upstream.
  */
-integrations_proxy_token?: string, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+integrations_proxy_token?: string,
+/**
+ * Experimental opt-in for the sandbox environment surface — the access
+ * menu's Environment section, the session badge, and the environment
+ * toggle all stay hidden while this is off. Defaults on in development
+ * builds, opt-in in release builds.
+ */
+sandbox_experiment_enabled: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });

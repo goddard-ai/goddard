@@ -75,6 +75,11 @@ pub struct DaemonSettings {
     /// lazily; local-only, it authorizes proxy access and nothing upstream.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub integrations_proxy_token: String,
+    /// Experimental opt-in for the sandbox environment surface — the access
+    /// menu's Environment section, the session badge, and the environment
+    /// toggle all stay hidden while this is off. Defaults on in development
+    /// builds, opt-in in release builds.
+    pub sandbox_experiment_enabled: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -104,6 +109,7 @@ impl Default for DaemonSettings {
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
+            sandbox_experiment_enabled: default_experiment_enabled(),
             extra: BTreeMap::new(),
         }
     }

@@ -14,10 +14,11 @@ fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode
         .unwrap_or(remembered)
 }
 
-fn new_task_sandboxed(current: Option<&AgentSession>, remembered: bool) -> bool {
-    current
-        .map(|session| session.sandboxed)
-        .unwrap_or(remembered)
+fn new_task_sandboxed(current: Option<&AgentSession>, remembered: bool, enabled: bool) -> bool {
+    enabled
+        && current
+            .map(|session| session.sandboxed)
+            .unwrap_or(remembered)
 }
 
 /// Whether picking `mode` must pause on the one-time Full access
@@ -788,7 +789,11 @@ impl Waku {
         // a selected source task.
         let runtime_mode =
             new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
-        let sandboxed = new_task_sandboxed(self.selected_session(), self.state.last_sandboxed);
+        let sandboxed = new_task_sandboxed(
+            self.selected_session(),
+            self.state.last_sandboxed,
+            self.state.sandbox_experiment_enabled,
+        );
         let mut session = self.state.new_session(project_id, provider);
         session.runtime_mode = runtime_mode;
         session.sandboxed = sandboxed;
@@ -924,8 +929,11 @@ impl Waku {
             .unwrap_or_else(|| {
                 let runtime_mode =
                     new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
-                let sandboxed =
-                    new_task_sandboxed(self.selected_session(), self.state.last_sandboxed);
+                let sandboxed = new_task_sandboxed(
+                    self.selected_session(),
+                    self.state.last_sandboxed,
+                    self.state.sandbox_experiment_enabled,
+                );
                 let mut session = self.state.new_session(project_id, self.state.last_provider);
                 session.runtime_mode = runtime_mode;
                 session.sandboxed = sandboxed;
@@ -3504,7 +3512,7 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.is_some() {
+        if self.settings_page.is_some() || !self.state.sandbox_experiment_enabled {
             return;
         }
         let Some(sandboxed) = self.composer_session().map(|session| session.sandboxed) else {
@@ -3806,8 +3814,13 @@ impl Waku {
     }
 
     /// The environment is fixed when the session boots; once a task has
-    /// started it can only report where it runs, not move.
+    /// started it can only report where it runs, not move. The experiment
+    /// gate is absolute — no client path may mark a task sandboxed while the
+    /// surface that would explain the claim is hidden.
     pub(super) fn set_sandboxed(&mut self, sandboxed: bool, cx: &mut Context<Self>) {
+        if !self.state.sandbox_experiment_enabled {
+            return;
+        }
         let Some(session_changed) = self
             .composer_session()
             .filter(|session| !session.has_started())
@@ -4595,9 +4608,12 @@ mod tests {
         let mut current = AgentSession::new(Uuid::new_v4(), ProviderKind::OpenCode);
         current.sandboxed = true;
 
-        assert!(new_task_sandboxed(Some(&current), false));
-        assert!(!new_task_sandboxed(None, false));
-        assert!(new_task_sandboxed(None, true));
+        assert!(new_task_sandboxed(Some(&current), false, true));
+        assert!(!new_task_sandboxed(None, false, true));
+        assert!(new_task_sandboxed(None, true, true));
+        // The experiment gate keeps remembered or inherited intent from
+        // reaching a draft while the surface is hidden.
+        assert!(!new_task_sandboxed(Some(&current), true, false));
     }
 
     #[test]

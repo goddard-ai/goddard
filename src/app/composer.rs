@@ -2378,6 +2378,7 @@ impl Waku {
             .map(|session| session.runtime_mode)
             .unwrap_or_default();
         let sandboxed = session.is_some_and(|session| session.sandboxed);
+        let sandbox_enabled = self.state.sandbox_experiment_enabled;
         // The environment is provisioned when the session boots — a started
         // task's section still shows where it runs, but no longer changes it.
         let started = session.is_some_and(AgentSession::has_started);
@@ -2443,9 +2444,10 @@ impl Waku {
         dropdown_menu(
             MenuChip::new("runtime-mode")
                 // Sandboxed sessions trade the mode glyph for the container —
-                // the same icon the badge wears while the task runs.
+                // the same icon the badge wears while the task runs. The
+                // experiment gate keeps a hidden feature from leaking an icon.
                 .icon(
-                    if sandboxed {
+                    if sandboxed && sandbox_enabled {
                         "icons/container.svg"
                     } else {
                         selected_mode.icon()
@@ -2490,43 +2492,45 @@ impl Waku {
                         }
                     })
                     .collect();
-                items.push(MenuItem::Separator);
-                items.push(MenuItem::Header(tr!("sandbox.environment").into()));
-                for (icon_path, label, description, value) in [
-                    (
-                        "icons/laptop.svg",
-                        tr!("sandbox.this_mac"),
-                        tr!("sandbox.this_mac_description"),
-                        false,
-                    ),
-                    (
-                        "icons/container.svg",
-                        tr!("sandbox.sandbox_vm"),
-                        tr!("sandbox.sandbox_vm_description"),
-                        true,
-                    ),
-                ] {
-                    let selected = value == sandboxed;
-                    let weak = weak.clone();
-                    let choice_row = choice_row.clone();
-                    let row = MenuItem::custom(move |_, _| {
-                        choice_row(
-                            icon_path,
-                            label.clone(),
-                            description.clone(),
-                            selected,
-                            !started,
-                        )
-                    });
-                    // No `on_click` once the session exists — the row reports
-                    // the environment rather than choosing it.
-                    items.push(if started {
-                        row
-                    } else {
-                        row.on_click(move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| this.set_sandboxed(value, cx));
-                        })
-                    });
+                if sandbox_enabled {
+                    items.push(MenuItem::Separator);
+                    items.push(MenuItem::Header(tr!("sandbox.environment").into()));
+                    for (icon_path, label, description, value) in [
+                        (
+                            "icons/laptop.svg",
+                            tr!("sandbox.this_mac"),
+                            tr!("sandbox.this_mac_description"),
+                            false,
+                        ),
+                        (
+                            "icons/container.svg",
+                            tr!("sandbox.sandbox_vm"),
+                            tr!("sandbox.sandbox_vm_description"),
+                            true,
+                        ),
+                    ] {
+                        let selected = value == sandboxed;
+                        let weak = weak.clone();
+                        let choice_row = choice_row.clone();
+                        let row = MenuItem::custom(move |_, _| {
+                            choice_row(
+                                icon_path,
+                                label.clone(),
+                                description.clone(),
+                                selected,
+                                !started,
+                            )
+                        });
+                        // No `on_click` once the session exists — the row
+                        // reports the environment rather than choosing it.
+                        items.push(if started {
+                            row
+                        } else {
+                            row.on_click(move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| this.set_sandboxed(value, cx));
+                            })
+                        });
+                    }
                 }
                 items
             },

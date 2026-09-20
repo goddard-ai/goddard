@@ -706,6 +706,10 @@ experiments.project_map_title:
   en: Project map
 experiments.project_map_description:
   en: Give each new session a compact structural map of the workspace — top-level symbols of the most-referenced files, budgeted near 1,000 tokens — so the agent skips cold repo exploration. Applies to sessions started after turning it on.
+experiments.sandbox_title:
+  en: Sandbox VM
+experiments.sandbox_description:
+  en: Reveal the environment choice in the composer's access menu — run a task on this Mac or in an isolated Linux VM — and the Sandboxed badge on the session header. Applies to sessions started after turning it on.
 status_markers.complete:
   en: Complete
 status_markers.awaiting_input:
