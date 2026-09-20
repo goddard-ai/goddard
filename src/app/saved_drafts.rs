@@ -105,6 +105,24 @@ impl Waku {
             .count()
     }
 
+    /// A removed project takes its parked drafts with it, including any
+    /// ⌘Z-undoable Use records that could still hand one back.
+    pub(super) fn remove_project_drafts(&mut self, project_id: Uuid) {
+        let mut removed = HashSet::new();
+        self.state.saved_drafts.retain(|draft| {
+            let keep = draft.project_id != project_id;
+            if !keep {
+                removed.insert(draft.id);
+            }
+            keep
+        });
+        self.draft_use_undos
+            .retain(|undo| undo.saved.project_id != project_id);
+        if self.drafts_editing.is_some_and(|id| removed.contains(&id)) {
+            self.drafts_editing = None;
+        }
+    }
+
     // ── Page ───────────────────────────────────────────────────────────────
 
     /// Open the page as a navigation destination; back returns to whatever

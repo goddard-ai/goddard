@@ -188,6 +188,8 @@ enum PaletteAction {
     SelectResumeProvider(ProviderKind),
     ResumeProviderSession(waku_client::DaemonKey, ProviderSessionSummary),
     OpenProject,
+    OpenRemoveProject,
+    RemoveProject(Uuid),
     FocusComposer,
     CreateDraft,
     ViewDrafts,
@@ -242,6 +244,8 @@ enum CommandPaletteView {
     ResumeProviders,
     RunScriptProjects,
     RunScripts,
+    /// The "Remove project…" project picker.
+    RemoveProject,
     /// The "New task in…" directory picker.
     NewTaskIn,
     IssueProjects,
@@ -838,6 +842,16 @@ impl Waku {
             self.command_palette.run_script_generation.wrapping_add(1);
         self.command_palette.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("command_palette.run_script_project_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn open_command_palette_remove_project_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::RemoveProject;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.remove_project_placeholder"), cx);
             input.clear(cx);
         });
         self.refresh_command_palette_results("", false, cx);
@@ -1490,6 +1504,7 @@ impl Waku {
             CommandPaletteView::RunScripts => {
                 self.open_command_palette_run_script_projects_view(cx)
             }
+            CommandPaletteView::RemoveProject => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::NewTaskIn => self.leave_command_palette_new_task_view(cx),
             CommandPaletteView::IssueProjects => self.leave_command_palette_drill_in_view(cx),
             // Esc on the templates step backs up to the project step —
@@ -1513,6 +1528,7 @@ impl Waku {
                 tr!("command_palette.run_script_project_placeholder")
             }
             CommandPaletteView::RunScripts => tr!("command_palette.run_script_placeholder"),
+            CommandPaletteView::RemoveProject => tr!("command_palette.remove_project_placeholder"),
             CommandPaletteView::NewTaskIn => tr!("command_palette.new_task_in_placeholder"),
             CommandPaletteView::IssueProjects => {
                 tr!("command_palette.issue_project_placeholder")
@@ -1555,6 +1571,7 @@ impl Waku {
                 | CommandPaletteView::ResumeProviders
                 | CommandPaletteView::RunScriptProjects
                 | CommandPaletteView::RunScripts
+                | CommandPaletteView::RemoveProject
                 | CommandPaletteView::NewTaskIn
                 | CommandPaletteView::IssueProjects
                 | CommandPaletteView::IssueTemplates
@@ -1732,6 +1749,23 @@ impl Waku {
                 next(),
             ),
         ];
+
+        if self
+            .state
+            .projects
+            .iter()
+            .any(|project| !project.is_projectless())
+        {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.remove_project"),
+                "icons/trash.svg",
+                None,
+                PaletteAction::OpenRemoveProject,
+                "remove delete project workspace repository repo folder",
+                next(),
+            ));
+        }
 
         let can_choose_model = self
             .selected_session()
@@ -2494,6 +2528,53 @@ impl Waku {
             .collect()
     }
 
+    fn command_palette_remove_project_candidates(&self) -> Vec<CommandPaletteItem> {
+        let projects = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .collect::<Vec<_>>();
+        let current = self
+            .selected_session()
+            .map(|session| session.project_id)
+            .filter(|id| projects.iter().any(|project| project.id == *id));
+        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+        run_script::run_script_project_order(current, &recent, &projects)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(order, project_id)| {
+                let project = projects.iter().find(|project| project.id == project_id)?;
+                let mut detail =
+                    settings::abbreviate_home_path(&project.path, self.home_directory.as_deref());
+                if let waku_client::DaemonKey::Remote(host) = self.project_host(project_id)
+                    && let Some(host) = self.remote_host_name(host)
+                {
+                    detail = format!("{detail} · {host}");
+                }
+                if current == Some(project_id) {
+                    detail = format!("{detail} · {}", tr!("command_palette.current"));
+                }
+                let label = project.display_name();
+                Some(CommandPaletteItem {
+                    section: PaletteSection::Projects,
+                    search_text: format!(
+                        "{label} {} project remove delete",
+                        project.path.to_string_lossy()
+                    ),
+                    label,
+                    detail: Some(detail),
+                    icon: PaletteIcon::Asset("icons/trash.svg"),
+                    shortcut: None,
+                    action: PaletteAction::RemoveProject(project_id),
+                    content_match: None,
+                    order,
+                    recency: 0,
+                })
+            })
+            .collect()
+    }
+
     fn command_palette_run_script_candidates(&self) -> Vec<CommandPaletteItem> {
         let Some(project_id) = self.command_palette.run_script_project else {
             return Vec::new();
@@ -2604,6 +2685,29 @@ impl Waku {
         self.finish_drill_in_refresh(
             selected_action.flatten(),
             Some(PaletteAction::ChooseRunScriptProject),
+        );
+    }
+
+    fn refresh_command_palette_remove_project_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_remove_project_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(
+            selected_action.flatten(),
+            Some(PaletteAction::RemoveProject),
         );
     }
 
@@ -3106,6 +3210,10 @@ impl Waku {
                 self.refresh_command_palette_run_script_results(query, preserve_selection);
                 return;
             }
+            CommandPaletteView::RemoveProject => {
+                self.refresh_command_palette_remove_project_results(query, preserve_selection);
+                return;
+            }
             CommandPaletteView::NewTaskIn => {
                 self.refresh_command_palette_new_task_results(query, preserve_selection);
                 return;
@@ -3541,6 +3649,10 @@ impl Waku {
                 self.open_command_palette_run_script_projects_view(cx);
                 return;
             }
+            PaletteAction::OpenRemoveProject => {
+                self.open_command_palette_remove_project_view(cx);
+                return;
+            }
             PaletteAction::NewTaskIn => {
                 self.open_command_palette_new_task_view(cx);
                 return;
@@ -3593,6 +3705,7 @@ impl Waku {
             }
             PaletteAction::NewTaskInSameWorktree => self.new_task_in_same_worktree(window, cx),
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
+            PaletteAction::RemoveProject(project_id) => self.remove_project(project_id, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
             PaletteAction::CreateDraft => self.create_saved_draft(window, cx),
             PaletteAction::ViewDrafts => self.open_drafts_page(window, cx),
@@ -3788,6 +3901,7 @@ impl Waku {
             | PaletteAction::ResumeProviderSession(..)
             | PaletteAction::OpenRunScript
             | PaletteAction::ChooseRunScriptProject(_)
+            | PaletteAction::OpenRemoveProject
             | PaletteAction::NewTaskIn
             | PaletteAction::CreateGitHubIssue
             | PaletteAction::ChooseIssueProject(_)
@@ -3867,6 +3981,7 @@ impl Waku {
                 .is_some_and(|picker| picker.pending),
             CommandPaletteView::ResumeProviders
             | CommandPaletteView::RunScriptProjects
+            | CommandPaletteView::RemoveProject
             | CommandPaletteView::IssueProjects
             | CommandPaletteView::SavePrompt => false,
         };

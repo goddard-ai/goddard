@@ -2354,7 +2354,7 @@ impl Waku {
     }
 
     /// Persist the per-host catalog cache off the UI thread.
-    fn save_remote_catalogs(&self) {
+    pub(super) fn save_remote_catalogs(&self) {
         let catalogs = self.remote_catalogs.clone();
         let path = self.remote_catalogs_path.clone();
         std::thread::Builder::new()

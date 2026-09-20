@@ -595,6 +595,18 @@ impl Hub {
         }
     }
 
+    fn task_project_removed(&self, source_subscriber_id: u64, project_id: Uuid) {
+        let mut state = self.state.lock();
+        let removed_project = state.catalog_projects.remove(&project_id).is_some();
+        let session_count = state.catalog_sessions.len();
+        state
+            .catalog_sessions
+            .retain(|_, session| session.project_id != project_id);
+        if removed_project || state.catalog_sessions.len() != session_count {
+            Self::broadcast_task_state_changed(&mut state, source_subscriber_id);
+        }
+    }
+
     fn broadcast_task_state_changed(state: &mut HubState, source_subscriber_id: u64) {
         state.task_state_revision = state.task_state_revision.saturating_add(1);
         let message = ServerMessage::TaskStateChanged {
@@ -1738,6 +1750,7 @@ enum TaskCatalogAction {
     None,
     Load,
     Save { projects: Vec<Project> },
+    RemoveProject { project_id: Uuid },
     Changed,
 }
 
@@ -1811,6 +1824,9 @@ fn handle_request(
                     payload: ResponsePayload::TaskStateSaved { sessions },
                 },
             ) => hub.task_state_saved(source_subscriber_id, projects, sessions),
+            (TaskCatalogAction::RemoveProject { project_id }, ResponseOutcome::Ok { .. }) => {
+                hub.task_project_removed(source_subscriber_id, *project_id)
+            }
             (TaskCatalogAction::Changed, ResponseOutcome::Ok { .. }) => {
                 hub.task_state_changed(source_subscriber_id);
             }
@@ -1832,6 +1848,11 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         Command::SaveTaskState { projects, .. } => TaskCatalogAction::Save {
             projects: projects.clone(),
         },
+        Command::RemoveProject { project_id } => {
+            TaskCatalogAction::RemoveProject {
+                project_id: *project_id,
+            }
+        }
         Command::RemoveSession
         | Command::ForkSessionFromResponse { .. }
         | Command::RewindSessionToMessage { .. }

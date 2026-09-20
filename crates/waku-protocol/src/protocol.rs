@@ -269,6 +269,9 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    /// Remove a project and every task it owns from the daemon catalog. Like
+    /// `RemoveSession`, this is explicit because `SaveTaskState` is merge-only.
+    RemoveProject { project_id: Uuid },
     HydrateSession {
         session_id: Uuid,
     },

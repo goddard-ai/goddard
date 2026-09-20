@@ -2384,6 +2384,25 @@ impl StateStore {
         result
     }
 
+    pub fn remove_project(&self, project_id: Uuid) -> io::Result<()> {
+        let Some(daemon) = self.daemons.daemon_for_project(project_id) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the daemon owning this project is not connected",
+            ));
+        };
+        daemon
+            .client()
+            .notify(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::RemoveProject { project_id },
+            )
+            .map_err(to_io_error)?;
+        self.daemons.drop_project(project_id);
+        Ok(())
+    }
+
     pub fn blob_sweep(&self) -> impl FnOnce() + Send + 'static {
         let daemons = self.daemons.clone();
         move || {

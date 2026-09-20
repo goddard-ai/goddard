@@ -1998,6 +1998,7 @@ mod tests {
             is_image,
             blob_reference: None,
             session_id: None,
+            pasted_text_preview: None,
         }
     }
 

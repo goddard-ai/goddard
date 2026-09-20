@@ -75,6 +75,14 @@ impl ProjectSwitcherUi {
         }
     }
 
+    /// A project vanishing mid-gesture invalidates the snapshot, so close the
+    /// overlay rather than repair selection against a stale row list.
+    pub(super) fn project_removed(&mut self, project_id: Uuid) {
+        if self.open && self.ordered_project_ids.contains(&project_id) {
+            self.dismiss();
+        }
+    }
+
     fn reveal_highlight(&self) {
         let Some(index) = self.highlighted_project_id.and_then(|highlighted| {
             self.ordered_project_ids

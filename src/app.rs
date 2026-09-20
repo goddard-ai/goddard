@@ -1380,6 +1380,13 @@ impl SessionNavigation {
             .retain(|entry| *entry != NavigationLocation::Terminal(terminal_id));
     }
 
+    fn remove_project(&mut self, project_id: Uuid) {
+        self.back
+            .retain(|entry| *entry != NavigationLocation::ProjectsPage(project_id));
+        self.forward
+            .retain(|entry| *entry != NavigationLocation::ProjectsPage(project_id));
+    }
+
     fn remember_new_task(&mut self, session_id: Uuid) {
         self.new_task = Some(session_id);
     }

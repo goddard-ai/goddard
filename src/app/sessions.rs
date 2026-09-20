@@ -1052,26 +1052,116 @@ impl Waku {
         self.select_workspace_for(session_id, next, cx);
     }
 
+    /// Remove a project from its owning daemon and drop every task it owns.
+    /// The project directory and started-task worktrees stay on disk; this is
+    /// catalog/history removal, not filesystem deletion.
+    pub(super) fn remove_project(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .cloned()
+        else {
+            return;
+        };
+        if project.is_projectless() {
+            return;
+        }
+        let session_ids = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| session.project_id == project_id)
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        if session_ids
+            .iter()
+            .any(|id| self.response_fork_preparations.contains_key(id))
+        {
+            self.show_toast(tr!("session.response_fork_in_progress"));
+            cx.notify();
+            return;
+        }
+        let owner = self.daemons.project_owner(project_id);
+        if let Err(error) = self.store.remove_project(project_id) {
+            self.show_toast(tr!("errors.save_local_state", error = error));
+            cx.notify();
+            return;
+        }
+        if let waku_client::DaemonKey::Remote(host) = owner
+            && let Some(catalog) = self.remote_catalogs.get_mut(&host)
+        {
+            catalog.projects.retain(|project| project.id != project_id);
+            catalog
+                .sessions
+                .retain(|session| session.project_id != project_id);
+            self.save_remote_catalogs();
+        }
+
+        // Project-keyed surfaces and drafts die with the catalog row; session
+        // cleanup below handles task-scoped state.
+        self.remove_parked_github_surfaces(project_id);
+        if let Some(index) = self.right_panel_surfaces.iter().position(
+            |surface| matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id),
+        ) {
+            self.close_right_panel_surface(index, cx);
+        }
+        self.github_browsers.remove(&project_id);
+        self.projects_page_states.remove(&project_id);
+        self.missing_projects.remove(&project_id);
+        self.session_navigation.remove_project(project_id);
+        self.remove_composer_draft(
+            crate::persistence::ComposerDraftKey::NewSession(project_id),
+            cx,
+        );
+        self.remove_project_drafts(project_id);
+        if self.projects_page == Some(project_id) {
+            self.projects_page = None;
+        }
+        if self.last_projects_page_project == Some(project_id) {
+            self.last_projects_page_project = None;
+        }
+        if self.state.selected_project == Some(project_id) {
+            self.state.selected_project = self
+                .state
+                .projects
+                .iter()
+                .find(|project| project.id != project_id && !project.is_projectless())
+                .map(|project| project.id);
+        }
+        self.state
+            .projects
+            .retain(|project| project.id != project_id);
+        self.project_switcher.project_removed(project_id);
+        for session_id in session_ids {
+            self.remove_session_inner(session_id, None, false, cx);
+        }
+        self.save();
+        cx.notify();
+    }
+
     pub(super) fn remove_session(
         &mut self,
         session_id: Uuid,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.remove_session_inner(session_id, Some(window), cx);
+        self.remove_session_inner(session_id, Some(window), true, cx);
     }
 
     /// `remove_session` for a session that can never be selected — a side
     /// chat closed through its tab. The selection fallback takes the window,
     /// and a session that cannot be selected never reaches it.
     pub(super) fn remove_side_chat_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        self.remove_session_inner(session_id, None, cx);
+        self.remove_session_inner(session_id, None, false, cx);
     }
 
     fn remove_session_inner(
         &mut self,
         session_id: Uuid,
         window: Option<&mut Window>,
+        select_fallback: bool,
         cx: &mut Context<Self>,
     ) {
         // "Remove" on a watched friend session just closes our view —
@@ -1088,7 +1178,7 @@ impl Waku {
         // A task's side chats are not independent sessions — closing or
         // archiving their parent deletes them with it.
         for child_id in self.side_chat_descendants(session_id) {
-            self.remove_session_inner(child_id, None, cx);
+            self.remove_session_inner(child_id, None, false, cx);
         }
         let Some(index) = self
             .state
@@ -1224,10 +1314,16 @@ impl Waku {
         self.invalidate_checkpoint_refs();
 
         if was_selected {
-            // `None` callers delete sessions that can never be selected —
-            // side chats — so the fallback always has its window here.
-            if let Some(window) = window {
-                self.select_session_fallback(project_id, projectless || temporary, window, cx);
+            if select_fallback {
+                // `None` callers delete sessions that can never be selected —
+                // side chats — so the fallback always has its window here.
+                if let Some(window) = window {
+                    self.select_session_fallback(project_id, projectless || temporary, window, cx);
+                }
+            } else {
+                self.state.selected_session = None;
+                self.save();
+                cx.notify();
             }
         } else {
             self.save();
@@ -1473,7 +1569,7 @@ impl Waku {
         // Side chats die with their parent rather than archiving: the
         // workspace cleanup below removes the checkout they work in.
         for child_id in self.side_chat_descendants(session_id) {
-            self.remove_session_inner(child_id, None, cx);
+            self.remove_session_inner(child_id, None, false, cx);
         }
         let projectless = self
             .state

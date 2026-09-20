@@ -87,6 +87,7 @@ pub struct WakuBackend {
     /// the runtime event forwarder.
     memory: Arc<crate::memory::MemoryService>,
     removed_session_ids: Mutex<HashSet<Uuid>>,
+    removed_project_ids: Mutex<HashSet<Uuid>>,
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
     usage_scan_cache: Mutex<crate::usage_history::ScanCache>,
@@ -175,6 +176,7 @@ impl WakuBackend {
             task_store,
             task_state,
             removed_session_ids: Mutex::new(HashSet::new()),
+            removed_project_ids: Mutex::new(HashSet::new()),
             composer_drafts,
             attachments,
             usage_scan_cache: Mutex::new(HashMap::new()),
@@ -538,6 +540,70 @@ impl WakuBackend {
         if let Some(path) = removed_workspace {
             // A failed removal leaves files behind — safe — so the task's
             // removal does not hinge on it.
+            let _ = crate::projectless::remove_workspace(&path);
+        }
+        for id in removed_ids {
+            let removed = self.sessions.lock().remove(&id);
+            drop(removed);
+            self.agent.clear_session(id);
+        }
+        Ok(())
+    }
+
+    /// Removes a project and every task under it. The ids are remembered for
+    /// the same reason `remove_session` remembers tasks: a stale client save
+    /// must not restore the catalog row another client just deleted.
+    fn remove_project(&self, project_id: Uuid) -> anyhow::Result<()> {
+        let mut removed_workspace = None;
+        let mut removed_ids;
+        {
+            let mut state = self.task_state.lock();
+            let Some(index) = state
+                .projects
+                .iter()
+                .position(|project| project.id == project_id)
+            else {
+                return Ok(());
+            };
+            if state.projects[index].is_projectless() {
+                removed_workspace = Some(state.projects[index].path.clone());
+            }
+            let mut removed_set = state
+                .sessions
+                .iter()
+                .filter(|session| session.project_id == project_id)
+                .map(|session| session.id)
+                .collect::<HashSet<_>>();
+            let mut cursor = 0;
+            removed_ids = removed_set.iter().copied().collect::<Vec<_>>();
+            while cursor < removed_ids.len() {
+                let parent = removed_ids[cursor];
+                cursor += 1;
+                for child in state
+                    .sessions
+                    .iter()
+                    .filter(|session| session.side_chat_of == Some(parent))
+                    .map(|session| session.id)
+                {
+                    if removed_set.insert(child) {
+                        removed_ids.push(child);
+                    }
+                }
+            }
+            self.removed_project_ids.lock().insert(project_id);
+            {
+                let mut removed = self.removed_session_ids.lock();
+                for id in &removed_ids {
+                    removed.insert(*id);
+                }
+            }
+            state
+                .sessions
+                .retain(|session| !removed_ids.contains(&session.id));
+            state.projects.remove(index);
+            self.task_store.save(&mut state)?;
+        }
+        if let Some(path) = removed_workspace {
             let _ = crate::projectless::remove_workspace(&path);
         }
         for id in removed_ids {
@@ -1208,8 +1274,11 @@ impl Backend for WakuBackend {
                     .map(|(session_id, (runtime_id, _))| (*session_id, *runtime_id))
                     .collect::<HashMap<_, _>>();
                 let mut state = self.task_state.lock();
-                let removed_session_ids = self.removed_session_ids.lock();
+                let removed_project_ids = self.removed_project_ids.lock();
                 for project in projects {
+                    if removed_project_ids.contains(&project.id) {
+                        continue;
+                    }
                     if let Some(existing) = state
                         .projects
                         .iter_mut()
@@ -1220,6 +1289,8 @@ impl Backend for WakuBackend {
                         state.projects.push(project);
                     }
                 }
+                drop(removed_project_ids);
+                let removed_session_ids = self.removed_session_ids.lock();
                 let sessions = sessions
                     .into_iter()
                     .filter(|session| !removed_session_ids.contains(&session.id))
@@ -1335,6 +1406,10 @@ impl Backend for WakuBackend {
             }
             Command::RemoveSession => {
                 self.remove_session(session_id)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::RemoveProject { project_id } => {
+                self.remove_project(project_id)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::HydrateSession { session_id } => {
@@ -3796,6 +3871,7 @@ fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
+        | Command::RemoveProject { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::ListProviderSessions { .. }
@@ -4486,6 +4562,94 @@ mod tests {
                 .iter()
                 .any(|session| session.id == side_chat_id)
         );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn removing_a_project_removes_its_tasks_and_blocks_stale_saves() {
+        let root = std::env::temp_dir().join(format!("waku-remove-project-{}", Uuid::new_v4()));
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("repo"));
+        let project = state.projects[0].clone();
+        state.sessions[0].begin_turn("remove me");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let parent = state.sessions[0].clone();
+        let mut side_chat = AgentSession::new(project.id, ProviderKind::Codex);
+        side_chat.side_chat_of = Some(parent.id);
+        side_chat.begin_turn("side prompt");
+        side_chat.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.push_session(side_chat);
+        let other_project = Project::from_path(root.join("other"));
+        let mut other_session = AgentSession::new(other_project.id, ProviderKind::Codex);
+        other_session.begin_turn("keep me");
+        other_session.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.projects.push(other_project.clone());
+        state.push_session(other_session.clone());
+        store.save(&mut state).unwrap();
+
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap();
+        backend.remove_project(project.id).unwrap();
+        {
+            let state = backend.task_state.lock();
+            assert_eq!(
+                state
+                    .projects
+                    .iter()
+                    .map(|project| project.id)
+                    .collect::<Vec<_>>(),
+                vec![other_project.id]
+            );
+            assert_eq!(
+                state
+                    .sessions
+                    .iter()
+                    .map(|session| session.id)
+                    .collect::<Vec<_>>(),
+                vec![other_session.id]
+            );
+        }
+
+        let stale = backend
+            .handle(
+                waku_protocol::Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::SaveTaskState {
+                        projects: vec![project.clone(), other_project.clone()],
+                        live_session_ids: vec![parent.id, other_session.id],
+                        sessions: vec![parent.clone(), other_session.clone()],
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        assert!(matches!(stale, ResponsePayload::TaskStateSaved { .. }));
+        {
+            let state = backend.task_state.lock();
+            assert_eq!(
+                state
+                    .projects
+                    .iter()
+                    .map(|project| project.id)
+                    .collect::<Vec<_>>(),
+                vec![other_project.id]
+            );
+            assert_eq!(
+                state
+                    .sessions
+                    .iter()
+                    .map(|session| session.id)
+                    .collect::<Vec<_>>(),
+                vec![other_session.id]
+            );
+        }
 
         std::fs::remove_dir_all(root).ok();
     }
