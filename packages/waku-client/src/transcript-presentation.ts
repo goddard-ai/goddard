@@ -588,6 +588,7 @@ function activityNoun(kind: ActivityItem['kind'], count: number) {
     search: ['search', 'searches'],
     plan: ['plan step', 'plan steps'],
     tool: ['tool call', 'tool calls'],
+    projectMap: ['project map', 'project maps'],
   }
   const [one, many] = nouns[kind]
   return count === 1 ? one : many
@@ -604,6 +605,7 @@ function activityNounKey(kind: ActivityItem['kind'], count: number) {
     search: ['activity.search', 'activity.searches'],
     plan: ['activity.plan_step', 'activity.plan_steps'],
     tool: ['activity.tool_call', 'activity.tool_calls'],
+    projectMap: ['project_map.action_label', 'project_map.action_label'],
   }
   const [one, many] = keys[kind]
   return count === 1 ? one : many
@@ -657,6 +659,7 @@ function isGenericActivityTitle(activity: ActivityItem) {
     plan: ['plan', 'planupdated', 'updateplan'],
     tool: ['tool'],
     reasoning: ['reasoning'],
+    projectMap: [] as string[],
   }[activity.kind]
   return generic.includes(normalized)
 }
