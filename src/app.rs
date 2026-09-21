@@ -30,7 +30,7 @@ use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::git_branch::{BranchSnapshot, RemoteFileRef};
 use crate::input::{
     ComposerAttachmentPaste, ComposerEvent, ComposerInput, ComposerSplice, ComposerTextPaste,
-    FOLDED_PASTE_MARKER, INLINE_ATOM_MARKER, InputEvent, TextInput, Undo,
+    INLINE_ATOM_MARKER, InputEvent, TextInput, Undo,
 };
 use crate::md;
 use crate::model::{
@@ -518,12 +518,9 @@ struct ComposerSubmission {
     /// `display_content` when annotations put quote blocks in the bubble.
     human_content: Option<String>,
     attachments: Vec<MessageAttachment>,
-    /// Collapsed paste blocks already folded into `prompt`, kept so a failed
-    /// submission can restore them as composer cards rather than inline text.
-    pasted_blocks: Vec<String>,
-    /// Inline session references already folded into `prompt`, kept so a
-    /// failed submission can restore them as atoms rather than token text.
-    session_atoms: Vec<composer::ComposerSessionAtom>,
+    /// Inline atoms already folded into `prompt`, kept so a failed
+    /// submission can restore them as atoms rather than spliced text.
+    atoms: Vec<composer::ComposerInlineAtom>,
     /// Transcript annotations already folded into `prompt`'s header, kept so a
     /// failed submission can restore them alongside the draft text.
     annotations: Vec<TranscriptAnnotation>,
@@ -543,8 +540,7 @@ impl ComposerSubmission {
             display_content: None,
             human_content: None,
             attachments: Vec::new(),
-            pasted_blocks: Vec::new(),
-            session_atoms: Vec::new(),
+            atoms: Vec::new(),
             annotations: Vec::new(),
             hidden: false,
         }
@@ -570,10 +566,10 @@ impl ComposerSubmission {
             display_content: message.display_content,
             human_content: None,
             attachments: message.attachments,
-            // A queued message carries no block split — the paste text is
-            // already inside `content`, so editing pulls it back inline.
-            pasted_blocks: Vec::new(),
-            session_atoms: Vec::new(),
+            // A queued message carries no atom split — the pasted text and
+            // session tokens are already inside `content`, so editing pulls
+            // them back inline.
+            atoms: Vec::new(),
             // The annotation header already lives inside `content`; the
             // structured set rides `queued_annotations` and the caller
             // reattaches it. Queueing counts as sent, so the highlights stay
@@ -2217,11 +2213,11 @@ pub struct Waku {
     /// Files dropped onto the composer, drawn as chips above the input and
     /// drained into the next submission.
     composer_attachments: Vec<ComposerAttachment>,
-    /// Text pastes too large for the field, folded into it as marker chips
-    /// at the paste position and spliced back into the next submission
-    /// verbatim. Purely view state: drafts capture their text inline instead.
-    composer_pasted_blocks: Vec<composer::ComposerPastedBlock>,
-    composer_session_atoms: Vec<composer::ComposerSessionAtom>,
+    /// Atoms folded into the field behind [`INLINE_ATOM_MARKER`] sentinels —
+    /// collapsed pastes and session references — spliced to their payloads
+    /// in the next submission. Purely view state: drafts capture their text
+    /// inline instead.
+    composer_inline_atoms: Vec<composer::ComposerInlineAtom>,
     /// Window-modal expansion of an image attachment. The path is already
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
@@ -4723,9 +4719,8 @@ impl Waku {
                 &composer,
                 |this: &mut Self, _, event: &ComposerEvent, cx| match event {
                     ComposerEvent::Submit(prompt) => {
-                        let typed_only = prompt.trim().is_empty()
-                            && this.composer_pasted_blocks.is_empty()
-                            && this.composer_session_atoms.is_empty();
+                        let typed_only =
+                            prompt.trim().is_empty() && this.composer_inline_atoms.is_empty();
                         if this.big_picture.is_open() {
                             // Big Picture routes by its own target — a card's
                             // session or a new task — not the selection.
@@ -4745,8 +4740,7 @@ impl Waku {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
                         } else if prompt.trim().is_empty()
                             && this.composer_attachments.is_empty()
-                            && this.composer_pasted_blocks.is_empty()
-                            && this.composer_session_atoms.is_empty()
+                            && this.composer_inline_atoms.is_empty()
                             && !this.has_annotations()
                             && this.selected_session().is_some_and(|session| {
                                 composer::session_awaits_continue(session)
@@ -4769,8 +4763,7 @@ impl Waku {
                         // blocks, and annotations all steer as a submission.
                         let empty_draft = prompt.trim().is_empty()
                             && this.composer_attachments.is_empty()
-                            && this.composer_pasted_blocks.is_empty()
-                            && this.composer_session_atoms.is_empty()
+                            && this.composer_inline_atoms.is_empty()
                             && !this.has_annotations();
                         if this.big_picture.is_open() && !empty_draft {
                             if let Some(submission) = this.submission_with_attachments(prompt, cx) {
@@ -4810,14 +4803,19 @@ impl Waku {
                     }
                     ComposerEvent::Focus => {}
                     ComposerEvent::BackspaceOnEmpty => {
-                        if this.composer_pasted_blocks.pop().is_some()
-                            || this.composer_session_atoms.pop().is_some()
+                        // The field is empty, so no atom can still have a
+                        // live marker — pop clears a straggler. Attachments
+                        // are the real target of the chat-idiom pop.
+                        if this.composer_inline_atoms.pop().is_some()
                             || this.composer_attachments.pop().is_some()
                         {
                             this.sync_inline_atom_labels(cx);
                             this.schedule_composer_draft_save(cx);
                             cx.notify();
                         }
+                    }
+                    ComposerEvent::InlineAtomActivated(marker) => {
+                        this.activate_inline_atom(*marker, cx);
                     }
                 },
             )
@@ -4833,7 +4831,9 @@ impl Waku {
                         let answer = input.read(cx).content().to_owned();
                         this.update_user_input_custom_answer(answer, cx);
                     }
-                    InputEvent::Focus | InputEvent::BackspaceOnEmpty => {}
+                    InputEvent::Focus
+                    | InputEvent::BackspaceOnEmpty
+                    | InputEvent::InlineAtomActivated(_) => {}
                 },
             )
             .detach();
@@ -4842,7 +4842,10 @@ impl Waku {
                 &annotation_comment_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
                     InputEvent::Submit(_) => this.commit_annotation_editor(cx),
-                    InputEvent::Edited | InputEvent::Focus | InputEvent::BackspaceOnEmpty => {}
+                    InputEvent::Edited
+                    | InputEvent::Focus
+                    | InputEvent::BackspaceOnEmpty
+                    | InputEvent::InlineAtomActivated(_) => {}
                 },
             )
             .detach();
@@ -5536,8 +5539,7 @@ impl Waku {
                 composer_sources_stale: false,
                 composer_autocomplete: autocomplete::AutocompleteUi::new(),
                 composer_attachments,
-                composer_pasted_blocks: Vec::new(),
-                composer_session_atoms: Vec::new(),
+                composer_inline_atoms: Vec::new(),
                 image_preview: None,
                 image_preview_generation: 0,
                 remote_images: RefCell::new(HashMap::new()),

@@ -561,6 +561,10 @@ pub enum InputEvent {
     /// behind the field — the composer's attachments — listen for this;
     /// everyone else ignores it.
     BackspaceOnEmpty,
+    /// A double-click landed on an [`INLINE_ATOM_MARKER`]'s painted label —
+    /// the byte offset of the marker, so the owner can expand or activate
+    /// the atom it stands for.
+    InlineAtomActivated(usize),
 }
 
 /// Clipboard payloads whose primary representation is an image or file list,
@@ -578,7 +582,7 @@ pub struct CollapsedPaste(pub String);
 
 /// Byte-level splice report emitted whenever `content` changes, ahead of
 /// [`InputEvent::Edited`], so an owner anchoring state to text offsets — the
-/// composer's folded paste markers — can remap it without diffing the whole
+/// composer's inline atoms — can remap it without diffing the whole
 /// string. `removed` is the byte range replaced in the old content,
 /// `inserted` the byte length that took its place.
 #[derive(Clone)]
@@ -587,14 +591,8 @@ pub struct ContentSplice {
     pub inserted: usize,
 }
 
-/// The object-replacement character a folded paste leaves in the field: one
-/// invisible glyph standing for the whole block, spliced back to the real
-/// text on submit. Deleting it deletes the block.
-pub const FOLDED_PASTE_MARKER: char = '\u{FFFC}';
-
 /// The sentinel an inline atom leaves in the field — the interlinear
-/// annotation anchor. Unlike [`FOLDED_PASTE_MARKER`] it never conceals: the
-/// owner pushes one label per marker through
+/// annotation anchor. The owner pushes one label per marker through
 /// [`TextInput::set_inline_atom_labels`] and the painted text substitutes
 /// the marker for it, styled as a mention. Content indices still hold the
 /// raw three bytes, so the atom deletes atomically — one backspace takes the
@@ -738,10 +736,6 @@ pub struct TextInput {
     /// Large text pastes surface as [`CollapsedPaste`] instead of splicing
     /// into the field.
     accepts_collapsed_paste: bool,
-    /// [`FOLDED_PASTE_MARKER`] glyphs paint invisible: the owner stages a
-    /// pasted block behind each marker and draws its chip over the glyph's
-    /// line, so the marker itself must never show the notdef box.
-    folded_paste: bool,
     /// One label per [`INLINE_ATOM_MARKER`] in content order — what each
     /// marker substitutes to in the painted text. The owner keeps it in step
     /// with its atom list; a marker beyond the list paints as nothing.
@@ -862,7 +856,6 @@ impl TextInput {
             line_height: 22.0,
             accepts_media_paste: false,
             accepts_collapsed_paste: false,
-            folded_paste: false,
             inline_atom_labels: Vec::new(),
             clear_on_escape: false,
             select_all_on_focus_click: false,
@@ -1108,13 +1101,6 @@ impl TextInput {
         self.accepts_collapsed_paste = accepts;
     }
 
-    /// Paint [`FOLDED_PASTE_MARKER`] glyphs invisible. Pair with
-    /// [`set_collapsed_paste`](Self::set_collapsed_paste) on fields whose
-    /// owner folds pastes into markers.
-    pub fn set_folded_paste(&mut self, folded: bool) {
-        self.folded_paste = folded;
-    }
-
     /// Push the owner's inline-atom labels — one per [`INLINE_ATOM_MARKER`]
     /// in content order. Each marker paints as its label in the text flow,
     /// styled as a mention; a marker past the end of the list paints as
@@ -1123,11 +1109,7 @@ impl TextInput {
     pub fn set_inline_atom_labels(&mut self, labels: Vec<SharedString>, cx: &mut Context<Self>) {
         self.inline_atom_labels = labels
             .into_iter()
-            .map(|label| {
-                label
-                    .replace([FOLDED_PASTE_MARKER, INLINE_ATOM_MARKER, '\n', '\r'], " ")
-                    .into()
-            })
+            .map(|label| label.replace([INLINE_ATOM_MARKER, '\n', '\r'], " ").into())
             .collect();
         cx.notify();
     }
@@ -1459,24 +1441,6 @@ impl TextInput {
         };
         let range = self.display_index(range.start)..self.display_index(range.end);
         crate::md::render::range_rects(layout, &range, 0.0, 0.0)
-    }
-
-    /// Where `offset` paints relative to the field element's top-left —
-    /// `(x, y)` of the glyph with scroll applied — plus the line height, so a
-    /// sibling overlay can anchor an element to a byte offset. Reads the
-    /// previous frame's layout, like [`Self::position_for_offset`].
-    pub fn overlay_anchor(&self, offset: usize) -> Option<(Point<Pixels>, Pixels)> {
-        let layout = self.last_layout.as_ref()?;
-        let origin = layout.position_for_index(0)?;
-        let position =
-            layout.position_for_index(self.display_index(offset.min(self.content.len())))?;
-        // Scroll offsets are negative once scrolled: adding one back turns
-        // the painted window position into a field-relative one.
-        let scroll = self.scroll_handle.offset();
-        Some((
-            point(position.x - origin.x, position.y - origin.y + scroll.y),
-            layout.line_height(),
-        ))
     }
 
     /// Height of each logical line as laid out, so a gutter can put one number
@@ -2588,6 +2552,29 @@ impl TextInput {
         }
 
         if event.click_count == 2 {
+            // A double-click on an atom's painted label snaps to the marker's
+            // edge — treat either edge as the marker, select it, and let the
+            // owner decide what activating the atom means.
+            let marker_len = INLINE_ATOM_MARKER.len_utf8();
+            let marker_range = self.content[offset.min(self.content.len())..]
+                .starts_with(INLINE_ATOM_MARKER)
+                .then(|| {
+                    offset.min(self.content.len())..offset.min(self.content.len()) + marker_len
+                })
+                .or_else(|| {
+                    (offset >= marker_len
+                        && self.content[offset - marker_len..offset].ends_with(INLINE_ATOM_MARKER))
+                    .then(|| offset - marker_len..offset)
+                });
+            if let Some(range) = marker_range {
+                self.selected_range = range.clone();
+                self.selection_reversed = false;
+                self.selected_word_range = Some(range.clone());
+                self.pause_blink_cursor(cx);
+                cx.emit(InputEvent::InlineAtomActivated(range.start));
+                cx.notify();
+                return;
+            }
             let range = word_range_at(&self.content, offset);
             self.selected_range = range.clone();
             self.selection_reversed = false;
@@ -3233,7 +3220,6 @@ fn input_text_runs(
     search: SearchPaint,
     annotations: AnnotationPaint,
     atoms: AtomPaint,
-    concealed: &[Range<usize>],
 ) -> Vec<TextRun> {
     let mut boundaries = vec![0, display_len];
     for range in [selected_range, marked_range].into_iter().flatten() {
@@ -3253,10 +3239,6 @@ fn input_text_runs(
         boundaries.push(range.end.min(display_len));
     }
     for range in atoms.ranges {
-        boundaries.push(range.start.min(display_len));
-        boundaries.push(range.end.min(display_len));
-    }
-    for range in concealed {
         boundaries.push(range.start.min(display_len));
         boundaries.push(range.end.min(display_len));
     }
@@ -3289,16 +3271,11 @@ fn input_text_runs(
             let start = boundary[0];
             let end = boundary[1];
             let token_index = highlight.partition_point(|(range, _)| range.end <= start);
-            let concealed = concealed
-                .iter()
-                .any(|range| range.start <= start && range.end >= end);
             let atom = atoms
                 .ranges
                 .iter()
                 .any(|range| range.start <= start && range.end >= end);
-            let color = if concealed {
-                gpui::transparent_black()
-            } else if atom {
+            let color = if atom {
                 atoms.color
             } else {
                 highlight
@@ -3479,14 +3456,6 @@ impl Element for InputElement {
         } else {
             AtomPaint::none()
         };
-        let concealed: Vec<Range<usize>> = if input.folded_paste && !content_is_empty && !masked {
-            display_text
-                .match_indices(FOLDED_PASTE_MARKER)
-                .map(|(index, _)| index..index + FOLDED_PASTE_MARKER.len_utf8())
-                .collect()
-        } else {
-            Vec::new()
-        };
         let runs = input_text_runs(
             display_text.len(),
             base_run,
@@ -3502,7 +3471,6 @@ impl Element for InputElement {
             search,
             annotations,
             atoms,
-            &concealed,
         );
         let mut text = StyledText::new(display_text).with_runs(runs);
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
@@ -3874,6 +3842,10 @@ pub enum ComposerEvent {
     /// Backspace in an already-empty composer — the chat idiom for "remove
     /// the last staged attachment".
     BackspaceOnEmpty,
+    /// A double-click landed on an inline atom's painted label — the byte
+    /// offset of its marker. The owner expands a paste atom or opens a
+    /// session atom.
+    InlineAtomActivated(usize),
 }
 
 /// An image or file paste, re-emitted from the embedded field's
@@ -3883,13 +3855,13 @@ pub enum ComposerEvent {
 pub struct ComposerAttachmentPaste(pub Vec<ClipboardEntry>);
 
 /// A large text paste, re-emitted from the embedded field's
-/// [`CollapsedPaste`]. The owning view folds it into the composer as a
-/// [`FOLDED_PASTE_MARKER`] chip rather than as field content.
+/// [`CollapsedPaste`]. The owning view folds it into the composer as an
+/// [`INLINE_ATOM_MARKER`] atom rather than as field content.
 #[derive(Clone)]
 pub struct ComposerTextPaste(pub String);
 
 /// Byte-level splice report, re-emitted from the embedded field's
-/// [`ContentSplice`]. The owner remaps its folded paste markers through it.
+/// [`ContentSplice`]. The owner remaps its inline-atom markers through it.
 #[derive(Clone)]
 pub struct ComposerSplice(pub ContentSplice);
 
@@ -3939,6 +3911,9 @@ impl ComposerInput {
                 InputEvent::Focus => cx.emit(ComposerEvent::Focus),
                 InputEvent::Edited => cx.emit(ComposerEvent::Edited),
                 InputEvent::BackspaceOnEmpty => cx.emit(ComposerEvent::BackspaceOnEmpty),
+                InputEvent::InlineAtomActivated(marker) => {
+                    cx.emit(ComposerEvent::InlineAtomActivated(*marker))
+                }
             }),
             cx.subscribe(&input, |_, _, event: &MediaPaste, cx| {
                 cx.emit(ComposerAttachmentPaste(event.0.clone()));
@@ -3966,42 +3941,12 @@ impl ComposerInput {
     }
 
     /// Opt the embedded field into [`CollapsedPaste`] and re-emit it as
-    /// [`ComposerTextPaste`], and into [`FOLDED_PASTE_MARKER`] concealment so
-    /// the staged markers never show their glyph. Only surfaces that stage
-    /// the blocks should enable it — an unheard event drops the paste
-    /// entirely.
+    /// [`ComposerTextPaste`]. Only surfaces that stage the blocks should
+    /// enable it — an unheard event drops the paste entirely.
     pub fn collapsed_paste(self, cx: &mut Context<Self>) -> Self {
-        self.input.update(cx, |input, _| {
-            input.set_collapsed_paste(true);
-            input.set_folded_paste(true);
-        });
-        self
-    }
-
-    /// Splice a [`FOLDED_PASTE_MARKER`] over the current selection, set on
-    /// its own line: newlines are added around it only where the surrounding
-    /// text doesn't already break. Returns the marker's byte offset, which
-    /// the owner records beside the block it stands for.
-    pub fn insert_paste_marker(&mut self, cx: &mut Context<Self>) -> usize {
-        let (range, before_line_start, at_line_end) = self.input.update(cx, |input, _| {
-            let range = input.selected_range();
-            (
-                range.clone(),
-                range.start == 0 || input.content()[..range.start].ends_with('\n'),
-                range.end == input.content().len()
-                    || input.content()[range.end..].starts_with('\n'),
-            )
-        });
-        let prefix = (!before_line_start).then_some('\n');
-        let suffix = (!at_line_end).then_some('\n');
-        let marker = range.start + prefix.map_or(0, |prefix| prefix.len_utf8());
-        let mut text = String::new();
-        text.extend(prefix);
-        text.push(FOLDED_PASTE_MARKER);
-        text.extend(suffix);
         self.input
-            .update(cx, |input, cx| input.replace_range(range, &text, cx));
-        marker
+            .update(cx, |input, _| input.set_collapsed_paste(true));
+        self
     }
 
     /// Splice an [`INLINE_ATOM_MARKER`] over the current selection, inline:
@@ -4052,13 +3997,6 @@ impl ComposerInput {
     pub fn set_inline_atom_labels(&mut self, labels: Vec<SharedString>, cx: &mut Context<Self>) {
         self.input
             .update(cx, |input, cx| input.set_inline_atom_labels(labels, cx));
-    }
-
-    /// Where the byte offset paints relative to the composer's top-left —
-    /// `(x, y)` with scroll applied — plus the line height, so a sibling
-    /// overlay can anchor a chip to a [`FOLDED_PASTE_MARKER`].
-    pub fn marker_anchor(&self, offset: usize, cx: &App) -> Option<(Point<Pixels>, Pixels)> {
-        self.input.read(cx).overlay_anchor(offset)
     }
 
     pub fn focus(&self) -> FocusHandle {
@@ -5540,7 +5478,6 @@ mod tests {
             SearchPaint::none(),
             AnnotationPaint::none(),
             AtomPaint::none(),
-            &[],
         );
 
         assert_eq!(
@@ -5583,7 +5520,6 @@ mod tests {
             SearchPaint::none(),
             AnnotationPaint::none(),
             AtomPaint::none(),
-            &[],
         );
 
         assert_eq!(
@@ -5641,7 +5577,6 @@ mod tests {
             },
             AnnotationPaint::none(),
             AtomPaint::none(),
-            &[],
         );
 
         assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), 20);

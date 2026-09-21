@@ -1,7 +1,7 @@
 use super::composer::{
-    ComposerPastedBlock, ComposerSessionAtom, ComposerSubmitAction, composer_submit_action,
+    ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, composer_submit_action,
     dropped_file_mention, merged_submission, next_picker_highlight, pasted_text_preview,
-    remap_pasted_block_markers, splice_inline_atoms, supports_reasoning_default_reset,
+    remap_marker_seats, splice_inline_atoms, supports_reasoning_default_reset,
     visible_branch_entries, workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
@@ -477,124 +477,94 @@ fn pasted_text_preview_caps_at_two_hundred_characters() {
     assert_eq!(pasted_text_preview("   "), "");
 }
 
-#[test]
-fn collapsed_paste_blocks_splice_back_at_their_markers() {
-    use crate::input::FOLDED_PASTE_MARKER as M;
-    let blocks = vec!["first\nblock".to_owned(), " second\nblock ".to_owned()];
-    // Each marker splices to its block in marker order, wherever it sits.
-    let content = format!("fix this\n{M}\nand\n{M}\nthen");
-    assert_eq!(
-        splice_inline_atoms(&content, &blocks, &[]),
-        "fix this\nfirst\nblock\nand\nsecond\nblock\nthen"
-    );
-    // A marker without a block splices to nothing; a block without a
-    // marker folds onto the end, split off by a blank line.
-    assert_eq!(
-        splice_inline_atoms(&format!("fix this\n{M}"), &["  ".to_owned()], &[]),
-        "fix this"
-    );
-    assert_eq!(
-        splice_inline_atoms("fix this", &blocks, &[]),
-        "fix this\n\nfirst\nblock\n\nsecond\nblock"
-    );
-    assert_eq!(splice_inline_atoms("fix this", &[], &[]), "fix this");
+fn pasted_atom(marker: usize, text: &str) -> ComposerInlineAtom {
+    ComposerInlineAtom {
+        marker,
+        kind: ComposerAtomKind::PastedText(text.to_owned()),
+    }
+}
+
+fn session_atom(marker: usize) -> ComposerInlineAtom {
+    ComposerInlineAtom {
+        marker,
+        kind: ComposerAtomKind::SessionRef {
+            session_id: Uuid::nil(),
+            title: "Big refactor".into(),
+        },
+    }
 }
 
 #[test]
 fn inline_atoms_splice_back_at_their_markers() {
-    use crate::input::{FOLDED_PASTE_MARKER as P, INLINE_ATOM_MARKER as A};
-    let atom = |marker| ComposerSessionAtom {
-        session_id: Uuid::nil(),
-        title: "Big refactor".into(),
-        marker,
-    };
-    // Each kind splices its own marker wherever the two interleave.
-    let content = format!("see {A} first, then\n{P}");
+    use crate::input::INLINE_ATOM_MARKER as M;
+    // Each marker splices to its atom's payload in marker order — pasted
+    // text verbatim, a session as its token — wherever the kinds interleave.
+    let content = format!("fix this\n{M}\nand {M} then\n{M}");
+    let atoms = vec![
+        pasted_atom(0, "first\nblock"),
+        session_atom(0),
+        pasted_atom(0, " second\nblock "),
+    ];
     assert_eq!(
-        splice_inline_atoms(&content, &["pasted\nblock".to_owned()], &[atom(4)],),
-        "see [session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] first, then\npasted\nblock"
+        splice_inline_atoms(&content, &atoms),
+        "fix this\nfirst\nblock\nand [session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] then\nsecond\nblock"
     );
-    // An atom without a marker folds onto the end like an orphan block.
+    // A marker without an atom splices to nothing; an atom without a
+    // marker folds onto the end, split off by a blank line.
     assert_eq!(
-        splice_inline_atoms("fix this", &[], &[atom(0)]),
-        "fix this\n\n[session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)]"
+        splice_inline_atoms(&format!("fix this\n{M}"), &[pasted_atom(0, "  ")]),
+        "fix this"
     );
+    assert_eq!(
+        splice_inline_atoms("fix this", &[pasted_atom(0, "a\nb"), session_atom(0)]),
+        "fix this\n\na\nb\n\n[session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)]"
+    );
+    assert_eq!(splice_inline_atoms("fix this", &[]), "fix this");
 }
 
 #[test]
-fn pasted_block_remap_keeps_the_marker_a_paste_just_seated() {
-    use crate::input::FOLDED_PASTE_MARKER as M;
-    let block = |text: &str, marker: usize| ComposerPastedBlock {
-        text: text.to_owned(),
-        marker,
-    };
-    // The splice a folded paste's own marker insertion produces has an
-    // empty removed range, and the block already holds the marker's
-    // post-splice offset — the seat is inside the inserted range, so it
-    // must not be mistaken for a suffix block and left without a position.
-    let remapped =
-        remap_pasted_block_markers(vec![block("pasted", 0)], &[0], &(0..0), M.len_utf8());
-    assert_eq!(remapped.len(), 1);
-    assert_eq!(remapped[0].marker, 0);
-    assert_eq!(remapped[0].text, "pasted");
+fn marker_remap_keeps_the_seat_an_atom_just_seated() {
+    use crate::input::INLINE_ATOM_MARKER as M;
+    // The splice an atom's own marker insertion produces has an empty
+    // removed range, and the atom already holds the marker's post-splice
+    // offset — the seat is inside the inserted range, so it must not be
+    // mistaken for a suffix atom and left without a position.
+    let seats = remap_marker_seats(&[0], &[0], &(0..0), M.len_utf8());
+    assert_eq!(seats, [Some(0)]);
 
-    // Same story mid-field: insert_paste_marker seats the marker on its own
-    // line, so the splice may carry a surrounding newline too.
-    let remapped =
-        remap_pasted_block_markers(vec![block("pasted", 10)], &[10], &(9..9), M.len_utf8() + 1);
-    assert_eq!(remapped.len(), 1);
-    assert_eq!(remapped[0].marker, 10);
+    // Same story mid-field: the splice may carry a surrounding space too.
+    let seats = remap_marker_seats(&[10], &[10], &(9..9), M.len_utf8() + 1);
+    assert_eq!(seats, [Some(10)]);
 
-    // A paste over a selection seats the block the same way.
-    let remapped =
-        remap_pasted_block_markers(vec![block("pasted", 4)], &[4], &(4..9), M.len_utf8());
-    assert_eq!(remapped.len(), 1);
-    assert_eq!(remapped[0].marker, 4);
+    // A marker over a selection seats the atom the same way.
+    let seats = remap_marker_seats(&[4], &[4], &(4..9), M.len_utf8());
+    assert_eq!(seats, [Some(4)]);
 
-    // A second folded paste joins an existing block without dropping
-    // either.
-    let remapped = remap_pasted_block_markers(
-        vec![block("first", 0), block("second", 8)],
-        &[0, 8],
-        &(8..8),
-        M.len_utf8(),
-    );
-    assert_eq!(remapped.len(), 2);
-    assert_eq!(remapped[0].marker, 0);
-    assert_eq!(remapped[1].marker, 8);
+    // A second atom joins the first without dropping either.
+    let seats = remap_marker_seats(&[0, 8], &[0, 8], &(8..8), M.len_utf8());
+    assert_eq!(seats, [Some(0), Some(8)]);
 }
 
 #[test]
-fn pasted_block_remap_shifts_and_drops_around_edits() {
-    use crate::input::FOLDED_PASTE_MARKER as M;
-    let block = |text: &str, marker: usize| ComposerPastedBlock {
-        text: text.to_owned(),
-        marker,
-    };
-    // Typing before a marker re-seats the block on the moved glyph.
-    let remapped = remap_pasted_block_markers(vec![block("b", 8)], &[10], &(2..2), 2);
-    assert_eq!(remapped.len(), 1);
-    assert_eq!(remapped[0].marker, 10);
+fn marker_remap_shifts_and_drops_around_edits() {
+    use crate::input::INLINE_ATOM_MARKER as M;
+    // Typing before a marker re-seats the atom on the moved glyph.
+    let seats = remap_marker_seats(&[8], &[10], &(2..2), 2);
+    assert_eq!(seats, [Some(10)]);
 
-    // Deleting a marker's range drops its block; a survivor keeps its seat.
-    let remapped =
-        remap_pasted_block_markers(vec![block("a", 0), block("b", 8)], &[0], &(8..11), 0);
-    assert_eq!(remapped.len(), 1);
-    assert_eq!(remapped[0].text, "a");
-    assert_eq!(remapped[0].marker, 0);
+    // Deleting a marker's range drops its atom; a survivor keeps its seat.
+    let seats = remap_marker_seats(&[0, 8], &[0], &(8..11), 0);
+    assert_eq!(seats, [Some(0), None]);
 
-    // An undo step whose inserted text brings a marker back rebinds a block
+    // An undo step whose inserted text brings a marker back rebinds an atom
     // whose marker the removed range held.
-    let remapped = remap_pasted_block_markers(vec![block("a", 5)], &[5], &(4..6), 5);
-    assert_eq!(remapped.len(), 1);
-    assert_eq!(remapped[0].marker, 5);
+    let seats = remap_marker_seats(&[5], &[5], &(4..6), 5);
+    assert_eq!(seats, [Some(5)]);
 
-    // A splice that leaves a stray marker — one no block owns — still keeps
-    // the trailing blocks aligned to their own markers.
-    let remapped =
-        remap_pasted_block_markers(vec![block("a", 12)], &[4, 12], &(4..4), M.len_utf8());
-    assert_eq!(remapped.len(), 1);
-    assert_eq!(remapped[0].marker, 12);
+    // A splice that leaves a stray marker — one no atom owns — still keeps
+    // the trailing atoms aligned to their own markers.
+    let seats = remap_marker_seats(&[12], &[4, 12], &(4..4), M.len_utf8());
+    assert_eq!(seats, [Some(12)]);
 }
 
 #[test]

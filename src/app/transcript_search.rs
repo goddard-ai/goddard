@@ -90,7 +90,9 @@ impl Waku {
             |this: &mut Self, _, event: &InputEvent, cx| match event {
                 InputEvent::Edited => this.refresh_transcript_search(cx),
                 InputEvent::Submit(_) => this.navigate_transcript_search(false, cx),
-                InputEvent::Focus | InputEvent::BackspaceOnEmpty => {}
+                InputEvent::Focus
+                | InputEvent::BackspaceOnEmpty
+                | InputEvent::InlineAtomActivated(_) => {}
             },
         )
         .detach();

@@ -201,17 +201,12 @@ impl Waku {
         };
         crate::persistence::ComposerDraft {
             // Inline atoms have no draft slot of their own — the shared
-            // schema is just text — so paste blocks splice in verbatim and
-            // session atoms as their token; both come back as ordinary
-            // inline text on restore.
+            // schema is just text — so each splices to its payload: pasted
+            // text verbatim, session atoms as their token; both come back
+            // as ordinary inline text on restore.
             text: super::composer::splice_inline_atoms(
                 self.composer.read(cx).content(cx),
-                &self
-                    .composer_pasted_blocks
-                    .iter()
-                    .map(|block| block.text.clone())
-                    .collect::<Vec<_>>(),
-                &self.composer_session_atoms,
+                &self.composer_inline_atoms,
             ),
             attachments: self
                 .composer_attachments
@@ -414,8 +409,7 @@ impl Waku {
             .collect();
         // The previous target's atoms already folded into its draft text;
         // a restored draft carries them inline, not as atoms.
-        self.composer_pasted_blocks.clear();
-        self.composer_session_atoms.clear();
+        self.composer_inline_atoms.clear();
         self.sync_inline_atom_labels(cx);
         if key == self.selected_composer_draft_key() {
             self.restore_draft_annotations(draft.annotations);

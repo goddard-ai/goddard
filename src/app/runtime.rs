@@ -2824,8 +2824,7 @@ impl Waku {
                         .human_content
                         .or(submission.display_content)
                         .unwrap_or(submission.prompt),
-                    &submission.pasted_blocks,
-                    &submission.session_atoms,
+                    &submission.atoms,
                 ),
                 attachments: submission
                     .attachments
@@ -4526,7 +4525,7 @@ impl Waku {
                 }
                 ComposerEvent::Edited => cx.notify(),
                 ComposerEvent::Focus => {}
-                ComposerEvent::BackspaceOnEmpty => {}
+                ComposerEvent::BackspaceOnEmpty | ComposerEvent::InlineAtomActivated(_) => {}
             },
         )
         .detach();
@@ -4604,8 +4603,7 @@ impl Waku {
                 display_content,
                 human_content: None,
                 attachments: edit.attachments,
-                pasted_blocks: Vec::new(),
-                session_atoms: Vec::new(),
+                atoms: Vec::new(),
                 annotations: Vec::new(),
                 hidden: false,
             },

@@ -1,1 +1,2 @@
 - Tasks are now inline `session:` mentions in the composer — drag one from the sidebar or accept it from `@` autocomplete and it lands at the caret, holds its place in the prompt, and deletes atomically with Backspace.
+- Collapsed pastes join them: a folded paste now sits inline as a `pasted text` mention wherever the caret was — deletable with one Backspace, and a double-click splices it back into the field.

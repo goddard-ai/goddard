@@ -1212,7 +1212,7 @@ impl BrowserView {
                     this.address_dirty = address.read(cx).content() != shown;
                 }
                 InputEvent::Focus => {}
-                InputEvent::BackspaceOnEmpty => {}
+                InputEvent::BackspaceOnEmpty | InputEvent::InlineAtomActivated(_) => {}
             },
         );
 

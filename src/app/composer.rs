@@ -14,7 +14,7 @@ use gpui::AnyView;
 /// is held, and the column itself accepts the drop for the same staging.
 pub(super) const SESSION_DROP_GROUP: &str = "session-file-drop";
 
-/// A collapsed text paste past this size stops being a composer chip and is
+/// A collapsed text paste past this size stops being an inline atom and is
 /// stored as a durable `.txt` blob instead — a real file attachment the agent
 /// opens itself, rather than a block of bytes folded into every draft sync.
 const PASTED_TEXT_FILE_BYTES: usize = 64 * 1024;
@@ -22,30 +22,60 @@ const PASTED_TEXT_FILE_BYTES: usize = 64 * 1024;
 /// How much of a paste its chip's hover preview shows.
 const PASTED_TEXT_PREVIEW_CHARS: usize = 200;
 
-/// The composer's `padding_x` — where the field's text, and so a marker
-/// chip's `left`, starts inside the card.
-const COMPOSER_TEXT_INSET: f32 = 14.0;
-
-/// A collapsed paste block folded into the composer. The text itself lives
-/// here; `marker` is the byte offset of its [`FOLDED_PASTE_MARKER`] stand-in
-/// in the field's content, which the chip overlay anchors to and every
-/// [`ComposerSplice`] remaps. Blocks stay ordered by marker offset — the
-/// order the markers appear in the text.
-pub(super) struct ComposerPastedBlock {
-    pub text: String,
+/// One inline atom folded into the composer — the payload its
+/// [`INLINE_ATOM_MARKER`] sentinel stands for. `marker` is the marker's
+/// byte offset in the field's content, reseated by [`remap_marker_seats`]
+/// after every [`ComposerSplice`]; deleting the marker deletes the atom.
+/// Atoms stay ordered by marker offset — the order they appear in the text.
+#[derive(Clone, Debug)]
+pub(super) struct ComposerInlineAtom {
     pub marker: usize,
+    pub kind: ComposerAtomKind,
 }
 
-/// A session reference folded into the composer as an inline atom — the
-/// field holds an [`INLINE_ATOM_MARKER`] at the caret's position and paints
-/// it as the session's title, mention-style. `marker` is the marker's byte
-/// offset, remapped through every [`ComposerSplice`]; deleting it deletes
-/// the atom. On submit the marker splices to the session's token.
+/// What an atom's marker stands for — and what it splices to on submit.
 #[derive(Clone, Debug)]
-pub(super) struct ComposerSessionAtom {
-    pub session_id: Uuid,
-    pub title: SharedString,
-    pub marker: usize,
+pub(super) enum ComposerAtomKind {
+    /// A collapsed paste: the raw text, spliced back verbatim.
+    PastedText(String),
+    /// A session reference: spliced to the `[session ...]` token.
+    SessionRef {
+        session_id: Uuid,
+        title: SharedString,
+    },
+}
+
+impl ComposerInlineAtom {
+    /// What the marker substitutes to in the painted text — mention-style.
+    pub(super) fn label(&self) -> String {
+        match &self.kind {
+            ComposerAtomKind::PastedText(text) => {
+                let lines = text.lines().count();
+                if lines > 1 {
+                    format!("pasted text ({lines} lines)")
+                } else {
+                    "pasted text".to_owned()
+                }
+            }
+            ComposerAtomKind::SessionRef { title, .. } => session_atom_label(title),
+        }
+    }
+
+    /// What the marker splices to in the provider-facing prompt.
+    pub(super) fn payload(&self) -> String {
+        match &self.kind {
+            ComposerAtomKind::PastedText(text) => text.trim().to_owned(),
+            ComposerAtomKind::SessionRef { session_id, title } => session_token(*session_id, title),
+        }
+    }
+
+    /// The session this atom references, when it is one.
+    pub(super) fn session_id(&self) -> Option<Uuid> {
+        match &self.kind {
+            ComposerAtomKind::SessionRef { session_id, .. } => Some(*session_id),
+            ComposerAtomKind::PastedText(_) => None,
+        }
+    }
 }
 
 /// The label an inline session atom paints in the field — `session:` keeps
@@ -73,8 +103,8 @@ struct ComputerUsePreviewDrag {
 }
 
 /// A session row dragged out of the sidebar. Dropping it anywhere the
-/// composer is reachable stages a session-reference chip — `title` rides
-/// along so the drag preview and the chip never re-lookup the session.
+/// composer is reachable stages a session-reference atom — `title` rides
+/// along so the drag preview and the atom never re-lookup the session.
 #[derive(Clone)]
 pub(super) struct SidebarSessionDrag {
     pub(super) session_id: Uuid,
@@ -2825,9 +2855,9 @@ impl Waku {
     pub(super) fn session_atom_allowed(&self, session_id: Uuid) -> bool {
         self.composer_target_session() != Some(session_id)
             && !self
-                .composer_session_atoms
+                .composer_inline_atoms
                 .iter()
-                .any(|atom| atom.session_id == session_id)
+                .any(|atom| atom.session_id() == Some(session_id))
             && !self
                 .composer_attachments
                 .iter()
@@ -2842,23 +2872,25 @@ impl Waku {
         marker: usize,
         cx: &mut Context<Self>,
     ) {
-        self.composer_session_atoms.push(ComposerSessionAtom {
-            session_id,
-            title: SharedString::from(title.to_owned()),
+        self.composer_inline_atoms.push(ComposerInlineAtom {
             marker,
+            kind: ComposerAtomKind::SessionRef {
+                session_id,
+                title: SharedString::from(title.to_owned()),
+            },
         });
-        self.composer_session_atoms.sort_by_key(|atom| atom.marker);
+        self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
         self.sync_inline_atom_labels(cx);
         self.schedule_composer_draft_save(cx);
     }
 
-    /// Push the session atoms' labels into the field, in marker order — the
-    /// painted text substitutes each [`INLINE_ATOM_MARKER`] for its label.
+    /// Push the atoms' labels into the field, in marker order — the painted
+    /// text substitutes each [`INLINE_ATOM_MARKER`] for its label.
     pub(super) fn sync_inline_atom_labels(&mut self, cx: &mut Context<Self>) {
         let labels = self
-            .composer_session_atoms
+            .composer_inline_atoms
             .iter()
-            .map(|atom| SharedString::from(session_atom_label(&atom.title)))
+            .map(|atom| SharedString::from(atom.label()))
             .collect();
         self.composer.update(cx, |composer, cx| {
             composer.set_inline_atom_labels(labels, cx)
@@ -3077,17 +3109,19 @@ impl Waku {
     /// A text paste the field refused to splice. Past
     /// [`PASTED_TEXT_FILE_BYTES`] the text takes the same durable route as a
     /// pasted image — a `.txt` blob that submits as an ordinary file
-    /// attachment; under it the paste folds into the field as a marker chip
-    /// at the caret, and still joins the submission verbatim.
+    /// attachment; under it the paste folds into the field as an inline
+    /// atom at the caret, and still joins the submission verbatim.
     pub(super) fn stage_pasted_text(&mut self, text: String, cx: &mut Context<Self>) {
         if text.len() <= PASTED_TEXT_FILE_BYTES {
             let marker = self
                 .composer
-                .update(cx, |composer, cx| composer.insert_paste_marker(cx));
-            self.composer_pasted_blocks
-                .push(ComposerPastedBlock { text, marker });
-            self.composer_pasted_blocks
-                .sort_by_key(|block| block.marker);
+                .update(cx, |composer, cx| composer.insert_inline_marker(cx));
+            self.composer_inline_atoms.push(ComposerInlineAtom {
+                marker,
+                kind: ComposerAtomKind::PastedText(text),
+            });
+            self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
+            self.sync_inline_atom_labels(cx);
             self.schedule_composer_draft_save(cx);
             cx.notify();
             return;
@@ -3149,86 +3183,61 @@ impl Waku {
         .detach();
     }
 
-    /// Splice a collapsed paste back into the field in place of its marker,
-    /// as though it had never folded. The chip is consumed.
-    fn expand_pasted_block(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if index >= self.composer_pasted_blocks.len() {
+    /// A double-click on an atom's painted label — the field reports the
+    /// marker's byte offset. A pasted block splices back to its text in
+    /// place; a session atom opens its session.
+    pub(super) fn activate_inline_atom(&mut self, marker: usize, cx: &mut Context<Self>) {
+        let Some(atom) = self
+            .composer_inline_atoms
+            .iter()
+            .find(|atom| atom.marker == marker)
+            .map(|atom| atom.kind.clone())
+        else {
             return;
+        };
+        match atom {
+            ComposerAtomKind::PastedText(text) => {
+                // The splice that deletes the marker drops the atom through
+                // the usual remap, so there is nothing to remove here.
+                self.composer.update(cx, |composer, cx| {
+                    composer.replace_range(
+                        marker..marker + INLINE_ATOM_MARKER.len_utf8(),
+                        &text,
+                        cx,
+                    );
+                });
+                self.schedule_composer_draft_save(cx);
+            }
+            ComposerAtomKind::SessionRef { session_id, .. } => {
+                self.select_session(session_id, cx);
+            }
         }
-        let block = self.composer_pasted_blocks.remove(index);
-        let focus = self.composer_focus(cx);
-        window.focus(&focus, cx);
-        self.composer.update(cx, |composer, cx| {
-            composer.replace_range(
-                block.marker..block.marker + FOLDED_PASTE_MARKER.len_utf8(),
-                &block.text,
-                cx,
-            );
-        });
-        self.schedule_composer_draft_save(cx);
-        cx.notify();
-    }
-
-    fn remove_pasted_block(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index >= self.composer_pasted_blocks.len() {
-            return;
-        }
-        let block = self.composer_pasted_blocks.remove(index);
-        // Take the line break that set the marker apart — preferring the
-        // trailing one — so removing the chip doesn't leave a blank line.
-        let content = self.composer.read(cx).content(cx);
-        let mut range = block.marker..block.marker + FOLDED_PASTE_MARKER.len_utf8();
-        if content[range.end..].starts_with('\n') {
-            range.end += 1;
-        } else if content[..range.start].ends_with('\n') {
-            range.start -= 1;
-        }
-        self.composer
-            .update(cx, |composer, cx| composer.replace_range(range, "", cx));
-        self.schedule_composer_draft_save(cx);
         cx.notify();
     }
 
     /// Re-anchor each atom's marker after a field splice — see
-    /// [`remap_marker_seats`] for the seating rules. Paste blocks and
-    /// session atoms reseat independently, each against their own marker
-    /// char's positions.
+    /// [`remap_marker_seats`] for the seating rules — then keep the painted
+    /// labels in step with the survivors.
     pub(super) fn remap_inline_atoms(&mut self, splice: &ComposerSplice, cx: &mut Context<Self>) {
-        if self.composer_pasted_blocks.is_empty() && self.composer_session_atoms.is_empty() {
+        if self.composer_inline_atoms.is_empty() {
             return;
         }
-        let (paste_positions, atom_positions): (Vec<usize>, Vec<usize>) = {
-            let content = self.composer.read(cx).content(cx);
-            (
-                content
-                    .match_indices(FOLDED_PASTE_MARKER)
-                    .map(|(index, _)| index)
-                    .collect(),
-                content
-                    .match_indices(INLINE_ATOM_MARKER)
-                    .map(|(index, _)| index)
-                    .collect(),
-            )
-        };
-        self.composer_pasted_blocks = remap_pasted_block_markers(
-            std::mem::take(&mut self.composer_pasted_blocks),
-            &paste_positions,
-            &splice.0.removed,
-            splice.0.inserted,
-        );
-        let seats = remap_marker_seats(
-            &self
-                .composer_session_atoms
-                .iter()
-                .map(|atom| atom.marker)
-                .collect::<Vec<_>>(),
-            &atom_positions,
-            &splice.0.removed,
-            splice.0.inserted,
-        );
-        self.composer_session_atoms = self
-            .composer_session_atoms
-            .drain(..)
+        let positions: Vec<usize> = self
+            .composer
+            .read(cx)
+            .content(cx)
+            .match_indices(INLINE_ATOM_MARKER)
+            .map(|(index, _)| index)
+            .collect();
+        let markers = self
+            .composer_inline_atoms
+            .iter()
+            .map(|atom| atom.marker)
+            .collect::<Vec<_>>();
+        let seats = remap_marker_seats(&markers, &positions, &splice.0.removed, splice.0.inserted);
+        let mut atoms = std::mem::take(&mut self.composer_inline_atoms);
+        atoms = atoms
+            .into_iter()
             .zip(seats)
             .filter_map(|(mut atom, seat)| {
                 seat.map(|marker| {
@@ -3237,7 +3246,8 @@ impl Waku {
                 })
             })
             .collect();
-        self.composer_session_atoms.sort_by_key(|atom| atom.marker);
+        atoms.sort_by_key(|atom| atom.marker);
+        self.composer_inline_atoms = atoms;
         self.sync_inline_atom_labels(cx);
     }
 
@@ -3274,15 +3284,11 @@ impl Waku {
             .drain(..)
             .map(MessageAttachment::from)
             .collect::<Vec<_>>();
-        let pasted_blocks: Vec<String> = std::mem::take(&mut self.composer_pasted_blocks)
-            .into_iter()
-            .map(|block| block.text)
-            .collect();
-        let session_atoms = std::mem::take(&mut self.composer_session_atoms);
+        let atoms = std::mem::take(&mut self.composer_inline_atoms);
         // Markers splice back to their atoms in place — pasted text and
         // session tokens — then the attachment tokens `merged_submission`
         // still trails.
-        let body = splice_inline_atoms(prompt, &pasted_blocks, &session_atoms);
+        let body = splice_inline_atoms(prompt, &atoms);
         let annotations = self.drain_annotations();
         let submission = match merged_submission(&body, &attachments) {
             Some(body) => {
@@ -3312,34 +3318,28 @@ impl Waku {
         // typed.
         let typed_content = text_without_atom_markers(prompt);
         let typed = typed_content.trim();
-        let human_content =
-            (!annotations.is_empty() || !pasted_blocks.is_empty() || !session_atoms.is_empty())
-                .then(|| {
-                    if typed.is_empty() {
-                        annotation_display_content(&annotations)
-                    } else {
-                        typed.to_owned()
-                    }
-                });
-        let display_content = (!attachments.is_empty()
-            || !annotations.is_empty()
-            || !pasted_blocks.is_empty()
-            || !session_atoms.is_empty())
-        .then(|| {
-            if annotations.is_empty() {
-                body.clone()
+        let human_content = (!annotations.is_empty() || !atoms.is_empty()).then(|| {
+            if typed.is_empty() {
+                annotation_display_content(&annotations)
             } else {
-                annotation_bubble_content(&annotations, &body)
+                typed.to_owned()
             }
         });
+        let display_content =
+            (!attachments.is_empty() || !annotations.is_empty() || !atoms.is_empty()).then(|| {
+                if annotations.is_empty() {
+                    body.clone()
+                } else {
+                    annotation_bubble_content(&annotations, &body)
+                }
+            });
         self.discard_current_composer_draft(cx);
         Some(ComposerSubmission {
             prompt: submission,
             display_content,
             human_content,
             attachments,
-            pasted_blocks,
-            session_atoms,
+            atoms,
             annotations,
             hidden: false,
         })
@@ -3583,7 +3583,6 @@ impl Waku {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
-        let pasted_blocks = submission.pasted_blocks;
         if !submission.annotations.is_empty() {
             // The drain consumed the highlights; hand them back so the
             // restored draft still carries its comments — file annotations
@@ -3619,117 +3618,19 @@ impl Waku {
             .unwrap_or(submission.prompt);
         self.composer
             .update(cx, |input, cx| input.set_content(content, cx));
-        // A restored draft's blocks fold back in as marker chips, appended
-        // after the typed text rather than at their original positions.
-        for text in pasted_blocks {
-            let marker = self
-                .composer
-                .update(cx, |composer, cx| composer.insert_paste_marker(cx));
-            self.composer_pasted_blocks
-                .push(ComposerPastedBlock { text, marker });
-        }
-        // Session atoms come back the same way — inline mentions appended
-        // after the typed text.
-        for atom in submission.session_atoms {
+        // Restored atoms fold back in as inline mentions, appended after the
+        // typed text rather than at their original positions.
+        for atom in submission.atoms {
             let marker = self
                 .composer
                 .update(cx, |composer, cx| composer.insert_inline_marker(cx));
-            self.composer_session_atoms
-                .push(ComposerSessionAtom { marker, ..atom });
+            self.composer_inline_atoms
+                .push(ComposerInlineAtom { marker, ..atom });
         }
-        self.composer_session_atoms.sort_by_key(|atom| atom.marker);
+        self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
         self.sync_inline_atom_labels(cx);
         self.schedule_composer_draft_save(cx);
         cx.notify();
-    }
-
-    /// Collapsed paste blocks folded into the input: one compact "Pasted
-    /// text" chip per marker, overlaid on the marker's own line — hovering
-    /// shows the paste's leading characters, activating splices it back into
-    /// the field in place. Positions come from the previous frame's layout,
-    /// so a chip trails a reflow by a frame at most.
-    pub(super) fn render_pasted_blocks(&self, cx: &mut Context<Self>) -> Option<Div> {
-        if self.composer_pasted_blocks.is_empty() {
-            return None;
-        }
-        const CHIP_HEIGHT: f32 = 20.0;
-        let theme = Theme::current(cx);
-        let mut overlay = div().absolute().inset_0().overflow_hidden();
-        for (index, block) in self.composer_pasted_blocks.iter().enumerate() {
-            let Some((anchor, line_height)) =
-                self.composer.read(cx).marker_anchor(block.marker, cx)
-            else {
-                continue;
-            };
-            let preview = SharedString::from(pasted_text_preview(&block.text));
-            let chip = div()
-                .id(SharedString::from(format!("composer-pasted-block-{index}")))
-                .absolute()
-                // The marker is line-initial, so the anchor already sits at
-                // the field's text inset; the constant nudges the chip to the
-                // line's vertical middle.
-                .left(anchor.x + px(COMPOSER_TEXT_INSET))
-                .top(anchor.y + (line_height - px(CHIP_HEIGHT)).max(px(0.)) / 2.0)
-                .h(px(CHIP_HEIGHT))
-                .pl(px(6.0))
-                .pr(px(4.0))
-                .rounded(px(7.0))
-                .border(hairline())
-                .border_color(theme.border_subtle)
-                .bg(theme.inset)
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .cursor_default()
-                .tab_index(0)
-                .focus_visible(|style| style.bg(theme.focus_highlight()))
-                .when(!preview.is_empty(), |element| {
-                    element.tooltip(pasted_text_tooltip(preview.clone()))
-                })
-                .child(icon("icons/file.svg", 11.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_secondary)
-                        .child(tr!("composer.pasted_block")),
-                )
-                .child(
-                    div()
-                        .id(SharedString::from(format!(
-                            "composer-pasted-block-remove-{index}"
-                        )))
-                        .w(px(16.0))
-                        .h(px(16.0))
-                        .flex_none()
-                        .rounded(px(5.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .cursor_default()
-                        .tab_index(0)
-                        .focus_visible(|style| style.bg(theme.focus_highlight()))
-                        .hover(|element| element.bg(theme.overlay_strong))
-                        .active(|element| element.opacity(0.8))
-                        .child(icon("icons/x.svg", 9.0, theme.text_secondary))
-                        .tooltip(Tooltip::text(tr!("composer.remove_pasted_block")))
-                        .on_activation(cx, move |this, _, cx| {
-                            this.remove_pasted_block(index, cx);
-                        }),
-                )
-                .on_activation(cx, move |this, window, cx| {
-                    this.expand_pasted_block(index, window, cx);
-                })
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "backspace" | "delete") {
-                        this.remove_pasted_block(index, cx);
-                        cx.stop_propagation();
-                    }
-                }));
-            overlay = overlay.child(chip);
-        }
-        Some(overlay)
     }
 
     /// The staged-attachment chips above the input: a thumbnail tile per
@@ -4684,7 +4585,7 @@ impl Waku {
         });
         let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
             || !self.composer_attachments.is_empty()
-            || !self.composer_pasted_blocks.is_empty()
+            || !self.composer_inline_atoms.is_empty()
             || !self
                 .transcript_selection
                 .annotations
@@ -4788,17 +4689,7 @@ impl Waku {
                     card.child(self.render_composer_attachments(cx))
                 })
                 .children(self.render_annotation_chip(cx))
-                // The paste chips ride inside the field: the overlay is a
-                // sibling of the composer covering its exact box, and each
-                // chip anchors to its marker's line.
-                .child(
-                    div().pt(px(2.0)).child(
-                        div()
-                            .relative()
-                            .child(self.composer.clone())
-                            .children(self.render_pasted_blocks(cx)),
-                    ),
-                )
+                .child(div().pt(px(2.0)).child(self.composer.clone()))
                 .child(
                     div()
                         .mt(px(8.0))
@@ -6518,10 +6409,10 @@ pub(super) fn pasted_text_tooltip(
 
 /// `remap_inline_atoms`' core, kept pure for tests: the post-splice seat for
 /// each owned marker, or `None` when the marker is gone. `markers` are the
-/// atom's recorded positions (pre-splice unless the splice itself seated
-/// them — `insert_paste_marker`/`insert_inline_marker` record the marker's
-/// post-splice offset); `live` is the content's marker positions of this
-/// atom kind, sorted, after the splice; `removed`/`inserted` describe the
+/// atoms' recorded positions (pre-splice unless the splice itself seated
+/// them — `insert_inline_marker` records the marker's post-splice offset);
+/// `live` is the content's marker positions, sorted, after the splice;
+/// `removed`/`inserted` describe the
 /// splice in byte terms. Markers before `removed` keep their place, markers
 /// after it shift, and markers inside it rebind to markers the inserted text
 /// brought — a whole-content undo step carries them across — while the rest
@@ -6582,72 +6473,28 @@ pub(super) fn remap_marker_seats(
     seats
 }
 
-/// Re-anchor each block's marker through a splice — the block-level half of
-/// [`remap_marker_seats`], dropping blocks whose seat it couldn't keep.
-pub(super) fn remap_pasted_block_markers(
-    blocks: Vec<ComposerPastedBlock>,
-    live: &[usize],
-    removed: &Range<usize>,
-    inserted: usize,
-) -> Vec<ComposerPastedBlock> {
-    let markers: Vec<usize> = blocks.iter().map(|block| block.marker).collect();
-    let seats = remap_marker_seats(&markers, live, removed, inserted);
-    let mut blocks: Vec<ComposerPastedBlock> = blocks
-        .into_iter()
-        .zip(seats)
-        .filter_map(|(mut block, seat)| {
-            seat.map(|marker| {
-                block.marker = marker;
-                block
-            })
-        })
-        .collect();
-    blocks.sort_by_key(|block| block.marker);
-    blocks
-}
-
-/// Splice each atom marker in `content` back to its atom's text, in marker
-/// order — a [`FOLDED_PASTE_MARKER`] takes the next pasted block, an
-/// [`INLINE_ATOM_MARKER`] the next session atom's token. The result is what
-/// the prompt would read had nothing folded. An unclaimed marker (its atom
-/// is already gone) splices to nothing; an atom without a marker folds onto
-/// the end, split off by a blank line the way collapsed pastes used to join
-/// wholesale.
-pub(super) fn splice_inline_atoms(
-    content: &str,
-    pasted_blocks: &[String],
-    session_atoms: &[ComposerSessionAtom],
-) -> String {
+/// Splice each [`INLINE_ATOM_MARKER`] in `content` back to its atom's
+/// payload, in marker order — pasted text verbatim, a session atom's token.
+/// The result is what the prompt would read had nothing folded. An
+/// unclaimed marker (its atom is already gone) splices to nothing; an atom
+/// without a marker folds onto the end, split off by a blank line the way
+/// collapsed pastes used to join wholesale.
+pub(super) fn splice_inline_atoms(content: &str, atoms: &[ComposerInlineAtom]) -> String {
     let mut body = String::with_capacity(content.len());
     let mut rest = content;
-    let mut blocks = pasted_blocks.iter();
-    let mut atoms = session_atoms.iter();
-    while let Some(index) = rest.find(|c| matches!(c, FOLDED_PASTE_MARKER | INLINE_ATOM_MARKER)) {
+    let mut atoms = atoms.iter();
+    let marker_len = INLINE_ATOM_MARKER.len_utf8();
+    while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
         body.push_str(&rest[..index]);
-        let tail = &rest[index..];
-        let (text, len) = if tail.starts_with(FOLDED_PASTE_MARKER) {
-            (
-                blocks.next().map(|block| block.trim().to_owned()),
-                FOLDED_PASTE_MARKER.len_utf8(),
-            )
-        } else {
-            (
-                atoms
-                    .next()
-                    .map(|atom| session_token(atom.session_id, &atom.title)),
-                INLINE_ATOM_MARKER.len_utf8(),
-            )
-        };
-        if let Some(text) = text {
-            body.push_str(&text);
+        if let Some(atom) = atoms.next() {
+            body.push_str(&atom.payload());
         }
-        rest = &tail[len..];
+        rest = &rest[index + marker_len..];
     }
     body.push_str(rest);
     let mut body = body.trim().to_owned();
-    for text in blocks
-        .map(|block| block.trim().to_owned())
-        .chain(atoms.map(|atom| session_token(atom.session_id, &atom.title)))
+    for text in atoms
+        .map(|atom| atom.payload())
         .filter(|text| !text.is_empty())
     {
         if !body.is_empty() {
@@ -6661,7 +6508,7 @@ pub(super) fn splice_inline_atoms(
 /// `content` minus its atom markers — the user's own typed words, for a
 /// title or a restored draft where the atoms ride along separately.
 pub(super) fn text_without_atom_markers(content: &str) -> String {
-    content.replace([FOLDED_PASTE_MARKER, INLINE_ATOM_MARKER], "")
+    content.replace(INLINE_ATOM_MARKER, "")
 }
 
 /// The prompt a submission sends: the typed text plus one token per staged

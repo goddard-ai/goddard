@@ -400,8 +400,8 @@ impl Waku {
     fn session_mention_fingerprint(&self) -> usize {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.composer_target_session().hash(&mut hasher);
-        for atom in &self.composer_session_atoms {
-            atom.session_id.hash(&mut hasher);
+        for atom in &self.composer_inline_atoms {
+            atom.session_id().hash(&mut hasher);
         }
         for attachment in &self.composer_attachments {
             attachment.session_id.hash(&mut hasher);

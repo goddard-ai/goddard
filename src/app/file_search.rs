@@ -271,7 +271,7 @@ impl Waku {
                 InputEvent::Edited => this.refresh_file_search(SearchRefresh::Query, cx),
                 InputEvent::Submit(_) => this.file_search_navigate(false, cx),
                 InputEvent::Focus => {}
-                InputEvent::BackspaceOnEmpty => {}
+                InputEvent::BackspaceOnEmpty | InputEvent::InlineAtomActivated(_) => {}
             },
         )
         .detach();
