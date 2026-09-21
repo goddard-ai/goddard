@@ -4010,15 +4010,24 @@ impl ComposerInput {
     /// word. Returns the marker's byte offset, which the owner records
     /// beside the atom it stands for.
     pub fn insert_inline_marker(&mut self, cx: &mut Context<Self>) -> usize {
-        let (range, pad_before, pad_after) = self.input.update(cx, |input, _| {
-            let range = input.selected_range();
+        let range = self.input.update(cx, |input, _| input.selected_range());
+        self.insert_inline_marker_at(range, cx)
+    }
+
+    /// The same inline splice over an explicit range — the autocomplete's
+    /// trigger token, which sits behind the selection.
+    pub fn insert_inline_marker_at(
+        &mut self,
+        range: Range<usize>,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let (pad_before, pad_after) = self.input.update(cx, |input, _| {
             (
-                range.clone(),
-                input.content()[..range.start]
+                input.content()[..range.start.min(input.content().len())]
                     .chars()
                     .next_back()
                     .is_some_and(|c| !c.is_whitespace()),
-                input.content()[range.end..]
+                input.content()[range.end.min(input.content().len())..]
                     .chars()
                     .next()
                     .is_some_and(|c| !c.is_whitespace()),

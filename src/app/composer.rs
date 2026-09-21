@@ -2807,21 +2807,41 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_target_session() == Some(session_id)
-            || self
-                .composer_session_atoms
-                .iter()
-                .any(|atom| atom.session_id == session_id)
-            || self
-                .composer_attachments
-                .iter()
-                .any(|attachment| attachment.session_id == Some(session_id))
-        {
+        if !self.session_atom_allowed(session_id) {
             return;
         }
         let marker = self
             .composer
             .update(cx, |composer, cx| composer.insert_inline_marker(cx));
+        self.record_session_atom(session_id, title, marker, cx);
+        let focus = self.composer.read(cx).focus();
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// The dedupe/target guards every session-atom entry point shares —
+    /// dropping the session the composer already addresses is a no-op, as
+    /// is one already staged as an atom or a legacy attachment.
+    pub(super) fn session_atom_allowed(&self, session_id: Uuid) -> bool {
+        self.composer_target_session() != Some(session_id)
+            && !self
+                .composer_session_atoms
+                .iter()
+                .any(|atom| atom.session_id == session_id)
+            && !self
+                .composer_attachments
+                .iter()
+                .any(|attachment| attachment.session_id == Some(session_id))
+    }
+
+    /// Record the atom a freshly seated `marker` stands for.
+    pub(super) fn record_session_atom(
+        &mut self,
+        session_id: Uuid,
+        title: &str,
+        marker: usize,
+        cx: &mut Context<Self>,
+    ) {
         self.composer_session_atoms.push(ComposerSessionAtom {
             session_id,
             title: SharedString::from(title.to_owned()),
@@ -2830,9 +2850,6 @@ impl Waku {
         self.composer_session_atoms.sort_by_key(|atom| atom.marker);
         self.sync_inline_atom_labels(cx);
         self.schedule_composer_draft_save(cx);
-        let focus = self.composer.read(cx).focus();
-        window.focus(&focus, cx);
-        cx.notify();
     }
 
     /// Push the session atoms' labels into the field, in marker order — the
@@ -6605,9 +6622,7 @@ pub(super) fn splice_inline_atoms(
     let mut rest = content;
     let mut blocks = pasted_blocks.iter();
     let mut atoms = session_atoms.iter();
-    while let Some(index) =
-        rest.find(|c| matches!(c, FOLDED_PASTE_MARKER | INLINE_ATOM_MARKER))
-    {
+    while let Some(index) = rest.find(|c| matches!(c, FOLDED_PASTE_MARKER | INLINE_ATOM_MARKER)) {
         body.push_str(&rest[..index]);
         let tail = &rest[index..];
         let (text, len) = if tail.starts_with(FOLDED_PASTE_MARKER) {

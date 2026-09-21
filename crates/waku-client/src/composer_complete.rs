@@ -335,7 +335,10 @@ pub struct Scored<T> {
     pub positions: Vec<u32>,
 }
 
-fn filter_scored(
+/// The shared fuzzy filter: indexes of `haystack` entries matching `query`
+/// with their match positions, best first, capped. An empty query lists the
+/// haystack's head in its given order.
+pub fn filter_scored(
     haystack: &[&str],
     query: &str,
     matcher: &mut Matcher,

@@ -15,6 +15,7 @@
 //! submits again.
 
 use std::cell::{Cell, RefCell};
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use gpui::{
@@ -57,9 +58,25 @@ pub fn init(cx: &mut App) {
 
 pub(super) enum AutocompleteRow {
     Command(Scored<SlashCommand>),
+    /// A task mention under `@` — accepting splices an inline session atom.
+    Session(Scored<ComposerSessionRef>),
     File(Scored<FileEntry>),
     WorkItem(Scored<ComposerWorkItem>),
 }
+
+/// What a session `@` row carries: the id the atom records, the title the
+/// popup matches and the mention paints, and the project for disambiguation.
+#[derive(Clone)]
+pub(super) struct ComposerSessionRef {
+    pub id: Uuid,
+    pub title: SharedString,
+    pub project: SharedString,
+}
+
+/// Session rows cap under `@` — they lead the list so a title match is
+/// never buried under the file index, but a broad query still leaves files
+/// reachable.
+const SESSION_MENTION_CAP: usize = 8;
 
 /// Keystroke pause before a `#` query goes to the daemon — each search is two
 /// `gh` subprocesses, so typing waits for a settle the way the transcript
@@ -339,6 +356,65 @@ impl Waku {
         trigger
     }
 
+    /// Sessions the `@` popup can offer — the same set the sidebar drags:
+    /// started, unarchived, not side chats, minus the session the composer
+    /// addresses and any already staged. Recent activity first.
+    fn mentionable_sessions(&self) -> Vec<ComposerSessionRef> {
+        let project_name = |session: &AgentSession| {
+            self.state
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
+                .map_or(SharedString::default(), |project| {
+                    project.name.clone().into()
+                })
+        };
+        let mut sessions: Vec<&AgentSession> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.has_started()
+                    && session.archived_at.is_none()
+                    && !session.is_side_chat()
+                    && self.session_atom_allowed(session.id)
+            })
+            .collect();
+        sessions.sort_by_key(|session| {
+            std::cmp::Reverse(session.last_reply_at.unwrap_or(session.updated_at))
+        });
+        sessions
+            .into_iter()
+            .map(|session| ComposerSessionRef {
+                id: session.id,
+                title: SharedString::from(session.display_title().to_owned()),
+                project: project_name(session),
+            })
+            .collect()
+    }
+
+    /// A cheap fingerprint of what the session rows derive from — the
+    /// offerable set and the exclusions — so a session title edit or a
+    /// freshly staged atom invalidates the memo the way a new file index
+    /// does.
+    fn session_mention_fingerprint(&self) -> usize {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.composer_target_session().hash(&mut hasher);
+        for atom in &self.composer_session_atoms {
+            atom.session_id.hash(&mut hasher);
+        }
+        for attachment in &self.composer_attachments {
+            attachment.session_id.hash(&mut hasher);
+        }
+        for session in &self.state.sessions {
+            if session.has_started() && session.archived_at.is_none() && !session.is_side_chat() {
+                session.id.hash(&mut hasher);
+                session.display_title().hash(&mut hasher);
+            }
+        }
+        hasher.finish() as usize
+    }
+
     /// The filtered rows for `trigger`, shared by the popup body, the keyboard
     /// cursor and `enter` so an index always means the same row everywhere.
     fn autocomplete_rows(&self, trigger: &Trigger) -> Rc<Vec<AutocompleteRow>> {
@@ -351,7 +427,9 @@ impl Waku {
         };
         let source = match trigger.kind {
             TriggerKind::Command => Rc::as_ptr(&self.slash_command_index) as usize,
-            TriggerKind::File => Rc::as_ptr(&self.mention_file_index) as usize,
+            TriggerKind::File => {
+                Rc::as_ptr(&self.mention_file_index) as usize ^ self.session_mention_fingerprint()
+            }
             // `0` while no fetch has landed — a fresh `Rc` per call would
             // defeat the memo.
             TriggerKind::WorkItem => work_item_items
@@ -377,14 +455,39 @@ impl Waku {
             .into_iter()
             .map(AutocompleteRow::Command)
             .collect::<Vec<_>>(),
-            TriggerKind::File => composer_complete::filter_files(
-                &self.mention_file_index,
-                &trigger.query,
-                &mut matcher,
-            )
-            .into_iter()
-            .map(AutocompleteRow::File)
-            .collect(),
+            TriggerKind::File => {
+                // Session mentions lead: a title match names a task the user
+                // is thinking about, while a broad query still leaves files
+                // reachable below the cap.
+                let sessions = self.mentionable_sessions();
+                let titles = sessions
+                    .iter()
+                    .map(|session| session.title.as_str())
+                    .collect::<Vec<_>>();
+                composer_complete::filter_scored(
+                    &titles,
+                    &trigger.query,
+                    &mut matcher,
+                    SESSION_MENTION_CAP,
+                )
+                .into_iter()
+                .map(|(index, positions)| {
+                    AutocompleteRow::Session(Scored {
+                        item: sessions[index].clone(),
+                        positions,
+                    })
+                })
+                .chain(
+                    composer_complete::filter_files(
+                        &self.mention_file_index,
+                        &trigger.query,
+                        &mut matcher,
+                    )
+                    .into_iter()
+                    .map(AutocompleteRow::File),
+                )
+                .collect()
+            }
             // The remote search already narrowed `items` to the query; the
             // local pass only re-ranks so digits hit the number and text hits
             // the title, and so a still-in-flight query keeps the stale list
@@ -450,6 +553,20 @@ impl Waku {
         let Some(row) = rows.get(index) else {
             return;
         };
+        // A session row splices the marker over the trigger token directly —
+        // one splice, so the atom's recorded seat is the post-splice position
+        // the remap keeps.
+        if let AutocompleteRow::Session(scored) = row {
+            let session = scored.item.clone();
+            if self.session_atom_allowed(session.id) {
+                let marker = self.composer.update(cx, |input, cx| {
+                    input.insert_inline_marker_at(trigger.range.clone(), cx)
+                });
+                self.record_session_atom(session.id, &session.title, marker, cx);
+            }
+            cx.notify();
+            return;
+        }
         let insert = match row {
             AutocompleteRow::Command(scored) => {
                 let composer_text = composer_complete::command_composer_text(&scored.item);
@@ -460,6 +577,7 @@ impl Waku {
             // titled link happens at the transport boundary, like a command
             // template.
             AutocompleteRow::WorkItem(scored) => format!("#{} ", scored.item.number),
+            AutocompleteRow::Session(_) => unreachable!(),
         };
         if matches!(row, AutocompleteRow::Command(_)) {
             let mut submission = self.composer.read(cx).content(cx).to_owned();
@@ -900,6 +1018,36 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(command.scope.label()),
                     )
+                    .into_any_element()
+            }
+            AutocompleteRow::Session(scored) => {
+                let session = &scored.item;
+                base.child(icon("icons/chat.svg", 12.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_w(px(300.0))
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .child(matched_text(
+                                session.title.to_string(),
+                                highlight_byte_ranges(&session.title, &scored.positions, 0),
+                                theme.text,
+                                theme.accent,
+                                font.clone(),
+                            )),
+                    )
+                    .when(!session.project.is_empty(), |element| {
+                        element.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_ghost)
+                                .child(session.project.clone()),
+                        )
+                    })
                     .into_any_element()
             }
             AutocompleteRow::File(scored) => {
