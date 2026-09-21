@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { AgentSession } from "@waku/client";
 
 import {
+  gitStatusLabel,
   latestReviewTurnSource,
   parseNumstat,
   splitReviewPatch,
+  upstreamLabel,
 } from "./task-surfaces";
 
 describe("task surface presentation", () => {
@@ -31,6 +33,28 @@ diff --git a/src/gone.ts b/src/gone.ts
       additions: 3,
       deletions: 1,
     });
+  });
+
+  test("labels porcelain statuses for the git file badges", () => {
+    expect(gitStatusLabel("M", false)).toBe("modified");
+    expect(gitStatusLabel("D", false)).toBe("deleted");
+    expect(gitStatusLabel("R", false)).toBe("renamed");
+    expect(gitStatusLabel("??", true)).toBe("new");
+    expect(gitStatusLabel("A", true)).toBe("new");
+    expect(gitStatusLabel("U", false)).toBe("u");
+  });
+
+  test("summarizes upstream divergence in one line", () => {
+    expect(upstreamLabel(null)).toBeNull();
+    expect(upstreamLabel({ name: "origin/main", ahead: 0, behind: 0 })).toBe(
+      "origin/main · up to date",
+    );
+    expect(upstreamLabel({ name: "origin/feat", ahead: 2, behind: 1 })).toBe(
+      "origin/feat · ↑2 · ↓1",
+    );
+    expect(upstreamLabel({ name: "origin/feat", ahead: 3, behind: 0 })).toBe(
+      "origin/feat · ↑3",
+    );
   });
 
   test("selects the latest ready checkpoint for last-turn review", () => {

@@ -1,4 +1,4 @@
-import type { AgentSession, ReviewDiffSource } from "@waku/client";
+import type { AgentSession, ReviewDiffSource, UpstreamStatus } from "@waku/client";
 
 export interface ReviewPatchFile {
   key: string;
@@ -34,6 +34,29 @@ export function reviewDiffSourceLabel(source: ReviewDiffSource): string {
     branch: "Branch",
     commit: "Commit",
   }[source];
+}
+
+/** Porcelain letter → short label for the git surface's file badges. */
+export function gitStatusLabel(status: string, untracked: boolean): string {
+  if (untracked || status === "??") return "new";
+  return {
+    M: "modified",
+    A: "added",
+    D: "deleted",
+    R: "renamed",
+    C: "copied",
+    T: "typechange",
+  }[status] ?? status.toLowerCase();
+}
+
+/** "origin/main · ↑2 ↓1" — the subtitle line under the branch name. */
+export function upstreamLabel(upstream: UpstreamStatus | null): string | null {
+  if (!upstream) return null;
+  const parts = [upstream.name];
+  if (upstream.ahead > 0) parts.push(`↑${upstream.ahead}`);
+  if (upstream.behind > 0) parts.push(`↓${upstream.behind}`);
+  if (upstream.ahead === 0 && upstream.behind === 0) parts.push("up to date");
+  return parts.join(" · ");
 }
 
 export function parseNumstat(numstat: string): {

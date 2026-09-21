@@ -82,12 +82,15 @@ protocol changes.
       goes through `TranscriptListHandle.revealRow`, which mounts
       windowed history, opens folds, and scrolls the variable-height
       inverted list by measured row layout.
-- [ ] **Git surface sheet** — all ops exist: `inspectGitPanel`,
-      `stageFile`, `unstageFile`, `discardFile`, `commit`,
-      `generateCommitMessage`, `push`, `checkoutBranch`, `listCommits`,
-      `listWorktrees`, `createWorktree`, `listRepoBranches`,
-      `fetchRemote`, `pullUpstream`, `rebaseOnto`. Fourth surface beside
-      Terminal / Files / Review in `task-surface-sheet.tsx`.
+- [x] **Git surface sheet** — fourth surface beside Terminal / Files /
+      Review. Working-tree core shipped: branch + upstream subtitle,
+      pull (rebase) when behind, push when `can_push`, staged/unstaged
+      file lists with stage/unstage/discard (confirmed, untracked
+      warns it deletes), and the commit bar — blank message generates
+      via `generateCommitMessage` with the session's provider
+      invocation, nothing-staged confirms a worktree sweep. Still
+      desktop-only: branch switching (`checkoutBranch`), worktree ops,
+      commit log (`listCommits`), remote fetch/rebase.
 - [ ] **Pull-request surface** — `listPullRequests`, `getPullRequest`,
       `fetchPullRequestHead`; check and review-comment types
       (`PullRequestCheck`, `PullRequestReviewComment`) are generated.
@@ -117,8 +120,9 @@ protocol changes.
 - [ ] **Integrations auth UI** — `listIntegrations`,
       `connectIntegration`, `startIntegrationAuth`,
       `disconnectIntegration`.
-- [ ] **Queued-message management** — `queued_messages` on the session
-      plus `cancelQueuedPrompt`; show and cancel queued sends.
+- [x] **Queued-message management** — queued sends render above the
+      composer with a remove action; agent-parked prompts cancel via
+      `cancelQueuedPrompt`, user-queued rows via the persisted session.
 - [ ] **Issues surface** — `listIssues`, `getIssue`, `createIssue`,
       `listIssueTemplates` (parity depends on how much desktop exposes).
 

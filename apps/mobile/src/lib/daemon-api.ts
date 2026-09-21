@@ -1,9 +1,11 @@
 import type {
+  AgentInvocation,
   AgentSession,
   BranchSnapshot,
   ComposerDraftChange,
   DaemonSettings,
   FileEntry,
+  GitPanelSnapshot,
   LandOutcome,
   Project,
   ProviderKind,
@@ -11,6 +13,7 @@ import type {
   ProviderSessionCatalogStatus,
   ProviderSessionSummary,
   ProviderSessionHistory,
+  PullOutcome,
   ReviewDiffData,
   ReviewDiffSource,
   ResponsePayload,
@@ -19,6 +22,7 @@ import type {
   SlashCommand,
   WakuClient,
   WorkingTreeEntry,
+  WorkspaceOperation,
   WorkspaceResult,
 } from '@waku/client';
 
@@ -84,6 +88,12 @@ export const daemonKeys = {
     'workspace-diff',
     root,
     source,
+  ] as const,
+  gitPanel: (profileId: string, root: string) => [
+    'daemon',
+    profileId,
+    'git-panel',
+    root,
   ] as const,
 };
 
@@ -454,6 +464,95 @@ export async function collectWorkspaceDiff(
     throw new Error('The daemon returned an unexpected diff response');
   }
   return response.result.data;
+}
+
+async function runGitOperation(
+  client: WakuClient,
+  operation: Extract<WorkspaceOperation, { cwd: string }>,
+): Promise<WorkspaceResult> {
+  const response = expectResponse(
+    await client.request({ type: 'workspace', operation }),
+    'workspace',
+  );
+  return response.result;
+}
+
+/** The Git panel's branch/upstream/change-list snapshot — `null` when the
+ * workspace is not inside a repository. */
+export async function inspectGitPanel(
+  client: WakuClient,
+  cwd: string,
+  base: string | null = null,
+): Promise<GitPanelSnapshot | null> {
+  const result = await runGitOperation(client, { type: 'inspectGitPanel', cwd, base });
+  if (result.type !== 'gitPanel') {
+    throw new Error('The daemon returned an unexpected git panel response');
+  }
+  return result.snapshot;
+}
+
+export async function stageWorkspaceFile(client: WakuClient, cwd: string, path: string) {
+  await runGitOperation(client, { type: 'stageFile', cwd, path });
+}
+
+export async function unstageWorkspaceFile(client: WakuClient, cwd: string, path: string) {
+  await runGitOperation(client, { type: 'unstageFile', cwd, path });
+}
+
+export async function discardWorkspaceFile(client: WakuClient, cwd: string, path: string) {
+  await runGitOperation(client, { type: 'discardFile', cwd, path });
+}
+
+/** Commits the staged changes — or the whole worktree when
+ * `includeUnstaged` — and optionally pushes the result, matching the
+ * desktop git panel's one-tap flow. */
+export async function commitWorkspace(
+  client: WakuClient,
+  cwd: string,
+  message: string,
+  includeUnstaged: boolean,
+  push: boolean,
+) {
+  await runGitOperation(client, {
+    type: 'commit',
+    cwd,
+    message,
+    include_unstaged: includeUnstaged,
+    push,
+  });
+}
+
+export async function pushWorkspace(client: WakuClient, cwd: string) {
+  await runGitOperation(client, { type: 'push', cwd });
+}
+
+/** Integrates upstream commits; the outcome reports clean vs conflicted. */
+export async function pullWorkspace(client: WakuClient, cwd: string): Promise<PullOutcome> {
+  const result = await runGitOperation(client, { type: 'pullUpstream', cwd, strategy: 'rebase' });
+  if (result.type !== 'pull') {
+    throw new Error('The daemon returned an unexpected pull response');
+  }
+  return result.outcome;
+}
+
+/** Blank-message commits run through the provider, the way the desktop
+ * panel's generate-then-commit flow works. */
+export async function generateWorkspaceCommitMessage(
+  client: WakuClient,
+  cwd: string,
+  includeUnstaged: boolean,
+  invocation: AgentInvocation,
+): Promise<string> {
+  const result = await runGitOperation(client, {
+    type: 'generateCommitMessage',
+    cwd,
+    include_unstaged: includeUnstaged,
+    invocation,
+  });
+  if (result.type !== 'commitMessage') {
+    throw new Error('The daemon returned an unexpected commit message response');
+  }
+  return result.message;
 }
 
 export async function removeDaemonSession(

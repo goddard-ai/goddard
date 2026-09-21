@@ -7,11 +7,18 @@ import {
   type BottomSheetMethods,
 } from "@expo/ui/community/bottom-sheet";
 import { MenuView, type MenuAction } from "@expo/ui/community/menu";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type {
+  AgentInvocation,
   AgentSession,
+  GitFileChange,
   Project,
   ReviewDiffSource,
+  WakuClient,
   WorkingTreeEntry,
 } from "@waku/client";
 import { TerminalView, type TerminalViewRef } from "expo-libghostty";
@@ -26,10 +33,12 @@ import {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useColorScheme,
 } from "react-native";
@@ -42,21 +51,32 @@ import { MonoFont, NativeTint, Radius } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import {
   collectWorkspaceDiff,
+  commitWorkspace,
   daemonKeys,
+  discardWorkspaceFile,
+  generateWorkspaceCommitMessage,
+  inspectGitPanel,
   listWorkspaceTree,
+  pullWorkspace,
+  pushWorkspace,
   readWorkspaceTextFile,
+  stageWorkspaceFile,
+  unstageWorkspaceFile,
 } from "@/lib/daemon-api";
 import { useDaemon } from "@/lib/daemon-context";
 import { sessionCwd } from "@/lib/mobile-runtime";
+import { useProviderModels } from "@/hooks/use-daemon-data";
 import {
+  gitStatusLabel,
   latestReviewTurnSource,
   parseNumstat,
   reviewDiffSourceLabel,
   splitReviewPatch,
+  upstreamLabel,
   type ReviewPatchFile,
 } from "@/lib/task-surfaces";
 
-export type TaskSurface = "terminal" | "files" | "review";
+export type TaskSurface = "terminal" | "files" | "review" | "git";
 
 type ReviewPatchSection = ReviewPatchFile & { data: ReviewPatchFile[] };
 
@@ -88,6 +108,15 @@ const SURFACE_DETAILS: Record<
       ios: "doc.text.magnifyingglass",
       android: "difference",
       web: "difference",
+    },
+  },
+  git: {
+    title: "Git",
+    subtitle: "Branch and working tree",
+    icon: {
+      ios: "arrow.triangle.branch",
+      android: "call_split",
+      web: "call_split",
     },
   },
 };
@@ -150,6 +179,9 @@ function SurfaceBody({
   }
   if (surface === "files") {
     return <FilesSurface root={root} />;
+  }
+  if (surface === "git") {
+    return <GitSurface root={root} session={session} />;
   }
   return <ReviewSurface root={root} session={session} />;
 }
@@ -766,6 +798,352 @@ function ReviewSurface({
   );
 }
 
+type GitSection = {
+  key: "staged" | "unstaged";
+  title: string;
+  data: GitFileChange[];
+};
+
+/**
+ * The working-tree half of the desktop Git panel: branch + upstream, the
+ * staged/unstaged file lists with their per-file actions, and the
+ * commit-or-generate bar. Branch switching, worktrees, and the commit log
+ * stay desktop-side for now.
+ */
+function GitSurface({ root, session }: { root: string | null; session: AgentSession }) {
+  const daemon = useDaemon();
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
+  const profileId = daemon.activeProfile?.id ?? "disconnected";
+  const probe = useProviderModels(session.provider);
+  const [message, setMessage] = useState("");
+  const [pending, setPending] = useState<string | null>(null);
+  const [opError, setOpError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMessage("");
+    setOpError(null);
+  }, [root, session.id]);
+
+  const panel = useQuery({
+    queryKey: daemonKeys.gitPanel(profileId, root ?? "none"),
+    queryFn: () => inspectGitPanel(daemon.client!, root!),
+    enabled: Boolean(daemon.client && daemon.phase === "connected" && root),
+    placeholderData: keepPreviousData,
+  });
+  const snapshot = panel.data ?? null;
+  const stagedCount = snapshot?.staged.length ?? 0;
+  const unstagedCount = snapshot?.unstaged.length ?? 0;
+
+  // Everything that lists this working tree shares the invalidation.
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: daemonKeys.gitPanel(profileId, root ?? "none"),
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["daemon", profileId, "workspace-diff", root ?? "none"],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["daemon", profileId, "workspace-tree", root ?? "none"],
+    });
+  }, [profileId, queryClient, root]);
+
+  const runOp = useCallback(
+    <T,>(label: string, op: (client: WakuClient) => Promise<T>, onSuccess?: (value: T) => void) => {
+      const client = daemon.client;
+      if (!client || !root || pending) return;
+      setPending(label);
+      setOpError(null);
+      void Promise.resolve()
+        .then(() => op(client))
+        .then((value) => onSuccess?.(value))
+        .catch((cause) => setOpError(errorMessage(cause)))
+        .finally(() => {
+          setPending(null);
+          refresh();
+        });
+    },
+    [daemon.client, pending, refresh, root],
+  );
+
+  // The same invocation the desktop panel builds for generated messages:
+  // the session's provider binary, model, and effort.
+  const invocation = useMemo<AgentInvocation | null>(() => {
+    const binary = probe.data?.path;
+    if (!binary) return null;
+    return {
+      provider: session.provider,
+      binary,
+      model: session.model ?? null,
+      reasoning_effort: session.reasoning_effort ?? null,
+    };
+  }, [probe.data?.path, session.model, session.provider, session.reasoning_effort]);
+
+  /** Commits staged — or sweeps the worktree — generating the message from
+   * the provider when the field is blank, like the desktop panel. */
+  const commit = useCallback(
+    (includeUnstaged: boolean) => {
+      if (!root) return;
+      const typed = message.trim();
+      runOp(
+        "commit",
+        async (client) => {
+          const finalMessage =
+            typed ||
+            (await generateWorkspaceCommitMessage(client, root, includeUnstaged, invocation!));
+          await commitWorkspace(client, root, finalMessage, includeUnstaged, false);
+        },
+        () => setMessage(""),
+      );
+    },
+    [invocation, message, root, runOp],
+  );
+
+  const confirmCommit = useCallback(() => {
+    if (stagedCount === 0 && unstagedCount > 0) {
+      Alert.alert(
+        "Nothing staged",
+        `Commit all ${unstagedCount} ${unstagedCount === 1 ? "change" : "changes"}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Commit all", onPress: () => commit(true) },
+        ],
+      );
+      return;
+    }
+    commit(false);
+  }, [commit, stagedCount, unstagedCount]);
+
+  const discard = useCallback(
+    (file: GitFileChange) => {
+      Alert.alert(
+        `Discard changes to ${file.path}?`,
+        file.untracked
+          ? "This deletes the untracked file and cannot be undone."
+          : "This restores the file to HEAD and cannot be undone.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Discard",
+            style: "destructive",
+            onPress: () =>
+              runOp("discard", (client) => discardWorkspaceFile(client, root!, file.path)),
+          },
+        ],
+      );
+    },
+    [root, runOp],
+  );
+
+  const sections = useMemo<GitSection[]>(() => {
+    if (!snapshot) return [];
+    const all: GitSection[] = [
+      { key: "staged", title: "Staged", data: snapshot.staged },
+      { key: "unstaged", title: "Changes", data: snapshot.unstaged },
+    ];
+    return all.filter((section) => section.data.length > 0);
+  }, [snapshot]);
+
+  const canCommit = Boolean(
+    snapshot && (stagedCount > 0 || unstagedCount > 0) && (message.trim() || invocation),
+  );
+  const behind = snapshot?.upstream?.behind ?? 0;
+  const subtitle = snapshot
+    ? [snapshot.branch, upstreamLabel(snapshot.upstream)].filter(Boolean).join(" · ")
+    : undefined;
+
+  if (!root) {
+    return (
+      <View style={styles.fill}>
+        <SurfaceHeader surface="git" />
+        <PanelMessage
+          detail="This task does not have an available workspace."
+          title="No workspace"
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.fill}>
+      <SurfaceHeader
+        action={
+          <HeaderTextButton label="Refresh" onPress={() => void panel.refetch()} />
+        }
+        subtitle={subtitle}
+        surface="git"
+      />
+      {panel.isPending ? (
+        <LoadingMessage />
+      ) : panel.error ? (
+        <PanelMessage detail={errorMessage(panel.error)} title="Couldn’t load git status" />
+      ) : !snapshot ? (
+        <PanelMessage
+          detail="This workspace is not inside a git repository."
+          title="No repository"
+        />
+      ) : (
+        <>
+          {behind > 0 || snapshot.can_push ? (
+            <View style={[styles.gitSyncRow, { borderBottomColor: theme.border }]}>
+              {behind > 0 ? (
+                <HeaderTextButton
+                  label={pending === "pull" ? "Pulling…" : `Pull ↓${behind}`}
+                  onPress={() =>
+                    runOp("pull", async (client) => {
+                      const outcome = await pullWorkspace(client, root);
+                      if (outcome !== "clean") {
+                        throw new Error(
+                          `Pull stopped on a conflict in ${outcome.conflict.files.length} ${
+                            outcome.conflict.files.length === 1 ? "file" : "files"
+                          } — resolve it on the host.`,
+                        );
+                      }
+                    })
+                  }
+                />
+              ) : null}
+              {snapshot.can_push ? (
+                <HeaderTextButton
+                  label={pending === "push" ? "Pushing…" : "Push"}
+                  onPress={() => runOp("push", (client) => pushWorkspace(client, root))}
+                />
+              ) : null}
+            </View>
+          ) : null}
+          <BottomSheetSectionList<GitFileChange, GitSection>
+            contentContainerStyle={{
+              paddingBottom: 12,
+            }}
+            sections={sections}
+            keyExtractor={(file) => file.path}
+            stickySectionHeadersEnabled
+            ListEmptyComponent={
+              <PanelMessage detail="The working tree is clean." title="No changes" />
+            }
+            renderSectionHeader={({ section }) => (
+              <View
+                style={[
+                  styles.diffFileHeader,
+                  { backgroundColor: theme.surface, borderBottomColor: theme.border },
+                ]}
+              >
+                <Text style={[styles.diffPath, { color: theme.textSecondary }]}>
+                  {section.title} ({section.data.length})
+                </Text>
+              </View>
+            )}
+            renderItem={({ item, section }) => (
+              <View style={[styles.gitFileRow, { borderBottomColor: theme.border }]}>
+                <View style={[styles.gitStatusBadge, { backgroundColor: theme.overlay }]}>
+                  <Text style={[styles.gitStatusText, { color: theme.textTertiary }]}>
+                    {item.untracked ? "??" : item.status}
+                  </Text>
+                </View>
+                <View style={styles.gitFileCopy}>
+                  <Text numberOfLines={1} style={[styles.gitFilePath, { color: theme.text }]}>
+                    {item.path}
+                  </Text>
+                  <Text style={[styles.gitFileMeta, { color: theme.textGhost }]}>
+                    {gitStatusLabel(item.status, item.untracked)}
+                    {item.additions || item.deletions
+                      ? ` · +${item.additions} −${item.deletions}`
+                      : ""}
+                  </Text>
+                </View>
+                {section.key === "staged" ? (
+                  <HeaderTextButton
+                    label="Unstage"
+                    onPress={() =>
+                      runOp("unstage", (client) => unstageWorkspaceFile(client, root, item.path))
+                    }
+                  />
+                ) : (
+                  <View style={styles.gitFileActions}>
+                    <HeaderTextButton
+                      label="Stage"
+                      onPress={() =>
+                        runOp("stage", (client) => stageWorkspaceFile(client, root, item.path))
+                      }
+                    />
+                    <Pressable
+                      accessibilityLabel={`Discard ${item.path}`}
+                      accessibilityRole="button"
+                      hitSlop={6}
+                      onPress={() => discard(item)}
+                      style={({ pressed }) => [
+                        styles.textButton,
+                        { opacity: pressed ? 0.5 : 1 },
+                      ]}
+                    >
+                      <Text style={[styles.textButtonLabel, { color: theme.danger }]}>
+                        Discard
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            )}
+          />
+          {opError ? (
+            <Text style={[styles.gitError, { color: theme.danger }]}>{opError}</Text>
+          ) : null}
+          <View
+            style={[
+              styles.commitBar,
+              {
+                backgroundColor: theme.surface,
+                borderTopColor: theme.border,
+                paddingBottom: Math.max(insets.bottom, 10),
+              },
+            ]}
+          >
+            <TextInput
+              editable={pending == null}
+              onChangeText={setMessage}
+              placeholder={
+                invocation ? "Message (blank generates one)" : "Commit message"
+              }
+              placeholderTextColor={theme.textGhost}
+              style={[
+                styles.commitInput,
+                { backgroundColor: theme.overlay, color: theme.text },
+              ]}
+              value={message}
+            />
+            <Pressable
+              accessibilityHint={
+                message.trim()
+                  ? "Commits the staged changes"
+                  : "Generates a message and commits"
+              }
+              accessibilityLabel="Commit"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canCommit || pending != null }}
+              disabled={!canCommit || pending != null}
+              onPress={confirmCommit}
+              style={({ pressed }) => [
+                styles.commitButton,
+                { backgroundColor: theme.accent },
+                (!canCommit || pending != null || pressed) && { opacity: 0.5 },
+              ]}
+            >
+              {pending === "commit" ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.commitButtonLabel}>
+                  {stagedCount > 0 ? "Commit" : "Commit all"}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
 function HeaderTextButton({
   label,
   onPress,
@@ -914,6 +1292,66 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   diffPath: { flex: 1, fontSize: 13.5, fontWeight: "500" },
+  gitSyncRow: {
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 18,
+    justifyContent: "flex-end",
+    minHeight: 40,
+    paddingHorizontal: 14,
+  },
+  gitFileRow: {
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 46,
+    paddingHorizontal: 14,
+  },
+  gitStatusBadge: {
+    alignItems: "center",
+    borderRadius: Radius.small,
+    minWidth: 28,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  gitStatusText: { fontFamily: MonoFont, fontSize: 11, fontWeight: "600" },
+  gitFileCopy: { flex: 1, minWidth: 0 },
+  gitFilePath: { fontFamily: MonoFont, fontSize: 13 },
+  gitFileMeta: { fontSize: 11.5, marginTop: 1 },
+  gitFileActions: { alignItems: "center", flexDirection: "row", gap: 12 },
+  gitError: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    fontSize: 12.5,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  commitBar: {
+    alignItems: "center",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+  },
+  commitInput: {
+    borderRadius: Radius.small,
+    flex: 1,
+    fontSize: 14.5,
+    minHeight: 38,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  commitButton: {
+    alignItems: "center",
+    borderRadius: Radius.small,
+    justifyContent: "center",
+    minHeight: 38,
+    minWidth: 88,
+    paddingHorizontal: 14,
+  },
+  commitButtonLabel: { color: "#fff", fontSize: 14.5, fontWeight: "600" },
   loading: {
     alignItems: "center",
     flex: 1,
