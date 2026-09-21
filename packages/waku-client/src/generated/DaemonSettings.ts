@@ -97,4 +97,13 @@ sandbox_experiment_enabled: boolean,
  * changes which environment a new task seeds. A per-task choice in the
  * access menu still wins for that task.
  */
-sandbox_default_enabled: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+sandbox_default_enabled: boolean,
+/**
+ * Seconds a settled provider runtime may sit idle before the daemon
+ * reclaims it. `None` keeps the built-in default (30 minutes); `0`
+ * disables eviction. A reclaimed runtime restarts lazily from the
+ * session's provider cursor on the next prompt, so the knob trades a
+ * one-time resume delay against resident process memory. Runtimes
+ * whose session is busy or cannot resume are never evicted.
+ */
+runtime_idle_timeout_secs?: number | null, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });

@@ -634,6 +634,8 @@ impl PersistedState {
             // The sandbox experiment postdates the document the same way.
             sandbox_experiment_enabled: cfg!(debug_assertions),
             sandbox_default_enabled: false,
+            // Idle eviction postdates it too; absent means the default.
+            runtime_idle_timeout_secs: None,
             extra: self.daemon_settings_extra.clone(),
         }
     }

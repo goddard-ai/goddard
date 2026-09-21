@@ -1,0 +1,1 @@
+- Provider runtimes a task leaves idle are now reclaimed after 30 minutes instead of living until the daemon exits — the next prompt resumes the provider from its cursor, and sessions that are busy or cannot resume are never killed. Tune with `runtime_idle_timeout_secs` in daemon settings; `0` disables eviction

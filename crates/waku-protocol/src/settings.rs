@@ -86,6 +86,14 @@ pub struct DaemonSettings {
     /// access menu still wins for that task.
     #[serde(default)]
     pub sandbox_default_enabled: bool,
+    /// Seconds a settled provider runtime may sit idle before the daemon
+    /// reclaims it. `None` keeps the built-in default (30 minutes); `0`
+    /// disables eviction. A reclaimed runtime restarts lazily from the
+    /// session's provider cursor on the next prompt, so the knob trades a
+    /// one-time resume delay against resident process memory. Runtimes
+    /// whose session is busy or cannot resume are never evicted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_idle_timeout_secs: Option<u64>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -117,6 +125,7 @@ impl Default for DaemonSettings {
             integrations_proxy_token: String::new(),
             sandbox_experiment_enabled: default_experiment_enabled(),
             sandbox_default_enabled: false,
+            runtime_idle_timeout_secs: None,
             extra: BTreeMap::new(),
         }
     }

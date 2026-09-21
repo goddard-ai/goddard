@@ -245,6 +245,14 @@ impl AgentState {
             .is_some_and(|turn| turn.open && !turn.working)
     }
 
+    /// Whether prompts are parked for this session awaiting delivery.
+    pub fn has_queued(&self, session_id: Uuid) -> bool {
+        self.queues
+            .lock()
+            .get(&session_id)
+            .is_some_and(|queue| !queue.is_empty())
+    }
+
     pub fn enqueue(&self, session_id: Uuid, prompt: AgentPrompt) {
         self.queues
             .lock()

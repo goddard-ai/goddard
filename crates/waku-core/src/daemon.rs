@@ -39,6 +39,17 @@ use waku_protocol::{decode_enum, event_to_wire};
 /// requests, forks, checkpoints — and resident memory grows without bound.
 const RESIDENT_TRANSCRIPT_WINDOW: usize = 24;
 
+/// How often the idle-runtime reaper scans. Eviction lag is at most this
+/// plus the configured timeout, so a minute keeps the sweep cheap without
+/// letting a just-expired runtime linger.
+const IDLE_REAPER_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Resident provider runtime lifetime when `runtime_idle_timeout_secs` is
+/// unset. Thirty minutes covers stepping away without keeping every browsed
+/// task's process alive for the whole workday.
+const DEFAULT_RUNTIME_IDLE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(30 * 60);
+
 /// How long an archived task is kept, in seconds, before it is removed
 /// entirely. The sweep runs whenever task state loads rather than on a
 /// timer, so this bounds retention without scheduling exact deletions.
@@ -102,6 +113,19 @@ struct TerminalEntry {
     terminal: crate::terminal::DaemonTerminal,
 }
 
+/// A live provider runtime: the client-chosen id that scopes its events,
+/// the driver handle, and when it last did anything — forwarded an event
+/// or served a request. `resumable` records whether the runtime can be
+/// rebuilt from a provider cursor — seeded from the spawn options and set
+/// once the driver's `Connected` handshake reports one. The idle reaper
+/// reads both stamps.
+struct RuntimeEntry {
+    runtime_id: Uuid,
+    driver: DriverHandle,
+    last_active: std::time::Instant,
+    resumable: bool,
+}
+
 /// The provider/model selection an `agent create` request carried. Every
 /// `None` field inherits the sending task's configuration where the resolved
 /// provider still matches it; see [`WakuBackend::create_agent_task`].
@@ -142,7 +166,7 @@ fn resolve_agent_trait(
 }
 
 pub struct WakuBackend {
-    sessions: Arc<Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>>,
+    sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
     terminals: Mutex<HashMap<Uuid, TerminalEntry>>,
     #[cfg(all(test, unix))]
@@ -170,6 +194,10 @@ pub struct WakuBackend {
     /// Serializes cold-start of a stored task's runtime so two agent prompts
     /// cannot race to spawn it.
     runtime_start_locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+    /// Guards spawning the idle-runtime reaper — `set_event_source` may be
+    /// installed more than once in tests that bind two servers to one
+    /// backend.
+    idle_reaper_started: std::sync::atomic::AtomicBool,
     /// The address the daemon bound, published to provider sessions as
     /// `GODDARD_DAEMON_ADDRESS` when agent tools are enabled. Set once by the
     /// daemon executable after it binds its listener. `Arc` so the link
@@ -251,6 +279,7 @@ impl WakuBackend {
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             agent: Arc::new(crate::agent::AgentState::default()),
             runtime_start_locks: Mutex::new(HashMap::new()),
+            idle_reaper_started: std::sync::atomic::AtomicBool::new(false),
             daemon_address: Arc::new(Mutex::new(None)),
             exposed_port: Arc::new(Mutex::new(None)),
             usage_rates_dir,
@@ -936,7 +965,35 @@ impl Backend for WakuBackend {
     }
 
     fn set_event_source(&self, events: EventSink) {
-        self.automations.set_event_source(events);
+        self.automations.set_event_source(events.clone());
+        // The reaper starts with the event hub: retiring a runtime needs a
+        // sink, and before serve() installs one there is nothing to retire.
+        if self
+            .idle_reaper_started
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            return;
+        }
+        let sessions = self.sessions.clone();
+        let task_state = self.task_state.clone();
+        let settings = self.settings.clone();
+        let agent = self.agent.clone();
+        let _ = std::thread::Builder::new()
+            .name("waku-idle-reaper".into())
+            .spawn(move || loop {
+                std::thread::sleep(IDLE_REAPER_INTERVAL);
+                for (session_id, runtime_id, driver) in
+                    reap_idle_runtimes(&sessions, &task_state, &settings, &agent)
+                {
+                    // The scoped credential was valid only while the
+                    // provider process carrying it lived.
+                    agent.revoke_session(session_id);
+                    events
+                        .for_session(session_id, runtime_id)
+                        .end_session_runtime();
+                    drop_detached(driver);
+                }
+            });
     }
 
     fn set_review_notifier(&self, notifier: crate::share::ReviewNotifier) {
@@ -970,7 +1027,7 @@ impl Backend for WakuBackend {
         match request.command {
             Command::AttachSession => {
                 let sessions = self.sessions.lock();
-                let Some((runtime_id, driver)) = sessions.get(&session_id) else {
+                let Some(entry) = sessions.get(&session_id) else {
                     return Ok(ResponsePayload::SessionRuntime {
                         runtime_id: None,
                         supports_steer: false,
@@ -978,9 +1035,9 @@ impl Backend for WakuBackend {
                     });
                 };
                 Ok(ResponsePayload::SessionRuntime {
-                    runtime_id: Some(*runtime_id),
-                    supports_steer: driver.supports_steer(),
-                    supports_user_input_actions: driver.supports_user_input_actions(),
+                    runtime_id: Some(entry.runtime_id),
+                    supports_steer: entry.driver.supports_steer(),
+                    supports_user_input_actions: entry.driver.supports_user_input_actions(),
                 })
             }
             Command::GetSettings => Ok(ResponsePayload::Settings {
@@ -1408,7 +1465,7 @@ impl Backend for WakuBackend {
                     .sessions
                     .lock()
                     .iter()
-                    .map(|(session_id, (runtime_id, _))| (*session_id, *runtime_id))
+                    .map(|(session_id, entry)| (*session_id, entry.runtime_id))
                     .collect::<HashMap<_, _>>();
                 let mut state = self.task_state.lock();
                 let removed_project_ids = self.removed_project_ids.lock();
@@ -2015,13 +2072,20 @@ impl Backend for WakuBackend {
                     sandbox: None,
                     allow_model_fallback: false,
                 };
+                let resumable = options.provider_cursor.is_some();
                 let handle =
                     self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
                 let supports_steer = handle.supports_steer();
                 let supports_user_input_actions = handle.supports_user_input_actions();
-                self.sessions
-                    .lock()
-                    .insert(session_id, (runtime_id, handle));
+                self.sessions.lock().insert(
+                    session_id,
+                    RuntimeEntry {
+                        runtime_id,
+                        driver: handle,
+                        last_active: std::time::Instant::now(),
+                        resumable,
+                    },
+                );
                 Ok(ResponsePayload::Started {
                     supports_steer,
                     supports_user_input_actions,
@@ -2032,7 +2096,7 @@ impl Backend for WakuBackend {
                     let mut sessions = self.sessions.lock();
                     sessions
                         .get(&session_id)
-                        .is_some_and(|(active_runtime_id, _)| *active_runtime_id == runtime_id)
+                        .is_some_and(|entry| entry.runtime_id == runtime_id)
                         .then(|| sessions.remove(&session_id))
                         .flatten()
                 };
@@ -2101,16 +2165,20 @@ impl Backend for WakuBackend {
                 // flag only keeps unattended senders (agent prompts,
                 // automations) out until the user trusts the transfer.
                 let driver = {
-                    let sessions = self.sessions.lock();
-                    let (active_runtime_id, driver) = sessions
-                        .get(&session_id)
+                    let mut sessions = self.sessions.lock();
+                    let entry = sessions
+                        .get_mut(&session_id)
                         .ok_or_else(|| anyhow!("daemon session {session_id} is not running"))?;
-                    if *active_runtime_id != runtime_id {
+                    if entry.runtime_id != runtime_id {
                         bail!(
-                            "daemon session {session_id} belongs to runtime {active_runtime_id}, not {runtime_id}"
+                            "daemon session {session_id} belongs to runtime {}, not {runtime_id}",
+                            entry.runtime_id
                         );
                     }
-                    driver.clone()
+                    // Serving a request is activity — the idle reaper must
+                    // not reclaim a runtime a client just talked to.
+                    entry.last_active = std::time::Instant::now();
+                    entry.driver.clone()
                 };
                 if let Command::Prompt {
                     prompt,
@@ -2754,7 +2822,7 @@ impl WakuBackend {
             .sessions
             .lock()
             .get(&source.id)
-            .map(|(_, driver)| driver.clone())
+            .map(|entry| entry.driver.clone())
         {
             return driver.fork(turns_to_remove);
         }
@@ -2884,7 +2952,7 @@ impl WakuBackend {
                     .sessions
                     .lock()
                     .get(&source.id)
-                    .map(|(_, driver)| driver.clone())
+                    .map(|entry| entry.driver.clone())
                 {
                     driver
                         .rollback(rollback_turns)?
@@ -2910,7 +2978,7 @@ impl WakuBackend {
                     .sessions
                     .lock()
                     .get(&source.id)
-                    .map(|(_, driver)| driver.clone())
+                    .map(|entry| entry.driver.clone())
                 {
                     driver
                         .rollback(rollback_turns)?
@@ -2992,7 +3060,7 @@ impl WakuBackend {
                     .sessions
                     .lock()
                     .get(&source.id)
-                    .map(|(_, driver)| driver.clone())
+                    .map(|entry| entry.driver.clone())
                 {
                     driver
                         .rollback(rollback_turns)?
@@ -3047,7 +3115,7 @@ impl WakuBackend {
             .sessions
             .lock()
             .get(&source.id)
-            .map(|(_, driver)| driver.clone())
+            .map(|entry| entry.driver.clone())
         {
             return driver.rollback(rollback_turns);
         }
@@ -3424,8 +3492,9 @@ impl WakuBackend {
         session_id: Uuid,
         events: &EventSink,
     ) -> anyhow::Result<(Uuid, DriverHandle)> {
-        if let Some((runtime_id, driver)) = self.sessions.lock().get(&session_id) {
-            return Ok((*runtime_id, driver.clone()));
+        if let Some(entry) = self.sessions.lock().get_mut(&session_id) {
+            entry.last_active = std::time::Instant::now();
+            return Ok((entry.runtime_id, entry.driver.clone()));
         }
         // A per-session lock keeps two simultaneous agent prompts from
         // cold-starting the same stored task twice.
@@ -3436,8 +3505,9 @@ impl WakuBackend {
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
         let _start_guard = start_lock.lock();
-        if let Some((runtime_id, driver)) = self.sessions.lock().get(&session_id) {
-            return Ok((*runtime_id, driver.clone()));
+        if let Some(entry) = self.sessions.lock().get_mut(&session_id) {
+            entry.last_active = std::time::Instant::now();
+            return Ok((entry.runtime_id, entry.driver.clone()));
         }
         let (provider, options) = {
             let mut state = self.task_state.lock();
@@ -3485,6 +3555,7 @@ impl WakuBackend {
         };
         let runtime_id = Uuid::new_v4();
         let sink = events.begin_session_runtime(session_id, runtime_id);
+        let resumable = options.provider_cursor.is_some();
         let handle =
             match self.spawn_runtime(session_id, runtime_id, provider, options, sink.clone()) {
                 Ok(handle) => handle,
@@ -3494,9 +3565,15 @@ impl WakuBackend {
                 }
             };
         let driver = handle.clone();
-        self.sessions
-            .lock()
-            .insert(session_id, (runtime_id, handle));
+        self.sessions.lock().insert(
+            session_id,
+            RuntimeEntry {
+                runtime_id,
+                driver: handle,
+                last_active: std::time::Instant::now(),
+                resumable,
+            },
+        );
         Ok((runtime_id, driver))
     }
 
@@ -3908,7 +3985,7 @@ impl WakuBackend {
                     .sessions
                     .lock()
                     .get(&target)
-                    .map(|(_, driver)| driver.clone())
+                    .map(|entry| entry.driver.clone())
                     .ok_or_else(|| anyhow!("task {target} has no running session to steer"))?;
                 if !self.agent.has_open_turn(target) {
                     bail!("task {target} has no running turn to steer");
@@ -4019,7 +4096,7 @@ impl WakuBackend {
         self.sessions
             .lock()
             .get(&session_id)
-            .map(|(runtime_id, _)| *runtime_id)
+            .map(|entry| entry.runtime_id)
     }
 
     /// Cancel a parked agent prompt — the chip's own remove affordance.
@@ -4599,12 +4676,18 @@ fn forward_driver_events(
     agent: Arc<crate::agent::AgentState>,
     task_state: Arc<Mutex<PersistedState>>,
     task_store: Arc<StateStore>,
-    sessions: Arc<Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>>,
+    sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     automations: Arc<AutomationService>,
     memory: Arc<crate::memory::MemoryService>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
 ) {
     while let Ok(event) = event_receiver.recv() {
+        // Every forwarded event is activity the idle reaper counts.
+        if let Some(entry) = sessions.lock().get_mut(&session_id)
+            && entry.runtime_id == runtime_id
+        {
+            entry.last_active = std::time::Instant::now();
+        }
         let rejected_steer = agent.note_driver_event(session_id, &event);
         automations.note_driver_event(session_id, &event);
         let event = match event {
@@ -4613,6 +4696,15 @@ fn forward_driver_events(
                 // thread-id resolution and cold starts work even when no
                 // client ever saves the task.
                 record_provider_cursor(&task_state, &task_store, session_id, &provider_cursor);
+                // A reported cursor makes this runtime evictable — the next
+                // prompt can rebuild it even if the catalog row has since
+                // been skeletonized by the transcript window.
+                if provider_cursor.is_some()
+                    && let Some(entry) = sessions.lock().get_mut(&session_id)
+                    && entry.runtime_id == runtime_id
+                {
+                    entry.resumable = true;
+                }
                 DriverEvent::Connected { provider_cursor }
             }
             DriverEvent::SteerAccepted { message, .. } => {
@@ -4765,7 +4857,7 @@ fn forward_driver_events(
                 let mut sessions = sessions.lock();
                 sessions
                     .get(&session_id)
-                    .is_some_and(|(active_runtime_id, _)| *active_runtime_id == runtime_id)
+                    .is_some_and(|entry| entry.runtime_id == runtime_id)
                     .then(|| sessions.remove(&session_id))
                     .flatten()
             };
@@ -4773,6 +4865,68 @@ fn forward_driver_events(
             break;
         }
     }
+}
+
+/// Reclaim provider runtimes idle past the configured timeout. A runtime is
+/// only reclaimable when its task can come back: nothing mid-turn, parked,
+/// or queued for delivery, and the session either never produced provider
+/// state or holds a resume cursor to rebuild it. Entries are removed here;
+/// hub retirement and process teardown are the caller's job, off this lock.
+fn reap_idle_runtimes(
+    sessions: &Mutex<HashMap<Uuid, RuntimeEntry>>,
+    task_state: &Mutex<PersistedState>,
+    settings: &DaemonSettingsStore,
+    agent: &crate::agent::AgentState,
+) -> Vec<(Uuid, Uuid, DriverHandle)> {
+    let timeout = match settings.get().runtime_idle_timeout_secs {
+        Some(0) => return Vec::new(),
+        Some(secs) => std::time::Duration::from_secs(secs),
+        None => DEFAULT_RUNTIME_IDLE_TIMEOUT,
+    };
+    let cutoff = std::time::Instant::now() - timeout;
+    let state = task_state.lock();
+    let mut sessions = sessions.lock();
+    let evictable = sessions
+        .iter()
+        .filter(|(session_id, entry)| {
+            entry.last_active <= cutoff && runtime_evictable(&state, **session_id, entry, agent)
+        })
+        .map(|(session_id, _)| *session_id)
+        .collect::<Vec<_>>();
+    evictable
+        .into_iter()
+        .filter_map(|session_id| {
+            sessions
+                .remove(&session_id)
+                .map(|entry| (session_id, entry.runtime_id, entry.driver))
+        })
+        .collect()
+}
+
+/// Whether killing this task's provider process loses nothing the next
+/// prompt cannot rebuild. Busy is checked twice — the persisted status and
+/// the forwarder's turn bookkeeping — because either can be the fresher
+/// signal when they disagree. Resumability comes from the runtime entry,
+/// not the catalog row: a skeletonized session reads `provider_cursor:
+/// None` until its next hydrate.
+fn runtime_evictable(
+    state: &PersistedState,
+    session_id: Uuid,
+    entry: &RuntimeEntry,
+    agent: &crate::agent::AgentState,
+) -> bool {
+    let Some(session) = state.sessions.iter().find(|s| s.id == session_id) else {
+        // No catalog row claims this runtime — eviction only helps.
+        return true;
+    };
+    if session.status.is_busy()
+        || agent.has_open_turn(session_id)
+        || agent.has_queued(session_id)
+        || (session.detail_loaded && !session.queued_messages.is_empty())
+    {
+        return false;
+    }
+    entry.resumable || !session.has_started()
 }
 
 /// Deliver one queued agent prompt to a live session. A session with an
@@ -6094,7 +6248,12 @@ mod tests {
         let driver = DriverHandle::from_control(Arc::new(IdleDriver));
         let sessions = Arc::new(Mutex::new(HashMap::from([(
             session_id,
-            (runtime_id, driver.clone()),
+            RuntimeEntry {
+                runtime_id,
+                driver: driver.clone(),
+                last_active: std::time::Instant::now(),
+                resumable: true,
+            },
         )])));
         driver_events
             .send(DriverEvent::TextDelta("streamed".into()))
@@ -6205,6 +6364,112 @@ mod tests {
         backend.remove_session(worktree_id).unwrap();
         assert!(!backend.terminals.lock().contains_key(&worktree_bound));
         assert!(backend.terminals.lock().contains_key(&unrelated));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
+        let root = std::env::temp_dir().join(format!("waku-reaper-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("repo"));
+        let project_id = state.projects[0].id;
+        let seed = |session: &mut AgentSession| {
+            session.begin_turn("seed");
+            session.mark_active_turn_provider_started();
+            session.provider_cursor = Some(ProviderResumeCursor::Codex {
+                thread_id: "thread".into(),
+            });
+            session.finish_active_turn(TurnStatus::Completed);
+        };
+        // Resumable and settled — the only runtime the reaper may take.
+        let idle_id = state.sessions[0].id;
+        seed(&mut state.sessions[0]);
+        // Settled but holding no resume cursor — killing its provider would
+        // lose the session context a restart cannot rebuild.
+        let mut unresumable = state.new_session(project_id, ProviderKind::Codex);
+        unresumable.begin_turn("seed");
+        unresumable.finish_active_turn(TurnStatus::Completed);
+        let unresumable_id = unresumable.id;
+        state.push_session(unresumable);
+        // Resumable but mid-turn.
+        let mut working = state.new_session(project_id, ProviderKind::Codex);
+        seed(&mut working);
+        working.begin_turn("go");
+        working.mark_active_turn_provider_started();
+        working.status = SessionStatus::Working;
+        let working_id = working.id;
+        state.push_session(working);
+        // Resumable and settled, with a prompt still parked for delivery.
+        let mut queued = state.new_session(project_id, ProviderKind::Codex);
+        seed(&mut queued);
+        let queued_id = queued.id;
+        state.push_session(queued);
+        store.save(&mut state).unwrap();
+
+        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+        let mut doc = settings.get();
+        doc.runtime_idle_timeout_secs = Some(60);
+        settings.replace(doc).unwrap();
+        let backend = WakuBackend::new(settings, store).unwrap();
+        backend.agent.enqueue(
+            queued_id,
+            crate::agent::AgentPrompt {
+                prompt: "parked".into(),
+                sender: None,
+                queued_id: Some(Uuid::new_v4()),
+            },
+        );
+
+        // A two-minute-old stamp clears the configured minute. Resumability
+        // rides on the runtime entry — the catalog rows could be skeletons.
+        let driver = DriverHandle::from_control(Arc::new(IdleDriver));
+        let sessions = Arc::new(Mutex::new(HashMap::from_iter(
+            [idle_id, unresumable_id, working_id, queued_id]
+                .into_iter()
+                .map(|id| {
+                    (
+                        id,
+                        RuntimeEntry {
+                            runtime_id: Uuid::new_v4(),
+                            driver: driver.clone(),
+                            last_active: std::time::Instant::now()
+                                - std::time::Duration::from_secs(120),
+                            resumable: id != unresumable_id,
+                        },
+                    )
+                }),
+        )));
+
+        let evicted = reap_idle_runtimes(
+            &sessions,
+            &backend.task_state,
+            &backend.settings,
+            &backend.agent,
+        );
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(evicted[0].0, idle_id);
+        let remaining = sessions.lock();
+        assert!(!remaining.contains_key(&idle_id));
+        assert!(remaining.contains_key(&unresumable_id));
+        assert!(remaining.contains_key(&working_id));
+        assert!(remaining.contains_key(&queued_id));
+        drop(remaining);
+
+        // A fresh stamp keeps even a resumable runtime.
+        sessions.lock().insert(
+            idle_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver,
+                last_active: std::time::Instant::now(),
+                resumable: true,
+            },
+        );
+        assert!(
+            reap_idle_runtimes(&sessions, &backend.task_state, &backend.settings, &backend.agent)
+                .is_empty()
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 }

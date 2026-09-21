@@ -1455,6 +1455,10 @@ pub struct PersistedState {
     /// client `UpdateSettings` round-trip.
     #[serde(skip)]
     pub integrations_proxy_token: String,
+    /// Idle-runtime eviction timeout. Daemon-owned; mirrored only so it
+    /// survives a client `UpdateSettings` round-trip.
+    #[serde(skip)]
+    pub runtime_idle_timeout_secs: Option<u64>,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -1596,6 +1600,7 @@ impl PersistedState {
             integrations_proxy_token: String::new(),
             sandbox_experiment_enabled: default_experiment_enabled(),
             sandbox_default_enabled: false,
+            runtime_idle_timeout_secs: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -1808,6 +1813,7 @@ impl PersistedState {
             integrations_proxy_token: self.integrations_proxy_token.clone(),
             sandbox_experiment_enabled: self.sandbox_experiment_enabled,
             sandbox_default_enabled: self.sandbox_default_enabled,
+            runtime_idle_timeout_secs: self.runtime_idle_timeout_secs,
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -1835,6 +1841,7 @@ impl PersistedState {
         self.integrations_proxy_token = settings.integrations_proxy_token;
         self.sandbox_experiment_enabled = settings.sandbox_experiment_enabled;
         self.sandbox_default_enabled = settings.sandbox_default_enabled;
+        self.runtime_idle_timeout_secs = settings.runtime_idle_timeout_secs;
         self.daemon_settings_extra = settings.extra;
     }
 
