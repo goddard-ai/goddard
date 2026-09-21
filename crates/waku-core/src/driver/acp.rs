@@ -393,8 +393,21 @@ struct PendingAcpUserInput {
 
 type PendingAcpUserInputs = Arc<Mutex<HashMap<String, PendingAcpUserInput>>>;
 
+/// In-flight `session/prompt` requests plus the stop signals that decide
+/// how their settle should be scored. `session/cancel` is the only stop a
+/// client is expected to cause, so a `cancelled` resolution it never asked
+/// for means the provider interrupted the turn itself.
 #[derive(Default)]
-struct PendingPrompts(Vec<PendingPrompt>);
+struct PendingPrompts {
+    requests: Vec<PendingPrompt>,
+    cancel_requested: bool,
+    /// A sibling request already resolved cleanly: a `cancelled` settle
+    /// after that is the preemption receipt, not the turn's outcome.
+    saw_clean_settle: bool,
+    /// Devin's `_cognition.ai/agent_stopped` cause, captured while requests
+    /// are in flight — the harness's own verdict on why the run stopped.
+    stop_cause: Option<String>,
+}
 
 struct PendingPrompt {
     request_id: RequestId,
@@ -402,9 +415,19 @@ struct PendingPrompt {
     session_id: String,
 }
 
+/// What the last settle of a prompt batch learned about how it ended.
+#[derive(Default)]
+struct PromptSettle {
+    /// This client sent `session/cancel`: a `cancelled` stop reason is the
+    /// user's own stop, not a provider failure.
+    cancel_requested: bool,
+    saw_clean_settle: bool,
+    stop_cause: Option<String>,
+}
+
 impl PendingPrompts {
     fn insert(&mut self, request_id: RequestId, extension_id: Option<String>, session_id: String) {
-        self.0.push(PendingPrompt {
+        self.requests.push(PendingPrompt {
             request_id,
             extension_id,
             session_id,
@@ -412,31 +435,53 @@ impl PendingPrompts {
     }
 
     fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.requests.is_empty()
     }
 
-    fn settle_request(&mut self, request_id: &RequestId) -> bool {
-        let Some(index) = self
-            .0
+    fn note_cancel_requested(&mut self) {
+        if !self.requests.is_empty() {
+            self.cancel_requested = true;
+        }
+    }
+
+    fn note_agent_stop(&mut self, cause: &str) {
+        if !self.requests.is_empty() {
+            self.stop_cause = Some(cause.to_owned());
+        }
+    }
+
+    /// Removes the request and returns the batch's stop context once this
+    /// settle empties it — `None` while other prompts remain in flight.
+    fn settle_request(&mut self, request_id: &RequestId, clean: bool) -> Option<PromptSettle> {
+        let index = self
+            .requests
             .iter()
-            .position(|prompt| &prompt.request_id == request_id)
-        else {
-            return false;
-        };
-        self.0.remove(index);
-        self.0.is_empty()
+            .position(|prompt| &prompt.request_id == request_id)?;
+        self.requests.remove(index);
+        self.saw_clean_settle |= clean;
+        self.take_settle()
     }
 
-    fn settle_extension(&mut self, session_id: &str, extension_id: Option<&str>) -> bool {
-        let Some(index) = self.0.iter().position(|prompt| {
+    fn settle_extension(
+        &mut self,
+        session_id: &str,
+        extension_id: Option<&str>,
+    ) -> Option<PromptSettle> {
+        let index = self.requests.iter().position(|prompt| {
             prompt.session_id == session_id
                 && extension_id
                     .is_none_or(|extension_id| prompt.extension_id.as_deref() == Some(extension_id))
-        }) else {
-            return false;
-        };
-        self.0.remove(index);
-        self.0.is_empty()
+        })?;
+        self.requests.remove(index);
+        self.take_settle()
+    }
+
+    fn take_settle(&mut self) -> Option<PromptSettle> {
+        self.requests.is_empty().then(|| PromptSettle {
+            cancel_requested: std::mem::take(&mut self.cancel_requested),
+            saw_clean_settle: std::mem::take(&mut self.saw_clean_settle),
+            stop_cause: self.stop_cause.take(),
+        })
     }
 }
 
@@ -542,6 +587,16 @@ async fn run_sdk_connection(
                 let title_refresh = title_refresh.clone();
                 let first_prompt = first_prompt.clone();
                 async move |notification: UntypedMessage, _connection| {
+                    // Devin reports every agent-run stop with its own cause
+                    // (`complete`, `cancelled`, external reasons); kept so
+                    // the prompt settle can tell an external stop from a
+                    // clean end or this client's own cancel.
+                    if notification.method().trim_start_matches('_') == "cognition.ai/agent_stopped"
+                        && let Some(cause) =
+                            notification.params().get("cause").and_then(Value::as_str)
+                    {
+                        prompt_requests.lock().note_agent_stop(cause);
+                    }
                     if notification.method() == "_x.ai/session/prompt_complete" {
                         if let Some(session_id) = finish_xai_prompt_complete(
                             notification.params(),
@@ -801,6 +856,7 @@ async fn run_sdk_connection(
                     CommandMessage::Cancel => {
                         let _ = connection
                             .send_notification(CancelNotification::new(session_id.clone()));
+                        prompt_requests.lock().note_cancel_requested();
                         cancel_pending_permissions(&pending_permissions);
                         cancel_pending_user_inputs(&pending_user_inputs);
                     }
@@ -1776,13 +1832,18 @@ fn send_prompt(
     let callback_events = events.clone();
     let native_session_id = native_session_id.to_owned();
     let registered = sent.on_receiving_result(async move |result| {
-        if settle_prompt_request(&callback_requests, &callback_request_id) {
+        let clean = matches!(
+            &result,
+            Ok(response) if response.stop_reason != StopReason::Cancelled
+        );
+        if let Some(settle) = settle_prompt_request(&callback_requests, &callback_request_id, clean)
+        {
             // Only an empty turn pays for this lookup, so a healthy turn never
             // waits on Kimi's records.
             let native_failure = wire_offset
                 .filter(|_| !stream_state.lock().produced_content)
                 .and_then(|offset| crate::kimi_session::turn_failure(&native_session_id, offset));
-            let success = finish_prompt(result, native_failure, &callback_events);
+            let success = finish_prompt(result, native_failure, settle, &callback_events);
             if success && provider == ProviderKind::Grok {
                 start_grok_title_refresh(
                     grok_title_home.as_deref(),
@@ -1802,13 +1863,17 @@ fn send_prompt(
         Ok(())
     });
     if registered.is_err() {
-        prompt_requests.lock().settle_request(&request_id);
+        prompt_requests.lock().settle_request(&request_id, false);
     }
     registered
 }
 
-fn settle_prompt_request(prompt_requests: &Mutex<PendingPrompts>, request_id: &RequestId) -> bool {
-    prompt_requests.lock().settle_request(request_id)
+fn settle_prompt_request(
+    prompt_requests: &Mutex<PendingPrompts>,
+    request_id: &RequestId,
+    clean: bool,
+) -> Option<PromptSettle> {
+    prompt_requests.lock().settle_request(request_id, clean)
 }
 
 fn finish_xai_prompt_complete(
@@ -1820,12 +1885,12 @@ fn finish_xai_prompt_complete(
         return None;
     };
     let prompt_id = params.get("promptId").and_then(Value::as_str);
-    if !prompt_requests
+    let Some(settle) = prompt_requests
         .lock()
         .settle_extension(session_id, prompt_id)
-    {
+    else {
         return None;
-    }
+    };
 
     let stop_reason = match params.get("stopReason").and_then(Value::as_str) {
         Some("cancelled") => StopReason::Cancelled,
@@ -1834,7 +1899,8 @@ fn finish_xai_prompt_complete(
         Some("refusal") => StopReason::Refusal,
         _ => StopReason::EndTurn,
     };
-    finish_prompt(Ok(PromptResponse::new(stop_reason)), None, events).then(|| session_id.to_owned())
+    finish_prompt(Ok(PromptResponse::new(stop_reason)), None, settle, events)
+        .then(|| session_id.to_owned())
 }
 
 fn start_grok_title_refresh(
@@ -1895,6 +1961,7 @@ fn start_devin_title_refresh(
 fn finish_prompt(
     result: agent_client_protocol::Result<PromptResponse>,
     native_failure: Option<String>,
+    settle: PromptSettle,
     events: &impl DriverEventSink,
 ) -> bool {
     let response = match result {
@@ -1922,8 +1989,39 @@ fn finish_prompt(
         });
         return false;
     }
+    // `agent_stopped` causes that describe this client ending the run:
+    // a clean finish, our own `session/cancel`, or a newer prompt taking
+    // over. Any other cause names an external stop, which outranks a clean
+    // `end_turn` the same way `native_failure` does.
+    let external_stop = settle.stop_cause.as_deref().filter(|cause| {
+        !matches!(
+            *cause,
+            "complete" | "cancelled" | "interrupted_by_new_prompt"
+        )
+    });
     let (success, summary_pair) = match response.stop_reason {
-        StopReason::EndTurn | StopReason::Cancelled => (true, None),
+        StopReason::EndTurn => match external_stop {
+            Some(cause) => (
+                false,
+                Some(localized!("session.agent_stopped_reason", reason = cause)),
+            ),
+            None => (true, None),
+        },
+        // A `cancelled` settle this client asked for is the user's own stop,
+        // and one behind a sibling's clean finish is a preemption receipt.
+        // Anything else is the provider interrupting the turn itself.
+        StopReason::Cancelled if settle.cancel_requested || settle.saw_clean_settle => (true, None),
+        StopReason::Cancelled => (
+            false,
+            Some(localized!(
+                "session.agent_stopped_reason",
+                reason = settle
+                    .stop_cause
+                    .as_deref()
+                    .filter(|cause| *cause != "complete")
+                    .unwrap_or("cancelled")
+            )),
+        ),
         StopReason::MaxTokens => (false, Some(localized!("session.agent_ran_out_of_context"))),
         StopReason::Refusal => (false, Some(localized!("session.agent_declined_turn"))),
         StopReason::MaxTurnRequests => (
@@ -3348,18 +3446,9 @@ mod tests {
         requests
             .lock()
             .insert(RequestId::Str("steer".into()), None, "session".into());
-        assert!(!settle_prompt_request(
-            &requests,
-            &RequestId::Str("first".into())
-        ));
-        assert!(settle_prompt_request(
-            &requests,
-            &RequestId::Str("steer".into())
-        ));
-        assert!(!settle_prompt_request(
-            &requests,
-            &RequestId::Str("steer".into())
-        ));
+        assert!(settle_prompt_request(&requests, &RequestId::Str("first".into()), false).is_none());
+        assert!(settle_prompt_request(&requests, &RequestId::Str("steer".into()), true).is_some());
+        assert!(settle_prompt_request(&requests, &RequestId::Str("steer".into()), false).is_none());
     }
 
     #[test]
@@ -3393,7 +3482,7 @@ mod tests {
                 summary_i18n: None,
             }
         ));
-        assert!(!settle_prompt_request(&requests, &request_id));
+        assert!(settle_prompt_request(&requests, &request_id, false).is_none());
         assert!(event_rx.try_recv().is_err());
     }
 
@@ -3406,6 +3495,7 @@ mod tests {
         assert!(!finish_prompt(
             Ok(PromptResponse::new(StopReason::EndTurn)),
             Some("402 membership inactive".to_owned()),
+            PromptSettle::default(),
             &events
         ));
 
@@ -3423,12 +3513,131 @@ mod tests {
         ));
     }
 
+    /// Devin's model server stops a turn without the client ever sending
+    /// `session/cancel`: the `cancelled` stop reason is then a failure, not
+    /// the user's own stop.
+    #[test]
+    fn an_unrequested_cancelled_stop_reason_fails_the_turn() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+
+        assert!(!finish_prompt(
+            Ok(PromptResponse::new(StopReason::Cancelled)),
+            None,
+            PromptSettle::default(),
+            &events
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnFinished {
+                success: false,
+                summary_i18n: Some(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_requested_cancelled_stop_reason_still_settles_cleanly() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+
+        assert!(finish_prompt(
+            Ok(PromptResponse::new(StopReason::Cancelled)),
+            None,
+            PromptSettle {
+                cancel_requested: true,
+                ..PromptSettle::default()
+            },
+            &events
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            }
+        ));
+    }
+
+    /// A cancelled settle arriving behind a sibling's clean finish is the
+    /// preemption receipt for a steer, not an interruption.
+    #[test]
+    fn a_cancelled_settle_behind_a_clean_sibling_settles_cleanly() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+
+        assert!(finish_prompt(
+            Ok(PromptResponse::new(StopReason::Cancelled)),
+            None,
+            PromptSettle {
+                saw_clean_settle: true,
+                ..PromptSettle::default()
+            },
+            &events
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            }
+        ));
+    }
+
+    /// Devin names an externally stopped run in `agent_stopped`'s `cause`,
+    /// which fails the turn even when the prompt resolves `end_turn`.
+    #[test]
+    fn a_devin_stop_cause_overrides_a_clean_stop_reason() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+
+        assert!(!finish_prompt(
+            Ok(PromptResponse::new(StopReason::EndTurn)),
+            None,
+            PromptSettle {
+                stop_cause: Some("interrupted".to_owned()),
+                ..PromptSettle::default()
+            },
+            &events
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnFinished {
+                success: false,
+                summary_i18n: Some(_),
+                ..
+            }
+        ));
+    }
+
+    /// `complete` and `cancelled` causes are the client's own endings, and a
+    /// new-prompt interruption is a steer — none of them fail a clean stop.
+    #[test]
+    fn client_caused_stop_causes_keep_a_clean_stop_reason() {
+        for cause in ["complete", "cancelled", "interrupted_by_new_prompt"] {
+            let (events, event_rx) = crossbeam_channel::unbounded();
+            assert!(finish_prompt(
+                Ok(PromptResponse::new(StopReason::EndTurn)),
+                None,
+                PromptSettle {
+                    stop_cause: Some(cause.to_owned()),
+                    ..PromptSettle::default()
+                },
+                &events
+            ));
+            assert!(matches!(
+                event_rx.try_recv().unwrap(),
+                DriverEvent::TurnFinished { success: true, .. }
+            ));
+        }
+    }
+
     #[test]
     fn typed_prompt_response_settles_the_turn() {
         let (events, event_rx) = crossbeam_channel::unbounded();
         assert!(finish_prompt(
             Ok(PromptResponse::new(StopReason::EndTurn)),
             None,
+            PromptSettle::default(),
             &events
         ));
         assert!(matches!(

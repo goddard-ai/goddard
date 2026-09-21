@@ -968,13 +968,16 @@ impl Waku {
             None,
         );
         let enabled = target.is_some();
-        // A blocked task outranks plain completions, so the target being one
-        // is what the badge warns about.
+        // A blocked or failed task outranks plain completions, so the
+        // target being one is what the badge warns about.
         let blocked = target.is_some_and(|session_id| {
-            self.state
-                .sessions
-                .iter()
-                .any(|session| session.id == session_id && session.status == SessionStatus::Waiting)
+            self.state.sessions.iter().any(|session| {
+                session.id == session_id
+                    && matches!(
+                        session.status,
+                        SessionStatus::Waiting | SessionStatus::Failed
+                    )
+            })
         });
         div()
             .id("unseen-completion-bell")
