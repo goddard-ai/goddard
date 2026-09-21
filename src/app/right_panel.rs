@@ -3037,9 +3037,8 @@ impl Waku {
         // The row kinds are fingerprinted and spliced exactly like a card's:
         // appends keep position, a refold re-measures, and the tail re-measures
         // while the session works so fresh text is never clipped.
-        let checkpoint_pending = self.ending_checkpoint_pending(session.id);
-        let fingerprint =
-            transcript_rows_fingerprint(&session, &self.expanded_turns, checkpoint_pending);
+        let pending_turn = self.pending_checkpoint_turn(session.id);
+        let fingerprint = transcript_rows_fingerprint(&session, &self.expanded_turns, pending_turn);
         let view = self
             .side_chat_views
             .entry(session_id)
@@ -3054,13 +3053,21 @@ impl Waku {
             });
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
             let mut folded =
-                folded_transcript_row_kinds(&session, &self.expanded_turns, checkpoint_pending);
-            folded.retain(|kind| {
-                !matches!(
-                    kind,
-                    TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_)
-                )
+                folded_transcript_row_kinds(&session, &self.expanded_turns, pending_turn);
+            // Panels have no footer or file summary, but a capture in flight
+            // still marks the settled turn — a queued prompt is waiting on it.
+            folded.retain(|kind| match kind {
+                TranscriptRowKind::ResponseFooter(..) => false,
+                TranscriptRowKind::ChangedFiles(turn_id) => pending_turn == Some(*turn_id),
+                _ => true,
             });
+            // A footer turn hosts its pending card inside the footer row,
+            // which this surface filters out — append one at the tail.
+            if let Some(turn_id) = pending_turn
+                && !folded.contains(&TranscriptRowKind::ChangedFiles(turn_id))
+            {
+                folded.push(TranscriptRowKind::ChangedFiles(turn_id));
+            }
             let kinds = Rc::new(folded);
             view.kinds = (fingerprint, kinds.clone());
             (kinds, true)
@@ -3281,7 +3288,13 @@ impl Waku {
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)
             }
-            TranscriptRowKind::CheckpointPending => self.render_card_checkpoint_pending_row(&theme),
+            // Only a pending capture's ChangedFiles survives the fold retain;
+            // it renders the compact pending row rather than the full card.
+            TranscriptRowKind::ChangedFiles(turn_id)
+                if self.pending_checkpoint_turn(session.id) == Some(turn_id) =>
+            {
+                self.render_card_checkpoint_pending_row(&theme)
+            }
             // Folded out of the kinds list entirely; the fallback renders
             // nothing.
             TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {

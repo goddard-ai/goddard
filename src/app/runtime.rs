@@ -4063,14 +4063,21 @@ impl Waku {
                 .any(|capture| capture.session_id == session_id && capture.turn_count == turn_count)
     }
 
-    pub(super) fn ending_checkpoint_pending(&self, session_id: Uuid) -> bool {
+    /// The settled last turn whose checkpoint capture is still queued or in
+    /// flight — the turn a pending changed-files card stands in for.
+    pub(super) fn pending_checkpoint_turn(&self, session_id: Uuid) -> Option<Uuid> {
         self.state
             .sessions
             .iter()
             .find(|session| session.id == session_id)
             .and_then(|session| session.turns.last())
             .filter(|turn| turn.status != TurnStatus::Running)
-            .is_some_and(|turn| self.checkpoint_capture_pending(session_id, turn.turn_count))
+            .filter(|turn| self.checkpoint_capture_pending(session_id, turn.turn_count))
+            .map(|turn| turn.id)
+    }
+
+    pub(super) fn ending_checkpoint_pending(&self, session_id: Uuid) -> bool {
+        self.pending_checkpoint_turn(session_id).is_some()
     }
 
     fn defer_queue_drain(&mut self, session_id: Uuid) {

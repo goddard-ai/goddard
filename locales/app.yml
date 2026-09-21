@@ -3732,8 +3732,8 @@ transcript.you_stopped_after:
   en: You stopped after %{duration}
 transcript.working_for:
   en: Working for %{duration}
-transcript.saving_changes:
-  en: Saving changed files…
+transcript.checking_changes:
+  en: Checking for changes…
 transcript.thinking:
   en: Thinking
 transcript.thought_for:

@@ -1436,7 +1436,7 @@ transcript.worked: 已完成
 transcript.worked_for: 用时 %{duration}
 transcript.you_stopped_after: 你在工作 %{duration} 后停止了
 transcript.working_for: 工作中 · %{duration}
-transcript.saving_changes: 正在保存更改的文件…
+transcript.checking_changes: 正在检查更改…
 transcript.thinking: 正在思考
 transcript.thought_for: 思考用时 %{duration}
 transcript.changed_file: 更改了 %{count} 个文件

@@ -21,7 +21,7 @@ impl Waku {
                 transcript_rows_fingerprint(
                     session,
                     &self.expanded_turns,
-                    self.ending_checkpoint_pending(session.id),
+                    self.pending_checkpoint_turn(session.id),
                 )
             });
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
@@ -54,7 +54,7 @@ impl Waku {
             folded_transcript_row_kinds(
                 session,
                 &self.expanded_turns,
-                self.ending_checkpoint_pending(session.id),
+                self.pending_checkpoint_turn(session.id),
             )
         })
     }
@@ -514,11 +514,6 @@ pub(super) enum TranscriptRowKind {
     /// turn's indicator is held for [`WORKING_INDICATOR_FADE_OUT`] while it
     /// fades out.
     WorkingIndicator,
-    /// The settled last turn's checkpoint capture is queued or in flight —
-    /// a large worktree can hold it for a while, and without a row the
-    /// changed-files card reads as simply absent. Appended after every other
-    /// row; it never belongs to a turn's own row set.
-    CheckpointPending,
 }
 
 /// How long a settled turn's working indicator stays mounted while it fades
@@ -830,8 +825,7 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::TurnFold(_)
                 | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
-                | TranscriptRowKind::WorkingIndicator
-                | TranscriptRowKind::CheckpointPending => None,
+                | TranscriptRowKind::WorkingIndicator => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -1024,14 +1018,14 @@ pub(super) fn transcript_row_kinds(
 pub(super) fn transcript_rows_fingerprint(
     session: &AgentSession,
     expanded_turns: &HashSet<Uuid>,
-    checkpoint_pending: bool,
+    pending_turn: Option<Uuid>,
 ) -> u64 {
     let mut hash = mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, session.id);
 
-    // The checkpoint-pending row lives in the caller's capture queues, not
-    // the session — a capture starting or landing must move the fingerprint
-    // or the row would appear and disappear a fold late.
-    hash = mix(hash, checkpoint_pending as u64);
+    // The pending changed-files card lives in the caller's capture queues,
+    // not the session — a capture starting or landing must move the
+    // fingerprint or the card would appear and fill in a fold late.
+    hash = mix_turn_id(hash, pending_turn);
 
     // The working indicator row exists only while the session is busy, and a
     // driver error can drop the busy status without touching any turn — the
@@ -1114,7 +1108,7 @@ fn mix_turn_id(hash: u64, turn_id: Option<Uuid>) -> u64 {
 pub(super) fn folded_transcript_row_kinds(
     session: &AgentSession,
     expanded_turns: &HashSet<Uuid>,
-    checkpoint_pending: bool,
+    pending_turn: Option<Uuid>,
 ) -> Vec<TranscriptRowKind> {
     let anchors = session
         .transcript_blocks
@@ -1174,14 +1168,17 @@ pub(super) fn folded_transcript_row_kinds(
     // the footer row. Only turns without a footer need a standalone row;
     // derive its insertion point from the already-folded rows so it lands
     // after the visible `Worked for …` disclosure and before the next prompt.
+    // A settled turn whose checkpoint is still capturing counts too: its
+    // card renders in a pending state so a slow snapshot does not read as
+    // the turn finishing with nothing saved.
     let changed_turns = session
         .turns
         .iter()
         .filter(|turn| {
             turn.status != TurnStatus::Running
-                && turn.checkpoint.as_ref().is_some_and(|checkpoint| {
+                && (turn.checkpoint.as_ref().is_some_and(|checkpoint| {
                     checkpoint.status == CheckpointStatus::Ready && !checkpoint.files.is_empty()
-                })
+                }) || Some(turn.id) == pending_turn)
                 && !response_footers.contains_key(&turn.id)
         })
         .map(|turn| turn.id)
@@ -1242,12 +1239,6 @@ pub(super) fn folded_transcript_row_kinds(
         rows = with_footers;
     }
 
-    // The settled turn's checkpoint is still capturing: hold a row where its
-    // changed-files card will land so a slow snapshot does not read as the
-    // turn finishing silently.
-    if checkpoint_pending {
-        rows.push(TranscriptRowKind::CheckpointPending);
-    }
     rows
 }
 
@@ -1297,8 +1288,7 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator
-        | TranscriptRowKind::CheckpointPending => None,
+        | TranscriptRowKind::WorkingIndicator => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1312,8 +1302,7 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::TurnFold(_)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
-            | TranscriptRowKind::WorkingIndicator
-            | TranscriptRowKind::CheckpointPending => None,
+            | TranscriptRowKind::WorkingIndicator => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1336,8 +1325,7 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator
-        | TranscriptRowKind::CheckpointPending => false,
+        | TranscriptRowKind::WorkingIndicator => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1355,7 +1343,7 @@ fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
         TranscriptRowKind::TurnFold(turn_id) => Some(turn_id),
         TranscriptRowKind::ResponseFooter(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ChangedFiles(turn_id) => Some(turn_id),
-        TranscriptRowKind::WorkingIndicator | TranscriptRowKind::CheckpointPending => None,
+        TranscriptRowKind::WorkingIndicator => None,
     }
 }
 
@@ -1371,7 +1359,7 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
                 .filter(|message| message.role == MessageRole::Assistant)?
                 .turn_id
         }
-        TranscriptRowKind::WorkingIndicator | TranscriptRowKind::CheckpointPending => None,
+        TranscriptRowKind::WorkingIndicator => None,
         TranscriptRowKind::TurnBlock(_)
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)

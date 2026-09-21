@@ -1520,7 +1520,7 @@ fn settling_an_anchored_turn_splices_without_resetting_its_prompt() {
     });
     session.push_message(MessageRole::Assistant, "Here is the overview.");
 
-    let running = folded_transcript_row_kinds(&session, &HashSet::new(), false);
+    let running = folded_transcript_row_kinds(&session, &HashSet::new(), None);
     let anchor_row = running
         .iter()
         .position(|kind| *kind == Message(2))
@@ -1533,7 +1533,7 @@ fn settling_an_anchored_turn_splices_without_resetting_its_prompt() {
 
     session.status = SessionStatus::Idle;
     session.finish_active_turn(TurnStatus::Completed);
-    let settled = folded_transcript_row_kinds(&session, &HashSet::new(), false);
+    let settled = folded_transcript_row_kinds(&session, &HashSet::new(), None);
     let (range, new_count) = transcript_row_splice(&running, &settled)
         .expect("settlement folds the live work and removes its working row");
 
@@ -1576,7 +1576,7 @@ fn a_prompt_directly_behind_another_skips_the_followup_gap() {
     session.finish_active_turn(TurnStatus::Completed);
     session.begin_turn("second prompt");
 
-    let rows = folded_transcript_row_kinds(&session, &HashSet::new(), false);
+    let rows = folded_transcript_row_kinds(&session, &HashSet::new(), None);
     let row_index = |message_index: usize| {
         rows.iter()
             .position(|kind| *kind == Message(message_index))
@@ -2001,7 +2001,7 @@ fn row_kinds_and_row_count_describe_the_same_rows() {
     session.push_message(MessageRole::Assistant, "Done.");
     session.finish_active_turn(TurnStatus::Completed);
 
-    let kinds = folded_transcript_row_kinds(&session, &HashSet::from([turn_id]), false);
+    let kinds = folded_transcript_row_kinds(&session, &HashSet::from([turn_id]), None);
     // The work the agent did must be reachable by index, not just counted.
     assert!(
         kinds.iter().any(|kind| matches!(kind, TurnBlock(_))),
@@ -2021,7 +2021,7 @@ fn row_kinds_and_row_count_describe_the_same_rows() {
     }
     // Collapsed, that same work is one fold row — reachable, not lost.
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![
             Message(0),
             TurnFold(turn_id),
@@ -2050,7 +2050,7 @@ fn changed_files_attach_to_the_response_footer() {
     session.status = SessionStatus::Connecting;
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![
             Message(0),
             Message(1),
@@ -2121,11 +2121,11 @@ fn changed_files_remain_visible_when_an_interrupted_turn_has_no_answer() {
     );
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), TurnFold(turn_id), ChangedFiles(turn_id)]
     );
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::from([turn_id]), false),
+        folded_transcript_row_kinds(&session, &HashSet::from([turn_id]), None),
         vec![
             Message(0),
             TurnFold(turn_id),
@@ -2146,7 +2146,7 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
 
     attach_changed_files(&mut session, Vec::new());
     assert!(
-        !folded_transcript_row_kinds(&session, &HashSet::new(), false)
+        !folded_transcript_row_kinds(&session, &HashSet::new(), None)
             .contains(&ChangedFiles(turn_id))
     );
 
@@ -2160,7 +2160,7 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
     );
     assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
     assert!(
-        !folded_transcript_row_kinds(&session, &HashSet::new(), false)
+        !folded_transcript_row_kinds(&session, &HashSet::new(), None)
             .contains(&ChangedFiles(turn_id)),
         "a response with visible text hosts the card inside its footer"
     );
@@ -2170,7 +2170,7 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
         .expect("checkpoint")
         .status = CheckpointStatus::Unavailable;
     assert!(
-        !folded_transcript_row_kinds(&session, &HashSet::new(), false)
+        !folded_transcript_row_kinds(&session, &HashSet::new(), None)
             .contains(&ChangedFiles(turn_id))
     );
     assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
@@ -2218,7 +2218,7 @@ fn checkpoint_completion_invalidates_the_cached_transcript_rows() {
     let turn_id = session.begin_turn("Build it");
     session.push_message(MessageRole::Assistant, "Done.");
     session.finish_active_turn(TurnStatus::Completed);
-    let before = transcript_rows_fingerprint(&session, &HashSet::new(), false);
+    let before = transcript_rows_fingerprint(&session, &HashSet::new(), None);
 
     attach_changed_files(
         &mut session,
@@ -2230,12 +2230,12 @@ fn checkpoint_completion_invalidates_the_cached_transcript_rows() {
     );
 
     assert_ne!(
-        transcript_rows_fingerprint(&session, &HashSet::new(), false),
+        transcript_rows_fingerprint(&session, &HashSet::new(), None),
         before
     );
     assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
     assert!(
-        !folded_transcript_row_kinds(&session, &HashSet::new(), false)
+        !folded_transcript_row_kinds(&session, &HashSet::new(), None)
             .contains(&ChangedFiles(turn_id)),
         "checkpoint completion changes the existing footer row's height"
     );
@@ -2300,16 +2300,16 @@ fn the_row_fingerprint_moves_whenever_the_fold_does() {
     // reader opens it — and those rows have to be right when they do.
     let rows = |session: &AgentSession| {
         (
-            folded_transcript_row_kinds(session, &settled, false),
-            folded_transcript_row_kinds(session, &HashSet::from([turn_id]), false),
+            folded_transcript_row_kinds(session, &settled, None),
+            folded_transcript_row_kinds(session, &HashSet::from([turn_id]), None),
         )
     };
     let baseline_rows = rows(&base);
-    let baseline_fingerprint = transcript_rows_fingerprint(&base, &settled, false);
+    let baseline_fingerprint = transcript_rows_fingerprint(&base, &settled, None);
 
     // Expansion lives outside the session, so check it against the same base.
     assert_ne!(
-        transcript_rows_fingerprint(&base, &HashSet::from([turn_id]), false),
+        transcript_rows_fingerprint(&base, &HashSet::from([turn_id]), None),
         baseline_fingerprint,
         "expanding a turn fold"
     );
@@ -2358,7 +2358,7 @@ fn the_row_fingerprint_moves_whenever_the_fold_does() {
             "{description} should change the rows — the case no longer proves anything"
         );
         assert_ne!(
-            transcript_rows_fingerprint(&session, &settled, false),
+            transcript_rows_fingerprint(&session, &settled, None),
             baseline_fingerprint,
             "{description} changed the rows but not the fingerprint, so the \
              cached rows would go stale"
@@ -2370,7 +2370,7 @@ fn the_row_fingerprint_moves_whenever_the_fold_does() {
     let mut streamed = base.clone();
     streamed.messages[2].content.push_str(" Let me know.");
     assert_eq!(
-        transcript_rows_fingerprint(&streamed, &settled, false),
+        transcript_rows_fingerprint(&streamed, &settled, None),
         baseline_fingerprint,
         "appending to a message leaves the rows exactly where they were"
     );
@@ -2413,7 +2413,7 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
     // alike. A divider between two pieces of work would read as a cut-off
     // response.
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![
             Message(0),
             TurnFold(turn_id),
@@ -2423,7 +2423,7 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
     );
     // Expanding restores the turn's real order in place.
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::from([turn_id]), false),
+        folded_transcript_row_kinds(&session, &HashSet::from([turn_id]), None),
         vec![
             Message(0),
             TurnFold(turn_id),
@@ -2452,7 +2452,7 @@ fn a_hidden_prompt_renders_no_row_but_keeps_its_turn() {
 
     assert!(session.messages[2].hidden);
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![
             Message(0),
             Message(1),
@@ -2465,7 +2465,7 @@ fn a_hidden_prompt_renders_no_row_but_keeps_its_turn() {
     // The rail offers only the prompts a human typed, and the hidden prompt
     // still ends the previous turn's preview — "Kept going." must not leak
     // into "Build it"'s row.
-    let row_kinds = folded_transcript_row_kinds(&session, &HashSet::new(), false);
+    let row_kinds = folded_transcript_row_kinds(&session, &HashSet::new(), None);
     let nav = transcript_navigation_turns(&session, &row_kinds);
     assert_eq!(nav.len(), 1);
     assert_eq!(nav[0].message_index, 0);
@@ -2536,7 +2536,7 @@ fn consecutive_trailing_text_parts_all_stay_out_of_the_fold() {
     session.finish_active_turn(TurnStatus::Completed);
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![
             Message(0),
             TurnFold(turn_id),
@@ -2569,11 +2569,11 @@ fn a_turn_without_an_answer_folds_completely() {
     session.finish_active_turn(TurnStatus::Interrupted);
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), TurnFold(turn_id)]
     );
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::from([turn_id]), false),
+        folded_transcript_row_kinds(&session, &HashSet::from([turn_id]), None),
         vec![Message(0), TurnFold(turn_id), TurnBlock(0), Message(1)]
     );
 }
@@ -2650,7 +2650,7 @@ fn response_footer_follows_trailing_tool_activity() {
     session.finish_active_turn(TurnStatus::Interrupted);
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![
             Message(0),
             Message(1),
@@ -2672,7 +2672,7 @@ fn assistant_response_footer_treats_a_blank_part_as_work() {
     session.finish_active_turn(TurnStatus::Completed);
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![
             Message(0),
             TurnFold(turn_id),
@@ -2762,7 +2762,7 @@ fn running_turn_keeps_its_ordered_work_visible() {
     session.push_message(MessageRole::Assistant, "Interim update");
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), TurnBlock(0), Message(1)]
     );
 }
@@ -2776,7 +2776,7 @@ fn plain_settled_response_does_not_add_an_empty_work_fold() {
     session.finish_active_turn(TurnStatus::Completed);
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), Message(1), ResponseFooter(turn_id, 1)]
     );
 }
@@ -2896,21 +2896,21 @@ fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
 
     // No chunks yet: the indicator alone follows the prompt.
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), WorkingIndicator]
     );
 
     // Streamed content pushes it down, never off.
     session.push_message(MessageRole::Assistant, "Starting on it.");
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), Message(1), WorkingIndicator]
     );
 
     // A pending permission keeps the turn — and the indicator — alive.
     session.status = SessionStatus::Waiting;
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), Message(1), WorkingIndicator]
     );
 
@@ -2918,14 +2918,14 @@ fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
     // marked running. Busy-ness is the only input that moved, so the
     // fingerprint must move with it or the stale indicator lingers.
     session.status = SessionStatus::Working;
-    let busy_fingerprint = transcript_rows_fingerprint(&session, &HashSet::new(), false);
+    let busy_fingerprint = transcript_rows_fingerprint(&session, &HashSet::new(), None);
     session.status = SessionStatus::Failed;
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), Message(1)]
     );
     assert_ne!(
-        transcript_rows_fingerprint(&session, &HashSet::new(), false),
+        transcript_rows_fingerprint(&session, &HashSet::new(), None),
         busy_fingerprint,
         "dropping the busy status changed the rows but not the fingerprint"
     );
@@ -2935,41 +2935,67 @@ fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), Message(1), ResponseFooter(turn_id, 1)]
     );
 }
 
 /// A settled turn whose checkpoint capture is still queued or in flight
-/// closes with the pending row where its changed-files card will land — a
-/// slow snapshot must not read as the turn finishing silently. The flag
-/// lives in the capture queues rather than the session, so the fingerprint
-/// has to carry it or the row would appear and retire a fold late.
+/// shows its changed-files card pending: inside the footer row when the turn
+/// has one, as its own row when it does not. The flag lives in the capture
+/// queues rather than the session, so the fingerprint has to carry it or the
+/// card would appear and fill in a fold late.
 #[test]
-fn a_pending_checkpoint_holds_a_row_after_the_settled_turn() {
+fn a_pending_checkpoint_shows_a_pending_card_after_the_settled_turn() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     let turn_id = session.begin_turn("Build it");
     session.push_message(MessageRole::Assistant, "Done.");
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
 
+    // A footer turn hosts the pending card inside its footer row, so the
+    // rows hold still — only the fingerprint moves.
+    let settled = vec![Message(0), Message(1), ResponseFooter(turn_id, 1)];
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), false),
-        vec![Message(0), Message(1), ResponseFooter(turn_id, 1)]
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
+        settled
     );
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new(), true),
-        vec![
-            Message(0),
-            Message(1),
-            ResponseFooter(turn_id, 1),
-            CheckpointPending
-        ]
+        folded_transcript_row_kinds(&session, &HashSet::new(), Some(turn_id)),
+        settled
     );
     assert_ne!(
-        transcript_rows_fingerprint(&session, &HashSet::new(), true),
-        transcript_rows_fingerprint(&session, &HashSet::new(), false),
-        "the pending flag moved the rows but not the fingerprint"
+        transcript_rows_fingerprint(&session, &HashSet::new(), Some(turn_id)),
+        transcript_rows_fingerprint(&session, &HashSet::new(), None),
+        "the pending turn moved the footer's content but not the fingerprint"
+    );
+
+    // A turn without a footer — tool activity but no copyable answer — gets
+    // the standalone pending card after its fold.
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    let turn_id = session.begin_turn("Build it");
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: session.messages.len(),
+        turn_id: Some(turn_id),
+        activities: vec![ActivityItem::from_reasoning(
+            ReasoningBlock {
+                content: "Inspecting the project".into(),
+                started_at_ms: 1_000,
+                finished_at_ms: 2_000,
+            },
+            true,
+        )],
+    });
+    session.finish_active_turn(TurnStatus::Completed);
+    session.status = SessionStatus::Idle;
+
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
+        vec![Message(0), TurnFold(turn_id)]
+    );
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new(), Some(turn_id)),
+        vec![Message(0), TurnFold(turn_id), ChangedFiles(turn_id)]
     );
 }
 

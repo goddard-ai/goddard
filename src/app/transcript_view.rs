@@ -1666,7 +1666,6 @@ impl Waku {
                 }
             }
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
-            TranscriptRowKind::CheckpointPending => self.render_checkpoint_pending_row(&theme),
         };
         let new_content_dot = self
             .transcript_new_content_dot
@@ -2207,14 +2206,19 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let Some(checkpoint) = self
-            .selected_session()
-            .and_then(|session| session.turns.iter().find(|turn| turn.id == turn_id))
+        let session = self.selected_session()?;
+        let Some(checkpoint) = session
+            .turns
+            .iter()
+            .find(|turn| turn.id == turn_id)
             .and_then(|turn| turn.checkpoint.as_ref())
             .filter(|checkpoint| checkpoint.status == CheckpointStatus::Ready)
             .filter(|checkpoint| !checkpoint.files.is_empty())
         else {
-            return None;
+            // The settled turn's capture is still running: show the card in
+            // a pending state so it fills in place rather than popping in.
+            return (self.pending_checkpoint_turn(session.id) == Some(turn_id))
+                .then(|| self.render_changed_files_pending_card(turn_id, theme));
         };
 
         let files = checkpoint.files.as_slice();
@@ -2877,29 +2881,52 @@ impl Waku {
         .into_any_element()
     }
 
-    /// The settled turn's checkpoint capture is still running — a slow
-    /// snapshot on a large worktree can hold the changed-files card for
-    /// minutes, and without a row that reads as the turn finishing with
-    /// nothing saved. A spinner and a label hold the card's place until the
-    /// capture lands or fails.
-    fn render_checkpoint_pending_row(&self, theme: &Theme) -> AnyElement {
+    /// The changed-files card while its capture is still running — the same
+    /// shell the landed card uses, so the snapshot reads as the card arriving
+    /// rather than as separate background work.
+    fn render_changed_files_pending_card(&self, turn_id: Uuid, theme: &Theme) -> AnyElement {
         div()
-            .h(px(22.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(motion::spin_slow(icon(
-                "icons/loader-circle.svg",
-                10.0,
-                theme.text_tertiary,
-            )))
+            .id(SharedString::from(format!("changed-files-card-{turn_id}")))
+            .w_full()
+            .min_w_0()
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.overlay)
+            .overflow_hidden()
             .child(
                 div()
-                    .text_size(sp(13.5))
-                    .line_height(sp(18.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_tertiary)
-                    .child(SharedString::from(tr!("transcript.saving_changes"))),
+                    .min_h(px(58.0))
+                    .px(px(12.0))
+                    .py(px(9.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .size(px(36.0))
+                            .flex_none()
+                            .rounded(px(11.0))
+                            .bg(theme.overlay_strong)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(motion::spin_slow(icon(
+                                "icons/loader-circle.svg",
+                                14.0,
+                                theme.text_tertiary,
+                            ))),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(SharedString::from(tr!("transcript.checking_changes"))),
+                    ),
             )
             .into_any_element()
     }
