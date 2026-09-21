@@ -1442,6 +1442,55 @@ impl Waku {
             )
     }
 
+    /// A single-choice `dropdown_menu` for a preference whose states are
+    /// named modes — what a switch imitates when both sides of the bool
+    /// deserve a label. `options` lists `(value, label)` in menu order;
+    /// `set` receives the picked value.
+    fn setting_selector<T>(
+        &self,
+        id: &'static str,
+        options: Vec<(T, String)>,
+        current: T,
+        width: f32,
+        cx: &mut Context<Self>,
+        set: impl Fn(&mut Self, T, &mut Window, &mut Context<Self>) + Copy + 'static,
+    ) -> AnyElement
+    where
+        T: Copy + Eq + 'static,
+    {
+        let weak = cx.entity().downgrade();
+        let handle = self.menu_handle(id, cx);
+        let label = options
+            .iter()
+            .find(|(value, _)| *value == current)
+            .map(|(_, label)| label.clone())
+            .unwrap_or_default();
+        dropdown_menu(
+            MenuChip::new(id)
+                .label(label)
+                .outlined()
+                .selected(handle.is_open())
+                .w(px(width))
+                .justify_between(),
+            ElementId::Name(SharedString::from(format!("{id}-menu"))),
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                options
+                    .iter()
+                    .map(|(value, label)| {
+                        let weak = weak.clone();
+                        let value = *value;
+                        MenuItem::new(label.clone(), move |window, cx| {
+                            let _ = weak.update(cx, |this, cx| set(this, value, window, cx));
+                        })
+                        .selected(value == current)
+                    })
+                    .collect()
+            },
+        )
+    }
+
     fn render_general_settings(
         &self,
         search: &SettingSearch,
@@ -1715,18 +1764,18 @@ impl Waku {
 
         let git_cards: Vec<AnyElement> = [
             setting_card(
-                tr!("settings.new_worktree_default_branch"),
-                tr!("settings.new_worktree_default_branch_description"),
-                toggle_switch(
-                    "new-worktree-default-branch-toggle",
+                tr!("settings.new_worktree_base"),
+                tr!("settings.new_worktree_base_description"),
+                self.setting_selector(
+                    "new-worktree-base-selector",
+                    vec![
+                        (true, tr!("settings.new_worktree_base_default")),
+                        (false, tr!("settings.new_worktree_base_last_used")),
+                    ],
                     self.state.new_worktree_default_branch,
-                    false,
-                    theme,
+                    160.0,
                     cx,
-                    {
-                        let enabled = self.state.new_worktree_default_branch;
-                        move |this, _, cx| this.set_new_worktree_default_branch(!enabled, cx)
-                    },
+                    |this, value, _, cx| this.set_new_worktree_default_branch(value, cx),
                 ),
                 theme,
                 search,
@@ -1773,18 +1822,18 @@ impl Waku {
                 })
             },
             setting_card(
-                tr!("settings.sync_with_merge"),
-                tr!("settings.sync_with_merge_description"),
-                toggle_switch(
-                    "sync-with-merge-toggle",
+                tr!("settings.sync_strategy"),
+                tr!("settings.sync_strategy_description"),
+                self.setting_selector(
+                    "sync-strategy-selector",
+                    vec![
+                        (false, tr!("settings.sync_strategy_rebase")),
+                        (true, tr!("settings.sync_strategy_merge")),
+                    ],
                     self.state.sync_with_merge,
-                    false,
-                    theme,
+                    140.0,
                     cx,
-                    {
-                        let enabled = self.state.sync_with_merge;
-                        move |this, _, cx| this.set_sync_with_merge(!enabled, cx)
-                    },
+                    |this, value, _, cx| this.set_sync_with_merge(value, cx),
                 ),
                 theme,
                 search,
@@ -1807,35 +1856,35 @@ impl Waku {
                 search,
             ),
             setting_card(
-                tr!("settings.auto_resolve_in_chat"),
-                tr!("settings.auto_resolve_in_chat_description"),
-                toggle_switch(
-                    "auto-resolve-in-chat-toggle",
+                tr!("settings.sync_conflict_handling"),
+                tr!("settings.sync_conflict_handling_description"),
+                self.setting_selector(
+                    "sync-conflict-handling-selector",
+                    vec![
+                        (false, tr!("settings.conflict_handling_dialog")),
+                        (true, tr!("settings.conflict_handling_new_chat")),
+                    ],
                     self.state.auto_resolve_in_chat,
-                    false,
-                    theme,
+                    200.0,
                     cx,
-                    {
-                        let enabled = self.state.auto_resolve_in_chat;
-                        move |this, _, cx| this.set_auto_resolve_in_chat(!enabled, cx)
-                    },
+                    |this, value, _, cx| this.set_auto_resolve_in_chat(value, cx),
                 ),
                 theme,
                 search,
             ),
             setting_card(
-                tr!("settings.auto_resolve_land_conflicts"),
-                tr!("settings.auto_resolve_land_conflicts_description"),
-                toggle_switch(
-                    "auto-resolve-land-conflicts-toggle",
+                tr!("settings.land_conflict_handling"),
+                tr!("settings.land_conflict_handling_description"),
+                self.setting_selector(
+                    "land-conflict-handling-selector",
+                    vec![
+                        (false, tr!("settings.conflict_handling_dialog")),
+                        (true, tr!("settings.conflict_handling_task_chat")),
+                    ],
                     self.state.auto_resolve_land_conflicts,
-                    false,
-                    theme,
+                    200.0,
                     cx,
-                    {
-                        let enabled = self.state.auto_resolve_land_conflicts;
-                        move |this, _, cx| this.set_auto_resolve_land_conflicts(!enabled, cx)
-                    },
+                    |this, value, _, cx| this.set_auto_resolve_land_conflicts(value, cx),
                 ),
                 theme,
                 search,
@@ -2101,22 +2150,25 @@ impl Waku {
                         search,
                     ),
                     setting_card(
-                        tr!("settings.terminal_open_links_in_mouse_mode"),
                         tr!(
-                            "settings.terminal_open_links_in_mouse_mode_description",
+                            "settings.terminal_mouse_mode_click",
                             modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
                         ),
-                        toggle_switch(
-                            "terminal-open-links-in-mouse-mode-toggle",
+                        tr!(
+                            "settings.terminal_mouse_mode_click_description",
+                            modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
+                        ),
+                        self.setting_selector(
+                            "terminal-mouse-mode-click-selector",
+                            vec![
+                                (true, tr!("settings.terminal_mouse_mode_click_links")),
+                                (false, tr!("settings.terminal_mouse_mode_click_program")),
+                            ],
                             self.state.terminal_open_links_in_mouse_mode,
-                            false,
-                            theme,
+                            200.0,
                             cx,
-                            {
-                                let enabled = self.state.terminal_open_links_in_mouse_mode;
-                                move |this, _, cx| {
-                                    this.set_terminal_open_links_in_mouse_mode(!enabled, cx)
-                                }
+                            |this, value, _, cx| {
+                                this.set_terminal_open_links_in_mouse_mode(value, cx)
                             },
                         ),
                         theme,
@@ -4614,16 +4666,19 @@ impl Waku {
             return None;
         }
         let enabled = self.state.sandbox_default_enabled;
-        let title = tr!("daemon.sandbox_default_title");
-        let description = tr!("daemon.sandbox_default_description");
+        let title = tr!("daemon.new_task_environment");
+        let description = tr!("daemon.new_task_environment_description");
         let matched = search.matched(&title, &description)?;
-        let toggle = toggle_switch(
-            "sandbox-default-toggle",
+        let selector = self.setting_selector(
+            "sandbox-default-selector",
+            vec![
+                (false, tr!("sandbox.this_mac")),
+                (true, tr!("sandbox.sandbox_vm")),
+            ],
             enabled,
-            false,
-            theme,
+            160.0,
             cx,
-            move |this, _, cx| this.set_sandbox_default_enabled(!enabled, cx),
+            |this, value, _, cx| this.set_sandbox_default_enabled(value, cx),
         );
         Some(
             div()
@@ -4636,7 +4691,7 @@ impl Waku {
                 .items_center()
                 .gap(px(24.0))
                 .child(settings_row_text(title, description, matched, theme).whitespace_normal())
-                .child(toggle)
+                .child(selector)
                 .into_any_element(),
         )
     }
@@ -7126,7 +7181,6 @@ impl Waku {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let theme_settings = self.state.theme;
-        let match_system = theme_settings.mode == ThemeMode::System;
         let selected_language = self.state.language;
 
         let weak = cx.entity().downgrade();
@@ -7134,10 +7188,7 @@ impl Waku {
         let mode_handle = self.menu_handle_with("appearance-mode-selector", cx, restore_preview);
         let mode_selector = dropdown_menu(
             MenuChip::new("appearance-mode-selector")
-                .label(match theme_settings.mode {
-                    ThemeMode::Dark => tr!("settings.theme_dark"),
-                    _ => tr!("settings.theme_light"),
-                })
+                .label(theme_settings.mode.label())
                 .outlined()
                 .selected(mode_handle.is_open())
                 .w(px(116.0))
@@ -7146,28 +7197,22 @@ impl Waku {
             &mode_handle,
             MenuAlign::BelowRight,
             move |_| {
-                [ThemeMode::Light, ThemeMode::Dark]
+                ThemeMode::ALL
                     .into_iter()
                     .map(|mode| {
                         let weak = weak.clone();
-                        MenuItem::new(
-                            match mode {
-                                ThemeMode::Dark => tr!("settings.theme_dark"),
-                                _ => tr!("settings.theme_light"),
-                            },
-                            {
-                                let weak = weak.clone();
-                                move |window, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.update_theme_settings(
-                                            |settings| settings.mode = mode,
-                                            window,
-                                            cx,
-                                        );
-                                    });
-                                }
-                            },
-                        )
+                        MenuItem::new(mode.label(), {
+                            let weak = weak.clone();
+                            move |window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.update_theme_settings(
+                                        |settings| settings.mode = mode,
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            }
+                        })
                         .selected(mode == theme_settings.mode)
                         .on_highlight(move |window, cx| {
                             let _ = weak.update(cx, |this, cx| {
@@ -7431,22 +7476,25 @@ impl Waku {
                 cx,
                 |this, amount, window, cx| this.set_sidebar_transparency_amount(amount, window, cx),
             );
-            let toggle_row = settings_row(
+            let transparency_row = settings_row(
                 tr!("settings.sidebar_transparency"),
                 tr!("settings.sidebar_transparency_description"),
-                toggle_switch(
-                    "sidebar-transparency-toggle",
+                self.setting_selector(
+                    "sidebar-transparency-selector",
+                    vec![
+                        (true, tr!("settings.sidebar_transparency_translucent")),
+                        (false, tr!("settings.sidebar_transparency_solid")),
+                    ],
                     transparent,
-                    false,
-                    theme,
+                    160.0,
                     cx,
-                    move |this, window, cx| this.set_sidebar_transparency(!transparent, window, cx),
+                    Self::set_sidebar_transparency,
                 ),
                 theme,
                 search,
             );
             // Same shape as the completion-volume row: the slider only exists
-            // while the feature is on, so an in-flight drag cannot outlive
+            // while Translucent is picked, so an in-flight drag cannot outlive
             // it — `set_sidebar_transparency` cancels the drag state on the
             // way off.
             let amount_row = if !transparent {
@@ -7491,49 +7539,19 @@ impl Waku {
                         .into_any_element()
                 })
             };
-            vec![toggle_row, amount_row]
+            vec![transparency_row, amount_row]
         } else {
             Vec::new()
         };
 
         let mut rows: Vec<Option<AnyElement>> = vec![
             settings_row(
-                tr!("settings.match_system"),
-                tr!("settings.match_system_description"),
-                toggle_switch(
-                    "match-system-appearance",
-                    match_system,
-                    false,
-                    theme,
-                    cx,
-                    move |this, window, cx| {
-                        // Unchecking freezes the appearance on screen right now.
-                        let mode = if match_system {
-                            match window.appearance() {
-                                gpui::WindowAppearance::Dark
-                                | gpui::WindowAppearance::VibrantDark => ThemeMode::Dark,
-                                _ => ThemeMode::Light,
-                            }
-                        } else {
-                            ThemeMode::System
-                        };
-                        this.update_theme_settings(|s| s.mode = mode, window, cx);
-                    },
-                ),
+                tr!("settings.appearance"),
+                tr!("settings.appearance_mode_description"),
+                mode_selector,
                 theme,
                 search,
             ),
-            if match_system {
-                None
-            } else {
-                settings_row(
-                    tr!("settings.appearance"),
-                    tr!("settings.appearance_mode_description"),
-                    mode_selector,
-                    theme,
-                    search,
-                )
-            },
             settings_row(
                 tr!("settings.light_theme"),
                 tr!("settings.light_theme_description"),
@@ -7595,18 +7613,18 @@ impl Waku {
                 search,
             ),
             settings_row(
-                tr!("settings.thick_borders"),
-                tr!("settings.thick_borders_description"),
-                toggle_switch(
-                    "thick-borders-toggle",
+                tr!("settings.border_weight"),
+                tr!("settings.border_weight_description"),
+                self.setting_selector(
+                    "border-weight-selector",
+                    vec![
+                        (false, tr!("settings.border_weight_hairline")),
+                        (true, tr!("settings.border_weight_pixel")),
+                    ],
                     self.state.thick_borders,
-                    false,
-                    theme,
+                    140.0,
                     cx,
-                    {
-                        let enabled = self.state.thick_borders;
-                        move |this, _, cx| this.set_thick_borders(!enabled, cx)
-                    },
+                    |this, value, _, cx| this.set_thick_borders(value, cx),
                 ),
                 theme,
                 search,
@@ -7673,18 +7691,18 @@ impl Waku {
         let transcript_card = settings_row_card(
             vec![
                 settings_row(
-                    tr!("settings.render_math"),
-                    tr!("settings.render_math_description"),
-                    toggle_switch(
-                        "render-math-toggle",
+                    tr!("settings.math_rendering"),
+                    tr!("settings.math_rendering_description"),
+                    self.setting_selector(
+                        "math-rendering-selector",
+                        vec![
+                            (true, tr!("settings.math_rendering_formatted")),
+                            (false, tr!("settings.math_rendering_latex")),
+                        ],
                         self.state.render_math,
-                        false,
-                        theme,
+                        160.0,
                         cx,
-                        {
-                            let enabled = self.state.render_math;
-                            move |this, _, cx| this.set_render_math(!enabled, cx)
-                        },
+                        |this, value, _, cx| this.set_render_math(value, cx),
                     ),
                     theme,
                     search,
@@ -7707,18 +7725,18 @@ impl Waku {
                     search,
                 ),
                 settings_row(
-                    tr!("settings.markdown_preview"),
-                    tr!("settings.markdown_preview_description"),
-                    toggle_switch(
-                        "markdown-preview-toggle",
+                    tr!("settings.markdown_files"),
+                    tr!("settings.markdown_files_description"),
+                    self.setting_selector(
+                        "markdown-files-selector",
+                        vec![
+                            (true, tr!("settings.markdown_files_preview")),
+                            (false, tr!("settings.markdown_files_source")),
+                        ],
                         self.state.markdown_preview,
-                        false,
-                        theme,
+                        160.0,
                         cx,
-                        {
-                            let enabled = self.state.markdown_preview;
-                            move |this, _, cx| this.set_markdown_preview(!enabled, cx)
-                        },
+                        |this, value, _, cx| this.set_markdown_preview(value, cx),
                     ),
                     theme,
                     search,
@@ -9948,8 +9966,8 @@ impl Waku {
     /// [`Self::theme_preview_restore`] plus an open-time claim on the selector's
     /// mode slot, so its menu and options are browsable while the other slot
     /// owns the window — light themes under a dark appearance and vice versa —
-    /// even when "Match system appearance" is on. The claim is a preview: it
-    /// never persists, and a pick only commits the palette, not the slot.
+    /// even while Appearance is System. The claim is a preview: it never
+    /// persists, and a pick only commits the palette, not the slot.
     fn theme_slot_preview(
         mode: ThemeMode,
         cx: &mut Context<Self>,

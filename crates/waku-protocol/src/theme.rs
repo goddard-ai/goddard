@@ -20,6 +20,19 @@ pub enum ThemeMode {
     Dark,
 }
 
+impl ThemeMode {
+    /// Every mode in settings-picker order.
+    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
+
+    pub fn label(self) -> String {
+        match self {
+            Self::System => crate::i18n::translate("settings.theme_system"),
+            Self::Light => crate::i18n::translate("settings.theme_light"),
+            Self::Dark => crate::i18n::translate("settings.theme_dark"),
+        }
+    }
+}
+
 /// A named palette. Each theme belongs to exactly one polarity — the
 /// settings pickers are filtered by [`ThemeName::is_dark`].
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

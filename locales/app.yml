@@ -676,10 +676,10 @@ daemon.agent_settings_title:
   en: Agent settings
 daemon.agent_settings_description:
   en: Let agents create and edit custom commands for you. On by default; commands an agent adds are marked, and the daemon records which task made each change.
-daemon.sandbox_default_title:
-  en: Sandbox new tasks by default
-daemon.sandbox_default_description:
-  en: Start fresh tasks in the Sandbox VM environment instead of This Mac. A task's own Environment choice still wins for that task.
+daemon.new_task_environment:
+  en: New task environment
+daemon.new_task_environment_description:
+  en: Where a fresh task starts — a task's own Environment choice still wins for that task.
 daemon.build_title:
   en: Build
 daemon.build_description:
@@ -1046,12 +1046,8 @@ web.error_secure_websocket_required:
   en: A secure Goddard Web page can only connect through wss://
 web.error_daemon_token_required:
   en: Enter the daemon token
-settings.match_system:
-  en: Match system appearance
-settings.match_system_description:
-  en: Switch between your light and dark themes with the OS
 settings.appearance_mode_description:
-  en: Appearance to use while not matching the system
+  en: Follow the OS appearance, or always use the light or dark theme
 settings.light_theme:
   en: Light theme
 settings.light_theme_description:
@@ -1071,7 +1067,11 @@ settings.preview_assistant_reply:
 settings.sidebar_transparency:
   en: Sidebar transparency
 settings.sidebar_transparency_description:
-  en: Blend the desktop behind the sidebar. Turn off for a solid background.
+  en: Blend the desktop behind the sidebar or keep a solid fill
+settings.sidebar_transparency_translucent:
+  en: Translucent
+settings.sidebar_transparency_solid:
+  en: Solid
 settings.sidebar_transparency_amount:
   en: Amount
 settings.ui_font:
@@ -1100,10 +1100,14 @@ settings.terminal_font_size:
   en: Terminal font size
 settings.terminal_font_size_description:
   en: Text size in the integrated terminal. Follows the code font size while they match
-settings.thick_borders:
-  en: Thick borders
-settings.thick_borders_description:
-  en: Draw borders and separators a full pixel thick instead of a half-pixel hairline
+settings.border_weight:
+  en: Border weight
+settings.border_weight_description:
+  en: How thick borders and separators draw
+settings.border_weight_hairline:
+  en: Hairline
+settings.border_weight_pixel:
+  en: Full pixel
 settings.border_intensity:
   en: Border intensity
 settings.border_intensity_description:
@@ -1112,18 +1116,26 @@ settings.high_contrast:
   en: High contrast borders
 settings.high_contrast_description:
   en: Increase the contrast of borders and control outlines. On when the system Increase Contrast setting is on.
-settings.render_math:
-  en: Render math expressions
-settings.render_math_description:
-  en: Show formatted math in Markdown. Turn off to show LaTeX source.
+settings.math_rendering:
+  en: Math in Markdown
+settings.math_rendering_description:
+  en: Show math expressions formatted or as LaTeX source
+settings.math_rendering_formatted:
+  en: Formatted
+settings.math_rendering_latex:
+  en: LaTeX source
 settings.show_response_token_speed:
   en: Show response token speed
 settings.show_response_token_speed_description:
   en: Show an estimated tokens-per-second rate in each response's footer
-settings.markdown_preview:
-  en: Preview Markdown files
-settings.markdown_preview_description:
-  en: Open Markdown files as a rendered preview instead of source
+settings.markdown_files:
+  en: Markdown files
+settings.markdown_files_description:
+  en: Open Markdown files rendered or as source
+settings.markdown_files_preview:
+  en: Rendered preview
+settings.markdown_files_source:
+  en: Source
 settings.archive_navigation:
   en: After archiving a task
 settings.archive_navigation_description:
@@ -1144,32 +1156,46 @@ settings.dormant_after_days:
   en: "%{count} days"
 settings.dormant_after_never:
   en: Never
-settings.sync_with_merge:
-  en: Merge when syncing changes
-settings.sync_with_merge_description:
-  en: Use git merge instead of git pull --rebase when syncing a checkout from the new task area
+settings.sync_strategy:
+  en: Sync strategy
+settings.sync_strategy_description:
+  en: How a checkout synced from the new task area integrates upstream commits
+settings.sync_strategy_rebase:
+  en: Rebase
+settings.sync_strategy_merge:
+  en: Merge
 settings.auto_fetch_remotes:
   en: Fetch remotes automatically
 settings.auto_fetch_remotes_description:
   en: Check the remote in the background so sync and push suggestions reflect upstream as it is now, not as of the last manual fetch
-settings.auto_resolve_in_chat:
-  en: Resolve sync conflicts in a chat
-settings.auto_resolve_in_chat_description:
-  en: When a pull or land stops on conflicts, start a fresh chat on the checkout with the resolution steps already sent
-settings.auto_resolve_land_conflicts:
-  en: Resolve land conflicts in chat
-settings.auto_resolve_land_conflicts_description:
-  en: When a land stops on rebase or merge conflicts, send the resolution prompt to the task's chat instead of showing the conflict dialog
+settings.sync_conflict_handling:
+  en: When a sync hits conflicts
+settings.sync_conflict_handling_description:
+  en: A pull, land, or rebase that stops on conflicts opens the dialog — or a fresh chat on the checkout with the resolution steps already sent
+settings.conflict_handling_dialog:
+  en: Show the conflict dialog
+settings.conflict_handling_new_chat:
+  en: Resolve in a new chat
+settings.land_conflict_handling:
+  en: When a land hits conflicts
+settings.land_conflict_handling_description:
+  en: Send the resolution prompt to the chat that owns the checkout, queued behind a running turn — the sync setting applies when no session owns it
+settings.conflict_handling_task_chat:
+  en: Resolve in the task's chat
 settings.default_workspace:
   en: Default workspace
 settings.default_workspace_description:
   en: The workspace new tasks start in. "Last used workspace" reopens the workspace picked for each project; a different pick in the composer still applies to that task
 settings.default_workspace_last_used:
   en: Last used workspace
-settings.new_worktree_default_branch:
-  en: New worktrees use the default branch
-settings.new_worktree_default_branch_description:
-  en: Always fork a new worktree from the repository's default branch instead of the base branch last used
+settings.new_worktree_base:
+  en: Base for new worktrees
+settings.new_worktree_base_description:
+  en: The branch a new worktree forks from
+settings.new_worktree_base_default:
+  en: Default branch
+settings.new_worktree_base_last_used:
+  en: Last used base
 settings.new_worktree_sync_default_branch:
   en: New worktrees update the default branch
 settings.new_worktree_sync_default_branch_description:
@@ -1190,10 +1216,14 @@ settings.sidebar_composer_drafts:
   en: Sidebar draft previews
 settings.sidebar_composer_drafts_description:
   en: Show a task's unsent composer draft under its title in the sidebar
-settings.terminal_open_links_in_mouse_mode:
-  en: Open links in mouse-aware terminal programs
-settings.terminal_open_links_in_mouse_mode_description:
-  en: "%{modifier}-click keeps opening links and file paths while a program like vim or htop handles the mouse. Off sends those clicks to the program instead — Shift-%{modifier}-click still opens links."
+settings.terminal_mouse_mode_click:
+  en: "%{modifier}-click in mouse-aware programs"
+settings.terminal_mouse_mode_click_description:
+  en: "What %{modifier}-click does while a program like vim or htop handles the mouse — Shift-%{modifier}-click always opens links and file paths"
+settings.terminal_mouse_mode_click_links:
+  en: Open links
+settings.terminal_mouse_mode_click_program:
+  en: Send to the program
 settings.terminal_link_modifier:
   en: Terminal link modifier
 settings.terminal_link_modifier_description:
@@ -1210,6 +1240,8 @@ settings.completion_sound_name:
   en: Sound
 settings.completion_sound_volume:
   en: Volume
+settings.theme_system:
+  en: System
 settings.theme_light:
   en: Light
 settings.theme_dark:

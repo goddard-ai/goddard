@@ -256,8 +256,8 @@ daemon.agent_tools_title: 智能体工具
 daemon.agent_tools_description: 允许会话中的智能体创建任务并向其他任务发送消息。开启期间启动的会话将获得按会话隔离的 goddard-agent 命令，其发送的提示会在目标转录中标记。
 daemon.agent_settings_title: 智能体设置
 daemon.agent_settings_description: 允许智能体为你创建和编辑自定义命令。默认开启；智能体添加的命令会有标记，守护进程会记录是哪个任务做出的更改。
-daemon.sandbox_default_title: 默认在沙箱中运行新任务
-daemon.sandbox_default_description: 新任务将在这台 Mac 之外的沙箱 VM 环境中开始。单个任务的环境选择仍优先于该任务。
+daemon.new_task_environment: 新任务环境
+daemon.new_task_environment_description: 新任务开始的环境 — 单个任务的环境选择仍优先于该任务。
 daemon.build_title: 构建
 daemon.build_description: 此应用和已连接的守护进程所基于构建的提交。
 daemon.build_app: 应用
@@ -299,9 +299,7 @@ web.error_daemon_url_scheme: 守护进程 URL 必须使用 ws:// 或 wss://
 web.error_daemon_url_host: 守护进程 URL 必须包含主机，且不能包含凭据
 web.error_secure_websocket_required: 安全的 Goddard Web 页面只能通过 wss:// 连接
 web.error_daemon_token_required: 请输入守护进程令牌
-settings.match_system: 跟随系统外观
-settings.match_system_description: 根据系统设置自动切换浅色和深色主题
-settings.appearance_mode_description: 不跟随系统时使用的外观
+settings.appearance_mode_description: 跟随系统外观，或始终使用浅色或深色主题
 settings.light_theme: 浅色主题
 settings.light_theme_description: 浅色外观下使用的主题
 settings.dark_theme: 深色主题
@@ -311,7 +309,9 @@ settings.preview_description: 所选主题下的聊天与代码示例
 settings.preview_user_message: 能帮我修一下问候函数吗？
 settings.preview_assistant_reply: 已完成——函数现在会返回问候语。
 settings.sidebar_transparency: 侧边栏透明
-settings.sidebar_transparency_description: 在侧边栏后方透出桌面。关闭后使用纯色背景。
+settings.sidebar_transparency_description: 在侧边栏后方透出桌面，或使用纯色填充
+settings.sidebar_transparency_translucent: 半透明
+settings.sidebar_transparency_solid: 纯色
 settings.sidebar_transparency_amount: 透明程度
 settings.ui_font: 界面字体
 settings.ui_font_description: 整个界面与消息使用的字体
@@ -326,16 +326,22 @@ settings.code_font_size: 代码字号
 settings.code_font_size_description: 文件编辑器、差分视图、代码块与工具输出的文字大小
 settings.terminal_font_size: 终端字号
 settings.terminal_font_size_description: 内置终端的文字大小。与代码字号相同时随之变化
-settings.thick_borders: 粗边框
-settings.thick_borders_description: 以 1 像素绘制边框与分隔线，而非 0.5 像素细线
+settings.border_weight: 边框粗细
+settings.border_weight_description: 边框与分隔线的绘制粗细
+settings.border_weight_hairline: 细线
+settings.border_weight_pixel: 整像素
 settings.border_intensity: 边框强度
 settings.border_intensity_description: 调整边框与分隔线的显眼程度。0% 完全隐藏，100% 为原始强度
-settings.render_math: 渲染数学公式
-settings.render_math_description: 在 Markdown 中显示排版后的公式。关闭后显示 LaTeX 源码。
+settings.math_rendering: Markdown 中的公式
+settings.math_rendering_description: 以排版格式或 LaTeX 源码显示公式
+settings.math_rendering_formatted: 排版
+settings.math_rendering_latex: LaTeX 源码
 settings.show_response_token_speed: 显示回复的令牌速度
 settings.show_response_token_speed_description: 在每条回复的页脚中显示估算的每秒令牌数
-settings.markdown_preview: 预览 Markdown 文件
-settings.markdown_preview_description: 以渲染后的预览而非源码形式打开 Markdown 文件
+settings.markdown_files: Markdown 文件
+settings.markdown_files_description: 以渲染预览或源码形式打开 Markdown 文件
+settings.markdown_files_preview: 渲染预览
+settings.markdown_files_source: 源码
 settings.archive_navigation: 归档任务后
 settings.archive_navigation_description: 选择归档正在查看的任务后跳转的位置
 settings.archive_navigation_next_unread: 前往下一个未读完成
@@ -346,19 +352,26 @@ settings.dormant_after_description: 没有新活动达到此时长的任务将�
 settings.dormant_after_one_day: 1 天
 settings.dormant_after_days: "%{count} 天"
 settings.dormant_after_never: 从不
-settings.sync_with_merge: 同步更改时使用合并
-settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
+settings.sync_strategy: 同步方式
+settings.sync_strategy_description: 从新任务区域同步的检出如何整合上游提交
+settings.sync_strategy_rebase: 变基
+settings.sync_strategy_merge: 合并
 settings.auto_fetch_remotes: 自动获取远程更新
 settings.auto_fetch_remotes_description: 在后台检查远程，让同步和推送建议反映上游的最新状态，而不是上次手动获取时的状态
-settings.auto_resolve_in_chat: 在聊天中解决同步冲突
-settings.auto_resolve_in_chat_description: 当拉取或合入因冲突而停止时，在检出目录上开启一个新聊天并自动发送解决步骤
-settings.auto_resolve_land_conflicts: 在聊天中解决合入冲突
-settings.auto_resolve_land_conflicts_description: 当合入因变基或合并冲突而停止时，将解决提示发送到该任务的聊天，而不是显示冲突对话框
+settings.sync_conflict_handling: 同步遇到冲突时
+settings.sync_conflict_handling_description: 当拉取、合入或变基因冲突停止时，打开冲突对话框，或在检出目录上开启一个已发送解决步骤的新聊天
+settings.conflict_handling_dialog: 显示冲突对话框
+settings.conflict_handling_new_chat: 在新聊天中解决
+settings.land_conflict_handling: 合入遇到冲突时
+settings.land_conflict_handling_description: 将解决提示发送到拥有该检出目录的聊天，排在正在进行的回合之后 — 没有会话拥有该检出时按同步设置处理
+settings.conflict_handling_task_chat: 在该任务的聊天中解决
 settings.default_workspace: 默认工作区
 settings.default_workspace_description: 新任务启动时所在的工作区。“上次使用的工作区”会打开每个项目上次选择的工作区；在编辑器中另选工作区仍会对该任务生效
 settings.default_workspace_last_used: 上次使用的工作区
-settings.new_worktree_default_branch: 新工作树始终基于默认分支
-settings.new_worktree_default_branch_description: 创建新工作树时始终从仓库默认分支分叉，而不是沿用上次使用的基准分支
+settings.new_worktree_base: 新工作树的基准分支
+settings.new_worktree_base_description: 新工作树的分叉来源分支
+settings.new_worktree_base_default: 默认分支
+settings.new_worktree_base_last_used: 上次使用的基准分支
 settings.new_worktree_sync_default_branch: 新工作树更新默认分支
 settings.new_worktree_sync_default_branch_description: 在基于默认分支创建新工作树之前，先拉取远程并将本地默认分支快进到其跟踪分支
 settings.new_worktree_sync_branches: 同时更新以下分支
@@ -367,8 +380,10 @@ settings.three_finger_swipe_navigation: 三指轻扫切换任务
 settings.three_finger_swipe_navigation_description: 在触控板上用三指向左或向右轻扫即可在任务之间切换。需在系统设置 → 触控板中将“在全屏 App 之间轻扫”设为四指。
 settings.sidebar_shortcut_tags: 侧边栏快捷键标签
 settings.sidebar_shortcut_tags_description: "按住 %{modifier} 时，在侧边栏的前几个任务上显示 %{keys} 标签"
-settings.terminal_open_links_in_mouse_mode: 在响应鼠标的终端程序中打开链接
-settings.terminal_open_links_in_mouse_mode_description: "当 vim、htop 等程序接管鼠标时，%{modifier}-点击仍会打开链接和文件路径。关闭后这些点击会发送给程序；Shift-%{modifier}-点击仍可打开链接"
+settings.terminal_mouse_mode_click: "在响应鼠标的程序中 %{modifier}-点击"
+settings.terminal_mouse_mode_click_description: "当 vim、htop 等程序接管鼠标时 %{modifier}-点击的行为 — Shift-%{modifier}-点击始终打开链接和文件路径"
+settings.terminal_mouse_mode_click_links: 打开链接
+settings.terminal_mouse_mode_click_program: 发送给程序
 settings.terminal_link_modifier: 终端链接修饰键
 settings.terminal_link_modifier_description: 在终端中点击以打开链接和文件路径的按键；另一个键保持普通点击
 settings.terminal_copy_on_select: 选中即复制
@@ -377,6 +392,7 @@ settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
 settings.completion_sound_name: 提示音
 settings.completion_sound_volume: 音量
+settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
 input.do_anything: 做什么都可以…

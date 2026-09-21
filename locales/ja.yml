@@ -259,8 +259,8 @@ daemon.agent_tools_title: エージェントツール
 daemon.agent_tools_description: エージェントがタスクを作成し、他のタスクにメッセージを送れるようにします。有効な間に開始されたセッションにはセッション限定の goddard-agent コマンドが提供され、送信されたプロンプトは対象のトランスクリプトに記録されます。
 daemon.agent_settings_title: エージェント設定
 daemon.agent_settings_description: エージェントがカスタムコマンドを作成・編集できるようにします。デフォルトで有効です。エージェントが追加したコマンドには印が付き、どのタスクが変更したかが記録されます。
-daemon.sandbox_default_title: 新しいタスクをデフォルトでサンドボックス化
-daemon.sandbox_default_description: 新しいタスクをこの Mac ではなくサンドボックス VM 環境で開始します。タスクごとの環境の選択はそのタスクに優先します。
+daemon.new_task_environment: 新しいタスクの環境
+daemon.new_task_environment_description: 新しいタスクを開始する環境 — タスクごとの環境の選択はそのタスクに優先します。
 daemon.build_title: ビルド
 daemon.build_description: このアプリと接続中のデーモンがビルドされたコミット。
 daemon.build_app: アプリ
@@ -302,9 +302,7 @@ web.error_daemon_url_scheme: デーモン URL には ws:// または wss:// を�
 web.error_daemon_url_host: デーモン URL にはホストが必要で、認証情報は含められません
 web.error_secure_websocket_required: 安全な Goddard Web ページからは wss:// でのみ接続できます
 web.error_daemon_token_required: デーモントークンを入力してください
-settings.match_system: システムの外観に合わせる
-settings.match_system_description: システムに合わせてライトとダークのテーマを自動で切り替えます
-settings.appearance_mode_description: システムに合わせないときに使う外観
+settings.appearance_mode_description: OS の外観に合わせるか、常にライトまたはダークテーマを使います
 settings.light_theme: ライトテーマ
 settings.light_theme_description: ライトの外観で使うテーマ
 settings.dark_theme: ダークテーマ
@@ -314,7 +312,9 @@ settings.preview_description: 選択したテーマでのチャットとコー�
 settings.preview_user_message: 挨拶する関数を修正してもらえますか？
 settings.preview_assistant_reply: 完了です — 関数が挨拶を返すようになりました。
 settings.sidebar_transparency: サイドバーの透明化
-settings.sidebar_transparency_description: サイドバーの背後にデスクトップを透かして表示します。オフにすると単色の背景になります。
+settings.sidebar_transparency_description: サイドバーの背後にデスクトップを透かすか、単色で塗ります
+settings.sidebar_transparency_translucent: 半透明
+settings.sidebar_transparency_solid: 単色
 settings.sidebar_transparency_amount: 透過量
 settings.ui_font: UI のフォント
 settings.ui_font_description: インターフェース全体とメッセージで使うフォント
@@ -329,16 +329,22 @@ settings.code_font_size: コードのフォントサイズ
 settings.code_font_size_description: ファイルエディタ、差分表示、コードブロック、ツール出力の文字サイズ
 settings.terminal_font_size: ターミナルのフォントサイズ
 settings.terminal_font_size_description: 内蔵ターミナルの文字サイズ。コードのフォントサイズと同じ間は連動します
-settings.thick_borders: 太い境界線
-settings.thick_borders_description: 境界線と区切り線を0.5ピクセルのヘアラインではなく1ピクセルで描画します
+settings.border_weight: 境界線の太さ
+settings.border_weight_description: 境界線と区切り線をどの太さで描画するか
+settings.border_weight_hairline: ヘアライン
+settings.border_weight_pixel: 1 ピクセル
 settings.border_intensity: 境界線の強さ
 settings.border_intensity_description: 境界線と区切り線の見え方を調整します。0% で非表示、100% で元の強さです
-settings.render_math: 数式を描画
-settings.render_math_description: Markdown の数式を整形して表示します。オフにすると LaTeX ソースを表示します。
+settings.math_rendering: Markdown の数式
+settings.math_rendering_description: 数式を整形済みまたは LaTeX ソースで表示します
+settings.math_rendering_formatted: 整形済み
+settings.math_rendering_latex: LaTeX ソース
 settings.show_response_token_speed: 応答のトークン速度を表示
 settings.show_response_token_speed_description: 各応答のフッターに推定トークン/秒を表示します
-settings.markdown_preview: Markdown ファイルをプレビュー
-settings.markdown_preview_description: Markdown ファイルをソースではなくレンダリング済みのプレビューで開きます
+settings.markdown_files: Markdown ファイル
+settings.markdown_files_description: Markdown ファイルをレンダリング済みまたはソースで開きます
+settings.markdown_files_preview: レンダリング済みプレビュー
+settings.markdown_files_source: ソース
 settings.archive_navigation: タスクをアーカイブした後
 settings.archive_navigation_description: 表示中のタスクをアーカイブしたときの移動先を選びます
 settings.archive_navigation_next_unread: 次の未読の完了へ移動
@@ -349,19 +355,26 @@ settings.dormant_after_description: この期間新しいアクティビティ�
 settings.dormant_after_one_day: 1 日
 settings.dormant_after_days: "%{count} 日"
 settings.dormant_after_never: なし
-settings.sync_with_merge: 変更の同期にマージを使用
-settings.sync_with_merge_description: 新規タスク画面からチェックアウトを同期するときに、git pull --rebase の代わりに git マージを使います
+settings.sync_strategy: 同期方法
+settings.sync_strategy_description: 新規タスク画面から同期したチェックアウトが上流のコミットを取り込む方法
+settings.sync_strategy_rebase: リベース
+settings.sync_strategy_merge: マージ
 settings.auto_fetch_remotes: リモートを自動フェッチ
 settings.auto_fetch_remotes_description: バックグラウンドでリモートを確認し、同期やプッシュの提案が最後の手動フェッチ時点ではなく現在の上流の状態を反映するようにします
-settings.auto_resolve_in_chat: 同期の競合をチャットで解決
-settings.auto_resolve_in_chat_description: プルまたは取り込みが競合で停止したとき、チェックアウトで新しいチャットを開始し、解決手順を送信済みの状態にします
-settings.auto_resolve_land_conflicts: 取り込みの競合をチャットで解決
-settings.auto_resolve_land_conflicts_description: 取り込みがリベースまたはマージの競合で停止したとき、競合ダイアログを表示する代わりに解決プロンプトをタスクのチャットへ送信します
+settings.sync_conflict_handling: 同期が競合したとき
+settings.sync_conflict_handling_description: プル、取り込み、リベースが競合で停止したとき、ダイアログを開くか、解決手順を送信済みの新しいチャットをチェックアウトで開始します
+settings.conflict_handling_dialog: 競合ダイアログを表示
+settings.conflict_handling_new_chat: 新しいチャットで解決
+settings.land_conflict_handling: 取り込みが競合したとき
+settings.land_conflict_handling_description: 解決プロンプトをチェックアウトを所有するチャットへ送信し、実行中のターンの後ろにキューします — 所有するセッションがないときは同期の設定が適用されます
+settings.conflict_handling_task_chat: タスクのチャットで解決
 settings.default_workspace: デフォルトのワークスペース
 settings.default_workspace_description: 新しいタスクを開始するワークスペース。「前回使用したワークスペース」はプロジェクトごとに最後に選んだワークスペースを開きます。コンポーザーで別のワークスペースを選ぶとそのタスクにはそちらが適用されます
 settings.default_workspace_last_used: 前回使用したワークスペース
-settings.new_worktree_default_branch: 新しいワークツリーはデフォルトブランチから作成
-settings.new_worktree_default_branch_description: 新規ワークツリーを、最後に使ったベースブランチではなく常にリポジトリのデフォルトブランチから作成します
+settings.new_worktree_base: 新規ワークツリーのベース
+settings.new_worktree_base_description: 新しいワークツリーの分岐元となるブランチ
+settings.new_worktree_base_default: デフォルトブランチ
+settings.new_worktree_base_last_used: 最後に使ったベース
 settings.new_worktree_sync_default_branch: 新しいワークツリーはデフォルトブランチを更新
 settings.new_worktree_sync_default_branch_description: 新規ワークツリーのベースにする前に、リモートをフェッチしてローカルのデフォルトブランチを追跡ブランチまで早送りします
 settings.new_worktree_sync_branches: 次のブランチも更新
@@ -370,8 +383,10 @@ settings.three_finger_swipe_navigation: 3本指スワイプでタスク間を移
 settings.three_finger_swipe_navigation_description: トラックパッドを3本指で左右にスワイプしてタスク間を移動します。システム設定 → トラックパッドで「フルスクリーンアプリケーション間をスワイプ」を4本指に設定してください。
 settings.sidebar_shortcut_tags: サイドバーのショートカットタグ
 settings.sidebar_shortcut_tags_description: "%{modifier} を押している間、サイドバーの先頭タスクに %{keys} タグを表示します"
-settings.terminal_open_links_in_mouse_mode: マウス対応ターミナルプログラムでリンクを開く
-settings.terminal_open_links_in_mouse_mode_description: "vim や htop などのプログラムがマウスを使用中でも、%{modifier}-クリックでリンクやファイルパスを開きます。オフにするとクリックはプログラムに送られ、Shift-%{modifier}-click でも引き続きリンクを開けます"
+settings.terminal_mouse_mode_click: "マウス対応プログラムでの %{modifier}-クリック"
+settings.terminal_mouse_mode_click_description: "vim や htop などのプログラムがマウスを使用中の %{modifier}-クリックの動作 — Shift-%{modifier}-クリックは常にリンクとファイルパスを開きます"
+settings.terminal_mouse_mode_click_links: リンクを開く
+settings.terminal_mouse_mode_click_program: プログラムに送る
 settings.terminal_link_modifier: ターミナルのリンク修飾キー
 settings.terminal_link_modifier_description: ターミナルでクリックしてリンクやファイルパスを開くキー。もう一方のキーは通常のクリックになります
 settings.terminal_copy_on_select: 選択時にコピー
@@ -380,6 +395,7 @@ settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド
 settings.completion_sound_volume: 音量
+settings.theme_system: システム
 settings.theme_light: ライト
 settings.theme_dark: ダーク
 
