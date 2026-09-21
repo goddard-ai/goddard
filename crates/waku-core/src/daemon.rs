@@ -168,7 +168,7 @@ fn resolve_agent_trait(
 pub struct WakuBackend {
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
-    terminals: Mutex<HashMap<Uuid, TerminalEntry>>,
+    terminals: Arc<Mutex<HashMap<Uuid, TerminalEntry>>>,
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
     settings: Arc<DaemonSettingsStore>,
@@ -207,6 +207,9 @@ pub struct WakuBackend {
     /// the server's exposure control. LAN discovery reports it as
     /// `DaemonInfo.ws_port`; `None` while unexposed.
     exposed_port: Arc<Mutex<Option<u16>>>,
+    /// Process-memory sampling for `getDaemonStats` and the
+    /// `daemon-stats.jsonl` debugging file.
+    stats: Arc<crate::stats::DaemonStats>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
     /// Friend-to-friend sharing; lazily binds the iroh endpoint on first
@@ -259,7 +262,7 @@ impl WakuBackend {
         let backend = Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             repo_maps: Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
-            terminals: Mutex::new(HashMap::new()),
+            terminals: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(all(test, unix))]
             terminal_shell: None,
             memory: crate::memory::MemoryService::new(
@@ -282,6 +285,7 @@ impl WakuBackend {
             idle_reaper_started: std::sync::atomic::AtomicBool::new(false),
             daemon_address: Arc::new(Mutex::new(None)),
             exposed_port: Arc::new(Mutex::new(None)),
+            stats: crate::stats::DaemonStats::open(&data_dir),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             share: Arc::new(crate::share::ShareService::new(
@@ -1033,6 +1037,10 @@ impl Backend for WakuBackend {
         {
             return;
         }
+        // The stats sampler shares the guard: it owns a file and a thread,
+        // so a second event-source install must not duplicate it either.
+        self.stats
+            .spawn_sampler(self.sessions.clone(), self.terminals.clone());
         let sessions = self.sessions.clone();
         let task_state = self.task_state.clone();
         let settings = self.settings.clone();
@@ -1102,6 +1110,13 @@ impl Backend for WakuBackend {
             Command::GetSettings => Ok(ResponsePayload::Settings {
                 settings: self.settings.get(),
             }),
+            Command::GetDaemonStats => {
+                let (current, previous_boot) = self.stats.snapshot();
+                Ok(ResponsePayload::DaemonStats {
+                    current,
+                    previous_boot,
+                })
+            }
             Command::GetFriends => {
                 // Reading friends state means this install wants to be
                 // reachable — incoming requests and offers can only
@@ -4636,6 +4651,7 @@ fn handle_driver_command(
         | Command::SetFriendDisplayName { .. }
         | Command::SetFriendNickname { .. }
         | Command::GetAutomations
+        | Command::GetDaemonStats
         | Command::UpsertAutomation { .. }
         | Command::RemoveAutomation { .. }
         | Command::RunAutomationNow { .. }

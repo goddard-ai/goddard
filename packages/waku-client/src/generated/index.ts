@@ -56,6 +56,7 @@ export type { CustomCommandIcon } from "./CustomCommandIcon";
 export type { DaemonExposure } from "./DaemonExposure";
 export type { DaemonReady } from "./DaemonReady";
 export type { DaemonSettings } from "./DaemonSettings";
+export type { DaemonStatsSample } from "./DaemonStatsSample";
 export type { DaySlice } from "./DaySlice";
 export type { EvalAnswer } from "./EvalAnswer";
 export type { EvalBackend } from "./EvalBackend";

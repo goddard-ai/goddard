@@ -193,6 +193,12 @@ pub enum Event {
         /// Sessions whose lost runtime the app auto-resumed onto the
         /// replacement connection.
         sessions_resumed: usize,
+        /// Pre-restart RSS of the daemon process — the last sample the
+        /// previous boot wrote. Absent when the daemon can't be asked.
+        daemon_rss_mb: Option<u64>,
+        /// Pre-restart RSS summed over the daemon's descendant tree —
+        /// provider runtimes carry their memory under their own pids.
+        children_rss_mb: Option<u64>,
     },
 }
 
@@ -405,14 +411,22 @@ impl Event {
                 cause,
                 outcome,
                 sessions_resumed,
-            } => (
-                "daemon.recovery",
-                json!({
+                daemon_rss_mb,
+                children_rss_mb,
+            } => {
+                let mut data = json!({
                     "cause": cause,
                     "outcome": outcome,
                     "sessionsResumed": sessions_resumed,
-                }),
-            ),
+                });
+                if let Some(rss) = daemon_rss_mb {
+                    data["daemonRssMb"] = json!(rss);
+                }
+                if let Some(rss) = children_rss_mb {
+                    data["childrenRssMb"] = json!(rss);
+                }
+                ("daemon.recovery", data)
+            }
         };
 
         let properties = data
@@ -593,6 +607,8 @@ mod tests {
                 cause: "unexpected_exit",
                 outcome: "recovered",
                 sessions_resumed: 2,
+                daemon_rss_mb: Some(312),
+                children_rss_mb: Some(4096),
             },
         ];
 

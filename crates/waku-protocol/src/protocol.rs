@@ -201,6 +201,11 @@ pub enum Command {
     UpdateSettings {
         settings: DaemonSettings,
     },
+    /// Read the daemon's process-memory samples: the latest reading, and the
+    /// final sample the previous daemon process wrote before it exited —
+    /// the pre-restart reading that explains an unexpected exit. Diagnostics
+    /// only; agent-scoped credentials are refused.
+    GetDaemonStats,
     /// Open, update, or close the daemon's non-loopback WebSocket listener.
     /// `None` unexposes; `Some` atomically rebinds when the config changed —
     /// the loopback listener and its sessions are never touched. Only the
@@ -884,6 +889,27 @@ pub enum ResponseOutcome {
     Error { error: RpcError },
 }
 
+/// One process-memory sample written by the daemon's stats sampler — see
+/// [`Command::GetDaemonStats`]. Also the per-line shape of
+/// `daemon-stats.jsonl` in the daemon's data directory.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonStatsSample {
+    /// Unix seconds when the sample was taken.
+    pub at: u64,
+    /// The daemon process's own resident size. `None` on platforms without
+    /// a sampler implementation, or before the first sample lands.
+    pub daemon_rss_mb: Option<u64>,
+    /// Resident size summed over the daemon's whole descendant tree —
+    /// provider runtimes and terminals carry their memory under their own
+    /// pids, so real growth shows up here rather than in `daemon_rss_mb`.
+    pub children_rss_mb: Option<u64>,
+    /// Live provider runtimes at sample time.
+    pub runtimes: u32,
+    /// Live remote terminals at sample time.
+    pub terminals: u32,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(
     tag = "type",
@@ -914,6 +940,15 @@ pub enum ResponsePayload {
     },
     Settings {
         settings: DaemonSettings,
+    },
+    /// Process-memory samples, as read for `getDaemonStats`. `previous_boot`
+    /// is the last sample the prior daemon process wrote — `None` when this
+    /// boot found no stats file or an older daemon wrote none.
+    DaemonStats {
+        #[serde(default)]
+        current: Option<DaemonStatsSample>,
+        #[serde(default)]
+        previous_boot: Option<DaemonStatsSample>,
     },
     /// The bound port after `setDaemonExposure` — `None` once unexposed.
     Exposure {

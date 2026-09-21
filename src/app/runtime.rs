@@ -1619,13 +1619,13 @@ impl Waku {
     /// Supervisor recovery reports. Each opens a [`DaemonRecoveryEpisode`]
     /// whose short window lets the RuntimeLost-driven resumes it causes be
     /// counted before the `daemon.recovery` event fires.
-    fn drain_daemon_recovery_events(&mut self) -> bool {
+    fn drain_daemon_recovery_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         while let Ok((key, report)) = self.daemon_recovery_events.try_recv() {
             changed = true;
             // A new report ends the open episode: its window is over — the
             // supervisor only reports again once a later outage resolves.
-            self.flush_daemon_recovery_report();
+            self.flush_daemon_recovery_report(cx);
             self.daemon_recovery_episode = Some(DaemonRecoveryEpisode {
                 key,
                 cause: report.cause,
@@ -1637,23 +1637,62 @@ impl Waku {
         changed
     }
 
-    /// Emit the `daemon.recovery` analytics event for the open episode.
-    fn flush_daemon_recovery_report(&mut self) {
+    /// Emit the `daemon.recovery` analytics event for the open episode. The
+    /// daemon's memory reading is fetched on a background executor: a
+    /// restarted daemon reports the last sample the previous process wrote,
+    /// a reconnected one reports its current sample, and an unreachable
+    /// daemon answers nothing so the fields stay absent.
+    fn flush_daemon_recovery_report(&mut self, cx: &mut Context<Self>) {
         let Some(episode) = self.daemon_recovery_episode.take() else {
             return;
         };
-        self.analytics.track(crate::analytics::Event::DaemonRecovery {
-            cause: match episode.cause {
-                waku_client::DaemonRecoveryCause::UnexpectedExit => "unexpected_exit",
-                waku_client::DaemonRecoveryCause::Disconnect => "disconnect",
-                waku_client::DaemonRecoveryCause::Rebuild => "rebuild",
-            },
-            outcome: match episode.outcome {
-                waku_client::DaemonRecoveryOutcome::Recovered => "recovered",
-                waku_client::DaemonRecoveryOutcome::Unreachable => "unreachable",
-            },
-            sessions_resumed: episode.sessions_resumed,
-        });
+        let client = self
+            .daemons
+            .supervisor(episode.key)
+            .map(|supervisor| supervisor.client());
+        let analytics = self.analytics.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let sample = match (episode.outcome, client) {
+                    (waku_client::DaemonRecoveryOutcome::Recovered, Some(client)) => client
+                        .request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::GetDaemonStats,
+                        )
+                        .ok()
+                        .and_then(|payload| match payload {
+                            waku_client::ResponsePayload::DaemonStats {
+                                current,
+                                previous_boot,
+                            } => match episode.cause {
+                                // A disconnect means the daemon never died —
+                                // its own latest sample is the honest reading.
+                                waku_client::DaemonRecoveryCause::Disconnect => {
+                                    current.or(previous_boot)
+                                }
+                                _ => previous_boot.or(current),
+                            },
+                            _ => None,
+                        }),
+                    _ => None,
+                };
+                analytics.track(crate::analytics::Event::DaemonRecovery {
+                    cause: match episode.cause {
+                        waku_client::DaemonRecoveryCause::UnexpectedExit => "unexpected_exit",
+                        waku_client::DaemonRecoveryCause::Disconnect => "disconnect",
+                        waku_client::DaemonRecoveryCause::Rebuild => "rebuild",
+                    },
+                    outcome: match episode.outcome {
+                        waku_client::DaemonRecoveryOutcome::Recovered => "recovered",
+                        waku_client::DaemonRecoveryOutcome::Unreachable => "unreachable",
+                    },
+                    sessions_resumed: episode.sessions_resumed,
+                    daemon_rss_mb: sample.as_ref().and_then(|sample| sample.daemon_rss_mb),
+                    children_rss_mb: sample.and_then(|sample| sample.children_rss_mb),
+                });
+            })
+            .detach();
     }
 
     /// The soonest timer the pump must wake for: background log output
@@ -6682,7 +6721,7 @@ impl Waku {
         // Recovery reports drain first: they are the cause of the RuntimeLost
         // driver events in the same batch, and must open their episode before
         // resume counting runs.
-        if self.drain_daemon_recovery_events()
+        if self.drain_daemon_recovery_events(cx)
             | self.drain_driver_events(cx)
             | self.drain_provider_probe_events()
             | self.drain_provider_version_events()
@@ -6723,7 +6762,7 @@ impl Waku {
             .as_ref()
             .is_some_and(|episode| episode.flush_at <= Instant::now())
         {
-            self.flush_daemon_recovery_report();
+            self.flush_daemon_recovery_report(cx);
         }
 
         if self

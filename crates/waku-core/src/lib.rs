@@ -106,6 +106,7 @@ pub mod share;
 pub mod shell_command;
 pub mod skills;
 mod slash_command_catalog;
+mod stats;
 mod subagents;
 pub mod sync;
 pub mod terminal;
