@@ -32,6 +32,32 @@ export function useScreenHeaderInset() {
   return Math.round(useHeaderHeight());
 }
 
+/**
+ * Chrome backdrop shown once content has scrolled under the navigation bar.
+ * A solid surface with a hairline — not a blur or gradient — so rows clip
+ * cleanly at the bar's bottom edge instead of reading as a fade. It lives in
+ * the screen content, so it travels with the page during a swipe-back while
+ * the bar's buttons and title stay put in the native navigation bar above it.
+ */
+export function ScreenHeaderBackdrop({ visible }: { visible: boolean }) {
+  const theme = useTheme();
+  const height = useScreenHeaderInset();
+  if (!visible) return null;
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.backdrop,
+        {
+          backgroundColor: theme.background,
+          borderBottomColor: theme.borderStrong,
+          height,
+        },
+      ]}
+    />
+  );
+}
+
 /** Space occupied by the leading button, trailing actions, native margins,
  * and the gaps around a task title placed with the leading bar items. */
 const TitleChromeWidth = 208;
@@ -140,6 +166,14 @@ export function HeaderMenuTrigger({
 }
 
 const styles = StyleSheet.create({
+  backdrop: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 20,
+  },
   titles: {
     alignItems: "flex-start",
     justifyContent: "center",

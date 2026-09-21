@@ -32,6 +32,7 @@ import {
   HeaderActionGroup,
   HeaderMenuTrigger,
   HeaderTitle,
+  ScreenHeaderBackdrop,
   nativeHeaderButtons,
   navigateBack,
   useScreenHeaderInset,
@@ -134,6 +135,7 @@ export function SessionView({
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
   const [findIndex, setFindIndex] = useState(0);
+  const [underHeader, setUnderHeader] = useState(false);
   const [mountedTranscriptSessionId, setMountedTranscriptSessionId] = useState<string | null>(null);
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<TranscriptListHandle>(null);
@@ -156,6 +158,7 @@ export function SessionView({
   // Transient task chrome belongs to one session. A route reuse must not show
   // the previous task's file, review, or terminal surface.
   useEffect(() => {
+    setUnderHeader(false);
     setTaskSurfaceOpen(false);
     setTaskSurface(null);
     setModelSheetOpen(false);
@@ -610,6 +613,7 @@ export function SessionView({
               onDevSample={devPrompt ? probe.sample : undefined}
               onForkTurn={forkTurn}
               onRewindTurn={confirmRewind}
+              onUnderHeaderChange={setUnderHeader}
             />
           </ActivitySheetHost>
         ) : (
@@ -696,6 +700,7 @@ export function SessionView({
           </View>
         )}
       </View>
+      <ScreenHeaderBackdrop visible={underHeader} />
       {session && (
         <MobileComposer
           key={`composer:${session.id}`}

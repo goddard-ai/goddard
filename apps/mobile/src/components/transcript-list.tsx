@@ -50,6 +50,7 @@ import {
   nativeChildIndex,
   offTail,
   shouldExtendTail,
+  underHeader,
   peekedWithinBand,
   type ScrollMetrics,
 } from '@/lib/transcript-scroll';
@@ -98,7 +99,7 @@ type KeepRowTop = (rowKey: string, apply: () => void) => void;
  *
  * JS owns only what the native layer cannot know: which of the two anchors
  * applies, the re-seat for a reader resting just off the bottom, the
- * jump-to-latest button, mounting more history, and
+ * jump-to-latest button, the header backdrop, mounting more history, and
  * the anchor handshake that makes tapped disclosures grow downward.
  */
 export function TranscriptList({
@@ -111,6 +112,7 @@ export function TranscriptList({
   forkTurns,
   onRewindTurn,
   onForkTurn,
+  onUnderHeaderChange,
   onDevSample,
 }: {
   ref?: Ref<TranscriptListHandle>;
@@ -125,6 +127,7 @@ export function TranscriptList({
   forkTurns?: ReadonlySet<string>;
   onRewindTurn?: (turnId: string) => void;
   onForkTurn?: (turnId: string) => void;
+  onUnderHeaderChange: (under: boolean) => void;
   onDevSample?: (sample: TranscriptDevSample) => void;
 }) {
   const theme = useTheme();
@@ -223,6 +226,7 @@ export function TranscriptList({
 
   // ── Scroll bookkeeping ──────────────────────────────────────────────────
   const metrics = useRef<ScrollMetrics>({ offset: 0, contentHeight: 0, viewportHeight: 0 });
+  const underRef = useRef(false);
   const touchingRef = useRef(false);
   const touchMoved = useRef(false);
   const extending = useRef(false);
@@ -261,6 +265,11 @@ export function TranscriptList({
 
   const evaluate = useCallback(() => {
     const current = metrics.current;
+    const under = underHeader(current);
+    if (under !== underRef.current) {
+      underRef.current = under;
+      onUnderHeaderChange(under);
+    }
     // Scroll events arrive at display rate; touch React state on transitions
     // only, and not at all mid-glide — the offset is on its way to 0.
     const gliding = Date.now() < seatingUntil.current && !touchingRef.current;
@@ -282,7 +291,7 @@ export function TranscriptList({
       extending.current = true;
       setWindowStart((value) => extendedWindowStart(value ?? start));
     }
-  }, [hasEarlier, start]);
+  }, [hasEarlier, onUnderHeaderChange, start]);
 
   // A window extension that changes nothing on screen (all-hidden rows) must
   // not wedge the extender.

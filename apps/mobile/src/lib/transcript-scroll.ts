@@ -40,6 +40,11 @@ export function distanceToTop(metrics: ScrollMetrics): number {
   return metrics.contentHeight - metrics.viewportHeight - metrics.offset;
 }
 
+/** True when transcript content sits under the floating header. */
+export function underHeader(metrics: ScrollMetrics): boolean {
+  return distanceToTop(metrics) > 4;
+}
+
 /** True when the reader is off the bottom but still inside the stick band. */
 export function withinStickBand(offset: number): boolean {
   return offset > 0.5 && offset <= STICK_THRESHOLD;
