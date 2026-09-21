@@ -121,6 +121,7 @@ GitHub release at the end — that stays a human's click.
    release tag:
    ```sh
    git log --oneline "$(git describe --tags --abbrev=0)"..dev
+   git rev-parse dev   # the audited tip — saved for the delta check in step 7
    ```
    Give any changelog-worthy commit missing a `.changelog/` fragment one of its
    own, and check every pending fragment's filename: the category prefix
@@ -178,13 +179,24 @@ GitHub release at the end — that stays a human's click.
    This creates the `## [<version>]` section for the Cargo version and deletes
    the consumed fragments. Commit it with the version bump
    (`chore: release v<version>`).
-7. **Promote `dev` to `main`** — fast-forward and push:
+7. **Promote `dev` to `main`** — `dev` is a shared branch, so commits can land
+   after the audit. Re-check the delta first, and give any new arrival the same
+   fragment audit (a missed fragment just means a missing release-notes bullet —
+   fix it in the draft). A final `cargo fmt --check` catches drift in code the
+   earlier `cargo fmt` predates:
+   ```sh
+   git log --oneline <audited-tip>..dev
+   cargo fmt --check
+   ```
+   Then fast-forward and push:
    ```sh
    git checkout main && git merge --ff-only dev && git push
    ```
    If CI fails after this, the fix lands on `dev` and `main` fast-forwards
    again — never commit to `main` directly.
-8. **Release it through CI** — push a `v<version>` tag, or Actions → Release →
+8. **Release it through CI** — push a `v<version>` tag on the release commit
+   (explicit SHA, not the `dev` ref, so the tag can't drift if `dev` moves
+   again), or Actions → Release →
    Run workflow (see below). `bun run release` stays local-only: it builds,
    signs, notarizes, and writes the DMG + zip + appcast into `dist/`, which is
    what the workflow uploads as the GitHub release's assets and
