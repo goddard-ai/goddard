@@ -1,0 +1,1 @@
+- Fix the mobile chat list looking unresponsive to taps: switching sessions while viewing one updated the conversation behind the drawer but left it open, so the tap appeared to do nothing — the drawer now closes on every selection

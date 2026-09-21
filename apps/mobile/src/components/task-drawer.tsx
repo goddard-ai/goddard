@@ -236,9 +236,11 @@ function TaskDrawerContent({
     router.dismissTo('/');
   }, [onClose]);
   const showSession = useCallback((sessionId: string) => {
-    if (frame.selectedSessionId === sessionId) {
-      onClose();
-    } else if (frame.selectedSessionId) {
+    // setParams keeps the pathname, so the effect that closes the drawer on
+    // navigation never fires for session-to-session switches — close it here.
+    onClose();
+    if (frame.selectedSessionId === sessionId) return;
+    if (frame.selectedSessionId) {
       router.setParams({ id: sessionId });
     } else {
       router.replace({ pathname: '/session/[id]', params: { id: sessionId } });
