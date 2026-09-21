@@ -33,16 +33,16 @@ export function useScreenHeaderInset() {
 }
 
 /**
- * Chrome backdrop shown once content has scrolled under the navigation bar.
- * A solid surface with a hairline — not a blur or gradient — so rows clip
- * cleanly at the bar's bottom edge instead of reading as a fade. It lives in
- * the screen content, so it travels with the page during a swipe-back while
- * the bar's buttons and title stay put in the native navigation bar above it.
+ * Solid surface behind the transparent navigation bar: background fill plus a
+ * hairline, never a blur or gradient. Always mounted — the transcript frame
+ * is inset below it, so it can only ever cover the empty header strip. It
+ * lives in the screen content, so it travels with the page during a
+ * swipe-back while the bar's buttons and title stay put in the native
+ * navigation bar above it.
  */
-export function ScreenHeaderBackdrop({ visible }: { visible: boolean }) {
+export function ScreenHeaderBackdrop() {
   const theme = useTheme();
   const height = useScreenHeaderInset();
-  if (!visible) return null;
   return (
     <View
       pointerEvents="none"

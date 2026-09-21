@@ -50,7 +50,6 @@ import {
   nativeChildIndex,
   offTail,
   shouldExtendTail,
-  underHeader,
   peekedWithinBand,
   type ScrollMetrics,
 } from '@/lib/transcript-scroll';
@@ -112,7 +111,6 @@ export function TranscriptList({
   forkTurns,
   onRewindTurn,
   onForkTurn,
-  onUnderHeaderChange,
   onDevSample,
 }: {
   ref?: Ref<TranscriptListHandle>;
@@ -127,7 +125,6 @@ export function TranscriptList({
   forkTurns?: ReadonlySet<string>;
   onRewindTurn?: (turnId: string) => void;
   onForkTurn?: (turnId: string) => void;
-  onUnderHeaderChange: (under: boolean) => void;
   onDevSample?: (sample: TranscriptDevSample) => void;
 }) {
   const theme = useTheme();
@@ -226,7 +223,6 @@ export function TranscriptList({
 
   // ── Scroll bookkeeping ──────────────────────────────────────────────────
   const metrics = useRef<ScrollMetrics>({ offset: 0, contentHeight: 0, viewportHeight: 0 });
-  const underRef = useRef(false);
   const touchingRef = useRef(false);
   const touchMoved = useRef(false);
   const extending = useRef(false);
@@ -265,11 +261,6 @@ export function TranscriptList({
 
   const evaluate = useCallback(() => {
     const current = metrics.current;
-    const under = underHeader(current);
-    if (under !== underRef.current) {
-      underRef.current = under;
-      onUnderHeaderChange(under);
-    }
     // Scroll events arrive at display rate; touch React state on transitions
     // only, and not at all mid-glide — the offset is on its way to 0.
     const gliding = Date.now() < seatingUntil.current && !touchingRef.current;
@@ -291,7 +282,7 @@ export function TranscriptList({
       extending.current = true;
       setWindowStart((value) => extendedWindowStart(value ?? start));
     }
-  }, [hasEarlier, onUnderHeaderChange, start]);
+  }, [hasEarlier, start]);
 
   // A window extension that changes nothing on screen (all-hidden rows) must
   // not wedge the extender.
@@ -523,7 +514,7 @@ export function TranscriptList({
   const showEmpty = hydrated && !running && rows.length === 0;
 
   return (
-    <View style={styles.frame}>
+    <View style={[styles.frame, { paddingTop: headerInset }]}>
       <ScrollViewMarker
         scrollEdgeEffects={{ bottom: 'hidden', left: 'hidden', right: 'hidden', top: 'hidden' }}
         style={styles.list}>
@@ -571,8 +562,10 @@ export function TranscriptList({
               />
             );
           })}
-          {/* Last child: the visual top, under the floating header. */}
-          <View style={[styles.inverted, styles.column, { paddingTop: headerInset + 2 }]}>
+          {/* Last child: the visual top, just under the header strip the
+           * frame inset leaves clear — content can never reach the bar, so
+           * iOS 26's underlap edge effect never resolves to a fade. */}
+          <View style={[styles.inverted, styles.column, { paddingTop: 2 }]}>
             {hasEarlier && <EarlierIndicator />}
           </View>
         </ScrollView>
