@@ -1008,6 +1008,11 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             } else {
                 if !content.trim().is_empty() {
                     let body = render_markdown_message_body(&content, markdown, theme, ctx);
+                    // A table claims no intrinsic width — its columns are
+                    // fractions of the container — so without the full row a
+                    // short message would shrink-wrap the bubble around its
+                    // text and squash the table into it.
+                    let has_table = markdown.is_some_and(MarkdownView::contains_table);
                     let overflowing = user_message_viewport
                         .map(|viewport| viewport.overflowing.get())
                         .unwrap_or(false);
@@ -1024,6 +1029,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                 "user-message-bubble-{message_id}"
                             )))
                             .max_w(px(540.0))
+                            .when(has_table, |bubble| bubble.w_full())
                             .when(!user_message_expanded, |bubble| {
                                 bubble.max_h(px(USER_MESSAGE_MAX_HEIGHT))
                             })

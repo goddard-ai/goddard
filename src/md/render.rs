@@ -982,6 +982,25 @@ impl MarkdownView {
             .chain(self.tail.iter())
             .map(|top| &top.block)
     }
+
+    /// Whether a table appears anywhere, including nested in a quote or list
+    /// item. Table columns size as fractions of their container, so a table
+    /// claims no intrinsic width — a shrink-wrapped parent like the user
+    /// bubble has to offer it the full row explicitly.
+    pub fn contains_table(&self) -> bool {
+        self.blocks().any(block_contains_table)
+    }
+}
+
+fn block_contains_table(block: &Block) -> bool {
+    match block {
+        Block::Table { .. } => true,
+        Block::BlockQuote { children } => children.iter().any(block_contains_table),
+        Block::List { items, .. } => items
+            .iter()
+            .any(|item| item.blocks.iter().any(block_contains_table)),
+        _ => false,
+    }
 }
 
 // ── Render context ─────────────────────────────────────────────────────────

@@ -1,0 +1,1 @@
+- A markdown table in a sent prompt no longer squashes into the bubble width sized by the message's short text — the bubble now takes its full width allowance whenever the prompt contains a table
