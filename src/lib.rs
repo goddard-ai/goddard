@@ -1091,4 +1091,17 @@ pub(crate) fn set_app_menus(cx: &mut App, updater_available: bool) {
             ],
         },
     ]);
+
+    // Dock menus dispatch through the same app-menu action path, so the
+    // taskbar jump list on Windows and the Dock menu on macOS get these
+    // entries with no extra plumbing.
+    let mut dock_items = vec![MenuItem::action(tr!("menu.new_task"), NewSession)];
+    if updater_available {
+        dock_items.push(MenuItem::action(
+            tr!("menu.check_for_updates"),
+            CheckForUpdates,
+        ));
+    }
+    dock_items.push(MenuItem::action(tr!("menu.settings"), OpenSettings));
+    cx.set_dock_menu(dock_items);
 }
