@@ -89,7 +89,7 @@ const IDLE: ConnectionStatus = {
 };
 
 /** RN WebSockets send an Origin header the daemon's origin check reads;
- * the `X-Goddard-Client: native` marker is what lets native clients in.
+ * the `X-Waku-Client: native` marker is what lets native clients in.
  * Pairing needs the same socket, so this is shared beyond the link. */
 export function createNativeDaemonSocket(url: string): WebSocketLike {
   // React Native adds an Origin header to native sockets. This marker lets the
@@ -103,7 +103,7 @@ export function createNativeDaemonSocket(url: string): WebSocketLike {
     ): WebSocketLike;
   };
   return new NativeWebSocket(url, null, {
-    headers: { "X-Goddard-Client": "native" },
+    headers: { "X-Waku-Client": "native" },
   });
 }
 
