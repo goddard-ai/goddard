@@ -3123,18 +3123,12 @@ impl Waku {
         cx.notify();
     }
 
-    /// Re-anchor each block's marker after a field splice: markers before the
-    /// removed range keep their place, markers after it shift, and markers
-    /// inside it rebind to markers the inserted text brought — a
-    /// whole-content undo step carries them across — while the rest lose
-    /// their block. The vec then re-zips to the content's marker positions
-    /// so block order always matches marker order.
+    /// Re-anchor each block's marker after a field splice — see
+    /// [`remap_pasted_block_markers`] for the seating rules.
     pub(super) fn remap_pasted_blocks(&mut self, splice: &ComposerSplice, cx: &App) {
         if self.composer_pasted_blocks.is_empty() {
             return;
         }
-        let removed = &splice.0.removed;
-        let inserted_end = removed.start + splice.0.inserted;
         let markers: Vec<usize> = self
             .composer
             .read(cx)
@@ -3142,44 +3136,12 @@ impl Waku {
             .match_indices(FOLDED_PASTE_MARKER)
             .map(|(index, _)| index)
             .collect();
-        let rebound = markers
-            .iter()
-            .filter(|position| **position >= removed.start && **position < inserted_end)
-            .count();
-        let mut prefix = Vec::new();
-        let mut dropped = Vec::new();
-        let mut suffix = Vec::new();
-        for block in std::mem::take(&mut self.composer_pasted_blocks) {
-            if block.marker < removed.start {
-                prefix.push(block);
-            } else if block.marker >= removed.end {
-                suffix.push(block);
-            } else {
-                dropped.push(block);
-            }
-        }
-        let mut positions = markers.iter().copied();
-        let mut blocks = Vec::with_capacity(prefix.len() + suffix.len() + rebound);
-        for mut block in prefix {
-            if let Some(position) = positions.next() {
-                block.marker = position;
-                blocks.push(block);
-            }
-        }
-        let mut dropped = dropped.into_iter();
-        for position in positions.by_ref().take(rebound) {
-            if let Some(mut block) = dropped.next() {
-                block.marker = position;
-                blocks.push(block);
-            }
-        }
-        for mut block in suffix {
-            if let Some(position) = positions.next() {
-                block.marker = position;
-                blocks.push(block);
-            }
-        }
-        self.composer_pasted_blocks = blocks;
+        self.composer_pasted_blocks = remap_pasted_block_markers(
+            std::mem::take(&mut self.composer_pasted_blocks),
+            &markers,
+            &splice.0.removed,
+            splice.0.inserted,
+        );
     }
 
     /// The text and attachment presentation accepted from the composer. The
@@ -6438,6 +6400,84 @@ pub(super) fn pasted_text_tooltip(
         })
         .into()
     }
+}
+
+/// `remap_pasted_blocks`' core, kept pure for tests: re-anchor each block's
+/// marker through a splice described by the pre-splice `removed` range and
+/// the `inserted` byte count, given the content's live `markers` (sorted)
+/// after it. Markers before `removed` keep their place, markers after it
+/// shift, and markers inside it rebind to markers the inserted text
+/// brought — a whole-content undo step carries them across — while the rest
+/// lose their block. The result re-zips to marker positions so block order
+/// always matches marker order.
+pub(super) fn remap_pasted_block_markers(
+    blocks: Vec<ComposerPastedBlock>,
+    markers: &[usize],
+    removed: &Range<usize>,
+    inserted: usize,
+) -> Vec<ComposerPastedBlock> {
+    let inserted_end = removed.start + inserted;
+    let rebound = markers
+        .iter()
+        .filter(|position| **position >= removed.start && **position < inserted_end)
+        .count();
+    let mut prefix = Vec::new();
+    let mut seated = Vec::new();
+    let mut dropped = Vec::new();
+    let mut suffix = Vec::new();
+    for block in blocks {
+        if block.marker < removed.start {
+            prefix.push(block);
+        } else if block.marker < inserted_end && markers.binary_search(&block.marker).is_ok() {
+            // `insert_paste_marker` records the marker's post-splice
+            // position, so a block the splice just seated already holds one
+            // of the inserted markers rather than a pre-splice offset.
+            seated.push(block);
+        } else if block.marker >= removed.end {
+            suffix.push(block);
+        } else {
+            dropped.push(block);
+        }
+    }
+    let mut positions = markers.iter().copied();
+    let mut remapped =
+        Vec::with_capacity(prefix.len() + seated.len() + dropped.len().min(rebound) + suffix.len());
+    for mut block in prefix {
+        if let Some(position) = positions.next() {
+            block.marker = position;
+            remapped.push(block);
+        }
+    }
+    // The next `rebound` positions are the markers the inserted text
+    // brought: seated blocks keep the one they already hold, dropped blocks
+    // rebind to what remains, and strays stay consumed so suffix positions
+    // keep their alignment.
+    let mut inserted_positions: Vec<usize> = positions.by_ref().take(rebound).collect();
+    seated.sort_by_key(|block| block.marker);
+    for block in seated {
+        if let Some(index) = inserted_positions
+            .iter()
+            .position(|position| *position == block.marker)
+        {
+            inserted_positions.remove(index);
+        }
+        remapped.push(block);
+    }
+    let mut inserted_positions = inserted_positions.into_iter();
+    for mut block in dropped {
+        if let Some(position) = inserted_positions.next() {
+            block.marker = position;
+            remapped.push(block);
+        }
+    }
+    for mut block in suffix {
+        if let Some(position) = positions.next() {
+            block.marker = position;
+            remapped.push(block);
+        }
+    }
+    remapped.sort_by_key(|block| block.marker);
+    remapped
 }
 
 /// Splice each [`FOLDED_PASTE_MARKER`] in `content` back to its block's

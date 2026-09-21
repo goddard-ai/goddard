@@ -1,0 +1,1 @@
+- Pasting a large or multi-line copy (20+ lines or 4 KB+) into the composer no longer swallows it — the splice that seats the "Pasted text" chip's marker was dropping the block it had just created, leaving an invisible marker and losing the pasted text on submit

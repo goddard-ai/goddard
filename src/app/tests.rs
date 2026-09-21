@@ -1,7 +1,8 @@
 use super::composer::{
-    ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
-    next_picker_highlight, pasted_text_preview, splice_pasted_blocks,
-    supports_reasoning_default_reset, visible_branch_entries, workspace_subject_for,
+    ComposerPastedBlock, ComposerSubmitAction, composer_submit_action, dropped_file_mention,
+    merged_submission, next_picker_highlight, pasted_text_preview, remap_pasted_block_markers,
+    splice_pasted_blocks, supports_reasoning_default_reset, visible_branch_entries,
+    workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::{next_idle_session, next_non_busy_session, next_unread_completion};
@@ -497,6 +498,82 @@ fn collapsed_paste_blocks_splice_back_at_their_markers() {
         "fix this\n\nfirst\nblock\n\nsecond\nblock"
     );
     assert_eq!(splice_pasted_blocks("fix this", &[]), "fix this");
+}
+
+#[test]
+fn pasted_block_remap_keeps_the_marker_a_paste_just_seated() {
+    use crate::input::FOLDED_PASTE_MARKER as M;
+    let block = |text: &str, marker: usize| ComposerPastedBlock {
+        text: text.to_owned(),
+        marker,
+    };
+    // The splice a folded paste's own marker insertion produces has an
+    // empty removed range, and the block already holds the marker's
+    // post-splice offset — the seat is inside the inserted range, so it
+    // must not be mistaken for a suffix block and left without a position.
+    let remapped =
+        remap_pasted_block_markers(vec![block("pasted", 0)], &[0], &(0..0), M.len_utf8());
+    assert_eq!(remapped.len(), 1);
+    assert_eq!(remapped[0].marker, 0);
+    assert_eq!(remapped[0].text, "pasted");
+
+    // Same story mid-field: insert_paste_marker seats the marker on its own
+    // line, so the splice may carry a surrounding newline too.
+    let remapped =
+        remap_pasted_block_markers(vec![block("pasted", 10)], &[10], &(9..9), M.len_utf8() + 1);
+    assert_eq!(remapped.len(), 1);
+    assert_eq!(remapped[0].marker, 10);
+
+    // A paste over a selection seats the block the same way.
+    let remapped =
+        remap_pasted_block_markers(vec![block("pasted", 4)], &[4], &(4..9), M.len_utf8());
+    assert_eq!(remapped.len(), 1);
+    assert_eq!(remapped[0].marker, 4);
+
+    // A second folded paste joins an existing block without dropping
+    // either.
+    let remapped = remap_pasted_block_markers(
+        vec![block("first", 0), block("second", 8)],
+        &[0, 8],
+        &(8..8),
+        M.len_utf8(),
+    );
+    assert_eq!(remapped.len(), 2);
+    assert_eq!(remapped[0].marker, 0);
+    assert_eq!(remapped[1].marker, 8);
+}
+
+#[test]
+fn pasted_block_remap_shifts_and_drops_around_edits() {
+    use crate::input::FOLDED_PASTE_MARKER as M;
+    let block = |text: &str, marker: usize| ComposerPastedBlock {
+        text: text.to_owned(),
+        marker,
+    };
+    // Typing before a marker re-seats the block on the moved glyph.
+    let remapped = remap_pasted_block_markers(vec![block("b", 8)], &[10], &(2..2), 2);
+    assert_eq!(remapped.len(), 1);
+    assert_eq!(remapped[0].marker, 10);
+
+    // Deleting a marker's range drops its block; a survivor keeps its seat.
+    let remapped =
+        remap_pasted_block_markers(vec![block("a", 0), block("b", 8)], &[0], &(8..11), 0);
+    assert_eq!(remapped.len(), 1);
+    assert_eq!(remapped[0].text, "a");
+    assert_eq!(remapped[0].marker, 0);
+
+    // An undo step whose inserted text brings a marker back rebinds a block
+    // whose marker the removed range held.
+    let remapped = remap_pasted_block_markers(vec![block("a", 5)], &[5], &(4..6), 5);
+    assert_eq!(remapped.len(), 1);
+    assert_eq!(remapped[0].marker, 5);
+
+    // A splice that leaves a stray marker — one no block owns — still keeps
+    // the trailing blocks aligned to their own markers.
+    let remapped =
+        remap_pasted_block_markers(vec![block("a", 12)], &[4, 12], &(4..4), M.len_utf8());
+    assert_eq!(remapped.len(), 1);
+    assert_eq!(remapped[0].marker, 12);
 }
 
 #[test]
