@@ -1,0 +1,1 @@
+- Full-text session search no longer matches synthesized transcript notices — status lines like "the Goddard daemon restarted and this turn could not be reattached" were indexed as ordinary messages and surfaced tasks whose real content never mentioned the query

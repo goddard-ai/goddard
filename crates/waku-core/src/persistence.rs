@@ -957,6 +957,7 @@ fn search_session_messages(
                     AND {archive_clause}
                     AND messages.role IN ('user', 'assistant')
                     AND messages.hidden = 0
+                    AND messages.notice IS NULL
                     AND instr(lower(messages.content), lower(?1)) > 0
              )
              SELECT session_id, role, content
@@ -2151,6 +2152,7 @@ mod tests {
     use super::*;
     use crate::model::{
         ActivityItem, ActivityKind, FavoriteModel, MessageRole, ReasoningBlock, TranscriptBlock,
+        TranscriptNoticeStatus,
     };
     use base64::Engine as _;
 
@@ -3613,6 +3615,13 @@ mod tests {
         assistant_match.messages.last_mut().unwrap().streaming = true;
         assistant_match.push_message(MessageRole::Assistant, "Final assistant needle");
         assistant_match.finish_active_turn(crate::model::TurnStatus::Completed);
+        assistant_match.push_notice_message(
+            MessageRole::Assistant,
+            "the Goddard daemon restarted and this turn could not be reattached",
+            TranscriptNotice::Status {
+                kind: TranscriptNoticeStatus::Error,
+            },
+        );
         assistant_match.begin_hidden_turn("Hidden continue needle");
         assistant_match.finish_active_turn(crate::model::TurnStatus::Interrupted);
         state.sessions.push(assistant_match);
@@ -3675,6 +3684,16 @@ mod tests {
             .unwrap()
             .is_empty(),
             "a hidden prompt never surfaces in search"
+        );
+        assert!(
+            reopened.session_message_search(
+                "reattached".into(),
+                50,
+                SessionMessageSearchScope::Active
+            )()
+            .unwrap()
+            .is_empty(),
+            "a synthesized notice never surfaces in search"
         );
 
         fs::remove_dir_all(directory).ok();
