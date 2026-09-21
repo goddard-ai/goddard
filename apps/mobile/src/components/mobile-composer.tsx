@@ -19,6 +19,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppSymbol } from './app-symbol';
@@ -37,6 +38,7 @@ import { ModelTraitsSheet } from './session-option-sheets';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
 import { useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
 import { useComposerPicker } from '@/hooks/use-composer-picker';
+import { useComposerKeyboardPadding } from '@/hooks/use-keyboard-padding';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -188,6 +190,7 @@ export function MobileComposer({
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const shellPadding = useComposerKeyboardPadding(insets.bottom);
   const daemon = useDaemon();
   const runtime = useRuntime();
   const [draft, setDraft] = useState('');
@@ -447,7 +450,7 @@ export function MobileComposer({
         : 'Message agent';
 
   return (
-    <View style={[styles.shell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+    <Animated.View style={[styles.shell, shellPadding]}>
       {permission && !userInput && (
         <PermissionPanel
           permission={permission}
@@ -635,7 +638,7 @@ export function MobileComposer({
       )}
       {localCommands.sheets}
       <ComposerContextPicker {...contextPicker.picker} />
-    </View>
+    </Animated.View>
   );
 }
 

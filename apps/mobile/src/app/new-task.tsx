@@ -41,7 +41,7 @@ import { Sheet, SheetRow } from '@/components/sheet';
 import { Radius, Spacing } from '@/constants/theme';
 import { useAllProviderModels, useProviderCatalog, useTaskState } from '@/hooks/use-daemon-data';
 import { useComposerPicker } from '@/hooks/use-composer-picker';
-import { useKeyboardPadding } from '@/hooks/use-keyboard-padding';
+import { useComposerKeyboardPadding, useKeyboardPadding } from '@/hooks/use-keyboard-padding';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useTheme } from '@/hooks/use-theme';
 import { daemonKeys, inspectBranches } from '@/lib/daemon-api';
@@ -372,6 +372,7 @@ export default function NewTaskScreen() {
     || (!prompt.trim() && !draftSync.currentAnnotations().length) || submitting;
 
   const keyboardPadding = useKeyboardPadding();
+  const composerPadding = useComposerKeyboardPadding(insets.bottom);
 
   return (
     <Animated.View
@@ -423,7 +424,7 @@ export default function NewTaskScreen() {
         )}
       </View>
 
-      <View style={[styles.composerShell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      <Animated.View style={[styles.composerShell, composerPadding]}>
         {error && (
           <View
             accessibilityLiveRegion="polite"
@@ -468,7 +469,7 @@ export default function NewTaskScreen() {
           )}
           value={prompt}
         />
-      </View>
+      </Animated.View>
 
       <DaemonPickerSheet
         onDismiss={() => setOpenSheet(null)}
