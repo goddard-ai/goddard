@@ -148,18 +148,17 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
 }
 
 /** Slides and rounds with the content as the drawer reveals, so the app lifts
- * off as a card matching the display's corner radius. */
+ * off as a card matching the display's corner radius. The radius is applied at
+ * rest too — at the true display value the clip coincides with the screen's own
+ * curve, so it's invisible until the card starts to slide. */
 function DrawerCard({ children }: { children: ReactNode }) {
   const progress = useDrawerProgress();
   const cornerRadius = useDisplayCornerRadius();
-  const cardStyle = useAnimatedStyle(() => ({
-    borderRadius: progress.value * cornerRadius,
-  }));
   const dimStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
   }));
   return (
-    <Animated.View style={[styles.drawerCard, cardStyle]}>
+    <Animated.View style={[styles.drawerCard, { borderRadius: cornerRadius }]}>
       {children}
       <Animated.View
         pointerEvents="none"
@@ -653,8 +652,8 @@ const SessionRow = memo(function SessionRow({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   drawerCard: {
-    // Continuous curve matches the display's squircle; borderRadius is
-    // animated in useAnimatedStyle from drawer progress.
+    // Continuous curve matches the display's squircle; borderRadius is set
+    // per-device on the element above.
     borderCurve: 'continuous',
     flex: 1,
     overflow: 'hidden',
