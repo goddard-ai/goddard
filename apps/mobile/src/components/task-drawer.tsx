@@ -301,8 +301,15 @@ function TaskDrawerContent({
   // beat between the empty state fading out and the fresh rows fading in.
   const listOpacity = useSharedValue(1);
   const emptyOpacity = useSharedValue(emptyShown ? 1 : 0);
-  const listFadeStyle = useAnimatedStyle(() => ({ opacity: listOpacity.value }));
-  const emptyFadeStyle = useAnimatedStyle(() => ({ opacity: emptyOpacity.value }));
+  // The drag itself lifts the list layers from 15% to full as the drawer
+  // reveals, multiplied with the crossfade values so both fades compose.
+  const drawerProgress = useDrawerProgress();
+  const listFadeStyle = useAnimatedStyle(() => ({
+    opacity: listOpacity.value * (0.15 + 0.85 * drawerProgress.value),
+  }));
+  const emptyFadeStyle = useAnimatedStyle(() => ({
+    opacity: emptyOpacity.value * (0.15 + 0.85 * drawerProgress.value),
+  }));
   const fadeState = useRef({ emptyShown, hasRows });
   useLayoutEffect(() => {
     const prev = fadeState.current;
