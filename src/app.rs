@@ -283,21 +283,22 @@ enum SettingsPage {
 }
 
 impl SettingsPage {
-    /// Computer Use, Friends, Jev, and Integrations are still experimental,
-    /// so their navigation entry points only appear once the Experiments
-    /// opt-in is on. Keeping this decision on the page itself makes the
-    /// Settings sidebar and command palette use the same gate.
+    /// Computer Use, Friends, and Integrations each sit behind a single
+    /// Experiments opt-in; Jev's page configures the eval backend that
+    /// several experiments share, so it stays while any of them is on.
+    /// Keeping this decision on the page itself makes the Settings sidebar
+    /// and command palette use the same gate.
     fn is_visible_in_navigation(
         self,
         computer_use_experiment_enabled: bool,
         friends_enabled: bool,
-        model_router_enabled: bool,
+        jev_in_use: bool,
         integrations_enabled: bool,
     ) -> bool {
         match self {
             Self::ComputerUse => computer_use_experiment_enabled,
             Self::Friends => friends_enabled,
-            Self::Jev => model_router_enabled,
+            Self::Jev => jev_in_use,
             Self::Integrations => integrations_enabled,
             Self::Keybindings => crate::keybindings::manager_enabled(),
             _ => true,
@@ -310,13 +311,13 @@ impl SettingsPage {
         self,
         computer_use_experiment_enabled: bool,
         friends_enabled: bool,
-        model_router_enabled: bool,
+        jev_in_use: bool,
         integrations_enabled: bool,
     ) -> Self {
         if self.is_visible_in_navigation(
             computer_use_experiment_enabled,
             friends_enabled,
-            model_router_enabled,
+            jev_in_use,
             integrations_enabled,
         ) {
             self

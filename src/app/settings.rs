@@ -238,13 +238,13 @@ pub(super) struct RemoteHostEditor {
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
 /// already be trimmed and lowercased; when it is empty every page matches.
-/// Friends, Jev, and Integrations are experiments — their rows only appear
-/// while the opt-in is on.
+/// Friends and Integrations are experiments — their rows only appear while
+/// the opt-in is on; Jev's stays while any eval-backed experiment is on.
 pub(super) fn visible_settings_pages(
     query: &str,
     computer_use_experiment_enabled: bool,
     friends_enabled: bool,
-    model_router_enabled: bool,
+    jev_in_use: bool,
     integrations_enabled: bool,
 ) -> impl Iterator<Item = (SettingsPage, String, &'static str)> + '_ {
     SETTINGS_PAGES
@@ -253,7 +253,7 @@ pub(super) fn visible_settings_pages(
             page.is_visible_in_navigation(
                 computer_use_experiment_enabled,
                 friends_enabled,
-                model_router_enabled,
+                jev_in_use,
                 integrations_enabled,
             )
         })
@@ -824,7 +824,7 @@ impl Waku {
                 &query,
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
-                self.state.model_router_enabled,
+                self.jev_in_use(),
                 self.state.integrations_enabled,
             )
             .collect()
@@ -1008,7 +1008,7 @@ impl Waku {
             &query,
             self.state.computer_use_experiment_enabled,
             self.state.friends_enabled,
-            self.state.model_router_enabled,
+            self.jev_in_use(),
             self.state.integrations_enabled,
         )
         .map(|(page, ..)| page)
@@ -1084,7 +1084,7 @@ impl Waku {
             .into_visible(
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
-                self.state.model_router_enabled,
+                self.jev_in_use(),
                 self.state.integrations_enabled,
             );
         let search = SettingSearch::inactive().for_page(
@@ -1302,7 +1302,7 @@ impl Waku {
             if !page.is_visible_in_navigation(
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
-                self.state.model_router_enabled,
+                self.jev_in_use(),
                 self.state.integrations_enabled,
             ) {
                 continue;
@@ -5013,9 +5013,10 @@ impl Waku {
         cx.notify();
     }
 
-    /// The Jev page — the Auto model routing experiment's home: eval backend
-    /// and credentials, then the class-level routing targets. The page only
-    /// exists in navigation while the experiment opt-in is on.
+    /// The Jev page — the eval backend every eval-backed feature shares:
+    /// backend and credentials first, then the Auto routing experiment's
+    /// class-level targets. The page only exists in navigation while at
+    /// least one eval-backed experiment is on.
     fn render_jev_settings(&self, search: &SettingSearch, cx: &mut Context<Self>) -> AnyElement {
         self.render_model_routing_settings(Theme::current(cx), search, cx)
     }
@@ -5312,11 +5313,17 @@ impl Waku {
         cx.notify();
     }
 
-    fn set_model_router_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        if !enabled && self.settings_page == Some(SettingsPage::Jev) {
+    /// An open Jev page unmounts when the last eval-backed experiment goes
+    /// off — its navigation row is gone too. Enabling anything leaves it.
+    fn close_jev_page_if_unused(&mut self) {
+        if !self.jev_in_use() && self.settings_page == Some(SettingsPage::Jev) {
             self.settings_page = None;
         }
+    }
+
+    fn set_model_router_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.model_router_enabled = enabled;
+        self.close_jev_page_if_unused();
         if enabled {
             // The Jev page reads the eval mirror — warm it rather than
             // waiting for the first frame to discover it is missing.
@@ -5331,6 +5338,7 @@ impl Waku {
             self.clear_status_markers();
         }
         self.state.status_markers_enabled = enabled;
+        self.close_jev_page_if_unused();
         self.save();
         cx.notify();
     }
@@ -5340,6 +5348,7 @@ impl Waku {
             self.clear_action_predictions();
         }
         self.state.action_predictions_enabled = enabled;
+        self.close_jev_page_if_unused();
         self.save();
         cx.notify();
     }

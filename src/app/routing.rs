@@ -282,6 +282,20 @@ impl Waku {
             && !self.route_candidates().is_empty()
     }
 
+    /// Whether an opted-in feature runs on the Jev eval backend — auto
+    /// routing, turn status markers, and action predictions each go quiet
+    /// without a configured backend — so the settings page that configures
+    /// it stays reachable while any of them is on. Provider switching and
+    /// auto-mode permission review evaluate through Jev too but ship
+    /// without an opt-in of their own: counting them would pin the page
+    /// open permanently, so their "configure a backend" path still leans
+    /// on one of these flags.
+    pub(super) fn jev_in_use(&self) -> bool {
+        self.state.model_router_enabled
+            || self.state.status_markers_enabled
+            || self.state.action_predictions_enabled
+    }
+
     /// Whether the selected eval backend is missing the credential its Jev
     /// call requires — the picker's Auto row warns rather than failing at
     /// submit. Mirrors the `required` checks in waku-core's `backend_request`.

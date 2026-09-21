@@ -3530,7 +3530,8 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         !visible_settings_pages("", true, false, true, true)
             .any(|(page, ..)| page == SettingsPage::Friends)
     );
-    // Jev likewise leaves the navigation when its experiment is off.
+    // Jev likewise leaves the navigation when no eval-backed experiment is
+    // on — its gate is the union of those opt-ins, not one flag.
     assert!(
         !visible_settings_pages("", true, true, false, true)
             .any(|(page, ..)| page == SettingsPage::Jev)

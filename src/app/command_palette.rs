@@ -2317,7 +2317,7 @@ impl Waku {
             if !page.is_visible_in_navigation(
                 self.state.computer_use_experiment_enabled,
                 self.state.friends_enabled,
-                self.state.model_router_enabled,
+                self.jev_in_use(),
                 self.state.integrations_enabled,
             ) {
                 continue;

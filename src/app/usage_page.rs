@@ -50,7 +50,7 @@ impl Waku {
         if page == SettingsPage::Friends && !self.state.friends_enabled {
             return;
         }
-        if page == SettingsPage::Jev && !self.state.model_router_enabled {
+        if page == SettingsPage::Jev && !self.jev_in_use() {
             return;
         }
         if page == SettingsPage::Integrations && !self.state.integrations_enabled {
