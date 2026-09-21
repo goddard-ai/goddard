@@ -496,7 +496,7 @@ fn work_status_icon(status: BackgroundWorkStatus) -> &'static str {
         | BackgroundWorkStatus::Monitoring => "icons/loader-circle.svg",
         BackgroundWorkStatus::Stopping | BackgroundWorkStatus::Stopped => "icons/stop.svg",
         BackgroundWorkStatus::Completed => "icons/check.svg",
-        BackgroundWorkStatus::Failed => "icons/x.svg",
+        BackgroundWorkStatus::Failed => "icons/x-bold.svg",
         BackgroundWorkStatus::Lost => "icons/alert.svg",
     }
 }
@@ -2280,7 +2280,7 @@ mod tests {
                 BackgroundWorkKind::Monitor,
                 BackgroundWorkStatus::Failed,
             ),
-            Some("icons/x.svg")
+            Some("icons/x-bold.svg")
         );
         assert_eq!(
             background_summary_process_status_icon(

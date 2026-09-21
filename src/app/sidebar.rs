@@ -606,7 +606,7 @@ pub(super) fn sidebar_check_status_icon(
     match status {
         waku_client::PullRequestCheckStatus::Passing => "icons/check.svg",
         waku_client::PullRequestCheckStatus::Pending => "icons/hourglass.svg",
-        waku_client::PullRequestCheckStatus::Failing => "icons/x.svg",
+        waku_client::PullRequestCheckStatus::Failing => "icons/x-bold.svg",
     }
 }
 
@@ -1015,7 +1015,7 @@ impl Waku {
             .when(enabled, |element| {
                 element.child(if blocked {
                     div().absolute().top(px(2.0)).right(px(2.0)).child(icon(
-                        "icons/x.svg",
+                        "icons/x-bold.svg",
                         8.0,
                         theme.danger,
                     ))
@@ -4527,7 +4527,7 @@ impl Waku {
                     .into_any_element(),
                 ),
                 SessionStatus::Failed => Some(
-                    icon("icons/x.svg", 12.0, status_color(&theme, session.status))
+                    icon("icons/x-bold.svg", 12.0, status_color(&theme, session.status))
                         .into_any_element(),
                 ),
                 SessionStatus::Idle if self.state.unseen_completions.contains_key(&session_id) => {

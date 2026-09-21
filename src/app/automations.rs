@@ -2703,7 +2703,7 @@ fn run_status_badge(theme: &Theme, status: AutomationRunStatus) -> (&'static str
             tr!("automations.status_completed"),
         ),
         AutomationRunStatus::Failed => (
-            "icons/x.svg",
+            "icons/x-bold.svg",
             theme.danger,
             tr!("automations.status_failed"),
         ),

@@ -1058,7 +1058,9 @@ impl Waku {
         let status_icon = match tone {
             ToastTone::Alert => icon("icons/alert.svg", 14.0, theme.danger).into_any_element(),
             ToastTone::Success => icon("icons/check.svg", 14.0, theme.success).into_any_element(),
-            ToastTone::Failure => icon("icons/x.svg", 14.0, theme.danger).into_any_element(),
+            ToastTone::Failure => {
+                icon("icons/x-bold.svg", 14.0, theme.danger).into_any_element()
+            }
             ToastTone::Notice => icon("icons/server.svg", 14.0, theme.accent).into_any_element(),
             ToastTone::Progress => {
                 motion::spin(icon("icons/loader-circle.svg", 14.0, theme.text_tertiary))

@@ -508,7 +508,7 @@ impl Waku {
             })
             .when(session.status == SessionStatus::Failed, |entry| {
                 entry.child(icon(
-                    "icons/x.svg",
+                    "icons/x-bold.svg",
                     12.0,
                     status_color(&theme, session.status),
                 ))

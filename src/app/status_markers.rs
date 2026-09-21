@@ -108,7 +108,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
     StatusMarker {
         id: "failed",
         label_key: "status_markers.failed",
-        icon: "icons/x.svg",
+        icon: "icons/x-bold.svg",
         tone: MarkerTone::Danger,
         threshold: 0.45,
         instructions: "The turn failed — a reported error, a tool failure that ended \

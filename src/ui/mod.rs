@@ -901,6 +901,7 @@ mod tests {
             "icons/zap.svg",
             "icons/panel-right.svg",
             "icons/x.svg",
+            "icons/x-bold.svg",
             "icons/bot.svg",
             "icons/rotate-cw.svg",
             "icons/package.svg",

@@ -1026,7 +1026,9 @@ impl Waku {
                         )
                     }
                     Some(0) => None,
-                    Some(_) => Some(icon("icons/x.svg", 12.0, theme.danger).into_any_element()),
+                    Some(_) => {
+                        Some(icon("icons/x-bold.svg", 12.0, theme.danger).into_any_element())
+                    }
                     None => None,
                 }
             }

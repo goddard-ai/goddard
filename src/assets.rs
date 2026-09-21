@@ -261,6 +261,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "window-minimize",
     "window-restore",
     "x",
+    "x-bold",
     "zap",
 ];
 

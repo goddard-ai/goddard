@@ -3281,7 +3281,8 @@ impl Waku {
                             element
                                 .when(activity.failed, |element| {
                                     element.child(
-                                        icon("icons/x.svg", 10.0, theme.danger).into_any_element(),
+                                        icon("icons/x-bold.svg", 10.0, theme.danger)
+                                            .into_any_element(),
                                     )
                                 })
                                 .when(!activity.complete && !activity.failed, |element| {
