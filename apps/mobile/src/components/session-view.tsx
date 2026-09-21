@@ -11,13 +11,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { ActivitySheetHost } from '@/components/activity-sheet';
+import { AppSymbol } from '@/components/app-symbol';
+import { GlassSurface } from '@/components/glass-surface';
 import { ConnectionBanner } from '@/components/connection-banner';
 import { MobileComposer } from '@/components/mobile-composer';
 import { PROVIDER_MENU_ICONS } from '@/components/provider-menu-icons';
@@ -47,10 +51,16 @@ import { SessionEmpty } from '@/components/transcript-rows';
 import { useProviderModels, useSession, useTaskState } from '@/hooks/use-daemon-data';
 import { useKeyboardPadding } from '@/hooks/use-keyboard-padding';
 import { useTheme } from '@/hooks/use-theme';
+import { Radius } from '@/constants/theme';
 import { useDaemon } from '@/lib/daemon-context';
-import { sessionBusy } from '@/lib/mobile-runtime';
+import { listSessionTurnRefs } from '@/lib/daemon-api';
+import { sessionBusy, sessionCwd } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
-import { displaySessionTitle } from '@/lib/session-presentation';
+import {
+  displaySessionTitle,
+  forkableTurnIds,
+  rewindableTurnIds,
+} from '@/lib/session-presentation';
 
 const SURFACE_MENU_COMMANDS = [
   { id: 'terminal', title: 'Terminal', symbol: 'terminal' },
@@ -64,6 +74,12 @@ const TASK_MENU_COMMANDS = [
     id: 'copy-last-response',
     title: 'Copy last response',
     symbol: 'doc.on.doc',
+    destructive: false,
+  },
+  {
+    id: 'find',
+    title: 'Find in transcript',
+    symbol: 'magnifyingglass',
     destructive: false,
   },
   {
@@ -113,9 +129,14 @@ export function SessionView({
   const [taskSurfaceOpen, setTaskSurfaceOpen] = useState(false);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [turnRefs, setTurnRefs] = useState<ReadonlySet<number> | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findIndex, setFindIndex] = useState(0);
   const [mountedTranscriptSessionId, setMountedTranscriptSessionId] = useState<string | null>(null);
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<TranscriptListHandle>(null);
+  const lastFindQuery = useRef('');
   const headerInset = useScreenHeaderInset();
   const sessionRef = useRef(session);
   const queryRef = useRef(query);
@@ -137,6 +158,10 @@ export function SessionView({
     setTaskSurfaceOpen(false);
     setTaskSurface(null);
     setModelSheetOpen(false);
+    setFindOpen(false);
+    setFindQuery('');
+    setFindIndex(0);
+    lastFindQuery.current = '';
   }, [session?.id]);
 
   // Route/header/composer get the first commit by themselves. Transcript row
@@ -274,6 +299,8 @@ export function SessionView({
         setModelSheetOpen(true);
       } else if (command === 'rename') {
         setRenaming(true);
+      } else if (command === 'find') {
+        setFindOpen(true);
       } else if (command === 'copy-last-response') {
         void copyLastResponse();
       } else if (command === 'compact') {
@@ -291,6 +318,125 @@ export function SessionView({
 
   const taskState = useTaskState().data;
   const project = taskState?.projects.find((item) => item.id === session?.project_id);
+
+  // Checkpoint turn counts drive the rewind affordance — one workspace op
+  // per settle, mirroring desktop's checkpoint ref cache.
+  const settledTurns = session?.turns.filter((turn) => turn.status !== 'running').length ?? 0;
+  const workspaceCwd = session && project ? sessionCwd(session, project) : null;
+  useEffect(() => {
+    const client = daemon.client;
+    const current = sessionRef.current;
+    if (!client || !current || !workspaceCwd || daemon.phase !== 'connected') {
+      setTurnRefs(null);
+      return;
+    }
+    let cancelled = false;
+    void listSessionTurnRefs(client, workspaceCwd, current.id)
+      .then((refs) => { if (!cancelled) setTurnRefs(refs); })
+      .catch(() => { if (!cancelled) setTurnRefs(null); });
+    return () => { cancelled = true; };
+  }, [daemon.client, daemon.phase, session?.id, settledTurns, workspaceCwd]);
+
+  // Set contents change only when eligibility flips; a fresh identity per
+  // stream commit would re-render every memoized transcript row.
+  const rewindTurns = useStableSet(useMemo(
+    () => (session ? rewindableTurnIds(session, turnRefs) : new Set<string>()),
+    [session, turnRefs],
+  ));
+  const forkTurns = useStableSet(useMemo(
+    () => (session ? forkableTurnIds(session) : new Set<string>()),
+    [session],
+  ));
+
+  const confirmRewind = useCallback((turnId: string) => {
+    const current = sessionRef.current;
+    const turn = current?.turns.find((item) => item.id === turnId);
+    if (!current || !turn) return;
+    const dropped = current.turns.length - turn.turn_count + 1;
+    Alert.alert(
+      `Rewind “${displaySessionTitle(current)}” to here?`,
+      `This removes ${dropped === 1 ? 'this turn' : `${dropped} turns`} and restores the files and conversation to before this message.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Rewind',
+          style: 'destructive',
+          onPress: () => {
+            void runtimeRef.current.rewindSessionToMessage(current.id, turn.turn_count)
+              .then(({ warning }) => {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                if (warning) Alert.alert('Rewind cleanup warning', warning);
+              })
+              .catch((cause) => {
+                Alert.alert('Couldn’t rewind', cause instanceof Error ? cause.message : String(cause));
+              });
+          },
+        },
+      ],
+    );
+  }, []);
+
+  const forkTurn = useCallback((turnId: string) => {
+    const current = sessionRef.current;
+    const turn = current?.turns.find((item) => item.id === turnId);
+    if (!current || !turn) return;
+    void runtimeRef.current.forkSessionFromResponse(current.id, turn.turn_count)
+      .then(({ session: forked, warning }) => {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        router.push({ pathname: '/session/[id]', params: { id: forked.id } });
+        if (warning) Alert.alert('Fork checkpoint warning', warning);
+      })
+      .catch((cause) => {
+        Alert.alert('Couldn’t fork task', cause instanceof Error ? cause.message : String(cause));
+      });
+  }, []);
+
+  // Transcript find bar: matches resolve to expanded row keys; the list's
+  // revealRow mounts windowed history and opens folds as needed.
+  const findMatches = useMemo(() => {
+    const needle = findQuery.trim().toLowerCase();
+    if (!findOpen || needle.length < 2 || !session) return [] as Array<{ key: string; turnId: string | null }>;
+    const matches: Array<{ key: string; turnId: string | null }> = [];
+    for (const message of session.messages) {
+      const text = (message.display_content ?? message.content).toLowerCase();
+      if (message.hidden || !text.includes(needle)) continue;
+      if (message.role === 'user') matches.push({ key: `user:${message.id}`, turnId: message.turn_id });
+      else if (message.role === 'system') matches.push({ key: `system:${message.id}`, turnId: message.turn_id });
+      else if (message.role === 'assistant') matches.push({ key: `md:${message.id}.0`, turnId: message.turn_id });
+    }
+    return matches;
+  }, [findOpen, findQuery, session]);
+
+  const revealMatch = useCallback((index: number, matches: Array<{ key: string; turnId: string | null }>) => {
+    const match = matches[index];
+    if (!match) return;
+    listRef.current?.revealRow(match.key, match.turnId);
+  }, []);
+
+  // A new query jumps to the newest match — the convention for find-in-page.
+  // Streaming updates rebuild the match list without re-yanking the reader.
+  useEffect(() => {
+    if (findQuery === lastFindQuery.current) return;
+    lastFindQuery.current = findQuery;
+    if (!findMatches.length) return;
+    const index = findMatches.length - 1;
+    setFindIndex(index);
+    revealMatch(index, findMatches);
+  }, [findMatches, findQuery, revealMatch]);
+
+  const stepFind = useCallback((delta: number) => {
+    if (!findMatches.length) return;
+    const next = (findIndex + delta + findMatches.length) % findMatches.length;
+    setFindIndex(next);
+    revealMatch(next, findMatches);
+  }, [findIndex, findMatches, revealMatch]);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery('');
+    setFindIndex(0);
+    lastFindQuery.current = '';
+  }, []);
   const subtitleParts = [project?.name, daemon.activeProfile?.name].filter(Boolean);
   const title = session ? displaySessionTitle(session) : 'Task';
   // The bar's subtitle doubles as the quiet link indicator, the way messaging
@@ -453,12 +599,16 @@ export function SessionView({
         {session && transcriptMounted ? (
           <ActivitySheetHost key={`activity-sheet:${session.id}`} session={session}>
             <TranscriptList
+              forkTurns={forkTurns}
               headerInset={headerInset}
               hydrated={!query.isPlaceholderData}
               ref={listRef}
+              rewindTurns={rewindTurns}
               running={running}
               session={session}
               onDevSample={devPrompt ? probe.sample : undefined}
+              onForkTurn={forkTurn}
+              onRewindTurn={confirmRewind}
             />
           </ActivitySheetHost>
         ) : (
@@ -469,6 +619,72 @@ export function SessionView({
               missing={query.data === null}
             />
           </View>
+        )}
+        {findOpen && session && (
+          <GlassSurface
+            fallbackColor={theme.surface}
+            interactive
+            style={[styles.findBar, { top: headerInset + 8 }]}>
+            <View style={styles.findBarInner}>
+              <AppSymbol
+                name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
+                size={14}
+                tintColor={theme.textTertiary}
+              />
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+                onChangeText={setFindQuery}
+                placeholder="Find in transcript"
+                placeholderTextColor={theme.textGhost}
+                returnKeyType="search"
+                style={[styles.findInput, { color: theme.text }]}
+                value={findQuery}
+              />
+              <Text style={[styles.findCount, { color: theme.textTertiary }]}>
+                {findMatches.length
+                  ? `${Math.min(findIndex + 1, findMatches.length)} of ${findMatches.length}`
+                  : 'No matches'}
+              </Text>
+              <Pressable
+                accessibilityLabel="Previous match"
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() => stepFind(-1)}
+                style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
+                <AppSymbol
+                  name={{ ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }}
+                  size={16}
+                  tintColor={theme.textSecondary}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Next match"
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() => stepFind(1)}
+                style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
+                <AppSymbol
+                  name={{ ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
+                  size={16}
+                  tintColor={theme.textSecondary}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Close find"
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={closeFind}
+                style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
+                <AppSymbol
+                  name={{ ios: 'xmark', android: 'close', web: 'close' }}
+                  size={15}
+                  tintColor={theme.textSecondary}
+                />
+              </Pressable>
+            </View>
+          </GlassSurface>
         )}
         <View pointerEvents="box-none" style={[styles.linkBanner, { top: headerInset + 8 }]}>
           <ConnectionBanner floating />
@@ -519,6 +735,17 @@ export function SessionView({
       )}
     </Animated.View>
   );
+}
+
+/** Same-contents-in, same-identity-out, so memoized children see a stable
+ * prop until membership actually changes. */
+function useStableSet(current: ReadonlySet<string>): ReadonlySet<string> {
+  const ref = useRef(current);
+  const previous = ref.current;
+  const same = previous.size === current.size
+    && [...current].every((value) => previous.has(value));
+  if (!same) ref.current = current;
+  return ref.current;
 }
 
 /**
@@ -587,6 +814,22 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   placeholder: { alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 32 },
   linkBanner: { left: 12, position: 'absolute', right: 12, zIndex: 10 },
+  findBar: {
+    borderRadius: Radius.pill,
+    left: 12,
+    position: 'absolute',
+    right: 12,
+    zIndex: 10,
+  },
+  findBarInner: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 40,
+    paddingHorizontal: 12,
+  },
+  findCount: { fontSize: 12, fontVariant: ['tabular-nums'] },
+  findInput: { flex: 1, fontSize: 15, paddingVertical: 6 },
   devBadge: {
     backgroundColor: 'rgba(0,0,0,0.75)',
     borderRadius: 6,

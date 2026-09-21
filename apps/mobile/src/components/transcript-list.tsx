@@ -67,6 +67,11 @@ export interface TranscriptListHandle {
   /** A message the reader just sent is about to land: follow it to the
    * bottom even if they had scrolled up into history. */
   followNextGrowth: () => void;
+  /** Scroll a row's visual top to just under the floating header. Expands
+   * its turn's fold and mounts enough history for the row to exist; the
+   * scroll fires when the row's layout lands. Returns whether the key
+   * resolves to a row at all. */
+  revealRow: (rowKey: string, turnId?: string | null) => boolean;
 }
 
 export interface TranscriptDevSample {
@@ -102,6 +107,10 @@ export function TranscriptList({
   hydrated,
   running,
   headerInset,
+  rewindTurns,
+  forkTurns,
+  onRewindTurn,
+  onForkTurn,
   onDevSample,
 }: {
   ref?: Ref<TranscriptListHandle>;
@@ -110,6 +119,12 @@ export function TranscriptList({
   hydrated: boolean;
   running: boolean;
   headerInset: number;
+  /** Turn ids where the per-turn affordances are eligible (daemon-owned
+   * semantics, resolved by the session screen). */
+  rewindTurns?: ReadonlySet<string>;
+  forkTurns?: ReadonlySet<string>;
+  onRewindTurn?: (turnId: string) => void;
+  onForkTurn?: (turnId: string) => void;
   onDevSample?: (sample: TranscriptDevSample) => void;
 }) {
   const theme = useTheme();
@@ -371,7 +386,70 @@ export function TranscriptList({
     scrollToLatest(true);
   }, [scrollToLatest]);
 
-  useImperativeHandle(ref, () => ({ scrollToLatest, followNextGrowth }), [followNextGrowth, scrollToLatest]);
+  // ── Row reveal (search navigation) ────────────────────────────────────
+  // Rows are direct ScrollView children, so a frame's layout y is the row's
+  // content offset. Revealing a row that is windowed out or folded away
+  // mounts it first; the scroll fires when its layout lands.
+  const rowLayouts = useRef(new Map<string, { y: number; height: number }>());
+  const pendingReveal = useRef<string | null>(null);
+
+  const tryReveal = useCallback(() => {
+    const key = pendingReveal.current;
+    if (!key) return;
+    const layout = rowLayouts.current.get(key);
+    if (!layout) return;
+    pendingReveal.current = null;
+    // Off the tail on purpose: the same "seating" glide the jump button
+    // uses so streaming growth does not fight the animation.
+    seatingUntil.current = Date.now() + SEAT_GLIDE_MS;
+    const target = Math.max(
+      0,
+      layout.y + layout.height - metrics.current.viewportHeight + headerInset + 8,
+    );
+    scrollRef.current?.scrollTo({ y: target, animated: !reducedMotion });
+  }, [headerInset, reducedMotion]);
+
+  const onRowLayout = useCallback((rowKey: string, layout: { y: number; height: number }) => {
+    rowLayouts.current.set(rowKey, layout);
+    if (pendingReveal.current === rowKey) tryReveal();
+  }, [tryReveal]);
+
+  const revealRow = useCallback((rowKey: string, turnId?: string | null) => {
+    Keyboard.dismiss();
+    pendingReveal.current = rowKey;
+    if (turnId) {
+      setExpandedFolds((current) => (current.has(turnId) ? current : new Set(current).add(turnId)));
+    }
+    if (!rows.some((row) => row.key === rowKey)) {
+      const pipelineIndex = pipeline.findIndex((row) => {
+        if (row.kind !== 'message') return row.key === rowKey;
+        const id = row.message.id;
+        return rowKey === `user:${id}` || rowKey === `system:${id}` || rowKey.startsWith(`md:${id}.`);
+      });
+      if (pipelineIndex < 0) {
+        // Folded-away rows are absent until the expansion lands; reach the
+        // turn's position so a deep match still mounts its history.
+        if (turnId == null) return false;
+        const foldIndex = pipeline.findIndex((row) => row.turnId === turnId);
+        if (foldIndex < 0) return false;
+        if (foldIndex < start) {
+          setWindowStart((value) => Math.min(value ?? foldIndex, foldIndex));
+        }
+        return true;
+      }
+      if (pipelineIndex < start) {
+        setWindowStart((value) => Math.min(value ?? pipelineIndex, pipelineIndex));
+      }
+    }
+    tryReveal();
+    return true;
+  }, [pipeline, rows, start, tryReveal]);
+
+  useImperativeHandle(
+    ref,
+    () => ({ scrollToLatest, followNextGrowth, revealRow }),
+    [followNextGrowth, revealRow, scrollToLatest],
+  );
 
   useEffect(() => () => {
     if (followRequest.current) clearTimeout(followRequest.current);
@@ -469,12 +547,17 @@ export function TranscriptList({
             return (
               <TranscriptRowFrame
                 key={row.key}
+                forkTurns={forkTurns}
                 keepRowTop={keepRowTop}
                 markdownStyles={markdownStyles}
                 md={md}
+                rewindTurns={rewindTurns}
                 row={row}
                 seeded={row.kind === 'md' && seeded.ids.has(row.messageId)}
                 veils={veils}
+                onForkTurn={onForkTurn}
+                onRewindTurn={onRewindTurn}
+                onRowLayout={onRowLayout}
                 onToggleFold={toggleFold}
               />
             );
@@ -533,7 +616,12 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   veils,
   seeded,
   markdownStyles,
+  rewindTurns,
+  forkTurns,
   onToggleFold,
+  onRewindTurn,
+  onForkTurn,
+  onRowLayout,
 }: {
   row: TranscriptRow;
   keepRowTop: KeepRowTop;
@@ -541,21 +629,32 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   veils: VeilRegistry;
   seeded: boolean;
   markdownStyles: MarkdownStyles;
+  rewindTurns?: ReadonlySet<string>;
+  forkTurns?: ReadonlySet<string>;
   onToggleFold: (turnId: string) => void;
+  onRewindTurn?: (turnId: string) => void;
+  onForkTurn?: (turnId: string) => void;
+  onRowLayout: (rowKey: string, layout: { y: number; height: number }) => void;
 }) {
   const keepTop = useCallback(
     (apply: () => void) => keepRowTop(row.key, apply),
     [keepRowTop, row.key],
   );
   return (
-    <View style={[styles.inverted, styles.column, { paddingTop: row.topGap }]}>
+    <View
+      style={[styles.inverted, styles.column, { paddingTop: row.topGap }]}
+      onLayout={(event) => onRowLayout(row.key, event.nativeEvent.layout)}>
       <RowAnchorProvider value={keepTop}>
         <TranscriptRowView
+          forkTurns={forkTurns}
           markdownStyles={markdownStyles}
           md={md}
+          rewindTurns={rewindTurns}
           row={row}
           seeded={seeded}
           veils={veils}
+          onForkTurn={onForkTurn}
+          onRewindTurn={onRewindTurn}
           onToggleFold={onToggleFold}
         />
       </RowAnchorProvider>

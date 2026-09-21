@@ -119,6 +119,21 @@ export async function searchSessionMessages(
   return response.matches;
 }
 
+/** Checkpoint turn counts that have a git ref — desktop's
+ * `checkpoint_ref_cache` source. Drives the rewind affordance. */
+export async function listSessionTurnRefs(
+  client: WakuClient,
+  cwd: string,
+  sessionId: string,
+): Promise<Set<number>> {
+  const response = await client.request({
+    type: 'workspace',
+    operation: { type: 'sessionTurnRefs', cwd, session_id: sessionId },
+  });
+  const result = expectResponse(response, 'workspace').result;
+  return result.type === 'turnRefs' ? new Set(result.turn_counts) : new Set();
+}
+
 export async function listProviderSessions(
   client: WakuClient,
   provider: ProviderKind,

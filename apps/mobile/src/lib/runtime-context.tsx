@@ -121,6 +121,14 @@ interface RuntimeContextValue {
   cancel: (sessionId: string) => Promise<void>;
   compactSession: (sessionId: string) => Promise<void>;
   rollbackSession: (sessionId: string, turns: number) => Promise<void>;
+  rewindSessionToMessage: (
+    sessionId: string,
+    turnCount: number,
+  ) => Promise<{ session: AgentSession; warning: string | null }>;
+  forkSessionFromResponse: (
+    sessionId: string,
+    turnCount: number,
+  ) => Promise<{ session: AgentSession; warning: string | null }>;
   respond: (sessionId: string, requestId: string, optionId: string) => Promise<void>;
   respondUserInput: (
     sessionId: string,
@@ -794,6 +802,50 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await client.request({ type: 'rollback', turns }, sessionId, runtime.runtimeId);
   }, [daemon.client]);
 
+  /** Rewind to before one user turn — the daemon restores the checkpoint,
+   * truncates the provider conversation, and returns the rewritten session. */
+  const rewindSessionToMessage = useCallback(async (
+    sessionId: string,
+    turnCount: number,
+  ): Promise<{ session: AgentSession; warning: string | null }> => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId) throw new Error('Goddard daemon is disconnected');
+    const response = await client.request(
+      { type: 'rewindSessionToMessage', turnCount },
+      sessionId,
+    );
+    if (response.type !== 'sessionRewound') {
+      throw new Error(`Expected sessionRewound, received ${response.type}`);
+    }
+    const next = { ...response.session, detail_loaded: true };
+    cacheSession(next);
+    void queryClient.invalidateQueries({ queryKey: daemonKeys.taskState(profileId) });
+    return { session: next, warning: response.cleanupWarning };
+  }, [cacheSession, daemon.activeProfile?.id, daemon.client, queryClient]);
+
+  /** Fork the session through one response — the daemon copies the provider
+   * conversation and checkpoint refs into a new task and returns it. */
+  const forkSessionFromResponse = useCallback(async (
+    sessionId: string,
+    turnCount: number,
+  ): Promise<{ session: AgentSession; warning: string | null }> => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId) throw new Error('Goddard daemon is disconnected');
+    const response = await client.request(
+      { type: 'forkSessionFromResponse', turnCount },
+      sessionId,
+    );
+    if (response.type !== 'sessionForked') {
+      throw new Error(`Expected sessionForked, received ${response.type}`);
+    }
+    const next = { ...response.session, detail_loaded: true };
+    cacheSession(next);
+    void queryClient.invalidateQueries({ queryKey: daemonKeys.taskState(profileId) });
+    return { session: next, warning: response.checkpointWarning };
+  }, [cacheSession, daemon.activeProfile?.id, daemon.client, queryClient]);
+
   const markWorking = useCallback((sessionId: string) => {
     const profileId = daemon.activeProfile?.id;
     if (!profileId) return;
@@ -1113,6 +1165,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       cancel,
       compactSession,
       rollbackSession,
+      rewindSessionToMessage,
+      forkSessionFromResponse,
       respond,
       respondUserInput,
       clarifyUserInput,

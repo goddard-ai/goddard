@@ -10,8 +10,10 @@ import {
   displaySessionTitle,
   expandTranscriptRows,
   findActivityBlock,
+  forkableTurnIds,
   groupSessions,
   relativeSessionTime,
+  rewindableTurnIds,
   sessionDateGroup,
   stabilizeTranscriptRows,
 } from './session-presentation';
@@ -297,6 +299,64 @@ describe('mobile session presentation', () => {
     expect(stable[2]).not.toBe(before[2]!);
     expect(stable[2]!.kind === 'md' && stable[2].source).toBe('Two more');
     expect(stabilizeTranscriptRows(stable, stabilizeTranscriptRows(stable, after))).toBe(stable);
+  });
+});
+
+describe('conversation editing eligibility', () => {
+  const editSession = (overrides: Partial<AgentSession>) => session({
+    provider_cursor: { provider: 'codex', threadId: 'thread' },
+    turns: [
+      turn({ id: 't1', status: 'completed', turn_count: 1 }),
+      turn({ id: 't2', status: 'completed', turn_count: 2 }),
+    ],
+    ...overrides,
+  });
+
+  test('rewind needs a checkpoint ref at the retained turn count', () => {
+    const current = editSession({});
+    expect([...rewindableTurnIds(current, new Set([0, 1]))].sort()).toEqual(['t1', 't2']);
+    expect([...rewindableTurnIds(current, new Set([1]))]).toEqual(['t2']);
+    expect(rewindableTurnIds(current, new Set()).size).toBe(0);
+    expect(rewindableTurnIds(current, null).size).toBe(0);
+  });
+
+  test('rewind hides while busy or archived, and on providers that cannot truncate', () => {
+    const refs = new Set([0, 1]);
+    expect(rewindableTurnIds(editSession({ status: 'working' }), refs).size).toBe(0);
+    expect(rewindableTurnIds(editSession({ archived_at: 5 }), refs).size).toBe(0);
+    expect(rewindableTurnIds(editSession({ provider: 'droid' }), refs).size).toBe(0);
+  });
+
+  test('rewind needs a provider cursor when provider turns must roll back', () => {
+    const noCursor = editSession({ provider_cursor: null });
+    expect(rewindableTurnIds(noCursor, new Set([0, 1])).size).toBe(0);
+    // A non-provider tail turn rolls nothing back, so no cursor is needed.
+    const nativeTail = editSession({
+      provider_cursor: null,
+      turns: [
+        turn({ id: 't1', status: 'completed', turn_count: 1 }),
+        turn({ id: 't2', status: 'completed', turn_count: 2, provider_turn_started: false }),
+      ],
+    });
+    expect([...rewindableTurnIds(nativeTail, new Set([1]))]).toEqual(['t2']);
+  });
+
+  test('fork needs a matching provider cursor and a provider-started settled turn', () => {
+    expect([...forkableTurnIds(editSession({}))].sort()).toEqual(['t1', 't2']);
+    expect(forkableTurnIds(editSession({ provider_cursor: null })).size).toBe(0);
+    expect(forkableTurnIds(editSession({
+      provider_cursor: { provider: 'claude', sessionId: 'other' },
+    })).size).toBe(0);
+    expect(forkableTurnIds(editSession({ status: 'working' })).size).toBe(0);
+    expect(forkableTurnIds(editSession({ archived_at: 5 })).size).toBe(0);
+    const mixed = editSession({
+      turns: [
+        turn({ id: 't1', status: 'completed', turn_count: 1 }),
+        turn({ id: 't2', status: 'completed', turn_count: 2, provider_turn_started: false }),
+        turn({ id: 't3', status: 'running', turn_count: 3 }),
+      ],
+    });
+    expect([...forkableTurnIds(mixed)]).toEqual(['t1']);
   });
 });
 

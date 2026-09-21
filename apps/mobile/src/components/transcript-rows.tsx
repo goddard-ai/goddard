@@ -32,19 +32,34 @@ export const TranscriptRowView = memo(function TranscriptRowView({
   veils,
   seeded,
   markdownStyles,
+  rewindTurns,
+  forkTurns,
   onToggleFold,
+  onRewindTurn,
+  onForkTurn,
 }: {
   row: TranscriptRow;
   md: TranscriptMarkdownCache;
   veils: VeilRegistry;
   seeded: boolean;
   markdownStyles: MarkdownStyles;
+  rewindTurns?: ReadonlySet<string>;
+  forkTurns?: ReadonlySet<string>;
   onToggleFold: (turnId: string) => void;
+  onRewindTurn?: (turnId: string) => void;
+  onForkTurn?: (turnId: string) => void;
 }) {
   const theme = useTheme();
   switch (row.kind) {
-    case 'user':
-      return <UserBubble message={row.message} />;
+    case 'user': {
+      const rewindTurnId = row.turnId && rewindTurns?.has(row.turnId) ? row.turnId : null;
+      return (
+        <UserBubble
+          message={row.message}
+          onRewind={rewindTurnId && onRewindTurn ? () => onRewindTurn(rewindTurnId) : undefined}
+        />
+      );
+    }
     case 'system':
       return (
         <View style={styles.systemFrame}>
@@ -53,7 +68,12 @@ export const TranscriptRowView = memo(function TranscriptRowView({
           </Text>
         </View>
       );
-    case 'md':
+    case 'md': {
+      // The footer sits on the last block of a turn's closing response —
+      // the same spot desktop hangs its fork button.
+      const forkTurnId = row.footerTimestamp != null && row.turnId && forkTurns?.has(row.turnId)
+        ? row.turnId
+        : null;
       return (
         <>
           {row.live ? (
@@ -73,12 +93,30 @@ export const TranscriptRowView = memo(function TranscriptRowView({
             </MdRevealOnMount>
           )}
           {row.footerTimestamp != null && (
-            <Text style={[styles.messageFooter, { color: theme.textGhost }]}>
-              {formatMessageTime(row.footerTimestamp)}
-            </Text>
+            <View style={styles.messageFooterRow}>
+              <Text style={[styles.messageFooter, { color: theme.textGhost }]}>
+                {formatMessageTime(row.footerTimestamp)}
+              </Text>
+              {forkTurnId && onForkTurn && (
+                <Pressable
+                  accessibilityHint="Copies the task up to this response"
+                  accessibilityLabel="Fork from here"
+                  accessibilityRole="button"
+                  hitSlop={6}
+                  onPress={() => onForkTurn(forkTurnId)}
+                  style={({ pressed }) => [styles.footerAction, { opacity: pressed ? 0.5 : 1 }]}>
+                  <AppSymbol
+                    name={{ ios: 'arrow.triangle.branch', android: 'call_split', web: 'call_split' }}
+                    size={12}
+                    tintColor={theme.textGhost}
+                  />
+                </Pressable>
+              )}
+            </View>
           )}
         </>
       );
+    }
     case 'activities':
       return <ActivityGroup block={row.block} blockIndex={row.blockIndex} live={row.live} />;
     case 'fold':
@@ -141,10 +179,11 @@ const UserBubble = memo(
     previous.message.content === next.message.content &&
     previous.message.display_content === next.message.display_content &&
     previous.message.attachments === next.message.attachments &&
-    previous.message.sent_by_task === next.message.sent_by_task,
+    previous.message.sent_by_task === next.message.sent_by_task &&
+    (previous.onRewind != null) === (next.onRewind != null),
 );
 
-function UserBubbleInner({ message }: { message: Message }) {
+function UserBubbleInner({ message, onRewind }: { message: Message; onRewind?: () => void }) {
   const theme = useTheme();
   const content = message.display_content ?? message.content;
 
@@ -184,6 +223,21 @@ function UserBubbleInner({ message }: { message: Message }) {
           <Text selectable style={[styles.userText, { color: theme.text }]}>{content}</Text>
         </Pressable>
       ) : null}
+      {onRewind && (
+        <Pressable
+          accessibilityHint="Restores the task to before this message"
+          accessibilityLabel="Rewind here"
+          accessibilityRole="button"
+          hitSlop={6}
+          onPress={onRewind}
+          style={({ pressed }) => [styles.userFooterAction, { opacity: pressed ? 0.5 : 1 }]}>
+          <AppSymbol
+            name={{ ios: 'arrow.uturn.backward', android: 'undo', web: 'undo' }}
+            size={12}
+            tintColor={theme.textGhost}
+          />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -345,7 +399,10 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   agentBadgeText: { fontSize: 11.5, lineHeight: 14 },
-  messageFooter: { fontSize: 11.5, marginTop: 10 },
+  messageFooter: { fontSize: 11.5 },
+  messageFooterRow: { alignItems: 'center', flexDirection: 'row', gap: 10, marginTop: 10 },
+  footerAction: { padding: 4 },
+  userFooterAction: { alignSelf: 'flex-end', marginTop: 4, padding: 4 },
   systemFrame: { alignItems: 'center' },
   systemMessage: {
     borderRadius: Radius.pill,

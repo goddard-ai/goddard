@@ -45,8 +45,8 @@ protocol changes.
       changes.
 - [x] **Message-content search** — drawer search now unions local
       title/project matching with debounced `searchSessionMessages`
-      queries (active + archived scopes). An in-session search bar over
-      the open transcript remains open.
+      queries (active + archived scopes); the open transcript also has
+      its own find bar (see Tier 1).
 - [~] **Daemon version display** — `WakuClient` stores
       `daemonVersion`/`daemonCommit` from `hello`; shown on the daemon
       editor screen. A true update banner still needs a "latest version"
@@ -54,10 +54,9 @@ protocol changes.
 - [x] **Question-card clarify/dismiss** — `UserInputPanel` renders
       Clarify/Dismiss when `supportsUserInputActions` is set, matching
       desktop semantics (Clarify requires typed text).
-- [~] **Session actions** — Compact context and Roll-back-last-turn
-      (with confirm) added to the task menu. Rewind-to-message and
-      fork-from-response are per-turn operations on desktop; they need a
-      per-turn affordance in the transcript, deferred to Tier 1.
+- [x] **Session actions** — Compact context and Roll-back-last-turn
+      (with confirm) added to the task menu; per-turn Rewind/Fork live on
+      the transcript rows (see Tier 1).
 - [x] **Home-screen quick actions** — `expo-quick-actions` configured;
       "New task" + 3 recent sessions with deep links. Requires a native
       rebuild (dev client) to take effect — not verifiable in Expo Go.
@@ -68,14 +67,21 @@ protocol changes.
 
 ## Tier 1 — small-medium (days, still protocol-ready)
 
-- [ ] **Per-turn rewind / fork** — `rewindSessionToMessage` and
-      `forkSessionFromResponse` take a turn index; desktop exposes them
-      as per-response buttons. Needs a turn-level affordance (long-press
-      a user message → Rewind here / Fork from here).
-- [ ] **In-session transcript search** — a find bar over the open
-      session's transcript. `searchSessionMessages` covers cross-task
-      content search (wired into the drawer); a per-session scope or
-      client-side scan of loaded blocks both work.
+- [x] **Per-turn rewind / fork** — a rewind button sits under eligible
+      user bubbles and a fork button on closing-response footers,
+      matching desktop's per-turn affordances. Eligibility mirrors
+      `validate_message_rewind`/`validate_response_fork`: settled,
+      unarchived sessions on conversation-editing providers; rewind also
+      requires a checkpoint ref from the workspace `sessionTurnRefs` op
+      and a provider cursor when provider turns roll back. Rewind
+      confirms before running; fork pushes the new task screen; daemon
+      cleanup/checkpoint warnings surface as alerts.
+- [x] **In-session transcript search** — "Find in transcript" in the
+      task menu opens a floating find bar (client-side scan of message
+      text) with match count and previous/next navigation. Navigation
+      goes through `TranscriptListHandle.revealRow`, which mounts
+      windowed history, opens folds, and scrolls the variable-height
+      inverted list by measured row layout.
 - [ ] **Git surface sheet** — all ops exist: `inspectGitPanel`,
       `stageFile`, `unstageFile`, `discardFile`, `commit`,
       `generateCommitMessage`, `push`, `checkoutBranch`, `listCommits`,

@@ -10,6 +10,7 @@ import type {
 } from '@waku/client';
 import { turnAnswerStart, turnFoldLabel } from '@waku/client/transcript-presentation';
 
+import { sessionBusy } from './mobile-runtime';
 import type { MarkdownBlock } from '../md/parse';
 import { TranscriptMarkdownCache } from '../md/transcript-cache';
 
@@ -150,6 +151,80 @@ export function groupSessions(
     const data = grouped.get(group.id);
     return data?.length ? [{ ...group, data }] : [];
   });
+}
+
+/** Providers with turn-aware conversation edits — mirrors
+ * `ProviderKind::supports_conversation_rollback` and
+ * `supports_conversation_fork` in crates/waku-protocol (the lists are
+ * identical today). Keep in sync if the protocol gains a capability flag. */
+const CONVERSATION_EDIT_PROVIDERS: ReadonlySet<ProviderKind> = new Set([
+  'amp',
+  'claude',
+  'codex',
+  'copilot',
+  'cursor',
+  'deepSeek',
+  'grok',
+  'muse',
+  'ohMyPi',
+  'openCode',
+  'openCode2',
+  'pi',
+]);
+
+function providerTurnsAfter(session: AgentSession, retainedTurnCount: number): number {
+  return session.turns.filter(
+    (turn) => turn.turn_count > retainedTurnCount && turn.provider_turn_started,
+  ).length;
+}
+
+/** Turns whose first user message may offer "rewind to here", mirroring
+ * desktop's `user_message_action_for_message`: settled session, a provider
+ * that can truncate, and a checkpoint ref at the retained turn count
+ * (`turnRefs` comes from the workspace `sessionTurnRefs` op — pass `null`
+ * before it lands to hide the affordance). */
+export function rewindableTurnIds(
+  session: AgentSession,
+  turnRefs: ReadonlySet<number> | null,
+): ReadonlySet<string> {
+  const eligible = new Set<string>();
+  if (
+    !sessionHasStarted(session)
+    || session.archived_at != null
+    || sessionBusy(session)
+    || turnRefs == null
+    || !CONVERSATION_EDIT_PROVIDERS.has(session.provider)
+  ) {
+    return eligible;
+  }
+  for (const turn of session.turns) {
+    if (turn.status === 'running') continue;
+    const retained = turn.turn_count - 1;
+    if (!turnRefs.has(retained)) continue;
+    if (providerTurnsAfter(session, retained) > 0 && session.provider_cursor == null) continue;
+    eligible.add(turn.id);
+  }
+  return eligible;
+}
+
+/** Turns whose closing assistant response may offer "fork from here",
+ * mirroring `assistant_message_action_for_message`. */
+export function forkableTurnIds(session: AgentSession): ReadonlySet<string> {
+  const eligible = new Set<string>();
+  if (
+    !sessionHasStarted(session)
+    || session.archived_at != null
+    || sessionBusy(session)
+    || !CONVERSATION_EDIT_PROVIDERS.has(session.provider)
+    || session.provider_cursor == null
+    || session.provider_cursor.provider !== session.provider
+  ) {
+    return eligible;
+  }
+  for (const turn of session.turns) {
+    if (turn.status !== 'running' && turn.provider_turn_started) eligible.add(turn.id);
+  }
+  return eligible;
 }
 
 export function sessionDateGroup(timestamp: number, now = new Date()): SessionGroupId {
