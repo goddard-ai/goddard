@@ -4326,8 +4326,9 @@ impl Waku {
 
     /// The body a session row shares between the sidebar and a Big Picture
     /// card header: title plus status/archive on top, project or branch
-    /// detail below, and — while the composer-drafts setting is on and the
-    /// task holds one — the draft's text on its own line in between.
+    /// detail below, and — while the composer-drafts setting is on, the task
+    /// holds one, and the task isn't selected — the draft's text on its own
+    /// line in between.
     /// `grouped_by_project` swaps the detail line into branch mode the way a
     /// project-grouped sidebar does.
     pub(super) fn render_session_row_body(
@@ -4469,11 +4470,17 @@ impl Waku {
                 .child(SharedString::from(localized_session_title(session)))
                 .into_any_element()
         };
-        let draft_preview = self
-            .state
-            .sidebar_composer_drafts
-            .then(|| sidebar_draft_preview(&self.composer_drafts, session))
-            .flatten();
+        // The selected task's composer already shows the text, so the row
+        // previews drafts only for sessions that aren't selected.
+        let draft_preview = (self.state.sidebar_composer_drafts
+            && !sidebar_session_selected(
+                self.state.selected_session,
+                self.pending_session_activation
+                    .map(|pending| pending.session_id),
+                session_id,
+            ))
+        .then(|| sidebar_draft_preview(&self.composer_drafts, session))
+        .flatten();
         let pull_request_badge = self
             .sidebar_pull_requests
             .borrow()
@@ -4700,11 +4707,14 @@ impl Waku {
                     div()
                         .w_full()
                         .min_w_0()
-                        .truncate()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
                         .text_size(sp(12.5))
                         .line_height(sp(15.0))
                         .text_color(theme.danger)
-                        .child(preview),
+                        .child(icon("icons/pencil.svg", 12.0, theme.danger))
+                        .child(div().flex_1().min_w_0().truncate().child(preview)),
                 )
             })
             .child(
