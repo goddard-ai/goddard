@@ -1,4 +1,3 @@
-import { BlurView } from "expo-blur";
 import { router, type NativeStackHeaderItem } from "expo-router";
 import { useHeaderHeight } from "expo-router/build/react-navigation/elements";
 import type { ReactNode } from "react";
@@ -7,7 +6,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useColorScheme,
   useWindowDimensions,
 } from "react-native";
 
@@ -32,34 +30,6 @@ export function navigateBack() {
  */
 export function useScreenHeaderInset() {
   return Math.round(useHeaderHeight());
-}
-
-/**
- * Translucent chrome backdrop shown once content has scrolled under the
- * navigation bar, like a native bar's scroll-edge treatment. It lives in the
- * screen content, so it travels with the page during a swipe-back while the
- * bar's buttons and title stay put in the native navigation bar above it.
- */
-export function ScreenHeaderBackdrop({ visible }: { visible: boolean }) {
-  const theme = useTheme();
-  const colorScheme = useColorScheme();
-  const height = useScreenHeaderInset();
-  if (!visible) return null;
-  return (
-    <View
-      pointerEvents="none"
-      style={[
-        styles.backdrop,
-        {
-          height,
-          borderBottomColor: theme.borderStrong,
-          backgroundColor: colorScheme === "dark" ? "#33333375" : "#ffffffd6",
-        },
-      ]}
-    >
-      <BlurView intensity={6} style={StyleSheet.absoluteFill} />
-    </View>
-  );
 }
 
 /** Space occupied by the leading button, trailing actions, native margins,
@@ -170,15 +140,6 @@ export function HeaderMenuTrigger({
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    left: 0,
-    overflow: "hidden",
-    position: "absolute",
-    right: 0,
-    top: 0,
-    zIndex: 20,
-  },
   titles: {
     alignItems: "flex-start",
     justifyContent: "center",

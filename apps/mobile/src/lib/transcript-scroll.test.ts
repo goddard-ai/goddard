@@ -16,7 +16,6 @@ import {
   peekedWithinBand,
   shouldExtendTail,
   STICK_THRESHOLD,
-  underHeader,
   withinStickBand,
 } from './transcript-scroll';
 
@@ -24,14 +23,8 @@ describe('inverted transcript scroll model', () => {
   test('measures hidden content above the viewport in native coordinates', () => {
     expect(distanceToTop({ offset: 0, contentHeight: 2_000, viewportHeight: 800 })).toBe(1_200);
     expect(distanceToTop({ offset: 1_200, contentHeight: 2_000, viewportHeight: 800 })).toBe(0);
-    // Short transcripts never reach under the header.
+    // Short transcripts leave room above the viewport rather than overflow.
     expect(distanceToTop({ offset: 0, contentHeight: 300, viewportHeight: 800 })).toBe(-500);
-  });
-
-  test('reports content under the header only when it overflows the top', () => {
-    expect(underHeader({ offset: 0, contentHeight: 300, viewportHeight: 800 })).toBe(false);
-    expect(underHeader({ offset: 0, contentHeight: 900, viewportHeight: 800 })).toBe(true);
-    expect(underHeader({ offset: 100, contentHeight: 900, viewportHeight: 800 })).toBe(false);
   });
 
   test('jump button uses hysteresis around the show and hide bands', () => {
