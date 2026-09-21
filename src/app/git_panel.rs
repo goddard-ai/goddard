@@ -5124,6 +5124,7 @@ fn git_panel_commit_card(entry: &CommitEntry, theme: &Theme) -> AnyElement {
                     .line_height(sp(16.0))
                     .text_color(theme.text_secondary)
                     .line_clamp(4)
+                    .text_ellipsis()
                     .child(body),
             )
         })
