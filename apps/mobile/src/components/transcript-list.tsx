@@ -20,11 +20,10 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { ScrollViewMarker } from 'react-native-screens/experimental';
-
 import { AppSymbol } from '@/components/app-symbol';
 import { GlassSurface } from '@/components/glass-surface';
 import { useMarkdownStyles, VeilRegistry } from '@/components/md-block-row';
+import { ScrollViewMarker } from '@/components/scroll-view-marker';
 import { RowAnchorProvider } from '@/components/transcript-anchor';
 import {
   EarlierIndicator,
