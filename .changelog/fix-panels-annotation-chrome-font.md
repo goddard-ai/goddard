@@ -1,0 +1,1 @@
+- The file editor's annotation chrome — the "Add to chat" pill, the comment editor and its input, and the hover tooltip — no longer renders in the code face inherited from the pane; each surface now sets the UI face explicitly
