@@ -1,0 +1,1 @@
+- Fixed task titles that could show the hidden `<project-memory>`/`<project-map>` context blocks injected into a session's first prompt — Kimi echoes the prompt back as its title and Devin's stored placeholder can truncate inside a block, so both the prompt-derived fallback and provider-reported titles now strip those spans.

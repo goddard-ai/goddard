@@ -39,6 +39,16 @@ from the user's side, indistinguishable from no title at all: they stare at
 truncated prompt text for the entire run. Every path below is judged on how
 fast it replaces that placeholder, not merely on whether it eventually does.
 
+The daemon prepends hidden `<project-map>`/`<project-memory>` context blocks
+to the provider-facing first prompt, and a provider can report that text back
+as a title — Kimi echoes the prompt verbatim, and Devin's stored placeholder
+can truncate inside a block.
+[`strip_injected_prompt_blocks`](../crates/waku-protocol/src/model.rs) removes
+those spans in `set_title_from_prompt`, in `set_auto_title` (so it covers every
+provider title, pushed or polled), and inside Devin's placeholder comparison —
+an opener whose closer was truncated away is dropped only when nothing precedes
+it, so a real title that merely mentions the tag survives.
+
 ## The three delivery shapes
 
 Every provider funnels into `DriverEvent::AutoTitleUpdated(Option<String>)`,

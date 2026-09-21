@@ -79,6 +79,11 @@ pub(crate) fn title_from_notification(method: &str, params: &Value) -> Option<St
 }
 
 fn distinct_title(title: &str, prompt: Option<&str>) -> Option<String> {
+    // Both sides can carry the daemon's injected context blocks: the prompt
+    // placeholder is the provider-facing text, and Devin's stored title can be
+    // a truncation of it. Stripping keeps the placeholder recognizable and
+    // keeps block markup out of a title that survives.
+    let title = waku_protocol::model::strip_injected_prompt_blocks(title);
     let trimmed = title.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("untitled") {
         return None;
@@ -87,7 +92,8 @@ fn distinct_title(title: &str, prompt: Option<&str>) -> Option<String> {
     if normalized.is_empty() {
         return None;
     }
-    if let Some(prompt) = prompt.map(str::trim).filter(|prompt| !prompt.is_empty()) {
+    let prompt = prompt.map(waku_protocol::model::strip_injected_prompt_blocks);
+    if let Some(prompt) = prompt.as_deref().filter(|prompt| !prompt.is_empty()) {
         if normalized.eq_ignore_ascii_case(&normalize_title(prompt)) {
             return None;
         }
@@ -223,6 +229,40 @@ mod tests {
                 .as_deref(),
             None
         );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn injected_context_blocks_read_as_placeholders_not_titles() {
+        let root = std::env::temp_dir().join(format!("waku-devin-title-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let db = root.join("sessions.db");
+        // Devin's stored placeholder is the provider-facing first prompt,
+        // truncated — with injection that lands inside the map block.
+        let injected = "<project-map>\nA structural map of this workspace, \
+                        most-referenced files first.\n</project-map>\n\n\
+                        <project-memory>\nnotes\n</project-memory>\n\nfix the bug";
+        write_sessions_db(
+            &db,
+            &[
+                ("truncated-block", Some(&injected[..80])),
+                ("verbatim-block", Some(injected)),
+            ],
+        );
+
+        assert_eq!(
+            generated_title_from(&db, "truncated-block", Some(injected))
+                .unwrap()
+                .as_deref(),
+            None
+        );
+        assert_eq!(
+            generated_title_from(&db, "verbatim-block", Some(injected))
+                .unwrap()
+                .as_deref(),
+            None
+        );
+        assert!(is_placeholder_title(&injected[..80], Some(injected)));
         std::fs::remove_dir_all(root).ok();
     }
 

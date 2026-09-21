@@ -167,9 +167,11 @@ export function reduceRuntimeEvent(
     case 'agentPresetSelected':
       session.agent_preset = typeof payload === 'string' ? payload : null
       break
-    case 'autoTitleUpdated':
-      session.auto_title = typeof payload === 'string' && payload.trim() ? payload.trim() : null
+    case 'autoTitleUpdated': {
+      const title = typeof payload === 'string' ? stripInjectedPromptBlocks(payload) : ''
+      session.auto_title = title || null
       break
+    }
     case 'availableCommands':
       if (Array.isArray(payload)) session.available_commands = payload as ReportedCommand[]
       break
@@ -664,11 +666,39 @@ function asThreadGoal(payload: unknown): ThreadGoal | null {
   return value as unknown as ThreadGoal
 }
 
+/** Mirror of the desktop's `strip_injected_prompt_blocks`: the daemon prepends
+ * `<project-map>`/`<project-memory>` context to a session's first prompt, and a
+ * provider can report that text back as a title. An opener whose closer was
+ * truncated away is removed only when nothing precedes it — a mid-title
+ * mention is real text. */
+function stripInjectedPromptBlocks(text: string) {
+  let cleaned = text
+  let before = -1
+  while (cleaned.length !== before) {
+    before = cleaned.length
+    for (const tag of ['project-map', 'project-memory']) {
+      const open = `<${tag}>`
+      const close = `</${tag}>`
+      for (;;) {
+        const start = cleaned.indexOf(open)
+        if (start === -1) break
+        const end = cleaned.indexOf(close, start)
+        if (end === -1) {
+          if (!cleaned.slice(0, start).trim()) cleaned = cleaned.slice(0, start)
+          break
+        }
+        cleaned = cleaned.slice(0, start) + cleaned.slice(end + close.length)
+      }
+    }
+  }
+  return cleaned.trim()
+}
+
 /** Mirror of the desktop's prompt-derived title fallback: first seven words,
  * ellipsized at 54 characters, applied only while the task is unnamed. */
 function setTitleFromPrompt(session: AgentSession, prompt: string) {
   if (session.messages.length > 0 || session.title !== 'New task' || session.auto_title) return
-  let title = prompt.split(/\s+/u).filter(Boolean).slice(0, 7).join(' ')
+  let title = stripInjectedPromptBlocks(prompt).split(/\s+/u).filter(Boolean).slice(0, 7).join(' ')
   if (!title) return
   if ([...title].length > 54) title = `${[...title].slice(0, 53).join('')}…`
   session.auto_title = title

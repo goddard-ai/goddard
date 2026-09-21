@@ -114,6 +114,42 @@ describe('promptSubmitted', () => {
     expect(result.session.turns.at(-1)?.turn_count).toBe(1)
   })
 
+  test('injected context blocks never reach the prompt-derived title', () => {
+    const session: AgentSession = { ...idleSession(), messages: [], turns: [] }
+    const injected =
+      '<project-map>\nA structural map.\n</project-map>\n\n' +
+      '<project-memory>\nDistilled notes.\n</project-memory>\n\n' +
+      'strip the blocks from session titles'
+    const result = reduceRuntimeEvent(
+      session,
+      event('promptSubmitted', { ...SUBMISSION, message: injected }),
+      clock,
+    )
+
+    expect(result.session.auto_title).toBe('strip the blocks from session titles')
+  })
+
+  test('a provider title carrying injected context is stripped or dropped', () => {
+    const session = idleSession()
+    const echoed = reduceRuntimeEvent(
+      session,
+      event(
+        'autoTitleUpdated',
+        '<project-memory>\nnotes\n</project-memory>\n\nFix the title lookup',
+      ),
+      clock,
+    )
+    expect(echoed.session.auto_title).toBe('Fix the title lookup')
+
+    // A stored placeholder truncated inside the block leaves nothing usable.
+    const truncated = reduceRuntimeEvent(
+      session,
+      event('autoTitleUpdated', '<project-memory>\nThis project has persistent me'),
+      clock,
+    )
+    expect(truncated.session.auto_title).toBeNull()
+  })
+
   test('a delivered agent prompt drops its chip and carries provenance', () => {
     const queuedId = '30000000-0000-4000-8000-000000000003'
     const session: AgentSession = {

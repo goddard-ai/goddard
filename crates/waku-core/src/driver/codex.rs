@@ -466,8 +466,13 @@ impl CodexDriver {
                             {
                                 let mut title = writer_title_generation.lock();
                                 if title.enabled && !title.launched && title.pending.is_none() {
+                                    // The prompt text carries the daemon's
+                                    // injected context blocks; the title
+                                    // turn summarizes only what the user typed.
                                     title.pending = Some(CodexTitleRequest {
-                                        prompt: text.clone(),
+                                        prompt: waku_protocol::model::strip_injected_prompt_blocks(
+                                            &text,
+                                        ),
                                     });
                                 }
                             }

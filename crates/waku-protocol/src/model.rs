@@ -1566,6 +1566,37 @@ fn is_true(value: &bool) -> bool {
     *value
 }
 
+/// Context blocks the daemon prepends to a session's first visible prompt —
+/// `<project-map>`, then `<project-memory>`. They are provider-facing context,
+/// not user text, but a provider can still report them back as a title (Kimi
+/// echoes the prompt verbatim; Devin's stored placeholder can truncate inside
+/// a block), so anything deriving a title from prompt text drops them first.
+/// An opener whose closer was truncated away is removed only when nothing
+/// precedes it — a mid-title mention is real text.
+pub fn strip_injected_prompt_blocks(text: &str) -> String {
+    let mut cleaned = text.to_owned();
+    loop {
+        let before = cleaned.len();
+        for tag in ["project-map", "project-memory"] {
+            let open = format!("<{tag}>");
+            let close = format!("</{tag}>");
+            while let Some(start) = cleaned.find(&open) {
+                match cleaned[start..].find(&close) {
+                    Some(end) => cleaned.replace_range(start..start + end + close.len(), ""),
+                    None if cleaned[..start].trim().is_empty() => {
+                        cleaned.truncate(start);
+                        break;
+                    }
+                    None => break,
+                }
+            }
+        }
+        if cleaned.len() == before {
+            return cleaned.trim().to_owned();
+        }
+    }
+}
+
 impl AgentSession {
     pub const DEFAULT_TITLE: &'static str = "New task";
 
@@ -1831,6 +1862,7 @@ impl AgentSession {
         {
             return;
         }
+        let prompt = strip_injected_prompt_blocks(prompt);
         let mut title = prompt
             .split_whitespace()
             .take(7)
@@ -1848,8 +1880,8 @@ impl AgentSession {
     /// title. Returns whether the stored fallback changed.
     pub fn set_auto_title(&mut self, title: Option<String>) -> bool {
         let title = title.and_then(|title| {
-            let title = title.trim();
-            (!title.is_empty()).then(|| title.to_owned())
+            let title = strip_injected_prompt_blocks(&title);
+            (!title.is_empty()).then_some(title)
         });
         if self.auto_title == title {
             return false;
@@ -5206,6 +5238,39 @@ mod tests {
             "build a really polished local agent interface"
         );
         assert_eq!(session.title, AgentSession::DEFAULT_TITLE);
+    }
+
+    #[test]
+    fn injected_context_blocks_never_reach_a_session_title() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Kimi);
+        let injected = "<project-map>\nA structural map.\n</project-map>\n\n\
+                        <project-memory>\nDistilled notes.\n</project-memory>\n\n\
+                        strip the blocks from session titles";
+        session.set_title_from_prompt(injected);
+        assert_eq!(
+            session.auto_title.as_deref(),
+            Some("strip the blocks from session titles")
+        );
+
+        // A provider that echoes the prompt back as its title — or stores a
+        // truncation of it — gets the same treatment on the way in.
+        session.set_auto_title(Some(injected.into()));
+        assert_eq!(
+            session.auto_title.as_deref(),
+            Some("strip the blocks from session titles")
+        );
+        assert!(session.set_auto_title(Some(
+            "<project-memory>\nThis project has persistent me".into()
+        )));
+        assert_eq!(session.auto_title, None);
+
+        // A title that merely mentions the tag is real text and survives.
+        assert!(session.set_auto_title(Some("Strip <project-memory> blocks from titles".into())));
+        assert_eq!(
+            session.auto_title.as_deref(),
+            Some("Strip <project-memory> blocks from titles")
+        );
     }
 
     #[test]
