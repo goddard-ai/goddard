@@ -2326,6 +2326,12 @@ pub struct Waku {
     /// them — a hit when their action lands, a miss when the session's next
     /// prompt ends the window.
     pending_action_predictions: Vec<action_predictions::PendingActionPrediction>,
+    /// The gated pick floating above the composer, cleared when its
+    /// prediction resolves.
+    action_suggestion: Option<action_predictions::ActionSuggestion>,
+    /// Focus handle for the suggestion chip — stored so tab focus survives
+    /// re-renders instead of resetting every frame.
+    action_suggestion_focus: FocusHandle,
     /// Turns that settled while their session was off screen, queued as
     /// (turn, finish-summary) pairs per session until it is next opened.
     pending_action_prediction_turns: HashMap<Uuid, Vec<(Uuid, Option<String>)>>,
@@ -5552,6 +5558,8 @@ impl Waku {
                 status_marker_events,
                 action_journal: action_predictions::load_action_journal(),
                 pending_action_predictions: Vec::new(),
+                action_suggestion: None,
+                action_suggestion_focus: cx.focus_handle(),
                 pending_action_prediction_turns: HashMap::new(),
                 action_prediction_in_flight: HashSet::new(),
                 action_prediction_tx,

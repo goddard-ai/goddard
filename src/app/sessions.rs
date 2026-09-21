@@ -1360,6 +1360,13 @@ impl Waku {
         self.pending_action_predictions
             .retain(|prediction| prediction.session_id != session_id);
         self.pending_action_prediction_turns.remove(&session_id);
+        if self
+            .action_suggestion
+            .as_ref()
+            .is_some_and(|suggestion| suggestion.session_id == session_id)
+        {
+            self.action_suggestion = None;
+        }
         // A departing side chat's tab lives in its parent's strip — the
         // active one, or whichever session parked it. It runs after the row
         // is gone so the close path's own session removal finds nothing.

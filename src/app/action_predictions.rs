@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
+use waku_client::git::PullStrategy;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{AgentSession, SessionWorkspace};
 
@@ -89,16 +90,17 @@ impl JournalAction {
 }
 
 /// The fixed follow-up prompts a suggestion could send verbatim. `id` is
-/// the journal's `canned` value and the candidate key; `text` is the exact
-/// composer payload, so hand-typed equivalents match by comparison.
+/// the journal's `canned` value and the candidate key; `key` is the locale
+/// key whose translation is both the chip's label and the sent payload, so
+/// a hand-typed equivalent in the current locale matches by comparison.
 const CANNED_PROMPTS: &[(&str, &str)] = &[
-    ("keep-going", "Keep going"),
-    ("run-tests", "Run the tests"),
-    ("fix-errors", "Fix the remaining errors"),
-    ("commit-changes", "Commit these changes"),
-    ("add-tests", "Add tests for this"),
-    ("review-changes", "Review these changes for issues"),
-    ("open-pr", "Push and open a PR"),
+    ("keep-going", "suggestions.keep_going"),
+    ("run-tests", "suggestions.run_tests"),
+    ("fix-errors", "suggestions.fix_errors"),
+    ("commit-changes", "suggestions.commit_changes"),
+    ("add-tests", "suggestions.add_tests"),
+    ("review-changes", "suggestions.review_changes"),
+    ("open-pr", "suggestions.open_pr"),
 ];
 
 /// The canned id for a submitted prompt, when its text is one of the fixed
@@ -108,9 +110,33 @@ pub(super) fn canned_prompt_id(prompt: &str) -> Option<&'static str> {
     let normalized = prompt.trim();
     CANNED_PROMPTS
         .iter()
-        .find(|(_, text)| text.eq_ignore_ascii_case(normalized))
+        .find(|(_, key)| tr!(key).eq_ignore_ascii_case(normalized))
         .map(|(id, _)| *id)
 }
+
+/// Candidate ids a chip can execute itself. Everything else in the
+/// vocabulary resolves predictions but never renders — `new-prompt` and
+/// `other` are outcomes, session lifecycle picks are better left to the
+/// sidebar, and `revert`/`terminal-command` stay manual in v1.
+const ACTIONABLE_SUGGESTIONS: &[&str] = &[
+    "keep-going",
+    "run-tests",
+    "fix-errors",
+    "commit-changes",
+    "add-tests",
+    "review-changes",
+    "open-pr",
+    "commit",
+    "push",
+    "sync",
+    "land",
+];
+
+/// A suggestion renders only when the model is confident and committed:
+/// the argmax clears this probability and beats the runner-up by this
+/// margin. Both are starting values to revisit against the shadow log.
+const SUGGESTION_MIN_PROBABILITY: f64 = 0.5;
+const SUGGESTION_MIN_MARGIN: f64 = 0.15;
 
 /// One journaled action held in memory — the tail `recentActions` reads.
 /// The file carries the same shape: `{"at", "session", "action"}`.
@@ -130,6 +156,68 @@ pub(super) struct PendingActionPrediction {
     /// Every option the question offered — an unlisted action hitting an
     /// `other` prediction is a hit, not silence.
     pub candidates: Vec<String>,
+    /// The user clicked this prediction's chip — adoption, distinct from
+    /// the correctness outcome the resolution records.
+    pub adopted: bool,
+}
+
+/// The floating suggestion above the composer — the pending prediction's
+/// gated pick. It clears when the prediction resolves, whatever the
+/// outcome: fulfilled, or the window ended with the next prompt.
+#[derive(Clone)]
+pub(super) struct ActionSuggestion {
+    /// The prediction this chip stands in for — adoption marks and clearing
+    /// both key off it.
+    pub prediction_id: Uuid,
+    pub session_id: Uuid,
+    /// The candidate id; `suggestion_parts` maps it to label, icon, and
+    /// dispatch.
+    pub action: &'static str,
+}
+
+/// What a chip does when clicked.
+enum SuggestionDispatch {
+    /// Submit the fixed follow-up through the normal send path — it
+    /// journals as `prompt_send` with the canned id, resolving the
+    /// prediction itself.
+    Prompt(&'static str),
+    /// Open the commit dialog — reviewing the generated message is part of
+    /// the commit, so the chip opens it rather than committing blind.
+    Commit,
+    /// Push the session's workspace through the panel's op machinery.
+    Push,
+    /// Pull upstream into the session's workspace.
+    Sync,
+    /// Land the composer session's worktree onto its base.
+    Land,
+}
+
+/// The dispatch behind an actionable candidate id.
+fn suggestion_dispatch(action: &str) -> Option<SuggestionDispatch> {
+    match action {
+        "commit" => Some(SuggestionDispatch::Commit),
+        "push" => Some(SuggestionDispatch::Push),
+        "sync" => Some(SuggestionDispatch::Sync),
+        "land" => Some(SuggestionDispatch::Land),
+        canned => CANNED_PROMPTS
+            .iter()
+            .find(|(id, _)| *id == canned)
+            .map(|(_, key)| SuggestionDispatch::Prompt(key)),
+    }
+}
+
+/// The pick worth rendering: an actionable argmax that clears the
+/// confidence gate. Returns the candidate's static id for the chip.
+fn gated_suggestion(choice: &str, probabilities: &BTreeMap<String, f64>) -> Option<&'static str> {
+    let action = *ACTIONABLE_SUGGESTIONS.iter().find(|id| **id == choice)?;
+    let top = probabilities.get(choice).copied().unwrap_or(0.0);
+    let runner_up = probabilities
+        .iter()
+        .filter(|(id, _)| id.as_str() != choice)
+        .map(|(_, probability)| *probability)
+        .fold(0.0, f64::max);
+    (top >= SUGGESTION_MIN_PROBABILITY && top - runner_up >= SUGGESTION_MIN_MARGIN)
+        .then_some(action)
 }
 
 /// The decision-log feature tag these evaluations record under, so the
@@ -220,7 +308,7 @@ fn next_action_candidates(
         .flat_map(|block| block.activities.iter())
         .any(|activity| activity.failed);
     let mut candidates: Vec<(&'static str, &'static str)> = vec![
-        ("keep-going", "Send the follow-up prompt \"Keep going\""),
+        ("keep-going", "Tell the agent to keep going"),
         ("archive", "Archive this session"),
         ("new-task", "Start a new task"),
         ("new-worktree", "Start a task in a new worktree"),
@@ -231,33 +319,18 @@ fn next_action_candidates(
     ];
     if files_changed {
         candidates.extend([
-            ("run-tests", "Send the follow-up prompt \"Run the tests\""),
-            (
-                "commit-changes",
-                "Send the follow-up prompt \"Commit these changes\"",
-            ),
-            (
-                "add-tests",
-                "Send the follow-up prompt \"Add tests for this\"",
-            ),
-            (
-                "review-changes",
-                "Send the follow-up prompt \"Review these changes for issues\"",
-            ),
-            (
-                "open-pr",
-                "Send the follow-up prompt \"Push and open a PR\"",
-            ),
-            ("commit", "Commit the changes through the Git panel"),
+            ("run-tests", "Ask the agent to run the tests"),
+            ("commit-changes", "Ask the agent to commit the changes"),
+            ("add-tests", "Ask the agent to add tests for the change"),
+            ("review-changes", "Ask the agent to review the changes"),
+            ("open-pr", "Ask the agent to push and open a PR"),
+            ("commit", "Commit the changes through the Git UI"),
             ("push", "Push the work to its remote"),
             ("revert", "Rewind the workspace to before this turn"),
         ]);
     }
     if saw_failure {
-        candidates.push((
-            "fix-errors",
-            "Send the follow-up prompt \"Fix the remaining errors\"",
-        ));
+        candidates.push(("fix-errors", "Ask the agent to fix the errors"));
     }
     if matches!(session.workspace, SessionWorkspace::Worktree { .. }) {
         candidates.push(("land", "Land the worktree's commits onto its base"));
@@ -472,7 +545,18 @@ impl Waku {
             session_id,
             predicted: choice.clone(),
             candidates: probabilities.keys().cloned().collect(),
+            adopted: false,
         };
+        // The newest gated pick owns the chip; an unconfident answer leaves
+        // whatever the previous prediction suggested — the user never sees
+        // a suggestion swap for a weak signal.
+        if let Some(action) = gated_suggestion(choice, probabilities) {
+            self.action_suggestion = Some(ActionSuggestion {
+                prediction_id: prediction.id,
+                session_id,
+                action,
+            });
+        }
         append_jsonl(
             &prediction_log_path(),
             &json!({
@@ -530,7 +614,7 @@ impl Waku {
         };
         let action_id = action.id();
         let window_ended = action.ends_prediction_window();
-        let mut resolved: Vec<(Uuid, &'static str)> = Vec::new();
+        let mut resolved: Vec<(Uuid, &'static str, bool)> = Vec::new();
         self.pending_action_predictions.retain(|prediction| {
             if prediction.session_id != session {
                 return true;
@@ -550,13 +634,20 @@ impl Waku {
             };
             match outcome {
                 Some(outcome) => {
-                    resolved.push((prediction.id, outcome));
+                    resolved.push((prediction.id, outcome, prediction.adopted));
                     false
                 }
                 None => true,
             }
         });
-        for (prediction_id, outcome) in resolved {
+        for (prediction_id, outcome, adopted) in resolved {
+            if self
+                .action_suggestion
+                .as_ref()
+                .is_some_and(|suggestion| suggestion.prediction_id == prediction_id)
+            {
+                self.action_suggestion = None;
+            }
             append_jsonl(
                 &prediction_log_path(),
                 &json!({
@@ -565,6 +656,7 @@ impl Waku {
                     "at": unix_time(),
                     "outcome": outcome,
                     "action": action_id,
+                    "adopted": adopted,
                 }),
             );
         }
@@ -591,6 +683,141 @@ impl Waku {
         self.pending_action_predictions.clear();
         self.pending_action_prediction_turns.clear();
         self.action_prediction_in_flight.clear();
+        self.action_suggestion = None;
+    }
+
+    /// The chip's presentation: icon and localized label. `None` means the
+    /// candidate is not renderable — call sites reach here only through
+    /// `gated_suggestion`, which already filtered to actionable ids.
+    fn suggestion_parts(action: &str) -> Option<(&'static str, String)> {
+        let (icon, label_key) = match action {
+            "commit" => ("icons/git-commit-horizontal.svg", "suggestions.commit"),
+            "push" => ("icons/arrow-up.svg", "suggestions.push"),
+            "sync" => ("icons/arrow-down.svg", "suggestions.sync"),
+            "land" => ("icons/git-merge.svg", "suggestions.land"),
+            canned => {
+                let (_, key) = CANNED_PROMPTS.iter().find(|(id, _)| *id == canned)?;
+                ("icons/sparkle.svg", *key)
+            }
+        };
+        Some((icon, tr!(label_key)))
+    }
+
+    /// The suggestion row floating above the composer lane. The row itself
+    /// is a zero-height sibling at the lane's top — it takes no layout
+    /// space, so a chip appearing or clearing never moves the composer or
+    /// the transcript. The chip hangs off its bottom edge, painted over the
+    /// transcript's bottom padding.
+    pub(super) fn render_action_suggestion(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let suggestion = self.action_suggestion.as_ref()?;
+        if self.composer_session().map(|session| session.id) != Some(suggestion.session_id) {
+            return None;
+        }
+        let (icon_path, label) = Self::suggestion_parts(suggestion.action)?;
+        let theme = Theme::current(cx);
+        Some(
+            div().w_full().h(px(0.0)).relative().child(
+                div()
+                    .absolute()
+                    .bottom(px(8.0))
+                    .left_0()
+                    .right_0()
+                    // Same insets and content width as the composer card
+                    // below, so the chip's left edge lands on the card's.
+                    .px(px(20.0 - COMPOSER_OVERHANG))
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                            .mx_auto()
+                            .flex()
+                            .child(
+                                div()
+                                    .id("action-suggestion")
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.0))
+                                    .h(px(24.0))
+                                    .px(px(9.0))
+                                    .rounded(px(8.0))
+                                    .border(hairline())
+                                    .border_color(theme.border_subtle)
+                                    .bg(theme.raised)
+                                    .cursor_default()
+                                    .track_focus(&self.action_suggestion_focus)
+                                    .tab_index(0)
+                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                    .hover(|element| element.bg(theme.overlay_strong))
+                                    .child(icon(icon_path, 11.0, theme.text_secondary))
+                                    .child(label)
+                                    .tooltip(Tooltip::text(tr!("suggestions.tooltip")))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.accept_action_suggestion(window, cx);
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, window, cx| {
+                                            if matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            ) {
+                                                this.accept_action_suggestion(window, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
+                            ),
+                    ),
+            ),
+        )
+    }
+
+    /// Run the suggestion: mark the prediction adopted for the resolution
+    /// log, then dispatch the same way the action's own affordance does —
+    /// a canned prompt submits through the composer path, a Git action
+    /// through the panel's op machinery.
+    fn accept_action_suggestion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(suggestion) = self.action_suggestion.clone() else {
+            return;
+        };
+        if let Some(prediction) = self
+            .pending_action_predictions
+            .iter_mut()
+            .find(|prediction| prediction.id == suggestion.prediction_id)
+        {
+            prediction.adopted = true;
+        }
+        match suggestion_dispatch(suggestion.action) {
+            Some(SuggestionDispatch::Prompt(key)) => {
+                self.submit_composer_submission_to(
+                    suggestion.session_id,
+                    ComposerSubmission::plain(tr!(key)),
+                    cx,
+                );
+            }
+            Some(SuggestionDispatch::Commit) => self.open_commit_dialog(window, cx),
+            Some(SuggestionDispatch::Land) => self.land_composer_session(PullStrategy::Rebase, cx),
+            Some(dispatch) => {
+                let workspace = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == suggestion.session_id)
+                    .and_then(|session| {
+                        self.workspace_path_for_session(session)
+                            .map(Path::to_path_buf)
+                    });
+                if let Some(workspace) = workspace {
+                    match dispatch {
+                        SuggestionDispatch::Push => self.start_workspace_push(workspace, cx),
+                        SuggestionDispatch::Sync => {
+                            self.start_workspace_sync(workspace, PullStrategy::Rebase, cx)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None => {}
+        }
     }
 }
 
@@ -695,6 +922,28 @@ mod tests {
             activities: vec![activity],
         });
         assert!(candidate_ids(&session, turn_id).contains(&"fix-errors"));
+    }
+
+    #[test]
+    fn the_suggestion_gate_wants_confidence_margin_and_an_actionable_pick() {
+        let probabilities = |picks: &[(&str, f64)]| {
+            picks
+                .iter()
+                .map(|(id, p)| (id.to_string(), *p))
+                .collect::<BTreeMap<_, _>>()
+        };
+        // Confident, committed, and actionable — renders.
+        let p = probabilities(&[("run-tests", 0.6), ("new-prompt", 0.4)]);
+        assert_eq!(gated_suggestion("run-tests", &p), Some("run-tests"));
+        // Confident but committed to a non-renderable pick — nothing.
+        let p = probabilities(&[("archive", 0.8), ("run-tests", 0.2)]);
+        assert_eq!(gated_suggestion("archive", &p), None);
+        // Actionable but under the probability floor — nothing.
+        let p = probabilities(&[("run-tests", 0.4), ("new-prompt", 0.6)]);
+        assert_eq!(gated_suggestion("run-tests", &p), None);
+        // Actionable and confident but too close to the runner-up.
+        let p = probabilities(&[("run-tests", 0.55), ("commit", 0.45)]);
+        assert_eq!(gated_suggestion("run-tests", &p), None);
     }
 
     #[test]

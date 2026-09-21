@@ -1032,6 +1032,18 @@ workspace.from_ref: "从 %{branch}"
 workspace.from_default: 从默认分支
 workspace.workspace: 工作区
 workspace.worktree: 工作树
+suggestions.tooltip: 建议的下一步
+suggestions.keep_going: 继续
+suggestions.run_tests: 运行测试
+suggestions.fix_errors: 修复剩余错误
+suggestions.commit_changes: 提交这些更改
+suggestions.add_tests: 为此添加测试
+suggestions.review_changes: 审查这些更改的问题
+suggestions.open_pr: 推送并创建 PR
+suggestions.commit: 提交
+suggestions.push: 推送
+suggestions.sync: 同步
+suggestions.land: 合入
 sync.behind_one: "落后 %{upstream} 1 个提交"
 sync.behind_many: "落后 %{upstream} %{count} 个提交"
 sync.ahead_one: 领先 1 个提交

@@ -1189,7 +1189,18 @@ impl Waku {
     }
 
     fn start_git_panel_push(&mut self, cx: &mut Context<Self>) {
-        let Some((op_id, workspace)) = self.begin_git_panel_op(GitPanelPending::Pushing, cx) else {
+        let Some(workspace) = self.git_panel.as_ref().map(|panel| panel.workspace.clone()) else {
+            return;
+        };
+        self.start_workspace_push(workspace, cx);
+    }
+
+    /// Push `workspace` without the panel being open — the suggestion chip
+    /// and the button share this.
+    pub(super) fn start_workspace_push(&mut self, workspace: PathBuf, cx: &mut Context<Self>) {
+        let Some((op_id, workspace)) =
+            self.begin_workspace_op(GitPanelPending::Pushing, workspace, cx)
+        else {
             return;
         };
         let Some(client) = self.workspace_client_for_path(&workspace) else {
@@ -1216,8 +1227,22 @@ impl Waku {
     /// Merge instead. A clean pull just refreshes; a conflicted one leaves
     /// the integration in progress and opens the modal.
     fn start_git_panel_sync(&mut self, strategy: PullStrategy, cx: &mut Context<Self>) {
+        let Some(workspace) = self.git_panel.as_ref().map(|panel| panel.workspace.clone()) else {
+            return;
+        };
+        self.start_workspace_sync(workspace, strategy, cx);
+    }
+
+    /// `start_git_panel_sync` against an explicit workspace — the suggestion
+    /// chip's version, which does not need the panel open.
+    pub(super) fn start_workspace_sync(
+        &mut self,
+        workspace: PathBuf,
+        strategy: PullStrategy,
+        cx: &mut Context<Self>,
+    ) {
         let Some((op_id, workspace)) =
-            self.begin_git_panel_op(GitPanelPending::Syncing(strategy), cx)
+            self.begin_workspace_op(GitPanelPending::Syncing(strategy), workspace, cx)
         else {
             return;
         };

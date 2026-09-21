@@ -1061,6 +1061,18 @@ workspace.from_ref: "%{branch} から"
 workspace.from_default: デフォルトブランチから
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
+suggestions.tooltip: 次のおすすめアクション
+suggestions.keep_going: 続ける
+suggestions.run_tests: テストを実行
+suggestions.fix_errors: 残りのエラーを修正
+suggestions.commit_changes: 変更をコミット
+suggestions.add_tests: テストを追加
+suggestions.review_changes: 変更をレビュー
+suggestions.open_pr: プッシュしてPRを作成
+suggestions.commit: コミット
+suggestions.push: プッシュ
+suggestions.sync: 同期
+suggestions.land: 取り込む
 sync.behind_one: "%{upstream} より 1 コミット遅れています"
 sync.behind_many: "%{upstream} より %{count} コミット遅れています"
 sync.ahead_one: 1 コミット進んでいます

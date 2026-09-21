@@ -2702,6 +2702,30 @@ workspace.workspace:
   en: workspace
 workspace.worktree:
   en: Worktree
+suggestions.tooltip:
+  en: Suggested next step
+suggestions.keep_going:
+  en: Keep going
+suggestions.run_tests:
+  en: Run the tests
+suggestions.fix_errors:
+  en: Fix the remaining errors
+suggestions.commit_changes:
+  en: Commit these changes
+suggestions.add_tests:
+  en: Add tests for this
+suggestions.review_changes:
+  en: Review these changes for issues
+suggestions.open_pr:
+  en: Push and open a PR
+suggestions.commit:
+  en: Commit
+suggestions.push:
+  en: Push
+suggestions.sync:
+  en: Sync
+suggestions.land:
+  en: Land
 sync.behind_one:
   en: 1 commit behind %{upstream}
 sync.behind_many:
