@@ -194,6 +194,24 @@ fn default_experiment_enabled() -> bool {
     cfg!(debug_assertions)
 }
 
+/// Guided reading's fixation level: how much of each word is emphasized.
+/// 1–5, defaulting to the bionic tools' own default of 3.
+fn default_guided_reading_fixation() -> u8 {
+    3
+}
+
+/// Guided reading's saccade cadence — fixate every `saccade/10`-th word.
+/// 10–50 in steps of ten; 10 emphasizes every word.
+fn default_guided_reading_saccade() -> u8 {
+    10
+}
+
+/// Opacity percent applied to guided reading's unemphasized text. 100 keeps
+/// full contrast; lower values fade trailing letters.
+fn default_guided_reading_opacity() -> u8 {
+    100
+}
+
 fn default_ui_font_size() -> f32 {
     DEFAULT_UI_FONT_SIZE
 }
@@ -838,6 +856,14 @@ pub struct AppSettings {
     /// Experimental: transcript prose shapes word-leading graphemes semibold
     /// — the "guided reading" emphasis. Defaults on in debug builds.
     pub guided_reading_enabled: bool,
+    /// How much of each word is emphasized: 1–5 mapping to ~20–60% of the
+    /// word's graphemes.
+    pub guided_reading_fixation: u8,
+    /// Emphasis cadence — every `saccade/10`-th word is fixated: 10–50 in
+    /// steps of ten.
+    pub guided_reading_saccade: u8,
+    /// Opacity percent for the unemphasized text; 100 keeps full contrast.
+    pub guided_reading_opacity: u8,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -894,6 +920,9 @@ impl Default for AppSettings {
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
             guided_reading_enabled: default_experiment_enabled(),
+            guided_reading_fixation: default_guided_reading_fixation(),
+            guided_reading_saccade: default_guided_reading_saccade(),
+            guided_reading_opacity: default_guided_reading_opacity(),
             remote_hosts: Vec::new(),
         }
     }
@@ -1275,6 +1304,12 @@ pub struct PersistedState {
     pub sidebar_dock_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub guided_reading_enabled: bool,
+    #[serde(default = "default_guided_reading_fixation")]
+    pub guided_reading_fixation: u8,
+    #[serde(default = "default_guided_reading_saccade")]
+    pub guided_reading_saccade: u8,
+    #[serde(default = "default_guided_reading_opacity")]
+    pub guided_reading_opacity: u8,
     /// Whether the user has confirmed the Experiments page's warning
     /// interstitial. Gates the page's toggles, not the flags themselves —
     /// an experiment already on stays on.
@@ -1491,6 +1526,9 @@ impl PersistedState {
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
             guided_reading_enabled: default_experiment_enabled(),
+            guided_reading_fixation: default_guided_reading_fixation(),
+            guided_reading_saccade: default_guided_reading_saccade(),
+            guided_reading_opacity: default_guided_reading_opacity(),
             experiments_warning_acknowledged: false,
             remote_hosts: Vec::new(),
             sidebar_visible: true,
@@ -1821,6 +1859,9 @@ impl PersistedState {
             automations_enabled: self.automations_enabled,
             sidebar_dock_enabled: self.sidebar_dock_enabled,
             guided_reading_enabled: self.guided_reading_enabled,
+            guided_reading_fixation: self.guided_reading_fixation,
+            guided_reading_saccade: self.guided_reading_saccade,
+            guided_reading_opacity: self.guided_reading_opacity,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -1922,6 +1963,12 @@ impl PersistedState {
         self.automations_enabled = settings.automations_enabled;
         self.sidebar_dock_enabled = settings.sidebar_dock_enabled;
         self.guided_reading_enabled = settings.guided_reading_enabled;
+        self.guided_reading_fixation = settings.guided_reading_fixation.clamp(1, 5);
+        // Saccade is ten-stepped; a hand-edited value snaps to the nearest
+        // step so the renderer's `saccade/10` cadence stays honest.
+        self.guided_reading_saccade =
+            (settings.guided_reading_saccade.saturating_add(5) / 10 * 10).clamp(10, 50);
+        self.guided_reading_opacity = settings.guided_reading_opacity.min(100);
         self.remote_hosts = settings.remote_hosts;
     }
 

@@ -2777,6 +2777,11 @@ pub struct Waku {
     sidebar_transparency_slider: Rc<SliderState>,
     /// The border-intensity slider's in-flight drag, same reason.
     border_intensity_slider: Rc<SliderState>,
+    /// The Guided reading experiment's three in-flight slider drags —
+    /// fixation, saccade, opacity — same reason.
+    guided_reading_fixation_slider: Rc<SliderState>,
+    guided_reading_saccade_slider: Rc<SliderState>,
+    guided_reading_opacity_slider: Rc<SliderState>,
     /// Set while a settings menu is previewing a theme it has not committed;
     /// the persisted settings go back on screen when the menu dismisses.
     theme_preview_active: bool,
@@ -5687,6 +5692,9 @@ impl Waku {
                 completion_volume_slider: SliderState::new(),
                 sidebar_transparency_slider: SliderState::new(),
                 border_intensity_slider: SliderState::new(),
+                guided_reading_fixation_slider: SliderState::new(),
+                guided_reading_saccade_slider: SliderState::new(),
+                guided_reading_opacity_slider: SliderState::new(),
                 theme_preview_active: false,
                 theme_preview_expanded: false,
                 header_drag_armed: false,

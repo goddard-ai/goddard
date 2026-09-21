@@ -285,6 +285,8 @@ impl ExperimentGroup {
 /// One Experiments-page opt-in: its group, card text, current flag value,
 /// and the setter the toggle calls. `set` is a method pointer —
 /// `Self::set_*_enabled` coerces — so the page's table stays data.
+/// `tuning` renders parameter controls under the card while the experiment
+/// is on.
 struct ExperimentDef {
     group: ExperimentGroup,
     id: &'static str,
@@ -292,6 +294,7 @@ struct ExperimentDef {
     description_key: &'static str,
     enabled: bool,
     set: fn(&mut Waku, bool, &mut Context<Waku>),
+    tuning: Option<fn(&Waku, Theme, &mut Context<Waku>) -> AnyElement>,
 }
 
 /// The query state shared by every settings row built in one render pass.
@@ -4435,6 +4438,7 @@ impl Waku {
                 description_key: "experiments.subagents_description",
                 enabled: self.state.subagents_enabled,
                 set: Self::set_subagents_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4443,6 +4447,7 @@ impl Waku {
                 description_key: "experiments.automations_description",
                 enabled: self.state.automations_enabled,
                 set: Self::set_automations_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4451,6 +4456,7 @@ impl Waku {
                 description_key: "experiments.memory_description",
                 enabled: self.state.memory_experiment_enabled,
                 set: Self::set_memory_experiment_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4459,6 +4465,7 @@ impl Waku {
                 description_key: "experiments.project_map_description",
                 enabled: self.state.project_map_enabled,
                 set: Self::set_project_map_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4467,6 +4474,7 @@ impl Waku {
                 description_key: "experiments.model_router_description",
                 enabled: self.state.model_router_enabled,
                 set: Self::set_model_router_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4475,6 +4483,7 @@ impl Waku {
                 description_key: "experiments.status_markers_description",
                 enabled: self.state.status_markers_enabled,
                 set: Self::set_status_markers_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4483,6 +4492,7 @@ impl Waku {
                 description_key: "experiments.computer_use_description",
                 enabled: self.state.computer_use_experiment_enabled,
                 set: Self::set_computer_use_experiment_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4491,6 +4501,7 @@ impl Waku {
                 description_key: "experiments.integrations_description",
                 enabled: self.state.integrations_enabled,
                 set: Self::set_integrations_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -4499,6 +4510,7 @@ impl Waku {
                 description_key: "experiments.sandbox_description",
                 enabled: self.state.sandbox_experiment_enabled,
                 set: Self::set_sandbox_experiment_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Git,
@@ -4507,6 +4519,7 @@ impl Waku {
                 description_key: "experiments.git_panel_description",
                 enabled: self.state.git_panel_enabled,
                 set: Self::set_git_panel_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Git,
@@ -4515,6 +4528,7 @@ impl Waku {
                 description_key: "experiments.github_description",
                 enabled: self.state.github_enabled,
                 set: Self::set_github_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Git,
@@ -4523,6 +4537,7 @@ impl Waku {
                 description_key: "experiments.projects_page_description",
                 enabled: self.state.projects_page_enabled,
                 set: Self::set_projects_page_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Git,
@@ -4531,6 +4546,7 @@ impl Waku {
                 description_key: "experiments.review_queue_description",
                 enabled: self.state.review_queue_enabled,
                 set: Self::set_review_queue_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Surfaces,
@@ -4539,6 +4555,7 @@ impl Waku {
                 description_key: "experiments.big_picture_description",
                 enabled: self.state.big_picture_enabled,
                 set: Self::set_big_picture_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Surfaces,
@@ -4547,6 +4564,7 @@ impl Waku {
                 description_key: "experiments.friends_description",
                 enabled: self.state.friends_enabled,
                 set: Self::set_friends_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Surfaces,
@@ -4555,6 +4573,7 @@ impl Waku {
                 description_key: "experiments.sidebar_dock_description",
                 enabled: self.state.sidebar_dock_enabled,
                 set: Self::set_sidebar_dock_enabled,
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Surfaces,
@@ -4563,6 +4582,7 @@ impl Waku {
                 description_key: "experiments.guided_reading_description",
                 enabled: self.state.guided_reading_enabled,
                 set: Self::set_guided_reading_enabled,
+                tuning: Some(Self::guided_reading_tuning),
             },
         ];
         let groups = ExperimentGroup::ALL.into_iter().filter_map(|group| {
@@ -4710,12 +4730,171 @@ impl Waku {
                 .rounded(px(16.0))
                 .bg(theme.raised)
                 .flex()
-                .items_center()
-                .gap(px(24.0))
-                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
-                .child(toggle)
+                .flex_col()
+                .justify_center()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(24.0))
+                        .child(
+                            settings_row_text(title, description, matched, theme)
+                                .whitespace_normal(),
+                        )
+                        .child(toggle),
+                )
+                .when_some(experiment.tuning.filter(|_| enabled), |card, tuning| {
+                    card.child(tuning(self, theme, cx))
+                })
                 .into_any_element(),
         )
+    }
+
+    /// The Guided reading experiment's three parameters, on the official
+    /// bionic scales: fixation 1–5, saccade 10–50 in tens, opacity 0–100.
+    /// Fixation and saccade change shaped widths, so their commits remeasure
+    /// like a font-size change; opacity is paint-only.
+    fn guided_reading_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let row = |label: String, slider: Stateful<Div>, shown: String| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .w(px(64.0))
+                        .flex_none()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(label),
+                )
+                .child(slider.w(px(140.0)).flex_none())
+                .child(
+                    div()
+                        .w(px(32.0))
+                        .flex_none()
+                        .flex()
+                        .justify_end()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(shown),
+                )
+        };
+
+        let fixation = self.state.guided_reading_fixation;
+        let fixation_shown = self
+            .guided_reading_fixation_slider
+            .shown((fixation - 1) as f32);
+        let fixation_slider = slider::slider(
+            "guided-reading-fixation-slider",
+            &self.guided_reading_fixation_slider,
+            4.0,
+            (fixation - 1) as f32,
+            cx,
+            |this, value, window, cx| this.set_guided_reading_fixation(value, window, cx),
+        );
+        let saccade = self.state.guided_reading_saccade;
+        let saccade_shown = self
+            .guided_reading_saccade_slider
+            .shown((saccade / 10 - 1) as f32);
+        let saccade_slider = slider::slider(
+            "guided-reading-saccade-slider",
+            &self.guided_reading_saccade_slider,
+            4.0,
+            (saccade / 10 - 1) as f32,
+            cx,
+            |this, value, window, cx| this.set_guided_reading_saccade(value, window, cx),
+        );
+        let opacity = self.state.guided_reading_opacity;
+        let opacity_shown = self.guided_reading_opacity_slider.shown(opacity as f32);
+        let opacity_slider = slider::slider(
+            "guided-reading-opacity-slider",
+            &self.guided_reading_opacity_slider,
+            100.0,
+            opacity as f32,
+            cx,
+            |this, value, window, cx| this.set_guided_reading_opacity(value, window, cx),
+        );
+
+        div()
+            .mt(px(10.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(row(
+                tr!("experiments.guided_reading_fixation"),
+                fixation_slider,
+                format!("{}", fixation_shown.round() as i32 + 1),
+            ))
+            .child(row(
+                tr!("experiments.guided_reading_saccade"),
+                saccade_slider,
+                format!("{}", (saccade_shown.round() as i32 + 1) * 10),
+            ))
+            .child(row(
+                tr!("experiments.guided_reading_opacity"),
+                opacity_slider,
+                format!("{}%", opacity_shown.round() as i32),
+            ))
+            .into_any_element()
+    }
+
+    /// The renderer's guided-reading parameters while the experiment is on.
+    pub(super) fn guided_reading(&self) -> Option<md::render::GuidedReading> {
+        self.state
+            .guided_reading_enabled
+            .then_some(md::render::GuidedReading {
+                fixation: self.state.guided_reading_fixation,
+                saccade: self.state.guided_reading_saccade,
+                opacity: self.state.guided_reading_opacity,
+            })
+    }
+
+    fn set_guided_reading_fixation(
+        &mut self,
+        value: f32,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let level = (value.round() as i32 + 1).clamp(1, 5) as u8;
+        if self.state.guided_reading_fixation == level {
+            return;
+        }
+        self.state.guided_reading_fixation = level;
+        self.remeasure_font_sized_surfaces();
+        self.save();
+        cx.notify();
+    }
+
+    fn set_guided_reading_saccade(
+        &mut self,
+        value: f32,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let saccade = ((value.round() as i32 + 1) * 10).clamp(10, 50) as u8;
+        if self.state.guided_reading_saccade == saccade {
+            return;
+        }
+        self.state.guided_reading_saccade = saccade;
+        self.remeasure_font_sized_surfaces();
+        self.save();
+        cx.notify();
+    }
+
+    fn set_guided_reading_opacity(
+        &mut self,
+        value: f32,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let opacity = (value.round() as i32).clamp(0, 100) as u8;
+        if self.state.guided_reading_opacity == opacity {
+            return;
+        }
+        self.state.guided_reading_opacity = opacity;
+        self.save();
+        cx.notify();
     }
 
     fn set_big_picture_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -4850,6 +5029,13 @@ impl Waku {
     fn set_guided_reading_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.state.guided_reading_enabled == enabled {
             return;
+        }
+        if !enabled {
+            // The tuning sliders unmount with the toggle; drop any in-flight
+            // drag so its release handler can't die mid-gesture.
+            self.guided_reading_fixation_slider.cancel();
+            self.guided_reading_saccade_slider.cancel();
+            self.guided_reading_opacity_slider.cancel();
         }
         self.state.guided_reading_enabled = enabled;
         self.remeasure_font_sized_surfaces();

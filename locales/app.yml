@@ -732,6 +732,12 @@ experiments.guided_reading_title:
   en: Guided reading
 experiments.guided_reading_description:
   en: Bold the leading letters of each word in transcript prose to guide the eye — the emphasis pattern known as bionic reading. Applies to Latin-script prose only; code, math, and monospace text are untouched.
+experiments.guided_reading_fixation:
+  en: Fixation
+experiments.guided_reading_saccade:
+  en: Saccade
+experiments.guided_reading_opacity:
+  en: Opacity
 experiments.memory_title:
   en: Project memory
 experiments.memory_description:

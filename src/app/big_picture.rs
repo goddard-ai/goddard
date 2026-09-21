@@ -1259,7 +1259,7 @@ impl Waku {
         )
         .with_families(crate::fonts::current(cx))
         .with_math_enabled(self.state.render_math)
-        .with_guided_reading(self.state.guided_reading_enabled)
+        .with_guided_reading(self.guided_reading())
         .with_link_handler(self.big_picture.card_link_handler.clone())
         .with_streaming_animation(animate_streaming)
     }

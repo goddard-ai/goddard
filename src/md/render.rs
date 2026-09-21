@@ -664,6 +664,28 @@ pub fn flatten_plain(
     }
 }
 
+/// Guided-reading tunables, using the scales the bionic-reading tools
+/// popularized: `fixation` is how much of each word is emphasized (1–5,
+/// mapping to ~20–60%), `saccade` is the cadence between emphasized words
+/// (10–50, fixating every `saccade/10`-th word), and `opacity` fades the
+/// unemphasized text (0–100 percent).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GuidedReading {
+    pub fixation: u8,
+    pub saccade: u8,
+    pub opacity: u8,
+}
+
+impl Default for GuidedReading {
+    fn default() -> Self {
+        Self {
+            fixation: 3,
+            saccade: 10,
+            opacity: 100,
+        }
+    }
+}
+
 /// Guided reading: split each prose run so a word's leading graphemes shape
 /// at `SEMIBOLD` and the rest keeps the run's weight — the emphasis pattern
 /// sold elsewhere as "bionic reading". Only `runs` densifies; the flat string
@@ -674,13 +696,17 @@ pub fn flatten_plain(
 /// monospace or inside `code_ranges`/math stays whole: a mid-word style
 /// boundary drops kerning and breaks joining scripts, so eligibility is
 /// restricted to words made of Latin, Greek, or Cyrillic letters anyway.
-pub fn apply_fixation(flat: &mut FlatText, code_family: &SharedString) {
+pub fn apply_fixation(flat: &mut FlatText, code_family: &SharedString, guided: &GuidedReading) {
     let mut protected: Vec<Range<usize>> = flat.code_ranges.clone();
     if let Some(math) = &flat.math {
         protected.extend(math.spans.iter().map(|span| span.range.clone()));
     }
     protected.sort_by_key(|range| range.start);
 
+    let alpha = (f32::from(guided.opacity) / 100.0).clamp(0.0, 1.0);
+    // Saccade counts words across the whole element so a word split across
+    // styled runs can't cheat the cadence.
+    let mut word_index = 0usize;
     let mut runs: Vec<TextRun> = Vec::with_capacity(flat.runs.len() * 2);
     let mut offset = 0;
     for run in flat.runs.drain(..) {
@@ -690,16 +716,24 @@ pub fn apply_fixation(flat: &mut FlatText, code_family: &SharedString) {
             runs.push(run);
             continue;
         }
-        let segments = fixation_segments(&flat.text, offset..end, |at| {
-            protected
-                .iter()
-                .any(|range| range.start <= at && at < range.end)
-        });
+        let segments = fixation_segments(
+            &flat.text,
+            offset..end,
+            |at| {
+                protected
+                    .iter()
+                    .any(|range| range.start <= at && at < range.end)
+            },
+            guided,
+            &mut word_index,
+        );
         for (range, fixated) in segments {
             let mut split = run.clone();
             split.len = range.len();
             if fixated {
                 split.font.weight = FontWeight::SEMIBOLD;
+            } else if alpha < 1.0 {
+                split.color = split.color.opacity(alpha);
             }
             runs.push(split);
         }
@@ -709,33 +743,59 @@ pub fn apply_fixation(flat: &mut FlatText, code_family: &SharedString) {
 }
 
 /// Tile `range` of `text` into `(byte_range, fixated)` segments: each maximal
-/// run of eligible letters becomes a word whose leading ~40% is fixated, and
-/// everything else — whitespace, digits, punctuation, protected spans — is
-/// emitted plain. Splits only ever land on grapheme boundaries; cutting
+/// run of eligible letters becomes a word whose leading share — the
+/// `fixation` fraction — is emphasized, every `saccade/10`-th one. Everything
+/// else — whitespace, digits, punctuation, protected spans, skipped words —
+/// is emitted plain. Splits only ever land on grapheme boundaries; cutting
 /// inside a cluster would shape a dangling combining mark.
 fn fixation_segments(
     text: &str,
     range: Range<usize>,
     in_protected: impl Fn(usize) -> bool,
+    guided: &GuidedReading,
+    word_index: &mut usize,
 ) -> Vec<(Range<usize>, bool)> {
+    let saccade_step = usize::from(guided.saccade / 10).max(1);
+    // Fixation level → share of the word emphasized, in tenths.
+    let fraction_tenths = usize::from(guided.fixation.clamp(1, 5)) + 1;
     let mut segments: Vec<(Range<usize>, bool)> = Vec::new();
     let mut word: Vec<Range<usize>> = Vec::new();
     let mut cursor = range.start;
+    // Adjacent plain spans coalesce so a saccade-skipped word and its
+    // whitespace cost one run, not three.
+    let push_plain = |segments: &mut Vec<(Range<usize>, bool)>, range: Range<usize>| {
+        if range.is_empty() {
+            return;
+        }
+        if let Some(last) = segments.last_mut()
+            && !last.1
+        {
+            last.0.end = range.end;
+        } else {
+            segments.push((range, false));
+        }
+    };
     let flush_word = |word: &mut Vec<Range<usize>>,
                       segments: &mut Vec<(Range<usize>, bool)>,
-                      cursor: &mut usize| {
+                      cursor: &mut usize,
+                      word_index: &mut usize| {
         let Some(first) = word.first() else { return };
         let start = first.start;
         if *cursor < start {
-            segments.push((*cursor..start, false));
+            push_plain(segments, *cursor..start);
         }
-        // Fixation prefix: ~40% of the word's grapheme clusters, at least 1.
-        let fix = (word.len() * 2 + 4) / 5;
-        let fix_end = word[fix - 1].end;
         let end = word.last().map_or(start, |cluster| cluster.end);
-        segments.push((start..fix_end, true));
-        if fix_end < end {
-            segments.push((fix_end..end, false));
+        let fixate = *word_index % saccade_step == 0;
+        *word_index += 1;
+        if fixate {
+            // Fixation prefix: the level's share of the word's grapheme
+            // clusters, at least 1.
+            let fix = ((word.len() * fraction_tenths + 9) / 10).max(1);
+            let fix_end = word[(fix - 1).min(word.len() - 1)].end;
+            segments.push((start..fix_end, true));
+            push_plain(segments, fix_end..end);
+        } else {
+            push_plain(segments, start..end);
         }
         *cursor = end;
         word.clear();
@@ -749,13 +809,11 @@ fn fixation_segments(
         if eligible {
             word.push(start..start + cluster.len());
         } else {
-            flush_word(&mut word, &mut segments, &mut cursor);
+            flush_word(&mut word, &mut segments, &mut cursor, word_index);
         }
     }
-    flush_word(&mut word, &mut segments, &mut cursor);
-    if cursor < range.end {
-        segments.push((cursor..range.end, false));
-    }
+    flush_word(&mut word, &mut segments, &mut cursor, word_index);
+    push_plain(&mut segments, cursor..range.end);
     segments
 }
 
@@ -779,7 +837,7 @@ pub struct MarkdownView {
     /// `TextRun`s, so a theme or font change has to drop them or the
     /// transcript keeps painting the old faces — same for guided reading,
     /// which densifies the runs themselves.
-    style: RefCell<Option<(Palette, Metrics, Fonts, bool)>>,
+    style: RefCell<Option<(Palette, Metrics, Fonts, Option<GuidedReading>)>>,
     /// Per-element opacity spans for the live response. Text is committed to
     /// layout immediately; only these paint colors animate.
     veil: RefCell<RowVeil>,
@@ -931,7 +989,7 @@ impl MarkdownView {
         palette: &Palette,
         metrics: &Metrics,
         families: &Fonts,
-        guided_reading: bool,
+        guided_reading: Option<GuidedReading>,
     ) {
         let current = (*palette, *metrics, families.clone(), guided_reading);
         let mut style = self.style.borrow_mut();
@@ -1051,9 +1109,9 @@ pub struct Ctx<'a> {
     animate_streaming: bool,
     math_enabled: bool,
     /// Guided reading: split prose runs so word-leading graphemes shape at
-    /// `SEMIBOLD`. Style-affecting, so it joins `MarkdownView::sync_style`'s
-    /// cache stamp.
-    guided_reading: bool,
+    /// `SEMIBOLD` — the parameters when the experiment is on. Style-
+    /// affecting, so it joins `MarkdownView::sync_style`'s cache stamp.
+    guided_reading: Option<GuidedReading>,
     /// The enclosing context menu inner affordances contribute actions to —
     /// formulas and `@`-mention file references. `None` where the surface has
     /// no menu to join.
@@ -1093,7 +1151,7 @@ impl<'a> Ctx<'a> {
             copy_lead: Cell::new(None),
             animate_streaming: true,
             math_enabled: true,
-            guided_reading: false,
+            guided_reading: None,
             context_menu: None,
             wrap_context_menu: false,
             file_ref_items: None,
@@ -1172,8 +1230,8 @@ impl<'a> Ctx<'a> {
 
     /// Guided reading: word-leading graphemes in prose shape semibold —
     /// see [`apply_fixation`].
-    pub fn with_guided_reading(mut self, enabled: bool) -> Self {
-        self.guided_reading = enabled;
+    pub fn with_guided_reading(mut self, guided: Option<GuidedReading>) -> Self {
+        self.guided_reading = guided;
         self
     }
 
@@ -1292,8 +1350,8 @@ impl<'a> Ctx<'a> {
     ) -> Rc<FlatText> {
         let build = || {
             let mut flat = build();
-            if self.guided_reading {
-                apply_fixation(&mut flat, &self.families.code);
+            if let Some(guided) = self.guided_reading {
+                apply_fixation(&mut flat, &self.families.code, &guided);
             }
             if detect_refs {
                 if self.annotation_ref_labels > 0 {
@@ -3214,15 +3272,15 @@ mod tests {
             FontWeight::NORMAL,
             palette().text,
         );
-        apply_fixation(&mut flat, &Fonts::default().code);
+        apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_runs_tile(&flat);
-        // Five-letter words fixate their first two graphemes.
+        // Five-letter words fixate their first two graphemes; a word's
+        // plain tail coalesces with the following whitespace.
         assert_eq!(
             run_pieces(&flat),
             vec![
                 ("he".to_owned(), FontWeight::SEMIBOLD),
-                ("llo".to_owned(), FontWeight::NORMAL),
-                (", ".to_owned(), FontWeight::NORMAL),
+                ("llo, ".to_owned(), FontWeight::NORMAL),
                 ("wo".to_owned(), FontWeight::SEMIBOLD),
                 ("rld".to_owned(), FontWeight::NORMAL),
             ]
@@ -3238,7 +3296,7 @@ mod tests {
             FontWeight::NORMAL,
             palette().text,
         );
-        apply_fixation(&mut flat, &Fonts::default().code);
+        apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_runs_tile(&flat);
         let pieces = run_pieces(&flat);
         // Markdown bold is already semibold — never split.
@@ -3279,7 +3337,7 @@ mod tests {
             FontWeight::NORMAL,
             palette().text,
         );
-        apply_fixation(&mut flat, &Fonts::default().code);
+        apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_runs_tile(&flat);
         assert_eq!(
             run_pieces(&flat),
@@ -3300,7 +3358,7 @@ mod tests {
             FontWeight::NORMAL,
             palette().text,
         );
-        apply_fixation(&mut flat, &Fonts::default().code);
+        apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_runs_tile(&flat);
         // "café" is four clusters → "ca" fixated; the accent stays with its
         // base in the trailing segment.
@@ -3308,8 +3366,7 @@ mod tests {
             run_pieces(&flat),
             vec![
                 ("ca".to_owned(), FontWeight::SEMIBOLD),
-                ("fe\u{301}".to_owned(), FontWeight::NORMAL),
-                (" ".to_owned(), FontWeight::NORMAL),
+                ("fe\u{301} ".to_owned(), FontWeight::NORMAL),
                 ("na".to_owned(), FontWeight::SEMIBOLD),
                 ("ve".to_owned(), FontWeight::NORMAL),
             ]
@@ -3324,9 +3381,95 @@ mod tests {
             FontWeight::NORMAL,
             palette().text,
         );
-        apply_fixation(&mut flat, &Fonts::default().code);
+        apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_eq!(flat.runs.len(), 1);
         assert_eq!(flat.runs[0].font.weight, FontWeight::NORMAL);
+    }
+
+    #[test]
+    fn saccade_fixates_every_nth_word() {
+        let mut flat = flatten_plain(
+            "one two three four",
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        // Saccade 30 → every third word emphasized: "one" and "four";
+        // skipped words and gaps coalesce into one plain segment.
+        apply_fixation(
+            &mut flat,
+            &Fonts::default().code,
+            &GuidedReading {
+                saccade: 30,
+                ..GuidedReading::default()
+            },
+        );
+        assert_runs_tile(&flat);
+        assert_eq!(
+            run_pieces(&flat),
+            vec![
+                ("on".to_owned(), FontWeight::SEMIBOLD),
+                ("e two three ".to_owned(), FontWeight::NORMAL),
+                ("fo".to_owned(), FontWeight::SEMIBOLD),
+                ("ur".to_owned(), FontWeight::NORMAL),
+            ]
+        );
+    }
+
+    #[test]
+    fn fixation_level_scales_the_prefix() {
+        let mut flat = flatten_plain(
+            "characters",
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        // Level 5 → 60% of ten graphemes.
+        apply_fixation(
+            &mut flat,
+            &Fonts::default().code,
+            &GuidedReading {
+                fixation: 5,
+                ..GuidedReading::default()
+            },
+        );
+        assert_eq!(
+            run_pieces(&flat),
+            vec![
+                ("charac".to_owned(), FontWeight::SEMIBOLD),
+                ("ters".to_owned(), FontWeight::NORMAL),
+            ]
+        );
+    }
+
+    #[test]
+    fn opacity_fades_unemphasized_text_only() {
+        let base = palette().text;
+        let mut flat = flatten_plain(
+            "tail end",
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            base,
+        );
+        apply_fixation(
+            &mut flat,
+            &Fonts::default().code,
+            &GuidedReading {
+                opacity: 50,
+                ..GuidedReading::default()
+            },
+        );
+        assert_runs_tile(&flat);
+        for run in &flat.runs {
+            if run.font.weight == FontWeight::SEMIBOLD {
+                assert_eq!(run.color, base, "fixated text keeps full opacity");
+            } else {
+                assert!(
+                    (run.color.a - base.a * 0.5).abs() < 0.01,
+                    "unemphasized text fades to half opacity"
+                );
+            }
+        }
     }
 
     #[test]
@@ -3531,7 +3674,7 @@ mod tests {
         let dark = Palette::from_theme(&Theme::dark());
         let light = Palette::from_theme(&Theme::light());
 
-        view.sync_style(&dark, &Metrics::BODY, &Fonts::default(), false);
+        view.sync_style(&dark, &Metrics::BODY, &Fonts::default(), None);
         let cached = view.flat(0, || {
             flatten_plain(
                 "a",
@@ -3541,7 +3684,7 @@ mod tests {
             )
         });
 
-        view.sync_style(&dark, &Metrics::BODY, &Fonts::default(), false);
+        view.sync_style(&dark, &Metrics::BODY, &Fonts::default(), None);
         assert!(
             Rc::ptr_eq(
                 &cached,
@@ -3550,7 +3693,7 @@ mod tests {
             "re-syncing the same style must not invalidate"
         );
 
-        view.sync_style(&light, &Metrics::BODY, &Fonts::default(), false);
+        view.sync_style(&light, &Metrics::BODY, &Fonts::default(), None);
         let relit = view.flat(0, || {
             flatten_plain(
                 "a",

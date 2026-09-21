@@ -1850,6 +1850,9 @@ experiments.group_git: Git 与审查
 experiments.group_sessions: 会话与智能体
 experiments.group_surfaces: 应用界面
 experiments.guided_reading_description: 将转录正文中每个单词的开头字母加粗以引导视线 — 即“仿生阅读”强调效果。仅适用于拉丁字母文本；代码、数学公式和等宽文本不受影响。
+experiments.guided_reading_fixation: 注视强度
+experiments.guided_reading_opacity: 不透明度
+experiments.guided_reading_saccade: 眼跳间隔
 experiments.guided_reading_title: 引导式阅读
 experiments.integrations_description: 新增“设置 → 集成”页面，一次连接 Linear、GitHub、Notion、Stripe 等官方远程 MCP 服务器，并通过 Goddard 的本地代理提供给每个已启用的智能体。
 experiments.integrations_title: MCP 集成

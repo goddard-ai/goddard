@@ -1,1 +1,1 @@
-- Guided reading: an Experiments-page opt-in that shapes the leading letters of each word semibold in transcript prose — the "bionic reading" emphasis — for Latin-script text only; code, math, and monospace output are untouched
+- Guided reading: an Experiments-page opt-in that shapes the leading letters of each word semibold in transcript prose — the "bionic reading" emphasis — with Fixation (1–5), Saccade (10–50), and Opacity (0–100) sliders matching the official scales; Latin-script text only, and code, math, and monospace output are untouched
