@@ -397,6 +397,9 @@ settings.local_by_default_description: 项目、对话和设置均存储在这�
 settings.local_by_default_web_description: 项目、对话和附件保留在所连接的守护进程主机上。Goddard Web 的偏好设置保留在此浏览器中。
 settings.automatic_updates: 自动更新
 settings.automatic_updates_description: 在后台检查新版本，并在发现更新时提示安装
+settings.check_for_updates: 检查更新
+settings.check_for_updates_description: "已安装版本 %{version}"
+settings.check_now: 立即检查
 settings.share_anonymous_usage_data: 分享匿名使用数据
 settings.share_anonymous_usage_data_description: 分享功能使用情况和可靠性数据，帮助改进 Goddard。不会包含提示词、回复、项目名称、文件路径等个人信息
 providers.coding_agents: 编程智能体

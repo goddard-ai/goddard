@@ -1256,6 +1256,12 @@ settings.automatic_updates:
   en: Automatic updates
 settings.automatic_updates_description:
   en: Check for new versions in the background and offer to install them
+settings.check_for_updates:
+  en: Check for updates
+settings.check_for_updates_description:
+  en: "Version %{version} is installed"
+settings.check_now:
+  en: Check now
 settings.share_anonymous_usage_data:
   en: Share anonymous usage data
 settings.share_anonymous_usage_data_description:

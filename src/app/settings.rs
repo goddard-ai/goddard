@@ -1478,6 +1478,40 @@ impl Waku {
                 theme,
                 search,
             ));
+            let app_build = match option_env!("GODDARD_COMMIT_SHA") {
+                Some(commit) => format!("{} · {commit}", env!("CARGO_PKG_VERSION")),
+                None => env!("CARGO_PKG_VERSION").to_owned(),
+            };
+            head_cards.extend(setting_card(
+                tr!("settings.check_for_updates"),
+                tr!("settings.check_for_updates_description", version = app_build),
+                div()
+                    .id("check-for-updates-now")
+                    .tab_index(0)
+                    .h(px(27.0))
+                    .px(px(10.0))
+                    .rounded(px(8.0))
+                    .border(hairline())
+                    .border_color(theme.border_strong)
+                    .flex()
+                    .items_center()
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .hover(|element| element.bg(theme.overlay))
+                    .focus_visible(|element| element.bg(theme.focus_highlight()))
+                    .child(tr!("settings.check_now"))
+                    .on_activation(cx, |_, _, cx| {
+                        if let Some(updater) = cx
+                            .try_global::<crate::updater::UpdaterState>()
+                            .and_then(|state| state.0.as_ref())
+                        {
+                            updater.check_for_updates();
+                        }
+                    }),
+                theme,
+                search,
+            ));
         }
 
         let mut session_cards: Vec<AnyElement> = [
