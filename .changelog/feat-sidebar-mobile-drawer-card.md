@@ -1,0 +1,1 @@
+- Swiping right for task history in the mobile app now lifts the current screen into a floating card that rounds to the device's display corners as it slides — like iOS's own back gesture — with the dim clipping to the card instead of painting square corners

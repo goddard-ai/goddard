@@ -27,7 +27,8 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Drawer } from 'react-native-drawer-layout';
+import { Drawer, useDrawerProgress } from 'react-native-drawer-layout';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppSymbol } from '@/components/app-symbol';
@@ -42,6 +43,7 @@ import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
+import { useDisplayCornerRadius } from '@/lib/display-corner-radius';
 import { sessionIsRunning } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 import {
@@ -121,7 +123,9 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
           drawerType="back"
           open={open}
           overlayAccessibilityLabel="Close task history"
-          overlayStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.18)' }}
+          // The library overlay stays as an invisible press-catcher; the dim
+          // lives inside DrawerCard so it clips to the card's rounded corners.
+          overlayStyle={{ backgroundColor: 'transparent' }}
           renderDrawerContent={() => (
             <TaskDrawerContent
               drawerWidth={drawerWidth}
@@ -134,12 +138,34 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
           swipeEnabled={swipeEnabled}
           onClose={closeTaskDrawer}
           onOpen={openTaskDrawer}>
-          {children}
+          <DrawerCard>{children}</DrawerCard>
         </Drawer>
       ) : (
         <>{children}</>
       )}
     </TaskDrawerContext.Provider>
+  );
+}
+
+/** Slides and rounds with the content as the drawer reveals, so the app lifts
+ * off as a card matching the display's corner radius. */
+function DrawerCard({ children }: { children: ReactNode }) {
+  const progress = useDrawerProgress();
+  const cornerRadius = useDisplayCornerRadius();
+  const cardStyle = useAnimatedStyle(() => ({
+    borderRadius: progress.value * cornerRadius,
+  }));
+  const dimStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+  }));
+  return (
+    <Animated.View style={[styles.drawerCard, cardStyle]}>
+      {children}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, styles.drawerCardDim, dimStyle]}
+      />
+    </Animated.View>
   );
 }
 
@@ -626,6 +652,14 @@ const SessionRow = memo(function SessionRow({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  drawerCard: {
+    // Continuous curve matches the display's squircle; borderRadius is
+    // animated in useAnimatedStyle from drawer progress.
+    borderCurve: 'continuous',
+    flex: 1,
+    overflow: 'hidden',
+  },
+  drawerCardDim: { backgroundColor: 'rgba(0, 0, 0, 0.18)' },
   daemonFloat: {
     left: 12,
     position: 'absolute',
