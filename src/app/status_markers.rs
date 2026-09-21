@@ -128,10 +128,10 @@ const FLAG_MARKERS: &[StatusMarker] = &[
         icon: "icons/eye.svg",
         tone: MarkerTone::Warning,
         threshold: 0.75,
-        instructions: "Did the assistant finish without verifying its work — code it \
-            changed but did not build, test, or run, or claims it did not check? \
-            `toolSequence` shows what actually ran: a build, test, or run listed \
-            there without `(failed)` counts as verification.",
+        instructions: "Did the turn finish without its work being verified — code it \
+            changed but never built, tested, or ran, claims it did not check, or the \
+            last build/test/run in `toolSequence` ended `(failed)` and the turn closed \
+            without a passing rerun? `toolErrors` carries the failing output tails.",
     },
     StatusMarker {
         id: "drifted",
