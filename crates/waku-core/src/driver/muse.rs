@@ -516,6 +516,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                     let _ = worker.events.send(DriverEvent::SteerAccepted {
                         message: text,
                         sent_by_task: None,
+                        hidden: false,
                     });
                 }
                 Err(error) => {
@@ -523,6 +524,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                         message: text,
                         reason: error.message(),
                         reason_i18n: None,
+                        hidden: false,
                     });
                 }
             }

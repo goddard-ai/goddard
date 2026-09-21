@@ -1231,6 +1231,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                     message: text,
                     reason,
                     reason_i18n: Some(reason_i18n),
+                    hidden: false,
                 });
                 return true;
             }
@@ -1252,12 +1253,14 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                     let _ = events.send(DriverEvent::SteerAccepted {
                         message: text,
                         sent_by_task: None,
+                        hidden: false,
                     });
                 }
                 Ok(None) => {
                     let _ = events.send(DriverEvent::SteerAccepted {
                         message: text,
                         sent_by_task: None,
+                        hidden: false,
                     });
                 }
                 Err(error) => {

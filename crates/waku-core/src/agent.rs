@@ -36,6 +36,22 @@ pub struct AgentPrompt {
     /// prompt is confirmed delivered. `None` for prompts that never parked —
     /// steer-mode requests and queue prompts delivered immediately.
     pub queued_id: Option<Uuid>,
+    /// Set when the steer is a daemon-injected context block rather than
+    /// user or agent text: its `steerAccepted` echo stays out of the
+    /// transcript and, for [`ContextSteer::Memory`], marks the session's
+    /// memory injection delivered. A rejection leaves the session eligible
+    /// so the next prompt retries.
+    pub context: Option<ContextSteer>,
+}
+
+/// What accepting a hidden context steer settles for the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextSteer {
+    /// Context blocks only — the echo confirms delivery.
+    Blocks,
+    /// The steer carried the project-memory block — accepting it marks the
+    /// session's memory injection delivered.
+    Memory,
 }
 
 /// Live turn bookkeeping the runtime event forwarder maintains per session.
@@ -106,8 +122,14 @@ impl AgentState {
         self.turns.lock().clear();
     }
 
-    /// Update the session's turn bookkeeping from a runtime event.
-    pub fn note_driver_event(&self, session_id: Uuid, event: &DriverEvent) {
+    /// Update the session's turn bookkeeping from a runtime event. Returns
+    /// the pending steer a rejection resolved, so the caller can tell a
+    /// dropped context injection apart from a refused agent message.
+    pub fn note_driver_event(
+        &self,
+        session_id: Uuid,
+        event: &DriverEvent,
+    ) -> Option<AgentPrompt> {
         match event {
             DriverEvent::TurnStarted => {
                 *self.turns.lock().entry(session_id).or_default() = AgentTurn {
@@ -137,14 +159,17 @@ impl AgentState {
                 // the head of the queue — its mirrored chip never left the
                 // session, so the wait stays visible and ordered. A direct
                 // steer-mode request has no queue entry and stays dropped.
-                if let Some(entry) = self.take_pending_steer(session_id, message)
-                    && entry.queued_id.is_some()
-                {
-                    self.requeue_front(session_id, entry);
-                }
+                return match self.take_pending_steer(session_id, message) {
+                    Some(entry) if entry.context.is_none() && entry.queued_id.is_some() => {
+                        self.requeue_front(session_id, entry);
+                        None
+                    }
+                    entry => entry,
+                };
             }
             _ => {}
         }
+        None
     }
 
     /// Whether the session has an open turn — running or parked. Steer-mode
@@ -243,6 +268,16 @@ impl AgentState {
         if queue.is_empty() {
             queues.remove(&session_id);
         }
+    }
+
+    /// Whether a daemon context steer is still awaiting the provider's echo
+    /// for this session — a second prompt must not compose another context
+    /// injection while one is in flight.
+    pub fn context_steer_pending(&self, session_id: Uuid) -> bool {
+        self.pending_steers
+            .lock()
+            .get(&session_id)
+            .is_some_and(|pending| pending.iter().any(|steer| steer.context.is_some()))
     }
 
     /// Remember a steer injection so the provider's `steerAccepted` echo can
@@ -443,6 +478,7 @@ mod tests {
             prompt: text.to_owned(),
             sender,
             queued_id: Some(Uuid::new_v4()),
+            context: None,
         }
     }
 
@@ -525,6 +561,7 @@ mod tests {
                     prompt: "one rewritten".into(),
                     sender: None,
                     queued_id: Some(restored_id),
+                    context: None,
                 },
                 prompt("three", None),
             ],
@@ -555,28 +592,63 @@ mod tests {
                 prompt: "direct".into(),
                 sender: None,
                 queued_id: None,
+                context: None,
             },
         );
 
-        state.note_driver_event(
+        let _ = state.note_driver_event(
             session,
             &DriverEvent::SteerRejected {
                 message: "drained".into(),
                 reason: "turn ended".into(),
                 reason_i18n: None,
+                hidden: false,
             },
         );
         // The mirrored chip's prompt returns to the head of the queue.
         assert_eq!(state.pop_queued(session).unwrap().queued_id, Some(queued_id));
 
-        state.note_driver_event(
+        let _ = state.note_driver_event(
             session,
             &DriverEvent::SteerRejected {
                 message: "direct".into(),
                 reason: "turn ended".into(),
                 reason_i18n: None,
+                hidden: false,
             },
         );
+        assert!(state.pop_queued(session).is_none());
+    }
+
+    #[test]
+    fn a_rejected_context_steer_returns_to_the_caller_unrequeued() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        state.record_pending_steer(
+            session,
+            AgentPrompt {
+                prompt: "context".into(),
+                sender: None,
+                queued_id: None,
+                context: Some(ContextSteer::Memory),
+            },
+        );
+        assert!(state.context_steer_pending(session));
+
+        let rejected = state
+            .note_driver_event(
+                session,
+                &DriverEvent::SteerRejected {
+                    message: "context".into(),
+                    reason: "turn ended".into(),
+                    reason_i18n: None,
+                    hidden: false,
+                },
+            )
+            .expect("the rejected context steer resolves to its record");
+        assert_eq!(rejected.context, Some(ContextSteer::Memory));
+        // Not requeued, and the session is free to retry the injection.
+        assert!(!state.context_steer_pending(session));
         assert!(state.pop_queued(session).is_none());
     }
 
@@ -589,17 +661,17 @@ mod tests {
         assert!(!state.is_working(session));
         assert!(!state.has_parked_turn(session));
 
-        state.note_driver_event(session, &DriverEvent::TurnStarted);
+        let _ = state.note_driver_event(session, &DriverEvent::TurnStarted);
         assert!(state.has_open_turn(session));
         assert!(state.is_working(session));
         assert!(!state.has_parked_turn(session));
 
-        state.note_driver_event(session, &DriverEvent::TurnParked);
+        let _ = state.note_driver_event(session, &DriverEvent::TurnParked);
         assert!(state.has_open_turn(session));
         assert!(!state.is_working(session));
         assert!(state.has_parked_turn(session));
 
-        state.note_driver_event(
+        let _ = state.note_driver_event(
             session,
             &DriverEvent::TurnFinished {
                 success: true,
@@ -637,10 +709,10 @@ mod tests {
     fn process_exit_drops_pending_steers_and_turn_state() {
         let state = AgentState::default();
         let session = Uuid::new_v4();
-        state.note_driver_event(session, &DriverEvent::TurnStarted);
+        let _ = state.note_driver_event(session, &DriverEvent::TurnStarted);
         state.record_pending_steer(session, prompt("in flight", Some(Uuid::new_v4())));
 
-        state.note_driver_event(session, &DriverEvent::ProcessExited);
+        let _ = state.note_driver_event(session, &DriverEvent::ProcessExited);
 
         assert!(!state.has_open_turn(session));
         assert!(state.take_pending_steer(session, "in flight").is_none());
@@ -739,7 +811,7 @@ mod tests {
         let session = Uuid::new_v4();
         let token = state.mint(session);
         state.enqueue(session, prompt("held", None));
-        state.note_driver_event(session, &DriverEvent::TurnStarted);
+        let _ = state.note_driver_event(session, &DriverEvent::TurnStarted);
 
         state.clear_session(session);
 

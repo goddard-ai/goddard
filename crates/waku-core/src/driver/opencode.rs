@@ -615,6 +615,7 @@ impl OpenCodeDriver {
                                         message: text,
                                         reason: error.to_string(),
                                         reason_i18n: None,
+                                        hidden: false,
                                     });
                                 }
                                 continue;
@@ -634,6 +635,7 @@ impl OpenCodeDriver {
                                     let _ = worker_events.send(DriverEvent::SteerAccepted {
                                         message: text,
                                         sent_by_task: None,
+                                        hidden: false,
                                     });
                                 }
                                 Err(error) => {
@@ -662,11 +664,13 @@ impl OpenCodeDriver {
                                     Ok(()) => DriverEvent::SteerAccepted {
                                         message,
                                         sent_by_task: None,
+                                        hidden: false,
                                     },
                                     Err(reason) => DriverEvent::SteerRejected {
                                         message,
                                         reason,
                                         reason_i18n: None,
+                                        hidden: false,
                                     },
                                 };
                                 let _ = worker_events.send(event);
@@ -2038,6 +2042,7 @@ server.serve_forever()
                 DriverEvent::SteerAccepted {
                     message,
                     sent_by_task: None,
+                    ..
                 } => {
                     assert!(message.contains("BANANA"));
                     steer_accepted = true;

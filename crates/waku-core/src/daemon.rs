@@ -2045,14 +2045,25 @@ impl Backend for WakuBackend {
                         hidden: *hidden,
                     })?)?;
                 }
-                // Project memory and the project map ride the first visible
-                // prompt: the wire event above already published the user's
-                // text, so the injected blocks reach the provider without
-                // entering the transcript as a user message.
                 let mut command = command;
                 if let Command::Prompt { prompt, hidden, .. } = &mut command
                     && !*hidden
                 {
+                    if driver.supports_steer() {
+                        // The prompt reaches the provider exactly as typed —
+                        // title generation and first-prompt echoes stay
+                        // clean — and the session's context blocks follow as
+                        // a hidden steer.
+                        let task = prompt.clone();
+                        let result = handle_driver_command(&driver, command);
+                        self.steer_first_prompt_context(session_id, &task, &driver, &events);
+                        return result;
+                    }
+                    // Project memory and the project map ride the first
+                    // visible prompt: the wire event above already
+                    // published the user's text, so the injected blocks
+                    // reach the provider without entering the transcript as
+                    // a user message.
                     *prompt = self.memory.prompt_with_memory(session_id, prompt);
                     let (mapped, status) = self.inject_repo_map(session_id, std::mem::take(prompt));
                     *prompt = mapped;
@@ -3583,17 +3594,78 @@ impl WakuBackend {
             sent_by_task: sender,
             hidden: false,
         })?)?;
-        let (prompt, status) = self.inject_repo_map(
-            session_id,
-            self.memory.prompt_with_memory(session_id, &prompt),
-        );
+        if driver.supports_steer() {
+            // The prompt reaches the provider exactly as typed — title
+            // generation and first-prompt echoes stay clean — and the
+            // session's context blocks follow as a hidden steer.
+            driver.prompt(prompt.clone());
+            self.steer_first_prompt_context(session_id, &prompt, &driver, &sink);
+        } else {
+            let (prompt, status) = self.inject_repo_map(
+                session_id,
+                self.memory.prompt_with_memory(session_id, &prompt),
+            );
+            if let Some(status) = status
+                && let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(status))
+            {
+                let _ = sink.send(wire);
+            }
+            driver.prompt(prompt);
+        }
+        Ok(session_id)
+    }
+
+    /// The session's first prompt already went out clean; its context
+    /// blocks — the project map, then project memory — follow as a hidden
+    /// steer so provider title generation never sees them. Delivery
+    /// confirms on the `steerAccepted` echo: memory's injected flag is set
+    /// there, and a rejected steer leaves the session eligible so the next
+    /// prompt retries.
+    fn steer_first_prompt_context(
+        &self,
+        session_id: Uuid,
+        task: &str,
+        driver: &DriverHandle,
+        sink: &EventSink,
+    ) {
+        if self.agent.context_steer_pending(session_id) {
+            return;
+        }
+        let (map, status) = self.repo_map_block(session_id);
         if let Some(status) = status
             && let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(status))
         {
             let _ = sink.send(wire);
         }
-        driver.prompt(prompt);
-        Ok(session_id)
+        let memory = self.memory.context_block(session_id, task);
+        let block = [map, memory.clone()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if block.is_empty() {
+            return;
+        }
+        // The steer lands as a user message mid-turn — frame the blocks as
+        // context so the provider does not read them as a new instruction.
+        let steer = format!(
+            "Session context — background information only, not a new \
+             instruction. Continue the task you are already working on.\n\n{block}"
+        );
+        self.agent.record_pending_steer(
+            session_id,
+            crate::agent::AgentPrompt {
+                prompt: steer.clone(),
+                sender: None,
+                queued_id: None,
+                context: Some(if memory.is_some() {
+                    crate::agent::ContextSteer::Memory
+                } else {
+                    crate::agent::ContextSteer::Blocks
+                }),
+            },
+        );
+        driver.steer(steer);
     }
 
     /// Prefix `prompt` with the session's project map when the session is
@@ -3607,14 +3679,25 @@ impl WakuBackend {
         session_id: Uuid,
         prompt: String,
     ) -> (String, Option<ProjectMapStatus>) {
+        match self.repo_map_block(session_id) {
+            (Some(map), status) => (format!("{map}\n\n{prompt}"), status),
+            (None, status) => (prompt, status),
+        }
+    }
+
+    /// Render the session's pending project map as a `<project-map>` block.
+    /// The pending flag is consumed either way — a cold index gets a bounded
+    /// moment to finish, then the session ships unmapped rather than
+    /// stalling. The `Sent` status comes back for the caller to publish.
+    fn repo_map_block(&self, session_id: Uuid) -> (Option<String>, Option<ProjectMapStatus>) {
         const WAIT_FOR_COLD_INDEX: std::time::Duration = std::time::Duration::from_millis(1_500);
         let (lock, cvar) = &*self.repo_maps;
         let mut maps = lock.lock();
         if !maps.pending.remove(&session_id) {
-            return (prompt, None);
+            return (None, None);
         }
         let Some(cwd) = maps.sessions.get(&session_id).map(|(cwd, _)| cwd.clone()) else {
-            return (prompt, None);
+            return (None, None);
         };
         let deadline = std::time::Instant::now() + WAIT_FOR_COLD_INDEX;
         while !maps.indexes.contains_key(&cwd) && maps.building.contains(&cwd) {
@@ -3626,12 +3709,12 @@ impl WakuBackend {
             }
         }
         let Some(index) = maps.indexes.get(&cwd) else {
-            return (prompt, None);
+            return (None, None);
         };
         let map = index.render(crate::repo_map::DEFAULT_TOKEN_BUDGET);
         drop(maps);
         if map.text.is_empty() {
-            return (prompt, None);
+            return (None, None);
         }
         let status = ProjectMapStatus::Sent {
             mapped_files: map.mapped_files,
@@ -3640,14 +3723,14 @@ impl WakuBackend {
             text: map.text.clone(),
         };
         (
-            format!(
+            Some(format!(
                 "<project-map>\n\
                  A structural map of this workspace, most-referenced files first. \
                  It is partial — open files to verify before relying on it. \
                  Paths are workspace-relative.\n\
-                 {}</project-map>\n\n{prompt}",
+                 {}</project-map>",
                 map.text
-            ),
+            )),
             Some(status),
         )
     }
@@ -3715,6 +3798,7 @@ impl WakuBackend {
                         sender,
                         // A direct steer never parks — no chip to mirror.
                         queued_id: None,
+                        context: None,
                     },
                 );
                 driver.steer(prompt);
@@ -3745,6 +3829,7 @@ impl WakuBackend {
                 prompt: prompt.clone(),
                 sender,
                 queued_id: Some(queued_id),
+                context: None,
             },
         );
         if self.agent.is_working(target) {
@@ -4393,7 +4478,7 @@ fn forward_driver_events(
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
 ) {
     while let Ok(event) = event_receiver.recv() {
-        agent.note_driver_event(session_id, &event);
+        let rejected_steer = agent.note_driver_event(session_id, &event);
         automations.note_driver_event(session_id, &event);
         let event = match event {
             DriverEvent::Connected { provider_cursor } => {
@@ -4406,8 +4491,18 @@ fn forward_driver_events(
             DriverEvent::SteerAccepted { message, .. } => {
                 let steer = agent.take_pending_steer(session_id, &message);
                 let sent_by_task = steer.as_ref().and_then(|steer| steer.sender);
+                let hidden = steer.as_ref().is_some_and(|steer| steer.context.is_some());
                 if let Some(sender) = sent_by_task {
                     record_agent_steer(&task_state, &task_store, session_id, &message, sender);
+                }
+                // A context steer carrying project memory settled the
+                // session's injection — later prompts stay untouched. A
+                // rejected steer leaves the flag unset so the next prompt
+                // retries.
+                if steer.as_ref().is_some_and(|steer| {
+                    steer.context == Some(crate::agent::ContextSteer::Memory)
+                }) {
+                    memory.mark_injected(session_id);
                 }
                 // A queue-drained prompt folded into the parked turn: its
                 // mirrored chip's wait is over even when the steer carried
@@ -4426,6 +4521,26 @@ fn forward_driver_events(
                 DriverEvent::SteerAccepted {
                     message,
                     sent_by_task,
+                    hidden,
+                }
+            }
+            DriverEvent::SteerRejected {
+                message,
+                reason,
+                reason_i18n,
+                ..
+            } => {
+                // A daemon-injected context steer is the daemon's own
+                // delivery — swallow the rejection so no client surfaces it;
+                // the session stays eligible and the next prompt retries.
+                if rejected_steer.is_some_and(|steer| steer.context.is_some()) {
+                    continue;
+                }
+                DriverEvent::SteerRejected {
+                    message,
+                    reason,
+                    reason_i18n,
+                    hidden: false,
                 }
             }
             event => event,
@@ -4706,6 +4821,7 @@ fn rehydrate_agent_queue(
                         prompt: queued.content.clone(),
                         sender: sent_by,
                         queued_id: Some(queued.id),
+                        context: None,
                     })
                 }
                 crate::model::QueuedMessageSource::User => None,
@@ -4944,7 +5060,7 @@ mod tests {
         // A working session parks the prompt — no runtime runs in the test,
         // so the queuedMessagesChanged broadcast is skipped but the mirror
         // still lands in the session document.
-        backend
+        let _ = backend
             .agent
             .note_driver_event(session_id, &DriverEvent::TurnStarted);
         backend
@@ -5541,5 +5657,169 @@ mod tests {
             backend.inject_repo_map(Uuid::new_v4(), "hi".to_owned()),
             ("hi".to_owned(), None)
         );
+    }
+
+    /// Records the commands a session's driver receives — the steer path's
+    /// only observable effect before the provider echoes.
+    #[derive(Default)]
+    struct CaptureDriver {
+        prompts: Mutex<Vec<String>>,
+        steers: Mutex<Vec<String>>,
+    }
+
+    impl crate::driver::DriverControl for CaptureDriver {
+        fn prompt(&self, prompt: String) {
+            self.prompts.lock().push(prompt);
+        }
+        fn supports_steer(&self) -> bool {
+            true
+        }
+        fn steer(&self, prompt: String) {
+            self.steers.lock().push(prompt);
+        }
+        fn respond(&self, _request_id: String, _option_id: String) {}
+        fn rollback(
+            &self,
+            _turns: usize,
+        ) -> anyhow::Result<Option<waku_protocol::model::ProviderResumeCursor>> {
+            Ok(None)
+        }
+        fn cancel(&self) {}
+    }
+
+    #[test]
+    fn the_first_prompt_context_rides_a_hidden_steer() {
+        let root = std::env::temp_dir().join(format!("waku-context-steer-{}", Uuid::new_v4()));
+        let repo = root.join("repo");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(repo.join("src/lib.rs"), "pub fn entry() {}\n").unwrap();
+        let memory_store = repo.join(".goddard/memory");
+        std::fs::create_dir_all(&memory_store).unwrap();
+        std::fs::write(
+            memory_store.join("MEMORY.md"),
+            "The release freeze lands on Fridays.\n",
+        )
+        .unwrap();
+        std::fs::write(memory_store.join("LOG.txt"), "one durable note\n").unwrap();
+
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(repo.clone());
+        state.sessions[0].begin_turn("seed");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let session_id = state.sessions[0].id;
+        store.save(&mut state).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap();
+        // What spawn_runtime records for a fresh session, plus a built index.
+        {
+            let mut maps = backend.repo_maps.0.lock();
+            maps.sessions
+                .insert(session_id, (repo.clone(), Uuid::new_v4()));
+            maps.pending.insert(session_id);
+            maps.indexes.insert(
+                repo.clone(),
+                crate::repo_map::RepoMapIndex::scan(&repo).unwrap(),
+            );
+        }
+
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = crate::driver::DriverHandle::from_control(capture.clone());
+        backend.steer_first_prompt_context(
+            session_id,
+            "fix the bug",
+            &driver,
+            &EventSink::detached(),
+        );
+
+        // The clean prompt went out untouched; the context blocks follow in
+        // one framed steer — map first, then memory.
+        assert!(capture.prompts.lock().is_empty());
+        let steers = capture.steers.lock().clone();
+        assert_eq!(steers.len(), 1);
+        let steer = &steers[0];
+        assert!(steer.starts_with("Session context — background information only"));
+        assert!(steer.find("<project-map>").unwrap() < steer.find("<project-memory>").unwrap());
+        assert!(steer.contains("src/lib.rs:"));
+        assert!(steer.contains("The release freeze lands on Fridays."));
+        assert!(!steer.contains("fix the bug"));
+
+        // The injection is unsettled until the provider echoes the steer;
+        // accepting it marks the session's memory delivered.
+        assert!(backend.agent.context_steer_pending(session_id));
+        let taken = backend.agent.take_pending_steer(session_id, steer).unwrap();
+        assert_eq!(taken.context, Some(crate::agent::ContextSteer::Memory));
+        backend.memory.mark_injected(session_id);
+
+        backend.steer_first_prompt_context(
+            session_id,
+            "follow up",
+            &driver,
+            &EventSink::detached(),
+        );
+        assert_eq!(capture.steers.lock().len(), 1, "nothing re-injects");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_rejected_context_steer_leaves_the_session_eligible() {
+        let root = std::env::temp_dir().join(format!("waku-context-steer-{}", Uuid::new_v4()));
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let memory_store = repo.join(".goddard/memory");
+        std::fs::create_dir_all(&memory_store).unwrap();
+        std::fs::write(memory_store.join("MEMORY.md"), "one fact\n").unwrap();
+
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(repo.clone());
+        state.sessions[0].begin_turn("seed");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let session_id = state.sessions[0].id;
+        store.save(&mut state).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap();
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = crate::driver::DriverHandle::from_control(capture.clone());
+        backend.steer_first_prompt_context(
+            session_id,
+            "first task",
+            &driver,
+            &EventSink::detached(),
+        );
+        assert_eq!(capture.steers.lock().len(), 1);
+
+        // The steer missed the turn: the pending record drops but the
+        // memory flag stays unset, so the next prompt injects again.
+        let rejected = backend.agent.note_driver_event(
+            session_id,
+            &DriverEvent::SteerRejected {
+                message: capture.steers.lock()[0].clone(),
+                reason: "turn ended".into(),
+                reason_i18n: None,
+                hidden: false,
+            },
+        );
+        assert!(rejected.is_some_and(|steer| steer.context.is_some()));
+        assert!(!backend.agent.context_steer_pending(session_id));
+
+        backend.steer_first_prompt_context(
+            session_id,
+            "next task",
+            &driver,
+            &EventSink::detached(),
+        );
+        assert_eq!(
+            capture.steers.lock().len(),
+            2,
+            "the next prompt retries the context steer"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

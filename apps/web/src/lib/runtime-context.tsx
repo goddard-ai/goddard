@@ -479,7 +479,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           }
         }
         if (event.event.kind === 'steerAccepted') {
-          const payload = event.event.payload as { message?: string }
+          const payload = event.event.payload as { message?: string; hidden?: boolean }
+          // A hidden steer is daemon-injected context — provider-facing
+          // only, so nothing lands in the transcript.
+          if (payload.hidden) return
           const pending = pendingSteers.current.get(session.id)?.shift()
           if (pending) {
             const turnId = current.turns.at(-1)?.id ?? null

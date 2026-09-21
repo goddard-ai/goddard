@@ -357,7 +357,7 @@ impl ClaudeDriver {
                             match &written {
                                 Ok(()) => {
                                     let _ = writer_events
-                                        .send(DriverEvent::SteerAccepted { message: text, sent_by_task: None });
+                                        .send(DriverEvent::SteerAccepted { message: text, sent_by_task: None, hidden: false });
                                 }
                                 Err(error) => {
                                     let _ = writer_events.send(DriverEvent::steer_rejected_keyed(
@@ -2061,6 +2061,7 @@ mod tests {
                 DriverEvent::SteerAccepted {
                     message,
                     sent_by_task: None,
+                    ..
                 } => {
                     assert!(message.contains("BANANA"));
                     steer_accepted = true;

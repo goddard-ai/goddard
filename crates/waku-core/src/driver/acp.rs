@@ -822,6 +822,7 @@ async fn run_sdk_connection(
                                     provider.display_name()
                                 ),
                                 reason_i18n: None,
+                                hidden: false,
                             });
                             continue;
                         }
@@ -842,6 +843,7 @@ async fn run_sdk_connection(
                                 let _ = events.send(DriverEvent::SteerAccepted {
                                     message: text,
                                     sent_by_task: None,
+                                    hidden: false,
                                 });
                             }
                             Err(error) => {
@@ -849,6 +851,7 @@ async fn run_sdk_connection(
                                     message: text,
                                     reason: error.to_string(),
                                     reason_i18n: None,
+                                    hidden: false,
                                 });
                             }
                         }
@@ -4160,6 +4163,199 @@ mod tests {
                 reported_error.is_some_and(|error| !error.trim().is_empty()),
                 "the turn failed without naming a reason"
             ),
+        }
+    }
+
+    /// Live probe for the memory-injection redesign: a clean first prompt to
+    /// a real Devin ACP session, then a `<project-memory>`-style steer while
+    /// that turn is in flight. Once the turn settles, watch Devin's
+    /// sessions.db for the generated title — a memory-flavored title means
+    /// the generator reads full session context, a task-flavored one means
+    /// it reads the first message.
+    ///
+    /// Run explicitly:
+    /// `cargo test -p waku-core devin_title_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore = "live provider probe"]
+    fn devin_title_probe_memory_steer() {
+        const CLEAN_PROMPT: &str = "Reply with exactly the word: atlantic";
+
+        let binary =
+            crate::command_env::find_executable("devin").expect("devin is not installed");
+        let cwd = std::env::temp_dir().join("waku-devin-title-probe");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let agent =
+            catalog_agent(ProviderKind::Devin, &binary, &cwd).expect("the ACP agent should spawn");
+
+        let updates = Arc::new(Mutex::new(Vec::<String>::new()));
+        let captured = Arc::clone(&updates);
+        let probe_cwd = cwd.clone();
+        let started = std::time::Instant::now();
+        let request = Client
+            .builder()
+            .name("waku-devin-title-probe")
+            .on_receive_notification(
+                async move |notification: SessionNotification, _connection| {
+                    let Ok(update) = serde_json::to_value(&notification.update) else {
+                        return Ok(());
+                    };
+                    let kind = update
+                        .get("sessionUpdate")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    let detail = if kind == "session_info_update" {
+                        format!(" {update}")
+                    } else {
+                        String::new()
+                    };
+                    captured
+                        .lock()
+                        .push(format!("{:>6.1}s {kind}{detail}", started.elapsed().as_secs_f64()));
+                    Ok(())
+                },
+                agent_client_protocol::on_receive_notification!(),
+            )
+            .on_receive_request(
+                async move |request: RequestPermissionRequest, responder, _connection| {
+                    let allow = request
+                        .options
+                        .iter()
+                        .find(|option| option.kind == PermissionOptionKind::AllowOnce)
+                        .or_else(|| {
+                            request
+                                .options
+                                .iter()
+                                .find(|option| option.kind == PermissionOptionKind::AllowAlways)
+                        })
+                        .or_else(|| request.options.first());
+                    let outcome = match allow {
+                        Some(option) => RequestPermissionOutcome::Selected(
+                            SelectedPermissionOutcome::new(option.option_id.clone()),
+                        ),
+                        None => RequestPermissionOutcome::Cancelled,
+                    };
+                    responder.respond(RequestPermissionResponse::new(outcome))?;
+                    Ok(Handled::Yes)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .connect_with(agent, async move |connection: ConnectionTo<Agent>| {
+                connection
+                    .send_request(
+                        InitializeRequest::new(ProtocolVersion::V1)
+                            .client_capabilities(ClientCapabilities::new().terminal(false))
+                            .client_info(Implementation::new(
+                                "waku-title-probe",
+                                env!("CARGO_PKG_VERSION"),
+                            )),
+                    )
+                    .block_task()
+                    .await?;
+                let session = connection
+                    .send_request(NewSessionRequest::new(probe_cwd.clone()))
+                    .block_task()
+                    .await?;
+                let session_id = session.session_id;
+                eprintln!("probe session: {session_id}");
+
+                let prompt = |text: &str| {
+                    PromptRequest::new(
+                        session_id.clone(),
+                        vec![ContentBlock::Text(TextContent::new(text.to_owned()))],
+                    )
+                };
+                let memory = "<project-memory>\n\
+                    This project has persistent memory distilled from earlier sessions.\n\n\
+                    ## Memory\n\
+                    The telemetry pipeline stores segments in a custom columnar format \
+                    codenamed ZEBRA-CONSTELLATION.\n\
+                    Operators restart the night crawler service with `crawlerctl bounce`.\n\
+                    </project-memory>\n\n\
+                    Context for this session — no action needed.";
+                // The steer lands while the first prompt is in flight — the
+                // exact ordering a hidden memory injection would take.
+                let first = connection.send_request(prompt(CLEAN_PROMPT));
+                let second = connection.send_request(prompt(memory));
+                eprintln!("first prompt: {:?}", first.block_task().await);
+                eprintln!("second prompt: {:?}", second.block_task().await);
+                Ok::<_, agent_client_protocol::Error>(session_id.to_string())
+            });
+        let session_id = smol::block_on(smol::future::race(
+            async move { request.await.map_err(|error| anyhow!("{error}")) },
+            async move {
+                smol::Timer::after(Duration::from_secs(300)).await;
+                Err(anyhow!("the probe session timed out"))
+            },
+        ))
+        .expect("the probe session should finish");
+
+        eprintln!("turn structure:");
+        for entry in updates.lock().iter() {
+            eprintln!("  {entry}");
+        }
+
+        // The generated title lands after the turn. session/load replays the
+        // stored title as session_info_update, so reload on a fresh
+        // connection until it reports a real title.
+        for attempt in 0..30 {
+            std::thread::sleep(Duration::from_secs(3));
+            let titles = Arc::new(Mutex::new(Vec::<String>::new()));
+            let captured = Arc::clone(&titles);
+            let agent = match catalog_agent(ProviderKind::Devin, &binary, &cwd) {
+                Ok(agent) => agent,
+                Err(_) => continue,
+            };
+            let load_cwd = cwd.clone();
+            let load_id = session_id.clone();
+            let request = Client
+                .builder()
+                .name("waku-devin-title-reload")
+                .on_receive_notification(
+                    async move |notification: SessionNotification, _connection| {
+                        if let Ok(update) = serde_json::to_value(&notification.update)
+                            && update.get("sessionUpdate").and_then(Value::as_str)
+                                == Some("session_info_update")
+                            && let Some(title) = update.get("title").and_then(Value::as_str)
+                        {
+                            captured.lock().push(title.to_owned());
+                        }
+                        Ok(())
+                    },
+                    agent_client_protocol::on_receive_notification!(),
+                )
+                .connect_with(agent, async move |connection: ConnectionTo<Agent>| {
+                    connection
+                        .send_request(
+                            InitializeRequest::new(ProtocolVersion::V1)
+                                .client_capabilities(ClientCapabilities::new().terminal(false)),
+                        )
+                        .block_task()
+                        .await?;
+                    connection
+                        .send_request(LoadSessionRequest::new(load_id, load_cwd))
+                        .block_task()
+                        .await?;
+                    // Replay finishes around the load response; a short grace
+                    // catches the trailing info update.
+                    smol::Timer::after(Duration::from_millis(200)).await;
+                    Ok::<_, agent_client_protocol::Error>(())
+                });
+            let _ = smol::block_on(smol::future::race(
+                async move { request.await.map_err(|error| anyhow!("{error}")) },
+                async move {
+                    smol::Timer::after(Duration::from_secs(15)).await;
+                    Err(anyhow!("reload timed out"))
+                },
+            ));
+            let titles = std::mem::take(&mut *titles.lock());
+            for title in &titles {
+                eprintln!("reload {attempt}: title {title:?}");
+            }
+            if titles.iter().any(|title| {
+                !crate::devin_session::is_placeholder_title(title, Some(CLEAN_PROMPT))
+            }) {
+                break;
+            }
         }
     }
 }

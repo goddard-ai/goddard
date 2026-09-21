@@ -2287,6 +2287,21 @@ impl AgentSession {
         id
     }
 
+    /// Record a provider-facing user message no transcript row renders — a
+    /// daemon-injected context steer the provider folded into the turn.
+    /// The message stays in the record so the session documents the text the
+    /// provider actually saw.
+    pub fn push_hidden_user_message(&mut self, content: impl Into<String>) -> Uuid {
+        let mut message = match self.active_turn_id() {
+            Some(turn_id) => Message::new_for_turn(MessageRole::User, content, turn_id),
+            None => Message::new(MessageRole::User, content),
+        };
+        message.hidden = true;
+        let id = message.id;
+        self.messages.push(message);
+        id
+    }
+
     /// [`push_message`] carrying a structured [`TranscriptNotice`] so clients
     /// draw the bespoke row instead of bare `content` text.
     pub fn push_notice_message(
@@ -2900,6 +2915,9 @@ pub enum DriverEvent {
     SteerAccepted {
         message: String,
         sent_by_task: Option<Uuid>,
+        /// The steer carried daemon-injected context rather than user or
+        /// agent text — clients record it on the turn but render no row.
+        hidden: bool,
     },
     /// The daemon-owned slice of the session's follow-up queue changed —
     /// an agent prompt was parked, delivered, or cancelled. Carries the
@@ -2915,6 +2933,9 @@ pub enum DriverEvent {
         /// The i18n semantic behind `reason`, when the daemon composed it
         /// from a known key rather than provider text.
         reason_i18n: Option<crate::protocol::WireTranslation>,
+        /// A daemon-injected context steer — the daemon retries delivery on
+        /// the next prompt, so clients never surface the rejection.
+        hidden: bool,
     },
     /// Context-window occupancy reported by the live stream. Fields arrive at
     /// different moments — token counts with each assistant message, the
@@ -2998,6 +3019,7 @@ impl DriverEvent {
             message,
             reason: pair.0,
             reason_i18n: Some(pair.1),
+            hidden: false,
         }
     }
 

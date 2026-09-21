@@ -354,7 +354,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         entry.lastDriverError = event.event.payload;
       }
       if (event.event.kind === 'steerAccepted') {
-        const payload = event.event.payload as { message?: string };
+        const payload = event.event.payload as { message?: string; hidden?: boolean };
+        // A hidden steer is daemon-injected context — provider-facing
+        // only, so nothing lands in the transcript.
+        if (payload.hidden) return;
         // The provider folded a steer into the live turn. Ours is pending
         // here; another client's is not, and its message belongs in this
         // transcript just the same — the desktop mirrors it too.

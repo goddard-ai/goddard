@@ -473,6 +473,7 @@ fn handle_command(
                 let _ = events.send(DriverEvent::SteerAccepted {
                     message: text,
                     sent_by_task: None,
+                    hidden: false,
                 });
             }
             Err(error) => {
@@ -480,6 +481,7 @@ fn handle_command(
                     message: text,
                     reason: error.to_string(),
                     reason_i18n: None,
+                    hidden: false,
                 });
             }
         },

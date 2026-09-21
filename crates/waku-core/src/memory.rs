@@ -160,16 +160,44 @@ impl MemoryService {
     /// small file loads plus at most one eval call — callers run on daemon
     /// threads, never the UI thread.
     pub fn prompt_with_memory(&self, session_id: Uuid, prompt: &str) -> String {
-        let Some(block) = self.memory_block(session_id, prompt) else {
+        let Some(block) = self.memory_block(session_id, prompt, true) else {
             return prompt.to_owned();
         };
         format!("{block}\n\n{prompt}")
     }
 
+    /// Compose the injection block for a hidden context steer without
+    /// marking the session injected — the steer path confirms delivery on
+    /// the provider's `steerAccepted` echo ([`Self::mark_injected`]), so a
+    /// rejected steer leaves the session eligible to retry.
+    pub fn context_block(&self, session_id: Uuid, task: &str) -> Option<String> {
+        self.memory_block(session_id, task, false)
+    }
+
+    /// The provider accepted the session's context steer — the memory
+    /// injection is delivered and later prompts stay untouched.
+    pub fn mark_injected(&self, session_id: Uuid) {
+        let Some(project_path) = self
+            .session_project(session_id)
+            .and_then(|project_id| self.project_path(project_id))
+        else {
+            return;
+        };
+        let store = memory_dir(&project_path);
+        let mut memory_state = load_state(&store);
+        memory_state
+            .sessions
+            .entry(session_id)
+            .or_default()
+            .injected = true;
+        let _ = save_state(&store, &memory_state);
+    }
+
     /// Compose the injection block, or `None` when nothing should ship.
-    /// A successful composition marks the session injected so the block
-    /// lands exactly once.
-    fn memory_block(&self, session_id: Uuid, task: &str) -> Option<String> {
+    /// `mark` decides whether a successful composition flags the session
+    /// injected immediately — the prepend path's single shot — or waits for
+    /// the steer echo.
+    fn memory_block(&self, session_id: Uuid, task: &str, mark: bool) -> Option<String> {
         let settings = self.settings.get();
         if !settings.memory_experiment_enabled {
             return None;
@@ -191,12 +219,14 @@ impl MemoryService {
         let memory_md = read_memory(&store);
         let notes = rank_notes(settings.eval.as_ref(), task, &read_log_lines(&store));
         let block = compose_block(&memory_md, &notes, &store.join(LOG_FILE))?;
-        memory_state
-            .sessions
-            .entry(session_id)
-            .or_default()
-            .injected = true;
-        let _ = save_state(&store, &memory_state);
+        if mark {
+            memory_state
+                .sessions
+                .entry(session_id)
+                .or_default()
+                .injected = true;
+            let _ = save_state(&store, &memory_state);
+        }
         Some(block)
     }
 

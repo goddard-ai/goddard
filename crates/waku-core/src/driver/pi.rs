@@ -596,6 +596,7 @@ impl PiDriver {
                                     let _ = writer_events.send(DriverEvent::SteerAccepted {
                                         message: prompt,
                                         sent_by_task: None,
+                                        hidden: false,
                                     });
                                 }
                                 Err(error) => {
@@ -603,6 +604,7 @@ impl PiDriver {
                                         message: prompt,
                                         reason: error,
                                         reason_i18n: None,
+                                        hidden: false,
                                     });
                                 }
                             }

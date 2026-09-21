@@ -1822,11 +1822,13 @@ fn handle_codex_message(
                 message,
                 reason: error.to_owned(),
                 reason_i18n: None,
+                hidden: false,
             });
         } else {
             let _ = events.send(DriverEvent::SteerAccepted {
                 message,
                 sent_by_task: None,
+                hidden: false,
             });
         }
         return;
@@ -3495,6 +3497,7 @@ mod tests {
             DriverEvent::SteerAccepted {
                 message,
                 sent_by_task: None,
+                ..
             } => {
                 assert_eq!(message, "Focus on the failing tests first");
             }
@@ -3537,6 +3540,7 @@ mod tests {
                 message,
                 reason,
                 reason_i18n: _,
+                ..
             } => {
                 assert_eq!(message, "Steer me");
                 assert_eq!(reason, "expected turn mismatch");

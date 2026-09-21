@@ -549,6 +549,7 @@ impl Waku {
             DriverEvent::SteerAccepted {
                 message,
                 sent_by_task,
+                hidden,
             } => {
                 // An accepted steer folds into the running turn; one that
                 // lands after the turn ended — after Stop, say — would
@@ -561,6 +562,16 @@ impl Waku {
                     .find(|session| session.id == session_id)
                     .is_some_and(session_accepts_steer_result);
                 if !accepts {
+                    return true;
+                }
+                if hidden {
+                    // The daemon's context steer — provider-facing text, so
+                    // it lands in the turn's record without a transcript row
+                    // and never entered the composer's pending steers.
+                    if let Some(session) = self.state.session_mut(session_id) {
+                        session.push_hidden_user_message(message);
+                        self.state.mark_session_dirty(session_id);
+                    }
                     return true;
                 }
                 let submission = runtime
@@ -603,7 +614,13 @@ impl Waku {
                 message,
                 reason,
                 reason_i18n,
+                hidden,
             } => {
+                // A hidden context steer is the daemon's own delivery — it
+                // retries on the next prompt, so no toast and no queue entry.
+                if hidden {
+                    return true;
+                }
                 let reason = reason_i18n.map(|i18n| i18n.render()).unwrap_or(reason);
                 let mut submission = runtime
                     .pending_steers

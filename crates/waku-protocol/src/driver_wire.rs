@@ -116,9 +116,10 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::SteerAccepted {
             message,
             sent_by_task,
+            hidden,
         } => (
             "steerAccepted",
-            json!({ "message": message, "sentByTask": sent_by_task }),
+            json!({ "message": message, "sentByTask": sent_by_task, "hidden": hidden }),
         ),
         DriverEvent::QueuedMessagesChanged { messages } => (
             "queuedMessagesChanged",
@@ -128,9 +129,15 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             message,
             reason,
             reason_i18n,
+            hidden,
         } => (
             "steerRejected",
-            json!({ "message": message, "reason": reason, "reasonI18n": reason_i18n }),
+            json!({
+                "message": message,
+                "reason": reason,
+                "reasonI18n": reason_i18n,
+                "hidden": hidden,
+            }),
         ),
         DriverEvent::UsageUpdated {
             context_tokens,
@@ -231,6 +238,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::SteerAccepted {
                 message: steer.message,
                 sent_by_task: steer.sent_by_task,
+                hidden: steer.hidden,
             }
         }
         "queuedMessagesChanged" => {
@@ -249,6 +257,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 message: steer.message,
                 reason: steer.reason,
                 reason_i18n: steer.reason_i18n,
+                hidden: steer.hidden,
             }
         }
         "usageUpdated" => {
@@ -346,6 +355,8 @@ struct AcceptedSteerWire {
     message: String,
     #[serde(default)]
     sent_by_task: Option<Uuid>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -355,6 +366,8 @@ struct RejectedSteerWire {
     reason: String,
     #[serde(default)]
     reason_i18n: Option<crate::protocol::WireTranslation>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -626,5 +639,46 @@ mod tests {
             panic!("the legacy steer rejection failed to decode");
         };
         assert!(reason_i18n.is_none());
+    }
+
+    #[test]
+    fn the_hidden_steer_flag_round_trips_and_defaults_off() {
+        let wire = event_to_wire(DriverEvent::SteerAccepted {
+            message: "context".into(),
+            sent_by_task: None,
+            hidden: true,
+        })
+        .unwrap();
+        assert_eq!(wire.payload["hidden"], true);
+        let DriverEvent::SteerAccepted { hidden, .. } = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert!(hidden);
+
+        let wire = event_to_wire(DriverEvent::SteerRejected {
+            message: "context".into(),
+            reason: "turn ended".into(),
+            reason_i18n: None,
+            hidden: true,
+        })
+        .unwrap();
+        let DriverEvent::SteerRejected { hidden, .. } = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert!(hidden);
+
+        // Older daemons omit the field — decode defaults to a visible steer.
+        for kind in ["steerAccepted", "steerRejected"] {
+            let legacy = crate::protocol::WireDriverEvent {
+                kind: kind.into(),
+                payload: serde_json::json!({"message": "go", "reason": "nope"}),
+            };
+            let hidden = match event_from_wire(legacy).unwrap() {
+                DriverEvent::SteerAccepted { hidden, .. } => hidden,
+                DriverEvent::SteerRejected { hidden, .. } => hidden,
+                _ => panic!("{kind} failed to decode"),
+            };
+            assert!(!hidden, "{kind} without the flag decodes visible");
+        }
     }
 }
