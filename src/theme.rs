@@ -1058,7 +1058,9 @@ impl Theme {
             text_ghost: 0x6272A4,
 
             accent: 0xBD93F9,
-            selection: wash(0x44475A, 0.80),
+            // Purple accent — the spec's own selection is `raised`, which the
+            // user-prompt bubble already fills with.
+            selection: wash(0xBD93F9, 0.35),
             code_text: 0x8BE9FD,
 
             inverse: 0xF8F8F2,

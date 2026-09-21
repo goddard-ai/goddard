@@ -1,0 +1,1 @@
+- Dracula's text selection is now a visible purple wash — it previously reused the user-prompt bubble's exact fill, so selecting part of a sent prompt showed nothing
