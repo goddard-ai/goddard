@@ -4663,6 +4663,14 @@ fn forward_driver_events(
                 maps.sessions.remove(&session_id);
                 maps.pending.remove(&session_id);
             }
+            // The hub retires a runtime on the request path — CloseSession,
+            // a failed Start — but a provider that exits on its own never
+            // produces one. Without this the dead runtime's replay journal,
+            // sequence counter, and active-runtime entry sit in the hub for
+            // the rest of the daemon's life.
+            events
+                .for_session(session_id, runtime_id)
+                .end_session_runtime();
             let removed = {
                 let mut sessions = sessions.lock();
                 sessions
@@ -5699,6 +5707,7 @@ mod tests {
             ("hi".to_owned(), None)
         );
     }
+<<<<<<< HEAD
 
     /// Records the commands a session's driver receives — the steer path's
     /// only observable effect before the provider echoes.
@@ -5967,5 +5976,65 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A driver that answers nothing; the forwarder only reaches for it
+    /// while draining a queued prompt, which these tests never do.
+    struct IdleDriver;
+
+    impl driver::DriverControl for IdleDriver {
+        fn prompt(&self, _prompt: String) {}
+        fn cancel(&self) {}
+        fn respond(&self, _request_id: String, _option_id: String) {}
+        fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn an_exited_runtime_releases_its_replay_journal() {
+        let root = std::env::temp_dir().join(format!("waku-exit-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        // The sink a runtime-starting request carries: bound to the session
+        // and registered with the hub so emitted events journal.
+        let events = EventSink::detached().begin_session_runtime(session_id, runtime_id);
+        let (wake, _wakes) = smol::channel::bounded(1);
+        let (driver_events, event_receiver) = driver::event_channel(wake);
+        let driver = DriverHandle::from_control(Arc::new(IdleDriver));
+        let sessions = Arc::new(Mutex::new(HashMap::from([(
+            session_id,
+            (runtime_id, driver.clone()),
+        )])));
+        driver_events
+            .send(DriverEvent::TextDelta("streamed".into()))
+            .unwrap();
+        driver_events.send(DriverEvent::ProcessExited).unwrap();
+
+        let task_state = Arc::new(Mutex::new(PersistedState::empty()));
+        let task_store = Arc::new(StateStore::daemon(root.join("app.db")));
+        forward_driver_events(
+            session_id,
+            runtime_id,
+            event_receiver,
+            events.clone(),
+            driver,
+            Arc::new(crate::agent::AgentState::default()),
+            task_state.clone(),
+            task_store.clone(),
+            sessions.clone(),
+            Arc::new(AutomationService::open(root.join("automations.json")).unwrap()),
+            crate::memory::MemoryService::new(
+                Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap()),
+                task_state,
+                task_store,
+            ),
+            Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
+        );
+
+        assert!(sessions.lock().is_empty());
+        assert_eq!(events.journaled_event_count(session_id), 0);
+        std::fs::remove_dir_all(&root).ok();
     }
 }

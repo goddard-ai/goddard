@@ -256,6 +256,20 @@ impl EventSink {
     pub fn end_session_runtime(&self) {
         self.hub.end_runtime(self.session_id, Some(self.runtime_id));
     }
+
+    /// Replay depth retained for `session_id` — tests assert a dead
+    /// runtime's backlog is gone, not just unreachable.
+    #[cfg(test)]
+    pub(crate) fn journaled_event_count(&self, session_id: Uuid) -> usize {
+        self.hub
+            .state
+            .lock()
+            .journal
+            .iter()
+            .filter(|((session, _), _)| *session == session_id)
+            .map(|(_, events)| events.len())
+            .sum()
+    }
 }
 
 /// One connected client's delivery state.
