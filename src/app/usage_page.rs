@@ -110,6 +110,7 @@ impl Waku {
             // be missing on a first visit — warm it here rather than
             // mid-render.
             self.seed_eval_inputs(cx);
+            self.load_eval_usage_stats(cx);
         }
         // The sidebar's search field holds real focus for the whole settings
         // visit, so landing on any page — from the sidebar, the palette, or a

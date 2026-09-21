@@ -1891,6 +1891,9 @@ pub struct Waku {
     /// Runtime-only; re-run after edits rather than cleared per keystroke.
     eval_probe_pending: bool,
     eval_probe_result: Option<Result<(String, u64), String>>,
+    /// Token totals summed from the daemon's eval decision log, loaded when
+    /// the Jev page opens. `None` until the scan answers.
+    eval_usage_stats: Option<waku_protocol::eval::EvalUsageStats>,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -5311,6 +5314,7 @@ impl Waku {
                 eval_inputs_seeded: false,
                 eval_probe_pending: false,
                 eval_probe_result: None,
+                eval_usage_stats: None,
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,

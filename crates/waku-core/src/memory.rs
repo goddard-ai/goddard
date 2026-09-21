@@ -400,6 +400,7 @@ fn triage_segments(
             Ok(evaluation) => {
                 record.model = Some(evaluation.model.clone());
                 record.latency_ms = Some(evaluation.latency_ms);
+                record.usage = Some(evaluation.usage.clone());
                 record.answers = Some(evaluation.answers.clone());
                 for index in batch_start..batch_end {
                     let keep =
@@ -690,6 +691,7 @@ fn rank_notes(
         Ok(evaluation) => {
             record.model = Some(evaluation.model.clone());
             record.latency_ms = Some(evaluation.latency_ms);
+            record.usage = Some(evaluation.usage.clone());
             record.answers = Some(evaluation.answers.clone());
             crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
             let ranked: Vec<String> = candidates

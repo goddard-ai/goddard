@@ -84,6 +84,7 @@ pub fn route_task(
         };
         record.latency_ms = Some(evaluation.latency_ms);
         record.model = Some(evaluation.model.clone());
+        record.usage = Some(evaluation.usage.clone());
         record.answers = Some(evaluation.answers.clone());
 
         let answer = choice_answer(&evaluation, "class");

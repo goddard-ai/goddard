@@ -23,7 +23,10 @@ use std::time::Instant;
 use anyhow::{Context as _, anyhow, bail};
 use serde::Serialize;
 use serde_json::{Value, json};
-use waku_protocol::eval::{EvalAnswer, EvalBackend, EvalQuestion, EvalSettings, Evaluation};
+use waku_protocol::eval::{
+    EvalAnswer, EvalBackend, EvalQuestion, EvalSettings, EvalUsage, EvalUsageStats,
+    EvalUsageTotals, Evaluation,
+};
 
 const TYPESAFE_URL: &str = "https://api.typesafe.ai/v1/systemone";
 const VERCEL_EVALUATION_URL: &str = "https://ai-gateway.vercel.sh/v4/ai/evaluation-model";
@@ -65,6 +68,10 @@ pub struct EvalDecisionRecord {
     /// The versioned model id the backend reported, when it answered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Backend-reported token usage. Absent on failed calls and on records
+    /// written before usage was tracked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<EvalUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,6 +108,7 @@ impl EvalDecisionRecord {
             backend: None,
             latency_ms: None,
             model: None,
+            usage: None,
             state: None,
             questions: None,
             answers: None,
@@ -151,6 +159,56 @@ pub fn append_decision_log(path: &Path, record: &EvalDecisionRecord) {
         file.write_all(&line)?;
         Ok(())
     })();
+}
+
+/// The fields a usage scan reads out of each log line. Everything else —
+/// the state payload, questions, answers — is skipped, so the scan stays
+/// proportional to line count rather than record size.
+#[derive(serde::Deserialize)]
+struct UsageLogLine {
+    #[serde(default)]
+    feature: String,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    usage: Option<EvalUsage>,
+}
+
+/// Sum token usage across the decision log for the settings pane. A record
+/// counts as an eval call when it carries the marks of an attempted call —
+/// usage, a model id, or an error — so `route-override` outcome records and
+/// fallback routes that never reached a backend stay out of the totals.
+/// Malformed lines are skipped: the log is append-only and a torn tail line
+/// must not blank the whole readout.
+pub fn usage_stats(path: &Path) -> EvalUsageStats {
+    let mut stats = EvalUsageStats::default();
+    let Ok(contents) = std::fs::read(path) else {
+        return stats;
+    };
+    for line in contents.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(record) = serde_json::from_slice::<UsageLogLine>(line) else {
+            continue;
+        };
+        if record.usage.is_none() && record.model.is_none() && record.error.is_none() {
+            continue;
+        }
+        let fold = |totals: &mut EvalUsageTotals| {
+            totals.calls += 1;
+            if let Some(usage) = &record.usage {
+                totals.calls_with_usage += 1;
+                totals.input_tokens += usage.input_tokens;
+                totals.output_tokens += usage.output_tokens;
+            }
+        };
+        fold(&mut stats.totals);
+        fold(stats.features.entry(record.feature).or_default());
+    }
+    stats
 }
 
 /// Run one evaluation against the configured backend, on the default
@@ -526,6 +584,59 @@ mod tests {
         let mut envelope = json!({ "answers": {} });
         translate_vercel_envelope(&mut envelope);
         assert_eq!(envelope["model"], GATEWAY_MODEL_ID);
+    }
+
+    #[test]
+    fn usage_parses_camel_and_snake_case() {
+        // TypeSafe and Vercel report camelCase; Cloudflare's Workers AI
+        // envelope reports snake_case.
+        let camel: EvalUsage =
+            serde_json::from_str(r#"{"inputTokens": 3, "outputTokens": 1}"#).unwrap();
+        let snake: EvalUsage =
+            serde_json::from_str(r#"{"input_tokens": 3, "output_tokens": 1}"#).unwrap();
+        assert_eq!(camel, snake);
+        assert_eq!(camel.input_tokens, 3);
+        assert_eq!(snake.output_tokens, 1);
+    }
+
+    #[test]
+    fn usage_stats_sums_reporting_calls_only() {
+        let path =
+            std::env::temp_dir().join(format!("goddard-eval-log-{}.jsonl", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"feature":"route","model":"jev","usage":{"inputTokens":10,"outputTokens":2}}"#,
+                "\n",
+                // A call logged before usage tracking: counts, no tokens.
+                r#"{"feature":"route","model":"jev"}"#,
+                "\n",
+                // An outcome record, not an eval call: skipped entirely.
+                r#"{"feature":"route-override","resolvedModel":"x"}"#,
+                "\n",
+                // A torn tail line must not fail the scan.
+                "{not json\n",
+                // A failed call still counts as a call.
+                r#"{"feature":"memory-rank","error":"boom"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        let stats = usage_stats(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(stats.totals.calls, 3);
+        assert_eq!(stats.totals.calls_with_usage, 1);
+        assert_eq!(stats.totals.input_tokens, 10);
+        assert_eq!(stats.totals.output_tokens, 2);
+        assert_eq!(stats.features["route"].calls, 2);
+        assert_eq!(stats.features["memory-rank"].calls, 1);
+        assert!(!stats.features.contains_key("route-override"));
+    }
+
+    #[test]
+    fn usage_stats_tolerates_a_missing_log() {
+        let stats = usage_stats(Path::new("/nonexistent/eval-decisions.jsonl"));
+        assert_eq!(stats.totals.calls, 0);
     }
 
     #[test]

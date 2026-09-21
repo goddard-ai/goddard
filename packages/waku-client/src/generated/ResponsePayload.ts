@@ -8,6 +8,7 @@ import type { ComposerDrafts } from "./ComposerDrafts";
 import type { ComputerPermissions } from "./ComputerPermissions";
 import type { CustomCommand } from "./CustomCommand";
 import type { DaemonSettings } from "./DaemonSettings";
+import type { EvalUsageStats } from "./EvalUsageStats";
 import type { Evaluation } from "./Evaluation";
 import type { FriendsState } from "./FriendsState";
 import type { IntegrationSnapshot } from "./IntegrationSnapshot";
@@ -45,4 +46,4 @@ status: ProviderSessionCatalogStatus, } | { "type": "providerSessionHistory", hi
  * `cwd_missing` catalog entry resumes in the nearest surviving
  * ancestor rather than the recorded path.
  */
-resolvedCwd: string | null, } | { "type": "composerDrafts", drafts: ComposerDrafts, } | { "type": "evaluation", evaluation: Evaluation, } | { "type": "routeDecision", decision: RouteDecision, } | { "type": "blobStored", reference: string, path: string, } | { "type": "attachmentStored", attachment: StoredAttachment, } | { "type": "blobData", bytes: string, } | { "type": "providerSessionForked", result: ProviderSessionFork, } | { "type": "sessionForked", session: AgentSession, checkpointWarning: string | null, } | { "type": "sessionRewound", session: AgentSession, cleanupWarning: string | null, } | { "type": "workspace", result: WorkspaceResult, } | { "type": "agentSessionCreated", sessionId: string, } | { "type": "agentSessionTranscript", transcript: AgentSessionTranscript, };
+resolvedCwd: string | null, } | { "type": "composerDrafts", drafts: ComposerDrafts, } | { "type": "evaluation", evaluation: Evaluation, } | { "type": "evalUsage", stats: EvalUsageStats, } | { "type": "routeDecision", decision: RouteDecision, } | { "type": "blobStored", reference: string, path: string, } | { "type": "attachmentStored", attachment: StoredAttachment, } | { "type": "blobData", bytes: string, } | { "type": "providerSessionForked", result: ProviderSessionFork, } | { "type": "sessionForked", session: AgentSession, checkpointWarning: string | null, } | { "type": "sessionRewound", session: AgentSession, cleanupWarning: string | null, } | { "type": "workspace", result: WorkspaceResult, } | { "type": "agentSessionCreated", sessionId: string, } | { "type": "agentSessionTranscript", transcript: AgentSessionTranscript, };

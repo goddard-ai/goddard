@@ -133,6 +133,7 @@ pub fn review_action(eval: &EvalSettings, action: &PendingAction) -> ReviewVerdi
         Ok(evaluation) => {
             record.latency_ms = Some(evaluation.latency_ms);
             record.model = Some(evaluation.model.clone());
+            record.usage = Some(evaluation.usage.clone());
             record.answers = Some(evaluation.answers.clone());
         }
         Err(error) => {

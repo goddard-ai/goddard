@@ -5,6 +5,7 @@ use super::composer::{
     model_picker_panel, model_picker_row_shell, model_picker_subtitle, next_picker_highlight,
     picker_provider_query, provider_sort_rank, visible_picker_rows,
 };
+use super::usage_page::format_tokens_compact;
 use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
@@ -5186,6 +5187,34 @@ impl Waku {
         cx.notify();
     }
 
+    /// Refresh the Jev page's usage card: the daemon sums the decision log's
+    /// recorded token usage and the answer lands on `eval_usage_stats`.
+    /// Every page open re-scans, so a visit always sees the latest calls.
+    pub(super) fn load_eval_usage_stats(&mut self, cx: &mut Context<Self>) {
+        let daemon = self.daemon.client();
+        let load = cx.background_executor().spawn(async move {
+            daemon
+                .request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::LoadEvalUsage,
+                )
+                .ok()
+                .and_then(|payload| match payload {
+                    waku_client::ResponsePayload::EvalUsage { stats } => Some(stats),
+                    _ => None,
+                })
+        });
+        cx.spawn(async move |this, cx| {
+            let stats = load.await;
+            let _ = this.update(cx, |this, cx| {
+                this.eval_usage_stats = stats;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// The Jev page's routing configuration: the eval backend and its
     /// credentials, then the three class-level routes the class map resolves
     /// through. The daemon settings document stays authoritative — edits
@@ -5508,9 +5537,50 @@ impl Waku {
             })
         });
 
+        // Token usage summed from the daemon's decision log — the all-calls
+        // total on top, then one row per feature that recorded calls. `None`
+        // until the scan answers, and an empty log renders no card at all.
+        let usage = self
+            .eval_usage_stats
+            .as_ref()
+            .filter(|stats| stats.totals.calls > 0)
+            .and_then(|stats| {
+                let untracked = stats.totals.calls - stats.totals.calls_with_usage;
+                let total_description = if untracked > 0 {
+                    tr!(
+                        "routing.usage_total_description_untracked",
+                        calls = stats.totals.calls,
+                        untracked = untracked
+                    )
+                } else {
+                    tr!(
+                        "routing.usage_total_description",
+                        calls = stats.totals.calls
+                    )
+                };
+                let mut rows: Vec<Option<AnyElement>> = vec![settings_row(
+                    tr!("routing.usage_total"),
+                    total_description,
+                    eval_usage_label(&stats.totals, theme),
+                    theme,
+                    search,
+                )];
+                rows.extend(stats.features.iter().map(|(feature, totals)| {
+                    settings_row(
+                        eval_feature_label(feature),
+                        tr!("routing.usage_feature_calls", calls = totals.calls),
+                        eval_usage_label(totals, theme),
+                        theme,
+                        search,
+                    )
+                }));
+                settings_row_card(rows, theme).map(|card| card.mt(px(15.0)).into_any_element())
+            });
+
         div()
             .children(credentials)
             .children(classes)
+            .children(usage)
             .into_any_element()
     }
 
@@ -10631,6 +10701,37 @@ fn settings_row(
             .child(control)
             .into_any_element(),
     )
+}
+
+/// Display label for a decision-log feature name on the Jev usage card.
+/// Unknown tags render raw — a new call site labels itself on the next line
+/// it logs, and a missing entry here degrades rather than hides.
+fn eval_feature_label(feature: &str) -> String {
+    match feature {
+        "evaluate" => tr!("routing.feature_evaluate"),
+        "turn-status" => tr!("routing.feature_turn_status"),
+        "route" => tr!("routing.feature_route"),
+        "route-effort" => tr!("routing.feature_route_effort"),
+        "route-class-suggest" => tr!("routing.feature_route_class_suggest"),
+        "provider-switch" => tr!("routing.feature_provider_switch"),
+        "memory-rank" => tr!("routing.feature_memory_rank"),
+        "memory-triage" => tr!("routing.feature_memory_triage"),
+        "permission-review" => tr!("routing.feature_permission_review"),
+        _ => return feature.to_owned(),
+    }
+}
+
+/// The right-side readout on a Jev usage row: compact "in · out" token
+/// counts in the same compact format the Usage page's columns use.
+fn eval_usage_label(totals: &waku_protocol::eval::EvalUsageTotals, theme: Theme) -> Div {
+    div()
+        .text_size(sp(12.5))
+        .text_color(theme.text_secondary)
+        .child(tr!(
+            "routing.usage_tokens",
+            input = format_tokens_compact(totals.input_tokens as f64),
+            output = format_tokens_compact(totals.output_tokens as f64)
+        ))
 }
 
 /// Display label for an eval backend in the routing section's selector.

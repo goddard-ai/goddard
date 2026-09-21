@@ -2170,6 +2170,15 @@ routing.cloudflare_token_placeholder: Cloudflare API トークン
 routing.connection_failed: "接続に失敗しました：%{error}"
 routing.connection_ok: "接続しました — %{model} が %{latency} ms で応答"
 routing.effort_default: デフォルト
+routing.feature_evaluate: 評価呼び出し
+routing.feature_memory_rank: メモリ順位付け
+routing.feature_memory_triage: メモリトリアージ
+routing.feature_permission_review: 権限レビュー
+routing.feature_provider_switch: プロバイダー切り替え
+routing.feature_route: タスク振り分け
+routing.feature_route_class_suggest: クラス提案
+routing.feature_route_effort: エフォート調整
+routing.feature_turn_status: ターン状態マーカー
 routing.in_progress: タスクを振り分け中…
 routing.last_used: 前回使用
 routing.last_used_description: 最後に使ったプロバイダーとモデルをそのまま使います
@@ -2186,6 +2195,11 @@ routing.testing: 確認中…
 routing.typesafe_key: TypeSafe API キー
 routing.typesafe_key_description: api.typesafe.ai を直接呼び出します。空欄のままにすると保存済みのキーを保持します。
 routing.typesafe_key_placeholder: ts_…
+routing.usage_feature_calls: "%{calls} 回の呼び出し"
+routing.usage_tokens: "入力 %{input} · 出力 %{output}"
+routing.usage_total: トークン使用量
+routing.usage_total_description: "%{calls} 回の評価呼び出しにおけるバックエンド報告の入出力トークンです。"
+routing.usage_total_description_untracked: "%{calls} 回の評価呼び出しにおけるバックエンド報告トークン — うち %{untracked} 回は使用量トラッキング導入前です。"
 routing.vercel_key: AI Gateway キーまたは OIDC トークン
 routing.vercel_key_description: AI_GATEWAY_API_KEY または VERCEL_OIDC_TOKEN の値です。AI Gateway の評価エンドポイントに Bearer 認証情報として送信されます。
 routing.vercel_key_placeholder: vck_… または OIDC トークン

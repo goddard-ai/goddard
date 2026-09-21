@@ -10,7 +10,7 @@ use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::automations::{Automation, AutomationInput, AutomationRun, AutomationsState};
 use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
-use crate::eval::{EvalQuestion, EvalSettings, Evaluation};
+use crate::eval::{EvalQuestion, EvalSettings, EvalUsageStats, Evaluation};
 use crate::model::{
     AgentSession, AgentSessionTranscript, GoalOperation, MessageAttachment, Project, ProviderKind,
     ProviderProbe, ProviderResumeCursor, ProviderSessionCatalogStatus, ProviderSessionHistory,
@@ -320,6 +320,9 @@ pub enum Command {
     TestEvalConnection {
         settings: EvalSettings,
     },
+    /// Aggregate the eval decision log's recorded token usage for the
+    /// settings pane — totals plus a per-feature breakdown.
+    LoadEvalUsage,
     /// Route a new session's first prompt: evaluate the task into a class,
     /// resolve the daemon's class map against `candidates`, and answer with
     /// the provider, model, and effort to start on. `last_used` is the
@@ -997,6 +1000,9 @@ pub enum ResponsePayload {
     },
     Evaluation {
         evaluation: Evaluation,
+    },
+    EvalUsage {
+        stats: EvalUsageStats,
     },
     RouteDecision {
         decision: RouteDecision,

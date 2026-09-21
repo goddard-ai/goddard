@@ -852,6 +852,34 @@ routing.suggest_empty:
   en: Jev returned no usable suggestions
 routing.in_progress:
   en: Routing task…
+routing.usage_total:
+  en: Token usage
+routing.usage_total_description:
+  en: "Backend-reported input and output tokens across %{calls} evaluation calls."
+routing.usage_total_description_untracked:
+  en: "Backend-reported tokens across %{calls} evaluation calls — %{untracked} ran before usage tracking."
+routing.usage_feature_calls:
+  en: "%{calls} calls"
+routing.usage_tokens:
+  en: "%{input} in · %{output} out"
+routing.feature_evaluate:
+  en: Evaluations
+routing.feature_turn_status:
+  en: Turn status markers
+routing.feature_route:
+  en: Task routing
+routing.feature_route_effort:
+  en: Effort adjustment
+routing.feature_route_class_suggest:
+  en: Class suggestions
+routing.feature_provider_switch:
+  en: Provider switching
+routing.feature_memory_rank:
+  en: Memory ranking
+routing.feature_memory_triage:
+  en: Memory triage
+routing.feature_permission_review:
+  en: Permission review
 daemon.not_configured:
   en: Not configured
 daemon.status:

@@ -2120,6 +2120,15 @@ routing.cloudflare_token_placeholder: Cloudflare API 令牌
 routing.connection_failed: "连接失败：%{error}"
 routing.connection_ok: 已连接 — %{model} 在 %{latency} 毫秒内应答
 routing.effort_default: 默认
+routing.feature_evaluate: 评估调用
+routing.feature_memory_rank: 记忆排序
+routing.feature_memory_triage: 记忆分诊
+routing.feature_permission_review: 权限审查
+routing.feature_provider_switch: 服务商切换
+routing.feature_route: 任务路由
+routing.feature_route_class_suggest: 类别建议
+routing.feature_route_effort: 投入度调整
+routing.feature_turn_status: 回合状态标记
 routing.in_progress: 正在路由任务…
 routing.last_used: 上次使用
 routing.last_used_description: 沿用上次使用的服务商和模型
@@ -2136,6 +2145,11 @@ routing.testing: 正在检查…
 routing.typesafe_key: TypeSafe API 密钥
 routing.typesafe_key_description: 直接调用 api.typesafe.ai。留空则保留已存储的密钥。
 routing.typesafe_key_placeholder: ts_…
+routing.usage_feature_calls: "%{calls} 次调用"
+routing.usage_tokens: "输入 %{input} · 输出 %{output}"
+routing.usage_total: 令牌用量
+routing.usage_total_description: "%{calls} 次评估调用的后端报告输入与输出令牌。"
+routing.usage_total_description_untracked: "%{calls} 次评估调用的后端报告令牌 — 其中 %{untracked} 次早于用量跟踪。"
 routing.vercel_key: AI Gateway 密钥或 OIDC 令牌
 routing.vercel_key_description: AI_GATEWAY_API_KEY 或 VERCEL_OIDC_TOKEN 值，作为 Bearer 凭据发送到 AI Gateway 评估端点。
 routing.vercel_key_placeholder: vck_… 或 OIDC 令牌

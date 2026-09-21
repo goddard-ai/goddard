@@ -1234,6 +1234,10 @@ impl Backend for WakuBackend {
                     .as_ref()
                     .ok()
                     .map(|evaluation| evaluation.model.clone());
+                record.usage = result
+                    .as_ref()
+                    .ok()
+                    .map(|evaluation| evaluation.usage.clone());
                 record.state = Some(state);
                 record.questions = Some(questions);
                 record.answers = result
@@ -1278,6 +1282,9 @@ impl Backend for WakuBackend {
                 crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
                 Ok(ResponsePayload::Ack)
             }
+            Command::LoadEvalUsage => Ok(ResponsePayload::EvalUsage {
+                stats: crate::eval::usage_stats(&crate::eval::default_log_path()),
+            }),
             Command::LoadUsageHistory {
                 window,
                 project_roots,
@@ -4209,6 +4216,7 @@ fn handle_driver_command(
         | Command::TestEvalConnection { .. }
         | Command::RouteTask { .. }
         | Command::RecordRouteOverride { .. }
+        | Command::LoadEvalUsage
         | Command::LoadUsageHistory { .. }
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }

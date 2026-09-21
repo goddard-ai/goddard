@@ -62,6 +62,8 @@ export type { EvalBackend } from "./EvalBackend";
 export type { EvalQuestion } from "./EvalQuestion";
 export type { EvalSettings } from "./EvalSettings";
 export type { EvalUsage } from "./EvalUsage";
+export type { EvalUsageStats } from "./EvalUsageStats";
+export type { EvalUsageTotals } from "./EvalUsageTotals";
 export type { Evaluation } from "./Evaluation";
 export type { FileEntry } from "./FileEntry";
 export type { FriendInfo } from "./FriendInfo";

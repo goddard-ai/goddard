@@ -65,7 +65,7 @@ feature?: string | null,
  * callers (routing) leave it `None` for the default; long-context
  * callers such as provider-switch compaction pass a larger budget.
  */
-timeoutSecs?: number | null, } | { "type": "testEvalConnection", settings: EvalSettings, } | { "type": "routeTask", prompt: string,
+timeoutSecs?: number | null, } | { "type": "testEvalConnection", settings: EvalSettings, } | { "type": "loadEvalUsage" } | { "type": "routeTask", prompt: string,
 /**
  * Lightweight project context for the classifier — the project
  * name only; filesystem drilling is deliberately out of scope.

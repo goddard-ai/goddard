@@ -107,8 +107,37 @@ pub enum EvalAnswer {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(default, rename_all = "camelCase")]
 pub struct EvalUsage {
+    /// Cloudflare's Workers AI envelope reports snake_case; TypeSafe and the
+    /// Vercel evaluation spec report camelCase.
+    #[serde(alias = "input_tokens")]
+    pub input_tokens: u64,
+    #[serde(alias = "output_tokens")]
+    pub output_tokens: u64,
+}
+
+/// Token totals for one slice of the eval decision log — the whole log, or
+/// one feature's records.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct EvalUsageTotals {
+    /// Evaluation calls logged in the slice, whether or not they reported
+    /// usage.
+    pub calls: u64,
+    /// Calls whose record carries backend-reported usage. Below `calls`
+    /// when records predate usage reporting or a backend omitted it.
+    pub calls_with_usage: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+}
+
+/// Aggregated token usage across the daemon's eval decision log, read back
+/// for the settings pane.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct EvalUsageStats {
+    pub totals: EvalUsageTotals,
+    /// Totals keyed by the decision record's feature name.
+    pub features: BTreeMap<String, EvalUsageTotals>,
 }
 
 /// One completed evaluation call.
