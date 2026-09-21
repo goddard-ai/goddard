@@ -390,6 +390,16 @@ export function SessionView({
         ]
       : [];
     return {
+      // iOS 26 scroll edge effects read as the transcript fading out once it
+      // becomes scrollable — suppress them at the Screen level too, so the
+      // treatment holds even where the ScrollViewMarker class is absent
+      // (older bundled screens in Expo Go).
+      scrollEdgeEffects: {
+        bottom: 'hidden',
+        left: 'hidden',
+        right: 'hidden',
+        top: 'hidden',
+      },
       headerTitle: Platform.OS === 'ios'
         ? ''
         : () => <HeaderTitle subtitle={subtitle} title={title} />,
