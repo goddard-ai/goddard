@@ -1,0 +1,1 @@
+- The sidebar's branch labels and dirty/unpushed badges now re-scan when any session's turn ends, not only the selected one — commits an agent makes on your behalf no longer leave stale git status on its row.

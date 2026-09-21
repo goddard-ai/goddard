@@ -860,6 +860,11 @@ impl Waku {
                 if self.state.selected_session == Some(session_id) {
                     self.workspace_queries_stale = true;
                 }
+                // A settled turn is when an agent's commits land — including
+                // commits it made on the user's behalf — so the sidebar's git
+                // rows re-scan and this session's checkout answers drop even
+                // while another session is selected.
+                self.invalidate_session_workspace_queries(session_id);
                 runtime.computer_use_previews.clear();
                 runtime.driver.refresh_background_work();
                 self.capture_latest_turn_checkpoint_for(session_id);
@@ -1031,6 +1036,7 @@ impl Waku {
                         .is_some();
                 if finished_turn {
                     self.capture_latest_turn_checkpoint_for(session_id);
+                    self.invalidate_session_workspace_queries(session_id);
                 }
                 if let Some(previous_kinds) = previous_kinds.as_deref() {
                     self.splice_active_transcript_rows_after_visibility_change(previous_kinds);

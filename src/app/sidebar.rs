@@ -2192,6 +2192,22 @@ impl Waku {
         }
     }
 
+    /// Drop the fingerprints behind [`ensure_sidebar_branch_labels`] and
+    /// [`ensure_sidebar_checkout_statuses`] so the next sidebar frame re-reads
+    /// every row. In-flight passes retire with the generations, so a scan that
+    /// started before the invalidation cannot write back older answers.
+    ///
+    /// [`ensure_sidebar_branch_labels`]: Self::ensure_sidebar_branch_labels
+    /// [`ensure_sidebar_checkout_statuses`]: Self::ensure_sidebar_checkout_statuses
+    pub(super) fn invalidate_sidebar_git_scans(&self) {
+        self.sidebar_branch_scan_fingerprint.set(None);
+        self.sidebar_branch_scan_generation
+            .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));
+        self.sidebar_checkout_scan_fingerprint.set(None);
+        self.sidebar_checkout_scan_generation
+            .set(self.sidebar_checkout_scan_generation.get().wrapping_add(1));
+    }
+
     /// Dirty flag + unpushed commit count for every started session's checkout
     /// or worktree, resolved in one background pass like the branch labels.
     /// Rows read only `sidebar_checkout_statuses`.

@@ -817,12 +817,7 @@ impl Waku {
         self.invalidate_workspace_remote_files(&workspace_path);
         self.invalidate_base_push_state(&workspace_path);
         self.mention_files.invalidate(&workspace_path);
-        self.sidebar_branch_scan_fingerprint.set(None);
-        self.sidebar_branch_scan_generation
-            .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));
-        self.sidebar_checkout_scan_fingerprint.set(None);
-        self.sidebar_checkout_scan_generation
-            .set(self.sidebar_checkout_scan_generation.get().wrapping_add(1));
+        self.invalidate_sidebar_git_scans();
         self.refresh_workspace_surfaces(cx);
         self.invalidate_composer_sources(cx);
         if self.file_finder.is_open() {
@@ -832,6 +827,31 @@ impl Waku {
         if self.git_panel.is_some() {
             self.refresh_git_panel(cx);
         }
+    }
+
+    /// The turn-settle version of [`invalidate_workspace_queries`] for a
+    /// session that is not necessarily on screen: its own checkout's cached
+    /// answers drop and the sidebar's git rows re-scan, whichever workspace
+    /// the right panel is showing. The visible workspace's surfaces stay
+    /// untouched — `workspace_queries_stale` handles the selected session.
+    ///
+    /// [`invalidate_workspace_queries`]: Self::invalidate_workspace_queries
+    pub(super) fn invalidate_session_workspace_queries(&mut self, session_id: Uuid) {
+        self.invalidate_sidebar_git_scans();
+        let Some(path) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| self.workspace_path_for_session(session))
+            .map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+        self.branch_snapshots.invalidate(&path);
+        self.invalidate_workspace_remote_files(&path);
+        self.invalidate_base_push_state(&path);
+        self.mention_files.invalidate(&path);
     }
 
     pub(super) fn create_session_for(
