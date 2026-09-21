@@ -1,0 +1,1 @@
+- Wrapped text no longer strands closing punctuation on its own line — `!`, `?`, `)`, `]`, `"`, `—`, and similar characters now carry down with the word they belong to, most visibly in the annotation comment card
