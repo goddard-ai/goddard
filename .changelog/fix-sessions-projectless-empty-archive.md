@@ -1,0 +1,1 @@
+- Creating a task with no project no longer fails at submit when the workspace it restores was archived while still empty — an entry-less archive now recreates the directory instead of dying on "No such file or directory"

@@ -318,6 +318,10 @@ fn write_workspace_zip(root: &Path, destination: &Path) -> io::Result<()> {
 
 fn extract_workspace_zip(archive: fs::File, destination: &Path) -> io::Result<()> {
     let mut archive = zip::ZipArchive::new(archive).map_err(zip_io_error)?;
+    // The destination exists even when the archive holds no entries — an
+    // empty workspace still restores as an empty directory, and the caller
+    // renames `destination` unconditionally.
+    fs::create_dir_all(destination)?;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(zip_io_error)?;
         // `enclosed_name` refuses absolute paths and `..` escapes.
@@ -685,6 +689,26 @@ mod tests {
         assert!(!archive.exists());
         // Restoring an existing directory is a no-op.
         assert!(!restore_workspace_in(&root, &workspace).unwrap());
+
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn restore_recreates_an_empty_workspace_from_an_empty_archive() {
+        let home = test_root();
+        let root = home.join("projects");
+        let workspace = root.join("2026-09-16/new-chat-2");
+        fs::create_dir_all(&workspace).unwrap();
+
+        // An empty workspace still gets an archive marker — restoring it
+        // must land the directory back rather than fail renaming a staging
+        // directory the entry-less zip never created.
+        archive_workspace_in(&root, &workspace).unwrap();
+        assert!(!workspace.exists());
+
+        assert!(restore_workspace_in(&root, &workspace).unwrap());
+        assert!(workspace.is_dir());
+        assert_eq!(fs::read_dir(&workspace).unwrap().count(), 0);
 
         fs::remove_dir_all(&home).ok();
     }
