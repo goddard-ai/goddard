@@ -803,12 +803,12 @@ impl Waku {
         }
     }
 
-    /// `secondary-t` — always a fresh terminal, rooted where the user is:
-    /// the selected terminal's directory and scope, the selected session's
-    /// workspace, or a global terminal in ~ when the main area shows
-    /// neither. A selected session only lends its workspace — a terminal
-    /// owned by the session (a right-panel tab) comes from `secondary-j`
-    /// or the panel's terminal button.
+    /// `secondary-t` — always a fresh terminal, rooted where the user is.
+    /// A focused right-panel terminal keeps the chord in the panel: the new
+    /// terminal joins its strip in the same directory. Everywhere else the
+    /// terminal lands in the Terminals group — rooted in the selected
+    /// terminal's directory, the selected session's workspace, or ~ when
+    /// the main area shows neither.
     pub(super) fn new_terminal_action(
         &mut self,
         _: &NewTerminal,
@@ -816,6 +816,24 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
+        if let Some(terminal_id) = self.focused_right_panel_terminal(window, cx)
+            && let Some(session_id) = self.state.selected_session
+            && let Some(working_directory) = self.terminal_cwd(terminal_id, cx)
+            && let Some(new_terminal_id) =
+                self.create_terminal(working_directory, Some(session_id), None, cx)
+            && let Some(index) = self
+                .right_panel_surfaces
+                .iter()
+                .rposition(|surface| surface.terminal_id() == Some(new_terminal_id))
+        {
+            // create_terminal appended the tab without activating it —
+            // select it in the strip and hand it the pending focus slot.
+            self.right_panel_active_surface = Some(index);
+            self.reveal_right_panel_tab(index);
+            self.request_active_terminal_focus();
+            cx.notify();
+            return;
+        }
         // Expand the group so the new row — and the selection — is visible.
         self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
         // The terminal on screen seeds the spawn directory: the full-width

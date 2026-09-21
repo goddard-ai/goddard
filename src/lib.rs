@@ -809,9 +809,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘R opens the run-a-script picker everywhere except the
         // browser surface, whose deeper context keeps it as reload.
         KeyBinding::new("secondary-r", RunProjectScript, None),
-        // ⌘T always spawns a terminal — rooted in the selected
-        // terminal's directory, the selected session's workspace, or ~
-        // when the main area shows neither.
+        // ⌘T always spawns a terminal — a sibling tab in the strip when a
+        // right-panel terminal holds focus, otherwise a Terminals-group
+        // terminal rooted in the selected terminal's directory, the
+        // selected session's workspace, or ~.
         KeyBinding::new("secondary-t", NewTerminal, None),
         KeyBinding::new("secondary-/", ToggleModelPicker, None),
         KeyBinding::new("secondary-alt-shift-n", ToggleBranchPicker, None),

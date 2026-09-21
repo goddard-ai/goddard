@@ -2291,7 +2291,7 @@ impl Waku {
         }
     }
 
-    fn reveal_right_panel_tab(&mut self, index: usize) {
+    pub(super) fn reveal_right_panel_tab(&mut self, index: usize) {
         self.right_panel_pending_tab_reveal = Some(index);
         self.right_panel_tabs_scroll_handle.scroll_to_item(index);
     }
@@ -2305,6 +2305,21 @@ impl Waku {
         self.right_panel_pending_terminal_focus = self
             .active_right_panel_surface()
             .and_then(RightPanelSurface::terminal_id);
+    }
+
+    /// The panel terminal currently holding keyboard focus, if the strip's
+    /// active tab is one — ⌘T's "stay in the panel" signal. A terminal tab
+    /// that is merely active while focus sits elsewhere (composer, sidebar)
+    /// does not count.
+    pub(super) fn focused_right_panel_terminal(&self, window: &Window, cx: &App) -> Option<Uuid> {
+        if !self.right_panel_visible {
+            return None;
+        }
+        let terminal_id = self.active_right_panel_surface()?.terminal_id()?;
+        self.right_panel_terminals
+            .get(&terminal_id)
+            .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window))
+            .then_some(terminal_id)
     }
 
     pub(super) fn request_active_browser_focus(&mut self) {
@@ -2355,12 +2370,7 @@ impl Waku {
             cx.notify();
             return;
         }
-        let terminal_focused = self.right_panel_visible
-            && self
-                .active_right_panel_surface()
-                .and_then(RightPanelSurface::terminal_id)
-                .and_then(|terminal_id| self.right_panel_terminals.get(&terminal_id))
-                .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window));
+        let terminal_focused = self.focused_right_panel_terminal(window, cx).is_some();
         if terminal_focused {
             self.set_right_panel_visible(false, cx);
             let focus_handle = self.composer_focus(cx);
