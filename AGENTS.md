@@ -154,7 +154,10 @@
   after the prefix is their media slug.
 - Preview how fragments will group with `bun ./scripts/changelog.ts check`
   before folding; an unrecognized group token lands the bullet in the
-  flat tail, so check is how a mistyped group gets caught.
+  flat tail, so check is how a mistyped group gets caught. Before picking
+  a tag, skim the pending fragment names — a group needs two entries, so
+  a fragment tagged differently from the sibling it belongs with (e.g.
+  remote-pairing work filed outside `ssh`) strands both in the flat tail.
 - Every `highlight-` fragment must embed a screenshot or recording —
   `![](media/<slug>.{png,gif,mp4,mov})` with the asset committed at
   `.changelog/media/<slug>.<ext>`; collect moves it to

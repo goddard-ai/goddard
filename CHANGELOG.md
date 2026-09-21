@@ -35,17 +35,18 @@ the original feature bullet instead of adding separate entries for them.
 
 ### Features
 
+- **Sessions**
+  - A Goddard daemon restart no longer kills in-flight work: the session reloads its provider transcript from the saved resume cursor, shows a "daemon restarted — resuming" marker, and continues the interrupted turn automatically (once per restart, only for turns the provider had actually started)
+  - `goddard-agent create` can now omit `provider`, `model`, `reasoning_effort`, `service_tier`, and `context_window` — omitted fields inherit the calling task's configuration (clamped to what the resolved model's catalog lists), so agents spawn follow-up tasks without restating their own settings
 - **Git**
   - Sync strips and push affordances now fetch the branch's remote-tracking ref in the background (at most once a minute while shown), so the suggested action reflects upstream as it is now rather than as of your last manual fetch — a colleague's merge surfaces as "Pull" instead of a stale "Push". Toggle off under Settings → Git.
   - Landed notices now carry a Push button that sends the base branch to its tracked upstream (⌘⇧↩ does the same for the selected task), showing a "Pushed" check once the remote holds the commits; a rejected push opens a dialog with the Git error and a "Sync & retry push" recovery
-- Daemon settings now show a QR code for mobile pairing: "Show QR code" in the connection details reveals a code encoding the LAN address and token, and the mobile app scans it (Daemons → scan icon, or the daemon picker's "Scan QR Code…") to add and connect to the host without typing — the same `goddard://connect` link also works from the phone's camera app
-- A Goddard daemon restart no longer kills in-flight work: the session reloads its provider transcript from the saved resume cursor, shows a "daemon restarted — resuming" marker, and continues the interrupted turn automatically (once per restart, only for turns the provider had actually started)
-- The command palette offers a "Check for Updates" command that runs a manual update check and reports the result
+- **SSH**
+  - Daemon settings now show a QR code for mobile pairing: "Show QR code" in the connection details reveals a code encoding the LAN address and token, and the mobile app scans it (Daemons → scan icon, or the daemon picker's "Scan QR Code…") to add and connect to the host without typing — the same `goddard://connect` link also works from the phone's camera app
+  - Adding a remote host in Settings → Daemon now starts with a "Connect via" picker — SSH or WebSocket — that selects which fields render, instead of offering destination, address, and token as peers where a filled destination silently discarded the other two; SSH is the default on unix and the option is omitted on platforms without SSH support
+- A manual update check no longer depends on reaching the app menu — the command palette offers a "Check for Updates" command, and Settings → General shows the installed version next to a "Check now" button
 - The Dock menu on macOS and the taskbar jump list on Windows offer New task, Check for Updates, and Settings
 - GitHub Copilot sessions now support mid-turn steering: a message sent while the agent is working is folded into the running turn instead of waiting for it to finish
-- `goddard-agent create` can now omit `provider`, `model`, `reasoning_effort`, `service_tier`, and `context_window` — omitted fields inherit the calling task's configuration (clamped to what the resolved model's catalog lists), so agents spawn follow-up tasks without restating their own settings
-- Settings → General now shows the installed version next to a "Check now" button that runs a manual update check, so an explicit check no longer depends on reaching the app menu
-- Adding a remote host in Settings → Daemon now starts with a "Connect via" picker — SSH or WebSocket — that selects which fields render, instead of offering destination, address, and token as peers where a filled destination silently discarded the other two; SSH is the default on unix and the option is omitted on platforms without SSH support
 - Right-click an `@` file mention in a sent prompt to copy its path or show it in the file manager
 
 ### Experiments
@@ -69,6 +70,7 @@ the original feature bullet instead of adding separate entries for them.
   - A selected task's sidebar row no longer repeats its unsent draft text — the composer already shows it — and the draft line now leads with a pencil icon so it reads as a draft
   - Starting a sidebar multi-selection with ⌘-click now keeps the task you're viewing in the selection, matching Finder's extend-rather-than-replace behavior — ⌘-click it again to leave it out — and batch menu items say how many tasks they act on ("Archive 3 tasks")
   - Drag-selecting text into the left window edge — in the terminal, the transcript, or anywhere else — no longer pops open the hidden sidebar; the edge strip now reveals it only on unpressed pointer motion
+  - Pinned terminals now sort to the top of the sidebar's Terminals group instead of staying in creation order among unpinned rows
 - **Providers**
   - Devin sessions no longer leave a subagent's tool calls stuck on "Running" — they settle when the subagent's lifecycle update arrives, and each subagent now shows up as a labeled "Subagent: …" row instead of a bare Tool entry
   - A turn stopped externally — for example by Devin's model server rather than by pressing Stop — now marks the session failed (red ✕) instead of earning a completed-turn unread dot.
@@ -88,7 +90,6 @@ the original feature bullet instead of adding separate entries for them.
   - Menu text in dark themes stays legible again: the glass card's specular sheen is shallower, and each palette's text tiers are now solved to WCAG contrast floors over every surface — Zenburn, Rosé Pine Moon, Everforest, Dracula, and GitHub Dark menu items had fallen to 1.8–4.5:1 and now clear the bar. High Contrast mode widens text contrast too, not just borders.
 - Switching projects from a new task's composer now moves that draft's "New task" row to the picked project — typed text and all — instead of stacking a second row under the old one; picking "No project" does the same
 - The file editor's annotation chrome — the "Add to chat" pill, the comment editor and its input, and the hover tooltip — no longer renders in the code face inherited from the pane; each surface now sets the UI face explicitly
-- Pinned terminals now sort to the top of the sidebar's Terminals group instead of staying in creation order among unpinned rows
 
 ## [0.5.0]
 
