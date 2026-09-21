@@ -185,7 +185,7 @@ pub struct WakuBackend {
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
     usage_scan_cache: Mutex<crate::usage_history::ScanCache>,
-    checkpoint_capture_locks: Mutex<HashMap<(PathBuf, Uuid, usize), Arc<Mutex<()>>>>,
+    checkpoint_capture_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
     /// Scoped agent credentials, per-session prompt queues, and the live
     /// turn bookkeeping the runtime event forwarder maintains. `pub(crate)`
     /// so server tests can mint a token and connect with it the way a
@@ -526,19 +526,19 @@ impl WakuBackend {
 
     /// Capture and persist one ending checkpoint exactly once per daemon.
     /// Desktop and Web may observe the same turn completion concurrently; a
-    /// per-turn lock prevents both clients from running the expensive Git
-    /// snapshot while leaving unrelated tasks independent.
+    /// per-worktree lock prevents both clients — and adjacent turns — from
+    /// running the expensive Git snapshot over the same worktree at once
+    /// while leaving unrelated worktrees independent.
     fn capture_turn_checkpoint(
         &self,
         cwd: PathBuf,
         session_id: Uuid,
         turn_count: usize,
     ) -> anyhow::Result<Checkpoint> {
-        let key = (cwd.clone(), session_id, turn_count);
         let capture_lock = self
             .checkpoint_capture_locks
             .lock()
-            .entry(key)
+            .entry(cwd.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
         let _capture = capture_lock.lock();
@@ -568,7 +568,15 @@ impl WakuBackend {
             }
         }
 
+        let capture_started = std::time::Instant::now();
         let checkpoint = crate::checkpoint::capture_turn(&cwd, session_id, turn_count)?;
+        // The transcript holds a "checking for changes" card open for this
+        // round trip — the elapsed line is the only record of how long the
+        // worktree snapshot actually took.
+        eprintln!(
+            "turn checkpoint for session {session_id} turn {turn_count} captured in {:?}",
+            capture_started.elapsed()
+        );
         let mut state = self.task_state.lock();
         if let Some(index) = state
             .sessions

@@ -6,8 +6,10 @@ use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context as _, anyhow, bail};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -15,6 +17,11 @@ use crate::model::{Checkpoint, CheckpointFile, CheckpointStatus, unix_time};
 
 const TURN_START_METADATA_PREFIX: &str = "Waku-Turn-Start: ";
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+/// The side index every snapshot on a worktree shares, kept in the worktree's
+/// own git dir so its stat cache stays valid for that checkout. Reuse is what
+/// makes `git add` incremental: entries whose stat is unchanged skip hashing,
+/// so the per-capture cost tracks changed files instead of worktree size.
+const CHECKPOINT_INDEX_NAME: &str = "waku-checkpoint-index";
 
 #[derive(Debug, Deserialize, Serialize)]
 struct TurnStartMetadata {
@@ -182,9 +189,10 @@ pub fn capture_ref(cwd: &Path, git_ref: &str) -> anyhow::Result<()> {
 
 /// Capture the current worktree and untracked files as a dangling commit.
 ///
-/// This shares the checkpoint path's isolated temporary index, so it never
-/// stages or unstages the user's files. Review uses the returned treeish to
-/// compare a stable worktree snapshot while edits continue on disk.
+/// This shares the checkpoint path's isolated per-worktree index, so it
+/// never stages or unstages the user's files. Review uses the returned
+/// treeish to compare a stable worktree snapshot while edits continue on
+/// disk.
 pub fn capture_worktree_commit(cwd: &Path) -> anyhow::Result<String> {
     if !is_git_repository(cwd) {
         bail!("worktree snapshots require a Git repository");
@@ -204,53 +212,109 @@ fn capture_worktree_commit_from(
         bail!("worktree snapshots require a Git repository");
     }
 
-    let common_dir = git_output(cwd, ["rev-parse", "--git-common-dir"])?
-        .trim()
-        .to_owned();
-    if common_dir.is_empty() {
-        bail!("git did not return its common directory");
-    }
-    let common_dir = PathBuf::from(common_dir);
-    let common_dir = if common_dir.is_absolute() {
-        common_dir
-    } else {
-        cwd.join(common_dir)
-    };
-    let temporary_index = common_dir.join(format!("waku-checkpoint-index-{}", Uuid::new_v4()));
+    let git_dir = worktree_git_dir(cwd)?;
+    let index = git_dir.join(CHECKPOINT_INDEX_NAME);
+    // Every snapshot writes through the same side index, so two captures on
+    // one worktree must not overlap. Captures on different worktrees keep
+    // their own indexes and stay independent.
+    let capture_lock = capture_lock(&git_dir);
+    let _capture = capture_lock.lock();
+    // A capture killed mid-write leaves its index lock behind; the mutex
+    // above makes any leftover dead.
+    let _ = fs::remove_file(index.with_extension("lock"));
 
-    let result = (|| {
-        if let Some(head) = head {
-            git_with_index(cwd, &temporary_index, ["read-tree", head])?;
+    match capture_with_index(cwd, &index, head, message, parents) {
+        Err(_) => {
+            // A stale or corrupt side index fails plumbing the caller cannot
+            // fix — rebuild it once from scratch before giving up.
+            let _ = fs::remove_file(&index);
+            let _ = fs::remove_file(index.with_extension("lock"));
+            capture_with_index(cwd, &index, head, message, parents)
         }
-        git_with_index(cwd, &temporary_index, ["add", "-A", "--", "."])?;
-        let tree = git_with_index(cwd, &temporary_index, ["write-tree"])?
+        ok => ok,
+    }
+}
+
+fn capture_with_index(
+    cwd: &Path,
+    index: &Path,
+    head: Option<&str>,
+    message: &str,
+    parents: &[String],
+) -> anyhow::Result<String> {
+    // A clean worktree commits HEAD's tree outright — no index writes and no
+    // hashing at all. Status runs against the side index, which keeps it off
+    // the user's index while still giving it a warm stat cache.
+    if let Some(head) = head
+        && worktree_is_clean(cwd, index)?
+    {
+        let tree = git_output(cwd, ["rev-parse", &format!("{head}^{{tree}}")])?
             .trim()
             .to_owned();
         if tree.is_empty() {
-            bail!("git write-tree returned no object id");
+            bail!("git rev-parse returned no tree id");
         }
-        let mut arguments = vec![
-            "commit-tree".to_owned(),
-            tree,
-            "-m".to_owned(),
-            message.to_owned(),
-        ];
-        for parent in parents {
-            arguments.push("-p".to_owned());
-            arguments.push(parent.clone());
-        }
-        let commit = git_with_identity_and_index(cwd, &temporary_index, &arguments)?
-            .trim()
-            .to_owned();
-        if commit.is_empty() {
-            bail!("git commit-tree returned no object id");
-        }
-        Ok(commit)
-    })();
+        return commit_tree(cwd, &tree, message, parents);
+    }
+    if let Some(head) = head {
+        git_with_index(cwd, index, ["read-tree", head])?;
+    }
+    git_with_index(cwd, index, ["add", "-A", "--", "."])?;
+    let tree = git_with_index(cwd, index, ["write-tree"])?
+        .trim()
+        .to_owned();
+    if tree.is_empty() {
+        bail!("git write-tree returned no object id");
+    }
+    commit_tree(cwd, &tree, message, parents)
+}
 
-    let _ = fs::remove_file(&temporary_index);
-    let _ = fs::remove_file(temporary_index.with_extension("lock"));
-    result
+/// Whether the worktree matches `HEAD` — no staged, unstaged, or untracked
+/// (but non-ignored) differences. Runs against the side index: an absent or
+/// stale index reports everything as changed, which safely falls through to
+/// the full snapshot. `--untracked-files=all` keeps a `status.showUntrackedFiles`
+/// user config from hiding files the snapshot must see.
+fn worktree_is_clean(cwd: &Path, index: &Path) -> anyhow::Result<bool> {
+    let output = git_with_index(
+        cwd,
+        index,
+        ["status", "--porcelain", "--untracked-files=all", "--", "."],
+    )?;
+    Ok(output.trim().is_empty())
+}
+
+/// The worktree's own admin dir — `.git` on a normal checkout, the
+/// per-worktree dir under the common `.git` on a linked one — where the side
+/// index lives.
+fn worktree_git_dir(cwd: &Path) -> anyhow::Result<PathBuf> {
+    let dir = git_output(cwd, ["rev-parse", "--git-dir"])?
+        .trim()
+        .to_owned();
+    if dir.is_empty() {
+        bail!("git did not return its directory");
+    }
+    let dir = PathBuf::from(dir);
+    Ok(if dir.is_absolute() {
+        dir
+    } else {
+        cwd.join(dir)
+    })
+}
+
+/// One lock per worktree git dir, so snapshots sharing a side index can never
+/// interleave their index writes.
+fn capture_lock(git_dir: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    // Symlinked spellings of one git dir must share a lock.
+    let key = git_dir
+        .canonicalize()
+        .unwrap_or_else(|_| git_dir.to_path_buf());
+    LOCKS
+        .get_or_init(Mutex::default)
+        .lock()
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
 }
 
 fn prepare_turn_diff_base(
@@ -374,16 +438,6 @@ fn commit_tree(
     message: &str,
     parents: &[String],
 ) -> anyhow::Result<String> {
-    let common_dir = git_output(cwd, ["rev-parse", "--git-common-dir"])?
-        .trim()
-        .to_owned();
-    let common_dir = PathBuf::from(common_dir);
-    let common_dir = if common_dir.is_absolute() {
-        common_dir
-    } else {
-        cwd.join(common_dir)
-    };
-    let temporary_index = common_dir.join(format!("waku-checkpoint-index-{}", Uuid::new_v4()));
     let mut arguments = vec![
         "commit-tree".to_owned(),
         tree.to_owned(),
@@ -394,8 +448,11 @@ fn commit_tree(
         arguments.push("-p".to_owned());
         arguments.push(parent.clone());
     }
-    git_with_identity_and_index(cwd, &temporary_index, &arguments)
-        .map(|commit| commit.trim().to_owned())
+    let commit = git_with_identity(cwd, &arguments)?.trim().to_owned();
+    if commit.is_empty() {
+        bail!("git commit-tree returned no object id");
+    }
+    Ok(commit)
 }
 
 pub fn restore_ref(cwd: &Path, git_ref: &str) -> anyhow::Result<()> {
@@ -776,20 +833,20 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    git_with_environment(cwd, index, args, false)
+    git_with_environment(cwd, Some(index), args, false)
 }
 
-fn git_with_identity_and_index<I, S>(cwd: &Path, index: &Path, args: I) -> anyhow::Result<String>
+fn git_with_identity<I, S>(cwd: &Path, args: I) -> anyhow::Result<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    git_with_environment(cwd, index, args, true)
+    git_with_environment(cwd, None, args, true)
 }
 
 fn git_with_environment<I, S>(
     cwd: &Path,
-    index: &Path,
+    index: Option<&Path>,
     args: I,
     identity: bool,
 ) -> anyhow::Result<String>
@@ -798,10 +855,10 @@ where
     S: AsRef<OsStr>,
 {
     let mut command = crate::command_env::search_path_command("git");
-    command
-        .args(args)
-        .current_dir(cwd)
-        .env("GIT_INDEX_FILE", index);
+    command.args(args).current_dir(cwd);
+    if let Some(index) = index {
+        command.env("GIT_INDEX_FILE", index);
+    }
     if identity {
         command
             .env("GIT_AUTHOR_NAME", "Goddard")
@@ -1233,6 +1290,83 @@ mod tests {
 
         assert_eq!(second.files.len(), 1);
         assert_eq!(second.files[0].path, "second-turn.txt");
+        fs::remove_dir_all(directory).ok();
+    }
+
+    /// A clean worktree commits HEAD's tree outright — the snapshot skips the
+    /// index write and the hash entirely.
+    #[test]
+    fn a_clean_worktree_snapshots_the_head_tree() {
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        fs::write(directory.join("tracked.txt"), "baseline\n").unwrap();
+        git_ok(&directory, &["add", "tracked.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        let checkpoint = capture_turn(&directory, session, 0).unwrap();
+        assert_eq!(checkpoint.status, CheckpointStatus::Ready);
+        assert_eq!(
+            git_text(
+                &directory,
+                &["rev-parse", &format!("{}^{{tree}}", checkpoint.git_ref)]
+            ),
+            git_text(&directory, &["rev-parse", "HEAD^{tree}"]),
+            "a clean worktree's snapshot is HEAD's tree"
+        );
+        fs::remove_dir_all(directory).ok();
+    }
+
+    /// A stale or corrupt side index must not fail the capture — it is
+    /// rebuilt once from scratch before the error reaches the caller.
+    #[test]
+    fn a_corrupt_side_index_rebuilds_itself() {
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        fs::write(directory.join("tracked.txt"), "baseline\n").unwrap();
+        git_ok(&directory, &["add", "tracked.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        fs::write(directory.join("tracked.txt"), "first change\n").unwrap();
+        capture_turn(&directory, session, 0).unwrap();
+        let index = worktree_git_dir(&directory)
+            .unwrap()
+            .join(CHECKPOINT_INDEX_NAME);
+        assert!(index.exists(), "a dirty capture leaves the side index");
+        fs::write(&index, b"not an index").unwrap();
+
+        fs::write(directory.join("tracked.txt"), "changed\n").unwrap();
+        let turn = capture_turn(&directory, session, 1).unwrap();
+        assert_eq!(turn.status, CheckpointStatus::Ready);
+        assert_eq!(turn.files.len(), 1);
+        assert_eq!(turn.files[0].path, "tracked.txt");
         fs::remove_dir_all(directory).ok();
     }
 }
