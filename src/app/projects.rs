@@ -14,6 +14,7 @@ use std::collections::HashSet;
 
 use super::*;
 
+use crate::ui::ActivationExt;
 use waku_client::{
     GitHubAvailability, PullRequestSummary, RepoBranch, RepoWorktree, WorkItemQueryState,
 };
@@ -577,7 +578,7 @@ impl Waku {
         }
     }
 
-    /// ⌘⌥1–2: switch the open page's tab, or open the page straight onto it.
+    /// ⌘⌥1–3: switch the open page's tab, or open the page straight onto it.
     pub(super) fn select_projects_tab_action(
         &mut self,
         action: &SelectProjectsTab,
@@ -1978,6 +1979,7 @@ impl Waku {
             .when(enabled, |element| {
                 let element = element
                     .cursor_default()
+                    .tab_index(0)
                     .focus_visible(|style| style.bg(theme.focus_highlight()));
                 if selected {
                     element.bg(theme.surface).text_color(theme.text)
@@ -1990,15 +1992,26 @@ impl Waku {
             .when(!enabled, |element| {
                 element.tooltip(Tooltip::text(tr!("projects.not_a_github_repo")))
             })
+            .when_some(
+                (!for_git && enabled)
+                    .then(|| ProjectsTab::ALL.iter().position(|tab| *tab == candidate))
+                    .flatten(),
+                |element, index| {
+                    element.tooltip(Tooltip::text_with_action(
+                        candidate.label(),
+                        &SelectProjectsTab { index },
+                    ))
+                },
+            )
             .child(candidate.label())
             .when(enabled, |element| {
-                element.on_click(cx.listener(move |this, _, window, cx| {
+                element.on_activation(cx, move |this, window, cx| {
                     if for_git {
                         this.set_git_tab(project_id, candidate, window, cx);
                     } else {
                         this.set_projects_tab(project_id, candidate, window, cx);
                     }
-                }))
+                })
             })
     }
 
@@ -2106,6 +2119,7 @@ impl Waku {
             .child(
                 div()
                     .id("projects-refresh")
+                    .tab_index(0)
                     .w(px(24.0))
                     .h(px(24.0))
                     .rounded(px(6.0))
@@ -2118,9 +2132,9 @@ impl Waku {
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .tooltip(Tooltip::text(tr!("github.refresh")))
                     .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         this.projects_refresh(project_id, cx);
-                    })),
+                    }),
             )
             .into_any_element()
     }

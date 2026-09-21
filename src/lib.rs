@@ -181,7 +181,7 @@ pub struct SelectSidebarSession {
     pub index: usize,
 }
 
-/// Switch the Projects page to its nth tab (⌘⌥1–⌘⌥4), or deep-link to that
+/// Switch the Projects page to its nth tab (⌘⌥1–⌘⌥3), or deep-link to that
 /// tab from anywhere when the page is closed.
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = waku, no_json)]
@@ -598,7 +598,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘⇧U opens the Automations page — scheduling's letter in the
         // page-toggle family.
         KeyBinding::new("secondary-shift-u", ToggleAutomationsPage, None),
-        // ⌘⌥1–2 switch the page's tabs while it is open. The chords used
+        // ⌘⌥1–3 switch the page's tabs while it is open. The chords used
         // to deep-link to a tab from anywhere; the model picker's
         // ⌘⌥1–⌘⌥9 favorite jump owns the workspace scope now.
         KeyBinding::new(
@@ -609,6 +609,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "secondary-alt-2",
             SelectProjectsTab { index: 1 },
+            Some("ProjectsPage"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-3",
+            SelectProjectsTab { index: 2 },
             Some("ProjectsPage"),
         ),
         KeyBinding::new(

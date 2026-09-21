@@ -17,6 +17,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::ui::ActivationExt;
 use waku_client::{
     GitHubAvailability, NotificationPoll, NotificationReason, NotificationSubjectType,
     NotificationThread, PullRequestSummary, WorkspaceOperation, WorkspaceResult,
@@ -994,9 +995,10 @@ impl Waku {
                         "icons/check.svg",
                         tr!("notifications.mark_all_read"),
                         &theme,
-                        cx.listener(|this, _, _, cx| {
+                        cx,
+                        |this, _, cx| {
                             this.notification_mark_all_read(cx);
-                        }),
+                        },
                     )
                     .into_any_element(),
                 )
@@ -1057,15 +1059,9 @@ impl Waku {
                             .text_color(theme.text_secondary)
                             .child(tr!("notifications.show_read")),
                     )
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_activation(cx, |this, _, cx| {
                         this.inbox_toggle_show_read(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.inbox_toggle_show_read(cx);
-                            cx.stop_propagation();
-                        }
-                    })),
+                    }),
             )
             .child(
                 div()
@@ -1083,15 +1079,9 @@ impl Waku {
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .tooltip(Tooltip::text(tr!("github.refresh")))
                     .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_activation(cx, |this, _, cx| {
                         this.inbox_refresh(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.inbox_refresh(cx);
-                            cx.stop_propagation();
-                        }
-                    })),
+                    }),
             )
             .into_any_element()
     }
@@ -1230,19 +1220,11 @@ impl Waku {
                                 .text_color(theme.text_tertiary)
                                 .child(tr!("notifications.mark_repo_read")),
                         )
-                        .on_click({
+                        .on_activation(cx, {
                             let repo = repo.clone();
-                            cx.listener(move |this, _, _, cx| {
+                            move |this, _, cx| {
                                 this.notification_mark_repo_read(&repo, cx);
-                            })
-                        })
-                        .on_key_down({
-                            cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.notification_mark_repo_read(&repo, cx);
-                                    cx.stop_propagation();
-                                }
-                            })
+                            }
                         }),
                 )
             })
@@ -1438,7 +1420,6 @@ impl Waku {
         action: Rc<dyn Fn(&mut Self, &mut Window, &mut Context<Self>)>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let click_action = action.clone();
         div()
             .id(SharedString::from(format!("inbox-{name}-{thread_id}")))
             .tab_index(0)
@@ -1454,15 +1435,8 @@ impl Waku {
             .tooltip(Tooltip::text(tooltip))
             .child(icon(icon_path, 12.0, theme.text_secondary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                click_action(this, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    cx.stop_propagation();
-                    action(this, window, cx);
-                }
-            }))
+            .on_activation(cx, move |this, window, cx| {
+                action(this, window, cx);
+            })
     }
 }

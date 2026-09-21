@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use gpui::{ElementId, KeyBinding, actions};
 
 use super::*;
+use crate::ui::ActivationExt;
 use waku_client::DaemonKey;
 use waku_client::automations::{
     Automation, AutomationInput, AutomationPrecheck, AutomationRun, AutomationRunStatus,
@@ -367,12 +368,12 @@ impl Waku {
     ) -> AnyElement {
         let feedback_id = format!("automation-webhook-copy-{automation_id}");
         let copied = self.control_was_copied(&feedback_id);
-        let weak = cx.entity().downgrade();
         let label = url.clone();
         div()
             .id(ElementId::Name(
                 format!("automation-webhook-{automation_id}").into(),
             ))
+            .tab_index(0)
             .h(px(24.0))
             .px(px(8.0))
             .rounded(px(6.0))
@@ -382,11 +383,10 @@ impl Waku {
             .bg(theme.composer)
             .cursor_pointer()
             .hover(|element| element.bg(theme.overlay))
-            .on_click(move |_, _, cx| {
+            .focus_visible(|element| element.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
-                let _ = weak.update(cx, |this, cx| {
-                    this.show_control_copied(feedback_id.clone(), cx);
-                });
+                this.show_control_copied(feedback_id.clone(), cx);
             })
             .child(
                 div()
@@ -868,14 +868,18 @@ impl Waku {
     /// The page's top bar: title (or breadcrumb in detail), the Schedules /
     /// Runs switch, search, and the New button.
     fn render_automations_header(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let weak = cx.entity().downgrade();
         let in_detail = self.automations_detail.is_some();
         let tab = self.automations_tab;
 
-        let tab_chip = |label: String, active: bool, tab: AutomationsTab, id: &'static str| {
-            let weak = weak.clone();
+        let tab_chip = |label: String,
+                        active: bool,
+                        tab: AutomationsTab,
+                        id: &'static str,
+                        cx: &mut Context<Self>|
+         -> Stateful<Div> {
             div()
                 .id(id)
+                .tab_index(0)
                 .h(px(24.0))
                 .px(px(10.0))
                 .rounded(px(6.0))
@@ -890,11 +894,10 @@ impl Waku {
                 .when(active, |element| element.bg(theme.overlay))
                 .cursor_pointer()
                 .hover(|element| element.bg(theme.overlay))
-                .on_click(move |_, _, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.automations_detail = None;
-                        this.set_automations_tab(tab, cx);
-                    });
+                .focus_visible(|element| element.bg(theme.focus_highlight()))
+                .on_activation(cx, move |this, _, cx| {
+                    this.automations_detail = None;
+                    this.set_automations_tab(tab, cx);
                 })
                 .child(label)
         };
@@ -967,12 +970,14 @@ impl Waku {
                                     tab == AutomationsTab::Schedules,
                                     AutomationsTab::Schedules,
                                     "automations-tab-schedules",
+                                    cx,
                                 ))
                                 .child(tab_chip(
                                     tr!("automations.tab_runs"),
                                     tab == AutomationsTab::Runs,
                                     AutomationsTab::Runs,
                                     "automations-tab-runs",
+                                    cx,
                                 )),
                         )
                     }),
@@ -1168,29 +1173,16 @@ impl Waku {
         let enabled = automation.enabled;
         let selected = self.automations_detail == Some((key, id));
 
-        let toggle = div()
-            .id(ElementId::Name(format!("automation-toggle-{id}").into()))
-            .flex_none()
-            .w(px(30.0))
-            .h(px(17.0))
-            .rounded(px(8.5))
-            .bg(if enabled {
-                theme.accent
-            } else {
-                theme.separator
-            })
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.set_automation_enabled(key, id, !enabled, cx);
-            }))
-            .child(
-                div()
-                    .size(px(13.0))
-                    .mt(px(2.0))
-                    .rounded(px(6.5))
-                    .bg(theme.composer)
-                    .ml(if enabled { px(15.0) } else { px(2.0) }),
-            );
+        // The shared switch, not a bespoke pill — its `on_activation` stops
+        // propagation, so toggling does not also open the row's detail.
+        let toggle = toggle_switch(
+            ElementId::Name(format!("automation-toggle-{id}").into()),
+            enabled,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| this.set_automation_enabled(key, id, !enabled, cx),
+        );
 
         div()
             .id(ElementId::Name(format!("automation-row-{id}").into()))
@@ -1209,17 +1201,10 @@ impl Waku {
             .focus_visible(|element| element.bg(theme.focus_highlight()))
             .track_focus(&self.automations_row_focus)
             .tab_index(0)
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_activation(cx, move |this, _, cx| {
                 this.automations_detail = Some((key, id));
                 cx.notify();
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.automations_detail = Some((key, id));
-                    cx.notify();
-                    cx.stop_propagation();
-                }
-            }))
+            })
             .child(toggle)
             .child(
                 div()
@@ -1309,8 +1294,11 @@ impl Waku {
         let refusal = (run.refusal_count > 0)
             .then(|| tr!("automations.refusal_count", count = run.refusal_count + 1));
 
+        let focus = self.transcript_control_focus(format!("automation-run-focus-{}", run.id), cx);
         div()
             .id(ElementId::Name(format!("automation-run-{}", run.id).into()))
+            .track_focus(&focus)
+            .tab_index(0)
             .min_h(px(40.0))
             .py(px(7.0))
             .mx(px(-8.0))
@@ -1321,11 +1309,12 @@ impl Waku {
             .gap(px(10.0))
             .cursor_pointer()
             .hover(|element| element.bg(theme.overlay))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .focus_visible(|element| element.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
                 this.automations_detail = Some((key, automation_id));
                 this.automations_tab = AutomationsTab::Schedules;
                 cx.notify();
-            }))
+            })
             .child(icon(icon_path, 12.0, color))
             .child(
                 div()
@@ -1371,6 +1360,7 @@ impl Waku {
                         .id(ElementId::Name(
                             format!("automation-run-task-{}", run.id).into(),
                         ))
+                        .tab_index(0)
                         .flex_none()
                         .h(px(22.0))
                         .px(px(7.0))
@@ -1383,9 +1373,10 @@ impl Waku {
                         .bg(theme.overlay)
                         .cursor_pointer()
                         .hover(|element| element.bg(theme.overlay))
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                        .focus_visible(|element| element.bg(theme.focus_highlight()))
+                        .on_activation(cx, move |this, _, cx| {
                             this.select_session(session_id, cx);
-                        }))
+                        })
                         .child(icon("icons/arrow-right.svg", 10.0, theme.accent))
                         .child(tr!("automations.open_task")),
                 )
@@ -1451,11 +1442,12 @@ impl Waku {
                              icon_path: &'static str,
                              label: String,
                              color: Hsla,
-                             on_click: Box<dyn Fn(&mut Self, &mut Window, &mut Context<Self>)>|
+                             activate: Box<dyn Fn(&mut Self, &mut Window, &mut Context<Self>)>,
+                             cx: &mut Context<Self>|
          -> AnyElement {
-            let weak = cx.entity().downgrade();
             div()
                 .id(id_name)
+                .tab_index(0)
                 .h(px(26.0))
                 .px(px(10.0))
                 .rounded(px(7.0))
@@ -1467,9 +1459,8 @@ impl Waku {
                 .bg(theme.raised)
                 .cursor_pointer()
                 .hover(|element| element.bg(theme.overlay))
-                .on_click(move |_, window, cx| {
-                    let _ = weak.update(cx, |this, cx| on_click(this, window, cx));
-                })
+                .focus_visible(|element| element.bg(theme.focus_highlight()))
+                .on_activation(cx, move |this, window, cx| activate(this, window, cx))
                 .child(icon(icon_path, 11.0, color))
                 .child(label)
                 .into_any_element()
@@ -1537,6 +1528,7 @@ impl Waku {
                                 .id(ElementId::Name(
                                     format!("detail-run-task-{}", run.id).into(),
                                 ))
+                                .tab_index(0)
                                 .flex_none()
                                 .h(px(20.0))
                                 .px(px(6.0))
@@ -1548,9 +1540,10 @@ impl Waku {
                                 .text_color(theme.accent)
                                 .bg(theme.overlay)
                                 .cursor_pointer()
-                                .on_click(cx.listener(move |this, _, _, cx| {
+                                .focus_visible(|element| element.bg(theme.focus_highlight()))
+                                .on_activation(cx, move |this, _, cx| {
                                     this.select_session(session_id, cx);
-                                }))
+                                })
                                 .child(icon("icons/arrow-right.svg", 9.0, theme.accent))
                                 .child(tr!("automations.open_task")),
                         )
@@ -1625,6 +1618,7 @@ impl Waku {
                         Box::new(move |this, _window, cx| {
                             this.run_automation_now(key, id, cx);
                         }),
+                        cx,
                     ))
                     .child(action_button(
                         "automation-edit",
@@ -1634,6 +1628,7 @@ impl Waku {
                         Box::new(move |this, _window, cx| {
                             this.request_automation_editor(Some((key, id)), cx);
                         }),
+                        cx,
                     ))
                     .child(action_button(
                         "automation-pause",
@@ -1651,6 +1646,7 @@ impl Waku {
                         Box::new(move |this, _window, cx| {
                             this.set_automation_enabled(key, id, !automation.enabled, cx);
                         }),
+                        cx,
                     ))
                     .child(action_button(
                         "automation-delete",
@@ -1678,6 +1674,7 @@ impl Waku {
                             })
                             .detach();
                         }),
+                        cx,
                     )),
             )
             .child(
@@ -2243,25 +2240,27 @@ impl Waku {
             "automation-editor-enabled",
             tr!("automations.enabled"),
             editor.enabled,
-            &theme,
-            cx.listener(|this, _, _, cx| {
+            theme,
+            cx,
+            |this, _, cx| {
                 if let Some(editor) = this.automations_editor.as_mut() {
                     editor.enabled = !editor.enabled;
                     cx.notify();
                 }
-            }),
+            },
         );
         let reuse_toggle = editor_toggle_row(
             "automation-editor-reuse",
             tr!("automations.reuse_session"),
             editor.reuse_session,
-            &theme,
-            cx.listener(|this, _, _, cx| {
+            theme,
+            cx,
+            |this, _, cx| {
                 if let Some(editor) = this.automations_editor.as_mut() {
                     editor.reuse_session = !editor.reuse_session;
                     cx.notify();
                 }
-            }),
+            },
         );
 
         let row = |label: String, content: AnyElement| {
@@ -2783,14 +2782,21 @@ fn automations_status_row(theme: &Theme, title: String, hint: String) -> Div {
         )
 }
 
-/// The small checkbox-style toggle the editor uses for enabled/reuse.
-fn editor_toggle_row(
+/// The small checkbox-style toggle the editor uses for enabled/reuse. The
+/// shared pill switch is the tab stop and carries activation; the label row
+/// stays click-to-toggle for pointer users.
+fn editor_toggle_row<E>(
     id: &'static str,
     label: String,
     enabled: bool,
-    theme: &Theme,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
+    theme: Theme,
+    cx: &mut Context<E>,
+    activate: impl Fn(&mut E, &mut Window, &mut Context<E>) + 'static + Clone,
+) -> Stateful<Div>
+where
+    E: 'static,
+{
+    let row_activate = activate.clone();
     div()
         .id(id)
         .h(px(24.0))
@@ -2798,27 +2804,17 @@ fn editor_toggle_row(
         .items_center()
         .gap(px(8.0))
         .cursor_pointer()
-        .on_click(on_click)
-        .child(
-            div()
-                .w(px(30.0))
-                .h(px(17.0))
-                .rounded(px(8.5))
-                .flex_none()
-                .bg(if enabled {
-                    theme.accent
-                } else {
-                    theme.separator
-                })
-                .child(
-                    div()
-                        .size(px(13.0))
-                        .mt(px(2.0))
-                        .rounded(px(6.5))
-                        .bg(theme.composer)
-                        .ml(if enabled { px(15.0) } else { px(2.0) }),
-                ),
-        )
+        .on_click(cx.listener(move |this, _, window, cx| {
+            row_activate(this, window, cx);
+        }))
+        .child(toggle_switch(
+            ElementId::Name(format!("{id}-switch").into()),
+            enabled,
+            false,
+            theme,
+            cx,
+            activate,
+        ))
         .child(
             div()
                 .text_size(sp(12.5))

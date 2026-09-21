@@ -285,6 +285,10 @@ pub trait ActivationExt: Sized {
     ) -> Self
     where
         E: 'static;
+
+    /// `on_activation` for render paths holding only `&mut App` — list row
+    /// builders and similar closures with no `Context<E>` in scope.
+    fn on_activation_app(self, activate: impl Fn(&mut Window, &mut App) + 'static) -> Self;
 }
 
 impl ActivationExt for Stateful<Div> {
@@ -296,14 +300,19 @@ impl ActivationExt for Stateful<Div> {
     where
         E: 'static,
     {
+        let activate = cx.listener(move |this, _: &(), window, cx| activate(this, window, cx));
+        self.on_activation_app(move |window, cx| activate(&(), window, cx))
+    }
+
+    fn on_activation_app(self, activate: impl Fn(&mut Window, &mut App) + 'static) -> Self {
         let activate = std::rc::Rc::new(activate);
         let click_activate = activate.clone();
         let key_activate = activate;
-        self.on_click(cx.listener(move |this, _, window, cx| {
-            click_activate(this, window, cx);
+        self.on_click(move |_, window, cx| {
+            click_activate(window, cx);
             cx.stop_propagation();
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+        })
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
             // Bare Enter/Space only. A modified chord belongs to whatever
             // command owns it, so a focused control must not swallow it —
             // this is the guard the hand-rolled settings toggles carried
@@ -311,10 +320,10 @@ impl ActivationExt for Stateful<Div> {
             if !event.keystroke.modifiers.modified()
                 && matches!(event.keystroke.key.as_str(), "enter" | "space")
             {
-                key_activate(this, window, cx);
+                key_activate(window, cx);
                 cx.stop_propagation();
             }
-        }))
+        })
     }
 }
 

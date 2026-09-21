@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use super::*;
+use crate::ui::ActivationExt;
 use waku_client::{
     GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary, PullRequestCheck,
     PullRequestCommit, PullRequestDetail, PullRequestState, PullRequestSummary, WorkItemComment,
@@ -1670,9 +1671,10 @@ impl Waku {
                         "icons/plus.svg",
                         tr!("github.start_task"),
                         &theme,
-                        cx.listener(move |this, _, window, cx| {
+                        cx,
+                        move |this, window, cx| {
                             this.github_start_task(project_id, prompt.clone(), window, cx);
-                        }),
+                        },
                     )
                 })
                 .when(pr_open, |element| {
@@ -1684,15 +1686,10 @@ impl Waku {
                         SharedString::from(format!("{scope}-github-fix-findings")),
                         preparing,
                         &theme,
-                        cx.listener(move |this, _, window, cx| {
+                        cx,
+                        move |this, window, cx| {
                             this.github_fix_findings(project_id, detail, window, cx);
-                        }),
-                        cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.github_fix_findings(project_id, detail, window, cx);
-                                cx.stop_propagation();
-                            }
-                        }),
+                        },
                     ))
                 })
                 .when(checks_failing, |element| {
@@ -1702,14 +1699,16 @@ impl Waku {
                         "icons/hammer.svg",
                         tr!("github.fix_checks"),
                         &theme,
-                        cx.listener(move |this, _, window, cx| {
+                        cx,
+                        move |this, window, cx| {
                             this.github_start_task(project_id, prompt.clone(), window, cx);
-                        }),
+                        },
                     ))
                 })
                 .child(
                     div()
                         .id(SharedString::from(format!("{scope}-github-open-external")))
+                        .tab_index(0)
                         .h(px(24.0))
                         .px(px(8.0))
                         .rounded(px(6.0))
@@ -1728,9 +1727,9 @@ impl Waku {
                                 .text_color(theme.text_secondary)
                                 .child(tr!("github.open_external")),
                         )
-                        .on_click(cx.listener(move |_, _, _, cx| {
+                        .on_activation(cx, move |_, _, cx| {
                             cx.open_url(&url);
-                        })),
+                        }),
                 ),
         );
         section = section.child(
@@ -1938,7 +1937,6 @@ impl Waku {
         let error = browser.comment_post_errors.get(&detail).cloned();
         let has_content = !input.read(cx).content().trim().is_empty();
         let click_input = input.clone();
-        let key_input = input.clone();
 
         div()
             .w_full()
@@ -1999,25 +1997,14 @@ impl Waku {
                                 )
                                 .into_any_element()
                             })
-                            .on_click(cx.listener(move |this, _, _, cx| {
+                            .on_activation(cx, move |this, _, cx| {
                                 this.github_post_comment(
                                     project_id,
                                     detail,
                                     click_input.clone(),
                                     cx,
                                 );
-                            }))
-                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.github_post_comment(
-                                        project_id,
-                                        detail,
-                                        key_input.clone(),
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }
-                            })),
+                            }),
                     ),
             )
             .when_some(error, |element, error| {
@@ -2224,15 +2211,20 @@ fn github_issue_meta(issue: &IssueSummary) -> Vec<String> {
 
 /// A detail-header action chip: icon + label, hover and focus treatments
 /// matching the list rows.
-pub(super) fn github_detail_action(
+pub(super) fn github_detail_action<E>(
     id: impl Into<gpui::ElementId>,
     icon_path: &'static str,
     label: String,
     theme: &Theme,
-    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
+    cx: &mut Context<E>,
+    activate: impl Fn(&mut E, &mut Window, &mut Context<E>) + 'static,
+) -> Stateful<Div>
+where
+    E: 'static,
+{
     div()
         .id(id)
+        .tab_index(0)
         .h(px(24.0))
         .px(px(8.0))
         .rounded(px(6.0))
@@ -2250,7 +2242,7 @@ pub(super) fn github_detail_action(
                 .text_color(theme.text_secondary)
                 .child(label),
         )
-        .on_click(on_click)
+        .on_activation(cx, activate)
 }
 
 /// Stable per-item segment for markdown cache keys — `pr-42`, `issue-7` —
@@ -2283,13 +2275,16 @@ fn github_task_prompt(detail: GitHubDetailRef, title: &str, url: &str, fix_check
 /// The detail header's "Fix" chip. While the flow is preparing — the
 /// detail still loading or the PR head branch being fetched — it renders a
 /// spinner and drops its click handler so a repeat press cannot double up.
-fn github_fix_action(
+fn github_fix_action<E>(
     id: impl Into<gpui::ElementId>,
     preparing: bool,
     theme: &Theme,
-    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
-    on_key: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
+    cx: &mut Context<E>,
+    activate: impl Fn(&mut E, &mut Window, &mut Context<E>) + 'static,
+) -> Stateful<Div>
+where
+    E: 'static,
+{
     div()
         .id(id)
         .tab_index(0)
@@ -2327,9 +2322,7 @@ fn github_fix_action(
                     tr!("github.fix")
                 }),
         )
-        .when(!preparing, |element| {
-            element.on_click(on_click).on_key_down(on_key)
-        })
+        .when(!preparing, |element| element.on_activation(cx, activate))
 }
 
 /// One-line field formatting for the fix prompt: collapse whitespace and

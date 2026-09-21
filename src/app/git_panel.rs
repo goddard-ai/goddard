@@ -3898,8 +3898,11 @@ impl Waku {
             return div().into_any_element();
         };
         let expanded = panel.upstream_expanded;
+        let focus = self.transcript_control_focus("git-panel-upstream-header", cx);
         let header = div()
             .id("git-panel-upstream-header")
+            .track_focus(&focus)
+            .tab_index(0)
             .h(px(24.0))
             .flex_none()
             .px(px(10.0))
@@ -3908,6 +3911,7 @@ impl Waku {
             .gap(px(6.0))
             .cursor_default()
             .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
             .child(icon(
                 if expanded {
                     "icons/chevron-down.svg"
@@ -3947,9 +3951,9 @@ impl Waku {
                         .into_any_element()
                 }),
             )
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_activation(cx, |this, _, cx| {
                 this.toggle_git_panel_upstream(cx);
-            }));
+            });
         let mut section = div().flex().flex_col().child(header);
         if expanded {
             for (index, entry) in panel.upstream_commits.iter().enumerate() {
@@ -4118,7 +4122,6 @@ impl Waku {
             .flatten();
         let sha = entry.sha.clone();
         let entry_for_click = entry.clone();
-        let entry_for_key = entry.clone();
         div()
             .id(SharedString::from(format!("{id_prefix}-{index}")))
             .relative()
@@ -4170,15 +4173,9 @@ impl Waku {
             .on_hover(cx.listener(move |this, hovered, _, cx| {
                 this.git_panel_commit_row_hovered(sha.clone(), *hovered, cx);
             }))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_activation(cx, move |this, _, cx| {
                 this.open_git_panel_commit_diff(&entry_for_click, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.open_git_panel_commit_diff(&entry_for_key, cx);
-                    cx.stop_propagation();
-                }
-            }))
+            })
             .children(popover)
     }
 

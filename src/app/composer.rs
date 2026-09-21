@@ -1557,9 +1557,11 @@ impl Waku {
                         element.child(
                             div()
                                 .id("jev-credential-warning")
+                                .tab_index(0)
                                 .flex()
                                 .items_center()
                                 .justify_center()
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
                                 .tooltip(Tooltip::text(tr!("models.auto_missing_credential")))
                                 .child(icon("icons/alert.svg", 13.0, theme.warning)),
                         )
@@ -1567,6 +1569,7 @@ impl Waku {
                     .child(
                         div()
                             .id("jev-settings")
+                            .tab_index(0)
                             .w(px(28.0))
                             .h(px(28.0))
                             .rounded(px(8.0))
@@ -1574,10 +1577,10 @@ impl Waku {
                             .items_center()
                             .justify_center()
                             .hover(|element| element.bg(theme.overlay_strong))
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
                             .tooltip(Tooltip::text(tr!("settings.jev")))
                             .child(icon("icons/settings.svg", 14.0, theme.text_ghost))
-                            .on_click(move |_, window, cx| {
-                                cx.stop_propagation();
+                            .on_activation_app(move |window, cx| {
                                 open_settings_page_from_picker(
                                     &settings_weak,
                                     &settings_popover,

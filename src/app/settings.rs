@@ -2995,42 +2995,20 @@ impl Waku {
         );
 
         let apply_disabled = pending || !fields_dirty;
-        let apply_button = div()
-            .id("apply-daemon-settings")
-            .tab_index(0)
-            .h(px(29.0))
-            .px(px(11.0))
-            .rounded(px(9.0))
-            .border(hairline())
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if apply_disabled { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .when(!apply_disabled, |element| {
-                element
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.apply_daemon_exposure_fields(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.apply_daemon_exposure_fields(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(if pending {
+        let apply_button = settings_button(
+            "apply-daemon-settings",
+            if pending {
                 tr!("daemon.restarting")
             } else {
                 tr!("daemon.apply")
-            });
+            },
+            !apply_disabled,
+            false,
+            false,
+            theme,
+            cx,
+            |this, _, cx| this.apply_daemon_exposure_fields(cx),
+        );
 
         let copy_url_feedback_id = "daemon-url";
         let url_copied = self.control_was_copied(copy_url_feedback_id);
@@ -5293,72 +5271,28 @@ impl Waku {
         );
 
         let dirty = self.eval_credentials_dirty(cx);
-        let apply_button = div()
-            .id("apply-eval-credentials")
-            .tab_index(0)
-            .h(px(29.0))
-            .px(px(11.0))
-            .rounded(px(9.0))
-            .border(hairline())
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if dirty { 1.0 } else { 0.55 })
-            .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .when(dirty, |element| {
-                element
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.save_eval_credentials(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.save_eval_credentials(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(tr!("daemon.apply"));
+        let apply_button = settings_button(
+            "apply-eval-credentials",
+            tr!("daemon.apply"),
+            dirty,
+            false,
+            false,
+            theme,
+            cx,
+            |this, _, cx| this.save_eval_credentials(cx),
+        );
 
         let pending = self.eval_probe_pending;
-        let test_button = div()
-            .id("test-eval-connection")
-            .tab_index(0)
-            .h(px(29.0))
-            .px(px(11.0))
-            .rounded(px(9.0))
-            .border(hairline())
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if pending { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .when(!pending, |element| {
-                element
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.verify_eval_connection(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.verify_eval_connection(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(tr!("routing.test_connection"));
+        let test_button = settings_button(
+            "test-eval-connection",
+            tr!("routing.test_connection"),
+            !pending,
+            false,
+            false,
+            theme,
+            cx,
+            |this, _, cx| this.verify_eval_connection(cx),
+        );
 
         let probe_status = if pending {
             Some((tr!("routing.testing"), theme.text_tertiary))
@@ -5525,48 +5459,20 @@ impl Waku {
                             )
                         })
                         .when(!has_status, |row| row.child(div().flex_1()))
-                        .child(
-                            div()
-                                .id("suggest-route-classes")
-                                .tab_index(0)
-                                .h(px(29.0))
-                                .px(px(11.0))
-                                .rounded(px(9.0))
-                                .border(hairline())
-                                .border_color(theme.border_strong)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_default()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .focus_visible(|style| style.border_color(theme.accent))
-                                .when(!self.route_suggest_pending, |element| {
-                                    element
-                                        .hover(|element| element.bg(theme.overlay))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.suggest_route_class_defaults(cx);
-                                        }))
-                                        .on_key_down(cx.listener(
-                                            |this, event: &KeyDownEvent, _, cx| {
-                                                if !event.keystroke.modifiers.modified()
-                                                    && matches!(
-                                                        event.keystroke.key.as_str(),
-                                                        "enter" | "space"
-                                                    )
-                                                {
-                                                    this.suggest_route_class_defaults(cx);
-                                                    cx.stop_propagation();
-                                                }
-                                            },
-                                        ))
-                                })
-                                .child(if self.route_suggest_pending {
-                                    tr!("routing.suggesting")
-                                } else {
-                                    tr!("routing.suggest_defaults")
-                                }),
-                        ),
+                        .child(settings_button(
+                            "suggest-route-classes",
+                            if self.route_suggest_pending {
+                                tr!("routing.suggesting")
+                            } else {
+                                tr!("routing.suggest_defaults")
+                            },
+                            !self.route_suggest_pending,
+                            false,
+                            false,
+                            theme,
+                            cx,
+                            |this, _, cx| this.suggest_route_class_defaults(cx),
+                        )),
                 )
             })
         });
@@ -9298,49 +9204,37 @@ impl Waku {
                                         .child(SharedString::from(grant.bundle_id.clone())),
                                 ),
                         )
-                        .child(
-                            div()
-                                .id(SharedString::from(format!("revoke-computer-app-{key}")))
-                                .tab_index(0)
-                                .h(px(25.0))
-                                .px(px(9.0))
-                                .rounded(px(8.0))
-                                .border(hairline())
-                                .border_color(theme.border_strong)
-                                .flex()
-                                .items_center()
-                                .cursor_default()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .hover(|element| element.bg(theme.overlay).text_color(theme.danger))
-                                .focus_visible(|element| element.border_color(theme.accent))
-                                .child(tr!("common.revoke"))
-                                .on_activation(cx, move |_this, window, cx| {
-                                    let answer = window.prompt(
-                                        gpui::PromptLevel::Warning,
-                                        &tr!(
-                                            "computer_use.confirm_revoke",
-                                            name = revoke_name.clone()
-                                        ),
-                                        Some(&tr!("computer_use.confirm_revoke_detail")),
-                                        &[
-                                            gpui::PromptButton::cancel(tr!("common.cancel")),
-                                            gpui::PromptButton::ok(tr!("common.revoke")),
-                                        ],
-                                        cx,
-                                    );
-                                    let key = key.clone();
-                                    cx.spawn(async move |this, cx| {
-                                        if answer.await.ok() != Some(1) {
-                                            return;
-                                        }
-                                        let _ = this.update(cx, |this, cx| {
-                                            this.revoke_computer_app(&key, cx);
-                                        });
-                                    })
-                                    .detach();
-                                }),
-                        ),
+                        .child(settings_button(
+                            SharedString::from(format!("revoke-computer-app-{key}")),
+                            tr!("common.revoke"),
+                            true,
+                            true,
+                            true,
+                            theme,
+                            cx,
+                            move |_this, window, cx| {
+                                let answer = window.prompt(
+                                    gpui::PromptLevel::Warning,
+                                    &tr!("computer_use.confirm_revoke", name = revoke_name.clone()),
+                                    Some(&tr!("computer_use.confirm_revoke_detail")),
+                                    &[
+                                        gpui::PromptButton::cancel(tr!("common.cancel")),
+                                        gpui::PromptButton::ok(tr!("common.revoke")),
+                                    ],
+                                    cx,
+                                );
+                                let key = key.clone();
+                                cx.spawn(async move |this, cx| {
+                                    if answer.await.ok() != Some(1) {
+                                        return;
+                                    }
+                                    let _ = this.update(cx, |this, cx| {
+                                        this.revoke_computer_app(&key, cx);
+                                    });
+                                })
+                                .detach();
+                            },
+                        )),
                 );
             }
         }
@@ -10996,6 +10890,60 @@ pub(super) fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
         Some(relative) if relative.as_os_str().is_empty() => "~".to_owned(),
         Some(relative) => format!("~/{}", relative.display()),
         None => path.display().to_string(),
+    }
+}
+
+/// The bordered action button the settings cards share — the Apply/Test/
+/// Suggest/Recheck/Revoke family. `enabled: false` dims the button and drops
+/// its activation but keeps the tab stop, so a pending operation cannot move
+/// focus. `danger` tints the label on hover for destructive actions;
+/// `compact` shrinks to `integration_button`'s footprint for buttons living
+/// inside list rows.
+#[track_caller]
+fn settings_button<E>(
+    id: impl Into<ElementId>,
+    label: String,
+    enabled: bool,
+    danger: bool,
+    compact: bool,
+    theme: Theme,
+    cx: &mut Context<E>,
+    activate: impl Fn(&mut E, &mut Window, &mut Context<E>) + 'static,
+) -> Stateful<Div>
+where
+    E: 'static,
+{
+    let button = div()
+        .id(id)
+        .tab_index(0)
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
+        .h(if compact { px(25.0) } else { px(29.0) })
+        .px(if compact { px(9.0) } else { px(11.0) })
+        .rounded(if compact { px(8.0) } else { px(9.0) })
+        .border(hairline())
+        .border_color(theme.border_strong)
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_default()
+        .text_size(sp(12.5))
+        .text_color(theme.text_secondary)
+        .when(!enabled, |element| element.opacity(0.55))
+        .when(enabled, |element| {
+            element.hover(move |style| {
+                let style = style.bg(theme.overlay);
+                if danger {
+                    style.text_color(theme.danger)
+                } else {
+                    style
+                }
+            })
+        })
+        .child(label);
+    if enabled {
+        button.on_activation(cx, activate)
+    } else {
+        button
     }
 }
 
