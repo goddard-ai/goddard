@@ -2735,6 +2735,8 @@ transcript.waiting_background:
   en: Waiting for background tasks
 session.stopped_before_response:
   en: The agent stopped before returning a response
+session.prompt_not_delivered:
+  en: The message never reached the agent — send it again
 session.codex_exited_before_response:
   en: Codex app-server exited before returning a response
 session.steer_rejected:

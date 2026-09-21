@@ -5,6 +5,13 @@ use super::*;
 /// dying on the resumed prompt is what stops the loop — not steady work.
 const MAX_RUNTIME_AUTO_RESUMES: u8 = 3;
 
+/// How long a dispatched prompt may sit unconfirmed before the turn is
+/// settled as undelivered. `driver.prompt` is fire-and-forget over the
+/// daemon socket and `DriverEvent::TurnStarted` is the only acknowledgement
+/// — a swallow anywhere in between (a dropped write, a wedged runtime
+/// mailbox) otherwise leaves the persisted turn `Running` forever.
+const UNSTARTED_TURN_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Whether a daemon-restart loss can auto-resume this session: a live
 /// provider turn was in flight and the provider session can be reloaded
 /// from its persisted cursor. A `Connecting` turn the provider never
@@ -3265,8 +3272,20 @@ impl Waku {
                     return;
                 };
                 if !self.runtimes.contains_key(&session_id) {
+                    // A turn the daemon still reports running but never
+                    // confirmed is the dropped-dispatch case outliving its
+                    // own watchdog — an app restart abandons the timer, not
+                    // the wedge. Re-arm it on the attached projection.
+                    let unstarted_turn = session
+                        .turns
+                        .last()
+                        .filter(|turn| {
+                            turn.status == TurnStatus::Running && !turn.provider_turn_started
+                        })
+                        .map(|turn| turn.id);
                     self.state.sessions[index] = session;
                     self.install_prepared_driver(session_id, prepared);
+                    self.watch_unstarted_turn(session_id, unstarted_turn, cx);
                     if self.state.selected_session == Some(session_id) {
                         self.reset_visible_state();
                         self.reset_transcript_rows(self.transcript_row_count());
@@ -3369,6 +3388,88 @@ impl Waku {
             self.pending_checkpoint_captures.push(checkpoint);
             self.start_pending_checkpoint_captures(cx);
         }
+        if self.state.selected_session == Some(session_id) {
+            self.reset_visible_state();
+            self.reset_transcript_rows(self.transcript_row_count());
+            self.reapply_transcript_landing(session_id, cx);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// Arms the [`UNSTARTED_TURN_TIMEOUT`] check for a prompt just handed to
+    /// the driver. The timer re-reads the turn at fire time, so a confirmed
+    /// or settled turn makes it a no-op.
+    fn watch_unstarted_turn(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(turn_id) = turn_id else {
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            cx.background_executor().timer(UNSTARTED_TURN_TIMEOUT).await;
+            let _ = waku.update(cx, move |waku, cx| {
+                waku.settle_unstarted_turn(session_id, turn_id, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// The watchdog's check: the prompt this turn was opened for never drew
+    /// a `TurnStarted`, so nothing on the provider side is running it. Settle
+    /// the turn interrupted and say so — an indefinite spinner would let the
+    /// user believe the agent is working when the message went nowhere.
+    fn settle_unstarted_turn(&mut self, session_id: Uuid, turn_id: Uuid, cx: &mut Context<Self>) {
+        let stuck = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| {
+                session.turns.last().is_some_and(|turn| {
+                    turn.id == turn_id
+                        && turn.status == TurnStatus::Running
+                        && !turn.provider_turn_started
+                })
+            });
+        if !stuck {
+            return;
+        }
+        // A dispatch that unblocks late would start the turn untracked; the
+        // cancel queues behind it on the daemon's mailbox and shuts it down.
+        if let Some(runtime) = self.runtimes.get(&session_id) {
+            runtime.driver.cancel();
+        }
+        // The notice lands while the turn is still active so it reads as the
+        // turn's answer — the message it was opened for never arrived.
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.push_notice_message(
+                MessageRole::Assistant,
+                tr!("session.prompt_not_delivered"),
+                TranscriptNotice::Status {
+                    kind: TranscriptNoticeStatus::Error,
+                },
+            );
+        }
+        self.finish_active_turn_with_analytics(
+            session_id,
+            TurnStatus::Failed,
+            crate::analytics::TurnOutcome::Failed,
+        );
+        if let Some(session) = self.state.session_mut(session_id) {
+            if session.status.is_busy() {
+                session.status = SessionStatus::Idle;
+            }
+            for message in &mut session.messages {
+                message.streaming = false;
+            }
+            session.updated_at = unix_time();
+        }
+        self.state.mark_session_dirty(session_id);
+        signal_event_pump(&self.event_wake_tx);
         if self.state.selected_session == Some(session_id) {
             self.reset_visible_state();
             self.reset_transcript_rows(self.transcript_row_count());
@@ -6158,6 +6259,22 @@ impl Waku {
             });
         if !can_start {
             self.submission_preparations.remove(&session_id);
+            // The turn this preparation belonged to may still read running —
+            // a session replaced under it never sends the prompt. Settle the
+            // orphaned turn rather than leaving a spinner nobody owns.
+            let unstarted_turn = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.turns.last())
+                .filter(|turn| {
+                    turn.status == TurnStatus::Running && !turn.provider_turn_started
+                })
+                .map(|turn| turn.id);
+            if let Some(turn_id) = unstarted_turn {
+                self.settle_unstarted_turn(session_id, turn_id, cx);
+            }
             self.drain_pending_workspace_cleanups(cx);
             cx.notify();
             return;
@@ -6384,6 +6501,7 @@ impl Waku {
                     submission.hidden,
                     submission.attachments.clone(),
                 );
+                self.watch_unstarted_turn(session_id, turn_id, cx);
             }
             Err(error) => {
                 failed_to_start = true;
