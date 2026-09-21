@@ -34,8 +34,9 @@ use github_copilot_sdk::session_events::{
     ToolExecutionCompleteData, ToolExecutionStartData,
 };
 use github_copilot_sdk::types::{
-    Attachment, ExitPlanModeData, MessageOptions, PermissionRequestData, PermissionRequestKind,
-    RequestId, ResumeSessionConfig, SessionConfig, SessionEvent, SessionId, SetModelOptions,
+    Attachment, DeliveryMode, ExitPlanModeData, MessageOptions, PermissionRequestData,
+    PermissionRequestKind, RequestId, ResumeSessionConfig, SessionConfig, SessionEvent, SessionId,
+    SetModelOptions,
 };
 use github_copilot_sdk::{CliProgram, Client, ClientInfo, ClientOptions};
 use parking_lot::Mutex;
@@ -57,6 +58,7 @@ enum CommandMessage {
         text: String,
         attachments: Vec<MessageAttachment>,
     },
+    Steer(String),
     Cancel,
     /// Model, reasoning effort, and context tier ride one `session.set_model`
     /// call; the mode half lives in the handler's shared state.
@@ -307,6 +309,38 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
                             let _ = events.send(DriverEvent::Error(format!(
                                 "GitHub Copilot: {error}"
                             )));
+                        }
+                    }
+                    CommandMessage::Steer(text) => {
+                        // Immediate delivery is the SDK's steering lane: the
+                        // CLI folds the message into the in-flight run at the
+                        // next model call — its `user.message` echo reports
+                        // `delivery: "steering"` — while the default enqueue
+                        // mode would queue a second turn of its own.
+                        if !stream.turn_open {
+                            let _ = events.send(DriverEvent::steer_rejected_keyed(
+                                text,
+                                localized!("errors.provider_no_active_turn",
+                                    provider = "GitHub Copilot"),
+                            ));
+                            continue;
+                        }
+                        let message =
+                            MessageOptions::new(text.clone()).with_mode(DeliveryMode::Immediate);
+                        match session.send(message).await {
+                            Ok(_) => {
+                                let _ = events.send(DriverEvent::SteerAccepted {
+                                    message: text,
+                                    sent_by_task: None,
+                                });
+                            }
+                            Err(error) => {
+                                let _ = events.send(DriverEvent::steer_rejected_keyed(
+                                    text,
+                                    localized!("errors.provider_transport_write",
+                                        provider = "GitHub Copilot", error = error),
+                                ));
+                            }
                         }
                     }
                     CommandMessage::Cancel => {
@@ -858,6 +892,14 @@ impl DriverControl for CopilotDriver {
         });
     }
 
+    fn supports_steer(&self) -> bool {
+        true
+    }
+
+    fn steer(&self, prompt: String) {
+        let _ = self.commands.send(CommandMessage::Steer(prompt));
+    }
+
     fn cancel(&self) {
         let _ = self.commands.send(CommandMessage::Cancel);
     }
@@ -979,5 +1021,100 @@ mod tests {
             }
         }
         assert_eq!(finished, Some(true));
+    }
+
+    /// Proves steering through the actual driver: an immediate-mode
+    /// `session.send` while the shell tool sleeps lands inside the same turn
+    /// — one SteerAccepted, one TurnFinished, and a reply that honors both
+    /// instructions. Ignored by default: needs the CLI installed,
+    /// credentials, and the network.
+    #[test]
+    #[ignore = "requires an installed, authenticated copilot"]
+    fn copilot_steering_folds_a_mid_turn_message_into_the_running_turn() {
+        let binary =
+            crate::command_env::find_executable("copilot").expect("copilot is not installed");
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let driver = CopilotDriver::start(
+            DriverStartOptions {
+                eval: None,
+                sandbox: None,
+                allow_model_fallback: false,
+                binary,
+                cwd: std::env::temp_dir(),
+                mode: RuntimeMode::FullAccess,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                agent: None,
+                subagents: None,
+                integrations: Vec::new(),
+                provider_cursor: None,
+            },
+            events,
+        )
+        .expect("the Copilot session should open");
+
+        driver.prompt(
+            "Use the bash tool to run exactly `sleep 6` (nothing else). \
+             After the command completes, reply with exactly: FIRST DONE"
+                .into(),
+        );
+
+        let mut text = String::new();
+        let mut steered = false;
+        let mut steer_accepted = false;
+        let mut turns_finished = 0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+        while std::time::Instant::now() < deadline {
+            let Ok(event) = event_rx.recv_timeout(std::time::Duration::from_secs(5)) else {
+                // Quiet after the turn settled means no second turn is coming.
+                if turns_finished == 1 {
+                    break;
+                }
+                continue;
+            };
+            match event {
+                DriverEvent::RichActivity(item) if !steered && !item.complete => {
+                    // The tool is running: the turn is unambiguously live.
+                    steered = true;
+                    driver.steer(
+                        "ADDITIONAL INSTRUCTION: end your very next reply \
+                         with the word BANANA."
+                            .into(),
+                    );
+                }
+                DriverEvent::SteerAccepted {
+                    message,
+                    sent_by_task: None,
+                } => {
+                    assert!(message.contains("BANANA"));
+                    steer_accepted = true;
+                }
+                DriverEvent::SteerRejected { reason, .. } => {
+                    panic!("the steer should be accepted, got rejection: {reason}");
+                }
+                DriverEvent::TextDelta(delta) => text.push_str(&delta),
+                DriverEvent::TurnFinished { success, .. } => {
+                    assert!(success, "the turn should settle successfully");
+                    turns_finished += 1;
+                }
+                DriverEvent::Error(error) => panic!("the agent reported: {error}"),
+                _ => {}
+            }
+        }
+
+        assert!(steered, "the probe never saw the tool start");
+        assert!(steer_accepted, "the driver should acknowledge the steer");
+        assert_eq!(
+            turns_finished, 1,
+            "a steered message must not settle a second turn"
+        );
+        assert!(
+            text.contains("BANANA"),
+            "the steered instruction should shape the same turn's reply, got {text:?}"
+        );
     }
 }
