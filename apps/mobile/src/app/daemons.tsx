@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import Constants from 'expo-constants';
 import { router, Stack } from 'expo-router';
-import { navigateBack } from '@/components/screen-header';
+import { navigateBack, nativeHeaderButtons } from '@/components/screen-header';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -99,6 +99,23 @@ export default function DaemonsScreen() {
         options={{
           headerRight: () => (
             <View style={styles.headerActions}>
+              {daemon.client && daemon.phase === 'connected' ? (
+                <Pressable
+                  accessibilityLabel="Notifications"
+                  accessibilityRole="button"
+                  hitSlop={10}
+                  onPress={() => router.push('/notifications')}>
+                  <AppSymbol
+                    name={{
+                      ios: 'bell',
+                      android: 'notifications',
+                      web: 'notifications',
+                    }}
+                    size={20}
+                    tintColor={NativeTint}
+                  />
+                </Pressable>
+              ) : null}
               <Pressable
                 accessibilityLabel="Scan QR code"
                 accessibilityRole="button"
@@ -127,19 +144,35 @@ export default function DaemonsScreen() {
               </Pressable>
             </View>
           ),
-          unstable_headerRightItems: () => [{
-            type: 'button',
-            accessibilityLabel: 'Scan QR code',
-            icon: { type: 'sfSymbol', name: 'qrcode.viewfinder' },
-            label: 'Scan QR code',
-            onPress: () => router.push('/daemon-scan'),
-          }, {
-            type: 'button',
-            accessibilityLabel: 'Add daemon',
-            icon: { type: 'sfSymbol', name: 'plus' },
-            label: 'Add daemon',
-            onPress: () => router.push('/daemon-editor'),
-          }],
+          unstable_headerRightItems: () => [
+            ...(daemon.client && daemon.phase === 'connected'
+              ? nativeHeaderButtons([
+                  {
+                    icon: {
+                      ios: 'bell',
+                      android: 'notifications',
+                      web: 'notifications',
+                    },
+                    label: 'Notifications',
+                    onPress: () => router.push('/notifications'),
+                  },
+                ])
+              : []),
+            {
+              type: 'button' as const,
+              accessibilityLabel: 'Scan QR code',
+              icon: { type: 'sfSymbol' as const, name: 'qrcode.viewfinder' },
+              label: 'Scan QR code',
+              onPress: () => router.push('/daemon-scan'),
+            },
+            {
+              type: 'button' as const,
+              accessibilityLabel: 'Add daemon',
+              icon: { type: 'sfSymbol' as const, name: 'plus' },
+              label: 'Add daemon',
+              onPress: () => router.push('/daemon-editor'),
+            },
+          ],
         }}
       />
       <ScrollView

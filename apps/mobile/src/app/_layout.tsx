@@ -224,6 +224,10 @@ function AppNavigator() {
             title: "Task",
           }}
         />
+        <Stack.Screen
+          name="notifications"
+          options={{ ...drawerHeader, title: "Notifications" }}
+        />
       </Stack.Protected>
       <Stack.Screen
         name="daemon-editor"
