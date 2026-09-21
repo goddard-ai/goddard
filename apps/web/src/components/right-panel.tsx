@@ -1474,7 +1474,7 @@ function TerminalPanel({
     })
 
     void client.request(
-      { type: 'openTerminal', cwd, cols: 80, rows: 24 },
+      { type: 'openTerminal', cwd, cols: 80, rows: 24, owner: session?.id },
       terminalId,
       terminalId,
     ).catch((cause) => {
@@ -1488,7 +1488,7 @@ function TerminalPanel({
       unsubscribe()
       void client.notify({ type: 'closeTerminal' }, terminalId, terminalId).catch(() => {})
     }
-  }, [client, cwd, phase, terminalId, write])
+  }, [client, cwd, phase, session?.id, terminalId, write])
 
   if (!cwd) return <PanelMessage title={t('files.no_project_open')} detail={t('terminal.no_workspace_description')} />
   return (

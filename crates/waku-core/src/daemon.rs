@@ -90,6 +90,18 @@ struct RepoMaps {
     building: HashSet<PathBuf>,
 }
 
+/// What the daemon remembers about one remote terminal: the client-chosen
+/// runtime id that owns writes, the task surface that opened it (when the
+/// client named one), and the cwd. Both ownership facts feed the orphan
+/// sweep — a terminal whose task or workspace is removed gets no
+/// `CloseTerminal`, and its PTY would otherwise run until daemon exit.
+struct TerminalEntry {
+    runtime_id: Uuid,
+    owner: Option<Uuid>,
+    cwd: PathBuf,
+    terminal: crate::terminal::DaemonTerminal,
+}
+
 /// The provider/model selection an `agent create` request carried. Every
 /// `None` field inherits the sending task's configuration where the resolved
 /// provider still matches it; see [`WakuBackend::create_agent_task`].
@@ -132,7 +144,7 @@ fn resolve_agent_trait(
 pub struct WakuBackend {
     sessions: Arc<Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
-    terminals: Mutex<HashMap<Uuid, (Uuid, crate::terminal::DaemonTerminal)>>,
+    terminals: Mutex<HashMap<Uuid, TerminalEntry>>,
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
     settings: Arc<DaemonSettingsStore>,
@@ -528,6 +540,35 @@ impl WakuBackend {
         Ok(checkpoint)
     }
 
+    /// Drop terminals whose owning task is gone or whose cwd sat under a
+    /// removed workspace. Remote clients send `CloseTerminal` when their
+    /// surfaces unmount, but a disconnect — or a deletion another client
+    /// made — skips that, and the PTY plus its shell would otherwise run
+    /// until daemon exit.
+    fn sweep_orphaned_terminals(
+        &self,
+        removed_sessions: &[Uuid],
+        workspace_roots: &[PathBuf],
+    ) -> Vec<crate::terminal::DaemonTerminal> {
+        let mut terminals = self.terminals.lock();
+        let orphaned = terminals
+            .iter()
+            .filter(|(_, entry)| {
+                entry
+                    .owner
+                    .is_some_and(|owner| removed_sessions.contains(&owner))
+                    || workspace_roots
+                        .iter()
+                        .any(|root| entry.cwd.starts_with(root))
+            })
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        orphaned
+            .into_iter()
+            .filter_map(|id| terminals.remove(&id).map(|entry| entry.terminal))
+            .collect()
+    }
+
     /// Removes one task from daemon state and storage. The id is remembered
     /// so a stale client `SaveTaskState` cannot restore the row, and any live
     /// runtime is dropped with it. When the departed task was the last one in
@@ -536,6 +577,7 @@ impl WakuBackend {
     fn remove_session(&self, session_id: Uuid) -> anyhow::Result<()> {
         let mut removed_workspace = None;
         let mut removed_ids;
+        let mut workspace_roots: Vec<PathBuf>;
         {
             let mut state = self.task_state.lock();
             // Side chats die with their parent: walk the descendant set
@@ -559,6 +601,16 @@ impl WakuBackend {
                     removed.insert(*id);
                 }
             }
+            // Terminals can't be attributed to a session row once it's gone,
+            // so gather each removed task's dedicated workspace first. The
+            // shared project root is deliberately absent — sibling tasks
+            // keep their terminals.
+            workspace_roots = state
+                .sessions
+                .iter()
+                .filter(|session| removed_ids.contains(&session.id))
+                .filter_map(|session| session.workspace.path().map(Path::to_path_buf))
+                .collect();
             let project_id = state
                 .sessions
                 .iter()
@@ -589,10 +641,13 @@ impl WakuBackend {
             self.task_store.save(&mut state)?;
         }
         if let Some(path) = removed_workspace {
+            workspace_roots.push(path.clone());
             // A failed removal leaves files behind — safe — so the task's
             // removal does not hinge on it.
             let _ = crate::projectless::remove_workspace(&path);
         }
+        let removed_terminals = self.sweep_orphaned_terminals(&removed_ids, &workspace_roots);
+        drop_detached(removed_terminals);
         let removed_runtimes = removed_ids
             .iter()
             .filter_map(|id| self.sessions.lock().remove(id))
@@ -610,6 +665,7 @@ impl WakuBackend {
     fn remove_project(&self, project_id: Uuid) -> anyhow::Result<()> {
         let mut removed_workspace = None;
         let mut removed_ids;
+        let workspace_roots: Vec<PathBuf>;
         {
             let mut state = self.task_state.lock();
             let Some(index) = state
@@ -651,6 +707,17 @@ impl WakuBackend {
                     removed.insert(*id);
                 }
             }
+            // The project row is leaving the catalog entirely: its checkout
+            // and every removed task's worktree both end as sweep roots.
+            workspace_roots = std::iter::once(state.projects[index].path.clone())
+                .chain(
+                    state
+                        .sessions
+                        .iter()
+                        .filter(|session| removed_ids.contains(&session.id))
+                        .filter_map(|session| session.workspace.path().map(Path::to_path_buf)),
+                )
+                .collect();
             state
                 .sessions
                 .retain(|session| !removed_ids.contains(&session.id));
@@ -660,6 +727,8 @@ impl WakuBackend {
         if let Some(path) = removed_workspace {
             let _ = crate::projectless::remove_workspace(&path);
         }
+        let removed_terminals = self.sweep_orphaned_terminals(&removed_ids, &workspace_roots);
+        drop_detached(removed_terminals);
         let removed_runtimes = removed_ids
             .iter()
             .filter_map(|id| self.sessions.lock().remove(id))
@@ -1445,6 +1514,12 @@ impl Backend for WakuBackend {
                         queue.push(session.id);
                     }
                 }
+                let cascaded_roots = state
+                    .sessions
+                    .iter()
+                    .filter(|session| cascaded.contains(&session.id))
+                    .filter_map(|session| session.workspace.path().map(Path::to_path_buf))
+                    .collect::<Vec<_>>();
                 if !cascaded.is_empty() {
                     state
                         .sessions
@@ -1455,6 +1530,8 @@ impl Backend for WakuBackend {
                     }
                 }
                 self.task_store.save(&mut state)?;
+                let removed_terminals = self.sweep_orphaned_terminals(&cascaded, &cascaded_roots);
+                drop_detached(removed_terminals);
                 let removed_runtimes = cascaded
                     .iter()
                     .filter_map(|id| self.sessions.lock().remove(id))
@@ -1844,54 +1921,67 @@ impl Backend for WakuBackend {
                 }
                 Ok(ResponsePayload::Workspace { result })
             }
-            Command::OpenTerminal { cwd, cols, rows } => {
+            Command::OpenTerminal {
+                cwd,
+                cols,
+                rows,
+                owner,
+            } => {
                 let terminal = self.open_terminal(&cwd, cols, rows, events)?;
-                let previous = self
-                    .terminals
-                    .lock()
-                    .insert(session_id, (runtime_id, terminal));
+                let previous = self.terminals.lock().insert(
+                    session_id,
+                    TerminalEntry {
+                        runtime_id,
+                        owner,
+                        cwd,
+                        terminal,
+                    },
+                );
                 drop_detached(previous);
                 Ok(ResponsePayload::Ack)
             }
             Command::WriteTerminal { data } => {
                 let terminals = self.terminals.lock();
-                let (active_runtime_id, terminal) = terminals
+                let entry = terminals
                     .get(&session_id)
                     .ok_or_else(|| anyhow!("daemon terminal {session_id} is not running"))?;
-                if *active_runtime_id != runtime_id {
+                if entry.runtime_id != runtime_id {
                     bail!(
-                        "daemon terminal {session_id} belongs to runtime {active_runtime_id}, not {runtime_id}"
+                        "daemon terminal {session_id} belongs to runtime {}, not {runtime_id}",
+                        entry.runtime_id
                     );
                 }
-                terminal.write(data)?;
+                entry.terminal.write(data)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::ResizeTerminal { cols, rows } => {
                 let terminals = self.terminals.lock();
-                let (active_runtime_id, terminal) = terminals
+                let entry = terminals
                     .get(&session_id)
                     .ok_or_else(|| anyhow!("daemon terminal {session_id} is not running"))?;
-                if *active_runtime_id != runtime_id {
+                if entry.runtime_id != runtime_id {
                     bail!(
-                        "daemon terminal {session_id} belongs to runtime {active_runtime_id}, not {runtime_id}"
+                        "daemon terminal {session_id} belongs to runtime {}, not {runtime_id}",
+                        entry.runtime_id
                     );
                 }
-                terminal.resize(cols, rows);
+                entry.terminal.resize(cols, rows);
                 Ok(ResponsePayload::Ack)
             }
             Command::CloseTerminal => {
                 let removed = {
                     let mut terminals = self.terminals.lock();
-                    if let Some((active_runtime_id, _)) = terminals.get(&session_id) {
-                        if *active_runtime_id != runtime_id {
-                            bail!(
-                                "daemon terminal {session_id} belongs to runtime {active_runtime_id}, not {runtime_id}"
-                            );
-                        }
+                    if let Some(entry) = terminals.get(&session_id)
+                        && entry.runtime_id != runtime_id
+                    {
+                        bail!(
+                            "daemon terminal {session_id} belongs to runtime {}, not {runtime_id}",
+                            entry.runtime_id
+                        );
                     }
                     terminals.remove(&session_id)
                 };
-                drop_detached(removed);
+                drop_detached(removed.map(|entry| entry.terminal));
                 Ok(ResponsePayload::Ack)
             }
             Command::Start { options } => {
@@ -5707,7 +5797,6 @@ mod tests {
             ("hi".to_owned(), None)
         );
     }
-<<<<<<< HEAD
 
     /// Records the commands a session's driver receives — the steer path's
     /// only observable effect before the provider echoes.
@@ -6035,6 +6124,87 @@ mod tests {
 
         assert!(sessions.lock().is_empty());
         assert_eq!(events.journaled_event_count(session_id), 0);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removing_a_task_sweeps_its_daemon_terminals() {
+        let root = std::env::temp_dir().join(format!("waku-sweep-{}", Uuid::new_v4()));
+        let project_dir = root.join("repo");
+        let worktree_dir = root.join("worktree");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(project_dir.clone());
+        let project_id = state.projects[0].id;
+        let local_id = state.sessions[0].id;
+        // Blank sessions never reach the store; both fixtures need a turn.
+        state.sessions[0].begin_turn("seed");
+        state.sessions[0].finish_active_turn(TurnStatus::Completed);
+        let mut worktree_session = state.new_session(project_id, ProviderKind::Codex);
+        worktree_session.workspace = SessionWorkspace::Worktree {
+            path: worktree_dir.clone(),
+            name: "worktree".into(),
+            branch: None,
+            base_branch: None,
+        };
+        worktree_session.begin_turn("seed");
+        worktree_session.finish_active_turn(TurnStatus::Completed);
+        let worktree_id = worktree_session.id;
+        state.push_session(worktree_session);
+        store.save(&mut state).unwrap();
+
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap()
+        .with_terminal_shell(alacritty_terminal::tty::Shell::new(
+            "/bin/sh".into(),
+            vec!["-c".into(), "while IFS= read -r line; do :; done".into()],
+        ));
+        let open = |terminal_id, cwd: PathBuf, owner| {
+            backend
+                .handle(
+                    Request {
+                        request_id: Uuid::new_v4(),
+                        session_id: terminal_id,
+                        runtime_id: terminal_id,
+                        command: Command::OpenTerminal {
+                            cwd,
+                            cols: 80,
+                            rows: 24,
+                            owner,
+                        },
+                    },
+                    EventSink::detached(),
+                    None,
+                )
+                .unwrap();
+        };
+        // One terminal owned by the local task at the shared project root,
+        // one anonymous terminal inside the worktree, one outside both.
+        let owned = Uuid::new_v4();
+        let worktree_bound = Uuid::new_v4();
+        let unrelated = Uuid::new_v4();
+        open(owned, project_dir.clone(), Some(local_id));
+        open(worktree_bound, worktree_dir.clone(), None);
+        open(unrelated, root.clone(), None);
+        assert_eq!(backend.terminals.lock().len(), 3);
+
+        // Ownership sweeps even at the shared root, but the anonymous
+        // worktree terminal survives — its workspace belongs to a live task.
+        backend.remove_session(local_id).unwrap();
+        assert!(!backend.terminals.lock().contains_key(&owned));
+        assert!(backend.terminals.lock().contains_key(&worktree_bound));
+        assert!(backend.terminals.lock().contains_key(&unrelated));
+
+        // Removing the worktree task takes every terminal under its path,
+        // tagged or not; the outside terminal is untouched.
+        backend.remove_session(worktree_id).unwrap();
+        assert!(!backend.terminals.lock().contains_key(&worktree_bound));
+        assert!(backend.terminals.lock().contains_key(&unrelated));
         std::fs::remove_dir_all(&root).ok();
     }
 }

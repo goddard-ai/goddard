@@ -3649,6 +3649,7 @@ mod tests {
                         cwd: root.clone(),
                         cols: 80,
                         rows: 24,
+                        owner: None,
                     },
                 )
                 .unwrap(),

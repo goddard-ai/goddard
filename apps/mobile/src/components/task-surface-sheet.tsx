@@ -146,7 +146,7 @@ function SurfaceBody({
 }) {
   const root = project ? sessionCwd(session, project) : null;
   if (surface === "terminal") {
-    return <TerminalSurface root={root} />;
+    return <TerminalSurface root={root} sessionId={session.id} />;
   }
   if (surface === "files") {
     return <FilesSurface root={root} />;
@@ -193,7 +193,13 @@ function SurfaceHeader({
   );
 }
 
-function TerminalSurface({ root }: { root: string | null }) {
+function TerminalSurface({
+  root,
+  sessionId,
+}: {
+  root: string | null;
+  sessionId: string;
+}) {
   const theme = useTheme();
 
   if (!root) {
@@ -219,12 +225,18 @@ function TerminalSurface({ root }: { root: string | null }) {
 
   return (
     <View style={[styles.fill, { backgroundColor: theme.surface }]}>
-      <TerminalSession root={root} />
+      <TerminalSession root={root} sessionId={sessionId} />
     </View>
   );
 }
 
-function TerminalSession({ root }: { root: string }) {
+function TerminalSession({
+  root,
+  sessionId,
+}: {
+  root: string;
+  sessionId: string;
+}) {
   const daemon = useDaemon();
   const theme = useTheme();
   const colorScheme = useColorScheme();
@@ -260,7 +272,7 @@ function TerminalSession({ root }: { root: string }) {
 
     void client
       .request(
-        { type: "openTerminal", cwd: root, cols: 80, rows: 24 },
+        { type: "openTerminal", cwd: root, cols: 80, rows: 24, owner: sessionId },
         terminalId,
         terminalId,
       )
@@ -275,7 +287,7 @@ function TerminalSession({ root }: { root: string }) {
         .notify({ type: "closeTerminal" }, terminalId, terminalId)
         .catch(() => {});
     };
-  }, [daemon.client, daemon.phase, root, terminalId]);
+  }, [daemon.client, daemon.phase, root, sessionId, terminalId]);
 
   const reportTransportError = useCallback((cause: unknown) => {
     setError(errorMessage(cause));

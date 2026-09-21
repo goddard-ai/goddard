@@ -427,6 +427,12 @@ pub enum Command {
         cwd: PathBuf,
         cols: u16,
         rows: u16,
+        /// The task whose surface opened this terminal, when one did. The
+        /// daemon sweeps the PTY when that task — or a workspace containing
+        /// `cwd` — is removed; `None` terminals leave only with their cwd's
+        /// workspace or an explicit `CloseTerminal`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<Uuid>,
     },
     WriteTerminal {
         #[serde(with = "base64_bytes")]
