@@ -236,8 +236,8 @@ fn contrast_wash(mut color: Hsla, is_dark: bool, pairs: &[(Rgba, Rgba)], floor: 
     let step = if is_dark { 0.01 } else { -0.01 };
     let mut opacity = min_border_opacity(color, pairs, floor);
     while opacity.is_none() {
-        let l = color.l + step;
-        if !(0.0..=1.0).contains(&l) {
+        let l = (color.l + step).clamp(0.0, 1.0);
+        if l == color.l {
             break;
         }
         color.l = l;
