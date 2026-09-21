@@ -1661,7 +1661,7 @@ fn right_panel_state_from_persisted(state: &PersistedRightPanelState) -> RightPa
     restored
 }
 
-/// The accent dot painted beside the first line of the latest agent reply when
+/// The info dot painted beside the first line of the latest agent reply when
 /// its session was opened with unseen completions. `armed_at` orders it against
 /// `transcript_last_wheel_scroll` — a wheel gesture predating the activation
 /// must not dismiss it — and `fade_started` runs the exit animation, after

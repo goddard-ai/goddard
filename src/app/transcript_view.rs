@@ -1696,7 +1696,7 @@ impl Waku {
                     .top(px(4.0 + (line_height - NEW_CONTENT_DOT_SIZE) / 2.0))
                     .size(px(NEW_CONTENT_DOT_SIZE))
                     .rounded_full()
-                    .bg(theme.accent);
+                    .bg(theme.info);
                 Some(if dot.fade_started.is_some() {
                     element
                         .with_animation(
