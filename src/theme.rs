@@ -114,13 +114,12 @@ const HIGH_CONTRAST_TEXT: f32 = 7.0;
 const HIGH_CONTRAST_TERTIARY: f32 = 4.5;
 const HIGH_CONTRAST_GHOST: f32 = 3.0;
 
-/// The menu/picker glass card's specular sheen: `raised` lifted this far in
-/// lightness, painted at this opacity (see `glass_card_bg` in ui::menu.rs).
-/// The text-floor solve needs the real card top — the lightest fill text
-/// can sit on — so the constants live here and the menu reads them back.
-pub(crate) const GLASS_SHEEN_LIFT_DARK: f32 = 0.04;
-pub(crate) const GLASS_SHEEN_LIFT_LIGHT: f32 = 0.05;
-pub(crate) const GLASS_SHEEN_ALPHA: f32 = 0.95;
+/// The menu card's specular sheen: `raised` lifted this far in lightness
+/// (see `card_bg` in ui::menu.rs). The text-floor solve needs the real card
+/// top — the lightest fill text can sit on — so the constants live here and
+/// the menu reads them back.
+pub(crate) const SHEEN_LIFT_DARK: f32 = 0.04;
+pub(crate) const SHEEN_LIFT_LIGHT: f32 = 0.05;
 
 /// The active mode's floors: (separator, subtle, border, strong). The
 /// "Border intensity" slider scales each floor's distance above 1:1 — the
@@ -167,20 +166,19 @@ fn text_floors() -> (f32, f32, f32, f32) {
     }
 }
 
-/// The glass card's top edge composited over the canvas — the lightest
-/// fill this palette's text can sit on, so floors solved against it hold on
-/// the real menu card, not just the solid `raised`.
-fn glass_sheen_top(raised: Hsla, canvas: Rgba, is_dark: bool) -> Rgba {
+/// The menu card's top edge — the lightest fill this palette's text can sit
+/// on, so floors solved against it hold on the real menu card, not just the
+/// solid `raised`.
+fn sheen_top(raised: Hsla, is_dark: bool) -> Rgba {
     let mut sheen = raised;
     sheen.l = (sheen.l
         + if is_dark {
-            GLASS_SHEEN_LIFT_DARK
+            SHEEN_LIFT_DARK
         } else {
-            GLASS_SHEEN_LIFT_LIGHT
+            SHEEN_LIFT_LIGHT
         })
     .min(1.0);
-    sheen.a = GLASS_SHEEN_ALPHA;
-    canvas.blend(sheen.to_rgb())
+    sheen.to_rgb()
 }
 
 fn luminance(rgb: Rgba) -> f32 {
@@ -463,13 +461,13 @@ impl Theme {
         // Text tiers carry the same solved-floor contract as the lines:
         // each is the weakest lift of its authored color that clears the
         // tier's WCAG floor on every surface text can be painted on —
-        // including the glass menu card, whose sheen edge floats above
-        // `raised` and would otherwise drop menu text under the floor.
+        // including the menu card, whose sheen edge floats above `raised`
+        // and would otherwise drop menu text under the floor.
         // Palettes already clearing a floor keep their authored color.
         let (text_c, secondary_c, tertiary_c, ghost_c) = text_floors();
         let mut text_pairs = border_pairs.to_vec();
-        let glass_top = glass_sheen_top(rgb(spec.raised).into(), rgb(spec.canvas), spec.is_dark);
-        text_pairs.push((glass_top, glass_top));
+        let sheen = sheen_top(rgb(spec.raised).into(), spec.is_dark);
+        text_pairs.push((sheen, sheen));
         let text_color = |color: u32, floor: f32| {
             contrast_wash(rgb(color).into(), spec.is_dark, &text_pairs, floor).alpha(1.0)
         };
@@ -1713,11 +1711,7 @@ mod tests {
                 ]
                 .map(Hsla::to_rgb)
                 .to_vec();
-                surfaces.push(glass_sheen_top(
-                    theme.raised,
-                    theme.canvas.to_rgb(),
-                    theme.is_dark,
-                ));
+                surfaces.push(sheen_top(theme.raised, theme.is_dark));
                 for (token, color, target) in [
                     ("text", theme.text, primary),
                     ("text_secondary", theme.text_secondary, secondary),

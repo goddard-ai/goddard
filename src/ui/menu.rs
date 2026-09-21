@@ -100,7 +100,7 @@ pub fn init(cx: &mut App) {
 }
 
 use crate::theme::{
-    GLASS_SHEEN_ALPHA, GLASS_SHEEN_LIFT_DARK, GLASS_SHEEN_LIFT_LIGHT, Theme, hairline, sp,
+    SHEEN_LIFT_DARK, SHEEN_LIFT_LIGHT, Theme, hairline, sp,
 };
 use crate::ui::icon;
 use crate::ui::motion;
@@ -1207,30 +1207,23 @@ where
         .into_any_element()
 }
 
-/// The menu card's liquid-glass-style fill: the raised surface let through
-/// enough that content ghosts beneath it, plus a specular sheen at the top
-/// edge — the lit-from-above rim glass is recognized by. The sheen stays
-/// shallow: every point it lightens the card is a point of contrast taken
-/// from the menu text painted on it. Reduce Transparency keeps the solid
-/// card since translucency is the effect.
-fn glass_card_bg(theme: &Theme) -> gpui::Background {
-    if crate::platform::reduce_transparency() {
-        return theme.raised.into();
-    }
+/// The menu card's fill: the raised surface with a specular sheen at the top
+/// edge — the lit-from-above rim. The sheen stays shallow: every point it
+/// lightens the card is a point of contrast taken from the menu text painted
+/// on it.
+fn card_bg(theme: &Theme) -> gpui::Background {
     let mut sheen = theme.raised;
     sheen.l = (sheen.l
         + if theme.is_dark {
-            GLASS_SHEEN_LIFT_DARK
+            SHEEN_LIFT_DARK
         } else {
-            GLASS_SHEEN_LIFT_LIGHT
+            SHEEN_LIFT_LIGHT
         })
     .min(1.0);
-    sheen.a = GLASS_SHEEN_ALPHA;
-    let base = theme.raised.opacity(if theme.is_dark { 0.92 } else { 0.9 });
     linear_gradient(
         180.0,
         linear_color_stop(sheen, 0.0),
-        linear_color_stop(base, 1.0),
+        linear_color_stop(theme.raised, 1.0),
     )
 }
 
@@ -1280,7 +1273,7 @@ impl RenderOnce for MenuCard {
             .rounded(px(11.0))
             .border(hairline())
             .border_color(theme.border_subtle)
-            .bg(glass_card_bg(&theme))
+            .bg(card_bg(&theme))
             .shadow_lg()
             .flex()
             .flex_col();
@@ -1354,7 +1347,7 @@ impl RenderOnce for MenuCard {
                 .rounded(px(11.0))
                 .border(hairline())
                 .border_color(theme.border_subtle)
-                .bg(glass_card_bg(&theme))
+                .bg(card_bg(&theme))
                 .shadow_lg()
                 .flex()
                 .flex_col();
