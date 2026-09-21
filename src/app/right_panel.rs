@@ -2877,7 +2877,9 @@ impl Waku {
         // The row kinds are fingerprinted and spliced exactly like a card's:
         // appends keep position, a refold re-measures, and the tail re-measures
         // while the session works so fresh text is never clipped.
-        let fingerprint = transcript_rows_fingerprint(&session, &self.expanded_turns);
+        let checkpoint_pending = self.ending_checkpoint_pending(session.id);
+        let fingerprint =
+            transcript_rows_fingerprint(&session, &self.expanded_turns, checkpoint_pending);
         let view = self
             .side_chat_views
             .entry(session_id)
@@ -2891,7 +2893,8 @@ impl Waku {
                 kinds: (0, Rc::new(Vec::new())),
             });
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
-            let mut folded = folded_transcript_row_kinds(&session, &self.expanded_turns);
+            let mut folded =
+                folded_transcript_row_kinds(&session, &self.expanded_turns, checkpoint_pending);
             folded.retain(|kind| {
                 !matches!(
                     kind,
@@ -3117,6 +3120,9 @@ impl Waku {
             }
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)
+            }
+            TranscriptRowKind::CheckpointPending => {
+                self.render_card_checkpoint_pending_row(&theme)
             }
             // Folded out of the kinds list entirely; the fallback renders
             // nothing.

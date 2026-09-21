@@ -18,7 +18,11 @@ impl Waku {
         let fingerprint = self
             .selected_session()
             .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
-                transcript_rows_fingerprint(session, &self.expanded_turns)
+                transcript_rows_fingerprint(
+                    session,
+                    &self.expanded_turns,
+                    self.ending_checkpoint_pending(session.id),
+                )
             });
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let mut next_kinds = self.selected_transcript_row_kinds();
@@ -47,7 +51,11 @@ impl Waku {
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
         self.selected_session().map_or_else(Vec::new, |session| {
-            folded_transcript_row_kinds(session, &self.expanded_turns)
+            folded_transcript_row_kinds(
+                session,
+                &self.expanded_turns,
+                self.ending_checkpoint_pending(session.id),
+            )
         })
     }
 
@@ -506,6 +514,11 @@ pub(super) enum TranscriptRowKind {
     /// turn's indicator is held for [`WORKING_INDICATOR_FADE_OUT`] while it
     /// fades out.
     WorkingIndicator,
+    /// The settled last turn's checkpoint capture is queued or in flight —
+    /// a large worktree can hold it for a while, and without a row the
+    /// changed-files card reads as simply absent. Appended after every other
+    /// row; it never belongs to a turn's own row set.
+    CheckpointPending,
 }
 
 /// How long a settled turn's working indicator stays mounted while it fades
@@ -817,7 +830,8 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::TurnFold(_)
                 | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
-                | TranscriptRowKind::WorkingIndicator => None,
+                | TranscriptRowKind::WorkingIndicator
+                | TranscriptRowKind::CheckpointPending => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -1010,8 +1024,14 @@ pub(super) fn transcript_row_kinds(
 pub(super) fn transcript_rows_fingerprint(
     session: &AgentSession,
     expanded_turns: &HashSet<Uuid>,
+    checkpoint_pending: bool,
 ) -> u64 {
     let mut hash = mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, session.id);
+
+    // The checkpoint-pending row lives in the caller's capture queues, not
+    // the session — a capture starting or landing must move the fingerprint
+    // or the row would appear and disappear a fold late.
+    hash = mix(hash, checkpoint_pending as u64);
 
     // The working indicator row exists only while the session is busy, and a
     // driver error can drop the busy status without touching any turn — the
@@ -1094,6 +1114,7 @@ fn mix_turn_id(hash: u64, turn_id: Option<Uuid>) -> u64 {
 pub(super) fn folded_transcript_row_kinds(
     session: &AgentSession,
     expanded_turns: &HashSet<Uuid>,
+    checkpoint_pending: bool,
 ) -> Vec<TranscriptRowKind> {
     let anchors = session
         .transcript_blocks
@@ -1193,35 +1214,41 @@ pub(super) fn folded_transcript_row_kinds(
     // visible row, which may be answer text, tool activity, or a collapsed work
     // disclosure. The message index supplies stable copy/fork identity without
     // deciding the footer's position.
-    if response_footers.is_empty() {
-        return rows;
+    if !response_footers.is_empty() {
+        let mut last_row_by_turn = HashMap::new();
+        for (index, row) in rows.iter().copied().enumerate() {
+            if let Some(turn_id) = row_turn_id(session, row)
+                && response_footers.contains_key(&turn_id)
+            {
+                last_row_by_turn.insert(turn_id, index);
+            }
+        }
+        let footer_after_row = last_row_by_turn
+            .into_iter()
+            .filter_map(|(turn_id, index)| {
+                response_footers
+                    .get(&turn_id)
+                    .copied()
+                    .map(|message_index| (index, (turn_id, message_index)))
+            })
+            .collect::<HashMap<_, _>>();
+        let mut with_footers = Vec::with_capacity(rows.len() + footer_after_row.len());
+        for (index, row) in rows.into_iter().enumerate() {
+            with_footers.push(row);
+            if let Some((turn_id, message_index)) = footer_after_row.get(&index).copied() {
+                with_footers.push(TranscriptRowKind::ResponseFooter(turn_id, message_index));
+            }
+        }
+        rows = with_footers;
     }
 
-    let mut last_row_by_turn = HashMap::new();
-    for (index, row) in rows.iter().copied().enumerate() {
-        if let Some(turn_id) = row_turn_id(session, row)
-            && response_footers.contains_key(&turn_id)
-        {
-            last_row_by_turn.insert(turn_id, index);
-        }
+    // The settled turn's checkpoint is still capturing: hold a row where its
+    // changed-files card will land so a slow snapshot does not read as the
+    // turn finishing silently.
+    if checkpoint_pending {
+        rows.push(TranscriptRowKind::CheckpointPending);
     }
-    let footer_after_row = last_row_by_turn
-        .into_iter()
-        .filter_map(|(turn_id, index)| {
-            response_footers
-                .get(&turn_id)
-                .copied()
-                .map(|message_index| (index, (turn_id, message_index)))
-        })
-        .collect::<HashMap<_, _>>();
-    let mut with_footers = Vec::with_capacity(rows.len() + footer_after_row.len());
-    for (index, row) in rows.into_iter().enumerate() {
-        with_footers.push(row);
-        if let Some((turn_id, message_index)) = footer_after_row.get(&index).copied() {
-            with_footers.push(TranscriptRowKind::ResponseFooter(turn_id, message_index));
-        }
-    }
-    with_footers
+    rows
 }
 
 /// The rows the turn *produced*, in transcript order: its assistant text parts
@@ -1270,7 +1297,8 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator => None,
+        | TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::CheckpointPending => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1284,7 +1312,8 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::TurnFold(_)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
-            | TranscriptRowKind::WorkingIndicator => None,
+            | TranscriptRowKind::WorkingIndicator
+            | TranscriptRowKind::CheckpointPending => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1307,7 +1336,8 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator => false,
+        | TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::CheckpointPending => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1325,7 +1355,7 @@ fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
         TranscriptRowKind::TurnFold(turn_id) => Some(turn_id),
         TranscriptRowKind::ResponseFooter(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ChangedFiles(turn_id) => Some(turn_id),
-        TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::WorkingIndicator | TranscriptRowKind::CheckpointPending => None,
     }
 }
 
@@ -1341,7 +1371,7 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
                 .filter(|message| message.role == MessageRole::Assistant)?
                 .turn_id
         }
-        TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::WorkingIndicator | TranscriptRowKind::CheckpointPending => None,
         TranscriptRowKind::TurnBlock(_)
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)

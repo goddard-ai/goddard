@@ -1,0 +1,1 @@
+- Changed-files cards no longer silently disappear on large repositories: checkpoint captures now wait up to ten minutes instead of two, a lightweight pre-turn ref preserves a diff base when the full start snapshot never lands, and a "Saving changed files…" row holds the card's place while the capture is still running

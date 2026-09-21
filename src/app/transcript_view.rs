@@ -1666,6 +1666,7 @@ impl Waku {
                 }
             }
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
+            TranscriptRowKind::CheckpointPending => self.render_checkpoint_pending_row(&theme),
         };
         let new_content_dot = self
             .transcript_new_content_dot
@@ -2872,6 +2873,33 @@ impl Waku {
             |element, delta| element.opacity(1.0 - delta),
         )
         .into_any_element()
+    }
+
+    /// The settled turn's checkpoint capture is still running — a slow
+    /// snapshot on a large worktree can hold the changed-files card for
+    /// minutes, and without a row that reads as the turn finishing with
+    /// nothing saved. A spinner and a label hold the card's place until the
+    /// capture lands or fails.
+    fn render_checkpoint_pending_row(&self, theme: &Theme) -> AnyElement {
+        div()
+            .h(px(22.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(motion::spin_slow(icon(
+                "icons/loader-circle.svg",
+                10.0,
+                theme.text_tertiary,
+            )))
+            .child(
+                div()
+                    .text_size(sp(13.5))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(tr!("transcript.saving_changes"))),
+            )
+            .into_any_element()
     }
 
     /// Schedule the splice that retires a fading working indicator. This runs

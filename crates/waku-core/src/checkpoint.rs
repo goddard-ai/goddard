@@ -35,6 +35,14 @@ pub fn turn_diff_base_ref(session_id: Uuid, turn_count: usize) -> String {
     format!("refs/waku/session-{session_id}-turn-diff-{turn_count}")
 }
 
+/// The commit `HEAD` named when the turn started — a cheap marker written
+/// before the full start snapshot so a failed or abandoned capture still
+/// leaves a diff base. It carries no worktree state, so diffing against it
+/// charges files that were already dirty to the turn.
+pub fn turn_base_ref(session_id: Uuid, turn_count: usize) -> String {
+    format!("refs/waku/session-{session_id}-turn-base-{turn_count}")
+}
+
 /// Snapshot of the whole worktree taken when a session is archived, so the
 /// worktree can be removed without losing work. Living under the shared
 /// `refs/waku/session-<id>-` prefix means session ref deletion — including
@@ -54,6 +62,15 @@ pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> an
 
     let head = resolve_ref(cwd, "HEAD");
     let branch = symbolic_head(cwd);
+    // The base marker costs one ref update and lands before the expensive
+    // snapshot: a client timeout or mid-capture failure then still leaves the
+    // ending diff a usable base.
+    if let Some(head) = head.as_ref() {
+        update_refs(
+            cwd,
+            format!("update {} {head}\n", turn_base_ref(session_id, turn_count)),
+        )?;
+    }
     let refs = repository_refs(cwd)?;
     let metadata = TurnStartMetadata {
         head: head.clone(),
@@ -119,8 +136,12 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
                 end_head.as_deref(),
                 end_branch.as_deref(),
             )?
-        } else {
+        } else if has_ref(cwd, &legacy_ref) {
             legacy_ref
+        } else {
+            // The start snapshot never landed — the pre-turn HEAD marker is
+            // the closest remaining base.
+            turn_base_ref(session_id, turn_count)
         };
         if has_ref(cwd, &diff_base) {
             diff_files(cwd, &diff_base, &git_ref)?
@@ -434,10 +455,11 @@ pub fn delete_turn_refs_after(
     let mut commands = String::new();
     for turn_count in retained_turn_count + 1..=previous_turn_count {
         commands.push_str(&format!(
-            "delete {}\ndelete {}\ndelete {}\n",
+            "delete {}\ndelete {}\ndelete {}\ndelete {}\n",
             checkpoint_ref(session_id, turn_count),
             turn_start_ref(session_id, turn_count),
-            turn_diff_base_ref(session_id, turn_count)
+            turn_diff_base_ref(session_id, turn_count),
+            turn_base_ref(session_id, turn_count)
         ));
     }
     update_refs(cwd, commands)
@@ -456,9 +478,10 @@ pub fn delete_session_refs(
         ));
         if turn_count > 0 {
             commands.push_str(&format!(
-                "delete {}\ndelete {}\n",
+                "delete {}\ndelete {}\ndelete {}\n",
                 turn_start_ref(session_id, turn_count),
-                turn_diff_base_ref(session_id, turn_count)
+                turn_diff_base_ref(session_id, turn_count),
+                turn_base_ref(session_id, turn_count)
             ));
         }
     }
@@ -487,6 +510,12 @@ pub fn delete_all_session_refs(cwd: &Path, session_id: Uuid) -> anyhow::Result<(
         commands.push_str(&format!(
             "delete {}\n",
             turn_diff_base_ref(session_id, *turn_count)
+        ));
+    }
+    for turn_count in refs.bases.keys() {
+        commands.push_str(&format!(
+            "delete {}\n",
+            turn_base_ref(session_id, *turn_count)
         ));
     }
     update_refs(cwd, commands)
@@ -526,6 +555,12 @@ pub fn copy_session_refs(
                 turn_diff_base_ref(target_session_id, turn_count)
             ));
         }
+        if let Some(commit) = source.bases.get(&turn_count) {
+            commands.push_str(&format!(
+                "update {} {commit}\n",
+                turn_base_ref(target_session_id, turn_count)
+            ));
+        }
     }
     update_refs(cwd, commands)
 }
@@ -535,6 +570,7 @@ struct SessionCheckpointRefs {
     turns: HashMap<usize, String>,
     starts: HashMap<usize, String>,
     diff_bases: HashMap<usize, String>,
+    bases: HashMap<usize, String>,
 }
 
 /// Every checkpoint ref for `session_id`, resolved in one `git for-each-ref`.
@@ -557,7 +593,12 @@ fn session_checkpoint_ref_commits(cwd: &Path, session_id: Uuid) -> SessionCheckp
             let Some(suffix) = refname.strip_prefix(prefix.as_str()) else {
                 continue;
             };
-            let target = if let Some(turn_count) = suffix.strip_prefix("turn-start-") {
+            let target = if let Some(turn_count) = suffix.strip_prefix("turn-base-") {
+                turn_count
+                    .parse()
+                    .ok()
+                    .map(|turn_count| (&mut refs.bases, turn_count))
+            } else if let Some(turn_count) = suffix.strip_prefix("turn-start-") {
                 turn_count
                     .parse()
                     .ok()
@@ -923,6 +964,11 @@ mod tests {
             resolve_ref(&directory, &turn_diff_base_ref(session, 1)),
             "the branch-aware review base is copied too"
         );
+        assert_eq!(
+            resolve_ref(&directory, &turn_base_ref(fork, 1)),
+            resolve_ref(&directory, &turn_base_ref(session, 1)),
+            "and the cheap head marker follows it"
+        );
 
         delete_turn_refs_after(&directory, session, 1, 3).unwrap();
         assert_eq!(
@@ -932,6 +978,7 @@ mod tests {
         );
         assert!(!has_ref(&directory, &turn_start_ref(session, 3)));
         assert!(!has_ref(&directory, &turn_diff_base_ref(session, 3)));
+        assert!(!has_ref(&directory, &turn_base_ref(session, 3)));
 
         delete_session_refs(&directory, fork, 3).unwrap();
         assert!(
@@ -940,9 +987,56 @@ mod tests {
         );
         assert!(!has_ref(&directory, &turn_start_ref(fork, 1)));
         assert!(!has_ref(&directory, &turn_diff_base_ref(fork, 1)));
+        assert!(!has_ref(&directory, &turn_base_ref(fork, 1)));
 
         // Nothing left to remove is a no-op, not a failure.
         delete_session_refs(&directory, fork, 3).unwrap();
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn capture_diffs_against_the_head_marker_when_the_start_snapshot_is_missing() {
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        fs::write(directory.join("tracked.txt"), "baseline\n").unwrap();
+        git_ok(&directory, &["add", "tracked.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        capture_turn_start(&directory, session, 1).unwrap();
+
+        // A start capture that dies late — request timeout, daemon crash —
+        // leaves the cheap head marker without the full start snapshot or
+        // the usual turn-0 baseline. Both go away here.
+        delete_ref(&directory, &turn_start_ref(session, 1)).unwrap();
+        delete_ref(&directory, &checkpoint_ref(session, 0)).unwrap();
+
+        fs::write(directory.join("tracked.txt"), "changed\n").unwrap();
+        fs::write(directory.join("new.txt"), "added\n").unwrap();
+
+        let checkpoint = capture_turn(&directory, session, 1).unwrap();
+        assert_eq!(checkpoint.status, CheckpointStatus::Ready);
+        assert!(
+            checkpoint.files.iter().any(|file| file.path == "tracked.txt"),
+            "edits still diff against the pre-turn head"
+        );
+        assert!(
+            checkpoint.files.iter().any(|file| file.path == "new.txt"),
+            "and so do files the turn created"
+        );
         fs::remove_dir_all(&directory).ok();
     }
 

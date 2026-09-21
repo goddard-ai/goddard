@@ -1156,14 +1156,22 @@ impl Waku {
                 })
                 .clone()
         };
-        let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns);
+        let fingerprint = transcript_rows_fingerprint(
+            session,
+            &self.expanded_turns,
+            self.ending_checkpoint_pending(session.id),
+        );
         let (kinds, refolded) = {
             let mut cache = self.big_picture.card_kinds.borrow_mut();
             let entry = cache
                 .entry(session_id)
                 .or_insert_with(|| (0, Rc::new(Vec::new())));
             if entry.0 != fingerprint {
-                let mut folded = folded_transcript_row_kinds(session, &self.expanded_turns);
+                let mut folded = folded_transcript_row_kinds(
+                    session,
+                    &self.expanded_turns,
+                    self.ending_checkpoint_pending(session.id),
+                );
                 folded.retain(|kind| {
                     !matches!(
                         kind,
@@ -1420,6 +1428,9 @@ impl Waku {
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)
             }
+            TranscriptRowKind::CheckpointPending => {
+                self.render_card_checkpoint_pending_row(&theme)
+            }
             // Folded out of `card_kinds` entirely; the fallback renders nothing.
             TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {
                 div().into_any_element()
@@ -1585,6 +1596,31 @@ impl Waku {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text_tertiary)
                     .child(SharedString::from(label)),
+            )
+            .into_any_element()
+    }
+
+    /// A card's "Saving changed files…" row while the settled turn's
+    /// checkpoint capture runs — the lane's checkpoint row at card scale.
+    /// Side-chat panels draw the same one.
+    pub(super) fn render_card_checkpoint_pending_row(&self, theme: &Theme) -> AnyElement {
+        div()
+            .h(px(22.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(motion::spin_slow(icon(
+                "icons/loader-circle.svg",
+                10.0,
+                theme.text_tertiary,
+            )))
+            .child(
+                div()
+                    .text_size(sp(13.5))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(tr!("transcript.saving_changes"))),
             )
             .into_any_element()
     }

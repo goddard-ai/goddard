@@ -17,11 +17,42 @@ use waku_protocol::MAX_WIRE_MESSAGE_BYTES;
 use waku_protocol::{
     ClientMessage, Command, DaemonSettings, PROTOCOL_VERSION, ReplayCursor, Request,
     ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage,
+    WorkspaceOperation,
 };
 
 const READ_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// Operations that walk or rebuild an entire worktree — snapshots,
+/// checkouts, restores — legitimately take minutes on a large repository.
+/// The daemon keeps working after the client stops waiting, so a tighter
+/// bound only orphans a result that lands anyway.
+const WORKTREE_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_BUFFERED_EVENTS_PER_RUNTIME: usize = 4096;
+
+/// The daemon answers most requests quickly, but anything that snapshots or
+/// rebuilds a worktree — checkpoint captures, worktree creation, a rewind's
+/// safety snapshot and restore — is bounded by repository size, not latency.
+fn request_timeout(command: &Command) -> Duration {
+    match command {
+        Command::Workspace { operation } => match operation {
+            WorkspaceOperation::CaptureTurn { .. }
+            | WorkspaceOperation::CaptureTurnStart { .. }
+            | WorkspaceOperation::CreateWorktree { .. }
+            | WorkspaceOperation::CreateWorktreeFromCheckout { .. }
+            | WorkspaceOperation::EnsureWorktree { .. }
+            | WorkspaceOperation::RemoveWorktree { .. }
+            | WorkspaceOperation::PruneWorktrees { .. }
+            | WorkspaceOperation::ResetWorktree { .. }
+            | WorkspaceOperation::ArchiveProjectlessWorkspace { .. }
+            | WorkspaceOperation::RestoreProjectlessWorkspace { .. } => {
+                WORKTREE_REQUEST_TIMEOUT
+            }
+            _ => REQUEST_TIMEOUT,
+        },
+        Command::RewindSessionToMessage { .. } => WORKTREE_REQUEST_TIMEOUT,
+        _ => REQUEST_TIMEOUT,
+    }
+}
 
 enum Outgoing {
     Message(ClientMessage),
@@ -328,6 +359,7 @@ impl DaemonClient {
             bail!("Goddard daemon is disconnected");
         }
         let request_id = Uuid::new_v4();
+        let timeout = request_timeout(&command);
         let (response, response_rx) = bounded(1);
         self.inner.pending.lock().insert(request_id, response);
         let message = ClientMessage::Request(Request {
@@ -345,7 +377,7 @@ impl DaemonClient {
             self.inner.pending.lock().remove(&request_id);
             bail!("Goddard daemon connection is closed");
         }
-        match response_rx.recv_timeout(REQUEST_TIMEOUT) {
+        match response_rx.recv_timeout(timeout) {
             Ok(Ok(payload)) => Ok(payload),
             Ok(Err(error)) => Err(anyhow!(error.localized_message())),
             Err(error) => {
@@ -705,7 +737,87 @@ fn read_server_message(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
+
+    #[test]
+    fn worktree_bound_commands_get_the_longer_timeout() {
+        let cwd = PathBuf::from("/tmp/waku-test");
+        let session_id = Uuid::new_v4();
+
+        for operation in [
+            WorkspaceOperation::CaptureTurnStart {
+                cwd: cwd.clone(),
+                session_id,
+                turn_count: 1,
+            },
+            WorkspaceOperation::CaptureTurn {
+                cwd: cwd.clone(),
+                session_id,
+                turn_count: 1,
+            },
+            WorkspaceOperation::CreateWorktree {
+                project_path: cwd.clone(),
+                name: None,
+                base_ref: None,
+                sync_default_branch: false,
+                sync_branches: Vec::new(),
+            },
+            WorkspaceOperation::CreateWorktreeFromCheckout {
+                project_path: cwd.clone(),
+                name: None,
+            },
+            WorkspaceOperation::EnsureWorktree {
+                project_path: cwd.clone(),
+                path: cwd.clone(),
+                branch: None,
+                base_ref: None,
+            },
+            WorkspaceOperation::RemoveWorktree {
+                path: cwd.clone(),
+                force: false,
+            },
+            WorkspaceOperation::PruneWorktrees { cwd: cwd.clone() },
+            WorkspaceOperation::ResetWorktree {
+                path: cwd.clone(),
+                base_ref: "HEAD".into(),
+            },
+            WorkspaceOperation::ArchiveProjectlessWorkspace { path: cwd.clone() },
+            WorkspaceOperation::RestoreProjectlessWorkspace { path: cwd.clone() },
+        ] {
+            assert_eq!(
+                request_timeout(&Command::Workspace {
+                    operation: operation.clone()
+                }),
+                WORKTREE_REQUEST_TIMEOUT,
+                "{operation:?}"
+            );
+        }
+        assert_eq!(
+            request_timeout(&Command::RewindSessionToMessage { turn_count: 2 }),
+            WORKTREE_REQUEST_TIMEOUT
+        );
+
+        // Reads and ordinary requests keep the short bound.
+        assert_eq!(
+            request_timeout(&Command::Workspace {
+                operation: WorkspaceOperation::ListWorktrees { cwd: cwd.clone() }
+            }),
+            REQUEST_TIMEOUT
+        );
+        assert_eq!(request_timeout(&Command::AttachSession), REQUEST_TIMEOUT);
+        assert_eq!(
+            request_timeout(&Command::Prompt {
+                prompt: String::new(),
+                turn_id: None,
+                message_id: None,
+                hidden: false,
+                attachments: Vec::new(),
+            }),
+            REQUEST_TIMEOUT
+        );
+    }
 
     #[test]
     fn daemon_endpoint_accepts_addresses_and_secure_urls() {
