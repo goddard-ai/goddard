@@ -239,6 +239,8 @@ impl Waku {
                                 &focus,
                                 absolute.to_string_lossy().into_owned(),
                                 &weak,
+                                format!("file-link-menu-archive-file-{}", file.path),
+                                cx,
                             ))
                             .into_any_element()
                     }))

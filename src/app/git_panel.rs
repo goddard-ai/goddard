@@ -5019,6 +5019,8 @@ impl Waku {
                     &self.transcript_control_focus(format!("git-panel-conflict-file-{path}"), cx),
                     absolute,
                     &weak,
+                    format!("file-link-menu-conflict-file-{path}"),
+                    cx,
                 ));
             }
             let scroll = self.git_panel_conflict_files_scroll.clone();

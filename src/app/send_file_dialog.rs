@@ -220,6 +220,8 @@ impl Waku {
                         &dialog.file_focus,
                         dialog.path.to_string_lossy().into_owned(),
                         &weak,
+                        "file-link-menu-send-file-dialog",
+                        cx,
                     )),
             )
             .child(

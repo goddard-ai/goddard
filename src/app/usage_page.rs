@@ -1462,6 +1462,8 @@ impl Waku {
                             ),
                             project.path.clone(),
                             &cx.entity().downgrade(),
+                            format!("file-link-menu-usage-project-path-{index}"),
+                            cx,
                         ))
                     })
                     .child(div().flex_1())

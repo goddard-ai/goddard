@@ -406,17 +406,27 @@ pub(super) struct LandedNoticeState {
 /// click/Enter/Space activation routed through `open_path_in_default_app`,
 /// which resolves workspace-relative paths and toasts on remote hosts. The
 /// press is stopped so a containing row's own click action stays silent.
+/// Right-click (or Shift+F10) raises the same menu the file browser's rows
+/// get; `menu_id` keys that menu, so it must be unique to the link's site —
+/// the element's own id string works.
 pub(super) fn file_link(
     element: Stateful<Div>,
     focus: &FocusHandle,
     path: String,
     waku: &gpui::WeakEntity<Waku>,
-) -> Stateful<Div> {
+    menu_id: impl Into<SharedString>,
+    cx: &mut App,
+) -> AnyElement {
+    let menu_id = menu_id.into();
+    let menu = waku
+        .update(cx, |this, cx| this.menu_handle(menu_id.clone(), cx))
+        .ok();
     let click_waku = waku.clone();
     let key_waku = waku.clone();
     let click_path = path.clone();
-    let key_path = path;
-    element
+    let key_path = path.clone();
+    let key_menu = menu.clone();
+    let element = element
         .track_focus(focus)
         .tab_index(0)
         .cursor_pointer()
@@ -429,14 +439,29 @@ pub(super) fn file_link(
             });
             cx.stop_propagation();
         })
-        .on_key_down(move |event: &KeyDownEvent, _, cx| {
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
             if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                 let _ = key_waku.update(cx, |this, cx| {
                     this.open_path_in_default_app(&key_path, cx);
                 });
                 cx.stop_propagation();
+            } else if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
+                if let Some(menu) = &key_menu {
+                    menu.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
             }
-        })
+        });
+    let Some(menu) = menu else {
+        return element.into_any_element();
+    };
+    let menu_waku = waku.clone();
+    context_menu(element, menu_id, &menu, move |cx| {
+        menu_waku
+            .read_with(cx, |this, cx| this.file_link_menu(&menu_waku, &path, cx))
+            .ok()
+            .unwrap_or_default()
+    })
 }
 
 /// The on-disk path a file-backed activity row's detail names, when the

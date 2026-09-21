@@ -4481,6 +4481,35 @@ impl Waku {
         items
     }
 
+    /// The `working_tree_row_menu` for a `file_link` target — the same
+    /// actions, resolved from the link's possibly workspace-relative path.
+    /// Runs at menu-open time, a one-shot user action, so the `is_dir`
+    /// probe's stat is allowed where a frame's would not be. A remote path
+    /// resolves to no items, matching the tree rows.
+    pub(super) fn file_link_menu(
+        &self,
+        waku: &WeakEntity<Self>,
+        path: &str,
+        cx: &App,
+    ) -> Vec<MenuItem> {
+        let path = Path::new(path.trim());
+        let absolute_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(root) = self.resolve_right_panel_files_root(cx) {
+            root.join(path)
+        } else {
+            return Vec::new();
+        };
+        if self.is_remote_path(&absolute_path) || !absolute_path.exists() {
+            return Vec::new();
+        }
+        let name = absolute_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        self.working_tree_row_menu(waku, &absolute_path, &name, absolute_path.is_dir())
+    }
+
     fn render_right_panel_file(
         &mut self,
         relative_path: String,
@@ -4660,6 +4689,8 @@ impl Waku {
                         ),
                         relative_path.clone(),
                         &cx.entity().downgrade(),
+                        format!("file-link-menu-viewer-{relative_path}"),
+                        cx,
                     ))
                     .children(github_button)
                     .children(preview_toggle),
@@ -6184,6 +6215,8 @@ impl Waku {
                 &self.transcript_control_focus(format!("{id_prefix}-path-{index}"), cx),
                 file.path.clone(),
                 &cx.entity().downgrade(),
+                format!("file-link-menu-{id_prefix}-{index}"),
+                cx,
             ))
             .child(
                 div()

@@ -2557,6 +2557,8 @@ impl Waku {
                 ),
                 file.path.clone(),
                 &cx.entity().downgrade(),
+                format!("file-link-menu-changed-files-preview-{turn_id}-{}", file.path),
+                cx,
             ))
             .child(
                 div()
@@ -3245,8 +3247,9 @@ impl Waku {
                                     &detail_focus,
                                     path.clone(),
                                     &weak,
-                                )
-                                .into_any_element(),
+                                    format!("file-link-menu-activity-detail-{id}"),
+                                    cx,
+                                ),
                                 None => detail.into_any_element(),
                             })
                         })

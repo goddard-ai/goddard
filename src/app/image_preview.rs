@@ -269,6 +269,8 @@ impl Waku {
                 &name_focus,
                 path.to_string_lossy().into_owned(),
                 &weak,
+                "file-link-menu-image-preview",
+                cx,
             ))
             .child(close);
 

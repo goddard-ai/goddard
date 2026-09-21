@@ -5378,23 +5378,14 @@ impl Waku {
             let markdown_file_menu_items: md::render::FileRefMenuItems = {
                 let waku = cx.entity().downgrade();
                 Rc::new(move |path, cx| {
-                    let copied_path = path.to_owned();
-                    let reveal_path = PathBuf::from(path);
-                    let remote = waku
-                        .update(cx, |this, _| this.is_remote_path(&reveal_path))
-                        .unwrap_or(true);
-                    vec![
-                        MenuItem::new(tr!("files.copy_path"), move |_, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(copied_path.clone()));
-                        })
-                        .icon("icons/copy.svg"),
-                        MenuItem::new(tr!("common.reveal_in_finder"), move |_, cx| {
-                            crate::platform::reveal_in_file_manager(&reveal_path, cx);
-                        })
-                        .icon("icons/folder-open.svg")
-                        .disabled(remote),
-                        MenuItem::Separator,
-                    ]
+                    let mut items = waku
+                        .update(cx, |this, cx| this.file_link_menu(&waku, path, cx))
+                        .unwrap_or_default();
+                    // These lead the row's own menu — keep the boundary.
+                    if !items.is_empty() {
+                        items.push(MenuItem::Separator);
+                    }
+                    items
                 })
             };
 
