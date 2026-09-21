@@ -1841,6 +1841,7 @@ impl Waku {
         )
         .with_families(crate::fonts::current(cx))
         .with_math_enabled(self.state.render_math)
+        .with_guided_reading(self.state.guided_reading_enabled)
         .with_link_handler(self.markdown_link_handler.clone())
         .with_image_resolver(Rc::new(move |url| media_paths.borrow().get(url).cloned()))
         .with_image_placeholder(Rc::new(move |url| {

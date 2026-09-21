@@ -10920,6 +10920,7 @@ dependencies = [
  "tar",
  "tokio",
  "unicode-linebreak",
+ "unicode-script",
  "unicode-segmentation",
  "url",
  "uuid",

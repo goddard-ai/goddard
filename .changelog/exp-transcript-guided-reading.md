@@ -1,0 +1,1 @@
+- Guided reading: an Experiments-page opt-in that shapes the leading letters of each word semibold in transcript prose — the "bionic reading" emphasis — for Latin-script text only; code, math, and monospace output are untouched

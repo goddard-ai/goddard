@@ -835,6 +835,9 @@ pub struct AppSettings {
     /// Experimental: the quick-action dock that rises above the sidebar
     /// footer on hover. Defaults on in debug builds.
     pub sidebar_dock_enabled: bool,
+    /// Experimental: transcript prose shapes word-leading graphemes semibold
+    /// — the "guided reading" emphasis. Defaults on in debug builds.
+    pub guided_reading_enabled: bool,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -890,6 +893,7 @@ impl Default for AppSettings {
             status_markers_enabled: default_experiment_enabled(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
+            guided_reading_enabled: default_experiment_enabled(),
             remote_hosts: Vec::new(),
         }
     }
@@ -1269,6 +1273,8 @@ pub struct PersistedState {
     pub automations_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub sidebar_dock_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
+    pub guided_reading_enabled: bool,
     /// Whether the user has confirmed the Experiments page's warning
     /// interstitial. Gates the page's toggles, not the flags themselves —
     /// an experiment already on stays on.
@@ -1484,6 +1490,7 @@ impl PersistedState {
             status_markers_enabled: default_experiment_enabled(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
+            guided_reading_enabled: default_experiment_enabled(),
             experiments_warning_acknowledged: false,
             remote_hosts: Vec::new(),
             sidebar_visible: true,
@@ -1813,6 +1820,7 @@ impl PersistedState {
             status_markers_enabled: self.status_markers_enabled,
             automations_enabled: self.automations_enabled,
             sidebar_dock_enabled: self.sidebar_dock_enabled,
+            guided_reading_enabled: self.guided_reading_enabled,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -1913,6 +1921,7 @@ impl PersistedState {
         self.status_markers_enabled = settings.status_markers_enabled;
         self.automations_enabled = settings.automations_enabled;
         self.sidebar_dock_enabled = settings.sidebar_dock_enabled;
+        self.guided_reading_enabled = settings.guided_reading_enabled;
         self.remote_hosts = settings.remote_hosts;
     }
 

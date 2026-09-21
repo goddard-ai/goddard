@@ -728,6 +728,10 @@ experiments.sidebar_dock_title:
   en: Sidebar dock
 experiments.sidebar_dock_description:
   en: A quick-action dock that rises above the sidebar footer on hover — inbox, archive, keyboard shortcuts, and settings one click away.
+experiments.guided_reading_title:
+  en: Guided reading
+experiments.guided_reading_description:
+  en: Bold the leading letters of each word in transcript prose to guide the eye — the emphasis pattern known as bionic reading. Applies to Latin-script prose only; code, math, and monospace text are untouched.
 experiments.memory_title:
   en: Project memory
 experiments.memory_description:

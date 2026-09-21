@@ -1899,6 +1899,8 @@ experiments.github_title: GitHub 連携
 experiments.group_git: Git とレビュー
 experiments.group_sessions: セッションとエージェント
 experiments.group_surfaces: アプリの画面
+experiments.guided_reading_description: トランスクリプトの本文で各単語の先頭の文字を太字にして視線を誘導します — 「バイオニックリーディング」として知られる強調パターンです。ラテン文字の本文のみに適用され、コード・数式・等幅テキストは変更されません。
+experiments.guided_reading_title: ガイデッドリーディング
 experiments.integrations_description: 設定 → 連携ページで Linear、GitHub、Notion、Stripe などの公式リモート MCP サーバーを一度接続すれば、Goddard のローカルプロキシを通じて有効なすべてのエージェントに提供されます。
 experiments.integrations_title: MCP 連携
 experiments.memory_description: 各プロジェクトに永続メモリを持たせます。完了したセッションは .goddard/memory ストアに蒸留され、次のセッションの最初のプロンプトがそれを引き継ぎます — 決定、好み、失敗したアプローチも含まれます。

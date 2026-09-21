@@ -4556,6 +4556,14 @@ impl Waku {
                 enabled: self.state.sidebar_dock_enabled,
                 set: Self::set_sidebar_dock_enabled,
             },
+            ExperimentDef {
+                group: ExperimentGroup::Surfaces,
+                id: "guided-reading-experiment-toggle",
+                title_key: "experiments.guided_reading_title",
+                description_key: "experiments.guided_reading_description",
+                enabled: self.state.guided_reading_enabled,
+                set: Self::set_guided_reading_enabled,
+            },
         ];
         let groups = ExperimentGroup::ALL.into_iter().filter_map(|group| {
             let cards: Vec<AnyElement> = experiments
@@ -4832,6 +4840,19 @@ impl Waku {
 
     fn set_sidebar_dock_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.sidebar_dock_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// Fixated text is wider than the prose it replaces, so toggling
+    /// reflows wrapped rows — drop cached heights the way a font-size
+    /// change does.
+    fn set_guided_reading_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.guided_reading_enabled == enabled {
+            return;
+        }
+        self.state.guided_reading_enabled = enabled;
+        self.remeasure_font_sized_surfaces();
         self.save();
         cx.notify();
     }

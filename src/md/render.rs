@@ -35,6 +35,8 @@ use gpui::{
     img, point, prelude::*, px, quad, relative, size,
 };
 use regex::Regex;
+use unicode_script::{Script, UnicodeScript};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::highlight::{self, Lang, TokenClass};
 use super::mend::PENDING_LINK_URL;
@@ -662,6 +664,101 @@ pub fn flatten_plain(
     }
 }
 
+/// Guided reading: split each prose run so a word's leading graphemes shape
+/// at `SEMIBOLD` and the rest keeps the run's weight — the emphasis pattern
+/// sold elsewhere as "bionic reading". Only `runs` densifies; the flat string
+/// and every byte-range index (`links`, `code_ranges`, `copy`) are untouched.
+///
+/// Two kinds of text are never split. Runs already at `SEMIBOLD` or heavier —
+/// markdown bold, headings — gain nothing but shaping cost. And anything
+/// monospace or inside `code_ranges`/math stays whole: a mid-word style
+/// boundary drops kerning and breaks joining scripts, so eligibility is
+/// restricted to words made of Latin, Greek, or Cyrillic letters anyway.
+pub fn apply_fixation(flat: &mut FlatText, code_family: &SharedString) {
+    let mut protected: Vec<Range<usize>> = flat.code_ranges.clone();
+    if let Some(math) = &flat.math {
+        protected.extend(math.spans.iter().map(|span| span.range.clone()));
+    }
+    protected.sort_by_key(|range| range.start);
+
+    let mut runs: Vec<TextRun> = Vec::with_capacity(flat.runs.len() * 2);
+    let mut offset = 0;
+    for run in flat.runs.drain(..) {
+        let end = offset + run.len;
+        if run.font.weight >= FontWeight::SEMIBOLD || run.font.family == *code_family {
+            offset = end;
+            runs.push(run);
+            continue;
+        }
+        let segments = fixation_segments(&flat.text, offset..end, |at| {
+            protected
+                .iter()
+                .any(|range| range.start <= at && at < range.end)
+        });
+        for (range, fixated) in segments {
+            let mut split = run.clone();
+            split.len = range.len();
+            if fixated {
+                split.font.weight = FontWeight::SEMIBOLD;
+            }
+            runs.push(split);
+        }
+        offset = end;
+    }
+    flat.runs = runs;
+}
+
+/// Tile `range` of `text` into `(byte_range, fixated)` segments: each maximal
+/// run of eligible letters becomes a word whose leading ~40% is fixated, and
+/// everything else — whitespace, digits, punctuation, protected spans — is
+/// emitted plain. Splits only ever land on grapheme boundaries; cutting
+/// inside a cluster would shape a dangling combining mark.
+fn fixation_segments(
+    text: &str,
+    range: Range<usize>,
+    in_protected: impl Fn(usize) -> bool,
+) -> Vec<(Range<usize>, bool)> {
+    let mut segments: Vec<(Range<usize>, bool)> = Vec::new();
+    let mut word: Vec<Range<usize>> = Vec::new();
+    let mut cursor = range.start;
+    let flush_word = |word: &mut Vec<Range<usize>>,
+                      segments: &mut Vec<(Range<usize>, bool)>,
+                      cursor: &mut usize| {
+        let Some(first) = word.first() else { return };
+        let start = first.start;
+        if *cursor < start {
+            segments.push((*cursor..start, false));
+        }
+        // Fixation prefix: ~40% of the word's grapheme clusters, at least 1.
+        let fix = (word.len() * 2 + 4) / 5;
+        let fix_end = word[fix - 1].end;
+        let end = word.last().map_or(start, |cluster| cluster.end);
+        segments.push((start..fix_end, true));
+        if fix_end < end {
+            segments.push((fix_end..end, false));
+        }
+        *cursor = end;
+        word.clear();
+    };
+    for (index, cluster) in text[range.clone()].grapheme_indices(true) {
+        let start = range.start + index;
+        let eligible = cluster.chars().next().is_some_and(|c| {
+            c.is_alphabetic()
+                && matches!(c.script(), Script::Latin | Script::Greek | Script::Cyrillic)
+        }) && !in_protected(start);
+        if eligible {
+            word.push(start..start + cluster.len());
+        } else {
+            flush_word(&mut word, &mut segments, &mut cursor);
+        }
+    }
+    flush_word(&mut word, &mut segments, &mut cursor);
+    if cursor < range.end {
+        segments.push((cursor..range.end, false));
+    }
+    segments
+}
+
 // ── Per-message state ──────────────────────────────────────────────────────
 
 /// Everything the renderer keeps between frames for one markdown body.
@@ -680,8 +777,9 @@ pub struct MarkdownView {
     volatile_from: Cell<usize>,
     /// Style the cached flats were built for. Colors and families live inside
     /// `TextRun`s, so a theme or font change has to drop them or the
-    /// transcript keeps painting the old faces.
-    style: RefCell<Option<(Palette, Metrics, Fonts)>>,
+    /// transcript keeps painting the old faces — same for guided reading,
+    /// which densifies the runs themselves.
+    style: RefCell<Option<(Palette, Metrics, Fonts, bool)>>,
     /// Per-element opacity spans for the live response. Text is committed to
     /// layout immediately; only these paint colors animate.
     veil: RefCell<RowVeil>,
@@ -826,8 +924,16 @@ impl MarkdownView {
     }
 
     /// Drop cached flats if the style they were built for no longer applies.
-    fn sync_style(&self, palette: &Palette, metrics: &Metrics, families: &Fonts) {
-        let current = (*palette, *metrics, families.clone());
+    /// `guided_reading` lives inside `TextRun`s, so the toggle invalidates
+    /// the same way a theme or font change does.
+    fn sync_style(
+        &self,
+        palette: &Palette,
+        metrics: &Metrics,
+        families: &Fonts,
+        guided_reading: bool,
+    ) {
+        let current = (*palette, *metrics, families.clone(), guided_reading);
         let mut style = self.style.borrow_mut();
         if style.as_ref() != Some(&current) {
             *style = Some(current);
@@ -925,6 +1031,10 @@ pub struct Ctx<'a> {
     copy_lead: Cell<Option<Rc<str>>>,
     animate_streaming: bool,
     math_enabled: bool,
+    /// Guided reading: split prose runs so word-leading graphemes shape at
+    /// `SEMIBOLD`. Style-affecting, so it joins `MarkdownView::sync_style`'s
+    /// cache stamp.
+    guided_reading: bool,
     /// The enclosing context menu inner affordances contribute actions to —
     /// formulas and `@`-mention file references. `None` where the surface has
     /// no menu to join.
@@ -964,6 +1074,7 @@ impl<'a> Ctx<'a> {
             copy_lead: Cell::new(None),
             animate_streaming: true,
             math_enabled: true,
+            guided_reading: false,
             context_menu: None,
             wrap_context_menu: false,
             file_ref_items: None,
@@ -1040,6 +1151,13 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// Guided reading: word-leading graphemes in prose shape semibold —
+    /// see [`apply_fixation`].
+    pub fn with_guided_reading(mut self, enabled: bool) -> Self {
+        self.guided_reading = enabled;
+        self
+    }
+
     /// Contribute formula and file-reference actions to an existing menu —
     /// a transcript row's message menu.
     pub fn with_context_menu(mut self, menu: ContextMenuHandle) -> Self {
@@ -1082,6 +1200,7 @@ impl<'a> Ctx<'a> {
             copy_lead: Cell::new(None),
             animate_streaming: self.animate_streaming,
             math_enabled: self.math_enabled,
+            guided_reading: self.guided_reading,
             context_menu: self.context_menu.clone(),
             wrap_context_menu: self.wrap_context_menu,
             file_ref_items: self.file_ref_items.clone(),
@@ -1154,6 +1273,9 @@ impl<'a> Ctx<'a> {
     ) -> Rc<FlatText> {
         let build = || {
             let mut flat = build();
+            if self.guided_reading {
+                apply_fixation(&mut flat, &self.families.code);
+            }
             if detect_refs {
                 if self.annotation_ref_labels > 0 {
                     flat.annotation_refs = annotation_references(&flat, self.annotation_ref_labels);
@@ -1998,7 +2120,7 @@ fn markdown_capped<'a>(
         return None;
     };
 
-    view.sync_style(ctx.palette, &ctx.metrics, &ctx.families);
+    view.sync_style(ctx.palette, &ctx.metrics, &ctx.families, ctx.guided_reading);
     let ctx = ctx.with_cache(view);
     if ctx.animate_streaming && view.streaming.get() {
         view.veil.borrow_mut().begin_frame();
@@ -3051,6 +3173,143 @@ mod tests {
         );
     }
 
+    /// `(slice, weight)` per run, in order — how a fixated flat reads.
+    fn run_pieces(flat: &FlatText) -> Vec<(String, FontWeight)> {
+        let mut offset = 0;
+        flat.runs
+            .iter()
+            .map(|run| {
+                let slice = flat.text[offset..offset + run.len].to_owned();
+                offset += run.len;
+                (slice, run.font.weight)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fixation_splits_words_and_still_tiles_the_text() {
+        let mut flat = flatten(
+            &runs_of("hello, world"),
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        apply_fixation(&mut flat, &Fonts::default().code);
+        assert_runs_tile(&flat);
+        // Five-letter words fixate their first two graphemes.
+        assert_eq!(
+            run_pieces(&flat),
+            vec![
+                ("he".to_owned(), FontWeight::SEMIBOLD),
+                ("llo".to_owned(), FontWeight::NORMAL),
+                (", ".to_owned(), FontWeight::NORMAL),
+                ("wo".to_owned(), FontWeight::SEMIBOLD),
+                ("rld".to_owned(), FontWeight::NORMAL),
+            ]
+        );
+    }
+
+    #[test]
+    fn fixation_skips_code_bold_and_math_but_keeps_link_styles() {
+        let mut flat = flatten(
+            &runs_of("see **bolden** `codex` [linked](https://example.com)"),
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        apply_fixation(&mut flat, &Fonts::default().code);
+        assert_runs_tile(&flat);
+        let pieces = run_pieces(&flat);
+        // Markdown bold is already semibold — never split.
+        assert_eq!(
+            pieces
+                .iter()
+                .filter(|(slice, _)| slice == "bolden")
+                .collect::<Vec<_>>(),
+            vec![&("bolden".to_owned(), FontWeight::SEMIBOLD)]
+        );
+        // Inline code keeps one normal-weight run in the code face.
+        assert_eq!(
+            pieces
+                .iter()
+                .filter(|(slice, _)| slice == "codex")
+                .collect::<Vec<_>>(),
+            vec![&("codex".to_owned(), FontWeight::NORMAL)]
+        );
+        // Linked words still fixate — and keep their underline.
+        let linked = pieces
+            .iter()
+            .filter(|(slice, _)| slice == "lin" || slice == "ked")
+            .map(|(slice, _)| slice.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(linked, vec!["lin", "ked"]);
+        assert!(
+            flat.runs
+                .iter()
+                .any(|run| run.underline.is_some() && run.font.weight == FontWeight::SEMIBOLD)
+        );
+    }
+
+    #[test]
+    fn fixation_leaves_joining_and_non_latin_scripts_untouched() {
+        let mut flat = flatten_plain(
+            "مرحبا 世界 test",
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        apply_fixation(&mut flat, &Fonts::default().code);
+        assert_runs_tile(&flat);
+        assert_eq!(
+            run_pieces(&flat),
+            vec![
+                ("مرحبا 世界 ".to_owned(), FontWeight::NORMAL),
+                ("te".to_owned(), FontWeight::SEMIBOLD),
+                ("st".to_owned(), FontWeight::NORMAL),
+            ]
+        );
+    }
+
+    #[test]
+    fn fixation_never_cuts_inside_a_grapheme_cluster() {
+        // "cafe\u{301}" — decomposed é is one cluster of two chars.
+        let mut flat = flatten_plain(
+            "cafe\u{301} nave",
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        apply_fixation(&mut flat, &Fonts::default().code);
+        assert_runs_tile(&flat);
+        // "café" is four clusters → "ca" fixated; the accent stays with its
+        // base in the trailing segment.
+        assert_eq!(
+            run_pieces(&flat),
+            vec![
+                ("ca".to_owned(), FontWeight::SEMIBOLD),
+                ("fe\u{301}".to_owned(), FontWeight::NORMAL),
+                (" ".to_owned(), FontWeight::NORMAL),
+                ("na".to_owned(), FontWeight::SEMIBOLD),
+                ("ve".to_owned(), FontWeight::NORMAL),
+            ]
+        );
+    }
+
+    #[test]
+    fn fixation_skips_monospace_runs() {
+        let mut flat = flatten_plain(
+            "verbatim output",
+            crate::fonts::DEFAULT_CODE_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        apply_fixation(&mut flat, &Fonts::default().code);
+        assert_eq!(flat.runs.len(), 1);
+        assert_eq!(flat.runs[0].font.weight, FontWeight::NORMAL);
+    }
+
     #[test]
     fn a_streaming_link_is_styled_but_not_clickable() {
         let flat = flatten(
@@ -3253,7 +3512,7 @@ mod tests {
         let dark = Palette::from_theme(&Theme::dark());
         let light = Palette::from_theme(&Theme::light());
 
-        view.sync_style(&dark, &Metrics::BODY, &Fonts::default());
+        view.sync_style(&dark, &Metrics::BODY, &Fonts::default(), false);
         let cached = view.flat(0, || {
             flatten_plain(
                 "a",
@@ -3263,7 +3522,7 @@ mod tests {
             )
         });
 
-        view.sync_style(&dark, &Metrics::BODY, &Fonts::default());
+        view.sync_style(&dark, &Metrics::BODY, &Fonts::default(), false);
         assert!(
             Rc::ptr_eq(
                 &cached,
@@ -3272,7 +3531,7 @@ mod tests {
             "re-syncing the same style must not invalidate"
         );
 
-        view.sync_style(&light, &Metrics::BODY, &Fonts::default());
+        view.sync_style(&light, &Metrics::BODY, &Fonts::default(), false);
         let relit = view.flat(0, || {
             flatten_plain(
                 "a",
