@@ -664,11 +664,10 @@ pub fn flatten_plain(
     }
 }
 
-/// Guided-reading tunables, using the scales the bionic-reading tools
-/// popularized: `fixation` is how much of each word is emphasized (1–5,
-/// mapping to ~20–60%), `saccade` is the letter distance the eye jumps
-/// between emphasized words (10–50), and `opacity` fades the unemphasized
-/// text (0–100 percent).
+/// Guided-reading tunables: `fixation` is how much of each word is
+/// emphasized (1–5, mapping to ~20–60%), `saccade` is the letter distance
+/// the eye jumps between emphasized words (10–50), and `opacity` fades
+/// the unemphasized text (0–100 percent).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuidedReading {
     pub fixation: u8,
@@ -687,9 +686,9 @@ impl Default for GuidedReading {
 }
 
 /// Guided reading: split each prose run so a word's leading graphemes shape
-/// at `SEMIBOLD` and the rest keeps the run's weight — the emphasis pattern
-/// sold elsewhere as "bionic reading". Only `runs` densifies; the flat string
-/// and every byte-range index (`links`, `code_ranges`, `copy`) are untouched.
+/// at `SEMIBOLD` and the rest keeps the run's weight. Only `runs` densifies;
+/// the flat string and every byte-range index (`links`, `code_ranges`,
+/// `copy`) are untouched.
 ///
 /// Two kinds of text are never split. Runs already at `SEMIBOLD` or heavier —
 /// markdown bold, headings — gain nothing but shaping cost. And anything

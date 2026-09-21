@@ -5121,8 +5121,8 @@ impl Waku {
         )
     }
 
-    /// The Guided reading experiment's three parameters, on the official
-    /// bionic scales: fixation 1–5, saccade 10–50 in tens, opacity 0–100.
+    /// The Guided reading experiment's three parameters: fixation 1–5,
+    /// saccade 10–50 in tens, opacity 0–100.
     /// Fixation and saccade change shaped widths, so their commits remeasure
     /// like a font-size change; opacity is paint-only.
     fn guided_reading_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {

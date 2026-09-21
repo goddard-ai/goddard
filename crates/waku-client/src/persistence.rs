@@ -198,7 +198,7 @@ fn default_experiment_enabled() -> bool {
 }
 
 /// Guided reading's fixation level: how much of each word is emphasized.
-/// 1–5, defaulting to the bionic tools' own default of 3.
+/// 1–5, defaulting to 3.
 fn default_guided_reading_fixation() -> u8 {
     3
 }
