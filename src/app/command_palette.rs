@@ -2242,6 +2242,12 @@ impl Waku {
                 "settings preferences appearance theme language light dark",
             ),
             (
+                SettingsPage::Keybindings,
+                "keybind.title",
+                "icons/keyboard.svg",
+                "keybindings keyboard shortcuts hotkeys keys remap manager",
+            ),
+            (
                 SettingsPage::Providers,
                 "settings.providers",
                 "icons/bot.svg",
@@ -2254,18 +2260,6 @@ impl Waku {
                 "settings preferences skills library create disable agent skill",
             ),
             (
-                SettingsPage::Git,
-                "settings.git",
-                "icons/git-branch.svg",
-                "settings preferences git worktrees branches repository checkout",
-            ),
-            (
-                SettingsPage::Keybindings,
-                "keybind.title",
-                "icons/keyboard.svg",
-                "keybindings keyboard shortcuts hotkeys keys remap manager",
-            ),
-            (
                 SettingsPage::Commands,
                 "settings.commands",
                 "icons/terminal.svg",
@@ -2276,6 +2270,12 @@ impl Waku {
                 "settings.terminal",
                 "icons/terminal-square.svg",
                 "settings preferences terminal shell font size link modifier click copy select",
+            ),
+            (
+                SettingsPage::Git,
+                "settings.git",
+                "icons/git-branch.svg",
+                "settings preferences git worktrees branches repository checkout",
             ),
             (
                 SettingsPage::Usage,
