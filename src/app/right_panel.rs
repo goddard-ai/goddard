@@ -1860,15 +1860,21 @@ mod tests {
         terminal_state.surfaces = vec![RightPanelSurface::Terminal(terminal_id)];
         terminal_state.active_surface = Some(0);
         terminal_state.file_tree_width = 248.0;
-        states.insert(session_with_terminal, terminal_state);
+        states.insert(RightPanelOwner::Session(session_with_terminal), terminal_state);
 
-        let other_state = RightPanelSessionState::take_or_closed(&mut states, other_session);
+        let other_state = RightPanelSessionState::take_or_closed(
+            &mut states,
+            RightPanelOwner::Session(other_session),
+        );
         assert!(!other_state.visible);
         assert!(other_state.surfaces.is_empty());
         assert_eq!(other_state.active_surface, None);
         assert_eq!(other_state.file_tree_width, DEFAULT_FILE_TREE_WIDTH);
 
-        let restored = RightPanelSessionState::take_or_closed(&mut states, session_with_terminal);
+        let restored = RightPanelSessionState::take_or_closed(
+            &mut states,
+            RightPanelOwner::Session(session_with_terminal),
+        );
         assert!(restored.visible);
         assert_eq!(
             restored.surfaces,
@@ -1999,15 +2005,62 @@ impl Waku {
         crate::platform::open_with_default_app(&resolved, cx);
     }
 
-    pub(super) fn store_selected_right_panel_state(&mut self) {
-        let state = self.take_active_right_panel_state();
-        // A session parks under its id; with none selected the active strip
-        // belongs to the detached context — a full-width terminal or the
-        // Projects page — and parks in its own slot.
-        if let Some(session_id) = self.state.selected_session {
-            self.right_panel_session_states.insert(session_id, state);
+    /// Which place the live strip belongs to right now, derived from the
+    /// same flags `navigation_location` reads — a page beats the selection
+    /// parked underneath it.
+    pub(super) fn active_right_panel_owner(&self) -> RightPanelOwner {
+        if self.notifications.open {
+            RightPanelOwner::Inbox
+        } else if self.automations_page {
+            RightPanelOwner::Automations
+        } else if self.drafts_page {
+            RightPanelOwner::Drafts
+        } else if let Some(project_id) = self.projects_page {
+            RightPanelOwner::Projects(project_id)
+        } else if let Some(session_id) = self.state.selected_session {
+            RightPanelOwner::Session(session_id)
+        } else if let Some(terminal_id) = self.selected_terminal {
+            RightPanelOwner::Terminal(terminal_id)
         } else {
-            self.right_panel_detached_state = state;
+            RightPanelOwner::Bare
+        }
+    }
+
+    /// Park the live strip under its owner and mount the incoming owner's —
+    /// the panel is context property, so a transition leaves every place's
+    /// tabs and visibility exactly as they were left. A no-op when the owner
+    /// did not change; call after the flags that decide the owner settle.
+    pub(super) fn sync_right_panel_owner(&mut self, cx: &mut Context<Self>) {
+        let owner = self.active_right_panel_owner();
+        if owner == self.right_panel_live_owner {
+            return;
+        }
+        let parked = self.take_active_right_panel_state();
+        self.right_panel_states
+            .insert(self.right_panel_live_owner, parked);
+        let incoming = RightPanelSessionState::take_or_closed(&mut self.right_panel_states, owner);
+        self.right_panel_live_owner = owner;
+        self.restore_right_panel_state(incoming, cx);
+    }
+
+    /// What the current owner lets into its strip: sessions and main-area
+    /// terminals take everything, a project page takes its issue/PR details
+    /// and files rooted at the project, and pages without their own surface
+    /// take nothing.
+    fn right_panel_owner_allows(&self, surface: &RightPanelSurface) -> bool {
+        match self.active_right_panel_owner() {
+            RightPanelOwner::Session(_) | RightPanelOwner::Terminal(_) | RightPanelOwner::Bare => {
+                true
+            }
+            RightPanelOwner::Projects(_) => matches!(
+                surface,
+                RightPanelSurface::GitHub(_)
+                    | RightPanelSurface::Files
+                    | RightPanelSurface::File(_)
+                    | RightPanelSurface::FileAtRef { .. }
+            ),
+            RightPanelOwner::Inbox => matches!(surface, RightPanelSurface::GitHub(_)),
+            RightPanelOwner::Drafts | RightPanelOwner::Automations => false,
         }
     }
 
@@ -2058,7 +2111,15 @@ impl Waku {
         self.right_panel_pending_tree_reveal = None;
         self.right_panel_tree_scroll_to = None;
         self.reload_clean_right_panel_file_editors(cx);
-        self.state.right_panel_visible = self.right_panel_visible;
+        // Visibility persists as the next launch's default only for owners
+        // that actually host a panel — an Automations visit must not write
+        // the hidden strip it mounts over the user's last real value.
+        if !matches!(
+            self.right_panel_live_owner,
+            RightPanelOwner::Drafts | RightPanelOwner::Automations | RightPanelOwner::Inbox
+        ) {
+            self.state.right_panel_visible = self.right_panel_visible;
+        }
         if self.active_right_panel_surface() == Some(&RightPanelSurface::Diff) {
             self.refresh_right_panel_diff(cx);
         }
@@ -2100,12 +2161,16 @@ impl Waku {
         session_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        let state = if self.state.selected_session == Some(session_id) {
+        let state = if self.right_panel_live_owner == RightPanelOwner::Session(session_id) {
             let state = self.take_active_right_panel_state();
             self.replace_active_right_panel_state(RightPanelSessionState::empty(false));
+            // The emptied strip has no owner — parking it under the dead
+            // session would leave a junk entry behind.
+            self.right_panel_live_owner = RightPanelOwner::Bare;
             Some(state)
         } else {
-            self.right_panel_session_states.remove(&session_id)
+            self.right_panel_states
+                .remove(&RightPanelOwner::Session(session_id))
         };
         if let Some(state) = state {
             for surface in &state.surfaces {
@@ -2201,16 +2266,12 @@ impl Waku {
         self.right_panel_diff_list_state.reset(line_count);
     }
 
-    /// Drop a project's work-item tab from every parked session's surface
+    /// Drop a project's work-item tab from every parked strip's surface
     /// list. The detail it renders is keyed by project, so a second copy in
-    /// another session's strip would show the same item. The active strip's
+    /// another owner's strip would show the same item. The active strip's
     /// copy — if any — is the caller's to handle.
     pub(super) fn remove_parked_github_surfaces(&mut self, project_id: Uuid) {
-        for state in self
-            .right_panel_session_states
-            .values_mut()
-            .chain(std::iter::once(&mut self.right_panel_detached_state))
-        {
+        for state in self.right_panel_states.values_mut() {
             let Some(index) = state.surfaces.iter().position(
                 |surface| matches!(surface, RightPanelSurface::GitHub(id) if *id == project_id),
             ) else {
@@ -2397,6 +2458,11 @@ impl Waku {
         reveal: bool,
         cx: &mut Context<Self>,
     ) {
+        // The active owner decides what its strip may host — a page that
+        // takes nothing leaves the request dead rather than leaking a tab.
+        if !self.right_panel_owner_allows(&surface) {
+            return;
+        }
         let reusable_index = reusable_surface_index(&self.right_panel_surfaces, &surface);
         if matches!(
             &surface,
@@ -2481,6 +2547,12 @@ impl Waku {
     }
 
     pub(super) fn open_right_panel_file(&mut self, relative_path: String, cx: &mut Context<Self>) {
+        // The Files-active path below reuses the tab rather than opening a
+        // surface, so the owner's admission check has to cover this entry
+        // too — files can't open where the owner takes none.
+        if !self.right_panel_owner_allows(&RightPanelSurface::File(relative_path.clone())) {
+            return;
+        }
         self.ensure_initial_right_panel_file_editor_width();
         let Some(active) = self.right_panel_active_surface else {
             self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx);
@@ -2646,7 +2718,7 @@ impl Waku {
         ) {
             self.close_right_panel_surface(index, cx);
         }
-        for state in self.right_panel_session_states.values_mut() {
+        for state in self.right_panel_states.values_mut() {
             let Some(index) = state.surfaces.iter().position(
                 |surface| matches!(surface, RightPanelSurface::SideChat(id) if *id == session_id),
             ) else {
@@ -3257,18 +3329,12 @@ impl Waku {
             .right_panel_surfaces
             .iter()
             .filter_map(RightPanelSurface::browser_id)
-            .chain(self.right_panel_session_states.values().flat_map(|state| {
+            .chain(self.right_panel_states.values().flat_map(|state| {
                 state
                     .surfaces
                     .iter()
                     .filter_map(RightPanelSurface::browser_id)
             }))
-            .chain(
-                self.right_panel_detached_state
-                    .surfaces
-                    .iter()
-                    .filter_map(RightPanelSurface::browser_id),
-            )
             .collect::<HashSet<_>>();
         self.right_panel_browsers
             .retain(|browser_id, _| retained_browser_ids.contains(browser_id));
@@ -3619,7 +3685,7 @@ impl Waku {
         let retained_terminal_ids = active_terminal_ids
             .iter()
             .copied()
-            .chain(self.right_panel_session_states.values().flat_map(|state| {
+            .chain(self.right_panel_states.values().flat_map(|state| {
                 state
                     .surfaces
                     .iter()
@@ -6690,18 +6756,26 @@ impl Waku {
     }
 
     /// The directory the Files surface and its editors are rooted at right
-    /// now: the selected session's workspace, or the selected terminal's
-    /// live cwd. A detached context with no terminal on screen keeps the
-    /// root its files already have — the Projects page must not dissolve a
-    /// terminal's open files just by passing through.
+    /// now, from the owner on screen: the selected session's workspace, the
+    /// selected terminal's live cwd, or the project a Projects page is
+    /// scoped to. Pages that admit no files resolve to `None`.
     pub(super) fn resolve_right_panel_files_root(&self, cx: &App) -> Option<PathBuf> {
-        if let Some(workspace) = self.selected_workspace_path() {
-            return Some(workspace.to_path_buf());
+        match self.active_right_panel_owner() {
+            RightPanelOwner::Session(_) => self
+                .selected_workspace_path()
+                .map(std::path::Path::to_path_buf),
+            RightPanelOwner::Terminal(terminal_id) => self.terminal_cwd(terminal_id, cx),
+            RightPanelOwner::Projects(project_id) => self
+                .state
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .map(|project| project.path.clone()),
+            RightPanelOwner::Inbox
+            | RightPanelOwner::Drafts
+            | RightPanelOwner::Automations
+            | RightPanelOwner::Bare => None,
         }
-        if let Some(terminal_id) = self.selected_terminal {
-            return self.terminal_cwd(terminal_id, cx);
-        }
-        self.right_panel_files_root.clone()
     }
 
     /// Re-root the files slice when the resolved root drifts — a `cd` in the

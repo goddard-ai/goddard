@@ -596,7 +596,7 @@ impl Waku {
         };
 
         if let Some((session_id, summary)) = self.session_owning_pull_request(&thread) {
-            self.notifications.open = false;
+            self.close_inbox(cx);
             self.select_session(session_id, cx);
             let prompt = github::github_fix_prompt(&summary, None);
             self.github_fill_fix_prompt(prompt, cx);
@@ -618,7 +618,7 @@ impl Waku {
         if let Some(browser) = self.github_browsers.get_mut(&project_id) {
             browser.fix_pending.insert(detail, window.window_handle());
         }
-        self.notifications.open = false;
+        self.close_inbox(cx);
         self.github_ensure_detail(project_id, detail, cx);
         self.github_maybe_run_pending_fix(project_id, detail, cx);
     }
@@ -750,6 +750,9 @@ impl Waku {
             self.sidebar_rows_fingerprint.set(None);
         }
         self.notifications.open = true;
+        // The page owns its own strip — whatever was mounted (a session's,
+        // a terminal's) parks until it comes back.
+        self.sync_right_panel_owner(cx);
         // Opening the page is an eager poll — freshness beats interval for
         // a user-initiated view.
         self.notifications.next_poll = Instant::now();
@@ -760,6 +763,7 @@ impl Waku {
 
     pub(super) fn close_inbox(&mut self, cx: &mut Context<Self>) {
         self.notifications.open = false;
+        self.sync_right_panel_owner(cx);
         cx.notify();
     }
 

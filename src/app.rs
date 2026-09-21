@@ -1134,6 +1134,28 @@ struct RightPanelRefEditor {
     scrollbar: Rc<ScrollbarState>,
 }
 
+/// Which place owns a right-panel strip — and therefore which parked state
+/// a transition parks and restores. Precedence mirrors
+/// `navigation_location`: a page beats the selection underneath it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum RightPanelOwner {
+    Session(Uuid),
+    /// A terminal filling the main area, keyed by its id — like a session,
+    /// each terminal keeps its own tabs.
+    Terminal(Uuid),
+    /// The Projects page, keyed by the project it is scoped to. Admits only
+    /// issue/PR details and project-rooted files.
+    Projects(Uuid),
+    /// The notification inbox — a page in the same "claims the main area"
+    /// sense; it admits issue/PR details only.
+    Inbox,
+    Drafts,
+    Automations,
+    /// Nothing selected and no page open — the strip that was live keeps a
+    /// home rather than being dropped.
+    Bare,
+}
+
 struct RightPanelSessionState {
     visible: bool,
     surfaces: Vec<RightPanelSurface>,
@@ -1197,9 +1219,9 @@ impl RightPanelSessionState {
         }
     }
 
-    fn take_or_closed(states: &mut HashMap<Uuid, Self>, session_id: Uuid) -> Self {
+    fn take_or_closed(states: &mut HashMap<RightPanelOwner, Self>, owner: RightPanelOwner) -> Self {
         states
-            .remove(&session_id)
+            .remove(&owner)
             .unwrap_or_else(|| Self::empty(false))
     }
 }
@@ -2626,11 +2648,15 @@ pub struct Waku {
     panel_resize_drag: Option<PanelResizeDrag>,
     /// Window-relative PiP position, independent of incoming preview frames.
     computer_use_preview_position: Option<gpui::Point<Pixels>>,
-    right_panel_session_states: HashMap<Uuid, RightPanelSessionState>,
-    /// Panel state parked while no task owns the strip — a full-width
-    /// terminal or the Projects page. Swapped in and out exactly like a
-    /// session's, so the detached context keeps its own tabs and visibility.
-    right_panel_detached_state: RightPanelSessionState,
+    /// Panel strips parked by owner — every place that can fill the main
+    /// area (a session, a main-area terminal, a page) swaps its own strip in
+    /// and out, so one context's tabs and visibility never leak into
+    /// another's.
+    right_panel_states: HashMap<RightPanelOwner, RightPanelSessionState>,
+    /// The owner the live strip currently belongs to. Compared against
+    /// `active_right_panel_owner` to drive the swap; diverges from it only
+    /// between a flag change and the sync that follows.
+    right_panel_live_owner: RightPanelOwner,
     right_panel_surfaces: Vec<RightPanelSurface>,
     right_panel_active_surface: Option<usize>,
     /// Per side-chat session: the transcript's virtualized rows, its row-kind
@@ -5726,8 +5752,8 @@ impl Waku {
                 fps_counter_visible: false,
                 panel_resize_drag: None,
                 computer_use_preview_position: None,
-                right_panel_session_states: HashMap::new(),
-                right_panel_detached_state: RightPanelSessionState::empty(false),
+                right_panel_states: HashMap::new(),
+                right_panel_live_owner: RightPanelOwner::Bare,
                 right_panel_surfaces: Vec::new(),
                 side_chat_views: HashMap::new(),
                 side_chat_composers: HashMap::new(),

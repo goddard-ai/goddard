@@ -401,6 +401,9 @@ impl super::Waku {
         // Settings-family pages close the inbox on open; the early return
         // in `open_settings_page` skips its clear, so match it here.
         self.notifications.open = false;
+        // Closing the inbox uncovers the owner underneath — its strip
+        // remounts behind the settings overlay.
+        self.sync_right_panel_owner(cx);
         // The footer's hover zone unmounts without firing hover-off; only the
         // dock's own hover may keep it alive across the swap.
         self.sidebar_dock_zone_hovered = false;

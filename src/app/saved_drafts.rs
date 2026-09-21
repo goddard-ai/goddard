@@ -153,6 +153,9 @@ impl Waku {
             self.sidebar_rows_fingerprint.set(None);
         }
         self.drafts_page = true;
+        // The page owns its own strip — whatever was mounted (a session's,
+        // a terminal's) parks until it comes back.
+        self.sync_right_panel_owner(cx);
         let focus = self.drafts_search.read(cx).focus();
         window.focus(&focus, cx);
         cx.notify();
@@ -169,6 +172,7 @@ impl Waku {
             self.session_navigation
                 .visit(Some(NavigationLocation::DraftsPage), location);
         }
+        self.sync_right_panel_owner(cx);
         cx.notify();
     }
 

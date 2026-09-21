@@ -267,6 +267,13 @@ impl Waku {
         }
         if self.selected_terminal == Some(terminal_id) {
             self.selected_terminal = None;
+            // The dead terminal's strip transfers to Bare rather than
+            // parking under a key nothing can select again — its panel
+            // terminals and browsers are live utilities, not the shell's.
+            self.right_panel_live_owner = RightPanelOwner::Bare;
+            self.right_panel_states
+                .remove(&RightPanelOwner::Terminal(terminal_id));
+            self.sync_right_panel_owner(cx);
         }
         if self.last_visible_terminal == Some(terminal_id) {
             self.last_visible_terminal = None;
@@ -535,13 +542,13 @@ impl Waku {
         }
         if let Some(session_id) = session {
             let surface = RightPanelSurface::Terminal(terminal_id);
-            if self.state.selected_session == Some(session_id) {
+            if self.right_panel_live_owner == RightPanelOwner::Session(session_id) {
                 // Push directly rather than add_right_panel_surface: the tab
                 // joins the strip without activating or stealing focus.
                 self.right_panel_surfaces.push(surface);
             } else {
-                self.right_panel_session_states
-                    .entry(session_id)
+                self.right_panel_states
+                    .entry(RightPanelOwner::Session(session_id))
                     .or_insert_with(|| RightPanelSessionState::empty(false))
                     .surfaces
                     .push(surface);
@@ -686,17 +693,8 @@ impl Waku {
         }
         if self.state.selected_session.is_some() {
             self.capture_and_save_current_composer_draft(cx);
-            self.store_selected_right_panel_state();
             self.store_transcript_scroll_position();
             self.state.selected_session = None;
-            // The session's strip is parked; the terminal context's own
-            // panel state — its tabs and visibility — comes back rather
-            // than inheriting what the session had open.
-            let detached = std::mem::replace(
-                &mut self.right_panel_detached_state,
-                RightPanelSessionState::empty(false),
-            );
-            self.restore_right_panel_state(detached, cx);
         }
         self.pending_session_activation = None;
         // A terminal claims the main area too: open pages fold, keeping
@@ -709,8 +707,11 @@ impl Waku {
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
-        // The detached strip may have parked while this terminal `cd`'d
-        // elsewhere, or another terminal's cwd was the resolved root.
+        // Whatever owned the strip — a session, a page, or another
+        // terminal — parks; this terminal's own strip comes back.
+        self.sync_right_panel_owner(cx);
+        // The terminal may have `cd`'d while it was off screen, or its
+        // strip may have come back rooted somewhere else.
         if self.sync_right_panel_files_root(cx) {
             self.refresh_right_panel_working_tree(cx);
         }
@@ -920,11 +921,7 @@ impl Waku {
             self.close_right_panel_surface(index, cx);
             return;
         }
-        for state in self
-            .right_panel_session_states
-            .values_mut()
-            .chain(std::iter::once(&mut self.right_panel_detached_state))
-        {
+        for state in self.right_panel_states.values_mut() {
             let Some(index) = state
                 .surfaces
                 .iter()

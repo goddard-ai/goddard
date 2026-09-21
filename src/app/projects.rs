@@ -525,6 +525,10 @@ impl Waku {
         }
         self.projects_page = Some(project_id);
         self.last_projects_page_project = Some(project_id);
+        // Whatever owned the strip — a session, a terminal, another page —
+        // parks; this project's own strip comes back.
+        self.sync_right_panel_owner(cx);
+        self.save();
         self.projects_ensure_state(project_id, window, cx);
         self.projects_refresh(project_id, cx);
         self.focus_projects_filter(window, cx);
@@ -559,6 +563,7 @@ impl Waku {
             self.session_navigation
                 .visit(Some(NavigationLocation::ProjectsPage(project_id)), location);
         }
+        self.sync_right_panel_owner(cx);
         cx.notify();
     }
 

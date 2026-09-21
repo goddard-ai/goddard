@@ -428,7 +428,6 @@ impl Waku {
         let session_changed = self.state.selected_session != Some(session_id);
         if session_changed {
             self.capture_and_save_current_composer_draft(cx);
-            self.store_selected_right_panel_state();
             self.store_transcript_scroll_position();
         }
         self.state.selected_session = Some(session_id);
@@ -532,14 +531,13 @@ impl Waku {
         {
             self.session_navigation.remember_new_task(session_id);
         }
+        // The owner swap runs whether or not the session id changed — a
+        // page may have been mounted over this same session, in which case
+        // the page's strip is what needs parking.
+        self.sync_right_panel_owner(cx);
         if session_changed {
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
-            let panel_state = RightPanelSessionState::take_or_closed(
-                &mut self.right_panel_session_states,
-                session_id,
-            );
-            self.restore_right_panel_state(panel_state, cx);
             self.restore_missing_worktree(session_id, cx);
             // An open Git panel follows the newly selected session's checkout.
             self.sync_git_panel_workspace(cx);
@@ -616,10 +614,13 @@ impl Waku {
                         .map(|surface| PersistedFullscreenSurface { surface, detail })
                 });
         let mut panels: HashMap<Uuid, PersistedRightPanelState> = self
-            .right_panel_session_states
+            .right_panel_states
             .iter()
-            .map(|(session_id, state)| {
-                (
+            .filter_map(|(owner, state)| {
+                let RightPanelOwner::Session(session_id) = owner else {
+                    return None;
+                };
+                Some((
                     *session_id,
                     persist_right_panel_state(
                         state.visible,
@@ -632,10 +633,13 @@ impl Waku {
                         &state.diff_expanded_paths,
                         state.diff_source,
                     ),
-                )
+                ))
             })
             .collect();
-        if let Some(session_id) = self.state.selected_session {
+        // Only a session's own strip may persist under its id — the live
+        // strip belongs to `right_panel_live_owner`, which a page can hold
+        // even while a session stays selected underneath.
+        if let RightPanelOwner::Session(session_id) = self.right_panel_live_owner {
             panels.insert(
                 session_id,
                 persist_right_panel_state(
@@ -707,17 +711,22 @@ impl Waku {
             .collect();
         self.pending_sidebar_scroll
             .set(self.state.sidebar_scroll.map(list_offset_from_persisted));
-        self.right_panel_session_states = self
+        self.right_panel_states = self
             .state
             .right_panel_sessions
             .iter()
             .filter(|(id, _)| task_exists(id))
-            .map(|(id, state)| (*id, right_panel_state_from_persisted(state)))
+            .map(|(id, state)| {
+                (
+                    RightPanelOwner::Session(*id),
+                    right_panel_state_from_persisted(state),
+                )
+            })
             .collect();
         // A side-chat tab outlives an unsent chat — those are never
         // catalogued — and a chat deleted while the app was down.
         let dead_side_chats: Vec<Uuid> = self
-            .right_panel_session_states
+            .right_panel_states
             .values()
             .flat_map(|state| state.surfaces.iter())
             .filter_map(|surface| match surface {
@@ -731,10 +740,13 @@ impl Waku {
         }
         if let Some(session_id) = self.state.selected_session {
             let panel_state = RightPanelSessionState::take_or_closed(
-                &mut self.right_panel_session_states,
-                session_id,
+                &mut self.right_panel_states,
+                RightPanelOwner::Session(session_id),
             );
             self.restore_right_panel_state(panel_state, cx);
+            // The strip just mounted answers to this owner until a page
+            // restore below swaps it out again.
+            self.right_panel_live_owner = self.active_right_panel_owner();
             if let Some(offset) = self.transcript_scroll_positions.get(&session_id).copied() {
                 let landing = TranscriptLanding::Position(offset);
                 // The runtime attach that lands after this resets the rows
@@ -1224,6 +1236,15 @@ impl Waku {
         self.remove_project_drafts(project_id);
         if self.projects_page == Some(project_id) {
             self.projects_page = None;
+            // The page's own strip dies with it — nothing selects it again.
+            self.right_panel_states
+                .remove(&RightPanelOwner::Projects(project_id));
+            // A live strip belonging to the deleted page transfers to Bare
+            // rather than parking under a dead key.
+            if self.right_panel_live_owner == RightPanelOwner::Projects(project_id) {
+                self.right_panel_live_owner = RightPanelOwner::Bare;
+            }
+            self.sync_right_panel_owner(cx);
         }
         if self.last_projects_page_project == Some(project_id) {
             self.last_projects_page_project = None;
@@ -1440,6 +1461,7 @@ impl Waku {
                 }
             } else {
                 self.state.selected_session = None;
+                self.sync_right_panel_owner(cx);
                 self.save();
                 cx.notify();
             }
@@ -1737,6 +1759,9 @@ impl Waku {
         if was_selected {
             self.state.selected_session = None;
             self.settings_page = None;
+            // The departed session's strip is already stored; whatever the
+            // navigation below lands on gets its own.
+            self.sync_right_panel_owner(cx);
             match self.state.archive_navigation {
                 ArchiveNavigation::NextSession => {
                     // The row that followed the departed one now sits at its
@@ -2447,7 +2472,14 @@ impl Waku {
 
     pub(super) fn persist_panel_layout(&mut self) {
         self.state.sidebar_visible = self.sidebar_visible;
-        self.state.right_panel_visible = self.right_panel_visible;
+        // A page that mounts no strip (Drafts, Automations, Inbox) leaves
+        // the panel hidden; its value must not overwrite the user's real one.
+        if !matches!(
+            self.right_panel_live_owner,
+            RightPanelOwner::Drafts | RightPanelOwner::Automations | RightPanelOwner::Inbox
+        ) {
+            self.state.right_panel_visible = self.right_panel_visible;
+        }
         self.state.git_panel_visible = self.git_panel_visible;
         self.state.sidebar_width = self.sidebar_width;
         self.state.right_panel_width = self.right_panel_width;

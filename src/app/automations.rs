@@ -158,6 +158,9 @@ impl Waku {
             self.sidebar_rows_fingerprint.set(None);
         }
         self.automations_page = true;
+        // The page owns its own strip — whatever was mounted (a session's,
+        // a terminal's) parks until it comes back.
+        self.sync_right_panel_owner(cx);
         let focus = self.automations_search.read(cx).focus();
         window.focus(&focus, cx);
         cx.notify();
@@ -175,6 +178,7 @@ impl Waku {
             self.session_navigation
                 .visit(Some(NavigationLocation::AutomationsPage), location);
         }
+        self.sync_right_panel_owner(cx);
         cx.notify();
     }
 
@@ -248,6 +252,7 @@ impl Waku {
         self.automations_editor = None;
         self.automations_detail = None;
         self.automations_page = false;
+        self.sync_right_panel_owner(cx);
         cx.notify();
     }
 

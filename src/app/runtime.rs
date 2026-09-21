@@ -2119,8 +2119,16 @@ impl Waku {
             .retain(|session| session.id != session_id);
         self.transcript_scroll_positions.remove(&session_id);
         self.background_work.remove(&session_id);
+        self.right_panel_states
+            .remove(&RightPanelOwner::Session(session_id));
         if self.state.selected_session == Some(session_id) {
             self.state.selected_session = None;
+            // The dead session's strip transfers to Bare rather than
+            // parking under a key nothing selects again.
+            if self.right_panel_live_owner == RightPanelOwner::Session(session_id) {
+                self.right_panel_live_owner = RightPanelOwner::Bare;
+            }
+            self.sync_right_panel_owner(cx);
         }
         self.save();
         cx.notify();
@@ -2319,6 +2327,9 @@ impl Waku {
                 self.state.selected_project = Some(project_id);
                 self.create_session_for(project_id, self.state.last_provider, cx);
             }
+            // Covers the no-selection landing too — select/create swap
+            // through their own activation, this is a no-op then.
+            self.sync_right_panel_owner(cx);
         }
     }
 
@@ -2997,6 +3008,7 @@ impl Waku {
             .is_some_and(|selected| removed_sessions.contains(&selected))
         {
             self.state.selected_session = None;
+            self.sync_right_panel_owner(cx);
         }
         if self.state.selected_project.is_some_and(|selected| {
             !self
