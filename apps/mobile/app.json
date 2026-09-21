@@ -61,6 +61,12 @@
       ],
       "expo-font",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Goddard to scan a daemon's QR code to connect."
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow Goddard to choose photos to attach to tasks.",

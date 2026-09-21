@@ -57,6 +57,9 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 waku-client = { path = "crates/waku-client" }
 waku-protocol = { path = "crates/waku-protocol" }
 pulldown-cmark = "0.13"
+# QR for the daemon connect link; default features pull renderers we paint
+# ourselves instead.
+qrcode = { version = "0.14", default-features = false }
 # Native, offline math typesetting; all layout and raster work runs on workers.
 ratex-parser = "=0.1.14"
 ratex-layout = "=0.1.14"

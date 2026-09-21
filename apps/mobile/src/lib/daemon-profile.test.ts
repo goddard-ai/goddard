@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  daemonConnectLink,
   displayHost,
   isPrivateDaemonAddress,
   normalizeDaemonAddress,
   normalizeDaemonProfile,
+  parseDaemonConnectLink,
   parseDaemonProfiles,
   profileInitials,
 } from './daemon-profile';
@@ -52,6 +54,31 @@ describe('daemon profiles', () => {
   test('creates compact initials', () => {
     expect(profileInitials('Home Mac')).toBe('HM');
     expect(profileInitials('studio')).toBe('ST');
+  });
+
+  test('parses the desktop QR connect link', () => {
+    const token = 'alpha bravo charlie delta echo foxtrot';
+    const link = parseDaemonConnectLink(
+      `goddard://connect?address=${encodeURIComponent('ws://192.168.1.8:34123')}&token=${encodeURIComponent(token)}&name=Studio%20Mac`,
+    );
+    expect(link).toEqual({
+      address: 'ws://192.168.1.8:34123',
+      token,
+      name: 'Studio Mac',
+    });
+  });
+
+  test('rejects connect links that are not ours or lack fields', () => {
+    expect(() => parseDaemonConnectLink('https://example.com/connect')).toThrow(
+      'not a Goddard connect code',
+    );
+    expect(() => parseDaemonConnectLink('not a url')).toThrow('not a Goddard connect code');
+    expect(() => parseDaemonConnectLink('goddard://connect?address=ws://10.0.0.2:34123')).toThrow(
+      'missing its address or token',
+    );
+    expect(() =>
+      daemonConnectLink({ address: 'ftp://waku.local', token: 'word' }),
+    ).toThrow('ws:// or wss://');
   });
 
   test('recovers valid profiles from a partially corrupt registry', () => {

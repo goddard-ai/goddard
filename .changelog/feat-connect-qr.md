@@ -1,0 +1,1 @@
+- Daemon settings now show a QR code for mobile pairing: "Show QR code" in the connection details reveals a code encoding the LAN address and token, and the mobile app scans it (Daemons → scan icon, or the daemon picker's "Scan QR Code…") to add and connect to the host without typing — the same `goddard://connect` link also works from the phone's camera app

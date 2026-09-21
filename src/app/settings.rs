@@ -53,6 +53,13 @@ const SETTINGS_CONTEXT: &str = "Settings";
 
 actions!(waku_settings, [FocusNext, FocusPrevious]);
 
+/// A QR module matrix encoded once — dark modules row-major — so the
+/// settings paint pass only reads it.
+pub(super) struct DaemonQrCode {
+    pub width: usize,
+    pub dark: Vec<bool>,
+}
+
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
 const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 16] = [
@@ -3227,6 +3234,38 @@ impl Waku {
             })
             .child(tr!("daemon.regenerate_token"));
 
+        let qr_shown = self.daemon_qr.is_some();
+        let qr_toggle = div()
+            .id("toggle-daemon-qr")
+            .tab_index(0)
+            .h(px(27.0))
+            .px(px(9.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(if qr_shown {
+                tr!("daemon.hide_qr")
+            } else {
+                tr!("daemon.show_qr")
+            })
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_daemon_qr(cx)))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.toggle_daemon_qr(cx);
+                    cx.stop_propagation();
+                }
+            }));
+
         let expose_card = {
             let title = tr!("daemon.expose_title");
             let description = tr!("daemon.expose_description");
@@ -3534,6 +3573,52 @@ impl Waku {
                         .child(regenerate_button)
                 })
             };
+            let qr_row = {
+                let title = tr!("daemon.qr_code");
+                let code = self.daemon_qr.clone();
+                search.matched(&title, "").map(|matched| {
+                    div()
+                        .py(px(8.0))
+                        .border_t(hairline())
+                        .border_color(theme.separator)
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(settings_title_jump(
+                            div()
+                                .w(px(80.0))
+                                .flex_none()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .items_start()
+                                .gap(px(6.0))
+                                .when_some(code, |column, code| column.child(daemon_qr_view(code)))
+                                .child(
+                                    div()
+                                        .whitespace_normal()
+                                        .text_size(sp(12.0))
+                                        .line_height(sp(15.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(tr!("daemon.qr_hint")),
+                                ),
+                        )
+                        .child(qr_toggle)
+                })
+            };
             if search.active() && search.hits() == before {
                 None
             } else {
@@ -3546,6 +3631,7 @@ impl Waku {
                         .children(header)
                         .children(url_row)
                         .children(token_row)
+                        .children(qr_row)
                         .when(!search.active(), |card| {
                             card.child(
                                 div()
@@ -6343,9 +6429,55 @@ impl Waku {
             .unwrap_or(true)
     }
 
+    /// The `goddard://connect` link the QR encodes — the LAN IPv4 a phone
+    /// can dial (this machine's hostname does not resolve for it), the
+    /// exposed port, the mnemonic token, and the hostname as a label hint.
+    fn daemon_connect_url(&self) -> String {
+        let host = self
+            .daemon_lan_ip
+            .as_deref()
+            .unwrap_or(&self.daemon_hostname);
+        let mut url = url::Url::parse("goddard://connect").expect("the connect link base is valid");
+        url.query_pairs_mut()
+            .append_pair(
+                "address",
+                &format!("ws://{host}:{}", self.state.daemon_exposure.port),
+            )
+            .append_pair("token", &self.state.daemon_exposure.token)
+            .append_pair("name", &self.daemon_hostname);
+        url.into()
+    }
+
+    /// The QR carries the token in scannable form, so it hides behind its
+    /// own toggle like the token's eye. Encoding once at reveal keeps the
+    /// paint pass to a read of the cached matrix.
+    fn toggle_daemon_qr(&mut self, cx: &mut Context<Self>) {
+        self.daemon_qr = if self.daemon_qr.is_some() {
+            None
+        } else {
+            qrcode::QrCode::with_error_correction_level(
+                self.daemon_connect_url(),
+                qrcode::EcLevel::M,
+            )
+            .ok()
+            .map(|code| {
+                std::sync::Arc::new(DaemonQrCode {
+                    width: code.width(),
+                    dark: code
+                        .into_colors()
+                        .into_iter()
+                        .map(|color| color == qrcode::types::Color::Dark)
+                        .collect(),
+                })
+            })
+        };
+        cx.notify();
+    }
+
     fn set_daemon_exposure_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if !enabled {
             self.daemon_token_revealed = false;
+            self.daemon_qr = None;
         }
         let settings = if enabled {
             match self.daemon_exposure_from_fields(cx) {
@@ -6389,6 +6521,7 @@ impl Waku {
         };
         settings.token = waku_client::DaemonExposureSettings::new_token();
         self.daemon_token_revealed = false;
+        self.daemon_qr = None;
         self.apply_daemon_exposure(settings, cx);
     }
 
@@ -6400,6 +6533,9 @@ impl Waku {
         if self.daemon_reconfigure_pending || settings == self.state.daemon_exposure {
             return;
         }
+        // A changed port or token stales the encoded link — hide it rather
+        // than show a code that no longer connects.
+        self.daemon_qr = None;
         if self.daemon.is_externally_managed() {
             self.show_toast(tr!("daemon.external_description"));
             return;
@@ -11036,6 +11172,47 @@ pub(super) fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
         Some(relative) => format!("~/{}", relative.display()),
         None => path.display().to_string(),
     }
+}
+
+/// The mobile connect code — black modules on a white card regardless of
+/// theme, since a scanner needs the classic contrast. Painted as quads so
+/// it stays sharp at any scale rather than rasterizing to an image.
+#[track_caller]
+fn daemon_qr_view(code: std::sync::Arc<DaemonQrCode>) -> Div {
+    const QUIET_ZONE: f32 = 10.0;
+    div()
+        .p(px(QUIET_ZONE))
+        .rounded(px(8.0))
+        .bg(gpui::white())
+        .child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, window, _| {
+                    let module = f32::from(bounds.size.width) / code.width as f32;
+                    // A hair of overlap keeps rasterization from leaving
+                    // bright seams between adjacent dark modules.
+                    let side = px(module + 0.5);
+                    for y in 0..code.width {
+                        for x in 0..code.width {
+                            if !code.dark[y * code.width + x] {
+                                continue;
+                            }
+                            window.paint_quad(fill(
+                                gpui::Bounds::new(
+                                    point(
+                                        bounds.origin.x + px(module * x as f32),
+                                        bounds.origin.y + px(module * y as f32),
+                                    ),
+                                    gpui::size(side, side),
+                                ),
+                                gpui::black(),
+                            ));
+                        }
+                    }
+                },
+            )
+            .size(px(120.0)),
+        )
 }
 
 /// The bordered action button the settings cards share — the Apply/Test/

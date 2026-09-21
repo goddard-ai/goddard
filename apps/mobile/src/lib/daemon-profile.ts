@@ -74,6 +74,52 @@ export function profileInitials(name: string): string {
   return `${[...words[0]!][0] ?? ''}${[...words.at(-1)!][0] ?? ''}`.toUpperCase();
 }
 
+export interface DaemonConnectLink {
+  name: string;
+  address: string;
+  token: string;
+}
+
+/** Validate connect-link fields — shared by the QR scanner's full-URL parse
+ * and the `goddard://connect` deep link's already-split params. */
+export function daemonConnectLink(parts: {
+  address?: string;
+  token?: string;
+  name?: string;
+}): DaemonConnectLink {
+  const address = parts.address?.trim();
+  const token = parts.token?.trim();
+  if (!address || !token) {
+    throw new Error('The connect code is missing its address or token');
+  }
+  return {
+    address: normalizeDaemonAddress(address),
+    token,
+    name: parts.name?.trim() ?? '',
+  };
+}
+
+/** Parse a `goddard://connect?address=…&token=…` link — the payload the
+ * desktop daemon settings QR encodes. */
+export function parseDaemonConnectLink(raw: string): DaemonConnectLink {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw new Error('That is not a Goddard connect code');
+  }
+  const isConnect =
+    url.hostname === 'connect' || url.pathname.replace(/^\/+|\/+$/g, '') === 'connect';
+  if (url.protocol !== 'goddard:' || !isConnect) {
+    throw new Error('That is not a Goddard connect code');
+  }
+  return daemonConnectLink({
+    address: url.searchParams.get('address') ?? undefined,
+    token: url.searchParams.get('token') ?? undefined,
+    name: url.searchParams.get('name') ?? undefined,
+  });
+}
+
 export function isPrivateDaemonAddress(address: string): boolean {
   try {
     const hostname = new URL(normalizeDaemonAddress(address)).hostname

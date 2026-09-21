@@ -1816,6 +1816,9 @@ pub struct Waku {
     /// Cached once at construction for the Daemon settings connection URL;
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
+    /// Same cache for the connect QR: phones can't resolve the hostname, so
+    /// the code carries the LAN IPv4 when one exists.
+    daemon_lan_ip: Option<String>,
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
     session_hydrations: HashSet<Uuid>,
@@ -1878,6 +1881,9 @@ pub struct Waku {
     worktree_sync_branches_input: Entity<TextInput>,
     daemon_reconfigure_pending: bool,
     daemon_token_revealed: bool,
+    /// The mobile connect QR, encoded once when the user reveals it —
+    /// `Some` is also the visibility flag, so frames only paint the matrix.
+    daemon_qr: Option<std::sync::Arc<settings::DaemonQrCode>>,
     /// The evaluation credentials editor's fields — one set per eval backend,
     /// seeded from the daemon's settings mirror when the routing section
     /// first shows. Secrets stay masked and never render elsewhere.
@@ -3911,6 +3917,7 @@ impl Waku {
         let store = StateStore::remote(daemon.clone());
         let daemons = store.daemons();
         let daemon_hostname = crate::daemon::local_hostname().unwrap_or_else(|| "this-mac".into());
+        let daemon_lan_ip = crate::daemon::local_ipv4();
         let composer_draft_store = ComposerDraftStore::remote(daemons.clone());
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
@@ -5268,6 +5275,7 @@ impl Waku {
                 remote_catalogs,
                 remote_catalogs_path,
                 daemon_hostname,
+                daemon_lan_ip,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
                 sweep_visited: HashSet::new(),
@@ -5312,6 +5320,7 @@ impl Waku {
                 worktree_sync_branches_input,
                 daemon_reconfigure_pending: false,
                 daemon_token_revealed: false,
+                daemon_qr: None,
                 eval_typesafe_key_input,
                 eval_vercel_key_input,
                 eval_vercel_team_input,

@@ -98,19 +98,42 @@ export default function DaemonsScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable
-              accessibilityLabel="Add daemon"
-              accessibilityRole="button"
-              hitSlop={10}
-              onPress={() => router.push('/daemon-editor')}>
-              <AppSymbol
-                name={{ ios: 'plus', android: 'add', web: 'add' }}
-                size={21}
-                tintColor={NativeTint}
-              />
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                accessibilityLabel="Scan QR code"
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={() => router.push('/daemon-scan')}>
+                <AppSymbol
+                  name={{
+                    ios: 'qrcode.viewfinder',
+                    android: 'qr_code_scanner',
+                    web: 'qr_code_scanner',
+                  }}
+                  size={20}
+                  tintColor={NativeTint}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Add daemon"
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={() => router.push('/daemon-editor')}>
+                <AppSymbol
+                  name={{ ios: 'plus', android: 'add', web: 'add' }}
+                  size={21}
+                  tintColor={NativeTint}
+                />
+              </Pressable>
+            </View>
           ),
           unstable_headerRightItems: () => [{
+            type: 'button',
+            accessibilityLabel: 'Scan QR code',
+            icon: { type: 'sfSymbol', name: 'qrcode.viewfinder' },
+            label: 'Scan QR code',
+            onPress: () => router.push('/daemon-scan'),
+          }, {
             type: 'button',
             accessibilityLabel: 'Add daemon',
             icon: { type: 'sfSymbol', name: 'plus' },
@@ -204,6 +227,11 @@ export default function DaemonsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 14,
+  },
   listContent: { paddingBottom: 36, paddingHorizontal: 16 },
   sectionTitle: {
     fontSize: 13,

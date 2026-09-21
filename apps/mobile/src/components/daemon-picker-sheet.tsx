@@ -1,4 +1,5 @@
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -160,6 +161,25 @@ export function DaemonPickerSheet({
                 />
               )}
               onPress={() => pushEditor(null)}
+            />
+            <SheetRow
+              description="The code in Settings → Daemon on the host"
+              label="Scan QR Code…"
+              leading={(
+                <AppSymbol
+                  name={{
+                    ios: 'qrcode.viewfinder',
+                    android: 'qr_code_scanner',
+                    web: 'qr_code_scanner',
+                  }}
+                  size={22}
+                  tintColor={NativeTint}
+                />
+              )}
+              onPress={() => {
+                handleDismiss();
+                router.push('/daemon-scan');
+              }}
             />
           </View>
           <View

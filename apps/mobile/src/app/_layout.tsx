@@ -161,6 +161,16 @@ function AppNavigator() {
           title: "Add Daemon",
         }}
       />
+      <Stack.Screen
+        name="daemon-scan"
+        options={{
+          presentation: "pageSheet",
+          title: "Scan QR Code",
+        }}
+      />
+      {/* The `goddard://connect` deep link — outside the daemon guard so it
+       * can add the very first profile. */}
+      <Stack.Screen name="connect" options={{ title: "Connect" }} />
     </Stack>
   );
 }

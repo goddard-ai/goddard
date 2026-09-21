@@ -62,6 +62,7 @@ impl Waku {
         // Secrets are revealed only for the current visit to the page. This
         // also masks the token again when the Daemon row is reselected.
         self.daemon_token_revealed = false;
+        self.daemon_qr = None;
         if page != SettingsPage::Commands {
             self.custom_command_editor = None;
         }

@@ -63,6 +63,20 @@ pub fn local_hostname() -> Option<String> {
         .find(|hostname| !hostname.is_empty())
 }
 
+/// The LAN IPv4 a nearby device can dial directly — the address the daemon
+/// settings QR encodes, since phones cannot resolve this machine's mDNS
+/// hostname. `connect` on an unbound UDP socket only resolves a route, so
+/// nothing is sent; the kernel reports the default egress interface's
+/// source address. Resolved once at app construction.
+pub fn local_ipv4() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("192.0.0.1:80").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) if !ip.is_loopback() => Some(ip.to_string()),
+        _ => None,
+    }
+}
+
 pub(crate) fn daemon_executable_path() -> anyhow::Result<PathBuf> {
     if let Some(path) = std::env::var_os("GODDARD_DAEMON_PATH").filter(|path| !path.is_empty()) {
         return Ok(path.into());

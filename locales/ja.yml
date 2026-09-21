@@ -246,6 +246,10 @@ daemon.token: トークン
 daemon.reveal_token: トークンを表示
 daemon.hide_token: トークンを隠す
 daemon.regenerate_token: 再生成
+daemon.qr_code: QR コード
+daemon.qr_hint: Goddard モバイルアプリでスキャンして接続します。
+daemon.show_qr: QR コードを表示
+daemon.hide_qr: 隠す
 daemon.security_warning: このトークンは、このマシン上のタスク、ファイル、Git、添付ファイル、コーディングエージェントへの完全なアクセス権を持ちます。プライベートネットワーク外では信頼できる TLS プロキシ経由で WSS を使用してください。
 daemon.external_title: 外部デーモン
 daemon.external_description: このデスクトップは Goddard の外部で管理されているデーモンに接続しています。リスナー、ブラウザオリジン、トークンは接続先ホストで設定してください。
