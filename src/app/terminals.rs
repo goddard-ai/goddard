@@ -76,13 +76,27 @@ fn truncate_path_ancestors(path: &str, max_chars: usize, keep_first: bool) -> St
     format!("…/{}", components[components.len() - 1])
 }
 
+/// The group's flat listing in sidebar order: pinned terminals lead,
+/// with `terminal_order`'s creation order kept inside each partition.
+/// Stays a lazy scan — the sidebar fingerprint reads it every frame.
+fn sidebar_terminal_order<'a>(
+    terminal_order: &'a [Uuid],
+    records: &'a HashMap<Uuid, TerminalRecord>,
+) -> impl Iterator<Item = Uuid> + 'a {
+    let partition = move |pinned: bool| {
+        terminal_order.iter().copied().filter(move |id| {
+            records
+                .get(id)
+                .is_some_and(|record| record.pinned == pinned)
+        })
+    };
+    partition(true).chain(partition(false))
+}
+
 impl Waku {
-    /// Terminal ids in creation order — the group's flat listing.
+    /// Terminal ids in sidebar order — pinned rows lead the group.
     pub(super) fn sidebar_terminal_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
-        self.terminal_order
-            .iter()
-            .copied()
-            .filter(|id| self.terminal_records.contains_key(id))
+        sidebar_terminal_order(&self.terminal_order, &self.terminal_records)
     }
 
     /// The directory a terminal spawns into — the record's own directory,
@@ -222,18 +236,16 @@ impl Waku {
         // A terminal filling the main area hands the view to a neighbor —
         // the row listed before it, else the one after — found before the
         // order entry disappears. No neighbor means the new task page.
+        let listed = self.sidebar_terminal_ids().collect::<Vec<_>>();
         let successor = (self.selected_terminal == Some(terminal_id))
             .then(|| {
-                let index = self
-                    .terminal_order
-                    .iter()
-                    .position(|id| *id == terminal_id)?;
-                self.terminal_order[..index]
+                let index = listed.iter().position(|id| *id == terminal_id)?;
+                listed[..index]
                     .iter()
                     .rev()
-                    .chain(self.terminal_order[index + 1..].iter())
+                    .chain(listed[index + 1..].iter())
                     .copied()
-                    .find(|id| self.terminal_records.contains_key(id))
+                    .next()
             })
             .flatten();
         self.right_panel_terminals.remove(&terminal_id);
@@ -828,19 +840,19 @@ impl Waku {
     ) {
         self.settings_page = None;
         if let Some(terminal_id) = self.selected_terminal {
-            // The next record after the selected one, wrapping — the
+            // The next row after the selected one, wrapping — the
             // selected id itself sits out of the chained slices, so a
             // lone terminal finds nothing.
-            let next = self
-                .terminal_order
+            let listed = self.sidebar_terminal_ids().collect::<Vec<_>>();
+            let next = listed
                 .iter()
                 .position(|id| *id == terminal_id)
                 .and_then(|index| {
-                    self.terminal_order[index + 1..]
+                    listed[index + 1..]
                         .iter()
-                        .chain(self.terminal_order[..index].iter())
+                        .chain(listed[..index].iter())
                         .copied()
-                        .find(|id| self.terminal_records.contains_key(id))
+                        .next()
                 });
             if let Some(next) = next {
                 self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
@@ -1377,6 +1389,32 @@ impl Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_terminal_order_leads_with_pinned() {
+        let ids = (1..=4u128).map(Uuid::from_u128).collect::<Vec<_>>();
+        let record = |pinned| TerminalRecord {
+            session: None,
+            pinned,
+            working_directory: None,
+            opened_at: 0,
+            custom_title: None,
+        };
+        let mut records = HashMap::new();
+        records.insert(ids[0], record(false));
+        records.insert(ids[1], record(true));
+        records.insert(ids[2], record(false));
+        records.insert(ids[3], record(true));
+
+        // Each partition keeps the flat list's creation order.
+        let listed = sidebar_terminal_order(&ids, &records).collect::<Vec<_>>();
+        assert_eq!(listed, vec![ids[1], ids[3], ids[0], ids[2]]);
+
+        // Order entries without records drop out of the listing.
+        records.remove(&ids[3]);
+        let listed = sidebar_terminal_order(&ids, &records).collect::<Vec<_>>();
+        assert_eq!(listed, vec![ids[1], ids[0], ids[2]]);
+    }
 
     #[test]
     fn ancestor_truncation_leaves_short_paths_alone() {

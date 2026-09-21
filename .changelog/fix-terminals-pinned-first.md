@@ -1,0 +1,1 @@
+- Pinned terminals now sort to the top of the sidebar's Terminals group instead of staying in creation order among unpinned rows

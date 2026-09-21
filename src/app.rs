@@ -2620,7 +2620,8 @@ pub struct Waku {
     right_panel_terminals: HashMap<Uuid, Entity<TerminalView>>,
     /// Every terminal the sidebar's Terminals group lists — session-scoped
     /// and global alike — keyed by the terminal surface's id.
-    /// `terminal_order` carries the flat list's creation order.
+    /// `terminal_order` carries the flat list's creation order; the sidebar
+    /// partitions it pinned-first at read time.
     terminal_records: HashMap<Uuid, TerminalRecord>,
     terminal_order: Vec<Uuid>,
     /// Terminals whose last command finished successfully while the
