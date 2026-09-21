@@ -3476,9 +3476,7 @@ impl WakuBackend {
         let model = match selection.model.as_deref().map(str::trim) {
             Some("" | "default") => None,
             Some(model) => Some(model.to_owned()),
-            None => sender_config
-                .as_ref()
-                .and_then(|config| config.1.clone()),
+            None => sender_config.as_ref().and_then(|config| config.1.clone()),
         };
         let (inherited_effort, inherited_tier, inherited_window) = sender_config
             .map(|config| (config.2, config.3, config.4))
@@ -3919,7 +3917,9 @@ impl WakuBackend {
                 .queued_messages
                 .iter()
                 .position(|queued| queued.id == queued_message_id)
-                .ok_or_else(|| anyhow!("task {session_id} has no queued prompt {queued_message_id}"))?;
+                .ok_or_else(|| {
+                    anyhow!("task {session_id} has no queued prompt {queued_message_id}")
+                })?;
             if !session.queued_messages[index].is_agent_owned() {
                 bail!("queued message {queued_message_id} is owned by the client, not the daemon");
             }
@@ -4499,22 +4499,18 @@ fn forward_driver_events(
                 // session's injection — later prompts stay untouched. A
                 // rejected steer leaves the flag unset so the next prompt
                 // retries.
-                if steer.as_ref().is_some_and(|steer| {
-                    steer.context == Some(crate::agent::ContextSteer::Memory)
-                }) {
+                if steer
+                    .as_ref()
+                    .is_some_and(|steer| steer.context == Some(crate::agent::ContextSteer::Memory))
+                {
                     memory.mark_injected(session_id);
                 }
                 // A queue-drained prompt folded into the parked turn: its
                 // mirrored chip's wait is over even when the steer carried
                 // no sender (an automation run) to attribute.
                 if let Some(queued_id) = steer.and_then(|steer| steer.queued_id)
-                    && unmirror_agent_queued_prompt(
-                        &task_state,
-                        &task_store,
-                        session_id,
-                        queued_id,
-                    )
-                    .is_ok()
+                    && unmirror_agent_queued_prompt(&task_state, &task_store, session_id, queued_id)
+                        .is_ok()
                 {
                     send_agent_queue_changed(&task_state, &events, session_id);
                 }
@@ -4715,8 +4711,7 @@ fn persist_agent_prompt(
             .retain(|queued| queued.id != queued_id);
         session.queued_messages.len() != before
     });
-    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task, false)
-        || dequeued
+    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task, false) || dequeued
     {
         state.mark_session_dirty(session_id);
         task_store.save(&mut state)?;
@@ -5130,7 +5125,9 @@ mod tests {
             .iter_mut()
             .find(|session| session.id == session_id)
             .unwrap();
-        session.queued_messages.push(crate::model::QueuedMessage::new("mine"));
+        session
+            .queued_messages
+            .push(crate::model::QueuedMessage::new("mine"));
         let user_id = session.queued_messages[0].id;
         drop(locked);
         assert!(
@@ -5155,7 +5152,8 @@ mod tests {
         // chip must not re-add it — rehydration would deliver it twice.
         let daemon_copy_without_agent = {
             let mut copy = existing.clone();
-            copy.queued_messages.retain(|queued| !queued.is_agent_owned());
+            copy.queued_messages
+                .retain(|queued| !queued.is_agent_owned());
             copy
         };
         let mut resurrecting = daemon_copy_without_agent.clone();

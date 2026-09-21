@@ -6268,9 +6268,7 @@ impl Waku {
                 .iter()
                 .find(|session| session.id == session_id)
                 .and_then(|session| session.turns.last())
-                .filter(|turn| {
-                    turn.status == TurnStatus::Running && !turn.provider_turn_started
-                })
+                .filter(|turn| turn.status == TurnStatus::Running && !turn.provider_turn_started)
                 .map(|turn| turn.id);
             if let Some(turn_id) = unstarted_turn {
                 self.settle_unstarted_turn(session_id, turn_id, cx);

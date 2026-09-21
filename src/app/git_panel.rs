@@ -1527,7 +1527,11 @@ impl Waku {
     /// not only the picker's — opens a fresh chat on the checkout and sends
     /// the resolution prompt itself, no click. When no provider can take the
     /// send, the prompt still lands in the new chat's composer as a draft.
-    pub(super) fn auto_resolve_sync_conflict(&mut self, conflict: SyncConflict, cx: &mut Context<Self>) {
+    pub(super) fn auto_resolve_sync_conflict(
+        &mut self,
+        conflict: SyncConflict,
+        cx: &mut Context<Self>,
+    ) {
         let workspace = conflict.workspace();
         let prompt = sync_conflict_prompt(&conflict);
         if let SyncConflict::Rebase { base, .. } = &conflict {

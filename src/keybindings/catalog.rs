@@ -2679,7 +2679,12 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "secondary-shift-a",
         Workspace,
     ),
-    e("workspace.push_base", All, "secondary-shift-enter", Workspace),
+    e(
+        "workspace.push_base",
+        All,
+        "secondary-shift-enter",
+        Workspace,
+    ),
     e("workspace.pin_task", All, "secondary-alt-p", Workspace),
     e("workspace.copy_selection", All, "secondary-c", Workspace),
     e(

@@ -3121,9 +3121,7 @@ impl Waku {
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)
             }
-            TranscriptRowKind::CheckpointPending => {
-                self.render_card_checkpoint_pending_row(&theme)
-            }
+            TranscriptRowKind::CheckpointPending => self.render_card_checkpoint_pending_row(&theme),
             // Folded out of the kinds list entirely; the fallback renders
             // nothing.
             TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {

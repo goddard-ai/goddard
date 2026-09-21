@@ -1030,7 +1030,10 @@ mod tests {
         let checkpoint = capture_turn(&directory, session, 1).unwrap();
         assert_eq!(checkpoint.status, CheckpointStatus::Ready);
         assert!(
-            checkpoint.files.iter().any(|file| file.path == "tracked.txt"),
+            checkpoint
+                .files
+                .iter()
+                .any(|file| file.path == "tracked.txt"),
             "edits still diff against the pre-turn head"
         );
         assert!(

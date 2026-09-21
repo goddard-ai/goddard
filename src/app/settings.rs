@@ -1496,7 +1496,10 @@ impl Waku {
             };
             head_cards.extend(setting_card(
                 tr!("settings.check_for_updates"),
-                tr!("settings.check_for_updates_description", version = app_build),
+                tr!(
+                    "settings.check_for_updates_description",
+                    version = app_build
+                ),
                 div()
                     .id("check-for-updates-now")
                     .tab_index(0)

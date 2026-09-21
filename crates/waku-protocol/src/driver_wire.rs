@@ -121,10 +121,9 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "steerAccepted",
             json!({ "message": message, "sentByTask": sent_by_task, "hidden": hidden }),
         ),
-        DriverEvent::QueuedMessagesChanged { messages } => (
-            "queuedMessagesChanged",
-            json!({ "messages": messages }),
-        ),
+        DriverEvent::QueuedMessagesChanged { messages } => {
+            ("queuedMessagesChanged", json!({ "messages": messages }))
+        }
         DriverEvent::SteerRejected {
             message,
             reason,
@@ -458,8 +457,7 @@ mod tests {
         .unwrap();
         assert_eq!(wire.kind, "queuedMessagesChanged");
 
-        let DriverEvent::QueuedMessagesChanged { messages } = event_from_wire(wire).unwrap()
-        else {
+        let DriverEvent::QueuedMessagesChanged { messages } = event_from_wire(wire).unwrap() else {
             panic!("the event changed variants during its wire round trip");
         };
         assert_eq!(messages, vec![agent]);

@@ -4162,12 +4162,13 @@ impl Waku {
                 move |_| {
                     let edit_weak = weak.clone();
                     let remove_weak = weak.clone();
-                    let remove_item = MenuItem::new(tr!("composer.remove_followup"), move |_, cx| {
-                        let _ = remove_weak.update(cx, |this, cx| {
-                            this.remove_queued_message(session_id, message_id, cx);
-                        });
-                    })
-                    .icon("icons/trash.svg");
+                    let remove_item =
+                        MenuItem::new(tr!("composer.remove_followup"), move |_, cx| {
+                            let _ = remove_weak.update(cx, |this, cx| {
+                                this.remove_queued_message(session_id, message_id, cx);
+                            });
+                        })
+                        .icon("icons/trash.svg");
                     if agent_owned {
                         return vec![remove_item];
                     }

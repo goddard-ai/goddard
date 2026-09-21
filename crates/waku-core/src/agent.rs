@@ -125,11 +125,7 @@ impl AgentState {
     /// Update the session's turn bookkeeping from a runtime event. Returns
     /// the pending steer a rejection resolved, so the caller can tell a
     /// dropped context injection apart from a refused agent message.
-    pub fn note_driver_event(
-        &self,
-        session_id: Uuid,
-        event: &DriverEvent,
-    ) -> Option<AgentPrompt> {
+    pub fn note_driver_event(&self, session_id: Uuid, event: &DriverEvent) -> Option<AgentPrompt> {
         match event {
             DriverEvent::TurnStarted => {
                 *self.turns.lock().entry(session_id).or_default() = AgentTurn {
@@ -606,7 +602,10 @@ mod tests {
             },
         );
         // The mirrored chip's prompt returns to the head of the queue.
-        assert_eq!(state.pop_queued(session).unwrap().queued_id, Some(queued_id));
+        assert_eq!(
+            state.pop_queued(session).unwrap().queued_id,
+            Some(queued_id)
+        );
 
         let _ = state.note_driver_event(
             session,

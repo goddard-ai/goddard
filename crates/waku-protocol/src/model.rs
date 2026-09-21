@@ -1116,7 +1116,9 @@ impl SessionStatus {
 pub enum QueuedMessageSource {
     #[default]
     User,
-    Agent { sent_by: Option<Uuid> },
+    Agent {
+        sent_by: Option<Uuid>,
+    },
 }
 
 /// A follow-up message queued while the agent is busy. It becomes its own
@@ -2128,7 +2130,10 @@ impl AgentSession {
         // The daemon reuses a mirrored queue entry's id as the delivered
         // message's id, so a parked agent chip converts into this turn's
         // prompt even if its queue-change event was missed.
-        let dequeued = self.queued_messages.iter().any(|queued| queued.id == message_id);
+        let dequeued = self
+            .queued_messages
+            .iter()
+            .any(|queued| queued.id == message_id);
         self.queued_messages
             .retain(|queued| queued.id != message_id);
         if let Some(active) = self.active_turn_id() {
@@ -2924,7 +2929,9 @@ pub enum DriverEvent {
     /// daemon's full snapshot of agent-sourced entries; clients merge it
     /// through [`AgentSession::merge_agent_queued`] so composer-queued
     /// follow-ups are untouched.
-    QueuedMessagesChanged { messages: Vec<QueuedMessage> },
+    QueuedMessagesChanged {
+        messages: Vec<QueuedMessage>,
+    },
     /// The provider could not steer the running turn (for example it ended
     /// before the request arrived). The app decides the fallback.
     SteerRejected {
@@ -5789,13 +5796,15 @@ mod tests {
 
         // An identical snapshot is a no-op.
         let snapshot = session.queued_messages.clone();
-        assert!(!session.merge_agent_queued(
-            snapshot
-                .iter()
-                .filter(|queued| queued.is_agent_owned())
-                .cloned()
-                .collect()
-        ));
+        assert!(
+            !session.merge_agent_queued(
+                snapshot
+                    .iter()
+                    .filter(|queued| queued.is_agent_owned())
+                    .cloned()
+                    .collect()
+            )
+        );
         assert_eq!(session.queued_messages, snapshot);
     }
 
@@ -5811,13 +5820,7 @@ mod tests {
             .push(QueuedMessage::new("user draft"));
 
         let turn_id = Uuid::new_v4();
-        assert!(session.adopt_submitted_prompt(
-            "parked prompt",
-            turn_id,
-            queued_id,
-            None,
-            false
-        ));
+        assert!(session.adopt_submitted_prompt("parked prompt", turn_id, queued_id, None, false));
 
         // Only the matching entry left; the delivered message reuses its id.
         assert_eq!(session.queued_messages.len(), 1);

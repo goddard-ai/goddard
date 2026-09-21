@@ -339,11 +339,7 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 "`create` takes a JSON object; run `goddard-agent schema` for its shape",
             )?;
             Ok(Command::AgentCreateSession {
-                provider: payload
-                    .provider
-                    .as_deref()
-                    .map(provider_kind)
-                    .transpose()?,
+                provider: payload.provider.as_deref().map(provider_kind).transpose()?,
                 model: payload.model,
                 project: payload.project,
                 workspace: match payload.workspace {

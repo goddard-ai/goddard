@@ -3221,12 +3221,7 @@ impl Waku {
         self.refresh_command_palette_results(&query, true, cx);
     }
 
-    fn refresh_command_palette_results(
-        &mut self,
-        query: &str,
-        preserve_selection: bool,
-        cx: &App,
-    ) {
+    fn refresh_command_palette_results(&mut self, query: &str, preserve_selection: bool, cx: &App) {
         match self.command_palette.view {
             CommandPaletteView::Resume => {
                 self.refresh_command_palette_resume_results(query, preserve_selection);

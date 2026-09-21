@@ -4180,8 +4180,7 @@ mod tests {
     fn devin_title_probe_memory_steer() {
         const CLEAN_PROMPT: &str = "Reply with exactly the word: atlantic";
 
-        let binary =
-            crate::command_env::find_executable("devin").expect("devin is not installed");
+        let binary = crate::command_env::find_executable("devin").expect("devin is not installed");
         let cwd = std::env::temp_dir().join("waku-devin-title-probe");
         std::fs::create_dir_all(&cwd).unwrap();
         let agent =
@@ -4208,9 +4207,10 @@ mod tests {
                     } else {
                         String::new()
                     };
-                    captured
-                        .lock()
-                        .push(format!("{:>6.1}s {kind}{detail}", started.elapsed().as_secs_f64()));
+                    captured.lock().push(format!(
+                        "{:>6.1}s {kind}{detail}",
+                        started.elapsed().as_secs_f64()
+                    ));
                     Ok(())
                 },
                 agent_client_protocol::on_receive_notification!(),
@@ -4351,9 +4351,10 @@ mod tests {
             for title in &titles {
                 eprintln!("reload {attempt}: title {title:?}");
             }
-            if titles.iter().any(|title| {
-                !crate::devin_session::is_placeholder_title(title, Some(CLEAN_PROMPT))
-            }) {
+            if titles
+                .iter()
+                .any(|title| !crate::devin_session::is_placeholder_title(title, Some(CLEAN_PROMPT)))
+            {
                 break;
             }
         }

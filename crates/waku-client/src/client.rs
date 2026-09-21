@@ -16,8 +16,7 @@ use uuid::Uuid;
 use waku_protocol::MAX_WIRE_MESSAGE_BYTES;
 use waku_protocol::{
     ClientMessage, Command, DaemonSettings, PROTOCOL_VERSION, ReplayCursor, Request,
-    ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage,
-    WorkspaceOperation,
+    ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage, WorkspaceOperation,
 };
 
 const READ_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -44,9 +43,7 @@ fn request_timeout(command: &Command) -> Duration {
             | WorkspaceOperation::PruneWorktrees { .. }
             | WorkspaceOperation::ResetWorktree { .. }
             | WorkspaceOperation::ArchiveProjectlessWorkspace { .. }
-            | WorkspaceOperation::RestoreProjectlessWorkspace { .. } => {
-                WORKTREE_REQUEST_TIMEOUT
-            }
+            | WorkspaceOperation::RestoreProjectlessWorkspace { .. } => WORKTREE_REQUEST_TIMEOUT,
             _ => REQUEST_TIMEOUT,
         },
         Command::RewindSessionToMessage { .. } => WORKTREE_REQUEST_TIMEOUT,

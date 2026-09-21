@@ -2077,7 +2077,8 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
 
     attach_changed_files(&mut session, Vec::new());
     assert!(
-        !folded_transcript_row_kinds(&session, &HashSet::new(), false).contains(&ChangedFiles(turn_id))
+        !folded_transcript_row_kinds(&session, &HashSet::new(), false)
+            .contains(&ChangedFiles(turn_id))
     );
 
     attach_changed_files(
@@ -2090,7 +2091,8 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
     );
     assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
     assert!(
-        !folded_transcript_row_kinds(&session, &HashSet::new(), false).contains(&ChangedFiles(turn_id)),
+        !folded_transcript_row_kinds(&session, &HashSet::new(), false)
+            .contains(&ChangedFiles(turn_id)),
         "a response with visible text hosts the card inside its footer"
     );
     session.turns[0]
@@ -2099,7 +2101,8 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
         .expect("checkpoint")
         .status = CheckpointStatus::Unavailable;
     assert!(
-        !folded_transcript_row_kinds(&session, &HashSet::new(), false).contains(&ChangedFiles(turn_id))
+        !folded_transcript_row_kinds(&session, &HashSet::new(), false)
+            .contains(&ChangedFiles(turn_id))
     );
     assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
 }
@@ -2163,7 +2166,8 @@ fn checkpoint_completion_invalidates_the_cached_transcript_rows() {
     );
     assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
     assert!(
-        !folded_transcript_row_kinds(&session, &HashSet::new(), false).contains(&ChangedFiles(turn_id)),
+        !folded_transcript_row_kinds(&session, &HashSet::new(), false)
+            .contains(&ChangedFiles(turn_id)),
         "checkpoint completion changes the existing footer row's height"
     );
 }

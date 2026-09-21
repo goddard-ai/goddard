@@ -507,7 +507,9 @@ pub enum Command {
     /// mirrored [`crate::model::QueuedMessage`] entry. User-queued follow-ups
     /// are client-owned — they are removed by editing the saved session, not
     /// through this command.
-    CancelQueuedPrompt { queued_message_id: Uuid },
+    CancelQueuedPrompt {
+        queued_message_id: Uuid,
+    },
     /// Read the daemon-owned friends document (friend code, friends,
     /// pending requests, transfers). Global command — nil session id.
     GetFriends,
