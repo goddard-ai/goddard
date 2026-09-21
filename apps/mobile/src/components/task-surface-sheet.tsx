@@ -18,6 +18,8 @@ import type {
   GitFileChange,
   Project,
   ReviewDiffSource,
+  ReviewEntry,
+  ReviewQueue,
   WakuClient,
   WorkingTreeEntry,
 } from "@waku/client";
@@ -34,6 +36,7 @@ import {
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -50,33 +53,41 @@ import { liquidGlass } from "@/components/glass-surface";
 import { MonoFont, NativeTint, Radius } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import {
+  approveReviewCommit,
   collectWorkspaceDiff,
   commitWorkspace,
   daemonKeys,
   discardWorkspaceFile,
   generateWorkspaceCommitMessage,
   inspectGitPanel,
+  listReviewQueue,
   listWorkspaceTree,
+  promoteReviewQueue,
   pullWorkspace,
   pushWorkspace,
+  readWorkspaceBinaryFile,
   readWorkspaceTextFile,
+  rejectReviewCommit,
   stageWorkspaceFile,
   unstageWorkspaceFile,
+  writeWorkspaceTextFile,
 } from "@/lib/daemon-api";
 import { useDaemon } from "@/lib/daemon-context";
 import { sessionCwd } from "@/lib/mobile-runtime";
 import { useProviderModels } from "@/hooks/use-daemon-data";
 import {
   gitStatusLabel,
+  imageMimeForPath,
   latestReviewTurnSource,
   parseNumstat,
   reviewDiffSourceLabel,
+  reviewStatusLabel,
   splitReviewPatch,
   upstreamLabel,
   type ReviewPatchFile,
 } from "@/lib/task-surfaces";
 
-export type TaskSurface = "terminal" | "files" | "review" | "git";
+export type TaskSurface = "terminal" | "files" | "review" | "git" | "queue";
 
 type ReviewPatchSection = ReviewPatchFile & { data: ReviewPatchFile[] };
 
@@ -117,6 +128,15 @@ const SURFACE_DETAILS: Record<
       ios: "arrow.triangle.branch",
       android: "call_split",
       web: "call_split",
+    },
+  },
+  queue: {
+    title: "Review queue",
+    subtitle: "Approve and promote commits",
+    icon: {
+      ios: "checkmark.circle",
+      android: "check_circle",
+      web: "check_circle",
     },
   },
 };
@@ -182,6 +202,9 @@ function SurfaceBody({
   }
   if (surface === "git") {
     return <GitSurface root={root} session={session} />;
+  }
+  if (surface === "queue") {
+    return <QueueSurface root={root} />;
   }
   return <ReviewSurface root={root} session={session} />;
 }
@@ -391,14 +414,25 @@ function FilesSurface({ root }: { root: string | null }) {
   const daemon = useDaemon();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const profileId = daemon.activeProfile?.id ?? "disconnected";
   const [expanded, setExpanded] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const imageMime = selectedPath ? imageMimeForPath(selectedPath) : null;
 
   useEffect(() => {
     setExpanded([]);
     setSelectedPath(null);
   }, [root]);
+
+  useEffect(() => {
+    setEditing(false);
+    setDraft("");
+    setSaving(false);
+  }, [selectedPath]);
 
   const tree = useQuery({
     queryKey: daemonKeys.workspaceTree(profileId, root ?? "none", expanded),
@@ -414,9 +448,55 @@ function FilesSurface({ root }: { root: string | null }) {
     ),
     queryFn: () => readWorkspaceTextFile(daemon.client!, root!, selectedPath!),
     enabled: Boolean(
-      daemon.client && daemon.phase === "connected" && root && selectedPath,
+      daemon.client &&
+        daemon.phase === "connected" &&
+        root &&
+        selectedPath &&
+        !imageMime,
     ),
   });
+  const image = useQuery({
+    queryKey: [
+      ...daemonKeys.workspaceFile(
+        profileId,
+        root ?? "none",
+        selectedPath ?? "none",
+      ),
+      "binary",
+    ],
+    queryFn: () =>
+      readWorkspaceBinaryFile(daemon.client!, root!, selectedPath!),
+    enabled: Boolean(
+      daemon.client &&
+        daemon.phase === "connected" &&
+        root &&
+        selectedPath &&
+        imageMime,
+    ),
+  });
+
+  const saveFile = useCallback(() => {
+    const client = daemon.client;
+    if (!client || !root || !selectedPath || saving) return;
+    setSaving(true);
+    void writeWorkspaceTextFile(client, root, selectedPath, draft)
+      .then(async () => {
+        setEditing(false);
+        await queryClient.invalidateQueries({
+          queryKey: daemonKeys.workspaceFile(profileId, root, selectedPath),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: ["daemon", profileId, "workspace-diff"],
+        });
+        await queryClient.invalidateQueries({
+          queryKey: ["daemon", profileId, "git-panel"],
+        });
+      })
+      .catch((cause) =>
+        Alert.alert("Couldn’t save file", errorMessage(cause)),
+      )
+      .finally(() => setSaving(false));
+  }, [daemon.client, draft, profileId, queryClient, root, saving, selectedPath]);
 
   if (!root) {
     return (
@@ -436,10 +516,40 @@ function FilesSurface({ root }: { root: string | null }) {
       <View style={styles.fill}>
         <SurfaceHeader
           action={
-            <HeaderTextButton
-              label="Refresh"
-              onPress={() => void file.refetch()}
-            />
+            imageMime ? (
+              <HeaderTextButton
+                label="Refresh"
+                onPress={() => void image.refetch()}
+              />
+            ) : editing ? (
+              <View style={styles.headerActions}>
+                <HeaderTextButton
+                  label="Cancel"
+                  onPress={() => {
+                    setEditing(false);
+                    setDraft("");
+                  }}
+                />
+                <HeaderTextButton
+                  label={saving ? "Saving…" : "Save"}
+                  onPress={saveFile}
+                />
+              </View>
+            ) : (
+              <View style={styles.headerActions}>
+                <HeaderTextButton
+                  label="Edit"
+                  onPress={() => {
+                    setDraft(file.data ?? "");
+                    setEditing(true);
+                  }}
+                />
+                <HeaderTextButton
+                  label="Refresh"
+                  onPress={() => void file.refetch()}
+                />
+              </View>
+            )
           }
           subtitle={selectedPath}
           surface="files"
@@ -464,13 +574,62 @@ function FilesSurface({ root }: { root: string | null }) {
           />
           <Text style={[styles.backLabel, { color: NativeTint }]}>Files</Text>
         </Pressable>
-        {file.isPending ? (
+        {imageMime ? (
+          image.isPending ? (
+            <LoadingMessage />
+          ) : image.error ? (
+            <PanelMessage
+              detail={errorMessage(image.error)}
+              title="Couldn’t read image"
+            />
+          ) : (
+            <BottomSheetScrollView
+              contentContainerStyle={[
+                styles.fileImageContent,
+                { paddingBottom: Math.max(insets.bottom, 18) + 12 },
+              ]}
+              horizontal={false}
+              showsVerticalScrollIndicator
+            >
+              <Image
+                accessibilityLabel={selectedPath}
+                resizeMode="contain"
+                source={{
+                  uri: `data:${imageMime};base64,${image.data ?? ""}`,
+                }}
+                style={styles.fileImage}
+              />
+            </BottomSheetScrollView>
+          )
+        ) : file.isPending ? (
           <LoadingMessage />
         ) : file.error ? (
           <PanelMessage
             detail={errorMessage(file.error)}
             title="Couldn’t read file"
           />
+        ) : editing ? (
+          <BottomSheetScrollView
+            contentContainerStyle={[
+              styles.fileContent,
+              { paddingBottom: Math.max(insets.bottom, 18) + 12 },
+            ]}
+            horizontal={false}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
+            <TextInput
+              accessibilityLabel={`Edit ${selectedPath}`}
+              autoCapitalize="none"
+              autoCorrect={false}
+              multiline
+              onChangeText={setDraft}
+              scrollEnabled={false}
+              spellCheck={false}
+              style={[styles.fileText, styles.fileEditor, { color: theme.text }]}
+              value={draft}
+            />
+          </BottomSheetScrollView>
         ) : (
           <BottomSheetScrollView
             contentContainerStyle={[
@@ -1144,6 +1303,239 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
   );
 }
 
+/** The repo's `qa`-branch review queue — approve or reject proposed
+ * commits and promote the approved prefix onto the base branch, mirroring
+ * desktop's Projects → Review tab. */
+function QueueSurface({ root }: { root: string | null }) {
+  const daemon = useDaemon();
+  const theme = useTheme();
+  const queryClient = useQueryClient();
+  const profileId = daemon.activeProfile?.id ?? "disconnected";
+  const [pending, setPending] = useState<string | null>(null);
+  const [opError, setOpError] = useState<string | null>(null);
+
+  const queue = useQuery({
+    queryKey: daemonKeys.reviewQueue(profileId, root ?? "none"),
+    queryFn: () => listReviewQueue(daemon.client!, root!),
+    enabled: Boolean(daemon.client && daemon.phase === "connected" && root),
+  });
+  const snapshot = queue.data;
+
+  const refresh = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      queryKey: daemonKeys.reviewQueue(profileId, root ?? "none"),
+    });
+    await queryClient.invalidateQueries({
+      queryKey: ["daemon", profileId, "git-panel"],
+    });
+  }, [profileId, queryClient, root]);
+
+  const runOp = useCallback(
+    (
+      label: string,
+      op: (client: WakuClient) => Promise<ReviewQueue | null>,
+    ) => {
+      const client = daemon.client;
+      if (!client || !root || pending) return;
+      setPending(label);
+      setOpError(null);
+      void op(client)
+        .catch((cause) => setOpError(errorMessage(cause)))
+        .finally(() => {
+          setPending(null);
+          void refresh();
+        });
+    },
+    [daemon.client, pending, refresh, root],
+  );
+
+  const confirmPromote = useCallback(() => {
+    if (!snapshot?.frontier) return;
+    const target = snapshot.baseBranch ?? "main";
+    Alert.alert(
+      `Promote to ${target}?`,
+      `Fast-forwards ${target} through the approved commits.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Promote",
+          onPress: () =>
+            runOp("promote", (client) => promoteReviewQueue(client, root!)),
+        },
+      ],
+    );
+  }, [root, runOp, snapshot]);
+
+  if (!root) {
+    return (
+      <View style={styles.fill}>
+        <SurfaceHeader surface="queue" />
+        <PanelMessage
+          detail="This task does not have an available workspace."
+          title="No workspace"
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.fill}>
+      <SurfaceHeader
+        action={
+          <HeaderTextButton
+            label="Refresh"
+            onPress={() => void queue.refetch()}
+          />
+        }
+        subtitle={
+          snapshot
+            ? snapshot.baseBranch
+              ? `qa → ${snapshot.baseBranch}`
+              : "qa"
+            : undefined
+        }
+        surface="queue"
+      />
+      {queue.isPending ? (
+        <LoadingMessage />
+      ) : queue.error ? (
+        <PanelMessage
+          detail={errorMessage(queue.error)}
+          title="Couldn’t load review queue"
+        />
+      ) : !snapshot ? (
+        <PanelMessage
+          detail="This repository has no origin/qa branch."
+          title="No review queue"
+        />
+      ) : (
+        <>
+          {snapshot.frontier ? (
+            <View
+              style={[styles.gitSyncRow, { borderBottomColor: theme.border }]}
+            >
+              <Text
+                style={[styles.queueFrontier, { color: theme.textSecondary }]}
+              >
+                {`Promotable to ${snapshot.baseBranch ?? "main"}`}
+              </Text>
+              <HeaderTextButton
+                label={pending === "promote" ? "Promoting…" : "Promote"}
+                onPress={confirmPromote}
+              />
+            </View>
+          ) : null}
+          <BottomSheetFlatList<ReviewEntry>
+            contentContainerStyle={{ paddingBottom: 12 }}
+            data={snapshot.entries}
+            keyExtractor={(entry) => entry.commit.sha}
+            ListEmptyComponent={
+              <PanelMessage
+                detail="Nothing is waiting for review."
+                title="Queue is empty"
+              />
+            }
+            renderItem={({ item }) => (
+              <View
+                style={[styles.gitFileRow, { borderBottomColor: theme.border }]}
+              >
+                <View style={styles.gitFileCopy}>
+                  <Text
+                    numberOfLines={2}
+                    style={[styles.gitFilePath, { color: theme.text }]}
+                  >
+                    {item.commit.subject}
+                  </Text>
+                  <Text
+                    style={[styles.gitFileMeta, { color: theme.textGhost }]}
+                  >
+                    {[
+                      item.commit.short_sha,
+                      item.commit.author,
+                      reviewStatusLabel(item),
+                      item.commit.additions || item.commit.deletions
+                        ? `+${item.commit.additions} −${item.commit.deletions}`
+                        : null,
+                      item.testPlans.length > 0
+                        ? `${item.testPlans.length} test-plan ${
+                            item.testPlans.length === 1 ? "item" : "items"
+                          }`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </Text>
+                  {item.reviews.length > 0 ? (
+                    <Text
+                      style={[styles.gitFileMeta, { color: theme.textGhost }]}
+                    >
+                      {item.reviews
+                        .map(
+                          (record) =>
+                            `${record.reviewer}: ${record.decision}`,
+                        )
+                        .join(" · ")}
+                    </Text>
+                  ) : null}
+                </View>
+                {!item.reverted ? (
+                  <View style={styles.queueActions}>
+                    <HeaderTextButton
+                      label={
+                        pending === `approve:${item.commit.sha}`
+                          ? "…"
+                          : "Approve"
+                      }
+                      onPress={() =>
+                        runOp(`approve:${item.commit.sha}`, (client) =>
+                          approveReviewCommit(client, root, item.commit.sha),
+                        )
+                      }
+                    />
+                    <Pressable
+                      accessibilityLabel={`Reject ${item.commit.short_sha}`}
+                      accessibilityRole="button"
+                      hitSlop={6}
+                      onPress={() =>
+                        runOp(`reject:${item.commit.sha}`, (client) =>
+                          rejectReviewCommit(client, root, item.commit.sha),
+                        )
+                      }
+                      style={({ pressed }) => [
+                        styles.textButton,
+                        { opacity: pressed ? 0.5 : 1 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.textButtonLabel,
+                          {
+                            color:
+                              pending === `reject:${item.commit.sha}`
+                                ? theme.textGhost
+                                : theme.danger,
+                          },
+                        ]}
+                      >
+                        Reject
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+            )}
+          />
+          {opError ? (
+            <Text style={[styles.gitError, { color: theme.danger }]}>
+              {opError}
+            </Text>
+          ) : null}
+        </>
+      )}
+    </View>
+  );
+}
+
 function HeaderTextButton({
   label,
   onPress,
@@ -1243,8 +1635,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
   },
   backLabel: { fontSize: 15.5, fontWeight: "500" },
+  headerActions: { alignItems: "center", flexDirection: "row", gap: 14 },
   fileContent: { paddingHorizontal: 14, paddingTop: 4 },
   fileText: { fontFamily: MonoFont, fontSize: 12.5, lineHeight: 17 },
+  fileEditor: { minHeight: 200, textAlignVertical: "top" },
+  fileImage: { aspectRatio: 1, width: "100%" },
+  fileImageContent: { flexGrow: 1, justifyContent: "center", padding: 12 },
   truncated: { fontSize: 12, marginTop: 14 },
   fileRow: {
     alignItems: "center",
@@ -1352,6 +1748,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   commitButtonLabel: { color: "#fff", fontSize: 14.5, fontWeight: "600" },
+  queueFrontier: { flex: 1, fontSize: 13.5 },
+  queueActions: { alignItems: "flex-end", gap: 2 },
   loading: {
     alignItems: "center",
     flex: 1,

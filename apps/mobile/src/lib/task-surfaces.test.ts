@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentSession } from "@waku/client";
+import type { AgentSession, ReviewEntry } from "@waku/client";
 
 import {
   gitStatusLabel,
+  imageMimeForPath,
   latestReviewTurnSource,
   parseNumstat,
+  reviewStatusLabel,
   splitReviewPatch,
   upstreamLabel,
 } from "./task-surfaces";
@@ -54,6 +56,38 @@ diff --git a/src/gone.ts b/src/gone.ts
     );
     expect(upstreamLabel({ name: "origin/feat", ahead: 3, behind: 0 })).toBe(
       "origin/feat · ↑3",
+    );
+  });
+
+  test("labels image paths for the binary preview", () => {
+    expect(imageMimeForPath("docs/logo.PNG")).toBe("image/png");
+    expect(imageMimeForPath("icon.svg")).toBe("image/svg+xml");
+    expect(imageMimeForPath("src/app.ts")).toBeNull();
+    expect(imageMimeForPath("README")).toBeNull();
+  });
+
+  test("labels review-queue entries by the flag that blocks them", () => {
+    const entry = (overrides: Partial<ReviewEntry>) =>
+      ({
+        commit: { sha: "x" },
+        testPlans: [],
+        needsReview: false,
+        reviews: [],
+        rejected: false,
+        reverted: false,
+        approved: false,
+        ...overrides,
+      }) as ReviewEntry;
+    expect(reviewStatusLabel(entry({ reverted: true, approved: true }))).toBe(
+      "reverted",
+    );
+    expect(reviewStatusLabel(entry({ rejected: true }))).toBe("rejected");
+    expect(
+      reviewStatusLabel(entry({ approved: true, needsReview: true })),
+    ).toBe("approved");
+    expect(reviewStatusLabel(entry({ approved: true }))).toBe("auto-approved");
+    expect(reviewStatusLabel(entry({ needsReview: true }))).toBe(
+      "needs review",
     );
   });
 

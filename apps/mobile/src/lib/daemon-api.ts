@@ -7,6 +7,7 @@ import type {
   FileEntry,
   GitPanelSnapshot,
   LandOutcome,
+  NotificationPoll,
   Project,
   ProviderKind,
   ProviderProbe,
@@ -16,6 +17,7 @@ import type {
   PullOutcome,
   ReviewDiffData,
   ReviewDiffSource,
+  ReviewQueue,
   ResponsePayload,
   SessionMessageMatch,
   SessionMessageSearchScope,
@@ -94,6 +96,18 @@ export const daemonKeys = {
     profileId,
     'git-panel',
     root,
+  ] as const,
+  reviewQueue: (profileId: string, cwd: string) => [
+    'daemon',
+    profileId,
+    'review-queue',
+    cwd,
+  ] as const,
+  notifications: (profileId: string, all: boolean) => [
+    'daemon',
+    profileId,
+    'notifications',
+    all,
   ] as const,
 };
 
@@ -448,6 +462,44 @@ export async function readWorkspaceTextFile(
   return response.result.content;
 }
 
+/** Base64 bytes for files a text read cannot carry (image previews).
+ * The daemon caps the size and errors past it. */
+export async function readWorkspaceBinaryFile(
+  client: WakuClient,
+  root: string,
+  relativePath: string,
+): Promise<string> {
+  const response = expectResponse(
+    await client.request({
+      type: 'workspace',
+      operation: { type: 'readBinaryFile', root, relative_path: relativePath },
+    }),
+    'workspace',
+  );
+  if (response.result.type !== 'file') {
+    throw new Error('The daemon returned an unexpected file response');
+  }
+  return response.result.data;
+}
+
+export async function writeWorkspaceTextFile(
+  client: WakuClient,
+  root: string,
+  relativePath: string,
+  content: string,
+): Promise<void> {
+  const response = expectResponse(
+    await client.request({
+      type: 'workspace',
+      operation: { type: 'writeTextFile', root, relative_path: relativePath, content },
+    }),
+    'workspace',
+  );
+  if (response.result.type !== 'ack') {
+    throw new Error('The daemon returned an unexpected file response');
+  }
+}
+
 export async function collectWorkspaceDiff(
   client: WakuClient,
   cwd: string,
@@ -553,6 +605,102 @@ export async function generateWorkspaceCommitMessage(
     throw new Error('The daemon returned an unexpected commit message response');
   }
   return result.message;
+}
+
+/** The `qa` branch's proposed commits — `null` when the repo has no
+ * `origin/qa`. Approve/reject/promote all return the refreshed queue. */
+export async function listReviewQueue(
+  client: WakuClient,
+  cwd: string,
+): Promise<ReviewQueue | null> {
+  const result = await runGitOperation(client, { type: 'reviewQueue', cwd });
+  if (result.type !== 'reviewQueue') {
+    throw new Error('The daemon returned an unexpected review queue response');
+  }
+  return result.queue;
+}
+
+export async function approveReviewCommit(
+  client: WakuClient,
+  cwd: string,
+  sha: string,
+): Promise<ReviewQueue | null> {
+  const result = await runGitOperation(client, { type: 'reviewApprove', cwd, sha });
+  if (result.type !== 'reviewQueue') {
+    throw new Error('The daemon returned an unexpected review queue response');
+  }
+  return result.queue;
+}
+
+export async function rejectReviewCommit(
+  client: WakuClient,
+  cwd: string,
+  sha: string,
+): Promise<ReviewQueue | null> {
+  const result = await runGitOperation(client, { type: 'reviewReject', cwd, sha });
+  if (result.type !== 'reviewQueue') {
+    throw new Error('The daemon returned an unexpected review queue response');
+  }
+  return result.queue;
+}
+
+/** Fast-forwards `main` through the approved prefix of `qa`. */
+export async function promoteReviewQueue(
+  client: WakuClient,
+  cwd: string,
+): Promise<ReviewQueue | null> {
+  const result = await runGitOperation(client, { type: 'reviewPromote', cwd });
+  if (result.type !== 'reviewQueue') {
+    throw new Error('The daemon returned an unexpected review queue response');
+  }
+  return result.queue;
+}
+
+/** Daemon-wide GitHub inbox — these ops carry no `cwd`. `all: false`
+ * returns unread threads only. */
+export async function listNotifications(
+  client: WakuClient,
+  all: boolean,
+): Promise<NotificationPoll> {
+  const response = expectResponse(
+    await client.request({
+      type: 'workspace',
+      operation: { type: 'listNotifications', all },
+    }),
+    'workspace',
+  );
+  if (response.result.type !== 'notifications') {
+    throw new Error('The daemon returned an unexpected notifications response');
+  }
+  return response.result.poll;
+}
+
+export async function markNotificationRead(client: WakuClient, threadId: string) {
+  await client.request({
+    type: 'workspace',
+    operation: { type: 'markNotificationRead', thread_id: threadId },
+  });
+}
+
+export async function markNotificationDone(client: WakuClient, threadId: string) {
+  await client.request({
+    type: 'workspace',
+    operation: { type: 'markNotificationDone', thread_id: threadId },
+  });
+}
+
+export async function markRepoNotificationsRead(client: WakuClient, repo: string) {
+  await client.request({
+    type: 'workspace',
+    operation: { type: 'markRepoNotificationsRead', repo },
+  });
+}
+
+export async function markAllNotificationsRead(client: WakuClient) {
+  await client.request({
+    type: 'workspace',
+    operation: { type: 'markAllNotificationsRead' },
+  });
 }
 
 export async function removeDaemonSession(

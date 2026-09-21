@@ -343,6 +343,37 @@ export default function DaemonEditorScreen() {
                   </Text>
                 </View>
               )}
+              <View
+                style={[styles.separator, { backgroundColor: colors.separator }]}
+              />
+              <Pressable
+                accessibilityHint="Opens the daemon's GitHub inbox"
+                accessibilityRole="button"
+                onPress={() => router.push('/notifications')}
+                style={({ pressed }) => [
+                  styles.formRow,
+                  { opacity: pressed ? 0.5 : 1 },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.fieldLabel,
+                    styles.flexLabel,
+                    { color: colors.text },
+                  ]}
+                >
+                  Notifications
+                </Text>
+                <AppSymbol
+                  name={{
+                    ios: "chevron.right",
+                    android: "chevron_right",
+                    web: "chevron_right",
+                  }}
+                  size={14}
+                  tintColor={colors.secondaryText}
+                />
+              </Pressable>
             </View>
             <PairingSection client={daemon.client} />
           </>
@@ -776,6 +807,7 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   fieldLabel: { fontSize: 17, width: 82 },
+  flexLabel: { flex: 1, width: undefined },
   valueText: {
     flex: 1,
     fontSize: 17,

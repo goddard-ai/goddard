@@ -68,6 +68,7 @@ const SURFACE_MENU_COMMANDS = [
   { id: 'files', title: 'Files', symbol: 'folder' },
   { id: 'review', title: 'Review', symbol: 'doc.text.magnifyingglass' },
   { id: 'git', title: 'Git', symbol: 'arrow.triangle.branch' },
+  { id: 'queue', title: 'Review queue', symbol: 'checkmark.circle' },
 ] as const;
 
 const TASK_MENU_COMMANDS = [
@@ -295,7 +296,7 @@ export function SessionView({
 
   const handleTaskMenuCommand = useCallback(
     (command: string) => {
-      if (command === 'terminal' || command === 'files' || command === 'review' || command === 'git') {
+      if (command === 'terminal' || command === 'files' || command === 'review' || command === 'git' || command === 'queue') {
         openTaskSurface(command);
       } else if (command === 'model') {
         setModelSheetOpen(true);

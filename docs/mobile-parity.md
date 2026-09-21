@@ -94,15 +94,21 @@ protocol changes.
 - [ ] **Pull-request surface** — `listPullRequests`, `getPullRequest`,
       `fetchPullRequestHead`; check and review-comment types
       (`PullRequestCheck`, `PullRequestReviewComment`) are generated.
-- [ ] **Notifications inbox** — `listNotifications`,
-      `markNotificationRead`, `markAllNotificationsRead`,
-      `markRepoNotificationsRead` (GitHub inbox, not push).
-- [ ] **Review queue** — `reviewQueue`, `reviewApprove`, `reviewReject`,
-      `reviewPromote` workspace ops.
+- [x] **Notifications inbox** — `listNotifications`,
+      `markNotificationRead`, `markNotificationDone`,
+      `markAllNotificationsRead`, `markRepoNotificationsRead` (GitHub
+      inbox, not push). `/notifications` screen off the daemon editor:
+      unread/all scopes, per-repo groups, mark-read/done per thread,
+      opens the resolved GitHub URL.
+- [x] **Review queue** — `reviewQueue`, `reviewApprove`, `reviewReject`,
+      `reviewPromote`. Fifth task surface (task menu → Review queue):
+      `qa`-branch entries with status badges, per-commit approve/reject,
+      confirmed promote of the approved prefix to the base branch.
 - [ ] **Usage screen** — `loadUsageHistory` + `fetchPlanUsage`;
       `react-native-svg` is already a dependency for the chart.
-- [ ] **File preview upgrades** — `readBinaryFile` for image previews;
-      `writeTextFile` for editing; extend the existing Files surface.
+- [x] **File preview upgrades** — image extensions preview via
+      `readBinaryFile` (base64 → `Image`); text files gain an Edit/Save
+      mode via `writeTextFile`.
 - [ ] **Video/audio attachments + preview** — widen
       `expo-image-picker` media types and add `expo-video` playback;
       upload path already exists.

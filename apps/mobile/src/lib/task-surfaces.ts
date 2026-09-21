@@ -1,4 +1,9 @@
-import type { AgentSession, ReviewDiffSource, UpstreamStatus } from "@waku/client";
+import type {
+  AgentSession,
+  ReviewDiffSource,
+  ReviewEntry,
+  UpstreamStatus,
+} from "@waku/client";
 
 export interface ReviewPatchFile {
   key: string;
@@ -57,6 +62,35 @@ export function upstreamLabel(upstream: UpstreamStatus | null): string | null {
   if (upstream.behind > 0) parts.push(`↓${upstream.behind}`);
   if (upstream.ahead === 0 && upstream.behind === 0) parts.push("up to date");
   return parts.join(" · ");
+}
+
+/** Badge for a `qa`-queue commit — reverted and rejected outrank the
+ * promotable flag since they explain why it can't land. */
+export function reviewStatusLabel(entry: ReviewEntry): string {
+  if (entry.reverted) return "reverted";
+  if (entry.rejected) return "rejected";
+  if (entry.approved) return entry.needsReview ? "approved" : "auto-approved";
+  return "needs review";
+}
+
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+};
+
+/** MIME for an image the Files viewer can render — `null` for anything
+ * else, which falls back to the text viewer. */
+export function imageMimeForPath(path: string): string | null {
+  const ext = path.split(".").at(-1)?.toLowerCase() ?? "";
+  return IMAGE_MIME[ext] ?? null;
 }
 
 export function parseNumstat(numstat: string): {
