@@ -44,6 +44,28 @@ pub struct EvalSettings {
     pub cloudflare_api_token: Option<String>,
 }
 
+impl EvalSettings {
+    /// Whether the selected backend is missing the credential its requests
+    /// require — mirrors the `required` checks in waku-core's eval request
+    /// builder, so a feature can skip a call that can only fail.
+    pub fn credential_missing(&self) -> bool {
+        let missing = |value: &Option<String>| {
+            value
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .is_empty()
+        };
+        match self.backend {
+            EvalBackend::TypeSafe => missing(&self.typesafe_api_key),
+            EvalBackend::VercelGateway => missing(&self.vercel_api_key),
+            EvalBackend::Cloudflare => {
+                missing(&self.cloudflare_account_id) || missing(&self.cloudflare_api_token)
+            }
+        }
+    }
+}
+
 /// One typed question evaluated against the request's shared `state`. The
 /// `type` tag and field names match the evaluation API contract exactly.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -158,4 +180,34 @@ pub struct Evaluation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "unknown")]
     pub provider_metadata: Option<Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credential_missing_mirrors_each_backends_required_fields() {
+        let mut settings = EvalSettings::default();
+        assert!(settings.credential_missing());
+        settings.typesafe_api_key = Some("key".to_owned());
+        assert!(!settings.credential_missing());
+
+        settings.backend = EvalBackend::VercelGateway;
+        assert!(settings.credential_missing());
+        settings.vercel_api_key = Some("key".to_owned());
+        // The team id is a routing nicety, not a credential.
+        assert!(!settings.credential_missing());
+
+        settings.backend = EvalBackend::Cloudflare;
+        assert!(settings.credential_missing());
+        settings.cloudflare_account_id = Some("account".to_owned());
+        assert!(settings.credential_missing());
+        settings.cloudflare_api_token = Some("token".to_owned());
+        assert!(!settings.credential_missing());
+
+        // Whitespace alone does not count as configured.
+        settings.cloudflare_api_token = Some("   ".to_owned());
+        assert!(settings.credential_missing());
+    }
 }

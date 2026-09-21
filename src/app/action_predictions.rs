@@ -427,8 +427,9 @@ impl Waku {
 
     /// Build the turn's state — the status-marker payload plus the fields
     /// a next-action judgment reads — and ask its session's daemon for the
-    /// prediction, off the UI thread. An unconfigured eval backend means
-    /// the feature simply does not fire.
+    /// prediction, off the UI thread. An unusable eval backend —
+    /// unconfigured or missing its credential — means the feature simply
+    /// does not fire.
     fn request_action_prediction_eval(
         &mut self,
         session_id: Uuid,
@@ -444,7 +445,11 @@ impl Waku {
         let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
             return;
         };
-        if daemon.settings().eval.is_none() {
+        if daemon
+            .settings()
+            .eval
+            .is_none_or(|eval| eval.credential_missing())
+        {
             return;
         }
         let Some(session) = self

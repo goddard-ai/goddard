@@ -296,25 +296,23 @@ impl Waku {
             || self.state.action_predictions_enabled
     }
 
-    /// Whether the selected eval backend is missing the credential its Jev
-    /// call requires — the picker's Auto row warns rather than failing at
-    /// submit. Mirrors the `required` checks in waku-core's `backend_request`.
+    /// Whether the eval backend on the composer session's daemon is missing
+    /// the credential its Jev call requires — the picker's Auto row warns
+    /// rather than failing at submit. A daemon that can't be inspected (a
+    /// remote host offline) is not a warning: the backend's state is simply
+    /// unknown.
     pub(super) fn jev_credential_missing(&self) -> bool {
-        let eval = self.state.eval.clone().unwrap_or_default();
-        let missing = |value: &Option<String>| {
-            value
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or_default()
-                .is_empty()
+        let Some(session) = self.composer_session() else {
+            return false;
         };
-        match eval.backend {
-            waku_protocol::eval::EvalBackend::TypeSafe => missing(&eval.typesafe_api_key),
-            waku_protocol::eval::EvalBackend::VercelGateway => missing(&eval.vercel_api_key),
-            waku_protocol::eval::EvalBackend::Cloudflare => {
-                missing(&eval.cloudflare_account_id) || missing(&eval.cloudflare_api_token)
-            }
-        }
+        let Some(daemon) = self.daemons.daemon_for_session(session.id) else {
+            return false;
+        };
+        daemon
+            .settings()
+            .eval
+            .unwrap_or_default()
+            .credential_missing()
     }
 
     /// The plan a first Auto submission carries into `prepare_submission`:
@@ -389,10 +387,19 @@ impl Waku {
     ) -> Option<TurnRoutePlan> {
         // Only sessions started through Auto keep deciding effort per turn —
         // a manual pick clears `route_decision` and owns its effort again.
-        if session.route_decision.is_none() || self.state.eval.is_none() {
+        if session.route_decision.is_none() {
             return None;
         }
         let daemon = self.daemons.daemon_for_session(session.id)?;
+        // The eval runs on the session's daemon — its backend, not the local
+        // mirror's, decides whether a turn evaluation can answer at all.
+        if daemon
+            .settings()
+            .eval
+            .is_none_or(|eval| eval.credential_missing())
+        {
+            return None;
+        }
         let model = self.model_metadata_for_session(session)?;
         let efforts: Vec<String> = model
             .reasoning_efforts

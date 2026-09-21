@@ -359,7 +359,11 @@ impl Waku {
             self.refocus_composer(window, cx);
             return;
         };
-        if daemon.settings().eval.is_none() {
+        if daemon
+            .settings()
+            .eval
+            .is_none_or(|eval| eval.credential_missing())
+        {
             self.show_toast(tr!("provider_switch.no_eval_backend"));
             self.refocus_composer(window, cx);
             return;

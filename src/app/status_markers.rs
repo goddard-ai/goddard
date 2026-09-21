@@ -548,8 +548,9 @@ impl Waku {
     }
 
     /// Build the turn's state and ask its session's daemon for the marker
-    /// scores, off the UI thread. An unconfigured eval backend on that daemon
-    /// means the feature simply does not fire — no row, no error.
+    /// scores, off the UI thread. An unusable eval backend on that daemon —
+    /// unconfigured or missing its credential — means the feature simply
+    /// does not fire: no row, no error, no doomed call.
     fn request_status_marker_eval(
         &mut self,
         session_id: Uuid,
@@ -563,7 +564,11 @@ impl Waku {
         let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
             return;
         };
-        if daemon.settings().eval.is_none() {
+        if daemon
+            .settings()
+            .eval
+            .is_none_or(|eval| eval.credential_missing())
+        {
             return;
         }
         let Some(session) = self

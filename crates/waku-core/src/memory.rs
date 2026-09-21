@@ -217,7 +217,14 @@ impl MemoryService {
         }
 
         let memory_md = read_memory(&store);
-        let notes = rank_notes(settings.eval.as_ref(), task, &read_log_lines(&store));
+        let notes = rank_notes(
+            settings
+                .eval
+                .as_ref()
+                .filter(|eval| !eval.credential_missing()),
+            task,
+            &read_log_lines(&store),
+        );
         let block = compose_block(&memory_md, &notes, &store.join(LOG_FILE))?;
         if mark {
             memory_state
@@ -334,7 +341,13 @@ impl MemoryService {
             .iter()
             .flat_map(|(_, slice)| slice.segments.iter().cloned())
             .collect();
-        let kept = triage_segments(settings.eval.as_ref(), &segments);
+        let kept = triage_segments(
+            settings
+                .eval
+                .as_ref()
+                .filter(|eval| !eval.credential_missing()),
+            &segments,
+        );
         let excerpts = kept
             .iter()
             .map(|index| segments[*index].as_str())

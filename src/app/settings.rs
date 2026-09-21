@@ -305,8 +305,9 @@ impl ExperimentGroup {
 /// One Experiments-page opt-in: its group, card text, current flag value,
 /// and the setter the toggle calls. `set` is a method pointer —
 /// `Self::set_*_enabled` coerces — so the page's table stays data.
-/// `tuning` renders parameter controls under the card while the experiment
-/// is on.
+/// `eval_backed` marks the opt-ins that run on the Jev backend — an enabled
+/// card warns when no usable backend is configured. `tuning` renders
+/// parameter controls under the card while the experiment is on.
 struct ExperimentDef {
     group: ExperimentGroup,
     id: &'static str,
@@ -314,6 +315,7 @@ struct ExperimentDef {
     description_key: &'static str,
     enabled: bool,
     set: fn(&mut Waku, bool, &mut Context<Waku>),
+    eval_backed: bool,
     tuning: Option<fn(&Waku, Theme, &mut Context<Waku>) -> AnyElement>,
 }
 
@@ -4749,6 +4751,7 @@ impl Waku {
                 description_key: "experiments.subagents_description",
                 enabled: self.state.subagents_enabled,
                 set: Self::set_subagents_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4758,6 +4761,7 @@ impl Waku {
                 description_key: "experiments.automations_description",
                 enabled: self.state.automations_enabled,
                 set: Self::set_automations_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4767,6 +4771,7 @@ impl Waku {
                 description_key: "experiments.memory_description",
                 enabled: self.state.memory_experiment_enabled,
                 set: Self::set_memory_experiment_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4776,6 +4781,7 @@ impl Waku {
                 description_key: "experiments.project_map_description",
                 enabled: self.state.project_map_enabled,
                 set: Self::set_project_map_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4785,6 +4791,7 @@ impl Waku {
                 description_key: "experiments.model_router_description",
                 enabled: self.state.model_router_enabled,
                 set: Self::set_model_router_enabled,
+                eval_backed: true,
                 tuning: None,
             },
             ExperimentDef {
@@ -4794,6 +4801,7 @@ impl Waku {
                 description_key: "experiments.status_markers_description",
                 enabled: self.state.status_markers_enabled,
                 set: Self::set_status_markers_enabled,
+                eval_backed: true,
                 tuning: None,
             },
             ExperimentDef {
@@ -4803,6 +4811,7 @@ impl Waku {
                 description_key: "experiments.action_predictions_description",
                 enabled: self.state.action_predictions_enabled,
                 set: Self::set_action_predictions_enabled,
+                eval_backed: true,
                 tuning: None,
             },
             ExperimentDef {
@@ -4812,6 +4821,7 @@ impl Waku {
                 description_key: "experiments.computer_use_description",
                 enabled: self.state.computer_use_experiment_enabled,
                 set: Self::set_computer_use_experiment_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4821,6 +4831,7 @@ impl Waku {
                 description_key: "experiments.integrations_description",
                 enabled: self.state.integrations_enabled,
                 set: Self::set_integrations_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4830,6 +4841,7 @@ impl Waku {
                 description_key: "experiments.sandbox_description",
                 enabled: self.state.sandbox_experiment_enabled,
                 set: Self::set_sandbox_experiment_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4839,6 +4851,7 @@ impl Waku {
                 description_key: "experiments.git_panel_description",
                 enabled: self.state.git_panel_enabled,
                 set: Self::set_git_panel_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4848,6 +4861,7 @@ impl Waku {
                 description_key: "experiments.github_description",
                 enabled: self.state.github_enabled,
                 set: Self::set_github_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4857,6 +4871,7 @@ impl Waku {
                 description_key: "experiments.projects_page_description",
                 enabled: self.state.projects_page_enabled,
                 set: Self::set_projects_page_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4866,6 +4881,7 @@ impl Waku {
                 description_key: "experiments.review_queue_description",
                 enabled: self.state.review_queue_enabled,
                 set: Self::set_review_queue_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4875,6 +4891,7 @@ impl Waku {
                 description_key: "experiments.big_picture_description",
                 enabled: self.state.big_picture_enabled,
                 set: Self::set_big_picture_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4884,6 +4901,7 @@ impl Waku {
                 description_key: "experiments.friends_description",
                 enabled: self.state.friends_enabled,
                 set: Self::set_friends_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4893,6 +4911,7 @@ impl Waku {
                 description_key: "experiments.sidebar_dock_description",
                 enabled: self.state.sidebar_dock_enabled,
                 set: Self::set_sidebar_dock_enabled,
+                eval_backed: false,
                 tuning: None,
             },
             ExperimentDef {
@@ -4902,6 +4921,7 @@ impl Waku {
                 description_key: "experiments.guided_reading_description",
                 enabled: self.state.guided_reading_enabled,
                 set: Self::set_guided_reading_enabled,
+                eval_backed: false,
                 tuning: Some(Self::guided_reading_tuning),
             },
         ];
@@ -5041,6 +5061,15 @@ impl Waku {
             cx,
             move |this, _, cx| set(this, !enabled, cx),
         );
+        // The hint reads the local daemon's eval document — the one the Jev
+        // page edits — so its fix button repairs exactly the state it shows.
+        let eval_hint = experiment.eval_backed
+            && enabled
+            && self
+                .state
+                .eval
+                .as_ref()
+                .is_none_or(|eval| eval.credential_missing());
         Some(
             div()
                 .min_h(px(66.0))
@@ -5062,6 +5091,36 @@ impl Waku {
                         )
                         .child(toggle),
                 )
+                .when(eval_hint, |card| {
+                    card.child(
+                        div()
+                            .mt(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(icon("icons/alert.svg", 12.0, theme.warning))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(sp(12.0))
+                                    .line_height(sp(16.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("experiments.needs_eval_backend")),
+                            )
+                            .child(settings_button(
+                                format!("{}-open-jev-settings", experiment.id),
+                                tr!("experiments.open_jev_settings"),
+                                true,
+                                false,
+                                true,
+                                theme,
+                                cx,
+                                |this, window, cx| {
+                                    this.open_settings_page(SettingsPage::Jev, window, cx);
+                                },
+                            )),
+                    )
+                })
                 .when_some(experiment.tuning.filter(|_| enabled), |card, tuning| {
                     card.child(tuning(self, theme, cx))
                 })

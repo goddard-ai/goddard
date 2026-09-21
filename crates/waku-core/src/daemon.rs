@@ -3385,8 +3385,14 @@ impl WakuBackend {
             ));
         }
         // Auto-mode permission review rides the same BYOK evaluation backend
-        // as routing. Unconfigured leaves each driver's ask-the-user path.
-        options.eval = daemon_settings.eval.clone();
+        // as routing. Unconfigured leaves each driver's ask-the-user path —
+        // a backend missing its credential would only fail closed there too,
+        // so it is withheld the same way rather than spending a doomed call
+        // and a decision-log row on every request.
+        options.eval = daemon_settings
+            .eval
+            .clone()
+            .filter(|eval| !eval.credential_missing());
         // The project map is experimental the same way: record the session's
         // workspace for first-prompt injection and warm the index in the
         // background so it can beat the provider's launch.

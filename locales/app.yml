@@ -749,6 +749,10 @@ experiments.model_router_title:
   en: Auto model routing
 experiments.model_router_description:
   en: Add Auto to the model picker. A task's first prompt is classified by the evaluation model, then routed to a provider and model from your routing policy.
+experiments.needs_eval_backend:
+  en: Runs on the evaluation backend — none is configured.
+experiments.open_jev_settings:
+  en: Open Jev settings
 experiments.status_markers_title:
   en: Turn status markers
 experiments.status_markers_description:
@@ -2304,7 +2308,7 @@ provider_switch.working:
 provider_switch.failed:
   en: "Provider switch failed — %{error}"
 provider_switch.no_eval_backend:
-  en: Provider switching needs an evaluation (Jev) backend configured in Settings.
+  en: Provider switching needs an evaluation (Jev) backend — configure it in Settings → Jev.
 sandbox.environment:
   en: Environment
 sandbox.this_mac:

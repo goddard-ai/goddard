@@ -859,7 +859,7 @@ provider_switch.estimate: "約 %{items} 件のトランスクリプト項目、�
 provider_switch.confirm: "%{provider} に切り替える"
 provider_switch.working: "%{provider} 用に履歴を圧縮しています…"
 provider_switch.failed: "プロバイダーの切り替えに失敗しました — %{error}"
-provider_switch.no_eval_backend: プロバイダーの切り替えには設定で評価（Jev）バックエンドの構成が必要です。
+provider_switch.no_eval_backend: プロバイダーの切り替えには評価（Jev）バックエンドが必要です — 設定 → Jev で構成してください。
 sandbox.environment: 環境
 sandbox.this_mac: この Mac
 sandbox.this_mac_description: この Mac でコマンドと編集を実行
@@ -1969,6 +1969,8 @@ experiments.memory_description: 各プロジェクトに永続メモリを持た
 experiments.memory_title: プロジェクトメモリ
 experiments.model_router_description: モデル選択に「自動」を追加します。タスクの最初のプロンプトを評価モデルが分類し、ルーティングポリシーのプロバイダーとモデルに振り分けます。
 experiments.model_router_title: 自動モデルルーティング
+experiments.needs_eval_backend: 評価バックエンドを使用します — まだ構成されていません。
+experiments.open_jev_settings: Jev 設定を開く
 experiments.project_map_description: 新しいセッションにワークスペースのコンパクトな構造マップを渡します — 最も参照されるファイルのトップレベルシンボルを約 1,000 トークンに収め、エージェントが初見のリポジトリ探索を省けます。有効化後に開始したセッションに適用されます。
 experiments.project_map_title: プロジェクトマップ
 experiments.projects_page_description: ⌘⇧P でプロジェクトごとのページを開き、ワークツリー、ブランチ、Issue、プルリクエストを一覧します。⌘⌥1–4 でタブに直接移動できます。

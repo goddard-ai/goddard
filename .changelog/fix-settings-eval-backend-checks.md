@@ -1,0 +1,1 @@
+- Eval-backed features now check the configured backend's credential before calling it: provider switching names Settings → Jev instead of failing mid-switch, and per-turn evaluations for status markers and action predictions no longer fire requests that can only fail.

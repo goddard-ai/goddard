@@ -1,0 +1,1 @@
+- An enabled eval-backed experiment card on Settings → Experiments now warns when no evaluation backend is configured, with a shortcut to the Jev settings page.

@@ -843,7 +843,7 @@ provider_switch.estimate: "约 %{items} 条记录项，约 %{tokens} 个 token�
 provider_switch.confirm: "切换到 %{provider}"
 provider_switch.working: "正在为 %{provider} 压缩历史记录…"
 provider_switch.failed: "切换 provider 失败 — %{error}"
-provider_switch.no_eval_backend: 切换 provider 需要在设置中配置评估（Jev）后端。
+provider_switch.no_eval_backend: 切换 provider 需要评估（Jev）后端 — 请在“设置 → Jev”中配置。
 sandbox.environment: 环境
 sandbox.this_mac: 这台 Mac
 sandbox.this_mac_description: 在此 Mac 上运行命令和编辑
@@ -1920,6 +1920,8 @@ experiments.memory_description: 为每个项目提供持久记忆。已完成的
 experiments.memory_title: 项目记忆
 experiments.model_router_description: 在模型选择器中新增“自动”。任务的第一个提示词由评估模型分类，然后按你的路由策略路由到某个服务商和模型。
 experiments.model_router_title: 自动模型路由
+experiments.needs_eval_backend: 使用评估后端 — 尚未配置。
+experiments.open_jev_settings: 打开 Jev 设置
 experiments.project_map_description: 为每个新会话提供一份工作区的紧凑结构地图 — 最常被引用文件的顶层符号，预算约 1,000 个令牌 — 让智能体跳过冷启动的仓库探索。对开启后启动的会话生效。
 experiments.project_map_title: 项目地图
 experiments.projects_page_description: 按 ⌘⇧P 打开每个项目的页面，列出其工作树、分支、issue 和拉取请求，⌘⌥1–4 可直接跳转到对应标签页。
