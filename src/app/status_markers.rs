@@ -1,9 +1,10 @@
 //! Turn status markers: while the experiment is on, each assistant turn that
-//! ends naturally is scored by the daemon's evaluation model against a fixed
-//! marker set — the common good outcomes plus the rarer bad states a settled
-//! turn can hide (blocked, drifted, stopped early). A marker whose
-//! probability clears its threshold renders as a chip on the response
-//! footer: colored icon and name, dim confidence percent.
+//! ends naturally is scored by the daemon's evaluation model — one `Choice`
+//! question picks how the turn ended (complete, awaiting input, partial,
+//! blocked, failed, other) while independent Nouls flag qualities that can
+//! co-occur with any ending (unverified, drifted). Cleared markers render as
+//! chips on the response footer: colored icon and name, dim confidence
+//! percent.
 //!
 //! Evals are spend, so they only run for the session on screen. A turn that
 //! ends while its session is unselected queues behind it and is scored when
@@ -21,8 +22,10 @@ use waku_protocol::model::{ActivityKind, AgentSession, MessageRole};
 use super::*;
 
 /// One status the evaluation model scores each settled turn against. `id` is
-/// the question key and the decision-log marker name; `threshold` is the
-/// probability a `Noul` answer must reach before the marker renders.
+/// the question key or choice option and the decision-log marker name. Ending
+/// markers are options of one `Choice` question — `threshold` is the bar the
+/// winner's probability must clear — while flag markers are independent
+/// Nouls and `threshold` is the probability each must reach.
 struct StatusMarker {
     id: &'static str,
     label_key: &'static str,
@@ -53,31 +56,72 @@ impl MarkerTone {
     }
 }
 
-/// The fixed marker set. Bad states carry lower thresholds — a false chip is
-/// cheap next to a missed failure — while `complete` only renders when the
-/// model is sure.
-const STATUS_MARKERS: &[StatusMarker] = &[
+/// How the turn ended — the options of one `Choice` question that compete
+/// for probability mass, so only the dominant ending can render and endings
+/// that contradict each other never share the footer. `other` is the escape
+/// bucket: when it wins, no ending chip renders. Bad endings carry lower
+/// thresholds — a false chip is cheap next to a missed failure — while
+/// `complete` only renders when the model is sure.
+const ENDING_QUESTION: &str = "ending";
+const ENDING_OTHER_OPTION: &str = "other";
+const ENDING_MARKERS: &[StatusMarker] = &[
     StatusMarker {
         id: "complete",
         label_key: "status_markers.complete",
         icon: "icons/check.svg",
         tone: MarkerTone::Success,
-        threshold: 0.80,
-        instructions: "Did the assistant fully address what the user asked for this \
-            turn — the `prompt` plus any `priorPrompts` still in play? Answer true \
-            only when the requested work was carried out end to end and the final \
-            response reports it done.",
+        threshold: 0.65,
+        instructions: "The requested work was carried out end to end and the final \
+            response reports it done — judge the ask as the `prompt` plus any \
+            `priorPrompts` still in play.",
     },
     StatusMarker {
         id: "awaiting-input",
         label_key: "status_markers.awaiting_input",
         icon: "icons/chat.svg",
         tone: MarkerTone::Info,
-        threshold: 0.70,
-        instructions: "Does this turn end waiting on the user — an unanswered question, a \
+        threshold: 0.55,
+        instructions: "The turn ends waiting on the user — an unanswered question, a \
             choice the user must pick, or input the assistant needs before it can \
-            continue?",
+            continue.",
     },
+    StatusMarker {
+        id: "partial",
+        label_key: "status_markers.partial",
+        icon: "icons/hourglass.svg",
+        tone: MarkerTone::Warning,
+        threshold: 0.50,
+        instructions: "The turn stopped before the work was finished — cut off by a \
+            context or step limit (`contextUsage` near its `window` is direct \
+            evidence), truncated output, or an explicit promise to continue later.",
+    },
+    StatusMarker {
+        id: "blocked",
+        label_key: "status_markers.blocked",
+        icon: "icons/block.svg",
+        tone: MarkerTone::Danger,
+        threshold: 0.45,
+        instructions: "The assistant cannot proceed without something outside its \
+            control — a missing permission, credential, file, tool, or environment \
+            resource; `toolErrors` output tails surface those failures.",
+    },
+    StatusMarker {
+        id: "failed",
+        label_key: "status_markers.failed",
+        icon: "icons/x.svg",
+        tone: MarkerTone::Danger,
+        threshold: 0.45,
+        instructions: "The turn failed — a reported error, a tool failure that ended \
+            the work, or the assistant saying it could not complete the request; \
+            `toolErrors` lists the calls that went wrong.",
+    },
+];
+
+/// Flags stay independent Nouls — qualities that legitimately co-occur with
+/// any ending (a turn can be `complete` *and* `unverified`, or `blocked`
+/// *and* `drifted`), so they must not compete for the ending's probability
+/// mass.
+const FLAG_MARKERS: &[StatusMarker] = &[
     StatusMarker {
         id: "unverified",
         label_key: "status_markers.unverified",
@@ -88,37 +132,6 @@ const STATUS_MARKERS: &[StatusMarker] = &[
             changed but did not build, test, or run, or claims it did not check? \
             `toolSequence` shows what actually ran: a build, test, or run listed \
             there without `(failed)` counts as verification.",
-    },
-    StatusMarker {
-        id: "partial",
-        label_key: "status_markers.partial",
-        icon: "icons/hourglass.svg",
-        tone: MarkerTone::Warning,
-        threshold: 0.65,
-        instructions: "Did the turn stop before the work was finished — cut off by a \
-            context or step limit, truncated output, or an explicit promise to continue \
-            later? `contextUsage` near its `window` is direct evidence of a \
-            context-limit cutoff.",
-    },
-    StatusMarker {
-        id: "blocked",
-        label_key: "status_markers.blocked",
-        icon: "icons/block.svg",
-        tone: MarkerTone::Danger,
-        threshold: 0.60,
-        instructions: "Is the assistant unable to proceed without something outside its \
-            control — a missing permission, credential, file, tool, or environment \
-            resource? `toolErrors` carries output tails where those failures surface.",
-    },
-    StatusMarker {
-        id: "failed",
-        label_key: "status_markers.failed",
-        icon: "icons/x.svg",
-        tone: MarkerTone::Danger,
-        threshold: 0.60,
-        instructions: "Did the turn fail — a reported error, a tool failure that ended \
-            the work, or the assistant saying it could not complete the request? \
-            `toolErrors` lists the calls that went wrong.",
     },
     StatusMarker {
         id: "drifted",
@@ -164,21 +177,35 @@ const FILES_CHANGED_STATE_MAX: usize = 50;
 /// calibration dataset keeps them distinct from ad-hoc `evaluate` calls.
 const EVAL_FEATURE: &str = "turn-status";
 
-/// The question map sent with every turn evaluation: one `Noul` per marker
-/// so states can co-surface instead of competing for a single choice.
+/// The question map sent with every turn evaluation: one `Choice` for the
+/// ending — options compete so only the dominant ending renders — plus one
+/// `Noul` per flag so qualities can co-surface with any ending.
 fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
-    STATUS_MARKERS
-        .iter()
-        .map(|marker| {
-            (
-                marker.id.to_owned(),
-                EvalQuestion::Noul {
-                    instructions: marker.instructions.to_owned(),
-                    criteria: None,
-                },
-            )
-        })
-        .collect()
+    let mut questions = BTreeMap::from([(
+        ENDING_QUESTION.to_owned(),
+        EvalQuestion::Choice {
+            instructions: "Which best describes how this turn ended? Judge the closing \
+                `response` against the `prompt` and any `priorPrompts` still in play; \
+                `toolSequence`, `toolErrors`, and `filesChanged` carry what the turn \
+                actually did."
+                .to_owned(),
+            criteria: ENDING_MARKERS
+                .iter()
+                .map(|marker| (marker.id.to_owned(), Some(marker.instructions.to_owned())))
+                .chain([(ENDING_OTHER_OPTION.to_owned(), None)])
+                .collect(),
+        },
+    )]);
+    for marker in FLAG_MARKERS {
+        questions.insert(
+            marker.id.to_owned(),
+            EvalQuestion::Noul {
+                instructions: marker.instructions.to_owned(),
+                criteria: None,
+            },
+        );
+    }
+    questions
 }
 
 /// The last `max` chars of `text` — conclusions and error lines live at the
@@ -384,20 +411,32 @@ fn turn_eval_state(session: &AgentSession, turn_id: Uuid, summary: Option<&str>)
 }
 
 /// The markers an evaluation cleared, in catalog order — what the footer row
-/// renders. `complete` yields whenever another marker cleared: it is the
-/// nothing-to-see-here chip, and "done" beside a warning or a question reads
-/// as a contradiction.
+/// renders. The ending `Choice` contributes its winner when the winner's
+/// probability clears that marker's bar; each flag `Noul` clears its own
+/// threshold. `complete` then yields whenever another marker cleared: it is
+/// the nothing-to-see-here chip, and "done" beside a warning or a question
+/// reads as a contradiction.
 fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)> {
-    let mut cleared: Vec<(&'static StatusMarker, f64)> = STATUS_MARKERS
-        .iter()
-        .filter_map(|marker| {
-            let noul = match evaluation.answers.get(marker.id) {
-                Some(EvalAnswer::Noul { noul }) => *noul,
-                _ => return None,
-            };
-            (noul >= marker.threshold).then_some((marker, noul))
-        })
-        .collect();
+    let mut cleared: Vec<(&'static StatusMarker, f64)> = Vec::new();
+    if let Some(EvalAnswer::Choice {
+        choice,
+        probabilities,
+        ..
+    }) = evaluation.answers.get(ENDING_QUESTION)
+        && let Some(marker) = ENDING_MARKERS.iter().find(|marker| marker.id == choice)
+    {
+        let winner = probabilities.get(choice).copied().unwrap_or(0.0);
+        if winner >= marker.threshold {
+            cleared.push((marker, winner));
+        }
+    }
+    for marker in FLAG_MARKERS {
+        if let Some(EvalAnswer::Noul { noul }) = evaluation.answers.get(marker.id)
+            && *noul >= marker.threshold
+        {
+            cleared.push((marker, *noul));
+        }
+    }
     if cleared.len() > 1 {
         cleared.retain(|(marker, _)| marker.id != "complete");
     }
@@ -407,7 +446,7 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
 /// One footer chip: the marker's colored icon and name plus the dim
 /// confidence the model reported.
 #[track_caller]
-fn status_marker_chip(marker: &StatusMarker, noul: f64, theme: &Theme) -> Div {
+fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) -> Div {
     let color = marker.tone.color(theme);
     div()
         .flex()
@@ -424,7 +463,7 @@ fn status_marker_chip(marker: &StatusMarker, noul: f64, theme: &Theme) -> Div {
             div()
                 .text_size(sp(11.0))
                 .text_color(theme.text_ghost)
-                .child(format!("{}%", (noul * 100.0).round() as u32)),
+                .child(format!("{}%", (probability * 100.0).round() as u32)),
         )
 }
 
@@ -567,9 +606,9 @@ impl Waku {
                 .items_center()
                 .gap(px(12.0))
                 .children(
-                    cleared
-                        .into_iter()
-                        .map(|(marker, noul)| status_marker_chip(marker, noul, theme)),
+                    cleared.into_iter().map(|(marker, probability)| {
+                        status_marker_chip(marker, probability, theme)
+                    }),
                 )
                 .into_any_element(),
         )
@@ -603,11 +642,29 @@ mod tests {
         }
     }
 
+    fn ending_choice(choice: &str, probabilities: &[(&str, f64)]) -> EvalAnswer {
+        EvalAnswer::Choice {
+            choice: choice.to_owned(),
+            confidence: None,
+            probabilities: probabilities
+                .iter()
+                .map(|(id, probability)| (id.to_string(), *probability))
+                .collect(),
+        }
+    }
+
     #[test]
-    fn questions_cover_every_marker_as_noul() {
+    fn questions_split_the_ending_choice_from_flag_nouls() {
         let questions = status_marker_questions();
-        assert_eq!(questions.len(), STATUS_MARKERS.len());
-        for marker in STATUS_MARKERS {
+        assert_eq!(questions.len(), FLAG_MARKERS.len() + 1);
+        let Some(EvalQuestion::Choice { criteria, .. }) = questions.get(ENDING_QUESTION) else {
+            panic!("the ending question must be a choice");
+        };
+        for marker in ENDING_MARKERS {
+            assert!(criteria.contains_key(marker.id));
+        }
+        assert!(criteria.contains_key(ENDING_OTHER_OPTION));
+        for marker in FLAG_MARKERS {
             assert!(matches!(
                 questions.get(marker.id),
                 Some(EvalQuestion::Noul { .. })
@@ -616,30 +673,90 @@ mod tests {
     }
 
     #[test]
-    fn cleared_markers_respect_thresholds() {
-        let mixed = evaluation(
+    fn cleared_markers_pick_the_ending_winner_and_clear_flags() {
+        let evaluation = evaluation(
             [
-                ("complete", 0.9),
-                ("awaiting-input", 0.69),
-                ("blocked", 0.61),
-                ("failed", 0.59),
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice(
+                        "blocked",
+                        &[
+                            ("complete", 0.05),
+                            ("awaiting-input", 0.10),
+                            ("partial", 0.15),
+                            ("blocked", 0.60),
+                            ("failed", 0.05),
+                            ("other", 0.05),
+                        ],
+                    ),
+                ),
+                ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.80 }),
+                ("drifted".to_owned(), EvalAnswer::Noul { noul: 0.50 }),
             ]
             .into_iter()
-            .map(|(id, noul)| (id.to_owned(), EvalAnswer::Noul { noul }))
             .collect(),
         );
-        let cleared = cleared_markers(&mixed);
-        let ids: Vec<&str> = cleared.iter().map(|(marker, _)| marker.id).collect();
-        // 0.69 misses awaiting-input's 0.70; 0.61 clears blocked's 0.60 while
-        // 0.59 misses failed's — the per-marker threshold is what decides.
-        // `complete` then yields the footer to the more informative chip.
-        assert_eq!(ids, ["blocked"]);
+        let ids: Vec<&str> = cleared_markers(&evaluation)
+            .iter()
+            .map(|(marker, _)| marker.id)
+            .collect();
+        // The ending winner clears blocked's 0.45 bar; unverified's 0.80
+        // clears 0.75 while drifted's 0.50 misses 0.70.
+        assert_eq!(ids, ["blocked", "unverified"]);
+    }
+
+    #[test]
+    fn a_weak_ending_winner_and_the_other_bucket_render_nothing() {
+        let split = evaluation(
+            [(
+                ENDING_QUESTION.to_owned(),
+                ending_choice(
+                    "complete",
+                    &[("complete", 0.40), ("partial", 0.35), ("other", 0.25)],
+                ),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert!(cleared_markers(&split).is_empty());
+
+        let other = evaluation(
+            [(
+                ENDING_QUESTION.to_owned(),
+                ending_choice("other", &[("other", 0.90), ("complete", 0.10)]),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert!(cleared_markers(&other).is_empty());
+    }
+
+    #[test]
+    fn complete_yields_the_footer_to_any_flag() {
+        let done_unchecked = evaluation(
+            [
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice("complete", &[("complete", 0.90), ("other", 0.10)]),
+                ),
+                ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let ids: Vec<&str> = cleared_markers(&done_unchecked)
+            .iter()
+            .map(|(marker, _)| marker.id)
+            .collect();
+        assert_eq!(ids, ["unverified"]);
 
         let clean = evaluation(
-            [("complete", 0.9)]
-                .into_iter()
-                .map(|(id, noul)| (id.to_owned(), EvalAnswer::Noul { noul }))
-                .collect(),
+            [(
+                ENDING_QUESTION.to_owned(),
+                ending_choice("complete", &[("complete", 0.90), ("other", 0.10)]),
+            )]
+            .into_iter()
+            .collect(),
         );
         let ids: Vec<&str> = cleared_markers(&clean)
             .iter()
