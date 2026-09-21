@@ -784,6 +784,7 @@ activity.updated_plan: プランを更新しました
 activity.plan_update_failed: プランの更新に失敗しました
 activity.activity: アクティビティ
 activity.tool: ツール
+activity.subagent: "サブエージェント：%{title}"
 activity.plan_updated: プランを更新しました
 activity.output_truncated: "\n\n… 出力は省略されました"
 activity.thought: 思考
@@ -1067,6 +1068,7 @@ sync.ahead_many: "%{count} コミット進んでいます"
 sync.pull: 変更をプル
 sync.push: 変更をプッシュ
 sync.command_hint: "ターミナルで %{command} を実行します"
+sync.on_base: "%{base} · %{summary}"
 
 terminal.starting: ターミナルを起動中…
 terminal.close_title: このターミナルを終了しますか？
@@ -1085,12 +1087,14 @@ session.turn_completed: ターンが完了しました
 session.turn_waiting_background: バックグラウンドタスクを待っています
 transcript.waiting_background: バックグラウンドタスクを待っています
 session.stopped_before_response: エージェントは回答を返す前に停止しました
+session.prompt_not_delivered: メッセージはエージェントに届きませんでした — もう一度送信してください
 session.codex_exited_before_response: Codex app-server は回答を返す前に終了しました
 session.steer_rejected: エージェントに追加の指示を送れませんでした（%{error}）。メッセージはフォローアップとしてキューに追加されました
 session.steer_rejected_plain: エージェントに追加の指示を送れませんでした。メッセージはフォローアップとしてキューに追加されました
 session.agent_ran_out_of_context: このターンでエージェントのコンテキストが不足しました
 session.agent_declined_turn: エージェントはこのターンを辞退しました
 session.agent_stopped_reason: "エージェントが停止しました：%{reason}"
+session.daemon_restarted_resuming: Goddard デーモンが再起動しました — 中断されたターンを再開しています
 
 errors.open_session: "そのタスクを開けませんでした：%{error}"
 errors.create_projectless_task: "~/.goddard/projects 内にタスクを作成できませんでした：%{error}"
@@ -1438,6 +1442,7 @@ transcript.worked: 完了
 transcript.worked_for: 作業時間 %{duration}
 transcript.you_stopped_after: "%{duration} 後にタスクを停止しました"
 transcript.working_for: 作業中 · %{duration}
+transcript.saving_changes: 変更されたファイルを保存中…
 transcript.thinking: 思考中
 transcript.thought_for: 思考時間 %{duration}
 transcript.changed_file: "%{count} 個のファイルを変更"
