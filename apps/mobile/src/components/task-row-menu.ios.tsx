@@ -4,6 +4,7 @@ import {
   accessibilityHint,
   accessibilityLabel,
 } from '@expo/ui/swift-ui/modifiers';
+import { Pressable } from 'react-native';
 
 import type { TaskRowMenuProps } from '@/components/task-row-menu.types';
 
@@ -11,6 +12,13 @@ import type { TaskRowMenuProps } from '@/components/task-row-menu.types';
  * SwiftUI Menu's primary action fires a normal tap directly while reserving
  * long-press for the native menu. ContextMenu delays its hosted React Native
  * child's tap while it arbitrates the long-press gesture.
+ *
+ * The label's Pressable handles the tap at the RN layer too: Expo Go bundles a
+ * fixed ExpoUI native module whose MenuView may predate primary-action
+ * support, in which case the event never reaches JS and the tap passes through
+ * to the hosted child instead. Where primaryAction does fire natively, the
+ * SwiftUI button consumes the tap and the Pressable is cancelled — and if both
+ * ever fired, a duplicate same-target navigation is harmless.
  */
 export function TaskRowMenu({
   accessibilityLabel: label,
@@ -24,7 +32,13 @@ export function TaskRowMenu({
   return (
     <Host ignoreSafeArea="all" matchContents style={style}>
       <Menu
-        label={<RNHostView matchContents>{renderTrigger(false)}</RNHostView>}
+        label={(
+          <RNHostView matchContents>
+            <Pressable accessible={false} onPress={onSelect}>
+              {({ pressed }) => renderTrigger(pressed)}
+            </Pressable>
+          </RNHostView>
+        )}
         modifiers={[
           accessibilityLabel(label),
           accessibilityHint('Long press for actions'),

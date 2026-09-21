@@ -1,1 +1,1 @@
-- Fix the mobile chat list looking unresponsive to taps: switching sessions while viewing one updated the conversation behind the drawer but left it open, so the tap appeared to do nothing — the drawer now closes on every selection
+- Fix the mobile chat list ignoring taps: Expo Go's bundled menu never delivered the tap event, so the row now also handles taps through a native-RN press target, and switching sessions while viewing one closes the drawer instead of leaving it open over the new chat
