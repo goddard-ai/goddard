@@ -30,7 +30,8 @@ use super::{
     should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
     transcript_anchor_end_space, transcript_navigation_turns, transcript_rests_at_tail,
     transcript_row_kinds, transcript_row_splice, transcript_rows_fingerprint,
-    widened_panel_width_for_file_editor, widened_panel_width_for_review,
+    update_transcript_activity, widened_panel_width_for_file_editor,
+    widened_panel_width_for_review,
 };
 use crate::git_branch::BranchEntry;
 use crate::model::{
@@ -1743,6 +1744,158 @@ fn stream_parts_keep_targeting_the_running_session_after_selection_changes() {
     assert_eq!(sessions[0].messages[1].content, "first second");
     assert!(sessions[0].messages[1].streaming);
     assert!(sessions[1].messages.is_empty());
+}
+
+#[test]
+fn an_activity_update_rewrites_its_row_without_opening_a_new_one() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Devin);
+    session.begin_turn("Rebase");
+    push_transcript_activity(
+        &mut session,
+        ActivityItem::new(
+            Some("call-1".to_owned()),
+            ActivityKind::Tool,
+            "Read file",
+            None,
+            false,
+        ),
+        false,
+    );
+
+    // A status heartbeat for the row already on screen.
+    let heartbeat = ActivityItem::new(
+        Some("call-1".to_owned()),
+        ActivityKind::Tool,
+        "Read file",
+        Some("still running".into()),
+        true,
+    );
+    let (activity_id, _) = update_transcript_activity(&mut session, heartbeat)
+        .expect("the heartbeat matches the pushed row");
+
+    assert_eq!(session.transcript_blocks.len(), 1);
+    assert_eq!(session.transcript_blocks[0].activities.len(), 1);
+    let activity = &session.transcript_blocks[0].activities[0];
+    assert_eq!(activity.id, activity_id);
+    assert!(activity.complete);
+    assert_eq!(activity.detail.as_deref(), Some("still running"));
+
+    // An update for work that never pushed a row comes back for a fresh push.
+    let unrelated = ActivityItem::new(
+        Some("call-2".to_owned()),
+        ActivityKind::Tool,
+        "Edit file",
+        None,
+        false,
+    );
+    assert!(update_transcript_activity(&mut session, unrelated).is_err());
+}
+
+#[test]
+fn a_text_delta_rejoins_the_message_an_interleaved_activity_cut_off() {
+    let project_id = Uuid::new_v4();
+    let mut session = AgentSession::new(project_id, ProviderKind::Devin);
+    session.begin_turn("Rebase");
+    let session_id = session.id;
+    let mut sessions = vec![session];
+
+    append_text_delta_to_session(
+        &mut sessions,
+        session_id,
+        false,
+        "All conflicts are adjacent".into(),
+    );
+    // The provider dispatched a tool mid-sentence; its own transcript keeps
+    // the narration as one message.
+    push_transcript_activity(
+        &mut sessions[0],
+        ActivityItem::new(
+            Some("call-1".to_owned()),
+            ActivityKind::Tool,
+            "Read file",
+            None,
+            false,
+        ),
+        false,
+    );
+    append_text_delta_to_session(
+        &mut sessions,
+        session_id,
+        false,
+        " additions — union resolutions".into(),
+    );
+
+    assert_eq!(sessions[0].messages.len(), 2);
+    assert_eq!(
+        sessions[0].messages[1].content,
+        "All conflicts are adjacent additions — union resolutions"
+    );
+    assert!(sessions[0].messages[1].streaming);
+}
+
+#[test]
+fn a_text_delta_opens_a_fresh_row_after_a_completed_sentence() {
+    let project_id = Uuid::new_v4();
+    let mut session = AgentSession::new(project_id, ProviderKind::Devin);
+    session.begin_turn("Rebase");
+    let session_id = session.id;
+    let mut sessions = vec![session];
+
+    append_text_delta_to_session(
+        &mut sessions,
+        session_id,
+        false,
+        "The rebase is done.".into(),
+    );
+    push_transcript_activity(
+        &mut sessions[0],
+        ActivityItem::new(None, ActivityKind::Command, "Ran tests", None, true),
+        false,
+    );
+    append_text_delta_to_session(
+        &mut sessions,
+        session_id,
+        false,
+        "Everything passed.".into(),
+    );
+
+    assert_eq!(sessions[0].messages.len(), 3);
+    assert_eq!(sessions[0].messages[1].content, "The rebase is done.");
+    assert_eq!(sessions[0].messages[2].content, "Everything passed.");
+}
+
+#[test]
+fn a_text_delta_does_not_rejoin_across_turns_or_notices() {
+    let project_id = Uuid::new_v4();
+    let mut session = AgentSession::new(project_id, ProviderKind::Devin);
+    session.begin_turn("Rebase");
+    let session_id = session.id;
+    let mut sessions = vec![session];
+
+    // A delta that reads as a fresh sentence keeps its own row even when the
+    // previous message ended without terminal punctuation.
+    append_text_delta_to_session(
+        &mut sessions,
+        session_id,
+        false,
+        "Let me check the file".into(),
+    );
+    push_transcript_activity(
+        &mut sessions[0],
+        ActivityItem::new(None, ActivityKind::Command, "Ran ls", None, true),
+        false,
+    );
+    append_text_delta_to_session(&mut sessions, session_id, false, "Now I see it.".into());
+    assert_eq!(sessions[0].messages.len(), 3);
+    assert_eq!(sessions[0].messages[1].content, "Let me check the file");
+    assert_eq!(sessions[0].messages[2].content, "Now I see it.");
+
+    // Once the turn settles, nothing stitches new text onto it.
+    sessions[0].finish_active_turn(TurnStatus::Completed);
+    append_text_delta_to_session(&mut sessions, session_id, false, "stray tail".into());
+    assert_eq!(sessions[0].messages.len(), 4);
+    assert_eq!(sessions[0].messages[3].content, "stray tail");
+    assert!(sessions[0].messages[3].turn_id.is_none());
 }
 
 #[test]

@@ -98,80 +98,45 @@ impl Waku {
         item: ActivityItem,
     ) {
         let previous_phase = runtime.stream_phase;
+        let continuing_work = matches!(
+            previous_phase,
+            Some(StreamPhase::Reasoning | StreamPhase::Activity)
+        );
+        let item = match self.state.session_mut(session_id) {
+            Some(session) => match update_transcript_activity(session, item) {
+                Ok((activity_id, replaces_changes)) => {
+                    if replaces_changes {
+                        // The rows this activity's diff was built from are
+                        // gone; an expanded card rebuilds from the new ones.
+                        self.activity_diffs.borrow_mut().remove(&activity_id);
+                    }
+                    // Progress on an already-anchored row is not a content
+                    // boundary: providers interleave status heartbeats between
+                    // token-level text chunks, and closing the streaming
+                    // message here splices one provider message into
+                    // fragments. Streaming phases keep their course.
+                    if !matches!(
+                        previous_phase,
+                        Some(StreamPhase::Text | StreamPhase::Reasoning)
+                    ) {
+                        runtime.stream_phase = Some(StreamPhase::Activity);
+                    }
+                    return;
+                }
+                Err(item) => item,
+            },
+            None => item,
+        };
+
+        // A brand-new row is a real boundary: the provider moved on to its
+        // next step, so any streaming text or reasoning ends here.
         if previous_phase == Some(StreamPhase::Text) {
             self.finish_streaming_assistant(session_id);
         }
         if previous_phase == Some(StreamPhase::Reasoning) {
             self.complete_reasoning_activity(session_id);
         }
-
-        let continuing_work = matches!(
-            previous_phase,
-            Some(StreamPhase::Reasoning | StreamPhase::Activity)
-        );
         if let Some(session) = self.state.session_mut(session_id) {
-            for block in session.transcript_blocks.iter_mut().rev() {
-                let matching = block.activities.iter_mut().rev().find(|activity| {
-                    item.source_id
-                        .as_ref()
-                        .is_some_and(|id| activity.source_id.as_ref() == Some(id))
-                        || (item.source_id.is_none()
-                            && activity.title == item.title
-                            && !activity.complete)
-                });
-                if let Some(activity) = matching {
-                    let has_arguments = item.arguments.is_some();
-                    let replaces_changes = !item.file_changes.is_empty();
-                    let activity_id = activity.id;
-                    activity.kind = item.kind;
-                    activity.title = item.title;
-                    if item.tool_name.is_some() {
-                        activity.tool_name = item.tool_name;
-                    }
-                    if item.mcp_server.is_some() {
-                        activity.mcp_server = item.mcp_server;
-                    }
-                    activity.complete = item.complete;
-                    activity.failed = item.failed;
-                    if item.detail.is_some() {
-                        activity.detail = item.detail;
-                    }
-                    if item.arguments.is_some() {
-                        activity.arguments = item.arguments;
-                    }
-                    if item.output.is_some() {
-                        activity.output = item.output;
-                    }
-                    if !item.image_urls.is_empty() {
-                        activity.image_urls = item.image_urls;
-                    }
-                    if !item.file_changes.is_empty() {
-                        activity.file_changes = item.file_changes;
-                    }
-                    if item.display_target.is_some()
-                        && (activity.display_target.is_none() || has_arguments)
-                    {
-                        activity.display_target = item.display_target;
-                    }
-                    if item.display_description.is_some()
-                        && (activity.display_description.is_none() || has_arguments)
-                    {
-                        activity.display_description = item.display_description;
-                    }
-                    if item.reasoning.is_some() {
-                        activity.reasoning = item.reasoning;
-                    }
-                    session.updated_at = unix_time();
-                    runtime.stream_phase = Some(StreamPhase::Activity);
-                    if replaces_changes {
-                        // The rows this activity's diff was built from are gone;
-                        // an expanded card rebuilds from the new ones.
-                        self.activity_diffs.borrow_mut().remove(&activity_id);
-                    }
-                    return;
-                }
-            }
-
             push_transcript_activity(session, item, continuing_work);
             session.updated_at = unix_time();
         }
@@ -1181,6 +1146,69 @@ pub(super) fn settle_stream_segment(session: &mut AgentSession) {
     complete_transcript_activities(session);
 }
 
+/// Write `item` into the activity row it reports on. `Ok((activity_id,
+/// replaces_changes))` when an existing row matched — progress on work the
+/// transcript already shows — or `Err(item)` to hand the item back for a
+/// fresh row.
+pub(super) fn update_transcript_activity(
+    session: &mut AgentSession,
+    item: ActivityItem,
+) -> Result<(Uuid, bool), ActivityItem> {
+    for block in session.transcript_blocks.iter_mut().rev() {
+        let matching = block.activities.iter_mut().rev().find(|activity| {
+            item.source_id
+                .as_ref()
+                .is_some_and(|id| activity.source_id.as_ref() == Some(id))
+                || (item.source_id.is_none() && activity.title == item.title && !activity.complete)
+        });
+        if let Some(activity) = matching {
+            let has_arguments = item.arguments.is_some();
+            let replaces_changes = !item.file_changes.is_empty();
+            let activity_id = activity.id;
+            activity.kind = item.kind;
+            activity.title = item.title;
+            if item.tool_name.is_some() {
+                activity.tool_name = item.tool_name;
+            }
+            if item.mcp_server.is_some() {
+                activity.mcp_server = item.mcp_server;
+            }
+            activity.complete = item.complete;
+            activity.failed = item.failed;
+            if item.detail.is_some() {
+                activity.detail = item.detail;
+            }
+            if item.arguments.is_some() {
+                activity.arguments = item.arguments;
+            }
+            if item.output.is_some() {
+                activity.output = item.output;
+            }
+            if !item.image_urls.is_empty() {
+                activity.image_urls = item.image_urls;
+            }
+            if !item.file_changes.is_empty() {
+                activity.file_changes = item.file_changes;
+            }
+            if item.display_target.is_some() && (activity.display_target.is_none() || has_arguments)
+            {
+                activity.display_target = item.display_target;
+            }
+            if item.display_description.is_some()
+                && (activity.display_description.is_none() || has_arguments)
+            {
+                activity.display_description = item.display_description;
+            }
+            if item.reasoning.is_some() {
+                activity.reasoning = item.reasoning;
+            }
+            session.updated_at = unix_time();
+            return Ok((activity_id, replaces_changes));
+        }
+    }
+    Err(item)
+}
+
 pub(super) fn push_transcript_activity(
     session: &mut AgentSession,
     item: ActivityItem,
@@ -1327,15 +1355,31 @@ pub(super) fn append_text_delta_to_session(
             }
         }
     }
-    let existing = continuing.then(|| {
+    let existing = if continuing {
         session
             .messages
             .iter_mut()
             .rev()
             .find(|message| message.role == MessageRole::Assistant && message.streaming)
-    });
-    if let Some(Some(message)) = existing {
+    } else {
+        // An interleaved activity is not a boundary in the provider's own
+        // message: it dispatches tool calls wherever a sentence happens to
+        // be, and its transcript keeps the text as one. Rejoin the last
+        // assistant text when it clearly ended mid-thought and the delta
+        // reads as its continuation — a completed sentence still opens a
+        // fresh row.
+        let turn_id = session.active_turn_id();
+        session.messages.last_mut().filter(|message| {
+            message.role == MessageRole::Assistant
+                && turn_id.is_some_and(|id| message.turn_id == Some(id))
+                && message.notice.is_none()
+                && !message.hidden
+                && text_delta_rejoins(&message.content, &delta)
+        })
+    };
+    if let Some(message) = existing {
         message.content.push_str(&delta);
+        message.streaming = true;
     } else {
         let mut message = session
             .active_turn_id()
@@ -1345,4 +1389,20 @@ pub(super) fn append_text_delta_to_session(
         session.messages.push(message);
     }
     session.updated_at = unix_time();
+}
+
+/// Whether a text delta resumes a message a mid-stream boundary cut off.
+/// Providers emit token-granular chunks and dispatch tool calls wherever a
+/// sentence happens to be, so a split lands mid-thought while their own
+/// transcript keeps the text as one message. `previous` must read as
+/// unfinished — no terminal punctuation — and `delta` must not open a fresh
+/// sentence.
+fn text_delta_rejoins(previous: &str, delta: &str) -> bool {
+    let ends_mid_thought = previous
+        .trim_end()
+        .chars()
+        .next_back()
+        .is_some_and(|c| !matches!(c, '.' | '!' | '?' | ':' | '…'));
+    let opens_fresh = delta.chars().next().is_some_and(char::is_uppercase);
+    ends_mid_thought && !opens_fresh
 }
