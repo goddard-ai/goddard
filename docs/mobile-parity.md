@@ -1,0 +1,158 @@
+# Mobile parity plan — Goddard vs T3 Code
+
+Feature-parity checklist for `apps/mobile` against T3 Code's mobile app
+(`apps/mobile` at github.com/pingdotgg/t3code). Ordered by implementation
+effort; tiers 0–2 are pure client work on the existing daemon protocol,
+tier 3 needs new native modules, tier 4 needs new infrastructure or
+protocol changes.
+
+## Baseline — already shipped
+
+- [x] Multi-daemon profiles: manual add, QR pairing, Bonjour/Zeroconf
+      discovery, SecureStore token storage, `goddard://connect` deep link
+- [x] Task drawer with title search, rename, delete
+- [x] New-task composer: project picker, provider/model pickers with
+      traits, workspace mode + branch pickers, attachments, slash
+      commands, @-file context, permission/access modes
+- [x] Session transcript: GFM markdown, turn folds, activity sheets,
+      changed-files card, diff view
+- [x] Permission approvals and agent question prompts
+- [x] Queue/steer while a turn runs; daemon-synced composer drafts
+- [x] Surfaces: libghostty terminal, workspace file tree + text preview,
+      review diffs (uncommitted/staged/committed/branch/last-turn)
+- [x] `/land` workspace landing
+- [x] System light/dark theme, haptics, reduced-motion
+
+## Tier 0 — trivial (hours each, protocol already supports it)
+
+- [ ] **Selectable transcript text** — `selectable` on markdown `Text`
+      nodes in `src/md/render.tsx` (agent messages are currently not
+      selectable; user bubbles and sheets already are).
+- [ ] **Pin sessions** — `AgentSession.pinned_at` exists; persist via
+      `saveTaskState`. Pinned rows float to the top of the task drawer.
+- [ ] **Archive sessions + archived view** — `AgentSession.archived_at`
+      exists. Swipe/menu action plus an archived section or screen.
+- [ ] **Dormant/snooze sessions** — `dormant_at` / `dormant_exempt_until`
+      fields exist; wire a snooze action that hides the task until it
+      needs attention.
+- [ ] **Swipe actions on task rows** — `react-native-gesture-handler` is
+      already a dependency; expose pin/archive/delete on swipe.
+- [ ] **In-session message search** — `searchSessionMessages` command
+      exists; drawer search currently matches titles only. Add a search
+      bar to the session view and/or extend drawer search to content.
+- [ ] **Daemon version / update banner** — `hello` carries
+      `daemonVersion` and `protocolVersion`; compare against the app
+      build and show a notice when the daemon lags.
+- [ ] **Question-card clarify/dismiss** — `clarifyUserInput` and
+      `cancelUserInput` commands plus `supportsUserInputActions` already
+      exist; `UserInputPanel` in `mobile-composer.tsx` doesn't use them.
+- [ ] **Session actions: compact / rollback / rewind / fork** —
+      `compact`, `rollback`, `rewindSessionToMessage`,
+      `forkSessionFromResponse` commands exist; add to the task menu.
+- [ ] **Home-screen quick actions** — `expo-quick-actions` plugin:
+      "New task" + deep links to recent sessions (`goddard://` scheme and
+      expo-router are already configured).
+- [ ] **Pairing approvals on phone** — `getPairing`, `respondPairRequest`,
+      `revokePairedClient`, plus pushed `pairPending` / `pairGranted` /
+      `pairDeclined` events. Let the phone approve a new client pairing.
+
+## Tier 1 — small-medium (days, still protocol-ready)
+
+- [ ] **Git surface sheet** — all ops exist: `inspectGitPanel`,
+      `stageFile`, `unstageFile`, `discardFile`, `commit`,
+      `generateCommitMessage`, `push`, `checkoutBranch`, `listCommits`,
+      `listWorktrees`, `createWorktree`, `listRepoBranches`,
+      `fetchRemote`, `pullUpstream`, `rebaseOnto`. Fourth surface beside
+      Terminal / Files / Review in `task-surface-sheet.tsx`.
+- [ ] **Pull-request surface** — `listPullRequests`, `getPullRequest`,
+      `fetchPullRequestHead`; check and review-comment types
+      (`PullRequestCheck`, `PullRequestReviewComment`) are generated.
+- [ ] **Notifications inbox** — `listNotifications`,
+      `markNotificationRead`, `markAllNotificationsRead`,
+      `markRepoNotificationsRead` (GitHub inbox, not push).
+- [ ] **Review queue** — `reviewQueue`, `reviewApprove`, `reviewReject`,
+      `reviewPromote` workspace ops.
+- [ ] **Usage screen** — `loadUsageHistory` + `fetchPlanUsage`;
+      `react-native-svg` is already a dependency for the chart.
+- [ ] **File preview upgrades** — `readBinaryFile` for image previews;
+      `writeTextFile` for editing; extend the existing Files surface.
+- [ ] **Video/audio attachments + preview** — widen
+      `expo-image-picker` media types and add `expo-video` playback;
+      upload path already exists.
+- [ ] **Settings screen** — no settings route exists today. Daemon side
+      is ready: `getSettings` / `updateSettings` / `setDaemonExposure`.
+      Client-side sections: appearance, font size, storage.
+- [ ] **Per-thread settings sheet** — `applyOptions`
+      (`WireSessionOptions`) switches model/mode/effort on a live
+      session; extend the existing model sheet.
+- [ ] **Offline outbox** — client-side queue in AsyncStorage drained on
+      `connected`; `prompt` accepts messages any time.
+- [ ] **Skills UI** — `loadSkills`, `setSkillsEnabled`, `trashSkills`.
+- [ ] **Custom slash-commands editor** — `listCustomCommands`,
+      `upsertCustomCommand`, `removeCustomCommand`.
+- [ ] **Integrations auth UI** — `listIntegrations`,
+      `connectIntegration`, `startIntegrationAuth`,
+      `disconnectIntegration`.
+- [ ] **Queued-message management** — `queued_messages` on the session
+      plus `cancelQueuedPrompt`; show and cancel queued sends.
+- [ ] **Issues surface** — `listIssues`, `getIssue`, `createIssue`,
+      `listIssueTemplates` (parity depends on how much desktop exposes).
+
+## Tier 2 — moderate (native module or layout work, no new infra)
+
+- [ ] **Share extension / incoming share** — iOS share-extension target +
+      Android share intent (e.g. `expo-share-intent`), persisted share
+      inbox feeding the composer. Protocol has `IncomingShareInfo`.
+- [ ] **Voice dictation** — `expo-audio` recording + Speech
+      transcription; button slot in the composer. T3 ships a native
+      transcription module — Expo speech-recognition is enough to start.
+- [ ] **iPad split-view layout** — persistent sidebar + detail pane with
+      adaptive push/replace navigation; `supportsTablet` is already on,
+      current UI is phone-style drawer only.
+- [ ] **Hardware keyboard shortcuts** — iPad keybindings for navigation,
+      send, new task; key-event handling in the session view.
+- [ ] **Local notifications** — `expo-notifications` local alerts for
+      "agent finished / needs input" while the socket lives
+      (foreground + short background grace). Partial fix only.
+- [ ] **Material You (Android)** — dynamic wallpaper palette;
+      Android-only, independent of the iOS theme system.
+
+## Tier 3 — hard / blocked on infra or protocol
+
+- [ ] **Push notifications** — alerts when the app is closed. Requires a
+      relay with a push path (T3 Connect equivalent); no cheap version.
+- [ ] **iOS Live Activities / Android ongoing + Live Updates** — ambient
+      agent progress; depends on the push path for real updates.
+- [ ] **Home-screen widgets** — `expo-widgets` Agent Activity + usage
+      widgets; only refresh while the app runs without push.
+- [ ] **Multi-daemon aggregated task list** — `daemon-context` is built
+      around one active link; aggregation needs a multi-client runtime
+      and a unified home list.
+- [ ] **Terminal scrollback replay** — `openTerminal` takes only `cwd`;
+      needs daemon-side scrollback persistence.
+- [ ] **Question attachments** — `UserInputAnswer` is
+      `{questionId, answers: string[]}`; needs a protocol field.
+- [ ] **Device/simulator preview** — watch + control agent-driven
+      simulators; needs the desktop-side device hub first.
+- [ ] **Cloud relay / account sign-in** — remote access without
+      LAN/tailnet, and the enabling layer for push.
+- [ ] **AI thread-title regeneration** — `auto_title` exists; no explicit
+      regenerate command (possibly `evaluate`-driven); needs a daemon
+      hook or a defined route.
+- [ ] **Unified command palette** — after hardware-keyboard support,
+      a palette sheet aggregating session/task/composer commands.
+
+## Dependencies
+
+- Push notifications → cloud relay.
+- Live Activities, always-fresh widgets → push notifications.
+- Device preview → desktop device hub.
+- Question attachments → protocol change (`UserInputAnswer` + daemon).
+- Terminal scrollback → daemon scrollback persistence.
+- Multi-daemon home → multi-client runtime refactor.
+
+## Out of scope (T3 desktop-only features)
+
+SnapShot window capture, browser profiles/import, desktop keybinding
+editor, panel animations, environment themes, background service
+management, T3 Connect host setup (desktop owns hosting).
