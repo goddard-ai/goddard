@@ -173,7 +173,7 @@ function DrawerCard({ children }: { children: ReactNode }) {
   const progress = useDrawerProgress();
   const cornerRadius = useDisplayCornerRadius();
   const shadowStyle = useAnimatedStyle(() => ({
-    shadowOpacity: progress.value * 0.06,
+    shadowOpacity: progress.value * 0.08,
   }));
   return (
     <Animated.View
@@ -744,7 +744,7 @@ const styles = StyleSheet.create({
     flex: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 3,
+    shadowRadius: 5,
   },
   drawerCard: {
     // Continuous curve matches the display's squircle; borderRadius is set
