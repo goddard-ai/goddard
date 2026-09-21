@@ -55,14 +55,14 @@ pub fn list_worktrees(cwd: &Path) -> anyhow::Result<Option<Vec<RepoWorktree>>> {
 
 /// One `worktree list --porcelain` block: the attributes between a
 /// `worktree <path>` line and the blank line that ends the block.
-struct ParsedWorktree {
-    path: PathBuf,
-    head: String,
-    branch: Option<String>,
+pub(crate) struct ParsedWorktree {
+    pub(crate) path: PathBuf,
+    pub(crate) head: String,
+    pub(crate) branch: Option<String>,
     bare: bool,
 }
 
-fn parse_worktree_porcelain(output: &str) -> Vec<ParsedWorktree> {
+pub(crate) fn parse_worktree_porcelain(output: &str) -> Vec<ParsedWorktree> {
     let mut worktrees = Vec::new();
     let mut current: Option<ParsedWorktree> = None;
     for line in output.lines() {

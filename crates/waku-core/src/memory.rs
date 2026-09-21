@@ -63,6 +63,12 @@ const FALLBACK_TRANSCRIPT_CHARS: usize = 60_000;
 /// The headless provider run gets a hard ceiling; a stuck distill must never
 /// pin the per-project worker.
 const DISTILL_TIMEOUT: Duration = Duration::from_secs(300);
+/// How many cited commits one pass bothers to verify; beyond that the rest
+/// go unchecked rather than bounding the git work.
+const MAX_COMMIT_REFS: usize = 16;
+/// History depth searched per side when matching an orphaned SHA to its
+/// rewritten successor by subject.
+const SUCCESSOR_SCAN_DEPTH: usize = 300;
 
 /// What the distiller sees per session: messages already considered stay
 /// below `position`; only the tail is new.
@@ -304,7 +310,29 @@ impl MemoryService {
             .map(|index| segments[*index].as_str())
             .collect::<Vec<_>>()
             .join("\n\n");
-        let prompt = distill_prompt(&read_memory(&store), &log_tail(&store, 30), &excerpts);
+
+        let memory_md = read_memory(&store);
+        let commit_refs = check_commit_refs(&project_path, &memory_md);
+        // An orphaned SHA stays stale in LOG.txt forever unless a note
+        // records the rewrite — one dated correction per superseded
+        // reference, deduped on the successor so a rebase appends once.
+        if commit_refs.iter().any(|commit| commit.successor.is_some()) {
+            let logged = read_log_lines(&store);
+            let corrections: Vec<String> = commit_refs
+                .iter()
+                .filter_map(|commit| {
+                    let next = commit.successor.as_ref()?;
+                    (!logged.iter().any(|line| line.contains(next.as_str()))).then(|| {
+                        format!(
+                            "git-check: {} \"{}\" was rebased to {next}",
+                            commit.cited, commit.subject
+                        )
+                    })
+                })
+                .collect();
+            append_notes(&store, &corrections)?;
+        }
+        let prompt = distill_prompt(&memory_md, &log_tail(&store, 30), &excerpts, &commit_refs);
 
         let binary = provider_binary(&settings, source.provider)?;
         let output = headless_prompt(
@@ -454,14 +482,230 @@ fn tail_fallback(segments: &[String]) -> Vec<usize> {
     kept
 }
 
+/// A commit cited in MEMORY.md, resolved against the project's repository.
+/// SHAs go dangling on every rebase, so the distiller sees a verified
+/// status per citation instead of trusting the stored text.
+struct CommitRef {
+    /// The cited token — abbreviated SHAs stay abbreviated.
+    cited: String,
+    /// The commit's subject line, which survives the rebases SHAs don't.
+    subject: String,
+    /// Branches and tags containing the commit.
+    landed_on: Vec<String>,
+    /// Detached worktree HEADs containing it — committed, but on no branch.
+    worktree_heads: Vec<String>,
+    /// A different commit carrying the same subject: the rebase's rewrite.
+    successor: Option<String>,
+}
+
+/// Tokenize `text` into commit-SHA candidates: lowercase hex runs of 7-40
+/// characters holding at least one digit, so hex colors (`#44475a` is 6)
+/// and words like `facaded` never reach git. Order preserved, duplicates
+/// dropped, capped at [`MAX_COMMIT_REFS`].
+fn commit_ref_candidates(text: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+    for token in text.split(|c: char| !matches!(c, '0'..='9' | 'a'..='f')) {
+        if !(7..=40).contains(&token.len())
+            || !token.bytes().any(|b| b.is_ascii_digit())
+            || !seen.insert(token)
+        {
+            continue;
+        }
+        candidates.push(token.to_owned());
+        if candidates.len() == MAX_COMMIT_REFS {
+            break;
+        }
+    }
+    candidates
+}
+
+/// `git` in `cwd`, trimmed stdout on success. Every caller treats `None` as
+/// "unknown" — the reference check must never fail a distillation pass.
+fn git_stdout(cwd: &Path, args: &[&str]) -> Option<String> {
+    let output = crate::command_env::search_path_command("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// True when `sha` is an ancestor of `head` — the reachability probe for
+/// detached worktree HEADs, which `branch --contains` cannot see.
+fn git_is_ancestor(cwd: &Path, sha: &str, head: &str) -> bool {
+    crate::command_env::search_path_command("git")
+        .args(["merge-base", "--is-ancestor", sha, head])
+        .current_dir(cwd)
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// A short name for a worktree in the check report: the leaf directory, or
+/// its parent when the checkout nests the project inside a named dir —
+/// `worktrees/goddard/dusty-bell/goddard` reads as `dusty-bell`.
+fn worktree_label(path: &Path, project_path: &Path) -> String {
+    let leaf = || {
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+    };
+    let project_leaf = project_path.file_name().and_then(|name| name.to_str());
+    match leaf() {
+        Some(leaf) if Some(leaf.as_str()) != project_leaf => leaf,
+        _ => path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .or_else(leaf)
+            .unwrap_or_else(|| path.display().to_string()),
+    }
+}
+
+/// Resolve every commit-shaped token in `memory_md` against the repository.
+/// Empty when the project is not a Git repository or no token names a real
+/// commit — the caller then skips the check section entirely.
+fn check_commit_refs(project_path: &Path, memory_md: &str) -> Vec<CommitRef> {
+    let candidates = commit_ref_candidates(memory_md);
+    if candidates.is_empty() || git_stdout(project_path, &["rev-parse", "--git-dir"]).is_none() {
+        return Vec::new();
+    }
+
+    // A branch checked out in a worktree is covered by `branch --contains`;
+    // only detached HEADs are invisible to it and need the ancestry probe.
+    let detached: Vec<(String, String)> =
+        git_stdout(project_path, &["worktree", "list", "--porcelain"])
+            .map(|output| crate::repo::parse_worktree_porcelain(&output))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.branch.is_none() && !entry.head.is_empty())
+            .map(|entry| (entry.head, worktree_label(&entry.path, project_path)))
+            .collect();
+
+    // Subject → rewritten SHA across every named ref plus each detached
+    // head's recent history: how an orphaned commit finds its successor.
+    let mut history = git_stdout(
+        project_path,
+        &[
+            "log",
+            "--all",
+            &format!("-{SUCCESSOR_SCAN_DEPTH}"),
+            "--format=%h%x09%s",
+        ],
+    )
+    .unwrap_or_default();
+    for (head, _) in &detached {
+        if let Some(log) = git_stdout(
+            project_path,
+            &["log", head, "-n", "150", "--format=%h%x09%s"],
+        ) {
+            history.push_str(&log);
+        }
+    }
+
+    candidates
+        .iter()
+        .filter(|cited| {
+            git_stdout(project_path, &["cat-file", "-t", cited.as_str()]).as_deref()
+                == Some("commit")
+        })
+        .map(|cited| {
+            let subject = git_stdout(project_path, &["log", "-1", "--format=%s", cited.as_str()])
+                .unwrap_or_default();
+            let mut landed_on: Vec<String> =
+                git_stdout(project_path, &["branch", "--all", "--contains", cited])
+                    .unwrap_or_default()
+                    .lines()
+                    .map(|line| line.trim_start_matches(['*', '+', ' ']).to_owned())
+                    .filter(|line| !line.is_empty())
+                    .collect();
+            landed_on.extend(
+                git_stdout(project_path, &["tag", "--contains", cited.as_str()])
+                    .unwrap_or_default()
+                    .lines()
+                    .map(str::to_owned),
+            );
+            let worktree_heads: Vec<String> = detached
+                .iter()
+                .filter(|(head, _)| git_is_ancestor(project_path, cited, head))
+                .map(|(_, label)| label.clone())
+                .collect();
+            let successor = if landed_on.is_empty() && worktree_heads.is_empty() {
+                history.lines().find_map(|line| {
+                    let (sha, other) = line.split_once('\t')?;
+                    (other == subject
+                        && !cited.starts_with(sha)
+                        && !sha.starts_with(cited.as_str()))
+                    .then(|| sha.to_owned())
+                })
+            } else {
+                None
+            };
+            CommitRef {
+                cited: cited.clone(),
+                subject,
+                landed_on,
+                worktree_heads,
+                successor,
+            }
+        })
+        .collect()
+}
+
+/// The commit-check prompt section: one verified line per cited commit. The
+/// distiller owns the wording fix; this supplies the git ground truth.
+fn commit_ref_report(commit_refs: &[CommitRef]) -> Option<String> {
+    if commit_refs.is_empty() {
+        return None;
+    }
+    let lines = commit_refs
+        .iter()
+        .map(|commit| {
+            let status = if !commit.landed_on.is_empty() {
+                format!("landed on {}", commit.landed_on.join(", "))
+            } else if !commit.worktree_heads.is_empty() {
+                format!(
+                    "worktree-only (detached HEAD of {})",
+                    commit.worktree_heads.join(", ")
+                )
+            } else if let Some(successor) = &commit.successor {
+                format!("superseded — a rebase rewrote it as {successor}")
+            } else {
+                "unreachable — no ref or worktree contains it".to_owned()
+            };
+            format!("- {} \"{}\" — {}", commit.cited, commit.subject, status)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(lines)
+}
+
 /// The one-shot prompt the headless driver answers. The output format is
 /// deliberately rigid so [`parse_distill_output`] never has to guess.
-fn distill_prompt(memory_md: &str, recent: &[String], excerpts: &str) -> String {
+fn distill_prompt(
+    memory_md: &str,
+    recent: &[String],
+    excerpts: &str,
+    commit_refs: &[CommitRef],
+) -> String {
     let recent_text = if recent.is_empty() {
         "(none)".to_owned()
     } else {
         recent.join("\n")
     };
+    let commit_check = commit_ref_report(commit_refs)
+        .map(|lines| {
+            format!(
+                "\nCommit references verified against git just now:\n{lines}\n\
+                 Reflect them in MEMORY.md: a landed commit's status becomes\n\
+                 \"landed\", a superseded one is rewritten to the new SHA, and\n\
+                 an unreachable one is dropped or flagged — the durable fact\n\
+                 itself stays either way.\n"
+            )
+        })
+        .unwrap_or_default();
     format!(
         "You maintain the persistent memory of a software project. It is stored as\n\
          - MEMORY.md: at most {MAX_MEMORY_LINES} lines of durable facts — decisions, \
@@ -469,11 +713,17 @@ fn distill_prompt(memory_md: &str, recent: &[String], excerpts: &str) -> String 
          - LOG.txt: an append-only log of one-line notes.\n\n\
          Current MEMORY.md:\n{memory_md}\n\n\
          Recent log lines:\n{recent_text}\n\n\
-         New transcript excerpts:\n{excerpts}\n\n\
+         New transcript excerpts:\n{excerpts}\n{commit_check}\n\
          Write 0-5 new log lines and the refreshed MEMORY.md.\n\
          - One durable fact per log line, at most {MAX_NOTE_CHARS} characters each.\n\
          - Record decisions, user preferences, failed approaches, and non-obvious facts. \
          Skip status updates, file-by-file narration, and anything already in MEMORY.md.\n\
+         - A fact that cites a commit names its status — landed, pending-qa, \
+         worktree-only, proposed, or rejected — and pairs the SHA with the commit \
+         subject in quotes. Rebases orphan SHAs; subjects survive them.\n\
+         - MEMORY.md holds durable facts only. Volatile pointers — temp log \
+         paths, live instrumentation, where HEAD currently sits — belong in \
+         LOG.txt, never in MEMORY.md.\n\
          - Never record secrets, tokens, passwords, or credentials.\n\
          - Preserve human edits already present in MEMORY.md; keep it under \
          {MAX_MEMORY_LINES} lines.\n\n\
@@ -1063,5 +1313,92 @@ mod tests {
         let restored = load_state(&store);
         assert_eq!(restored.sessions[&session].position, 42);
         std::fs::remove_dir_all(&store).ok();
+    }
+
+    fn git_ok(cwd: &Path, args: &[&str]) -> String {
+        let output = crate::command_env::search_path_command("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    #[test]
+    fn commit_candidates_require_hex_and_a_digit() {
+        let text = "landed 31370233 but not color #44475a nor word facaded nor 0xBD93F9";
+        assert_eq!(commit_ref_candidates(text), vec!["31370233"]);
+        // Duplicates collapse; non-commit words with digits stay candidates
+        // for git to reject.
+        assert_eq!(commit_ref_candidates("f00ba12 f00ba12"), vec!["f00ba12"]);
+        assert!(commit_ref_candidates("no refs here").is_empty());
+    }
+
+    #[test]
+    fn commit_refs_track_landed_and_rebased() {
+        let root = std::env::temp_dir().join(format!("waku-memory-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        git_ok(&root, &["init", "-b", "main"]);
+        std::fs::write(root.join("a.txt"), "one").unwrap();
+        git_ok(&root, &["add", "."]);
+        git_ok(
+            &root,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=goddard@test",
+                "commit",
+                "-m",
+                "first change",
+            ],
+        );
+        let orphaned = git_ok(&root, &["rev-parse", "--short", "HEAD"]);
+        // Amend is the smallest rebase: same subject, new SHA, old dangles.
+        std::fs::write(root.join("a.txt"), "two").unwrap();
+        git_ok(&root, &["add", "."]);
+        git_ok(
+            &root,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=goddard@test",
+                "commit",
+                "--amend",
+                "-m",
+                "first change",
+            ],
+        );
+        let landed = git_ok(&root, &["rev-parse", "--short", "HEAD"]);
+
+        let memory = format!("the fix cites {orphaned} and also {landed}");
+        let refs = check_commit_refs(&root, &memory);
+        assert_eq!(refs.len(), 2);
+        let orphaned_ref = refs.iter().find(|r| r.cited == orphaned).unwrap();
+        assert_eq!(orphaned_ref.subject, "first change");
+        assert!(orphaned_ref.landed_on.is_empty());
+        assert!(orphaned_ref.worktree_heads.is_empty());
+        let successor = orphaned_ref.successor.as_deref().unwrap();
+        assert!(landed.starts_with(successor) || successor.starts_with(landed.as_str()));
+        let landed_ref = refs.iter().find(|r| r.cited == landed).unwrap();
+        assert_eq!(landed_ref.landed_on, vec!["main".to_owned()]);
+        assert!(landed_ref.successor.is_none());
+
+        let report = commit_ref_report(&refs).unwrap();
+        assert!(report.contains("landed on main"));
+        assert!(report.contains("superseded"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn commit_refs_empty_without_git_or_candidates() {
+        let root = std::env::temp_dir().join(format!("waku-memory-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(check_commit_refs(&root, "cites deadbee0").is_empty());
+        assert!(check_commit_refs(&root, "no hex tokens at all").is_empty());
+        assert!(commit_ref_report(&[]).is_none());
+        std::fs::remove_dir_all(&root).ok();
     }
 }
