@@ -56,9 +56,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 34,
   },
   appIcon: { borderRadius: 18, height: 72, marginBottom: 24, width: 72 },
-  title: { fontSize: 28, fontWeight: '700', letterSpacing: -0.7, textAlign: 'center' },
+  title: { fontSize: 29, fontWeight: '700', letterSpacing: -0.7, textAlign: 'center' },
   body: {
-    fontSize: 16,
+    fontSize: 17,
     lineHeight: 23,
     marginTop: 10,
     maxWidth: 440,
@@ -73,7 +73,7 @@ const styles = StyleSheet.create({
     minHeight: 50,
     paddingHorizontal: 22,
   },
-  primaryButtonText: { fontSize: 16, fontWeight: '700' },
+  primaryButtonText: { fontSize: 17, fontWeight: '700' },
   securityNote: {
     alignItems: 'flex-start',
     flexDirection: 'row',
@@ -81,5 +81,5 @@ const styles = StyleSheet.create({
     marginTop: 24,
     maxWidth: 330,
   },
-  securityText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  securityText: { flex: 1, fontSize: 13, lineHeight: 17 },
 });

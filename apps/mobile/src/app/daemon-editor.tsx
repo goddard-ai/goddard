@@ -498,7 +498,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { paddingBottom: 44, paddingTop: 24 },
   sectionLabel: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "500",
     letterSpacing: 0.1,
     marginBottom: 7,
@@ -517,10 +517,10 @@ const styles = StyleSheet.create({
     paddingLeft: 16,
     paddingRight: 8,
   },
-  fieldLabel: { fontSize: 16, width: 82 },
+  fieldLabel: { fontSize: 17, width: 82 },
   rowInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 17,
     minHeight: 55,
     paddingHorizontal: 8,
     paddingVertical: 12,
@@ -541,7 +541,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 8,
   },
-  messageText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  messageText: { flex: 1, fontSize: 14, lineHeight: 18 },
   removeRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -550,14 +550,14 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingHorizontal: 16,
   },
-  removeText: { fontSize: 16 },
+  removeText: { fontSize: 17 },
   actionFootnote: {
-    fontSize: 13,
+    fontSize: 14,
     lineHeight: 18,
     marginHorizontal: 20,
     marginTop: 8,
   },
   headerButton: { justifyContent: "center", minHeight: 44, minWidth: 44 },
-  headerButtonText: { fontSize: 16 },
+  headerButtonText: { fontSize: 17 },
   headerButtonEmphasized: { fontWeight: "700" },
 });

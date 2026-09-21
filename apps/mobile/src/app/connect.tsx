@@ -115,14 +115,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 32,
   },
-  status: { fontSize: 15 },
+  status: { fontSize: 16 },
   messageRow: {
     alignItems: "flex-start",
     flexDirection: "row",
     gap: 8,
     maxWidth: 340,
   },
-  messageText: { flex: 1, fontSize: 14, lineHeight: 20 },
+  messageText: { flex: 1, fontSize: 15, lineHeight: 20 },
   actions: { flexDirection: "row", gap: 10, marginTop: 8 },
   button: {
     alignItems: "center",
@@ -131,5 +131,5 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 18,
   },
-  buttonText: { color: "#ffffff", fontSize: 15, fontWeight: "600" },
+  buttonText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
 });

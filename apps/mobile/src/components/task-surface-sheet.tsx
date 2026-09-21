@@ -285,7 +285,7 @@ function TerminalSession({ root }: { root: string }) {
     <View style={styles.terminalBody}>
       <TerminalView
         ref={terminal}
-        fontSize={12}
+        fontSize={13}
         style={styles.fill}
         theme={{
           background: theme.surface,
@@ -830,10 +830,10 @@ const styles = StyleSheet.create({
     width: 30,
   },
   headerCopy: { flex: 1, minWidth: 0 },
-  headerTitle: { fontSize: 15, fontWeight: "600" },
-  headerSubtitle: { fontSize: 11.5, marginTop: 1 },
+  headerTitle: { fontSize: 16, fontWeight: "600" },
+  headerSubtitle: { fontSize: 12.5, marginTop: 1 },
   textButton: { justifyContent: "center", minHeight: 36, paddingHorizontal: 4 },
-  textButtonLabel: { fontSize: 14, fontWeight: "500" },
+  textButtonLabel: { fontSize: 15, fontWeight: "500" },
   terminalBody: { flex: 1, minHeight: 0, position: "relative" },
   terminalStatus: {
     borderRadius: Radius.small,
@@ -844,7 +844,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 10,
   },
-  terminalStatusText: { fontSize: 11 },
+  terminalStatusText: { fontSize: 12 },
   backRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -852,10 +852,10 @@ const styles = StyleSheet.create({
     minHeight: 38,
     paddingHorizontal: 15,
   },
-  backLabel: { fontSize: 14.5, fontWeight: "500" },
+  backLabel: { fontSize: 15.5, fontWeight: "500" },
   fileContent: { paddingHorizontal: 14, paddingTop: 4 },
-  fileText: { fontFamily: MonoFont, fontSize: 11.5, lineHeight: 17 },
-  truncated: { fontSize: 11, marginTop: 14 },
+  fileText: { fontFamily: MonoFont, fontSize: 12.5, lineHeight: 17 },
+  truncated: { fontSize: 12, marginTop: 14 },
   fileRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -863,7 +863,7 @@ const styles = StyleSheet.create({
     minHeight: 39,
     paddingRight: 14,
   },
-  fileRowLabel: { flex: 1, fontSize: 13.5 },
+  fileRowLabel: { flex: 1, fontSize: 14.5 },
   reviewControls: {
     alignItems: "center",
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -880,12 +880,12 @@ const styles = StyleSheet.create({
     minHeight: 32,
     paddingHorizontal: 10,
   },
-  sourceLabel: { fontSize: 13, fontWeight: "500" },
-  reviewStats: { fontSize: 11.5 },
+  sourceLabel: { fontSize: 14, fontWeight: "500" },
+  reviewStats: { fontSize: 12.5 },
   reviewList: { paddingTop: 0 },
   contextNote: {
     borderRadius: Radius.small,
-    fontSize: 11.5,
+    fontSize: 12.5,
     margin: 12,
     padding: 9,
   },
@@ -901,7 +901,7 @@ const styles = StyleSheet.create({
     minHeight: 36,
     paddingHorizontal: 12,
   },
-  diffPath: { flex: 1, fontSize: 12.5, fontWeight: "500" },
+  diffPath: { flex: 1, fontSize: 13.5, fontWeight: "500" },
   loading: {
     alignItems: "center",
     flex: 1,
@@ -909,16 +909,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
   },
-  loadingText: { fontSize: 12.5 },
+  loadingText: { fontSize: 13.5 },
   message: {
     alignItems: "center",
     flex: 1,
     justifyContent: "center",
     padding: 28,
   },
-  messageTitle: { fontSize: 15, fontWeight: "600", textAlign: "center" },
+  messageTitle: { fontSize: 16, fontWeight: "600", textAlign: "center" },
   messageDetail: {
-    fontSize: 12.5,
+    fontSize: 13.5,
     lineHeight: 18,
     marginTop: 5,
     textAlign: "center",

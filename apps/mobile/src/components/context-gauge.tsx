@@ -28,5 +28,5 @@ const styles = StyleSheet.create({
   container: { alignItems: 'center', flexDirection: 'row', gap: 5 },
   track: { borderRadius: Radius.pill, height: 4, overflow: 'hidden', width: 30 },
   fill: { borderRadius: Radius.pill, height: 4 },
-  label: { fontSize: 10.5, fontVariant: ['tabular-nums'], fontWeight: '600' },
+  label: { fontSize: 11.5, fontVariant: ['tabular-nums'], fontWeight: '600' },
 });

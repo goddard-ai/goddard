@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   title: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     letterSpacing: 0.4,
     marginBottom: 6,
@@ -154,6 +154,6 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   rowCopy: { flex: 1, minWidth: 0 },
-  rowLabel: { fontSize: 15.5, fontWeight: '500' },
-  rowDescription: { fontSize: 12.5, lineHeight: 17, marginTop: 2 },
+  rowLabel: { fontSize: 16.5, fontWeight: '500' },
+  rowDescription: { fontSize: 13.5, lineHeight: 17, marginTop: 2 },
 });

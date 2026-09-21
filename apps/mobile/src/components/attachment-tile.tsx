@@ -236,19 +236,19 @@ function AttachmentImagePreview({
 
 const styles = StyleSheet.create({
   sessionChip: { height: 24, maxWidth: 240, flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 8, borderWidth: 1, paddingLeft: 6, paddingRight: 4 },
-  sessionChipName: { fontSize: 12.5, flexShrink: 1 },
+  sessionChipName: { fontSize: 13.5, flexShrink: 1 },
   sessionChipRemove: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   frame: { width: 96, height: 80, flexShrink: 0 },
   compact: { width: 80 },
   tile: { flex: 1, borderRadius: 9, borderWidth: 1, overflow: 'hidden' },
   placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 7 },
-  name: { alignSelf: 'stretch', fontSize: 11.5, textAlign: 'center' },
-  status: { fontSize: 10, marginTop: -4 },
+  name: { alignSelf: 'stretch', fontSize: 12.5, textAlign: 'center' },
+  status: { fontSize: 11, marginTop: -4 },
   removeTarget: { position: 'absolute', top: 0, right: 0, width: 44, height: 44, alignItems: 'flex-end', padding: 3 },
   removeBadge: { width: 26, height: 26, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   preview: { flex: 1 },
   previewHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 8 },
-  previewTitle: { flex: 1, fontSize: 15, fontWeight: '600' },
+  previewTitle: { flex: 1, fontSize: 16, fontWeight: '600' },
   close: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   previewImage: { flex: 1, margin: 16 },
 });

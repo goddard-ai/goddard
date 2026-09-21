@@ -532,7 +532,7 @@ const styles = StyleSheet.create({
   },
   headerSide: { width: 44 },
   backButton: { alignItems: 'center', height: 44, justifyContent: 'center', width: 44 },
-  pageTitle: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
+  pageTitle: { flex: 1, fontSize: 18, fontWeight: '600', textAlign: 'center' },
   editor: { paddingBottom: 4 },
   formGroup: { borderRadius: Radius.medium, overflow: 'hidden' },
   formRow: {
@@ -542,10 +542,10 @@ const styles = StyleSheet.create({
     paddingLeft: 12,
     paddingRight: 4,
   },
-  fieldLabel: { fontSize: 15.5, width: 74 },
+  fieldLabel: { fontSize: 16.5, width: 74 },
   rowInput: {
     flex: 1,
-    fontSize: 15.5,
+    fontSize: 16.5,
     minHeight: 53,
     paddingHorizontal: 8,
     paddingVertical: 11,
@@ -561,7 +561,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
     marginTop: 8,
   },
-  messageText: { flex: 1, fontSize: 12.5, lineHeight: 17 },
+  messageText: { flex: 1, fontSize: 13.5, lineHeight: 17 },
   editorButtons: { flexDirection: 'row', gap: 8, marginTop: 16 },
   editorButton: {
     alignItems: 'center',
@@ -573,7 +573,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: 14,
   },
-  editorButtonText: { fontSize: 16, fontWeight: '600' },
+  editorButtonText: { fontSize: 17, fontWeight: '600' },
   saveButtonText: { color: '#ffffff' },
   removeButton: {
     alignItems: 'center',
@@ -583,5 +583,5 @@ const styles = StyleSheet.create({
     minHeight: 46,
     marginTop: 4,
   },
-  removeText: { fontSize: 15.5 },
+  removeText: { fontSize: 16.5 },
 });

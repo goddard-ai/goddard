@@ -507,7 +507,7 @@ function optionDescription(description: string | null | undefined, isDefault: bo
 
 const styles = StyleSheet.create({
   loading: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 12, paddingVertical: 10 },
+  note: { fontSize: 14, lineHeight: 18, paddingHorizontal: 12, paddingVertical: 10 },
   pagerClip: { overflow: 'hidden' },
   pagerTrack: { flexDirection: 'row', width: '200%' },
   page: { paddingTop: 4, width: '50%' },
@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
     minHeight: 40,
     paddingHorizontal: 10,
   },
-  backLabel: { fontSize: 15, fontWeight: '600' },
+  backLabel: { fontSize: 16, fontWeight: '600' },
   searchField: {
     alignItems: 'center',
     borderRadius: Radius.medium,
@@ -529,9 +529,9 @@ const styles = StyleSheet.create({
     minHeight: 38,
     paddingHorizontal: 10,
   },
-  searchInput: { flex: 1, fontSize: 15, paddingVertical: 7 },
+  searchInput: { flex: 1, fontSize: 16, paddingVertical: 7 },
   sectionTitle: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     letterSpacing: 0.4,
     marginBottom: 6,

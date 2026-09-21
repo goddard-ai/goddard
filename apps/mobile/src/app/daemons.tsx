@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
   },
   listContent: { paddingBottom: 36, paddingHorizontal: 16 },
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '500',
     marginBottom: 7,
     marginLeft: 12,
@@ -251,9 +251,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   copy: { flex: 1 },
-  name: { fontSize: 16, fontWeight: '500' },
-  host: { fontSize: 13, marginTop: 1 },
-  pairLabel: { fontSize: 15, fontWeight: '600' },
+  name: { fontSize: 17, fontWeight: '500' },
+  host: { fontSize: 14, marginTop: 1 },
+  pairLabel: { fontSize: 16, fontWeight: '600' },
   rowSeparator: { height: StyleSheet.hairlineWidth, marginLeft: 62 },
   footer: {
     alignItems: 'flex-start',
@@ -262,8 +262,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginTop: 14,
   },
-  footerText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  footerText: { flex: 1, fontSize: 13, lineHeight: 17 },
   empty: { alignItems: 'center', paddingHorizontal: 40, paddingTop: 100 },
-  emptyTitle: { fontSize: 18, fontWeight: '700' },
-  emptyBody: { fontSize: 14, lineHeight: 20, marginTop: 8, maxWidth: 320, textAlign: 'center' },
+  emptyTitle: { fontSize: 19, fontWeight: '700' },
+  emptyBody: { fontSize: 15, lineHeight: 20, marginTop: 8, maxWidth: 320, textAlign: 'center' },
 });

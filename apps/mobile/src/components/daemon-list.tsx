@@ -108,8 +108,8 @@ const styles = StyleSheet.create({
   },
   copy: { flex: 1, minWidth: 0 },
   nameLine: { alignItems: 'center', flexDirection: 'row', gap: 8 },
-  name: { flexShrink: 1, fontSize: 16, fontWeight: '500' },
-  host: { fontSize: 12.5, marginTop: 3 },
+  name: { flexShrink: 1, fontSize: 17, fontWeight: '500' },
+  host: { fontSize: 13.5, marginTop: 3 },
   infoButton: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 13 },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: 60 },
 });

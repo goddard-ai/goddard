@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
     width: 12,
   },
   label: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
 });

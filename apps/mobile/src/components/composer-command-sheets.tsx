@@ -304,8 +304,8 @@ function GoalCommandSheet({ goal, prefill, replace, onRun, onDismiss }: {
 }
 
 const styles = StyleSheet.create({
-  input: { borderRadius: Radius.medium, fontSize: 15, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, marginHorizontal: 6, marginBottom: 8 },
+  input: { borderRadius: Radius.medium, fontSize: 16, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, marginHorizontal: 6, marginBottom: 8 },
   objective: { minHeight: 88, maxHeight: 180, textAlignVertical: 'top' },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 12, paddingVertical: 8 },
+  note: { fontSize: 14, lineHeight: 18, paddingHorizontal: 12, paddingVertical: 8 },
   loading: { paddingVertical: 20 },
 });

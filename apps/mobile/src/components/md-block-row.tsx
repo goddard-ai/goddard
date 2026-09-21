@@ -15,10 +15,10 @@ import type { TranscriptMarkdownCache } from '@/md/transcript-cache';
 import { RowVeil } from '@/md/veil';
 
 /**
- * Markdown metrics — the desktop's render.rs values: body 14/22, headings
- * 19/27 · 16/24 · 15/22 · 14/22, code 12.5/18. Block-level vertical rhythm
- * lives on the transcript rows (`topGap`), so blocks carry no margins of their
- * own.
+ * Markdown metrics — the desktop's render.rs values +1px: body 15/22,
+ * headings 20/27 · 17/24 · 16/22 · 15/22, code 13.5/18. Block-level vertical
+ * rhythm lives on the transcript rows (`topGap`), so blocks carry no margins
+ * of their own.
  */
 export function useMarkdownStyles(): MarkdownStyles {
   const theme = useTheme();
@@ -30,15 +30,15 @@ export function useMarkdownStyles(): MarkdownStyles {
       lineHeight,
     });
     return {
-      body: { color: theme.text, fontSize: 14, lineHeight: 22 },
+      body: { color: theme.text, fontSize: 15, lineHeight: 22 },
       paragraph: {},
       heading: [
-        heading(19, 27),
-        heading(16, 24),
+        heading(20, 27),
+        heading(17, 24),
+        heading(16, 22),
         heading(15, 22),
-        heading(14, 22),
-        heading(14, 22),
-        heading(14, 22),
+        heading(15, 22),
+        heading(15, 22),
       ],
       strong: { fontWeight: '600' },
       em: { fontStyle: 'italic' },
@@ -54,7 +54,7 @@ export function useMarkdownStyles(): MarkdownStyles {
         backgroundColor: theme.codeWash,
         color: theme.codeText,
         fontFamily: MonoFont,
-        fontSize: 12.5,
+        fontSize: 13.5,
       },
       codeBlock: {
         backgroundColor: theme.inset,
@@ -69,12 +69,12 @@ export function useMarkdownStyles(): MarkdownStyles {
         paddingHorizontal: 12,
         paddingVertical: 5,
       },
-      codeHeaderText: { color: theme.textTertiary, fontSize: 11 },
+      codeHeaderText: { color: theme.textTertiary, fontSize: 12 },
       codeContent: { paddingHorizontal: 12, paddingVertical: 10 },
       codeLine: {
         color: theme.text,
         fontFamily: MonoFont,
-        fontSize: 12.5,
+        fontSize: 13.5,
         lineHeight: 18,
       },
       blockquote: {
@@ -92,7 +92,7 @@ export function useMarkdownStyles(): MarkdownStyles {
       listItem: { flexDirection: 'row', gap: 8 },
       listMarker: {
         color: theme.accent,
-        fontSize: 14,
+        fontSize: 15,
         fontVariant: ['tabular-nums'],
         lineHeight: 22,
         minWidth: 18,
@@ -109,8 +109,8 @@ export function useMarkdownStyles(): MarkdownStyles {
       },
       tableHeadRow: {},
       tableCell: { minWidth: 48, padding: 12 },
-      tableCellText: { color: theme.text, fontSize: 14, lineHeight: 22 },
-      tableHeadText: { color: theme.text, fontSize: 14, fontWeight: '600', lineHeight: 22 },
+      tableCellText: { color: theme.text, fontSize: 15, lineHeight: 22 },
+      tableHeadText: { color: theme.text, fontSize: 15, fontWeight: '600', lineHeight: 22 },
       hr: { backgroundColor: theme.border, height: 1 },
       image: {
         backgroundColor: theme.inset,

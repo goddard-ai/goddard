@@ -535,5 +535,5 @@ const styles = StyleSheet.create({
     padding: 6,
     position: 'absolute',
   },
-  devBadgeText: { color: '#fff', fontSize: 11 },
+  devBadgeText: { color: '#fff', fontSize: 12 },
 });

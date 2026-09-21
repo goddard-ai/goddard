@@ -206,14 +206,14 @@ const styles = StyleSheet.create({
     gap: 10,
     justifyContent: "center",
   },
-  savingText: { color: "#ffffff", fontSize: 15, fontWeight: "600" },
+  savingText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
   messageRow: {
     alignItems: "flex-start",
     flexDirection: "row",
     gap: 8,
     maxWidth: 340,
   },
-  messageText: { flex: 1, fontSize: 14, lineHeight: 20 },
+  messageText: { flex: 1, fontSize: 15, lineHeight: 20 },
   button: {
     alignItems: "center",
     borderRadius: Radius.medium,
@@ -221,13 +221,13 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 18,
   },
-  buttonText: { color: "#ffffff", fontSize: 15, fontWeight: "600" },
+  buttonText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
   errorRow: {
     alignItems: "flex-start",
     flexDirection: "row",
     gap: 8,
     marginTop: 14,
   },
-  errorText: { flex: 1, fontSize: 13, lineHeight: 18 },
-  hint: { fontSize: 13, lineHeight: 18, marginTop: 12, textAlign: "center" },
+  errorText: { flex: 1, fontSize: 14, lineHeight: 18 },
+  hint: { fontSize: 14, lineHeight: 18, marginTop: 12, textAlign: "center" },
 });

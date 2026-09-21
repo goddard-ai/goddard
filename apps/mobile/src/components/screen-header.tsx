@@ -147,13 +147,13 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   title: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: "700",
     letterSpacing: -0.3,
     textAlign: "left",
   },
   subtitle: {
-    fontSize: 12.5,
+    fontSize: 13.5,
     marginTop: 1,
     textAlign: "left",
   },

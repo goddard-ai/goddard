@@ -75,7 +75,7 @@ export function ComposerContextPicker({
 
 const styles = StyleSheet.create({
   search: { borderRadius: Radius.medium, flexDirection: 'row', alignItems: 'center', paddingLeft: 12, paddingRight: 8, marginHorizontal: 6, marginBottom: 8 },
-  searchInput: { flex: 1, fontSize: 15, minHeight: 44, paddingVertical: 10 },
+  searchInput: { flex: 1, fontSize: 16, minHeight: 44, paddingVertical: 10 },
   searchProgress: { width: 28, alignItems: 'center', justifyContent: 'center' },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 12, paddingVertical: 14 },
+  note: { fontSize: 14, lineHeight: 18, paddingHorizontal: 12, paddingVertical: 14 },
 });

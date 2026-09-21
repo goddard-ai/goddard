@@ -59,5 +59,5 @@ const styles = StyleSheet.create({
     gap: 6,
     minHeight: 28,
   },
-  title: { flexShrink: 1, fontSize: 13, fontWeight: '500' },
+  title: { flexShrink: 1, fontSize: 14, fontWeight: '500' },
 });

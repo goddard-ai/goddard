@@ -262,9 +262,9 @@ const styles = StyleSheet.create({
   icon: { alignItems: 'center', justifyContent: 'center', width: 18 },
   spinner: { height: 18, transform: [{ scale: 0.8 }], width: 18 },
   copy: { flex: 1 },
-  title: { fontSize: 14, fontWeight: '700' },
-  body: { fontSize: 12, lineHeight: 17, marginTop: 2 },
+  title: { fontSize: 15, fontWeight: '700' },
+  body: { fontSize: 13, lineHeight: 17, marginTop: 2 },
   actions: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   action: { justifyContent: 'center', minHeight: 32, paddingHorizontal: 4 },
-  actionText: { fontSize: 13, fontWeight: '700' },
+  actionText: { fontSize: 14, fontWeight: '700' },
 });
