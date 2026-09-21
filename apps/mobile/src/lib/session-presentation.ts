@@ -117,7 +117,9 @@ export function groupSessions(
 ): SessionGroup[] {
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
   const grouped = new Map<SessionGroupId, SessionListItem[]>();
-  for (const session of sessions.filter(sessionHasStarted).sort((a, b) => (
+  for (const session of sessions
+    .filter((session) => sessionHasStarted(session) && session.archived_at == null)
+    .sort((a, b) => (
     sessionTimestamp(b) - sessionTimestamp(a)
   ))) {
     const id = sessionDateGroup(sessionTimestamp(session), now);

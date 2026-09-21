@@ -30,7 +30,8 @@ describe('mobile session presentation', () => {
     const yesterday = session({ id: 'old', last_reply_at: epoch(2026, 7, 30, 20) });
     const earlier = session({ id: 'earlier', last_reply_at: epoch(2026, 7, 20, 20) });
     const empty = session({ id: 'empty', last_reply_at: null, messages: [], turns: [] });
-    expect(groupSessions(projects, [earlier, yesterday, empty, current], now).map((group) => ({
+    const archived = session({ id: 'archived', archived_at: epoch(2026, 7, 31, 10) });
+    expect(groupSessions(projects, [earlier, yesterday, empty, archived, current], now).map((group) => ({
       id: group.id,
       sessions: group.data.map((item) => item.session.id),
     }))).toEqual([
