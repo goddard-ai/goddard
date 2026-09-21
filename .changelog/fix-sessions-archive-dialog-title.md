@@ -1,0 +1,1 @@
+- The archive and sweep confirmation dialogs now name the session's actual title instead of "New task" for tasks that were never manually renamed

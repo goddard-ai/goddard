@@ -103,7 +103,7 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .map(|session| session.title.clone())
+            .map(|session| session.display_title().to_owned())
             .unwrap_or_default();
         let archive_focus = cx.focus_handle();
         let state = ArchiveDialogState {
@@ -172,7 +172,8 @@ impl Waku {
                 ArchiveDialogKind::Dormant => tr!("dormant.confirm_description"),
             },
         };
-        let title = if dialog.title.trim().is_empty() {
+        let title = if dialog.title.trim().is_empty() || dialog.title == AgentSession::DEFAULT_TITLE
+        {
             match dialog.kind {
                 ArchiveDialogKind::Archive => tr!("archive.confirm_title"),
                 ArchiveDialogKind::Dormant => tr!("dormant.confirm_title"),
