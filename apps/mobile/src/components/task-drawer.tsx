@@ -138,8 +138,8 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
           drawerType="back"
           open={open}
           overlayAccessibilityLabel="Close task history"
-          // The library overlay stays as an invisible press-catcher; the dim
-          // lives inside DrawerCard so it clips to the card's rounded corners.
+          // The library overlay stays as an invisible press-catcher; the lift
+          // comes from the card's own edge shadow, so nothing paints a dim.
           overlayStyle={{ backgroundColor: 'transparent' }}
           renderDrawerContent={() => (
             <TaskDrawerContent
@@ -167,20 +167,20 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
 /** Slides and rounds with the content as the drawer reveals, so the app lifts
  * off as a card matching the display's corner radius. The radius is applied at
  * rest too — at the true display value the clip coincides with the screen's own
- * curve, so it's invisible until the card starts to slide. */
+ * curve, so it's invisible until the card starts to slide. The shadow lives on
+ * a non-clipping wrapper: iOS drops a shadow set on the same view that clips. */
 function DrawerCard({ children }: { children: ReactNode }) {
   const progress = useDrawerProgress();
   const cornerRadius = useDisplayCornerRadius();
-  const dimStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
+  const shadowStyle = useAnimatedStyle(() => ({
+    shadowOpacity: progress.value * 0.06,
   }));
   return (
-    <Animated.View style={[styles.drawerCard, { borderRadius: cornerRadius }]}>
-      {children}
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, styles.drawerCardDim, dimStyle]}
-      />
+    <Animated.View
+      style={[styles.drawerCardShadow, { borderRadius: cornerRadius }, shadowStyle]}>
+      <Animated.View style={[styles.drawerCard, { borderRadius: cornerRadius }]}>
+        {children}
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -735,6 +735,17 @@ const SessionRow = memo(function SessionRow({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  drawerCardShadow: {
+    // Continuous curve matches the display's squircle; borderRadius is set
+    // per-device on the element above and shadowOpacity animates with drawer
+    // progress.
+    borderCurve: 'continuous',
+    elevation: 3,
+    flex: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 3,
+  },
   drawerCard: {
     // Continuous curve matches the display's squircle; borderRadius is set
     // per-device on the element above.
@@ -742,7 +753,6 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
   },
-  drawerCardDim: { backgroundColor: 'rgba(0, 0, 0, 0.18)' },
   daemonFloat: {
     left: 12,
     position: 'absolute',
