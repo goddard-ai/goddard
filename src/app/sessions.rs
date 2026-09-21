@@ -3789,14 +3789,29 @@ impl Waku {
         if !locked && !self.provider_enabled(favorite.provider) {
             return;
         }
-        // A favorite stored before rows were combos carries no effort; it
-        // claims the model's default-effort row in the list, so the chord
-        // applies that same effort rather than leaving the field unset.
-        let effort = favorite
-            .effort
-            .clone()
-            .or_else(|| self.model_default_effort(favorite.provider, &favorite.model));
-        self.choose_model(favorite.provider, favorite.model, effort, favorite.fast, cx);
+        let (provider, model, effort, fast) = self.favorite_model_combo(&favorite);
+        self.choose_model(provider, model, effort, fast, cx);
+    }
+
+    /// A starred selection in combo terms: packed aliases (`swe-2-high`,
+    /// `grok-4.6-xhigh-fast`) written before the catalog folded them resolve
+    /// to the base model plus the effort and tier their suffix carries — the
+    /// same normalization the picker applies when it lands stars on folded
+    /// rows. An unset effort then lands on the model's default rung, matching
+    /// `favorite_matches_row`.
+    fn favorite_model_combo(
+        &self,
+        favorite: &FavoriteModel,
+    ) -> (ProviderKind, String, Option<String>, bool) {
+        let (model, effort, fast) = composer::normalize_model_combo(
+            &self.probes,
+            favorite.provider,
+            &favorite.model,
+            favorite.effort.clone(),
+            favorite.fast,
+        );
+        let effort = effort.or_else(|| self.model_default_effort(favorite.provider, &model));
+        (favorite.provider, model, effort, fast)
     }
 
     /// The effort a `{provider, model}` selection with no stored effort
@@ -3845,32 +3860,32 @@ impl Waku {
             if !eligible(favorite.provider) {
                 continue;
             }
-            let effort = favorite
-                .effort
-                .clone()
-                .or_else(|| self.model_default_effort(favorite.provider, &favorite.model));
-            combos.push((
-                favorite.provider,
-                favorite.model.clone(),
-                effort,
-                favorite.fast,
-            ));
+            // Normalizing folds packed spellings onto their base combo — a
+            // packed star and the matching base pick collapse to one entry
+            // rather than two stops that apply the same selection.
+            let combo = self.favorite_model_combo(favorite);
+            if !combos.contains(&combo) {
+                combos.push(combo);
+            }
         }
-        if let Some(recent) = self.state.recent_model_uses.iter().find(|use_| {
-            eligible(use_.provider)
-                && !combos.iter().any(|combo| {
-                    combo.0 == use_.provider
-                        && combo.1 == use_.model
-                        && combo.2 == use_.effort
-                        && combo.3 == use_.fast
-                })
-        }) {
-            combos.push((
-                recent.provider,
-                recent.model.clone(),
-                recent.effort.clone(),
-                recent.fast,
-            ));
+        let recent = self
+            .state
+            .recent_model_uses
+            .iter()
+            .filter(|use_| eligible(use_.provider))
+            .map(|use_| {
+                let (model, effort, fast) = composer::normalize_model_combo(
+                    &self.probes,
+                    use_.provider,
+                    &use_.model,
+                    use_.effort.clone(),
+                    use_.fast,
+                );
+                (use_.provider, model, effort, fast)
+            })
+            .find(|combo| !combos.contains(combo));
+        if let Some(recent) = recent {
+            combos.push(recent);
         }
         if combos.is_empty() {
             return;

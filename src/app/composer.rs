@@ -6789,6 +6789,44 @@ fn model_default_effort(model: &ProviderModel) -> Option<String> {
     })
 }
 
+/// A stored selection's effective combo: packed aliases (`grok-4.6-xhigh-fast`,
+/// `swe-2-high`) written before the catalog folded them resolve to the base
+/// model plus the effort and fast tier their suffix carries, matching what
+/// `session_model_combo` reports for the same pick. An id that resolves
+/// against no advertised base keeps its stored spelling.
+pub(super) fn normalize_model_combo(
+    probes: &[ProviderProbe],
+    provider: ProviderKind,
+    model: &str,
+    effort: Option<String>,
+    fast: bool,
+) -> (String, Option<String>, bool) {
+    let Some(matched) = probes
+        .iter()
+        .find(|probe| probe.provider == provider)
+        .and_then(|probe| {
+            waku_protocol::model_catalog::packed_catalog_model(&probe.models, model, provider)
+        })
+        .filter(|matched| !matched.suffix.is_empty())
+    else {
+        return (model.to_owned(), effort, fast);
+    };
+    (
+        matched.model.id.clone(),
+        effort.or_else(|| {
+            waku_protocol::model_catalog::packed_suffix_reasoning_effort(
+                &matched.suffix,
+                &matched.model.reasoning_efforts,
+            )
+        }),
+        fast || waku_protocol::model_catalog::packed_suffix_service_tier(
+            &matched.suffix,
+            &matched.model.service_tiers,
+        )
+        .is_some(),
+    )
+}
+
 /// Whether a starred entry marks this row. Favorites saved before rows were
 /// combos carry no effort; one claims the model's default-effort row so a
 /// bare `{provider, model}` star still lands on something selectable.
@@ -7049,50 +7087,15 @@ pub(super) fn visible_picker_rows(
     // before the catalog folded aliases into base models — resolve each back
     // to base plus the traits its suffix carries so stars and recents still
     // land on their combo row.
-    let packed_combo = |provider: ProviderKind,
-                        stored: &str,
-                        effort: &Option<String>,
-                        fast: bool,
-                        model: &ProviderModel|
-     -> (String, Option<String>, bool) {
-        let Some(selection) = probes
-            .iter()
-            .find(|probe| probe.provider == provider)
-            .and_then(|probe| {
-                waku_protocol::model_catalog::resolve_packed_model(
-                    probe.models.iter().map(|model| model.id.as_str()),
-                    stored,
-                    provider,
-                )
-            })
-            .filter(|selection| !selection.suffix.is_empty())
-        else {
-            return (stored.to_owned(), effort.clone(), fast);
-        };
-        (
-            selection.value,
-            effort.clone().or_else(|| {
-                waku_protocol::model_catalog::packed_suffix_reasoning_effort(
-                    &selection.suffix,
-                    &model.reasoning_efforts,
-                )
-            }),
-            fast || waku_protocol::model_catalog::packed_suffix_service_tier(
-                &selection.suffix,
-                &model.service_tiers,
-            )
-            .is_some(),
-        )
-    };
     for row in &mut rows {
         let default_effort = model_default_effort(&row.model);
         row.favorite_index = favorites.iter().position(|favorite| {
-            let (model, effort, fast) = packed_combo(
+            let (model, effort, fast) = normalize_model_combo(
+                probes,
                 favorite.provider,
                 &favorite.model,
-                &favorite.effort,
+                favorite.effort.clone(),
                 favorite.fast,
-                &row.model,
             );
             let normalized = FavoriteModel {
                 provider: favorite.provider,
@@ -7110,12 +7113,12 @@ pub(super) fn visible_picker_rows(
             )
         });
         row.recent_rank = recents.iter().position(|use_| {
-            let (model, effort, fast) = packed_combo(
+            let (model, effort, fast) = normalize_model_combo(
+                probes,
                 use_.provider,
                 &use_.model,
-                &use_.effort,
+                use_.effort.clone(),
                 use_.fast,
-                &row.model,
             );
             use_.provider == row.provider
                 && model == row.model.id

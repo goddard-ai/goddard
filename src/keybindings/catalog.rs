@@ -2781,10 +2781,11 @@ mod ctx {
     pub const InboxPage: &str = "InboxPage";
     pub const DraftsPage: &str = "DraftsPage";
     pub const WorkspaceNotTerminal: &str = "Workspace && !Terminal";
-    /// Where the composer session is reachable without covering the
-    /// surfaces that own their own chords: the terminal (pty input) and
-    /// the tabbed pages (their ⌘⌥ tab chords).
-    pub const ComposerScope: &str = "Workspace && !Terminal && !ProjectsPage && !AutomationsPage";
+    /// Where the composer exists — the session surface mounts its lane, and
+    /// Big Picture remounts it. Pages and terminal views never carry the
+    /// context, so their own chords (tab switching, pty input) can't lose to
+    /// the model chords.
+    pub const ComposerScope: &str = "ComposerExists && !Terminal";
     pub const TaskSwitcher: &str = "TaskSwitcher";
     pub const ProjectSwitcher: &str = "ProjectSwitcher";
     pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";

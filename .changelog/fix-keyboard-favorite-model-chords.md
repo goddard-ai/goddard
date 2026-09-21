@@ -1,0 +1,1 @@
+- The ⌘⌥1–⌘⌥9 favorite chords and ⌥Tab model cycling no longer stall on favorites stored as packed model slugs (e.g. `swe-2-medium`): the alias's suffix effort now applies to the session instead of the model's default, and the rotation positions itself on the folded base combo so every press advances

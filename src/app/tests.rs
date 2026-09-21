@@ -3792,6 +3792,51 @@ fn picker_rows_match_a_bare_legacy_favorite_to_the_default_effort_row() {
 }
 
 #[test]
+fn normalize_model_combo_decodes_packed_alias_traits() {
+    use super::composer::normalize_model_combo;
+
+    // The folded catalog lists only the synthesized base; stored spellings
+    // like `swe-2-high` survive from before the fold.
+    let probes = [picker_probe(
+        ProviderKind::Devin,
+        "swe-2",
+        &["low", "medium", "high", "max"],
+        true,
+    )];
+
+    // A packed alias resolves to the base plus the effort its suffix names —
+    // the combo `session_model_combo` would report for the same pick.
+    assert_eq!(
+        normalize_model_combo(&probes, ProviderKind::Devin, "swe-2-medium", None, false),
+        ("swe-2".to_owned(), Some("medium".to_owned()), false)
+    );
+    assert_eq!(
+        normalize_model_combo(&probes, ProviderKind::Devin, "swe-2-max", None, false),
+        ("swe-2".to_owned(), Some("max".to_owned()), false)
+    );
+    // A stored effort wins over the suffix; a suffix fast tier turns it on.
+    assert_eq!(
+        normalize_model_combo(
+            &probes,
+            ProviderKind::Devin,
+            "swe-2-medium-fast",
+            Some("low".to_owned()),
+            false,
+        ),
+        ("swe-2".to_owned(), Some("low".to_owned()), true)
+    );
+    // Unresolvable ids keep their stored spelling.
+    assert_eq!(
+        normalize_model_combo(&probes, ProviderKind::Devin, "swe-3", None, false),
+        ("swe-3".to_owned(), None, false)
+    );
+    assert_eq!(
+        normalize_model_combo(&probes, ProviderKind::Devin, "swe-2", None, false),
+        ("swe-2".to_owned(), None, false)
+    );
+}
+
+#[test]
 fn the_picker_is_empty_only_once_detection_has_answered() {
     use super::composer::picker_has_no_providers;
     use crate::model::{ProviderModel, ProviderProbe};

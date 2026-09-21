@@ -585,6 +585,17 @@ impl Render for Waku {
         });
         // A watched friend session is read-only — no composer, no drops.
         let friend_watch = self.selected_friend_watch().is_some();
+        // The composer exists only on the session surface: the tabbed pages,
+        // a main-area terminal, the AGY TUI, and a friend watch all replace
+        // it (Big Picture remounts the same entity, so it stays mounted).
+        let composer_mounted = self.selected_project().is_some()
+            && self.selected_terminal.is_none()
+            && self.projects_page.is_none()
+            && !self.notifications.open
+            && !self.drafts_page
+            && !self.automations_page
+            && !agy_surface
+            && !friend_watch;
         let computer_use = self.render_computer_use_overlay(window, cx);
         let command_palette = self.render_command_palette(window, cx);
         let file_finder = self.render_file_finder(window, cx);
@@ -604,7 +615,11 @@ impl Render for Waku {
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
         let content = div()
-            .key_context("Workspace")
+            .key_context(if composer_mounted {
+                "Workspace ComposerExists"
+            } else {
+                "Workspace"
+            })
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
             .on_action(cx.listener(Self::new_session_action))
             .on_action(cx.listener(Self::new_task_in_action))
@@ -740,33 +755,23 @@ impl Render for Waku {
                     // composer attachments. The group marks the column's
                     // hitbox so the composer card can light itself up as the
                     // landing zone wherever the drag is held.
-                    .when(
-                        self.selected_project().is_some()
-                            && self.selected_terminal.is_none()
-                            && self.projects_page.is_none()
-                            && !self.notifications.open
-                            && !self.drafts_page
-                            && !self.automations_page
-                            && !agy_surface
-                            && !friend_watch,
-                        |element| {
-                            element
-                                .group(composer::SESSION_DROP_GROUP)
-                                .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                                    this.stage_dropped_files(paths, window, cx);
-                                }))
-                                .on_drop(cx.listener(
-                                    |this, drag: &composer::SidebarSessionDrag, window, cx| {
-                                        this.stage_session_reference(
-                                            drag.session_id,
-                                            &drag.title,
-                                            window,
-                                            cx,
-                                        );
-                                    },
-                                ))
-                        },
-                    )
+                    .when(composer_mounted, |element| {
+                        element
+                            .group(composer::SESSION_DROP_GROUP)
+                            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                                this.stage_dropped_files(paths, window, cx);
+                            }))
+                            .on_drop(cx.listener(
+                                |this, drag: &composer::SidebarSessionDrag, window, cx| {
+                                    this.stage_session_reference(
+                                        drag.session_id,
+                                        &drag.title,
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            ))
+                    })
                     .child(self.render_header(window, cx))
                     .children(self.friend_watch_banner(cx))
                     // A selected terminal takes the column in place of the
@@ -807,42 +812,31 @@ impl Render for Waku {
                     // open a spacer holds the lane at its last measured
                     // height so the transcript's frame — and with it the
                     // scroll anchor — does not shift.
-                    .when(
-                        self.selected_project().is_some()
-                            && self.selected_terminal.is_none()
-                            && self.projects_page.is_none()
-                            && !self.notifications.open
-                            && !self.drafts_page
-                            && !self.automations_page
-                            && !agy_surface
-                            && !friend_watch,
-                        |element| {
-                            if self.big_picture.is_open() {
-                                element
-                                    .child(div().flex_none().h(px(self.composer_lane_height.get())))
-                            } else {
-                                let lane_height = self.composer_lane_height.clone();
-                                element.child(
-                                    div()
-                                        .flex_none()
-                                        .relative()
-                                        .child(
-                                            canvas(
-                                                move |bounds, _, _| {
-                                                    lane_height.set(f32::from(bounds.size.height))
-                                                },
-                                                |_, _, _, _| (),
-                                            )
-                                            .absolute()
-                                            .inset_0(),
+                    .when(composer_mounted, |element| {
+                        if self.big_picture.is_open() {
+                            element.child(div().flex_none().h(px(self.composer_lane_height.get())))
+                        } else {
+                            let lane_height = self.composer_lane_height.clone();
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .relative()
+                                    .child(
+                                        canvas(
+                                            move |bounds, _, _| {
+                                                lane_height.set(f32::from(bounds.size.height))
+                                            },
+                                            |_, _, _, _| (),
                                         )
-                                        .children(self.render_queued_messages(cx))
-                                        .child(self.render_composer(window, cx))
-                                        .child(self.render_workspace_footer(cx)),
-                                )
-                            }
-                        },
-                    )
+                                        .absolute()
+                                        .inset_0(),
+                                    )
+                                    .children(self.render_queued_messages(cx))
+                                    .child(self.render_composer(window, cx))
+                                    .child(self.render_workspace_footer(cx)),
+                            )
+                        }
+                    })
                     .relative()
                     .children(toast)
                     .when(self.sidebar_visible, |element| {

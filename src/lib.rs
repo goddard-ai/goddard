@@ -628,52 +628,52 @@ pub(crate) fn bind_keys(cx: &mut App) {
         ),
         // ⌘⌥1–⌘⌥9 apply the nth starred model selection to the composer
         // session — a draft or an idle task, ordered as in the picker's
-        // favorites section. The terminal keeps every chord as pty input;
-        // the Projects page keeps its own ⌘⌥ tab chords.
+        // favorites section. ComposerExists rides the mounted lane, so the
+        // tabbed pages and terminal views never contest the chords.
         KeyBinding::new(
             "secondary-alt-1",
             SelectFavoriteModel { index: 0 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-2",
             SelectFavoriteModel { index: 1 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-3",
             SelectFavoriteModel { index: 2 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-4",
             SelectFavoriteModel { index: 3 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-5",
             SelectFavoriteModel { index: 4 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-6",
             SelectFavoriteModel { index: 5 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-7",
             SelectFavoriteModel { index: 6 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-8",
             SelectFavoriteModel { index: 7 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-alt-9",
             SelectFavoriteModel { index: 8 },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         // ⌘E cycles the composer session's reasoning effort through the
         // current model's ladder; ⌘⇧E walks it in reverse.
@@ -682,21 +682,21 @@ pub(crate) fn bind_keys(cx: &mut App) {
             CycleReasoningEffort {
                 direction: EffortCycleDirection::Forward,
             },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         KeyBinding::new(
             "secondary-shift-e",
             CycleReasoningEffort {
                 direction: EffortCycleDirection::Backward,
             },
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         // ⌥Tab rotates the composer session's combo through the starred
         // selections plus the most recently used one.
         KeyBinding::new(
             "alt-tab",
             CycleFavoriteModel,
-            Some("Workspace && !Terminal && !ProjectsPage && !AutomationsPage"),
+            Some("ComposerExists && !Terminal"),
         ),
         // Page-scoped list conventions — active only while focus is
         // inside the page, so a focused filter field keeps its own
