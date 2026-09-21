@@ -1,1 +1,0 @@
-- The Dock menu on macOS and the taskbar jump list on Windows offer New task, Check for Updates, and Settings

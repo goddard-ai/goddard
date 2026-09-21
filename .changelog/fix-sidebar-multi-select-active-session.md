@@ -1,1 +1,0 @@
-- Starting a sidebar multi-selection with ⌘-click now keeps the task you're viewing in the selection, matching Finder's extend-rather-than-replace behavior — ⌘-click it again to leave it out — and batch menu items say how many tasks they act on ("Archive 3 tasks")

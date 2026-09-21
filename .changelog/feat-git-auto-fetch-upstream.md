@@ -1,1 +1,0 @@
-- Sync strips and push affordances now fetch the branch's remote-tracking ref in the background (at most once a minute while shown), so the suggested action reflects upstream as it is now rather than as of your last manual fetch — a colleague's merge surfaces as "Pull" instead of a stale "Push". Toggle off under Settings → Git.

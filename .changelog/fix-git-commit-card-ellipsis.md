@@ -1,1 +1,0 @@
-- The commit card's message preview now ends its last visible line with an ellipsis when the body is cut off — clamped paragraphs previously clipped mid-line with no marker, and a message with paragraph breaks could spill past the four-line preview

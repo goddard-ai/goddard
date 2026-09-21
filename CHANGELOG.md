@@ -31,6 +31,65 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.6.0]
+
+### Features
+
+- **Git**
+  - Sync strips and push affordances now fetch the branch's remote-tracking ref in the background (at most once a minute while shown), so the suggested action reflects upstream as it is now rather than as of your last manual fetch — a colleague's merge surfaces as "Pull" instead of a stale "Push". Toggle off under Settings → Git.
+  - Landed notices now carry a Push button that sends the base branch to its tracked upstream (⌘⇧↩ does the same for the selected task), showing a "Pushed" check once the remote holds the commits; a rejected push opens a dialog with the Git error and a "Sync & retry push" recovery
+- Daemon settings now show a QR code for mobile pairing: "Show QR code" in the connection details reveals a code encoding the LAN address and token, and the mobile app scans it (Daemons → scan icon, or the daemon picker's "Scan QR Code…") to add and connect to the host without typing — the same `goddard://connect` link also works from the phone's camera app
+- A Goddard daemon restart no longer kills in-flight work: the session reloads its provider transcript from the saved resume cursor, shows a "daemon restarted — resuming" marker, and continues the interrupted turn automatically (once per restart, only for turns the provider had actually started)
+- The command palette offers a "Check for Updates" command that runs a manual update check and reports the result
+- The Dock menu on macOS and the taskbar jump list on Windows offer New task, Check for Updates, and Settings
+- GitHub Copilot sessions now support mid-turn steering: a message sent while the agent is working is folded into the running turn instead of waiting for it to finish
+- `goddard-agent create` can now omit `provider`, `model`, `reasoning_effort`, `service_tier`, and `context_window` — omitted fields inherit the calling task's configuration (clamped to what the resolved model's catalog lists), so agents spawn follow-up tasks without restating their own settings
+- Settings → General now shows the installed version next to a "Check now" button that runs a manual update check, so an explicit check no longer depends on reaching the app menu
+- Adding a remote host in Settings → Daemon now starts with a "Connect via" picker — SSH or WebSocket — that selects which fields render, instead of offering destination, address, and token as peers where a filled destination silently discarded the other two; SSH is the default on unix and the option is omitted on platforms without SSH support
+- Right-click an `@` file mention in a sent prompt to copy its path or show it in the file manager
+
+### Experiments
+
+- **Transcript**
+  - **[Experimental]** Guided reading: an Experiments-page opt-in that shapes the leading letters of each word semibold in transcript prose — the "bionic reading" emphasis — with Fixation (1–5), Saccade (10–50), and Opacity (0–100) sliders matching the official scales; Latin-script text only, and code, math, and monospace output are untouched
+  - **[Experimental]** Turn status markers now judge each settled turn against an ordered tool-call sequence (reads and searches collapse to a count), failed-call output tails, per-file diff stats, earlier turn prompts, and context-window occupancy. The ending is a single calibrated pick — Complete, Awaiting input, Partial, Blocked, or Failed — while new flags catch risky diffs (Needs review), retry loops (Thrashing), and unconfirmed assumptions (Assumed); Unverified now also catches verification that ran and failed.
+- **[Experimental]** Project memory now verifies the commit SHAs it cites: each distillation pass resolves commit-shaped tokens in MEMORY.md against git — landed on a ref, on a detached worktree HEAD, or orphaned with a same-subject successor — records the status in LOG.txt, and the distiller rewrites dead citations instead of propagating them as durable fact
+- **[Experimental]** The Jev settings page now shows evaluation token usage — totals plus a per-feature breakdown (routing, turn status markers, memory, permission review) summed from the daemon's decision log
+
+### Fixed
+
+- **Sessions**
+  - Show prompts an agent queues into a task via `goddard-agent` in the target session's follow-up queue — marked as sent by an agent — instead of hiding them in daemon memory, with a remove action that cancels delivery before the prompt runs.
+  - Project memory and the project map now reach steer-capable providers as hidden context after the first prompt — session titles no longer pick up the injected blocks, and the context never renders as a transcript row. Providers without steering keep the prepended-prompt behavior.
+  - A prompt swallowed between the app and the provider no longer leaves a turn spinning forever — after a minute without the provider's turn-start acknowledgement the turn settles failed with a "message never reached the agent" notice, and the check re-arms when reattaching to a session still reporting an unconfirmed turn
+  - Fixed task titles that could show the hidden `<project-memory>`/`<project-map>` context blocks injected into a session's first prompt — Kimi echoes the prompt back as its title and Devin's stored placeholder can truncate inside a block, so both the prompt-derived fallback and provider-reported titles now strip those spans.
+  - Creating a task with no project no longer fails at submit — the daemon swept a freshly provisioned workspace's project row before the first prompt could attach a task, and a missing workspace directory is now recreated (or restored from its archive) instead of dying inside an opaque provider spawn error
+- **Sidebar**
+  - A collapsed sidebar group's unread dot now sits at the row's right edge like a session row's indicator instead of trailing the group label
+  - A selected task's sidebar row no longer repeats its unsent draft text — the composer already shows it — and the draft line now leads with a pencil icon so it reads as a draft
+  - Starting a sidebar multi-selection with ⌘-click now keeps the task you're viewing in the selection, matching Finder's extend-rather-than-replace behavior — ⌘-click it again to leave it out — and batch menu items say how many tasks they act on ("Archive 3 tasks")
+  - Drag-selecting text into the left window edge — in the terminal, the transcript, or anywhere else — no longer pops open the hidden sidebar; the edge strip now reveals it only on unpressed pointer motion
+- **Providers**
+  - Devin sessions no longer leave a subagent's tool calls stuck on "Running" — they settle when the subagent's lifecycle update arrives, and each subagent now shows up as a labeled "Subagent: …" row instead of a bare Tool entry
+  - A turn stopped externally — for example by Devin's model server rather than by pressing Stop — now marks the session failed (red ✕) instead of earning a completed-turn unread dot.
+  - Fixed project-memory distillation failing for Devin sessions: the headless driver now replays the session's stored reasoning effort and service tier so a folded base model id like `swe-2` resolves to an advertised packed id, and falls back to the advertised default model when nothing matches
+- **Git**
+  - The commit card's message preview now ends its last visible line with an ellipsis when the body is cut off — clamped paragraphs previously clipped mid-line with no marker, and a message with paragraph breaks could spill past the four-line preview
+  - The command palette's "Sync branch…" row now shows the ⌘S shortcut hint, resolved from the live keymap.
+  - The new task page's sync notice now reports the base branch a planned worktree will be cut from — and names it — instead of the local checkout's branch; its button fast-forwards or pushes the base when the checkout can't reach it with `git pull`/`git push`
+- **Transcript**
+  - Changed-files cards no longer silently disappear on large repositories: checkpoint captures now wait up to ten minutes instead of two, a lightweight pre-turn ref preserves a diff base when the full start snapshot never lands, and a "Saving changed files…" row holds the card's place while the capture is still running
+  - A markdown table in a sent prompt no longer squashes into the bubble width sized by the message's short text — the bubble now takes its full width allowance whenever the prompt contains a table
+- **Keyboard**
+  - Experimental surfaces are now fully operable without the pointer — the Projects tab strip gains tab stops and a ⌘⌥3 chord for Review, the Git panel's upstream section toggles with Enter/Space, the Jev credential warning and settings gear are focusable, Inbox toolbar controls and GitHub detail actions activate from the keyboard, Automations switches use the shared toggle (which also stops a row switch from opening the detail pane), and settings' Apply/Test/Suggest/Revoke buttons share one keyboard-ready button.
+  - The ⌘⌥1–⌘⌥9 favorite chords and ⌥Tab model cycling no longer stall on favorites stored as packed model slugs (e.g. `swe-2-medium`): the alias's suffix effort now applies to the session instead of the model's default, and the rotation positions itself on the folded base combo so every press advances
+- **Appearance**
+  - Dracula's text selection is now a visible purple wash — it previously reused the user-prompt bubble's exact fill, so selecting part of a sent prompt showed nothing
+  - Menu text in dark themes stays legible again: the glass card's specular sheen is shallower, and each palette's text tiers are now solved to WCAG contrast floors over every surface — Zenburn, Rosé Pine Moon, Everforest, Dracula, and GitHub Dark menu items had fallen to 1.8–4.5:1 and now clear the bar. High Contrast mode widens text contrast too, not just borders.
+- Switching projects from a new task's composer now moves that draft's "New task" row to the picked project — typed text and all — instead of stacking a second row under the old one; picking "No project" does the same
+- The file editor's annotation chrome — the "Add to chat" pill, the comment editor and its input, and the hover tooltip — no longer renders in the code face inherited from the pane; each surface now sets the UI face explicitly
+- Pinned terminals now sort to the top of the sidebar's Terminals group instead of staying in creation order among unpinned rows
+
 ## [0.5.0]
 
 ### Features

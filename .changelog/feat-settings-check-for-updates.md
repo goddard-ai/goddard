@@ -1,1 +1,0 @@
-- Settings → General now shows the installed version next to a "Check now" button that runs a manual update check, so an explicit check no longer depends on reaching the app menu

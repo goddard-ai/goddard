@@ -1,1 +1,0 @@
-- Fixed project-memory distillation failing for Devin sessions: the headless driver now replays the session's stored reasoning effort and service tier so a folded base model id like `swe-2` resolves to an advertised packed id, and falls back to the advertised default model when nothing matches

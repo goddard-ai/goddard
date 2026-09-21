@@ -1,1 +1,0 @@
-- A turn stopped externally — for example by Devin's model server rather than by pressing Stop — now marks the session failed (red ✕) instead of earning a completed-turn unread dot.

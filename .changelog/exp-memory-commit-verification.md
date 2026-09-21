@@ -1,1 +1,0 @@
-- **[Experimental]** Project memory now verifies the commit SHAs it cites: each distillation pass resolves commit-shaped tokens in MEMORY.md against git — landed on a ref, on a detached worktree HEAD, or orphaned with a same-subject successor — records the status in LOG.txt, and the distiller rewrites dead citations instead of propagating them as durable fact

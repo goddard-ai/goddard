@@ -1,1 +1,0 @@
-- The new task page's sync notice now reports the base branch a planned worktree will be cut from — and names it — instead of the local checkout's branch; its button fast-forwards or pushes the base when the checkout can't reach it with `git pull`/`git push`

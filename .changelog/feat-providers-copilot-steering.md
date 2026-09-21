@@ -1,1 +1,0 @@
-- GitHub Copilot sessions now support mid-turn steering: a message sent while the agent is working is folded into the running turn instead of waiting for it to finish

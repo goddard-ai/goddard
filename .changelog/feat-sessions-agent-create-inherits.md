@@ -1,1 +1,0 @@
-- `goddard-agent create` can now omit `provider`, `model`, `reasoning_effort`, `service_tier`, and `context_window` — omitted fields inherit the calling task's configuration (clamped to what the resolved model's catalog lists), so agents spawn follow-up tasks without restating their own settings

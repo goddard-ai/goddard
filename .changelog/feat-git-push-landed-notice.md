@@ -1,1 +1,0 @@
-- Landed notices now carry a Push button that sends the base branch to its tracked upstream (⌘⇧↩ does the same for the selected task), showing a "Pushed" check once the remote holds the commits; a rejected push opens a dialog with the Git error and a "Sync & retry push" recovery

@@ -1,1 +1,0 @@
-- The command palette's "Sync branch…" row now shows the ⌘S shortcut hint, resolved from the live keymap.

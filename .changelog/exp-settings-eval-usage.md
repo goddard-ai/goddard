@@ -1,1 +1,0 @@
-- The Jev settings page now shows evaluation token usage — totals plus a per-feature breakdown (routing, turn status markers, memory, permission review) summed from the daemon's decision log

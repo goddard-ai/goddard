@@ -1,1 +1,0 @@
-- A selected task's sidebar row no longer repeats its unsent draft text — the composer already shows it — and the draft line now leads with a pencil icon so it reads as a draft

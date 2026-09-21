@@ -1,1 +1,0 @@
-- Show prompts an agent queues into a task via `goddard-agent` in the target session's follow-up queue — marked as sent by an agent — instead of hiding them in daemon memory, with a remove action that cancels delivery before the prompt runs.

@@ -1,1 +1,0 @@
-- Adding a remote host in Settings → Daemon now starts with a "Connect via" picker — SSH or WebSocket — that selects which fields render, instead of offering destination, address, and token as peers where a filled destination silently discarded the other two; SSH is the default on unix and the option is omitted on platforms without SSH support

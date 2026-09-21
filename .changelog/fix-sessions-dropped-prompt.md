@@ -1,1 +1,0 @@
-- A prompt swallowed between the app and the provider no longer leaves a turn spinning forever — after a minute without the provider's turn-start acknowledgement the turn settles failed with a "message never reached the agent" notice, and the check re-arms when reattaching to a session still reporting an unconfirmed turn

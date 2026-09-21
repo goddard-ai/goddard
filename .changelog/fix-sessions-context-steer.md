@@ -1,1 +1,0 @@
-- Project memory and the project map now reach steer-capable providers as hidden context after the first prompt — session titles no longer pick up the injected blocks, and the context never renders as a transcript row. Providers without steering keep the prepended-prompt behavior.
