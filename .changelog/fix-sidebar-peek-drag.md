@@ -1,0 +1,1 @@
+- Drag-selecting text into the left window edge — in the terminal, the transcript, or anywhere else — no longer pops open the hidden sidebar; the edge strip now reveals it only on unpressed pointer motion

@@ -257,14 +257,18 @@ impl Waku {
     }
 
     /// Entering the edge strip reveals the overlay at once; the nudge plays
-    /// out from there.
-    fn sidebar_peek_strip_hover(
+    /// out from there. The trigger is pointer motion rather than the
+    /// hitbox's hover transition so a drag past the edge — selecting text in
+    /// the terminal or transcript, grabbing a scrollbar or resize handle —
+    /// doesn't trip it: those moves arrive with `pressed_button` set, and
+    /// the hitbox hover they also fire can't tell them apart.
+    fn sidebar_peek_strip_mouse_move(
         &mut self,
-        hovered: &bool,
+        event: &MouseMoveEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !*hovered
+        if event.pressed_button.is_some()
             || !self.sidebar_peek_allowed()
             || matches!(self.sidebar_peek, SidebarPeek::Shown { .. })
         {
@@ -925,7 +929,7 @@ impl Render for Waku {
                         .left_0()
                         .w(px(SIDEBAR_PEEK_STRIP))
                         .cursor_default()
-                        .on_hover(cx.listener(Self::sidebar_peek_strip_hover)),
+                        .on_mouse_move(cx.listener(Self::sidebar_peek_strip_mouse_move)),
                 )
             })
             // The peek overlay: the real sidebar pane — scroll position and
