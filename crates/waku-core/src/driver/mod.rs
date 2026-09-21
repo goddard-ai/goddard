@@ -101,6 +101,11 @@ impl DriverHandle {
         self.inner.supports_steer()
     }
 
+    /// How the launch's scoped `goddard-agent` surface reached this session.
+    pub fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
+        self.inner.agent_surface_delivery()
+    }
+
     pub fn steer(&self, prompt: String) {
         self.inner.steer(prompt);
     }
@@ -178,6 +183,22 @@ impl DriverHandle {
     }
 }
 
+/// How a launch's scoped `goddard-agent` surface reached a session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AgentSurfaceDelivery {
+    /// The provider ignored `options.agent` — nothing is on `PATH`, so the
+    /// session must not be told the CLI exists.
+    Absent,
+    /// The env or shim is in place but nothing told the model — first-prompt
+    /// context carries the instruction instead.
+    #[default]
+    Silent,
+    /// The driver announced it through a provider-native channel: a launch
+    /// flag, a config-registered instruction file, or an attached
+    /// instruction entry.
+    Announced,
+}
+
 pub trait DriverControl: Send + Sync {
     fn prompt(&self, prompt: String);
     /// `prompt` already carries the attachments' `@`-mention text; transports
@@ -188,6 +209,13 @@ pub trait DriverControl: Send + Sync {
     }
     fn supports_steer(&self) -> bool {
         false
+    }
+    /// Most drivers place `goddard-agent` on the session's `PATH` without
+    /// telling the model — [`AgentSurfaceDelivery::Silent`]. Providers with a
+    /// native instruction channel report `Announced`; a provider that drops
+    /// the launch env reports `Absent`.
+    fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
+        AgentSurfaceDelivery::Silent
     }
     /// Deliver a steering message to the running turn. Implementations report
     /// the outcome asynchronously through `DriverEvent::SteerAccepted` or

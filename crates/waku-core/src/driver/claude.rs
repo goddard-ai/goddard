@@ -35,7 +35,8 @@ use uuid::Uuid;
 
 use super::activity;
 use crate::driver::{
-    DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
+    AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
+    SessionOptions,
 };
 use crate::model::{
     ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkKind,
@@ -88,6 +89,7 @@ pub struct ClaudeDriver {
     commands: Sender<CommandMessage>,
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
     mode: RuntimeMode,
+    announced_agent_surface: bool,
 }
 
 /// The permission posture Claude is launched with.
@@ -208,8 +210,16 @@ impl ClaudeDriver {
         let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd);
         configure_stream_command(&mut command, mode);
+        let mut system_appendix: Vec<String> = Vec::new();
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
+            // `goddard-agent` is on PATH but nothing else tells the model it
+            // exists — the launch flag is this provider's announcement
+            // channel.
+            system_appendix.push(crate::agent::surface_instruction(
+                "goddard-agent",
+                &agent.scope(),
+            ));
         }
         if let Some(subagents) = &subagents {
             // `--agents` definitions live only for this session and outrank
@@ -219,8 +229,13 @@ impl ClaudeDriver {
                 command.args(["--agents", &agents_json]);
             }
             if let Some(hint) = crate::subagents::routing_hint(subagents) {
-                command.args(["--append-system-prompt", &hint]);
+                system_appendix.push(hint);
             }
+        }
+        // One flag carries every appendix — whether repeated
+        // `--append-system-prompt` flags compose is undocumented.
+        if !system_appendix.is_empty() {
+            command.args(["--append-system-prompt", &system_appendix.join("\n\n")]);
         }
         let launch_model = wire_model(model.as_deref(), context_window.as_deref());
         if let Some(model) = launch_model.as_deref() {
@@ -551,6 +566,7 @@ impl ClaudeDriver {
             commands,
             pending_user_inputs,
             mode,
+            announced_agent_surface: agent.is_some(),
         })
     }
 }
@@ -562,6 +578,14 @@ impl DriverControl for ClaudeDriver {
 
     fn supports_steer(&self) -> bool {
         true
+    }
+
+    fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
+        if self.announced_agent_surface {
+            AgentSurfaceDelivery::Announced
+        } else {
+            AgentSurfaceDelivery::Silent
+        }
     }
 
     fn steer(&self, prompt: String) {
@@ -2098,6 +2122,7 @@ mod tests {
             commands,
             pending_user_inputs: Arc::new(Mutex::new(HashMap::new())),
             mode: RuntimeMode::FullAccess,
+            announced_agent_surface: false,
         };
 
         assert!(driver.supports_steer());

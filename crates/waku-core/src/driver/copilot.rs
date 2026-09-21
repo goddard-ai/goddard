@@ -36,7 +36,7 @@ use github_copilot_sdk::session_events::{
 use github_copilot_sdk::types::{
     Attachment, DeliveryMode, ExitPlanModeData, MessageOptions, PermissionRequestData,
     PermissionRequestKind, RequestId, ResumeSessionConfig, SessionConfig, SessionEvent, SessionId,
-    SetModelOptions,
+    SetModelOptions, SystemMessageConfig,
 };
 use github_copilot_sdk::{CliProgram, Client, ClientInfo, ClientOptions};
 use parking_lot::Mutex;
@@ -46,7 +46,8 @@ use tokio::sync::oneshot;
 
 use super::activity;
 use crate::driver::{
-    DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
+    AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
+    SessionOptions,
 };
 use crate::model::{
     ActivityKind, DriverEvent, MessageAttachment, PermissionOption, ProviderResumeCursor,
@@ -87,6 +88,7 @@ struct Shared {
 pub struct CopilotDriver {
     commands: UnboundedSender<CommandMessage>,
     shared: Arc<Mutex<Shared>>,
+    announced_agent_surface: bool,
 }
 
 struct CopilotRun {
@@ -145,6 +147,11 @@ impl CopilotDriver {
             eval: eval.map(Arc::new),
             ..Default::default()
         }));
+        // `session.create`'s system message is this provider's announcement
+        // channel; a resumed session keeps the message it was created with,
+        // so it reports `Silent` and hears about the surface through
+        // first-prompt context instead.
+        let announced_agent_surface = agent.is_some() && resume_session_id.is_none();
         // `UnboundedSender::send` is synchronous, so the `DriverControl`
         // methods talk straight into the runtime task — no pump thread.
         let (commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -183,7 +190,11 @@ impl CopilotDriver {
             })
             .context("failed to start the GitHub Copilot runtime")?;
 
-        Ok(Self { commands, shared })
+        Ok(Self {
+            commands,
+            shared,
+            announced_agent_surface,
+        })
     }
 }
 
@@ -271,6 +282,19 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
                 .and_then(crate::subagents::copilot_custom_agents)
             {
                 config = config.with_custom_agents(agents);
+            }
+            // `goddard-agent` is on PATH but nothing else tells the model it
+            // exists — the system-message append is this provider's
+            // announcement channel.
+            if let Some(agent) = &agent {
+                config.system_message = Some(
+                    SystemMessageConfig::new()
+                        .with_mode("append")
+                        .with_content(crate::agent::surface_instruction(
+                            "goddard-agent",
+                            &agent.scope(),
+                        )),
+                );
             }
             client.create_session(config).await
         }
@@ -895,6 +919,14 @@ impl DriverControl for CopilotDriver {
 
     fn supports_steer(&self) -> bool {
         true
+    }
+
+    fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
+        if self.announced_agent_surface {
+            AgentSurfaceDelivery::Announced
+        } else {
+            AgentSurfaceDelivery::Silent
+        }
     }
 
     fn steer(&self, prompt: String) {

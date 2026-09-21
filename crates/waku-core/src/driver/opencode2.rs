@@ -53,7 +53,8 @@ use super::activity;
 use super::opencode2_computer_use::{INSTRUCTION_KEY, OpenCode2ComputerUse};
 use super::support::{self, OpenCodePermissionRequest, OpenCodePermissionState};
 use crate::driver::{
-    DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
+    AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
+    SessionOptions,
 };
 use crate::http_wire::Endpoint;
 use crate::model::{
@@ -894,6 +895,14 @@ impl DriverControl for OpenCode2Driver {
 
     fn supports_steer(&self) -> bool {
         self.supports_steer
+    }
+
+    fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
+        if self.agent_surface.is_some() {
+            AgentSurfaceDelivery::Announced
+        } else {
+            AgentSurfaceDelivery::Silent
+        }
     }
 
     fn steer(&self, prompt: String) {

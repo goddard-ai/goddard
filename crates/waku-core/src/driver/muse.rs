@@ -25,7 +25,9 @@ use crossbeam_channel::{Sender, bounded, unbounded};
 use serde_json::{Value, json};
 
 use super::activity;
-use crate::driver::{DriverControl, DriverEventSender, DriverStartOptions, SessionOptions};
+use crate::driver::{
+    AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverStartOptions, SessionOptions,
+};
 use crate::model::{
     ActivityItem, ActivityKind, DriverEvent, MessageAttachment, PermissionOption,
     ProviderResumeCursor, RuntimeMode, ThreadGoal, ThreadGoalStatus, UserInputAnswer,
@@ -1683,6 +1685,12 @@ impl DriverControl for MuseDriver {
 
     fn supports_steer(&self) -> bool {
         true
+    }
+
+    fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
+        // The MSP host ignores the launch env — one `muse serve` multiplexes
+        // every session, so no per-session `goddard-agent` can reach it.
+        AgentSurfaceDelivery::Absent
     }
 
     fn steer(&self, prompt: String) {

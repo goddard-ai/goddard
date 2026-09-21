@@ -19,7 +19,8 @@ use uuid::Uuid;
 use super::computer_use as computer_use_runtime;
 use crate::computer_use;
 use crate::driver::{
-    DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
+    AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
+    SessionOptions,
 };
 use crate::model::{
     ActivityItem, ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey,
@@ -139,6 +140,7 @@ pub struct CodexDriver {
     computer_use_process_directory: Option<PathBuf>,
     computer_use_server_path: Option<PathBuf>,
     computer_use_preview_monitor: Option<computer_use_runtime::ComputerUsePreviewMonitor>,
+    announced_agent_surface: bool,
 }
 
 struct CodexComputerUseConfig {
@@ -274,6 +276,15 @@ impl CodexDriver {
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
         }
+        // `goddard-agent` is on PATH but nothing else tells the model it
+        // exists — `thread/start`'s developer instructions are this
+        // provider's announcement channel. A resumed thread keeps the
+        // instructions of its original start, so a session that predates
+        // the surface learns it through first-prompt context instead.
+        let agent_instruction = agent
+            .as_ref()
+            .map(|env| crate::agent::surface_instruction("goddard-agent", &env.scope()));
+        let announced_agent_surface = agent.is_some() && provider_session_id.is_none();
         // Inside the guest the VM dying with the session is the teardown
         // guarantee the host-side guardian script provides locally.
         let mut command = if sandbox.is_some() {
@@ -405,11 +416,16 @@ impl CodexDriver {
                 // Codex cannot register agent definitions, so delegation is
                 // hint-only: the session learns `spawn_agent` exists through
                 // `developerInstructions`, which a resumed thread keeps from
-                // its original start.
-                let subagent_hint = subagents
+                // its original start. The agent-surface note rides the same
+                // field.
+                let mut developer_instructions: Vec<String> =
+                    agent_instruction.iter().cloned().collect();
+                if subagents
                     .as_ref()
-                    .filter(|spec| !spec.agents.is_empty())
-                    .map(|_| crate::subagents::CODEX_HINT);
+                    .is_some_and(|spec| !spec.agents.is_empty())
+                {
+                    developer_instructions.push(crate::subagents::CODEX_HINT.to_owned());
+                }
                 let open_thread = if let Some(thread_id) = provider_session_id {
                     let mut params = json!({
                         "threadId": thread_id,
@@ -437,8 +453,9 @@ impl CodexDriver {
                         "approvalsReviewer": approvals_reviewer,
                         "serviceName": "waku"
                     });
-                    if let Some(hint) = subagent_hint {
-                        params["developerInstructions"] = json!(hint);
+                    if !developer_instructions.is_empty() {
+                        params["developerInstructions"] =
+                            json!(developer_instructions.join("\n\n"));
                     }
                     if let Some(model) = model.as_deref() {
                         params["model"] = json!(model);
@@ -941,6 +958,7 @@ impl CodexDriver {
             computer_use_process_directory,
             computer_use_server_path,
             computer_use_preview_monitor,
+            announced_agent_surface,
         })
     }
 }
@@ -1067,6 +1085,14 @@ impl DriverControl for CodexDriver {
 
     fn supports_steer(&self) -> bool {
         true
+    }
+
+    fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
+        if self.announced_agent_surface {
+            AgentSurfaceDelivery::Announced
+        } else {
+            AgentSurfaceDelivery::Silent
+        }
     }
 
     fn steer(&self, prompt: String) {
@@ -3131,6 +3157,7 @@ mod tests {
             computer_use_process_directory: None,
             computer_use_server_path: None,
             computer_use_preview_monitor: None,
+            announced_agent_surface: false,
         };
 
         assert!(driver.apply_options(session_options(RuntimeMode::FullAccess, "gpt-5-codex")));

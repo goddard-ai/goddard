@@ -2059,11 +2059,13 @@ impl Backend for WakuBackend {
                         self.steer_first_prompt_context(session_id, &task, &driver, &events);
                         return result;
                     }
-                    // Project memory and the project map ride the first
-                    // visible prompt: the wire event above already
-                    // published the user's text, so the injected blocks
-                    // reach the provider without entering the transcript as
-                    // a user message.
+                    // The agent-surface note, project memory, and the project
+                    // map ride the first visible prompt: the wire event above
+                    // already published the user's text, so the injected
+                    // blocks reach the provider without entering the
+                    // transcript as a user message.
+                    *prompt =
+                        self.prepend_agent_surface(session_id, &driver, std::mem::take(prompt));
                     *prompt = self.memory.prompt_with_memory(session_id, prompt);
                     let (mapped, status) = self.inject_repo_map(session_id, std::mem::take(prompt));
                     *prompt = mapped;
@@ -3229,6 +3231,13 @@ impl WakuBackend {
             // unreachable from inside the guest.
             options.agent = None;
         }
+        // The agent-surface instruction reaches the session through whichever
+        // channel its provider offers; first-prompt context needs the launch's
+        // scopes for drivers without a native channel. A failed start revokes
+        // the credential and this record together.
+        if let Some(agent_env) = &options.agent {
+            self.agent.note_surface(session_id, agent_env.scope());
+        }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
         let handle = match driver::start_local(provider, options, event_sender) {
@@ -3599,6 +3608,7 @@ impl WakuBackend {
             driver.prompt(prompt.clone());
             self.steer_first_prompt_context(session_id, &prompt, &driver, &sink);
         } else {
+            let prompt = self.prepend_agent_surface(session_id, &driver, prompt);
             let (prompt, status) = self.inject_repo_map(
                 session_id,
                 self.memory.prompt_with_memory(session_id, &prompt),
@@ -3636,7 +3646,7 @@ impl WakuBackend {
             let _ = sink.send(wire);
         }
         let memory = self.memory.context_block(session_id, task);
-        let block = [map, memory.clone()]
+        let block = [map, memory.clone(), self.agent_surface_block(session_id, driver)]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -3664,6 +3674,33 @@ impl WakuBackend {
             },
         );
         driver.steer(steer);
+    }
+
+    /// The launch-scoped `goddard-agent` instruction for a session whose
+    /// provider delivered the surface without telling the model — `None`
+    /// when the driver announced it natively or the launch env never
+    /// arrived.
+    fn agent_surface_block(&self, session_id: Uuid, driver: &DriverHandle) -> Option<String> {
+        if driver.agent_surface_delivery() != crate::driver::AgentSurfaceDelivery::Silent {
+            return None;
+        }
+        self.agent.surface_block(session_id)
+    }
+
+    /// Fold the owed agent-surface instruction into a first prompt — the
+    /// non-steer path's single shot at telling the session about
+    /// `goddard-agent`, so delivery is marked as the prompt goes out.
+    fn prepend_agent_surface(
+        &self,
+        session_id: Uuid,
+        driver: &DriverHandle,
+        prompt: String,
+    ) -> String {
+        let Some(surface) = self.agent_surface_block(session_id, driver) else {
+            return prompt;
+        };
+        self.agent.mark_surface_announced(session_id);
+        format!("{surface}\n\n{prompt}")
     }
 
     /// Prefix `prompt` with the session's project map when the session is
@@ -4504,6 +4541,12 @@ fn forward_driver_events(
                     .is_some_and(|steer| steer.context == Some(crate::agent::ContextSteer::Memory))
                 {
                     memory.mark_injected(session_id);
+                }
+                // The agent-surface instruction composes into every context
+                // steer while it is owed, so any accepted context steer
+                // delivered it; a rejection leaves it pending to retry.
+                if steer.as_ref().is_some_and(|steer| steer.context.is_some()) {
+                    agent.mark_surface_announced(session_id);
                 }
                 // A queue-drained prompt folded into the parked turn: its
                 // mirrored chip's wait is over even when the steer carried
@@ -5663,6 +5706,7 @@ mod tests {
     struct CaptureDriver {
         prompts: Mutex<Vec<String>>,
         steers: Mutex<Vec<String>>,
+        surface_delivery: crate::driver::AgentSurfaceDelivery,
     }
 
     impl crate::driver::DriverControl for CaptureDriver {
@@ -5671,6 +5715,9 @@ mod tests {
         }
         fn supports_steer(&self) -> bool {
             true
+        }
+        fn agent_surface_delivery(&self) -> crate::driver::AgentSurfaceDelivery {
+            self.surface_delivery
         }
         fn steer(&self, prompt: String) {
             self.steers.lock().push(prompt);
@@ -5758,6 +5805,107 @@ mod tests {
             &EventSink::detached(),
         );
         assert_eq!(capture.steers.lock().len(), 1, "nothing re-injects");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn surface_test_backend(root: &Path) -> (WakuBackend, Uuid) {
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(repo);
+        state.sessions[0].begin_turn("seed");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let session_id = state.sessions[0].id;
+        store.save(&mut state).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap();
+        backend.agent.note_surface(
+            session_id,
+            crate::agent::AgentSurfaceScope {
+                task_tools: true,
+                settings_writes: true,
+                parent_task_id: None,
+            },
+        );
+        (backend, session_id)
+    }
+
+    #[test]
+    fn the_agent_surface_instruction_rides_the_context_steer_once() {
+        let root = std::env::temp_dir().join(format!("waku-context-steer-{}", Uuid::new_v4()));
+        let (backend, session_id) = surface_test_backend(&root);
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = crate::driver::DriverHandle::from_control(capture.clone());
+
+        backend.steer_first_prompt_context(
+            session_id,
+            "create a task for this",
+            &driver,
+            &EventSink::detached(),
+        );
+
+        let steers = capture.steers.lock().clone();
+        assert_eq!(steers.len(), 1);
+        assert!(steers[0].contains("`goddard-agent`"));
+        assert!(steers[0].contains("create, start, or spawn"));
+
+        // The accepted echo marks the surface delivered; the next prompt
+        // owes no block, so nothing steers at all.
+        assert!(backend.agent.take_pending_steer(session_id, &steers[0]).is_some());
+        backend.agent.mark_surface_announced(session_id);
+        backend.steer_first_prompt_context(
+            session_id,
+            "follow up",
+            &driver,
+            &EventSink::detached(),
+        );
+        assert_eq!(capture.steers.lock().len(), 1, "nothing re-injects");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_natively_announced_surface_stays_out_of_the_context_steer() {
+        let root = std::env::temp_dir().join(format!("waku-context-steer-{}", Uuid::new_v4()));
+        let (backend, session_id) = surface_test_backend(&root);
+        let capture = Arc::new(CaptureDriver {
+            surface_delivery: crate::driver::AgentSurfaceDelivery::Announced,
+            ..Default::default()
+        });
+        let driver = crate::driver::DriverHandle::from_control(capture.clone());
+
+        backend.steer_first_prompt_context(
+            session_id,
+            "create a task for this",
+            &driver,
+            &EventSink::detached(),
+        );
+
+        // The driver already told the session — no other block is owed, so
+        // no steer goes out at all.
+        assert!(capture.steers.lock().is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_agent_surface_prepends_once_for_non_steer_drivers() {
+        let root = std::env::temp_dir().join(format!("waku-context-steer-{}", Uuid::new_v4()));
+        let (backend, session_id) = surface_test_backend(&root);
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = crate::driver::DriverHandle::from_control(capture.clone());
+
+        let prompt =
+            backend.prepend_agent_surface(session_id, &driver, "create a task".to_owned());
+        assert!(prompt.starts_with("<goddard-agent>"));
+        assert!(prompt.ends_with("create a task"));
+
+        let prompt = backend.prepend_agent_surface(session_id, &driver, "next".to_owned());
+        assert_eq!(prompt, "next");
 
         let _ = std::fs::remove_dir_all(&root);
     }

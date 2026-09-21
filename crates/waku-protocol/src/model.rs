@@ -1569,7 +1569,8 @@ fn is_true(value: &bool) -> bool {
 }
 
 /// Context blocks the daemon prepends to a session's first visible prompt —
-/// `<project-map>`, then `<project-memory>`. They are provider-facing context,
+/// `<project-map>`, then `<project-memory>`, then `<goddard-agent>`. They are
+/// provider-facing context,
 /// not user text, but a provider can still report them back as a title (Kimi
 /// echoes the prompt verbatim; Devin's stored placeholder can truncate inside
 /// a block), so anything deriving a title from prompt text drops them first.
@@ -1579,7 +1580,7 @@ pub fn strip_injected_prompt_blocks(text: &str) -> String {
     let mut cleaned = text.to_owned();
     loop {
         let before = cleaned.len();
-        for tag in ["project-map", "project-memory"] {
+        for tag in ["project-map", "project-memory", "goddard-agent"] {
             let open = format!("<{tag}>");
             let close = format!("</{tag}>");
             while let Some(start) = cleaned.find(&open) {
@@ -5275,6 +5276,7 @@ mod tests {
         let mut session = AgentSession::new(project.id, ProviderKind::Kimi);
         let injected = "<project-map>\nA structural map.\n</project-map>\n\n\
                         <project-memory>\nDistilled notes.\n</project-memory>\n\n\
+                        <goddard-agent>\nA CLI contract.\n</goddard-agent>\n\n\
                         strip the blocks from session titles";
         session.set_title_from_prompt(injected);
         assert_eq!(

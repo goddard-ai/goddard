@@ -64,6 +64,13 @@ struct AgentTurn {
     working: bool,
 }
 
+/// One runtime's agent-surface announcement: the scopes its launch env
+/// granted and whether the session has already been told about them.
+struct AgentSurface {
+    scope: AgentSurfaceScope,
+    announced: bool,
+}
+
 /// Shared agent surface state. One instance lives on the backend; the runtime
 /// event forwarder holds a second reference so it can track turns, drain
 /// queues, and attach provenance to echoed steers without round-tripping
@@ -73,6 +80,9 @@ pub struct AgentState {
     /// Scoped bearer token → the session owning the runtime it was minted
     /// for. Several tokens can name the same session when a task restarts.
     tokens: Mutex<HashMap<String, Uuid>>,
+    /// The `goddard-agent` scopes each live runtime launched with, for
+    /// sessions the provider did not tell about the CLI itself.
+    surfaces: Mutex<HashMap<Uuid, AgentSurface>>,
     /// Queue-mode prompts waiting for the target session to become idle.
     queues: Mutex<HashMap<Uuid, VecDeque<AgentPrompt>>>,
     /// Steer injections in flight, oldest first.
@@ -101,9 +111,46 @@ impl AgentState {
 
     /// Drop every credential minted for the session's runtimes. Called when a
     /// runtime is closed, replaced, or reported exited — the token is valid
-    /// only while the provider process that carries it lives.
+    /// only while the provider process that carries it lives. The surface
+    /// announcement goes with it: a restarted runtime announces again to its
+    /// fresh provider process.
     pub fn revoke_session(&self, session_id: Uuid) {
         self.tokens.lock().retain(|_, owner| *owner != session_id);
+        self.surfaces.lock().remove(&session_id);
+    }
+
+    /// Record the scopes a launch carried so first-prompt context can
+    /// describe the tools the session actually has, for providers without a
+    /// native announcement channel.
+    pub fn note_surface(&self, session_id: Uuid, scope: AgentSurfaceScope) {
+        self.surfaces.lock().insert(
+            session_id,
+            AgentSurface {
+                scope,
+                announced: false,
+            },
+        );
+    }
+
+    /// The `goddard-agent` instruction a session is still owed — `None` when
+    /// its runtime carries no surface or already heard about it. The steer
+    /// path marks delivery on the provider's accept echo; a prompt-prepend
+    /// caller marks it on send (`mark_surface_announced`).
+    pub fn surface_block(&self, session_id: Uuid) -> Option<String> {
+        let surfaces = self.surfaces.lock();
+        let surface = surfaces.get(&session_id)?;
+        if surface.announced {
+            return None;
+        }
+        Some(surface_instruction("goddard-agent", &surface.scope))
+    }
+
+    /// The session was told about its agent surface — an injected context
+    /// steer was accepted, or a prepended prompt shipped.
+    pub fn mark_surface_announced(&self, session_id: Uuid) {
+        if let Some(surface) = self.surfaces.lock().get_mut(&session_id) {
+            surface.announced = true;
+        }
     }
 
     /// Forget everything about a session that is gone for good.
@@ -117,6 +164,7 @@ impl AgentState {
     /// Forget every credential and queue. Called on daemon shutdown.
     pub fn clear(&self) {
         self.tokens.lock().clear();
+        self.surfaces.lock().clear();
         self.queues.lock().clear();
         self.pending_steers.lock().clear();
         self.turns.lock().clear();
@@ -336,6 +384,28 @@ pub struct AgentLaunchEnv {
     pub settings_writes: bool,
 }
 
+impl AgentLaunchEnv {
+    /// The scopes this launch carries, for composing the session's
+    /// agent-surface instruction through whichever channel delivers it.
+    pub fn scope(&self) -> AgentSurfaceScope {
+        AgentSurfaceScope {
+            task_tools: self.task_tools,
+            settings_writes: self.settings_writes,
+            parent_task_id: self.parent_task_id,
+        }
+    }
+}
+
+/// Which `goddard-agent` subcommands a session's credential will accept —
+/// everything the agent-surface instruction needs that isn't the command
+/// name itself.
+#[derive(Clone, Copy, Debug)]
+pub struct AgentSurfaceScope {
+    pub task_tools: bool,
+    pub settings_writes: bool,
+    pub parent_task_id: Option<Uuid>,
+}
+
 /// Locate the `goddard-agent` binary to place on a provider's `PATH`.
 ///
 /// Development and unpackaged installs keep it beside the daemon
@@ -413,30 +483,55 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
     Ok(shim)
 }
 
-/// The prompt shared-service sessions get in place of a launch environment:
-/// the same contract the CLI's own help states, plus the session-scoped
-/// launcher's path and which credential scopes this session carries.
-pub fn shared_service_instruction(shim: &Path, env: &AgentLaunchEnv) -> String {
+/// The agent-surface instruction a session learns through whichever channel
+/// its provider offers — an attached instruction entry, a launch flag, a
+/// config-registered file, or the first-prompt context block. `command` is
+/// how the session invokes the CLI: `goddard-agent` when `PATH` carries it,
+/// the shim's path for shared-service providers.
+pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
     let mut instruction = format!(
-        "Goddard exposes a scoped agent surface to this session through `{shim}`; `{shim} --help` documents every subcommand and its JSON payload.",
-        shim = shim.display()
+        "<goddard-agent>\nGoddard gives this session a `{command}` CLI; \
+         `{command} --help` documents every subcommand and its JSON payload."
     );
-    if env.settings_writes {
+    if scope.task_tools {
+        instruction.push_str(&format!(
+            "\n- `create` — when the user asks you to create, start, or \
+             spawn another task or session, including running work in a \
+             separate task (e.g. `{command} create '{{\"prompt\": \"...\"}}')\n\
+             - `prompt` — when the user asks you to send a message to \
+             another task\n\
+             - `read` — to read another task's transcript"
+        ));
+    }
+    if scope.settings_writes {
         instruction.push_str(
-            " The `command` subcommands manage the user's custom commands — use them whenever adding one would help the human, not only when asked.",
+            "\n- `command` — manage the user's custom commands; may be used \
+             proactively whenever adding one would help",
         );
     }
-    if env.task_tools {
+    if scope.task_tools {
         instruction.push_str(
-            " When — and only when — the human explicitly asks you to create another task or send a message to one, use `create` and `prompt`; those calls are attributed to this task in the target's transcript. Do not use them for exploration, convenience, or self-orchestration.",
+            "\n\n`create`, `prompt`, and `read` act on the user's other \
+             tasks under this task's name — use them only when the user \
+             asks, never for exploration, convenience, or \
+             self-orchestration.",
         );
-        if let Some(parent) = env.parent_task_id {
+        if let Some(parent) = scope.parent_task_id {
             instruction.push_str(&format!(
-                " This session is a side chat of task {parent}; `read` its transcript when you need its context."
+                " This session is a side chat of task {parent}; `read` its \
+                 transcript when you need its context."
             ));
         }
     }
+    instruction.push_str("\n</goddard-agent>");
     instruction
+}
+
+/// The prompt shared-service sessions get in place of a launch environment:
+/// the same contract the CLI's own help states, with the session-scoped
+/// launcher's path as the command because `PATH` cannot carry it.
+pub fn shared_service_instruction(shim: &Path, env: &AgentLaunchEnv) -> String {
+    surface_instruction(&shim.display().to_string(), &env.scope())
 }
 
 #[cfg(unix)]
@@ -781,8 +876,11 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("goddard-agent-test-{}", Uuid::new_v4()));
         let env = launch_env(&directory);
         let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
+        assert!(instruction.starts_with("<goddard-agent>\n"));
+        assert!(instruction.ends_with("\n</goddard-agent>"));
         assert!(instruction.contains("/x/goddard-agent"));
-        assert!(instruction.contains("explicitly asks"));
+        assert!(instruction.contains("only when the user asks"));
+        assert!(instruction.contains("create, start, or spawn"));
         assert!(instruction.contains("`command`"));
 
         // Each scope drops its own half of the contract when disabled.
@@ -792,7 +890,7 @@ mod tests {
         };
         let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
         assert!(instruction.contains("`command`"));
-        assert!(!instruction.contains("explicitly asks"));
+        assert!(!instruction.contains("only when the user asks"));
 
         let env = AgentLaunchEnv {
             task_tools: true,
@@ -801,7 +899,35 @@ mod tests {
         };
         let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
         assert!(!instruction.contains("`command`"));
-        assert!(instruction.contains("explicitly asks"));
+        assert!(instruction.contains("only when the user asks"));
+    }
+
+    #[test]
+    fn the_surface_block_is_owed_once_until_announced_or_revoked() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        let scope = AgentSurfaceScope {
+            task_tools: true,
+            settings_writes: false,
+            parent_task_id: None,
+        };
+        assert!(state.surface_block(session).is_none());
+
+        state.note_surface(session, scope);
+        let block = state.surface_block(session).expect("the surface is owed");
+        assert!(block.contains("`goddard-agent`"));
+        // Composing the block does not announce it — the steer path waits
+        // for the provider's accept echo.
+        assert!(state.surface_block(session).is_some());
+
+        state.mark_surface_announced(session);
+        assert!(state.surface_block(session).is_none());
+
+        // A fresh runtime is owed the announcement again.
+        state.note_surface(session, scope);
+        assert!(state.surface_block(session).is_some());
+        state.revoke_session(session);
+        assert!(state.surface_block(session).is_none());
     }
 
     #[test]

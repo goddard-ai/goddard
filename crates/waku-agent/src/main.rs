@@ -47,12 +47,15 @@ USAGE
 USAGE CONTRACT
     `command` manages the user's settings — today their custom commands —
     and is available whenever changing a setting would help them.
-    `create`, `prompt`, and `read` are the cross-task surface: invoke
-    `create` or `prompt` only when the human you are working for has
-    explicitly asked you to create another task or to send a message to one.
-    `read` is the read half of that surface — use it when another task's
-    transcript holds context you need, for example when GODDARD_PARENT_TASK_ID
-    names the task this session is a side chat of.
+    `create`, `prompt`, and `read` are the cross-task surface. When the
+    human asks you to create, start, or spawn another task or session —
+    including running work in a separate task — use `create`; when they ask
+    you to send a message to another task, use `prompt`. `read` is the read
+    half of that surface — use it when another task's transcript holds
+    context you need, for example when GODDARD_PARENT_TASK_ID names the
+    task this session is a side chat of. Use `create` and `prompt` only
+    when the human asks — never for exploration, convenience, or
+    self-orchestration.
     There is no per-call approval gate for either surface; the daemon records
     this task's id on every accepted write, so agent-originated commands and
     turns are visibly attributed to it.

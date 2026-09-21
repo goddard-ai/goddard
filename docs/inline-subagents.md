@@ -34,7 +34,7 @@ document is about.
   Per-session processes get `apply_agent_environment` — env vars + a PATH
   prepend (`command_env.rs:57`). Shared services get a session-scoped
   *instruction* instead: `write_session_shim` + `shared_service_instruction`
-  (`agent.rs:280`, `agent.rs:321`) delivered via
+  (`agent.rs:438`, `agent.rs:528`) delivered via
   `PUT /api/session/{id}/instructions/entries/{key}` for OpenCode 2
   (`opencode2.rs:661`). Inline subagents should reuse exactly this split:
   argv/env for owned processes, session instructions for adopted ones.

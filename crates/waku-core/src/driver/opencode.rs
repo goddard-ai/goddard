@@ -25,7 +25,8 @@ use serde_json::{Value, json};
 use super::activity;
 use super::support::{OpenCodePermissionRequest, OpenCodePermissionState, permission_responses};
 use crate::driver::{
-    DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
+    AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
+    SessionOptions,
 };
 use crate::http_wire::{Endpoint, StreamControl, open_event_stream};
 use crate::model::{
@@ -164,6 +165,26 @@ fn reject_prompt(error: impl std::fmt::Display, events: &impl DriverEventSink, t
     }
 }
 
+/// Write the session's `goddard-agent` instruction into its private launch
+/// directory — OpenCode's `instructions` config references files, not text.
+fn write_agent_surface_instruction(
+    agent: &crate::agent::AgentLaunchEnv,
+) -> anyhow::Result<std::path::PathBuf> {
+    crate::fs_ext::create_private_dir_all(&agent.shim_directory).with_context(|| {
+        format!(
+            "could not create {}",
+            agent.shim_directory.display()
+        )
+    })?;
+    let path = agent.shim_directory.join("goddard-agent.md");
+    std::fs::write(
+        &path,
+        crate::agent::surface_instruction("goddard-agent", &agent.scope()),
+    )
+    .with_context(|| format!("could not write {}", path.display()))?;
+    Ok(path)
+}
+
 fn opencode_permission_rules(mode: RuntimeMode) -> Value {
     let rule = |permission: &str, action: &str| {
         json!({
@@ -197,6 +218,7 @@ pub struct OpenCodeDriver {
     event_stream: Arc<StreamControl>,
     mode: RuntimeMode,
     computer_use: Option<super::support::HeadlessComputerUseRuntime>,
+    announced_agent_surface: bool,
 }
 
 impl OpenCodeDriver {
@@ -260,6 +282,30 @@ impl OpenCodeDriver {
             config_doc["mcp"] = Value::Object(
                 crate::integrations::deliver::opencode_config_entries(&integrations),
             );
+        }
+        // `goddard-agent` is on PATH in this session's dedicated server, but
+        // nothing tells the model — OpenCode's `instructions` config is its
+        // native announcement channel, and it takes a file, not text. A
+        // failed write degrades to first-prompt context rather than failing
+        // the launch.
+        let mut announced_agent_surface = false;
+        if let Some(agent_env) = &agent_env {
+            match write_agent_surface_instruction(agent_env) {
+                Ok(path) => {
+                    if let Some(object) = config_doc.as_object_mut()
+                        && let Some(list) = object
+                            .entry("instructions")
+                            .or_insert_with(|| json!([]))
+                            .as_array_mut()
+                    {
+                        list.push(Value::String(path.display().to_string()));
+                        announced_agent_surface = true;
+                    }
+                }
+                Err(error) => eprintln!(
+                    "goddard-daemon: could not write OpenCode agent instructions: {error:#}"
+                ),
+            }
         }
         if config_doc.as_object().is_some_and(|doc| !doc.is_empty()) {
             environment.push(("OPENCODE_CONFIG_CONTENT".into(), config_doc.to_string()));
@@ -756,6 +802,7 @@ impl OpenCodeDriver {
             event_stream,
             mode,
             computer_use,
+            announced_agent_surface,
         })
     }
 }
@@ -767,6 +814,14 @@ impl DriverControl for OpenCodeDriver {
 
     fn supports_steer(&self) -> bool {
         true
+    }
+
+    fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
+        if self.announced_agent_surface {
+            AgentSurfaceDelivery::Announced
+        } else {
+            AgentSurfaceDelivery::Silent
+        }
     }
 
     fn steer(&self, prompt: String) {
