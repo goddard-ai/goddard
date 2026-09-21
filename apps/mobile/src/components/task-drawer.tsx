@@ -1,12 +1,15 @@
 import type { AgentSession } from '@waku/client';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { router, useGlobalSearchParams, usePathname } from 'expo-router';
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -18,7 +21,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -47,11 +49,37 @@ import {
   groupSessions,
   providerLabel,
   relativeSessionTime,
+  type SessionGroup,
   type SessionListItem,
 } from '@/lib/session-presentation';
 
 const DaemonPickerHeight = 38;
 const SearchDockGap = 14;
+
+/** FlashList has no section API, so groups flatten into header/session rows;
+ * `getItemType` keeps the two shapes in separate recycling pools. */
+type DrawerListRow =
+  | { kind: 'header'; key: string; title: string }
+  | { kind: 'session'; key: string; item: SessionListItem };
+
+function drawerRows(sections: SessionGroup[]): DrawerListRow[] {
+  return sections.flatMap((section) => [
+    { kind: 'header' as const, key: `header:${section.id}`, title: section.title },
+    ...section.data.map((item): DrawerListRow => ({
+      kind: 'session',
+      key: `session:${item.session.id}`,
+      item,
+    })),
+  ]);
+}
+
+function drawerRowKey(row: DrawerListRow): string {
+  return row.key;
+}
+
+function drawerRowType(row: DrawerListRow): string {
+  return row.kind;
+}
 interface TaskDrawerContextValue {
   openTaskDrawer: () => void;
   closeTaskDrawer: () => void;
@@ -162,16 +190,32 @@ function TaskDrawerContent({
       subscription.remove();
     };
   }, [open]);
+  // The drawer stays mounted while closed, and stream commits rewrite
+  // taskState several times a second. Render the list from a snapshot taken
+  // while open so those commits cost nothing until the drawer reopens.
+  const frameRef = useRef({
+    data: taskState.data,
+    runtimes: runtime.runtimes,
+    selectedSessionId,
+  });
+  if (open) {
+    frameRef.current = {
+      data: taskState.data,
+      runtimes: runtime.runtimes,
+      selectedSessionId,
+    };
+  }
+  const frame = frameRef.current;
   const listExtraData = useMemo(
-    () => ({ runtimes: runtime.runtimes, now }),
-    [runtime.runtimes, now],
+    () => ({ runtimes: frame.runtimes, now, selected: frame.selectedSessionId }),
+    [frame.runtimes, frame.selectedSessionId, now],
   );
   const visibleSessions = useMemo(() => {
-    if (!taskState.data) return [];
+    if (!frame.data) return [];
     const query = search.trim().toLocaleLowerCase();
-    if (!query) return taskState.data.sessions;
-    const projects = new Map(taskState.data.projects.map((project) => [project.id, project]));
-    return taskState.data.sessions.filter((session) => {
+    if (!query) return frame.data.sessions;
+    const projects = new Map(frame.data.projects.map((project) => [project.id, project]));
+    return frame.data.sessions.filter((session) => {
       const project = projects.get(session.project_id);
       return [
         displaySessionTitle(session),
@@ -181,26 +225,26 @@ function TaskDrawerContent({
         session.model,
       ].some((value) => value?.toLocaleLowerCase().includes(query));
     });
-  }, [search, taskState.data]);
+  }, [search, frame.data]);
   const sections = useMemo(
-    () => taskState.data ? groupSessions(taskState.data.projects, visibleSessions) : [],
-    [taskState.data, visibleSessions],
+    () => frame.data ? groupSessions(frame.data.projects, visibleSessions) : [],
+    [frame.data, visibleSessions],
   );
+  const rows = useMemo(() => drawerRows(sections), [sections]);
   const showNewTask = useCallback(() => {
     onClose();
     router.dismissTo('/');
   }, [onClose]);
   const showSession = useCallback((sessionId: string) => {
-    if (selectedSessionId === sessionId) {
+    if (frame.selectedSessionId === sessionId) {
       onClose();
-    } else if (selectedSessionId) {
+    } else if (frame.selectedSessionId) {
       router.setParams({ id: sessionId });
     } else {
       router.replace({ pathname: '/session/[id]', params: { id: sessionId } });
     }
-  }, [onClose, selectedSessionId]);
-
-  function confirmDelete(session: AgentSession) {
+  }, [frame.selectedSessionId, onClose]);
+  const confirmDelete = useCallback((session: AgentSession) => {
     Alert.alert(
       `Delete “${displaySessionTitle(session)}”?`,
       'This removes the task and its transcript from the daemon for every device.',
@@ -222,7 +266,42 @@ function TaskDrawerContent({
         },
       ],
     );
-  }
+  }, [runtime.deleteSession]);
+  const renameSession = useCallback(
+    (session: AgentSession) => setRenameTarget(session),
+    [],
+  );
+  const selectSession = useCallback(
+    (session: AgentSession) => showSession(session.id),
+    [showSession],
+  );
+  const renderRow = useCallback(({ item: row }: ListRenderItemInfo<DrawerListRow>) => {
+    if (row.kind === 'header') return <SectionHeader title={row.title} />;
+    const { session, projectName } = row.item;
+    return (
+      <SessionRow
+        drawerWidth={drawerWidth}
+        lastReplyLabel={session.last_reply_at == null
+          ? null
+          : relativeSessionTime(session.last_reply_at, now)}
+        projectName={projectName}
+        running={frame.runtimes[session.id]?.running ?? sessionIsRunning(session)}
+        selected={session.id === frame.selectedSessionId}
+        session={session}
+        onDelete={confirmDelete}
+        onRename={renameSession}
+        onSelect={selectSession}
+      />
+    );
+  }, [
+    confirmDelete,
+    drawerWidth,
+    frame.runtimes,
+    frame.selectedSessionId,
+    now,
+    renameSession,
+    selectSession,
+  ]);
 
   async function refreshTasks() {
     setRefreshing(true);
@@ -242,16 +321,17 @@ function TaskDrawerContent({
         <DaemonPill onPress={() => setDaemonPickerOpen(true)} />
       </View>
 
-      <SectionList
-        sections={sections}
+      <FlashList
+        data={rows}
         extraData={listExtraData}
-        keyExtractor={(item) => item.session.id}
+        getItemType={drawerRowType}
+        keyExtractor={drawerRowKey}
         contentContainerStyle={[
           styles.listContent,
           {
             paddingTop: insets.top + DaemonPickerHeight + 20,
           },
-          sections.length === 0 && styles.listContentEmpty,
+          rows.length === 0 && styles.listContentEmpty,
         ]}
         refreshControl={(
           <RefreshControl
@@ -262,23 +342,7 @@ function TaskDrawerContent({
             onRefresh={() => void refreshTasks()}
           />
         )}
-        renderSectionHeader={({ section }) => (
-          <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
-            {section.title}
-          </Text>
-        )}
-        renderItem={({ item }) => (
-          <SessionRow
-            drawerWidth={drawerWidth}
-            item={item}
-            now={now}
-            running={runtime.runtimes[item.session.id]?.running ?? sessionIsRunning(item.session)}
-            selected={item.session.id === selectedSessionId}
-            onDelete={() => confirmDelete(item.session)}
-            onRename={() => setRenameTarget(item.session)}
-            onSelect={() => showSession(item.session.id)}
-          />
-        )}
+        renderItem={renderRow}
         ListHeaderComponent={<ConnectionBanner />}
         ListEmptyComponent={(
           <TaskListEmpty
@@ -288,7 +352,6 @@ function TaskDrawerContent({
           />
         )}
         showsVerticalScrollIndicator={false}
-        stickySectionHeadersEnabled={false}
       />
 
       {(daemon.profiles.length > 0 || daemon.phase === 'booting') && (
@@ -472,10 +535,22 @@ function TaskListEmpty({
   );
 }
 
-function SessionRow({
+const SectionHeader = memo(function SectionHeader({ title }: { title: string }) {
+  const theme = useTheme();
+  return (
+    <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
+      {title}
+    </Text>
+  );
+});
+
+// Memoized on primitives: stream commits rebuild the row list several times a
+// second, and recycling must never reach into a row whose inputs are equal.
+const SessionRow = memo(function SessionRow({
   drawerWidth,
-  item,
-  now,
+  session,
+  projectName,
+  lastReplyLabel,
   running,
   selected,
   onDelete,
@@ -483,26 +558,23 @@ function SessionRow({
   onSelect,
 }: {
   drawerWidth: number;
-  item: SessionListItem;
-  now: number;
+  session: AgentSession;
+  projectName: string;
+  lastReplyLabel: string | null;
   running: boolean;
   selected: boolean;
-  onDelete: () => void;
-  onRename: () => void;
-  onSelect: () => void;
+  onDelete: (session: AgentSession) => void;
+  onRename: (session: AgentSession) => void;
+  onSelect: (session: AgentSession) => void;
 }) {
   const theme = useTheme();
   const rowWidth = Math.max(0, drawerWidth - 24);
-  const session = item.session;
-  const lastReplyTime = session.last_reply_at == null
-    ? null
-    : relativeSessionTime(session.last_reply_at, now);
   return (
     <TaskRowMenu
-      accessibilityLabel={`${displaySessionTitle(session)}, ${providerLabel(session.provider)} in ${item.projectName}${running ? ', Running' : ''}${lastReplyTime ? `, Last reply: ${lastReplyTime}` : ''}`}
-      onDelete={onDelete}
-      onRename={onRename}
-      onSelect={onSelect}
+      accessibilityLabel={`${displaySessionTitle(session)}, ${providerLabel(session.provider)} in ${projectName}${running ? ', Running' : ''}${lastReplyLabel ? `, Last reply: ${lastReplyLabel}` : ''}`}
+      onDelete={() => onDelete(session)}
+      onRename={() => onRename(session)}
+      onSelect={() => onSelect(session)}
       renderTrigger={(pressed) => (
         <View
           style={[
@@ -532,13 +604,13 @@ function SessionRow({
             <Text
               numberOfLines={1}
               style={[styles.sessionProject, { color: theme.textTertiary }]}>
-              {item.projectName}
+              {projectName}
             </Text>
-            {lastReplyTime !== null && (
+            {lastReplyLabel !== null && (
               <Text
                 numberOfLines={1}
                 style={[styles.sessionTime, { color: theme.textTertiary }]}>
-                {lastReplyTime}
+                {lastReplyLabel}
               </Text>
             )}
           </View>
@@ -548,7 +620,7 @@ function SessionRow({
       style={[styles.sessionMenu, { width: rowWidth }]}
     />
   );
-}
+});
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
