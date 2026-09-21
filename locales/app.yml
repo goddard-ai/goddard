@@ -732,6 +732,10 @@ experiments.status_markers_title:
   en: Turn status markers
 experiments.status_markers_description:
   en: When an assistant turn ends, the evaluation model scores it against a fixed marker set — complete, awaiting input, unverified, partial, blocked, failed, drifted — and markers that clear their threshold appear as chips under the response.
+experiments.action_predictions_title:
+  en: Action predictions
+experiments.action_predictions_description:
+  en: When an assistant turn ends, the evaluation model predicts your next move from a fixed set — follow-up prompts, Git actions, session management — and a local journal of consequential actions resolves each prediction. Nothing is suggested yet; verdicts are logged to ~/.goddard/action-predictions.jsonl to measure accuracy first.
 experiments.sidebar_dock_title:
   en: Sidebar dock
 experiments.sidebar_dock_description:

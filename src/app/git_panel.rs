@@ -36,6 +36,21 @@ const PANEL_CONTEXT: &str = "GitPanel";
 const PANEL_INPUT_CONTEXT: &str = "GitPanel > TextInput";
 const MODAL_CONTEXT: &str = "GitPanelModal";
 
+/// The journal action a finished panel operation was — the same kinds
+/// `GitActionFinished` reports, as the journal's closed vocabulary.
+fn journal_git_action(pending: &GitPanelPending) -> Option<action_predictions::JournalAction> {
+    use action_predictions::JournalAction as J;
+    match pending {
+        GitPanelPending::Committing => Some(J::GitCommit),
+        GitPanelPending::Pushing => Some(J::GitPush),
+        GitPanelPending::PushingBase | GitPanelPending::SyncingBase => Some(J::GitSyncBase),
+        GitPanelPending::Syncing(_) => Some(J::GitSync),
+        GitPanelPending::Landing => Some(J::GitLand),
+        GitPanelPending::Rebasing => Some(J::GitRebase),
+        GitPanelPending::AbortingSync | GitPanelPending::Generating { .. } => None,
+    }
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new(
@@ -1672,6 +1687,12 @@ impl Waku {
         if let (Some(action), Some(outcome)) = (action, outcome) {
             self.analytics
                 .track(crate::analytics::Event::GitActionFinished { action, outcome });
+        }
+        if result.is_ok()
+            && let Some(action) = journal_git_action(&op.pending)
+        {
+            let session = self.journal_session_for_workspace(&op.workspace);
+            self.record_action(session, action);
         }
         match result {
             Ok(WorkspaceResult::CommitMessage { message }) => {

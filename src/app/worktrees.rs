@@ -109,6 +109,10 @@ impl Waku {
             return;
         };
         self.worktree_creation_pending = true;
+        self.record_action(
+            Some(session_id),
+            action_predictions::JournalAction::WorktreeNew,
+        );
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
         cx.notify();
@@ -261,6 +265,10 @@ impl Waku {
             return;
         };
         self.worktree_move_pending.insert(session_id);
+        self.record_action(
+            Some(session_id),
+            action_predictions::JournalAction::WorktreeNew,
+        );
         cx.notify();
         cx.spawn(async move |waku, cx| {
             let result = cx

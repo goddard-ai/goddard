@@ -2319,6 +2319,22 @@ pub struct Waku {
     status_marker_in_flight: HashSet<Uuid>,
     status_marker_tx: Sender<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     status_marker_events: Receiver<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
+    /// The action journal's in-memory tail — the `recentActions` prior each
+    /// prediction's state carries. The file is the durable record.
+    action_journal: VecDeque<action_predictions::JournalRecord>,
+    /// Answered predictions awaiting the journaled action that resolves
+    /// them — a hit when their action lands, a miss when the session's next
+    /// prompt ends the window.
+    pending_action_predictions: Vec<action_predictions::PendingActionPrediction>,
+    /// Turns that settled while their session was off screen, queued as
+    /// (turn, finish-summary) pairs per session until it is next opened.
+    pending_action_prediction_turns: HashMap<Uuid, Vec<(Uuid, Option<String>)>>,
+    /// Turns with a prediction in flight, so a queued drain cannot
+    /// double-request one whose answer is still outstanding.
+    action_prediction_in_flight: HashSet<Uuid>,
+    action_prediction_tx: Sender<(Uuid, Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
+    action_prediction_events:
+        Receiver<(Uuid, Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -3192,6 +3208,7 @@ pub struct Waku {
     fps_value: u32,
 }
 
+mod action_predictions;
 mod activity_diff;
 mod agy;
 mod annotations;
@@ -4474,6 +4491,7 @@ impl Waku {
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
+        let (action_prediction_tx, action_prediction_events) = unbounded();
         #[cfg(target_os = "macos")]
         if state.computer_use_experiment_enabled {
             let computer_permission_tx = computer_permission_tx.clone();
@@ -5532,6 +5550,12 @@ impl Waku {
                 status_marker_in_flight: HashSet::new(),
                 status_marker_tx,
                 status_marker_events,
+                action_journal: action_predictions::load_action_journal(),
+                pending_action_predictions: Vec::new(),
+                pending_action_prediction_turns: HashMap::new(),
+                action_prediction_in_flight: HashSet::new(),
+                action_prediction_tx,
+                action_prediction_events,
                 runtimes: HashMap::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),

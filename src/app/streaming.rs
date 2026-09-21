@@ -877,6 +877,12 @@ impl Waku {
                         summary.clone(),
                         cx,
                     );
+                    self.note_turn_finished_for_action_predictions(
+                        session_id,
+                        finished_turn_id,
+                        summary.clone(),
+                        cx,
+                    );
                 }
                 if allow_queue_drain && success {
                     // Start the next queued follow-up once the runtime has

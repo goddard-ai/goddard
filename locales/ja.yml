@@ -1899,6 +1899,8 @@ drafts.view_tooltip: 下書きを表示
 errors.provider_terminal_sessions_local_only: "%{provider} のセッションにはローカルデーモンが必要です — このワークスペースはリモートホストにあります"
 errors.remote_connect: "%{name} に接続できませんでした：%{error}"
 errors.store_pasted_text: "ペーストしたテキストを添付できませんでした：%{error}"
+experiments.action_predictions_description: アシスタントのターンが終わると、評価モデルが固定の候補セット（フォローアッププロンプト、Git 操作、セッション管理）から次の行動を予測し、ローカルの行動ジャーナルが各予測を解決します。まだ候補は表示されません — まず正確度を測るため、判定結果は ~/.goddard/action-predictions.jsonl に記録されます。
+experiments.action_predictions_title: 行動予測
 experiments.automations_description: プロンプトをタイマーで実行するオートメーションページです — 毎時、毎日、平日、毎週、cron。それぞれを独立したタスクまたは既存タスクで実行し、実行履歴と手動の単発実行に対応します。
 experiments.automations_title: オートメーション
 experiments.big_picture_description: ⌘0 で全ウインドウのセッションカードグリッドを表示します。ライブトランスクリプトとカードごとの入力欄を備え、⌘1–9 で宛先を指定できます。

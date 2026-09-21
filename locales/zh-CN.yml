@@ -1849,6 +1849,8 @@ drafts.view_tooltip: 查看草稿
 errors.provider_terminal_sessions_local_only: "%{provider} 会话需要本地守护进程 — 此工作区位于远程主机"
 errors.remote_connect: "无法连接到 %{name}：%{error}"
 errors.store_pasted_text: "无法附加粘贴的文本：%{error}"
+experiments.action_predictions_description: 助手轮次结束后，评估模型会从固定候选集（后续提示词、Git 操作、会话管理）中预测你的下一步，本地的行为日志会逐条核销每个预测。暂不会显示建议 — 判定结果先记录到 ~/.goddard/action-predictions.jsonl 以衡量准确度。
+experiments.action_predictions_title: 行为预测
 experiments.automations_description: 新增“自动化”页面，可按计划定时运行提示词 — 每小时、每天、工作日、每周或 cron — 每次运行可作为独立任务或进入现有任务，并带有运行历史和单次手动运行。
 experiments.automations_title: 自动化
 experiments.big_picture_description: 按 ⌘0 打开全窗口的会话卡片网格，带实时转录、每张卡片的输入框，以及 ⌘1–9 选定。

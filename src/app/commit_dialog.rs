@@ -523,6 +523,20 @@ impl Waku {
                             "failed"
                         },
                     });
+                if result.is_ok() {
+                    let session = waku.journal_session_for_workspace(&workspace);
+                    let actions: &[action_predictions::JournalAction] = match action {
+                        CommitAction::Commit => &[action_predictions::JournalAction::GitCommit],
+                        CommitAction::CommitAndPush => &[
+                            action_predictions::JournalAction::GitCommit,
+                            action_predictions::JournalAction::GitPush,
+                        ],
+                        CommitAction::Push => &[action_predictions::JournalAction::GitPush],
+                    };
+                    for action in actions {
+                        waku.record_action(session, *action);
+                    }
+                }
                 if waku
                     .selected_workspace_path()
                     .is_some_and(|path| path == workspace)

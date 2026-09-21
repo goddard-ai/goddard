@@ -441,6 +441,7 @@ impl Waku {
         // Turns that settled off screen get their marker evals now that the
         // session is on it.
         self.drain_pending_status_marker_turns(session_id, cx);
+        self.drain_pending_action_prediction_turns(session_id, cx);
         // Session selection and terminal selection are mutually exclusive —
         // the transcript takes the main area back from the terminal.
         self.selected_terminal = None;
@@ -867,6 +868,7 @@ impl Waku {
         self.daemons
             .claim_session(id, self.daemons.project_owner(project_id));
         self.track_task_created(&session, "interactive");
+        self.record_action(Some(id), action_predictions::JournalAction::SessionNew);
         self.state.push_session(session);
         self.select_session(id, cx);
     }
@@ -963,6 +965,7 @@ impl Waku {
         self.daemons
             .claim_session(id, self.daemons.project_owner(parent.project_id));
         self.track_task_created(&session, "side_chat");
+        self.record_action(Some(id), action_predictions::JournalAction::SessionNew);
         self.state.push_session(session);
         self.save();
         cx.notify();
@@ -1026,6 +1029,10 @@ impl Waku {
         self.daemons
             .claim_session(session_id, self.daemons.project_owner(project_id));
         self.track_task_created(&session, "interactive");
+        self.record_action(
+            Some(session_id),
+            action_predictions::JournalAction::SessionNew,
+        );
         self.state.push_session(session);
         self.save();
         cx.notify();
@@ -1348,6 +1355,11 @@ impl Waku {
         self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         self.state.sessions.remove(index);
+        // A removed session can no longer journal an action — its pending
+        // predictions are censored, not kept waiting.
+        self.pending_action_predictions
+            .retain(|prediction| prediction.session_id != session_id);
+        self.pending_action_prediction_turns.remove(&session_id);
         // A departing side chat's tab lives in its parent's strip — the
         // active one, or whichever session parked it. It runs after the row
         // is gone so the close path's own session removal finds nothing.
@@ -1707,6 +1719,10 @@ impl Waku {
             // clobber the flag.
             session.updated_at = now;
         }
+        self.record_action(
+            Some(session_id),
+            action_predictions::JournalAction::SessionArchive,
+        );
         // A cached transcript query predates this arrival in the archive.
         self.archived_message_searches.clear();
         self.queue_archived_workspace_cleanup(session_id, cx);
@@ -1769,6 +1785,10 @@ impl Waku {
             session.archived_at = None;
             session.updated_at = now;
         }
+        self.record_action(
+            Some(session_id),
+            action_predictions::JournalAction::SessionUnarchive,
+        );
         // A cached transcript query still counts this departed session.
         self.archived_message_searches.clear();
         // An unarchived session keeps its worktree: a queued cleanup must
@@ -3590,6 +3610,10 @@ impl Waku {
             }
             self.save();
             cx.notify();
+            self.record_action(
+                Some(session_id),
+                action_predictions::JournalAction::ModelSwitch,
+            );
         }
     }
 

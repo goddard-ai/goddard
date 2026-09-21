@@ -4724,6 +4724,15 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
+                id: "action-predictions-experiment-toggle",
+                title_key: "experiments.action_predictions_title",
+                description_key: "experiments.action_predictions_description",
+                enabled: self.state.action_predictions_enabled,
+                set: Self::set_action_predictions_enabled,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
                 id: "computer-use-experiment-toggle",
                 title_key: "experiments.computer_use_title",
                 description_key: "experiments.computer_use_description",
@@ -5248,6 +5257,15 @@ impl Waku {
             self.clear_status_markers();
         }
         self.state.status_markers_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_action_predictions_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            self.clear_action_predictions();
+        }
+        self.state.action_predictions_enabled = enabled;
         self.save();
         cx.notify();
     }

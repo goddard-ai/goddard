@@ -321,6 +321,19 @@ impl Waku {
                     // checkout, so drop the cached snapshot; the
                     // next read refetches.
                     this.refresh_selected_branch_snapshot(cx);
+                    // Hand-typed commands journal here; custom-command
+                    // terminals already journaled at launch.
+                    if !this
+                        .right_panel_terminal_commands
+                        .contains_key(&terminal_id)
+                    {
+                        let session = this
+                            .terminal_records
+                            .get(&terminal_id)
+                            .and_then(|record| record.session)
+                            .or(this.state.selected_session);
+                        this.record_action(session, action_predictions::JournalAction::TerminalRun);
+                    }
                     this.custom_command_finished(terminal_id, *code, cx);
                     // A clean exit off-screen earns the row an unread dot;
                     // the terminal the user is watching needs none.

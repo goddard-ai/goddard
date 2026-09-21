@@ -3340,11 +3340,27 @@ impl Waku {
     /// behavior; a remote daemon has no PTY at all, so the panel must carry
     /// whatever the surface shows there too.
     pub(super) fn run_custom_command(&mut self, command: CustomCommand, cx: &mut Context<Self>) {
+        self.run_custom_command_journaled(
+            command,
+            action_predictions::JournalAction::TerminalRun,
+            cx,
+        );
+    }
+
+    /// `run_custom_command` with the journal entry the caller's action
+    /// actually was — the sync strip's Git move is not a terminal run.
+    pub(super) fn run_custom_command_journaled(
+        &mut self,
+        command: CustomCommand,
+        journal: action_predictions::JournalAction,
+        cx: &mut Context<Self>,
+    ) {
         if self.selected_workspace_path().is_none() {
             self.show_toast(tr!("commands.no_workspace"));
             cx.notify();
             return;
         }
+        self.record_action(self.state.selected_session, journal);
         let surface = RightPanelSurface::new_terminal();
         let terminal_id = surface.terminal_id();
         if let Some(terminal_id) = terminal_id {

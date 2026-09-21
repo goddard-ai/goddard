@@ -859,6 +859,11 @@ pub struct AppSettings {
     /// markers that clear their threshold render as chips on the response
     /// footer. Defaults on in debug builds.
     pub status_markers_enabled: bool,
+    /// Experimental: settled turns get a shadow next-action prediction from
+    /// the evaluation model, journaled user actions resolve it, and every
+    /// verdict is logged for calibration — nothing renders. Defaults on in
+    /// debug builds.
+    pub action_predictions_enabled: bool,
     /// Experimental: the Automations page — daemon-scheduled prompts that
     /// run as tasks whether or not the app is open. Defaults on in debug
     /// builds.
@@ -931,6 +936,7 @@ impl Default for AppSettings {
             friends_enabled: default_experiment_enabled(),
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
+            action_predictions_enabled: default_experiment_enabled(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
             guided_reading_enabled: default_experiment_enabled(),
@@ -1318,6 +1324,8 @@ pub struct PersistedState {
     #[serde(default = "default_experiment_enabled")]
     pub status_markers_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
+    pub action_predictions_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
     pub automations_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub sidebar_dock_enabled: bool,
@@ -1543,6 +1551,7 @@ impl PersistedState {
             friends_enabled: default_experiment_enabled(),
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
+            action_predictions_enabled: default_experiment_enabled(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
             guided_reading_enabled: default_experiment_enabled(),
@@ -1877,6 +1886,7 @@ impl PersistedState {
             friends_enabled: self.friends_enabled,
             model_router_enabled: self.model_router_enabled,
             status_markers_enabled: self.status_markers_enabled,
+            action_predictions_enabled: self.action_predictions_enabled,
             automations_enabled: self.automations_enabled,
             sidebar_dock_enabled: self.sidebar_dock_enabled,
             guided_reading_enabled: self.guided_reading_enabled,
@@ -1982,6 +1992,7 @@ impl PersistedState {
         self.friends_enabled = settings.friends_enabled;
         self.model_router_enabled = settings.model_router_enabled;
         self.status_markers_enabled = settings.status_markers_enabled;
+        self.action_predictions_enabled = settings.action_predictions_enabled;
         self.automations_enabled = settings.automations_enabled;
         self.sidebar_dock_enabled = settings.sidebar_dock_enabled;
         self.guided_reading_enabled = settings.guided_reading_enabled;

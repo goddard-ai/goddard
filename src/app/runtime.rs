@@ -4764,6 +4764,20 @@ impl Waku {
             driver_start,
         };
 
+        // A rewind is two journal moves: the workspace restore, then the
+        // resubmitted prompt — in that order, so a pending "revert"
+        // prediction resolves before the send closes the window.
+        self.record_action(
+            Some(session_id),
+            action_predictions::JournalAction::GitRevert,
+        );
+        self.record_action(
+            Some(session_id),
+            action_predictions::JournalAction::PromptSend {
+                canned: action_predictions::canned_prompt_id(&submission.prompt),
+            },
+        );
+
         // Optimistically leave edit mode and show the replacement bubble at
         // accept time. The main composer switches to its non-cancellable
         // spinner while every Git, process, native transcript, and provider
@@ -5475,21 +5489,32 @@ impl Waku {
         if self.response_fork_preparations.contains_key(&session.id) {
             return;
         }
-        if session.status == SessionStatus::Background {
+        let session_id = session.id;
+        let is_background = session.status == SessionStatus::Background;
+        let is_busy = session.is_busy();
+        if !submission.hidden {
+            self.record_action(
+                Some(session_id),
+                action_predictions::JournalAction::PromptSend {
+                    canned: action_predictions::canned_prompt_id(&submission.prompt),
+                },
+            );
+        }
+        if is_background {
             // The turn is parked on detached work and the provider is idle,
             // so the message goes straight in as a steer: queued, it would
             // wait for a settle that only the message itself could hasten.
             self.steer_composer_submission(submission, cx);
             return;
         }
-        if session.is_busy() || self.provider_switch_in_flight.contains(&session.id) {
+        if is_busy || self.provider_switch_in_flight.contains(&session_id) {
             // While the agent is working — or a provider switch is still
             // compacting — Enter queues a follow-up instead of refusing the
             // message. The queue drains once the turn settles.
-            self.enqueue_follow_up_submission(session.id, submission, cx);
+            self.enqueue_follow_up_submission(session_id, submission, cx);
             return;
         }
-        self.submit_submission_for_session(session.id, submission, cx);
+        self.submit_submission_for_session(session_id, submission, cx);
     }
 
     /// `submit_composer_submission` for an explicit session, used by Big
@@ -5514,6 +5539,14 @@ impl Waku {
         if self.response_fork_preparations.contains_key(&session.id) {
             self.restore_composer_submission(submission, cx);
             return;
+        }
+        if !submission.hidden {
+            self.record_action(
+                Some(session_id),
+                action_predictions::JournalAction::PromptSend {
+                    canned: action_predictions::canned_prompt_id(&submission.prompt),
+                },
+            );
         }
         if session.status == SessionStatus::Background {
             self.steer_session_submission(session.id, submission, cx);
@@ -6567,6 +6600,7 @@ impl Waku {
             | self.drain_review_events(cx)
             | self.drain_friend_session_closed_events(cx)
             | self.drain_status_marker_events()
+            | self.drain_action_prediction_events()
         {
             cx.notify();
         }

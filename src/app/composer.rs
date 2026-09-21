@@ -5617,7 +5617,13 @@ impl Waku {
         command.name = Some(name);
         command.icon = icon;
         command.close_on_success = true;
-        self.run_custom_command(command, cx);
+        // The strip is a Git action wearing a terminal run — journal the
+        // semantic move, not the mechanism.
+        self.run_custom_command_journaled(
+            command,
+            action_predictions::JournalAction::GitSyncBase,
+            cx,
+        );
     }
 
     pub(super) fn render_workspace_footer(&mut self, cx: &mut Context<Self>) -> Div {

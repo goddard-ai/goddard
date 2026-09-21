@@ -325,7 +325,11 @@ fn compress_tool_sequence(activities: &[&ActivityItem]) -> Vec<String> {
 /// Per-field caps keep the whole state inside ~30k chars — far below what
 /// Jev's input pricing makes worth economizing, so the trims only guard
 /// latency and judgment focus.
-fn turn_eval_state(session: &AgentSession, turn_id: Uuid, summary: Option<&str>) -> Value {
+pub(super) fn turn_eval_state(
+    session: &AgentSession,
+    turn_id: Uuid,
+    summary: Option<&str>,
+) -> Value {
     let prompt_index = session
         .messages
         .iter()
