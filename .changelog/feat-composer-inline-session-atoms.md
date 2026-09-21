@@ -1,0 +1,1 @@
+- Dragging a task into the composer now inserts an inline `session:` mention at the caret instead of a chip above the input, so the reference holds its place in the prompt — and deletes atomically with Backspace.

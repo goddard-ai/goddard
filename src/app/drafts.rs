@@ -200,16 +200,18 @@ impl Waku {
                 .unwrap_or_default()
         };
         crate::persistence::ComposerDraft {
-            // Collapsed paste blocks have no draft slot of their own — the
-            // shared schema is just text — so they splice in here and come
-            // back as ordinary inline text on restore.
-            text: super::composer::splice_pasted_blocks(
+            // Inline atoms have no draft slot of their own — the shared
+            // schema is just text — so paste blocks splice in verbatim and
+            // session atoms as their token; both come back as ordinary
+            // inline text on restore.
+            text: super::composer::splice_inline_atoms(
                 self.composer.read(cx).content(cx),
                 &self
                     .composer_pasted_blocks
                     .iter()
                     .map(|block| block.text.clone())
                     .collect::<Vec<_>>(),
+                &self.composer_session_atoms,
             ),
             attachments: self
                 .composer_attachments
@@ -410,9 +412,11 @@ impl Waku {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
-        // The previous target's blocks already folded into its draft text;
-        // a restored draft carries them inline, not as cards.
+        // The previous target's atoms already folded into its draft text;
+        // a restored draft carries them inline, not as atoms.
         self.composer_pasted_blocks.clear();
+        self.composer_session_atoms.clear();
+        self.sync_inline_atom_labels(cx);
         if key == self.selected_composer_draft_key() {
             self.restore_draft_annotations(draft.annotations);
         }

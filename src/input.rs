@@ -592,6 +592,16 @@ pub struct ContentSplice {
 /// text on submit. Deleting it deletes the block.
 pub const FOLDED_PASTE_MARKER: char = '\u{FFFC}';
 
+/// The sentinel an inline atom leaves in the field — the interlinear
+/// annotation anchor. Unlike [`FOLDED_PASTE_MARKER`] it never conceals: the
+/// owner pushes one label per marker through
+/// [`TextInput::set_inline_atom_labels`] and the painted text substitutes
+/// the marker for it, styled as a mention. Content indices still hold the
+/// raw three bytes, so the atom deletes atomically — one backspace takes the
+/// whole label — and every layout query translates through
+/// [`TextInput::display_index`]/[`TextInput::content_index`].
+pub const INLINE_ATOM_MARKER: char = '\u{FFF9}';
+
 /// Respect the representation priority chosen by the source application.
 /// Finder puts paths first (and a text fallback second), while screenshots put
 /// an image first. Text-first clipboard content remains ordinary text paste.
@@ -732,6 +742,10 @@ pub struct TextInput {
     /// pasted block behind each marker and draws its chip over the glyph's
     /// line, so the marker itself must never show the notdef box.
     folded_paste: bool,
+    /// One label per [`INLINE_ATOM_MARKER`] in content order — what each
+    /// marker substitutes to in the painted text. The owner keeps it in step
+    /// with its atom list; a marker beyond the list paints as nothing.
+    inline_atom_labels: Vec<SharedString>,
     /// Escape clears the field when it has content; an empty field lets the
     /// keystroke fall through to the surface's own escape.
     clear_on_escape: bool,
@@ -849,6 +863,7 @@ impl TextInput {
             accepts_media_paste: false,
             accepts_collapsed_paste: false,
             folded_paste: false,
+            inline_atom_labels: Vec::new(),
             clear_on_escape: false,
             select_all_on_focus_click: false,
             focus_click_select_all: false,
@@ -1100,6 +1115,71 @@ impl TextInput {
         self.folded_paste = folded;
     }
 
+    /// Push the owner's inline-atom labels — one per [`INLINE_ATOM_MARKER`]
+    /// in content order. Each marker paints as its label in the text flow,
+    /// styled as a mention; a marker past the end of the list paints as
+    /// nothing. Sentinel characters and breaks inside a label are stripped
+    /// so a label can never nest or corrupt another atom.
+    pub fn set_inline_atom_labels(&mut self, labels: Vec<SharedString>, cx: &mut Context<Self>) {
+        self.inline_atom_labels = labels
+            .into_iter()
+            .map(|label| {
+                label
+                    .replace([FOLDED_PASTE_MARKER, INLINE_ATOM_MARKER, '\n', '\r'], " ")
+                    .into()
+            })
+            .collect();
+        cx.notify();
+    }
+
+    /// Each [`INLINE_ATOM_MARKER`]'s content position paired with its label
+    /// (empty when the owner has no atom for it), in content order.
+    fn inline_atoms(&self) -> impl Iterator<Item = (usize, &str)> {
+        self.content
+            .match_indices(INLINE_ATOM_MARKER)
+            .enumerate()
+            .map(|(index, (position, _))| {
+                (
+                    position,
+                    self.inline_atom_labels
+                        .get(index)
+                        .map_or("", |label| label.as_str()),
+                )
+            })
+    }
+
+    /// The painted string's byte length — `content`'s plus every inline
+    /// atom's substitution delta. Layout staleness guards compare against
+    /// this, not `content.len()`.
+    fn display_len(&self) -> usize {
+        self.display_index(self.content.len())
+    }
+
+    /// The painted text with every [`INLINE_ATOM_MARKER`] swapped for its
+    /// label, and each label's range in display coordinates — the spans the
+    /// mention wash paints over.
+    fn display_text_and_atom_ranges(&self) -> (SharedString, Vec<Range<usize>>) {
+        if !self.content.contains(INLINE_ATOM_MARKER) {
+            return (self.content.clone(), Vec::new());
+        }
+        let marker_len = INLINE_ATOM_MARKER.len_utf8();
+        let mut display = String::with_capacity(self.content.len());
+        let mut ranges = Vec::new();
+        let mut rest = self.content.as_str();
+        let mut labels = self.inline_atom_labels.iter();
+        while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
+            display.push_str(&rest[..index]);
+            let start = display.len();
+            if let Some(label) = labels.next() {
+                display.push_str(label);
+            }
+            ranges.push(start..display.len());
+            rest = &rest[index + marker_len..];
+        }
+        display.push_str(rest);
+        (display.into(), ranges)
+    }
+
     /// Make Escape clear the field first, the filter-field convention: only
     /// a second press on the emptied field reaches the surface's own escape
     /// (dismissing the popover or palette around it).
@@ -1288,30 +1368,62 @@ impl TextInput {
     }
 
     /// The painted string's byte index for a content byte index. Masked
-    /// fields render one [`MASK_BULLET`] per char, so every layout query
-    /// translates; unmasked fields pass through.
+    /// fields render one [`MASK_BULLET`] per char and inline atoms paint
+    /// their label where the marker sits, so every layout query translates;
+    /// plain fields pass through.
     fn display_index(&self, content_index: usize) -> usize {
-        if !self.masked {
-            return content_index;
+        let content_index = content_index.min(self.content.len());
+        if self.masked {
+            return self.content[..content_index].chars().count() * MASK_BULLET.len();
         }
-        self.content[..content_index.min(self.content.len())]
-            .chars()
-            .count()
-            * MASK_BULLET.len()
+        let marker_len = INLINE_ATOM_MARKER.len_utf8();
+        let mut display = content_index;
+        for (position, label) in self.inline_atoms() {
+            if position >= content_index {
+                break;
+            }
+            if position + marker_len <= content_index {
+                display += label.len().saturating_sub(marker_len);
+            } else {
+                // Inside the marker's bytes: snap to the label's leading
+                // edge rather than mapping into its middle.
+                display -= content_index - position;
+            }
+        }
+        display
     }
 
     /// The content byte index for a painted byte index — the inverse of
-    /// [`Self::display_index`].
+    /// [`Self::display_index`]. A painted index inside an atom's label snaps
+    /// to the marker's nearer edge, so a click never lands inside an atom.
     fn content_index(&self, display_index: usize) -> usize {
-        if !self.masked {
-            return display_index;
+        if self.masked {
+            let chars = display_index / MASK_BULLET.len();
+            return self
+                .content
+                .char_indices()
+                .nth(chars)
+                .map(|(index, _)| index)
+                .unwrap_or(self.content.len());
         }
-        let chars = display_index / MASK_BULLET.len();
-        self.content
-            .char_indices()
-            .nth(chars)
-            .map(|(index, _)| index)
-            .unwrap_or(self.content.len())
+        let marker_len = INLINE_ATOM_MARKER.len_utf8();
+        let mut delta = 0usize;
+        for (position, label) in self.inline_atoms() {
+            let label_start = position + delta;
+            let label_end = label_start + label.len();
+            if display_index < label_start {
+                break;
+            }
+            if display_index < label_end {
+                return if display_index - label_start < label.len() / 2 {
+                    position
+                } else {
+                    position + marker_len
+                };
+            }
+            delta += label.len().saturating_sub(marker_len);
+        }
+        (display_index - delta).min(self.content.len())
     }
 
     /// Where `offset` sits in the window as of the last paint, with the line
@@ -1530,7 +1642,7 @@ impl TextInput {
         let Some(layout) = self
             .last_layout
             .as_ref()
-            .filter(|layout| layout.len() == self.content.len())
+            .filter(|layout| layout.len() == self.display_len())
         else {
             // The field normally has a current layout whenever it can receive
             // a key. If an edit and this action race the next paint, let an
@@ -1681,7 +1793,7 @@ impl TextInput {
         let layout = self
             .last_layout
             .as_ref()
-            .filter(|layout| layout.len() == self.content.len())?;
+            .filter(|layout| layout.len() == self.display_len())?;
         let row_count = visual_row_count(layout);
         if row_count == 0 {
             return None;
@@ -2240,6 +2352,34 @@ impl TextInput {
         self.history.seal();
     }
 
+    /// `content[range]` with each [`INLINE_ATOM_MARKER`] swapped for its
+    /// label — what a copy of text holding an atom should carry to the
+    /// clipboard.
+    fn export_text(&self, range: &Range<usize>) -> String {
+        let slice = &self.content[range.clone()];
+        if !slice.contains(INLINE_ATOM_MARKER) {
+            return slice.to_owned();
+        }
+        // Labels pair with markers in content order, so the markers ahead of
+        // the slice claim the leading labels first.
+        let offset = self.content[..range.start]
+            .matches(INLINE_ATOM_MARKER)
+            .count();
+        let marker_len = INLINE_ATOM_MARKER.len_utf8();
+        let mut out = String::with_capacity(slice.len());
+        let mut rest = slice;
+        let mut labels = self.inline_atom_labels.iter().skip(offset);
+        while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
+            out.push_str(&rest[..index]);
+            if let Some(label) = labels.next() {
+                out.push_str(label);
+            }
+            rest = &rest[index + marker_len..];
+        }
+        out.push_str(rest);
+        out
+    }
+
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         // A masked field never puts its content on the clipboard.
         if self.masked {
@@ -2254,7 +2394,7 @@ impl TextInput {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(
-            self.content[self.selected_range.clone()].to_string(),
+            self.export_text(&self.selected_range.clone()),
         ));
     }
 
@@ -2262,7 +2402,7 @@ impl TextInput {
         if !self.selected_range.is_empty() {
             if !self.masked {
                 cx.write_to_clipboard(ClipboardItem::new_string(
-                    self.content[self.selected_range.clone()].to_string(),
+                    self.export_text(&self.selected_range.clone()),
                 ));
             }
             // Like paste, a cut never coalesces with surrounding deletions.
@@ -3040,6 +3180,26 @@ impl SearchPaint<'static> {
     }
 }
 
+/// Inline-atom label washes layered into [`input_text_runs`]: the marker's
+/// substituted text paints as a mention — accent text over an accent wash.
+/// Ranges arrive already in display coordinates from
+/// [`TextInput::display_text_and_atom_ranges`].
+struct AtomPaint<'a> {
+    ranges: &'a [Range<usize>],
+    color: Hsla,
+    background: Hsla,
+}
+
+impl AtomPaint<'static> {
+    fn none() -> Self {
+        Self {
+            ranges: &[],
+            color: gpui::transparent_black(),
+            background: gpui::transparent_black(),
+        }
+    }
+}
+
 /// Pinned file-annotation washes layered into [`input_text_runs`], the same
 /// layering the transcript paints: below the selection, so selecting across
 /// an annotation still looks like a selection, and below find matches, which
@@ -3072,6 +3232,7 @@ fn input_text_runs(
     token_color: impl Fn(TokenClass) -> Hsla,
     search: SearchPaint,
     annotations: AnnotationPaint,
+    atoms: AtomPaint,
     concealed: &[Range<usize>],
 ) -> Vec<TextRun> {
     let mut boundaries = vec![0, display_len];
@@ -3088,6 +3249,10 @@ fn input_text_runs(
         boundaries.push(range.end.min(display_len));
     }
     for (range, _) in annotations.ranges {
+        boundaries.push(range.start.min(display_len));
+        boundaries.push(range.end.min(display_len));
+    }
+    for range in atoms.ranges {
         boundaries.push(range.start.min(display_len));
         boundaries.push(range.end.min(display_len));
     }
@@ -3127,8 +3292,14 @@ fn input_text_runs(
             let concealed = concealed
                 .iter()
                 .any(|range| range.start <= start && range.end >= end);
+            let atom = atoms
+                .ranges
+                .iter()
+                .any(|range| range.start <= start && range.end >= end);
             let color = if concealed {
                 gpui::transparent_black()
+            } else if atom {
+                atoms.color
             } else {
                 highlight
                     .get(token_index)
@@ -3142,6 +3313,8 @@ fn input_text_runs(
                 Some(search.active_color)
             } else if selected_range.is_some_and(|range| range.start < end && range.end > start) {
                 Some(selection_color)
+            } else if atom {
+                Some(atoms.background)
             } else if covering_match(start, end) {
                 Some(search.match_color)
             } else {
@@ -3203,6 +3376,16 @@ impl Element for InputElement {
         let style = window.text_style();
         let theme = Theme::current(cx);
         let content_is_empty = content.is_empty();
+        // Inline atoms swap their marker for the owner's label in the painted
+        // text; the ranges come back in display coordinates for the wash.
+        let (substituted, atom_ranges) = if content_is_empty || masked {
+            (SharedString::default(), Vec::new())
+        } else {
+            input.display_text_and_atom_ranges()
+        };
+        let has_atoms = !atom_ranges.is_empty();
+        let translate =
+            |range: &Range<usize>| input.display_index(range.start)..input.display_index(range.end);
         let (display_text, text_color, selected_range, marked_range) = if content_is_empty {
             (input.placeholder.clone(), theme.text_ghost, None, None)
         } else if masked {
@@ -3212,18 +3395,15 @@ impl Element for InputElement {
                 // Selection paints over bullets, so its range translates to
                 // display indices; IME marking stays off — nothing composed
                 // should ever show.
-                Some(
-                    input.display_index(input.selected_range.start)
-                        ..input.display_index(input.selected_range.end),
-                ),
+                Some(translate(&input.selected_range)),
                 None,
             )
         } else {
             (
-                content,
+                substituted,
                 style.color,
-                Some(input.selected_range.clone()),
-                input.marked_range.clone(),
+                Some(translate(&input.selected_range)),
+                input.marked_range.as_ref().map(|range| translate(range)),
             )
         };
         let base_run = TextRun {
@@ -3235,14 +3415,47 @@ impl Element for InputElement {
             strikethrough: None,
         };
         let palette = crate::md::render::Palette::from_theme(&theme);
+        // Content-indexed paints (tokens, matches, annotations) translate to
+        // display indices once atom labels shift them.
+        let translated_highlight;
+        let translated_matches;
+        let translated_annotations;
+        let (highlight, search_matches, annotation_ranges) = if has_atoms {
+            translated_highlight = input
+                .highlight
+                .iter()
+                .map(|(range, class)| (translate(range), *class))
+                .collect::<Vec<_>>();
+            translated_matches = input
+                .search_matches
+                .iter()
+                .map(|range| translate(range))
+                .collect::<Vec<_>>();
+            translated_annotations = input
+                .annotation_ranges
+                .iter()
+                .map(|(range, emphasized)| (translate(range), *emphasized))
+                .collect::<Vec<_>>();
+            (
+                &translated_highlight[..],
+                &translated_matches[..],
+                &translated_annotations[..],
+            )
+        } else {
+            (
+                &input.highlight[..],
+                &input.search_matches[..],
+                &input.annotation_ranges[..],
+            )
+        };
         let search = if content_is_empty || masked {
             SearchPaint::none()
         } else {
             SearchPaint {
-                matches: &input.search_matches,
+                matches: search_matches,
                 active: input
                     .active_search_match
-                    .and_then(|index| input.search_matches.get(index)),
+                    .and_then(|index| search_matches.get(index)),
                 match_color: theme.warning.opacity(0.22),
                 active_color: theme.warning.opacity(0.5),
             }
@@ -3252,10 +3465,19 @@ impl Element for InputElement {
             AnnotationPaint::none()
         } else {
             AnnotationPaint {
-                ranges: &input.annotation_ranges,
+                ranges: annotation_ranges,
                 color: annotation_wash,
                 emphasized_color: annotation_wash.opacity((annotation_wash.a * 1.75).min(1.0)),
             }
+        };
+        let atoms = if has_atoms {
+            AtomPaint {
+                ranges: &atom_ranges,
+                color: theme.accent,
+                background: theme.accent.opacity(0.12),
+            }
+        } else {
+            AtomPaint::none()
         };
         let concealed: Vec<Range<usize>> = if input.folded_paste && !content_is_empty && !masked {
             display_text
@@ -3274,11 +3496,12 @@ impl Element for InputElement {
             if content_is_empty || masked {
                 &[]
             } else {
-                &input.highlight
+                highlight
             },
             |class| palette.token(class),
             search,
             annotations,
+            atoms,
             &concealed,
         );
         let mut text = StyledText::new(display_text).with_runs(runs);
@@ -3781,6 +4004,47 @@ impl ComposerInput {
         marker
     }
 
+    /// Splice an [`INLINE_ATOM_MARKER`] over the current selection, inline:
+    /// the marker flows in the text like a mention rather than forcing its
+    /// own line, padded by a space only where it would otherwise abut a
+    /// word. Returns the marker's byte offset, which the owner records
+    /// beside the atom it stands for.
+    pub fn insert_inline_marker(&mut self, cx: &mut Context<Self>) -> usize {
+        let (range, pad_before, pad_after) = self.input.update(cx, |input, _| {
+            let range = input.selected_range();
+            (
+                range.clone(),
+                input.content()[..range.start]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| !c.is_whitespace()),
+                input.content()[range.end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| !c.is_whitespace()),
+            )
+        });
+        let mut text = String::new();
+        if pad_before {
+            text.push(' ');
+        }
+        let marker = range.start + text.len();
+        text.push(INLINE_ATOM_MARKER);
+        if pad_after {
+            text.push(' ');
+        }
+        self.input
+            .update(cx, |input, cx| input.replace_range(range, &text, cx));
+        marker
+    }
+
+    /// Forwarded [`TextInput::set_inline_atom_labels`] — the owner pushes its
+    /// atoms' labels here whenever the atom list changes.
+    pub fn set_inline_atom_labels(&mut self, labels: Vec<SharedString>, cx: &mut Context<Self>) {
+        self.input
+            .update(cx, |input, cx| input.set_inline_atom_labels(labels, cx));
+    }
+
     /// Where the byte offset paints relative to the composer's top-left —
     /// `(x, y)` with scroll applied — plus the line height, so a sibling
     /// overlay can anchor a chip to a [`FOLDED_PASTE_MARKER`].
@@ -3916,7 +4180,6 @@ mod tests {
         px,
     };
 
-    use super::TokenClass;
     use super::{
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
         DeleteToParagraphEnd, EditHistory, FieldMode, Paste, SearchPaint, TextInput,
@@ -3925,6 +4188,7 @@ mod tests {
         previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
         word_range_at,
     };
+    use super::{AtomPaint, TokenClass};
 
     struct InputHarness {
         input: Entity<TextInput>,
@@ -4015,6 +4279,53 @@ mod tests {
                 input.content_index(input.display_index(input.content.len())),
                 input.content.len()
             );
+        });
+    }
+
+    #[gpui::test]
+    fn inline_atoms_translate_layout_indices(cx: &mut TestAppContext) {
+        use super::INLINE_ATOM_MARKER as A;
+        cx.update(super::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            // "see {A} now" — one atom mid-text.
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx).multi_line();
+                input.set_content(format!("see {A} now"), cx);
+                input.set_inline_atom_labels(vec!["session:Big refactor".into()], cx);
+                input
+            });
+            InputHarness {
+                input,
+                width: px(200.),
+            }
+        });
+        let input = cx.read_entity(&harness, |harness, _| harness.input.clone());
+        cx.run_until_parked();
+        input.read_with(cx, |input, _| {
+            let marker = input.content.find(A).unwrap();
+            let marker_len = A.len_utf8();
+            let label_len = "session:Big refactor".len();
+            // Before the marker: identity. Past it: shifted by the delta.
+            assert_eq!(input.display_index(marker), marker);
+            assert_eq!(input.display_index(marker + marker_len), marker + label_len);
+            assert_eq!(
+                input.display_index(input.content.len()),
+                input.content.len() + label_len - marker_len
+            );
+            // A display index inside the label snaps to the marker's edges.
+            assert_eq!(input.content_index(marker + 1), marker);
+            assert_eq!(
+                input.content_index(marker + label_len - 1),
+                marker + marker_len
+            );
+            assert_eq!(input.content_index(marker + label_len), marker + marker_len);
+            // Round-trip holds for every char boundary outside the marker.
+            for (index, _) in input.content.char_indices() {
+                if index == marker {
+                    continue;
+                }
+                assert_eq!(input.content_index(input.display_index(index)), index);
+            }
         });
     }
 
@@ -5219,6 +5530,7 @@ mod tests {
             },
             SearchPaint::none(),
             AnnotationPaint::none(),
+            AtomPaint::none(),
             &[],
         );
 
@@ -5261,6 +5573,7 @@ mod tests {
             |_| hsla(0.0, 0.0, 1.0, 1.0),
             SearchPaint::none(),
             AnnotationPaint::none(),
+            AtomPaint::none(),
             &[],
         );
 
@@ -5318,6 +5631,7 @@ mod tests {
                 active_color,
             },
             AnnotationPaint::none(),
+            AtomPaint::none(),
             &[],
         );
 

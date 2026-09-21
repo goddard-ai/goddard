@@ -3125,6 +3125,7 @@ impl Waku {
         let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
             || !self.composer_attachments.is_empty()
             || !self.composer_pasted_blocks.is_empty()
+            || !self.composer_session_atoms.is_empty()
             || !self
                 .transcript_selection
                 .annotations

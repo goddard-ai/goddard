@@ -2819,12 +2819,13 @@ impl Waku {
                 continue;
             }
             let draft = crate::persistence::ComposerDraft {
-                text: super::composer::splice_pasted_blocks(
+                text: super::composer::splice_inline_atoms(
                     &submission
                         .human_content
                         .or(submission.display_content)
                         .unwrap_or(submission.prompt),
                     &submission.pasted_blocks,
+                    &submission.session_atoms,
                 ),
                 attachments: submission
                     .attachments
@@ -4604,6 +4605,7 @@ impl Waku {
                 human_content: None,
                 attachments: edit.attachments,
                 pasted_blocks: Vec::new(),
+                session_atoms: Vec::new(),
                 annotations: Vec::new(),
                 hidden: false,
             },

@@ -1,8 +1,8 @@
 use super::composer::{
-    ComposerPastedBlock, ComposerSubmitAction, composer_submit_action, dropped_file_mention,
-    merged_submission, next_picker_highlight, pasted_text_preview, remap_pasted_block_markers,
-    splice_pasted_blocks, supports_reasoning_default_reset, visible_branch_entries,
-    workspace_subject_for,
+    ComposerPastedBlock, ComposerSessionAtom, ComposerSubmitAction, composer_submit_action,
+    dropped_file_mention, merged_submission, next_picker_highlight, pasted_text_preview,
+    remap_pasted_block_markers, splice_inline_atoms, supports_reasoning_default_reset,
+    visible_branch_entries, workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::{next_idle_session, next_non_busy_session, next_unread_completion};
@@ -484,20 +484,41 @@ fn collapsed_paste_blocks_splice_back_at_their_markers() {
     // Each marker splices to its block in marker order, wherever it sits.
     let content = format!("fix this\n{M}\nand\n{M}\nthen");
     assert_eq!(
-        splice_pasted_blocks(&content, &blocks),
+        splice_inline_atoms(&content, &blocks, &[]),
         "fix this\nfirst\nblock\nand\nsecond\nblock\nthen"
     );
     // A marker without a block splices to nothing; a block without a
     // marker folds onto the end, split off by a blank line.
     assert_eq!(
-        splice_pasted_blocks(&format!("fix this\n{M}"), &["  ".to_owned()]),
+        splice_inline_atoms(&format!("fix this\n{M}"), &["  ".to_owned()], &[]),
         "fix this"
     );
     assert_eq!(
-        splice_pasted_blocks("fix this", &blocks),
+        splice_inline_atoms("fix this", &blocks, &[]),
         "fix this\n\nfirst\nblock\n\nsecond\nblock"
     );
-    assert_eq!(splice_pasted_blocks("fix this", &[]), "fix this");
+    assert_eq!(splice_inline_atoms("fix this", &[], &[]), "fix this");
+}
+
+#[test]
+fn inline_atoms_splice_back_at_their_markers() {
+    use crate::input::{FOLDED_PASTE_MARKER as P, INLINE_ATOM_MARKER as A};
+    let atom = |marker| ComposerSessionAtom {
+        session_id: Uuid::nil(),
+        title: "Big refactor".into(),
+        marker,
+    };
+    // Each kind splices its own marker wherever the two interleave.
+    let content = format!("see {A} first, then\n{P}");
+    assert_eq!(
+        splice_inline_atoms(&content, &["pasted\nblock".to_owned()], &[atom(4)],),
+        "see [session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] first, then\npasted\nblock"
+    );
+    // An atom without a marker folds onto the end like an orphan block.
+    assert_eq!(
+        splice_inline_atoms("fix this", &[], &[atom(0)]),
+        "fix this\n\n[session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)]"
+    );
 }
 
 #[test]
