@@ -99,6 +99,8 @@ pub struct MemoryService {
 struct SessionSlice {
     provider: ProviderKind,
     model: Option<String>,
+    reasoning_effort: Option<String>,
+    service_tier: Option<String>,
     /// New rendered transcript segments for this session.
     segments: Vec<String>,
     /// Message count the watermark should advance to after a successful pass.
@@ -270,6 +272,8 @@ impl MemoryService {
                     SessionSlice {
                         provider: session.provider,
                         model: session.model.clone(),
+                        reasoning_effort: session.reasoning_effort.clone(),
+                        service_tier: session.service_tier.clone(),
                         segments,
                         new_position: session.messages.len(),
                     },
@@ -308,6 +312,8 @@ impl MemoryService {
             binary,
             project_path.clone(),
             source.model.clone(),
+            source.reasoning_effort.clone(),
+            source.service_tier.clone(),
             prompt,
         )?;
         let (notes, memory_md) = parse_distill_output(&output)?;
@@ -822,12 +828,18 @@ fn provider_binary(
 /// Run one prompt through a provider driver with no session attached and
 /// collect its text output. `Ask` mode keeps the run read-only — the prompt
 /// tells the model not to touch tools, and any permission request simply
-/// stalls until the deadline drops the driver.
+/// stalls until the deadline drops the driver. The session's model traits
+/// ride along so providers that pack effort/tier into the model id (Devin)
+/// resolve the session's real pick; a model that cannot be resolved at all
+/// falls back to the provider's advertised default rather than sinking the
+/// pass.
 fn headless_prompt(
     provider: ProviderKind,
     binary: PathBuf,
     cwd: PathBuf,
     model: Option<String>,
+    reasoning_effort: Option<String>,
+    service_tier: Option<String>,
     prompt: String,
 ) -> anyhow::Result<String> {
     let (wake, _wakes) = smol::channel::unbounded();
@@ -837,8 +849,8 @@ fn headless_prompt(
         cwd,
         mode: waku_protocol::model::RuntimeMode::Ask,
         model,
-        reasoning_effort: None,
-        service_tier: None,
+        reasoning_effort,
+        service_tier,
         context_window: None,
         agent_preset: None,
         computer_use_enabled: false,
@@ -848,6 +860,7 @@ fn headless_prompt(
         provider_cursor: None,
         eval: None,
         sandbox: None,
+        allow_model_fallback: true,
     };
     let handle = driver::start_local(provider, options, sender)
         .context("could not start the memory distillation driver")?;

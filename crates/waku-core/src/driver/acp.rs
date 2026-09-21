@@ -145,6 +145,7 @@ impl AcpDriver {
             provider_cursor,
             eval,
             sandbox: _,
+            allow_model_fallback,
         } = options;
         let fork_context = match &provider_cursor {
             Some(ProviderResumeCursor::Cursor { fork_context, .. }) => fork_context.clone(),
@@ -205,6 +206,7 @@ impl AcpDriver {
                     reasoning_effort,
                     service_tier,
                     context_window,
+                    allow_model_fallback,
                     resume_session_id,
                     fork_context,
                     grok_title_home,
@@ -491,6 +493,7 @@ async fn run_sdk_connection(
     reasoning_effort: Option<String>,
     service_tier: Option<String>,
     context_window: Option<String>,
+    allow_model_fallback: bool,
     resume_session_id: Option<String>,
     fork_context: Option<String>,
     grok_title_home: Option<std::path::PathBuf>,
@@ -703,6 +706,7 @@ async fn run_sdk_connection(
                 current_effort.as_deref(),
                 current_tier.as_deref(),
                 current_window.as_deref(),
+                allow_model_fallback,
                 &events,
             )
             .await;
@@ -847,6 +851,7 @@ async fn run_sdk_connection(
                                 current_effort.as_deref(),
                                 current_tier.as_deref(),
                                 current_window.as_deref(),
+                                allow_model_fallback,
                                 &events,
                             )
                             .await;
@@ -1450,6 +1455,7 @@ fn resolve_devin_model(
     requested: &str,
     reasoning_effort: Option<&str>,
     service_tier: Option<&str>,
+    allow_model_fallback: bool,
 ) -> Option<String> {
     let Some(option) = option else {
         return (!is_devin_auto_model(requested)).then(|| requested.to_owned());
@@ -1463,7 +1469,9 @@ fn resolve_devin_model(
             return Some((*value).to_owned());
         }
     }
-    if is_devin_auto_model(requested) {
+    // Auto picks — and headless launches that would rather run on the agent's
+    // default than fail the selection — take the advertised current model.
+    if is_devin_auto_model(requested) || allow_model_fallback {
         return session_config_current_value(option)
             .map(str::to_owned)
             .or_else(|| values.first().map(|value| (*value).to_owned()));
@@ -1535,6 +1543,7 @@ async fn apply_model(
     reasoning_effort: Option<&str>,
     service_tier: Option<&str>,
     context_window: Option<&str>,
+    allow_model_fallback: bool,
     events: &DriverEventSender,
 ) {
     let Some(model) = model else {
@@ -1641,7 +1650,13 @@ async fn apply_model(
     if provider == ProviderKind::Devin {
         let options = config_options.unwrap_or_default();
         let option = advertised_model_option(options);
-        if let Some(resolved) = resolve_devin_model(option, model, reasoning_effort, service_tier) {
+        if let Some(resolved) = resolve_devin_model(
+            option,
+            model,
+            reasoning_effort,
+            service_tier,
+            allow_model_fallback,
+        ) {
             if option.and_then(session_config_current_value) == Some(resolved.as_str()) {
                 return;
             }
@@ -1665,7 +1680,7 @@ async fn apply_model(
                 }
             }
         } else {
-            if option.is_some() && !is_devin_auto_model(model) {
+            if option.is_some() && !is_devin_auto_model(model) && !allow_model_fallback {
                 let _ = events.send(DriverEvent::localized_error(localized!(
                     "errors.select_model",
                     error = format!("Devin did not advertise model {model}")
@@ -3038,17 +3053,23 @@ mod tests {
             &["swe-1-6-slow", "swe-1-6"],
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "adaptive", None, None).as_deref(),
+            resolve_devin_model(Some(&option), "adaptive", None, None, false).as_deref(),
             Some("swe-1-6-slow")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-1-6", None, None).as_deref(),
+            resolve_devin_model(Some(&option), "swe-1-6", None, None, false).as_deref(),
             Some("swe-1-6")
         );
-        assert_eq!(resolve_devin_model(Some(&option), "opus", None, None), None);
-        assert_eq!(resolve_devin_model(None, "adaptive", None, None), None);
         assert_eq!(
-            resolve_devin_model(None, "swe-1-6-slow", None, None).as_deref(),
+            resolve_devin_model(Some(&option), "opus", None, None, false),
+            None
+        );
+        assert_eq!(
+            resolve_devin_model(None, "adaptive", None, None, false),
+            None
+        );
+        assert_eq!(
+            resolve_devin_model(None, "swe-1-6-slow", None, None, false).as_deref(),
             Some("swe-1-6-slow")
         );
     }
@@ -3062,19 +3083,48 @@ mod tests {
             &["swe-2-medium", "swe-2-high", "swe-2-high-fast", "swe-2-max"],
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("high"), None).as_deref(),
+            resolve_devin_model(Some(&option), "swe-2", Some("high"), None, false).as_deref(),
             Some("swe-2-high")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("high"), Some("fast")).as_deref(),
+            resolve_devin_model(Some(&option), "swe-2", Some("high"), Some("fast"), false)
+                .as_deref(),
             Some("swe-2-high-fast")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("xhigh"), Some("fast")),
+            resolve_devin_model(Some(&option), "swe-2", Some("xhigh"), Some("fast"), false),
             None
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("medium"), Some("fast")).as_deref(),
+            resolve_devin_model(Some(&option), "swe-2", Some("medium"), Some("fast"), false)
+                .as_deref(),
+            Some("swe-2-medium")
+        );
+    }
+
+    #[test]
+    fn devin_model_fallback_uses_the_advertised_current_model() {
+        let option = select_config_option(
+            "model",
+            SessionConfigOptionCategory::Model,
+            "swe-2-medium",
+            &["swe-2-medium", "swe-2-high", "swe-2-high-fast", "swe-2-max"],
+        );
+        // Memory distillation replays the session's folded base id plus its
+        // stored traits, so the repack still lands on an advertised packed id.
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-2", Some("high"), None, true).as_deref(),
+            Some("swe-2-high")
+        );
+        // When even the repack misses — a stored trait the provider dropped —
+        // the fallback resolves the advertised current model instead of
+        // failing the headless launch outright.
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-2", Some("xhigh"), None, true).as_deref(),
+            Some("swe-2-medium")
+        );
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-9", None, None, true).as_deref(),
             Some("swe-2-medium")
         );
     }
@@ -3644,6 +3694,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3702,6 +3753,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3765,6 +3817,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -3839,6 +3892,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,

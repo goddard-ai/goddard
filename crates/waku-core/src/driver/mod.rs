@@ -268,6 +268,12 @@ pub struct DriverStartOptions {
     /// the driver spawns it through the sandbox JSON-RPC channel instead of a
     /// local `std::process::Command`. Daemon-owned — never crosses the wire.
     pub sandbox: Option<Arc<crate::sandbox::ShuruVm>>,
+    /// When `model` cannot be matched against what the provider advertises,
+    /// run on the provider's current/default model instead of reporting the
+    /// selection as an error. Headless launches (memory distillation) set
+    /// this so a stale stored pick cannot sink the run. Daemon-owned — never
+    /// crosses the wire.
+    pub allow_model_fallback: bool,
 }
 
 /// The subset of `DriverStartOptions` a user can change without starting a new

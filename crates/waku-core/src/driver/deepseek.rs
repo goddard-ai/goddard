@@ -117,6 +117,7 @@ impl DeepSeekDriver {
             provider_cursor,
             eval,
             sandbox: _,
+            allow_model_fallback: _,
         } = options;
         let (requested_session_id, resuming) = match provider_cursor {
             Some(ProviderResumeCursor::DeepSeek { session_id }) if !session_id.is_empty() => {

@@ -433,6 +433,7 @@ impl OpenCode2Driver {
             provider_cursor,
             eval,
             sandbox: _,
+            allow_model_fallback: _,
         } = options;
 
         let resumed = match provider_cursor {
@@ -3500,6 +3501,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -3570,6 +3572,7 @@ mod tests {
                 DriverStartOptions {
                     eval: None,
                     sandbox: None,
+                    allow_model_fallback: false,
                     binary: binary.clone(),
                     cwd: test_directory.clone(),
                     mode: RuntimeMode::FullAccess,

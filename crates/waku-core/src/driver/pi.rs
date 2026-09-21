@@ -225,6 +225,7 @@ impl PiDriver {
             provider_cursor,
             eval: _,
             sandbox: _,
+            allow_model_fallback: _,
         } = options;
         if mode != RuntimeMode::FullAccess {
             return Err(anyhow!(
@@ -1860,6 +1861,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -2161,6 +2163,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,

@@ -184,6 +184,7 @@ impl ClaudeDriver {
             provider_cursor,
             eval: _,
             sandbox,
+            allow_model_fallback: _,
         } = options;
         let (resume_session_id, resume_at) = match provider_cursor {
             Some(ProviderResumeCursor::Claude {
@@ -1935,6 +1936,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -2008,6 +2010,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,

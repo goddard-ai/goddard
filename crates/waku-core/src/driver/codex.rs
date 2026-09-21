@@ -231,6 +231,7 @@ impl CodexDriver {
             provider_cursor,
             eval: _,
             sandbox,
+            allow_model_fallback: _,
         } = options;
         let provider_session_id = match provider_cursor {
             Some(ProviderResumeCursor::Codex { thread_id }) => Some(thread_id),
@@ -2638,6 +2639,7 @@ mod tests {
                 DriverStartOptions {
                     eval: None,
                     sandbox: None,
+                    allow_model_fallback: false,
                     binary: binary.clone(),
                     cwd: directory.clone(),
                     mode: RuntimeMode::Ask,
@@ -2728,6 +2730,7 @@ mod tests {
                 DriverStartOptions {
                     eval: None,
                     sandbox: None,
+                    allow_model_fallback: false,
                     binary: binary.clone(),
                     cwd: cwd.clone(),
                     mode: RuntimeMode::Ask,

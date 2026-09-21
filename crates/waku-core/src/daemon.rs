@@ -1923,6 +1923,7 @@ impl Backend for WakuBackend {
                         .context("daemon received an invalid provider cursor")?,
                     eval: None,
                     sandbox: None,
+                    allow_model_fallback: false,
                 };
                 let handle =
                     self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
@@ -2727,6 +2728,7 @@ impl WakuBackend {
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
             },
             event_sender,
         )?;
@@ -2967,6 +2969,7 @@ impl WakuBackend {
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
             },
             event_sender,
         )?;
@@ -3366,6 +3369,7 @@ impl WakuBackend {
                 provider_cursor: session.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
             };
             (provider, options)
         };

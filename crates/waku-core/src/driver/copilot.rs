@@ -120,6 +120,7 @@ impl CopilotDriver {
             provider_cursor,
             eval,
             sandbox: _,
+            allow_model_fallback: _,
         } = options;
         let resume_session_id = match provider_cursor {
             Some(ProviderResumeCursor::Copilot { session_id }) => Some(session_id),
@@ -934,6 +935,7 @@ mod tests {
             DriverStartOptions {
                 eval: None,
                 sandbox: None,
+                allow_model_fallback: false,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,

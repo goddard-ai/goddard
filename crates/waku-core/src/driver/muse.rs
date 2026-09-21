@@ -152,6 +152,7 @@ impl MuseDriver {
             provider_cursor,
             eval,
             sandbox: _,
+            allow_model_fallback: _,
         } = options;
 
         let (resumed_id, resume_cursor) = match provider_cursor {
@@ -1787,6 +1788,7 @@ mod tests {
         DriverStartOptions {
             eval: None,
             sandbox: None,
+            allow_model_fallback: false,
             binary: PathBuf::new(),
             cwd: cwd.to_path_buf(),
             mode: RuntimeMode::Ask,
