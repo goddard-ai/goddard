@@ -344,6 +344,8 @@ settings.dormant_after_days: "%{count} 天"
 settings.dormant_after_never: 从不
 settings.sync_with_merge: 同步更改时使用合并
 settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
+settings.auto_fetch_remotes: 自动获取远程更新
+settings.auto_fetch_remotes_description: 在后台检查远程，让同步和推送建议反映上游的最新状态，而不是上次手动获取时的状态
 settings.auto_resolve_in_chat: 在聊天中解决同步冲突
 settings.auto_resolve_in_chat_description: 当拉取或合入因冲突而停止时，在检出目录上开启一个新聊天并自动发送解决步骤
 settings.auto_resolve_land_conflicts: 在聊天中解决合入冲突

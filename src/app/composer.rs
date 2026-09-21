@@ -5420,6 +5420,16 @@ impl Waku {
             }
             (planned_base, _) => {
                 let upstream = snapshot.upstream?;
+                // This arm never reaches `base_push_state_for`, whose read
+                // is what kicks the TTL'd upstream refresh — refresh HEAD's
+                // tracking ref on the same cadence so these counts are not
+                // last-fetch stale either. A `remote/branch` name is the
+                // only kind of upstream there is a remote for.
+                if upstream.name.contains('/') {
+                    if let Some(branch) = snapshot.current.clone() {
+                        self.maybe_fetch_upstream(&workspace_path, &branch, cx);
+                    }
+                }
                 (planned_base, upstream.name, upstream.ahead, upstream.behind)
             }
         };

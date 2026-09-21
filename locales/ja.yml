@@ -347,6 +347,8 @@ settings.dormant_after_days: "%{count} 日"
 settings.dormant_after_never: なし
 settings.sync_with_merge: 変更の同期にマージを使用
 settings.sync_with_merge_description: 新規タスク画面からチェックアウトを同期するときに、git pull --rebase の代わりに git マージを使います
+settings.auto_fetch_remotes: リモートを自動フェッチ
+settings.auto_fetch_remotes_description: バックグラウンドでリモートを確認し、同期やプッシュの提案が最後の手動フェッチ時点ではなく現在の上流の状態を反映するようにします
 settings.auto_resolve_in_chat: 同期の競合をチャットで解決
 settings.auto_resolve_in_chat_description: プルまたは取り込みが競合で停止したとき、チェックアウトで新しいチャットを開始し、解決手順を送信済みの状態にします
 settings.auto_resolve_land_conflicts: 取り込みの競合をチャットで解決

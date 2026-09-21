@@ -269,6 +269,9 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::BasePushState { cwd, base } => WorkspaceResult::BasePushState {
             state: crate::git_panel::base_push_state(&cwd, &base)?,
         },
+        WorkspaceOperation::FetchUpstream { cwd, base } => WorkspaceResult::Bool {
+            value: crate::git_panel::fetch_upstream(&cwd, &base)?,
+        },
         WorkspaceOperation::InspectGitPanel { cwd, base } => WorkspaceResult::GitPanel {
             snapshot: crate::git_panel::inspect(&cwd, base.as_deref())?,
         },

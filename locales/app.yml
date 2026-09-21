@@ -1136,6 +1136,10 @@ settings.sync_with_merge:
   en: Merge when syncing changes
 settings.sync_with_merge_description:
   en: Use git merge instead of git pull --rebase when syncing a checkout from the new task area
+settings.auto_fetch_remotes:
+  en: Fetch remotes automatically
+settings.auto_fetch_remotes_description:
+  en: Check the remote in the background so sync and push suggestions reflect upstream as it is now, not as of the last manual fetch
 settings.auto_resolve_in_chat:
   en: Resolve sync conflicts in a chat
 settings.auto_resolve_in_chat_description:

@@ -224,6 +224,10 @@ fn default_render_math() -> bool {
     true
 }
 
+fn default_auto_fetch_remotes() -> bool {
+    true
+}
+
 /// Sidebar transparency rides on macOS Sidebar vibrancy — a real backdrop
 /// blur. It's opt-in everywhere: off by default even where blur exists.
 fn default_sidebar_transparency() -> bool {
@@ -736,6 +740,10 @@ pub struct AppSettings {
     /// instead of `git pull --rebase` when a checkout is synced from the new
     /// task area.
     pub sync_with_merge: bool,
+    /// Fetch a branch's remote-tracking ref in the background so sync
+    /// strips and push affordances describe the remote as it is now, not
+    /// as of the last manual fetch.
+    pub auto_fetch_remotes: bool,
     /// A sync that stops on conflicts skips the Resolve-in-chat button and
     /// starts a fresh chat on the checkout with the resolution prompt
     /// already sent.
@@ -884,6 +892,7 @@ impl Default for AppSettings {
             render_math: true,
             show_response_token_speed: false,
             sync_with_merge: false,
+            auto_fetch_remotes: true,
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
             default_workspace: DefaultWorkspace::default(),
@@ -1189,6 +1198,11 @@ pub struct PersistedState {
     /// task area.
     #[serde(default)]
     pub sync_with_merge: bool,
+    /// Fetch a branch's remote-tracking ref in the background so sync
+    /// strips and push affordances describe the remote as it is now, not
+    /// as of the last manual fetch.
+    #[serde(default = "default_auto_fetch_remotes")]
+    pub auto_fetch_remotes: bool,
     /// A sync that stops on conflicts skips the Resolve-in-chat button and
     /// starts a fresh chat on the checkout with the resolution prompt
     /// already sent.
@@ -1490,6 +1504,7 @@ impl PersistedState {
             render_math: true,
             show_response_token_speed: false,
             sync_with_merge: false,
+            auto_fetch_remotes: true,
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
             default_workspace: DefaultWorkspace::default(),
@@ -1823,6 +1838,7 @@ impl PersistedState {
             render_math: self.render_math,
             show_response_token_speed: self.show_response_token_speed,
             sync_with_merge: self.sync_with_merge,
+            auto_fetch_remotes: self.auto_fetch_remotes,
             auto_resolve_in_chat: self.auto_resolve_in_chat,
             auto_resolve_land_conflicts: self.auto_resolve_land_conflicts,
             default_workspace: self.default_workspace,
@@ -1925,6 +1941,7 @@ impl PersistedState {
         self.render_math = settings.render_math;
         self.show_response_token_speed = settings.show_response_token_speed;
         self.sync_with_merge = settings.sync_with_merge;
+        self.auto_fetch_remotes = settings.auto_fetch_remotes;
         self.auto_resolve_in_chat = settings.auto_resolve_in_chat;
         self.auto_resolve_land_conflicts = settings.auto_resolve_land_conflicts;
         self.default_workspace = settings.default_workspace;

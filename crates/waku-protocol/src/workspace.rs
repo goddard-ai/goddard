@@ -789,6 +789,17 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         base: String,
     },
+    /// Refresh `base`'s remote-tracking ref with a scoped
+    /// `git fetch <remote> <branch>`, so divergence reads describe the
+    /// remote as it is now rather than as of the last manual fetch. Only
+    /// the tracking ref and FETCH_HEAD move — the local base and the
+    /// working tree are untouched. Returns `Bool`: `false` when `base`
+    /// tracks a local branch or nothing at all.
+    FetchUpstream {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        base: String,
+    },
     /// The Git panel's one-pass working-tree read: branch, upstream counts,
     /// and both change lists. `None` outside a work tree. `base` is the
     /// session's recorded base branch — the snapshot's land target falls back

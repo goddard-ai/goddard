@@ -1780,6 +1780,23 @@ impl Waku {
                 search,
             ),
             setting_card(
+                tr!("settings.auto_fetch_remotes"),
+                tr!("settings.auto_fetch_remotes_description"),
+                toggle_switch(
+                    "auto-fetch-remotes-toggle",
+                    self.state.auto_fetch_remotes,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.auto_fetch_remotes;
+                        move |this, _, cx| this.set_auto_fetch_remotes(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
+            setting_card(
                 tr!("settings.auto_resolve_in_chat"),
                 tr!("settings.auto_resolve_in_chat_description"),
                 toggle_switch(
@@ -8231,6 +8248,15 @@ impl Waku {
             return;
         }
         self.state.sync_with_merge = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_auto_fetch_remotes(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.auto_fetch_remotes == enabled {
+            return;
+        }
+        self.state.auto_fetch_remotes = enabled;
         self.save();
         cx.notify();
     }

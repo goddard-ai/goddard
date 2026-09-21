@@ -2095,6 +2095,10 @@ pub struct Waku {
     /// transcript row building reads it from `&self` paths.
     base_push_states:
         RefCell<QueryCache<(PathBuf, String), Result<waku_client::git::BasePushState, String>>>,
+    /// When each (workspace, base) upstream was last auto-fetched — the
+    /// throttle behind `maybe_fetch_upstream`, keyed like
+    /// `base_push_states`. `RefCell` for the same `&self` readers.
+    upstream_fetch_times: RefCell<HashMap<(PathBuf, String), Instant>>,
     /// Stale-while-revalidate value for the selected path, avoiding label
     /// flicker when app activation invalidates the query.
     visible_branch_snapshot: Option<(PathBuf, BranchSnapshot)>,
@@ -5411,6 +5415,7 @@ impl Waku {
                 branch_snapshots: QueryCache::new(MAX_CACHED_WORKSPACES),
                 remote_files: QueryCache::new(4 * MAX_CACHED_WORKSPACES),
                 base_push_states: RefCell::new(QueryCache::new(MAX_CACHED_WORKSPACES)),
+                upstream_fetch_times: RefCell::new(HashMap::new()),
                 visible_branch_snapshot: None,
                 branch_operation_pending: false,
                 commit_dialog: None,

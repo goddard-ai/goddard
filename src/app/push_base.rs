@@ -23,6 +23,11 @@ actions!(
 
 const DIALOG_CONTEXT: &str = "PushBaseDialog";
 
+/// How often one (workspace, base) pair may auto-fetch its upstream —
+/// enough to catch a colleague's merge while the draft sits open, bounded
+/// so a visible strip is not a fetch loop.
+const UPSTREAM_FETCH_INTERVAL: Duration = Duration::from_secs(60);
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", ConfirmPushBaseDialog, Some(DIALOG_CONTEXT)),
@@ -118,6 +123,10 @@ impl Waku {
         base: &str,
         cx: &mut Context<Self>,
     ) -> Option<BasePushState> {
+        // Every reader is a surface that advises sync or push — refresh the
+        // tracking ref on a TTL so the advice describes the remote as it is
+        // now, not as of the last manual fetch.
+        self.maybe_fetch_upstream(workspace, base, cx);
         let key = (workspace.to_path_buf(), base.to_owned());
         // Bind before matching: the scrutinee's RefMut would otherwise live
         // through the arms, and `Missing` re-borrows the cache to abandon.
@@ -172,6 +181,74 @@ impl Waku {
             })
             .map(|workspace| self.landed_push_state(&workspace, base, cx))
             .unwrap_or(LandedPush::Hidden)
+    }
+
+    /// Auto-fetch `base`'s upstream at most once per
+    /// `UPSTREAM_FETCH_INTERVAL`, so divergence counts describe the remote
+    /// as it is now rather than the last manual fetch. The attempt's
+    /// timestamp is marked up front — a failed fetch (offline, auth) just
+    /// keeps the last-known numbers and is not retried every frame.
+    pub(super) fn maybe_fetch_upstream(
+        &self,
+        workspace: &Path,
+        base: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.state.auto_fetch_remotes {
+            return;
+        }
+        {
+            let key = (workspace.to_path_buf(), base.to_owned());
+            let mut times = self.upstream_fetch_times.borrow_mut();
+            if times
+                .get(&key)
+                .is_some_and(|at| at.elapsed() < UPSTREAM_FETCH_INTERVAL)
+            {
+                return;
+            }
+            // Aged-out entries are dropped as each insert runs, keeping the
+            // map sized to what is actually being asked about.
+            times.retain(|_, at| at.elapsed() < UPSTREAM_FETCH_INTERVAL);
+            times.insert(key, Instant::now());
+        }
+        let Some(client) = self.workspace_client_for_path(workspace) else {
+            return;
+        };
+        let fetch_workspace = workspace.to_path_buf();
+        let fetch_base = base.to_owned();
+        let workspace = workspace.to_path_buf();
+        cx.spawn(async move |waku, cx| {
+            let fetched = cx
+                .background_executor()
+                .spawn(async move {
+                    matches!(
+                        client.request(WorkspaceOperation::FetchUpstream {
+                            cwd: fetch_workspace,
+                            base: fetch_base,
+                        }),
+                        Ok(WorkspaceResult::Bool { value: true })
+                    )
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                if !fetched {
+                    return;
+                }
+                // Tracking refs moved — every divergence read derived from
+                // them is stale.
+                waku.branch_snapshots.invalidate(&workspace);
+                waku.invalidate_base_push_state(&workspace);
+                if waku
+                    .git_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.workspace == workspace)
+                {
+                    waku.refresh_git_panel(cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Drop the cached push read for a workspace — land, push, sync, and

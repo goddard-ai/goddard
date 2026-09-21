@@ -261,6 +261,38 @@ pub fn base_push_state(cwd: &Path, base: &str) -> anyhow::Result<BasePushState> 
     })
 }
 
+/// Refresh `base`'s remote-tracking ref: `git fetch <remote> <branch>`,
+/// scoped so only that tracking ref (and FETCH_HEAD) moves — the local base
+/// and the working tree are untouched. `Ok(false)` when `base` tracks a
+/// local branch or nothing at all: there is no remote to ask.
+pub fn fetch_upstream(cwd: &Path, base: &str) -> anyhow::Result<bool> {
+    ensure_repository(cwd)?;
+    if branch_upstream(cwd, base)?.is_none() {
+        return Ok(false);
+    }
+    let remote = git_optional_stdout(cwd, &["config", &format!("branch.{base}.remote")])?
+        .unwrap_or_else(|| "origin".to_owned());
+    // `.` tracks another local branch — nothing remote to fetch.
+    if remote == "." {
+        return Ok(false);
+    }
+    let remote_branch = git_optional_stdout(cwd, &["config", &format!("branch.{base}.merge")])?
+        .and_then(|merge| merge.strip_prefix("refs/heads/").map(str::to_owned))
+        .unwrap_or_else(|| base.to_owned());
+    // BatchMode makes a key that needs a passphrase fail fast rather than
+    // prompt from a background fetch the user did not ask for. A configured
+    // `core.sshCommand` (or an exported GIT_SSH_COMMAND, which outranks the
+    // `-c` flag) wins — that is the user's own setup.
+    let mut args: Vec<String> = Vec::new();
+    if git_optional_stdout(cwd, &["config", "core.sshCommand"])?.is_none() {
+        args.push("-c".to_owned());
+        args.push("core.sshCommand=ssh -oBatchMode=yes".to_owned());
+    }
+    args.extend(["fetch".to_owned(), remote, remote_branch]);
+    git_success(cwd, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    Ok(true)
+}
+
 /// Push `base` to its tracked upstream — the landed notice's follow-up.
 /// When a checkout owns the base the push runs there, so `git push`
 /// resolves the branch's configured upstream (including a remote branch
@@ -1480,6 +1512,33 @@ mod tests {
             base_push_state(&repository, "missing").unwrap().upstream,
             None
         );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn fetch_upstream_refreshes_the_remote_tracking_ref() {
+        let (root, repository, remote) = remote_repository();
+        // Another writer moves the upstream; until a fetch, the divergence
+        // read still reports nothing behind.
+        let _other = remote_writer(&root, &remote);
+        assert_eq!(
+            base_push_state(&repository, "main").unwrap().behind,
+            Some(0)
+        );
+        assert!(fetch_upstream(&repository, "main").unwrap());
+        assert_eq!(
+            base_push_state(&repository, "main").unwrap().behind,
+            Some(1)
+        );
+
+        // A branch tracking nothing — or a local branch — has no remote to
+        // ask, and reports that nothing was fetched.
+        run_git(&repository, &["branch", "loose"]);
+        assert!(!fetch_upstream(&repository, "loose").unwrap());
+        // Point the checked-out branch's upstream at a local branch: the
+        // remote config becomes `.`, and there is still nothing to fetch.
+        run_git(&repository, &["branch", "--set-upstream-to", "loose"]);
+        assert!(!fetch_upstream(&repository, "main").unwrap());
         std::fs::remove_dir_all(root).ok();
     }
 
