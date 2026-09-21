@@ -13,7 +13,15 @@ import { turnAnswerStart, turnFoldLabel } from '@waku/client/transcript-presenta
 import type { MarkdownBlock } from '../md/parse';
 import { TranscriptMarkdownCache } from '../md/transcript-cache';
 
-export type SessionGroupId = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'more';
+export type SessionGroupId =
+  | 'pinned'
+  | 'today'
+  | 'yesterday'
+  | 'week'
+  | 'month'
+  | 'year'
+  | 'more'
+  | 'archived';
 
 export interface SessionListItem {
   session: AgentSession;
@@ -85,12 +93,14 @@ const GAP_GROUP = 12;
 const GAP_BLOCK = 12;
 
 const GROUPS: Array<{ id: SessionGroupId; title: string }> = [
+  { id: 'pinned', title: 'Pinned' },
   { id: 'today', title: 'Today' },
   { id: 'yesterday', title: 'Yesterday' },
   { id: 'week', title: 'This Week' },
   { id: 'month', title: 'This Month' },
   { id: 'year', title: 'This Year' },
   { id: 'more', title: 'More' },
+  { id: 'archived', title: 'Archived' },
 ];
 
 export function displaySessionTitle(session: AgentSession): string {
@@ -118,11 +128,16 @@ export function groupSessions(
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
   const grouped = new Map<SessionGroupId, SessionListItem[]>();
   for (const session of sessions
-    .filter((session) => sessionHasStarted(session) && session.archived_at == null)
+    .filter((session) => sessionHasStarted(session))
     .sort((a, b) => (
     sessionTimestamp(b) - sessionTimestamp(a)
   ))) {
-    const id = sessionDateGroup(sessionTimestamp(session), now);
+    // Desktop's order: pinned first as their own section, archived last.
+    const id = session.archived_at != null
+      ? 'archived'
+      : session.pinned_at != null
+        ? 'pinned'
+        : sessionDateGroup(sessionTimestamp(session), now);
     const items = grouped.get(id) ?? [];
     items.push({
       session,

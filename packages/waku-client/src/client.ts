@@ -133,6 +133,8 @@ export class WakuClient {
   private rejectConnect?: (error: Error) => void;
   private receivedAt = 0;
   private disconnectReason: string | null = null;
+  private daemonVersion: string | null = null;
+  private daemonCommit: string | null = null;
 
   constructor(options: WakuClientOptions) {
     this.address = options.address;
@@ -175,6 +177,16 @@ export class WakuClient {
   /** The close reason of the last established connection that ended remotely, when the peer gave one. */
   get lastDisconnectReason(): string | null {
     return this.disconnectReason;
+  }
+
+  /** Version string the daemon reported in its hello; null until the first handshake. */
+  get version(): string | null {
+    return this.daemonVersion;
+  }
+
+  /** Build commit the daemon reported in its hello, when the build had a checkout to stamp. */
+  get commit(): string | null {
+    return this.daemonCommit;
   }
 
   /** Connects, or reconnects while replaying events after the last seen sequence. */
@@ -257,6 +269,8 @@ export class WakuClient {
               socket.close(1002, "protocol version mismatch");
               return;
             }
+            this.daemonVersion = message.daemonVersion;
+            this.daemonCommit = message.daemonCommit;
             handshakeSettled = true;
             established = true;
             clearTimeout(connectTimer);

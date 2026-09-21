@@ -38,6 +38,25 @@ describe('mobile session presentation', () => {
       { id: 'today', sessions: ['new'] },
       { id: 'yesterday', sessions: ['old'] },
       { id: 'month', sessions: ['earlier'] },
+      { id: 'archived', sessions: ['archived'] },
+    ]);
+  });
+
+  test('pins lead the list ahead of the calendar groups', () => {
+    const now = new Date(2026, 7, 31, 12);
+    const projects: Project[] = [{ id: 'project', name: 'Goddard', path: '/waku', created_at: 1, temporary: false }];
+    const current = session({ id: 'new', last_reply_at: epoch(2026, 7, 31, 11) });
+    const pinned = session({
+      id: 'pinned',
+      pinned_at: epoch(2026, 7, 25, 10),
+      last_reply_at: epoch(2026, 7, 20, 20),
+    });
+    expect(groupSessions(projects, [pinned, current], now).map((group) => ({
+      id: group.id,
+      sessions: group.data.map((item) => item.session.id),
+    }))).toEqual([
+      { id: 'pinned', sessions: ['pinned'] },
+      { id: 'today', sessions: ['new'] },
     ]);
   });
 

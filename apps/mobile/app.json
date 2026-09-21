@@ -74,7 +74,16 @@
           "microphonePermission": false
         }
       ],
-      "./plugins/with-paste-input"
+      "./plugins/with-paste-input",
+      [
+        "expo-quick-actions",
+        {
+          "androidIcons": {
+            "ic_new_task": "./assets/images/icon.png",
+            "ic_recent_task": "./assets/images/icon.png"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

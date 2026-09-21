@@ -457,7 +457,10 @@ export function MobileComposer({
       {userInput && (
         <UserInputPanel
           input={userInput}
+          supportsActions={Boolean(liveRuntime?.supportsUserInputActions)}
           onSubmit={(answers) => runtime.respondUserInput(session.id, userInput.requestId, answers)}
+          onClarify={(content) => runtime.clarifyUserInput(session.id, userInput.requestId, content)}
+          onDismiss={() => runtime.cancelUserInput(session.id, userInput.requestId)}
         />
       )}
       {visibleError && (
@@ -724,10 +727,16 @@ function PermissionPanel({
 
 function UserInputPanel({
   input,
+  supportsActions,
   onSubmit,
+  onClarify,
+  onDismiss,
 }: {
   input: PendingUserInput;
+  supportsActions: boolean;
   onSubmit: (answers: UserInputAnswer[]) => Promise<void>;
+  onClarify: (content: string) => Promise<void>;
+  onDismiss: () => Promise<void>;
 }) {
   const theme = useTheme();
   const [index, setIndex] = useState(0);
@@ -857,6 +866,51 @@ function UserInputPanel({
         />
       </ScrollView>
       {error && <Text style={[styles.panelError, { color: theme.danger }]}>{error}</Text>}
+      {supportsActions && (
+        <View style={styles.questionSecondaryActions}>
+          <Pressable
+            accessibilityHint="Dismisses these questions without answering"
+            accessibilityRole="button"
+            disabled={submitting}
+            onPress={() => {
+              setSubmitting(true);
+              setError(null);
+              void Haptics.selectionAsync();
+              void onDismiss().catch((cause) => {
+                setError(cause instanceof Error ? cause.message : String(cause));
+                setSubmitting(false);
+              });
+            }}
+            style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.55 : 1 }]}>
+            <Text style={[styles.backButtonText, { color: theme.textTertiary }]}>Dismiss</Text>
+          </Pressable>
+          <Pressable
+            accessibilityHint="Sends your note back so the agent can re-ask"
+            accessibilityRole="button"
+            disabled={!custom.trim() || submitting}
+            onPress={() => {
+              setSubmitting(true);
+              setError(null);
+              void Haptics.selectionAsync();
+              void onClarify(custom.trim()).catch((cause) => {
+                setError(cause instanceof Error ? cause.message : String(cause));
+                setSubmitting(false);
+              });
+            }}
+            style={({ pressed }) => [
+              styles.clarifyButton,
+              {
+                borderColor: custom.trim() ? theme.borderStrong : theme.border,
+                opacity: !custom.trim() || submitting || pressed ? 0.55 : 1,
+              },
+            ]}>
+            <Text style={[
+              styles.clarifyButtonText,
+              { color: custom.trim() ? theme.text : theme.textGhost },
+            ]}>Clarify</Text>
+          </Pressable>
+        </View>
+      )}
       <View style={styles.questionActions}>
         {index > 0 ? (
           <Pressable
@@ -1014,6 +1068,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
     paddingVertical: 9,
   },
+  questionSecondaryActions: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  clarifyButton: {
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 30,
+    paddingHorizontal: 10,
+  },
+  clarifyButtonText: { fontSize: 12.5, fontWeight: '600' },
   questionActions: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   backButton: { justifyContent: 'center', minHeight: 36, paddingHorizontal: 6 },
   backButtonText: { fontSize: 14, fontWeight: '600' },

@@ -36,6 +36,7 @@ import {
 } from './daemon-api';
 import { persistentStorageSync } from './composer-preferences-store';
 import { useDaemon } from './daemon-context';
+import { sessionHasStarted } from './session-presentation';
 import {
   applySessionOptions,
   beginTurn,
@@ -58,6 +59,7 @@ import {
 export interface MobileRuntime {
   runtimeId: string;
   supportsSteer: boolean;
+  supportsUserInputActions: boolean;
   starting: boolean;
   running: boolean;
 }
@@ -117,15 +119,21 @@ interface RuntimeContextValue {
     providerPromptOverride?: string,
   ) => Promise<AgentSession>;
   cancel: (sessionId: string) => Promise<void>;
+  compactSession: (sessionId: string) => Promise<void>;
+  rollbackSession: (sessionId: string, turns: number) => Promise<void>;
   respond: (sessionId: string, requestId: string, optionId: string) => Promise<void>;
   respondUserInput: (
     sessionId: string,
     requestId: string,
     answers: UserInputAnswer[],
   ) => Promise<void>;
+  clarifyUserInput: (sessionId: string, requestId: string, content: string) => Promise<void>;
+  cancelUserInput: (sessionId: string, requestId: string) => Promise<void>;
   updateSessionOptions: (sessionId: string, changes: SessionOptionChanges) => Promise<void>;
   sendGoalOperation: (session: AgentSession, operation: GoalOperation) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
+  setSessionArchived: (sessionId: string, archived: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   removeQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
   dismissError: (sessionId: string) => void;
@@ -315,6 +323,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     session: AgentSession,
     runtimeId: string,
     supportsSteer = false,
+    supportsUserInputActions = false,
     starting = true,
   ): RuntimeEntry => {
     const client = daemon.client;
@@ -327,6 +336,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       session,
       runtimeId,
       supportsSteer,
+      supportsUserInputActions,
       starting,
       running: sessionIsRunning(session),
       lastDriverError: null,
@@ -519,7 +529,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const current = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(profileId, session.id),
       ) ?? hydrated;
-      subscribe(current, attached.runtimeId, attached.supportsSteer, false);
+      subscribe(current, attached.runtimeId, attached.supportsSteer, attached.supportsUserInputActions, false);
       return true;
     })().finally(() => {
       if (attachRequests.current.get(session.id) === request) attachRequests.current.delete(session.id);
@@ -614,6 +624,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           throw new Error(`Expected daemon response started, received ${response.type}`);
         }
         runtime.supportsSteer = response.supportsSteer;
+        runtime.supportsUserInputActions = response.supportsUserInputActions;
         runtime.starting = false;
         setRuntimes((values) => ({ ...values, [current.id]: publicRuntime(runtime!) }));
       }
@@ -748,6 +759,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         }, current.id, runtimeId);
         if (response.type !== 'started') throw new Error('The daemon could not start Codex');
         runtime.supportsSteer = response.supportsSteer;
+        runtime.supportsUserInputActions = response.supportsUserInputActions;
         runtime.starting = false;
         setRuntimes((values) => ({ ...values, [current.id]: publicRuntime(runtime!) }));
       } catch (cause) {
@@ -764,6 +776,22 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const runtime = entries.current.get(sessionId);
     if (!runtime) throw new Error('This task has no live agent runtime');
     await client.request({ type: 'cancel' }, sessionId, runtime.runtimeId);
+  }, [daemon.client]);
+
+  const compactSession = useCallback(async (sessionId: string) => {
+    const client = daemon.client;
+    if (!client) throw new Error('Goddard daemon is disconnected');
+    const runtime = entries.current.get(sessionId);
+    if (!runtime) throw new Error('This task has no live agent runtime');
+    await client.request({ type: 'compact' }, sessionId, runtime.runtimeId);
+  }, [daemon.client]);
+
+  const rollbackSession = useCallback(async (sessionId: string, turns: number) => {
+    const client = daemon.client;
+    if (!client) throw new Error('Goddard daemon is disconnected');
+    const runtime = entries.current.get(sessionId);
+    if (!runtime) throw new Error('This task has no live agent runtime');
+    await client.request({ type: 'rollback', turns }, sessionId, runtime.runtimeId);
   }, [daemon.client]);
 
   const markWorking = useCallback((sessionId: string) => {
@@ -798,6 +826,36 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (!client || !runtime) throw new Error('This task has no live agent runtime');
     await client.request(
       { type: 'respondUserInput', requestId, answers },
+      sessionId,
+      runtime.runtimeId,
+    );
+    setUserInputs((values) => ({ ...values, [sessionId]: undefined }));
+    markWorking(sessionId);
+  }, [daemon.client, markWorking]);
+
+  const clarifyUserInput = useCallback(async (
+    sessionId: string,
+    requestId: string,
+    content: string,
+  ) => {
+    const client = daemon.client;
+    const runtime = entries.current.get(sessionId);
+    if (!client || !runtime) throw new Error('This task has no live agent runtime');
+    await client.request(
+      { type: 'clarifyUserInput', requestId, content },
+      sessionId,
+      runtime.runtimeId,
+    );
+    setUserInputs((values) => ({ ...values, [sessionId]: undefined }));
+    markWorking(sessionId);
+  }, [daemon.client, markWorking]);
+
+  const cancelUserInput = useCallback(async (sessionId: string, requestId: string) => {
+    const client = daemon.client;
+    const runtime = entries.current.get(sessionId);
+    if (!client || !runtime) throw new Error('This task has no live agent runtime');
+    await client.request(
+      { type: 'cancelUserInput', requestId },
       sessionId,
       runtime.runtimeId,
     );
@@ -856,6 +914,53 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     cacheSession(next);
     await persistOrdered(next);
   }, [cacheSession, loadFullSession, persistOrdered]);
+
+  /** Pin/unpin — desktop's toggle_session_pin: a plain flag flip plus save,
+   * limited to started, unarchived tasks. */
+  const setSessionPinned = useCallback(async (sessionId: string, pinned: boolean) => {
+    const current = await loadFullSession(sessionId);
+    if (!sessionHasStarted(current) || current.archived_at != null) return;
+    const now = clock.nowSeconds();
+    const next = {
+      ...current,
+      pinned_at: pinned ? now : null,
+      updated_at: now,
+    };
+    cacheSession(next);
+    await persistOrdered(next);
+  }, [cacheSession, loadFullSession, persistOrdered]);
+
+  /** Archive/unarchive — desktop's finish_archive_session minus its
+   * app-local bookkeeping. The daemon cascades the flag to side chats and
+   * purges past the retention window; a busy runtime is closed first so a
+   * mobile archive stops the turn the way desktop's does. */
+  const setSessionArchived = useCallback(async (sessionId: string, archived: boolean) => {
+    const client = daemon.client;
+    const current = await loadFullSession(sessionId);
+    if (!sessionHasStarted(current) || current.side_chat_of != null) return;
+    if ((current.archived_at != null) === archived) return;
+    if (archived) {
+      const runtime = entries.current.get(sessionId);
+      if (runtime && client) {
+        await client
+          .request({ type: 'closeSession' }, sessionId, runtime.runtimeId)
+          .catch(() => {});
+        removeRuntime(sessionId);
+      }
+    }
+    const now = clock.nowSeconds();
+    const next = {
+      ...current,
+      archived_at: archived ? now : null,
+      updated_at: now,
+    };
+    cacheSession(next);
+    await persistOrdered(next);
+    if (archived) {
+      setPermissions((values) => removeKey(values, sessionId));
+      setUserInputs((values) => removeKey(values, sessionId));
+    }
+  }, [cacheSession, daemon.client, loadFullSession, persistOrdered, removeRuntime]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
     const client = daemon.client;
@@ -942,7 +1047,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           const current = queryClient.getQueryData<AgentSession>(
             daemonKeys.session(profileId, sessionId),
           );
-          if (current) subscribe(current, attached.runtimeId, attached.supportsSteer, false);
+          if (current) subscribe(current, attached.runtimeId, attached.supportsSteer, attached.supportsUserInputActions, false);
         }
         void queryClient.invalidateQueries({
           queryKey: daemonKeys.session(profileId, sessionId),
@@ -1006,11 +1111,17 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       steerPrompt,
       createTask,
       cancel,
+      compactSession,
+      rollbackSession,
       respond,
       respondUserInput,
+      clarifyUserInput,
+      cancelUserInput,
       updateSessionOptions,
       sendGoalOperation,
       renameSession,
+      setSessionPinned,
+      setSessionArchived,
       deleteSession,
       removeQueuedMessage,
       dismissError,
@@ -1030,6 +1141,7 @@ function publicRuntime(entry: RuntimeEntry): MobileRuntime {
   return {
     runtimeId: entry.runtimeId,
     supportsSteer: entry.supportsSteer,
+    supportsUserInputActions: entry.supportsUserInputActions,
     starting: entry.starting,
     running: entry.running,
   };

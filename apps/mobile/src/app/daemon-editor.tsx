@@ -1,8 +1,9 @@
 import * as Haptics from "expo-haptics";
+import type { PairingState, WakuClient } from "@waku/client";
 import type { SymbolViewProps } from "expo-symbols";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { navigateBack } from "@/components/screen-header";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -311,6 +312,42 @@ export default function DaemonEditorScreen() {
           </View>
         )}
 
+        {profile && profile.id === daemon.activeProfile?.id && daemon.client && (
+          <>
+            <Text
+              style={[
+                styles.sectionLabel,
+                styles.actionsLabel,
+                { color: colors.secondaryText },
+              ]}
+            >
+              DAEMON
+            </Text>
+            <View
+              style={[styles.formGroup, { backgroundColor: colors.surface }]}
+            >
+              {daemon.client.version && (
+                <View style={styles.formRow}>
+                  <Text style={[styles.fieldLabel, { color: colors.text }]}>
+                    Version
+                  </Text>
+                  <Text
+                    selectable
+                    style={[styles.valueText, { color: colors.secondaryText }]}
+                  >
+                    {`Goddard ${daemon.client.version}${
+                      daemon.client.commit
+                        ? ` · ${daemon.client.commit.slice(0, 8)}`
+                        : ""
+                    }`}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <PairingSection client={daemon.client} />
+          </>
+        )}
+
         {profile && (
           <>
             <Text
@@ -352,6 +389,227 @@ export default function DaemonEditorScreen() {
         )}
       </ScrollView>
     </View>
+  );
+}
+
+/** Pending pair requests and the clients the daemon already trusts. Mirrors
+ * desktop Settings → Pairing: approvals mint a token for the waiting device,
+ * revoking drops a client's credential on the daemon side. */
+function PairingSection({ client }: { client: WakuClient }) {
+  const colors = useNativeFormColors();
+  const [pairing, setPairing] = useState<PairingState | null>(null);
+  const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
+  const [busyClientId, setBusyClientId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .request({ type: "getPairing" })
+      .then((response) => {
+        if (!cancelled && response.type === "pairing") setPairing(response.state);
+      })
+      .catch(() => {});
+    const unsubscribe = client.subscribePairing((state) => {
+      if (!cancelled) setPairing(state);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [client]);
+
+  function respond(requestId: string, accept: boolean) {
+    setBusyRequestId(requestId);
+    void client
+      .request({ type: "respondPairRequest", requestId, accept })
+      .then(() =>
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+      )
+      .catch((cause) => {
+        Alert.alert(
+          accept ? "Couldn’t approve device" : "Couldn’t deny device",
+          cause instanceof Error ? cause.message : String(cause),
+        );
+      })
+      .finally(() => setBusyRequestId(null));
+  }
+
+  function revoke(clientId: string, name: string) {
+    Alert.alert(
+      `Revoke “${name}”?`,
+      "This device’s token stops working immediately.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Revoke",
+          style: "destructive",
+          onPress: () => {
+            setBusyClientId(clientId);
+            void client
+              .request({ type: "revokePairedClient", clientId })
+              .then(() =>
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Success,
+                ),
+              )
+              .catch((cause) => {
+                Alert.alert(
+                  "Couldn’t revoke device",
+                  cause instanceof Error ? cause.message : String(cause),
+                );
+              })
+              .finally(() => setBusyClientId(null));
+          },
+        },
+      ],
+    );
+  }
+
+  const pending = pairing?.pending ?? [];
+  const clients = pairing?.clients ?? [];
+  return (
+    <>
+      {pending.map((request) => (
+        <View key={request.requestId}>
+          <Text
+            style={[
+              styles.sectionLabel,
+              styles.actionsLabel,
+              { color: colors.secondaryText },
+            ]}
+          >
+            PAIR REQUEST
+          </Text>
+          <View
+            style={[styles.formGroup, { backgroundColor: colors.surface }]}
+          >
+            <View style={styles.pairRow}>
+              <View style={styles.pairText}>
+                <Text style={[styles.pairTitle, { color: colors.text }]}>
+                  {request.deviceName}
+                </Text>
+                <Text
+                  style={[
+                    styles.pairSubtitle,
+                    { color: colors.secondaryText },
+                  ]}
+                >
+                  wants to connect
+                </Text>
+              </View>
+              {busyRequestId === request.requestId ? (
+                <ActivityIndicator color={colors.secondaryText} size="small" />
+              ) : (
+                <View style={styles.pairActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => respond(request.requestId, false)}
+                    style={({ pressed }) => [
+                      styles.pairButton,
+                      { opacity: pressed ? 0.5 : 1 },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.pairButtonText, { color: colors.danger }]}
+                    >
+                      Deny
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => respond(request.requestId, true)}
+                    style={({ pressed }) => [
+                      styles.pairButton,
+                      styles.pairApprove,
+                      {
+                        backgroundColor: colors.accent,
+                        opacity: pressed ? 0.5 : 1,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.pairButtonText,
+                        { color: colors.background },
+                      ]}
+                    >
+                      Approve
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      ))}
+
+      <Text
+        style={[
+          styles.sectionLabel,
+          styles.actionsLabel,
+          { color: colors.secondaryText },
+        ]}
+      >
+        PAIRED DEVICES
+      </Text>
+      <View style={[styles.formGroup, { backgroundColor: colors.surface }]}>
+        {clients.length === 0 ? (
+          <View style={styles.pairRow}>
+            <Text
+              style={[styles.pairSubtitle, { color: colors.secondaryText }]}
+            >
+              {pairing ? "No paired devices" : "Loading…"}
+            </Text>
+          </View>
+        ) : (
+          clients.map((device, index) => (
+            <View key={device.clientId}>
+              {index > 0 && (
+                <View
+                  style={[
+                    styles.separator,
+                    { backgroundColor: colors.separator },
+                  ]}
+                />
+              )}
+              <View style={styles.pairRow}>
+                <View style={styles.pairText}>
+                  <Text style={[styles.pairTitle, { color: colors.text }]}>
+                    {device.name}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.pairSubtitle,
+                      { color: colors.secondaryText },
+                    ]}
+                  >
+                    {`Paired ${new Date(device.addedAtMs).toLocaleDateString()}`}
+                  </Text>
+                </View>
+                {busyClientId === device.clientId ? (
+                  <ActivityIndicator color={colors.secondaryText} size="small" />
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => revoke(device.clientId, device.name)}
+                    style={({ pressed }) => [
+                      styles.pairButton,
+                      { opacity: pressed ? 0.5 : 1 },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.pairButtonText, { color: colors.danger }]}
+                    >
+                      Revoke
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+    </>
   );
 }
 
@@ -518,6 +776,15 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   fieldLabel: { fontSize: 17, width: 82 },
+  valueText: {
+    flex: 1,
+    fontSize: 17,
+    minHeight: 55,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    textAlign: Platform.select({ ios: "right", default: "left" }),
+    textAlignVertical: "center",
+  },
   rowInput: {
     flex: 1,
     fontSize: 17,
@@ -557,6 +824,27 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 8,
   },
+  pairRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 56,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  pairText: { flex: 1, gap: 2 },
+  pairTitle: { fontSize: 16 },
+  pairSubtitle: { fontSize: 13 },
+  pairActions: { flexDirection: "row", gap: 10 },
+  pairButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 36,
+    minWidth: 44,
+    paddingHorizontal: 10,
+  },
+  pairApprove: { borderRadius: 8 },
+  pairButtonText: { fontSize: 15, fontWeight: "600" },
   headerButton: { justifyContent: "center", minHeight: 44, minWidth: 44 },
   headerButtonText: { fontSize: 17 },
   headerButtonEmphasized: { fontWeight: "700" },

@@ -53,6 +53,7 @@ import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useTaskState } from '@/hooks/use-daemon-data';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { searchSessionMessages } from '@/lib/daemon-api';
 import { useDaemon } from '@/lib/daemon-context';
 import { useDisplayCornerRadius } from '@/lib/display-corner-radius';
 import { sessionIsRunning } from '@/lib/mobile-runtime';
@@ -210,6 +211,7 @@ function TaskDrawerContent({
   const runtime = useRuntime();
   const taskState = useTaskState();
   const [search, setSearch] = useState('');
+  const [contentMatches, setContentMatches] = useState<Set<string> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [daemonPickerOpen, setDaemonPickerOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<AgentSession | null>(null);
@@ -269,12 +271,44 @@ function TaskDrawerContent({
     () => ({ runtimes: frame.runtimes, now, selected: frame.selectedSessionId }),
     [frame.runtimes, frame.selectedSessionId, now],
   );
+  // Local fields catch title/project/provider hits instantly; the daemon's
+  // message-store search adds tasks whose transcript content matches.
+  useEffect(() => {
+    const client = daemon.client;
+    const query = search.trim();
+    if (!client || query.length < 3) {
+      setContentMatches(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void Promise.all([
+        searchSessionMessages(client, query, 'active'),
+        searchSessionMessages(client, query, 'archived'),
+      ])
+        .then(([active, archived]) => {
+          if (!cancelled) {
+            setContentMatches(new Set(
+              [...active, ...archived].map((match) => match.session_id),
+            ));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setContentMatches(null);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [daemon.client, search]);
   const visibleSessions = useMemo(() => {
     if (!frame.data) return [];
     const query = search.trim().toLocaleLowerCase();
     if (!query) return frame.data.sessions;
     const projects = new Map(frame.data.projects.map((project) => [project.id, project]));
     return frame.data.sessions.filter((session) => {
+      if (contentMatches?.has(session.id)) return true;
       const project = projects.get(session.project_id);
       return [
         displaySessionTitle(session),
@@ -284,7 +318,7 @@ function TaskDrawerContent({
         session.model,
       ].some((value) => value?.toLocaleLowerCase().includes(query));
     });
-  }, [search, frame.data]);
+  }, [search, frame.data, contentMatches]);
   const sections = useMemo(
     () => frame.data ? groupSessions(frame.data.projects, visibleSessions) : [],
     [frame.data, visibleSessions],
@@ -375,6 +409,44 @@ function TaskDrawerContent({
     (session: AgentSession) => setRenameTarget(session),
     [],
   );
+  const togglePin = useCallback((session: AgentSession) => {
+    void Haptics.selectionAsync();
+    void runtime.setSessionPinned(session.id, session.pinned_at == null)
+      .catch((cause) => {
+        Alert.alert(
+          'Couldn’t update pin',
+          cause instanceof Error ? cause.message : String(cause),
+        );
+      });
+  }, [runtime.setSessionPinned]);
+  const toggleArchive = useCallback((session: AgentSession) => {
+    const archived = session.archived_at != null;
+    const run = () => {
+      void runtime.setSessionArchived(session.id, !archived)
+        .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
+        .catch((cause) => {
+          Alert.alert(
+            archived ? 'Couldn’t unarchive task' : 'Couldn’t archive task',
+            cause instanceof Error ? cause.message : String(cause),
+          );
+        });
+    };
+    void Haptics.selectionAsync();
+    // Desktop confirms before archiving a task whose turn is still running:
+    // archiving stops it.
+    if (!archived && (frame.runtimes[session.id]?.running ?? sessionIsRunning(session))) {
+      Alert.alert(
+        `Archive “${displaySessionTitle(session)}”?`,
+        'Archiving stops the running turn.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Archive', onPress: run },
+        ],
+      );
+    } else {
+      run();
+    }
+  }, [frame.runtimes, runtime.setSessionArchived]);
   const selectSession = useCallback(
     (session: AgentSession) => showSession(session.id),
     [showSession],
@@ -395,6 +467,8 @@ function TaskDrawerContent({
         onDelete={confirmDelete}
         onRename={renameSession}
         onSelect={selectSession}
+        onToggleArchive={toggleArchive}
+        onTogglePin={togglePin}
       />
     );
   }, [
@@ -405,6 +479,8 @@ function TaskDrawerContent({
     now,
     renameSession,
     selectSession,
+    toggleArchive,
+    togglePin,
   ]);
 
   async function refreshTasks() {
@@ -674,6 +750,8 @@ const SessionRow = memo(function SessionRow({
   onDelete,
   onRename,
   onSelect,
+  onToggleArchive,
+  onTogglePin,
 }: {
   drawerWidth: number;
   session: AgentSession;
@@ -684,15 +762,23 @@ const SessionRow = memo(function SessionRow({
   onDelete: (session: AgentSession) => void;
   onRename: (session: AgentSession) => void;
   onSelect: (session: AgentSession) => void;
+  onToggleArchive: (session: AgentSession) => void;
+  onTogglePin: (session: AgentSession) => void;
 }) {
   const theme = useTheme();
   const rowWidth = Math.max(0, drawerWidth - 24);
+  const pinned = session.pinned_at != null;
+  const archived = session.archived_at != null;
   return (
     <TaskRowMenu
       accessibilityLabel={`${displaySessionTitle(session)}, ${providerLabel(session.provider)} in ${projectName}${running ? ', Running' : ''}${lastReplyLabel ? `, Last reply: ${lastReplyLabel}` : ''}`}
+      archived={archived}
+      pinned={pinned}
       onDelete={() => onDelete(session)}
       onRename={() => onRename(session)}
       onSelect={() => onSelect(session)}
+      onToggleArchive={() => onToggleArchive(session)}
+      onTogglePin={() => onTogglePin(session)}
       renderTrigger={(pressed) => (
         <View
           style={[
@@ -701,10 +787,18 @@ const SessionRow = memo(function SessionRow({
               backgroundColor: pressed
                 ? theme.surfaceMuted
                 : selected ? theme.backgroundSelected : 'transparent',
+              opacity: archived ? 0.55 : 1,
               width: rowWidth,
             },
           ]}>
           <View style={styles.sessionHeading}>
+            {pinned && (
+              <AppSymbol
+                name={{ ios: 'pin.fill', android: 'push_pin', web: 'push_pin' }}
+                size={11}
+                tintColor={theme.textTertiary}
+              />
+            )}
             <Text numberOfLines={1} style={[styles.sessionTitle, { color: theme.text }]}>
               {displaySessionTitle(session)}
             </Text>

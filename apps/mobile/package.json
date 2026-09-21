@@ -24,6 +24,7 @@
     "expo-image-picker": "~57.0.16",
     "expo-libghostty": "0.8.1",
     "expo-linking": "~57.0.8",
+    "expo-quick-actions": "6.0.2",
     "expo-router": "~57.0.17",
     "expo-secure-store": "~57.0.2",
     "expo-splash-screen": "~57.0.8",

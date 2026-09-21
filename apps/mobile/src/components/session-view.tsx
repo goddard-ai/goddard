@@ -67,6 +67,18 @@ const TASK_MENU_COMMANDS = [
     destructive: false,
   },
   {
+    id: 'compact',
+    title: 'Compact context',
+    symbol: 'rectangle.compress.vertical',
+    destructive: false,
+  },
+  {
+    id: 'rollback',
+    title: 'Roll back last turn',
+    symbol: 'arrow.uturn.backward',
+    destructive: false,
+  },
+  {
     id: 'reload',
     title: 'Reload transcript',
     symbol: 'arrow.clockwise',
@@ -223,6 +235,37 @@ export function SessionView({
     );
   }, []);
 
+  const compactSession = useCallback(() => {
+    const current = sessionRef.current;
+    if (!current) return;
+    void runtimeRef.current.compactSession(current.id).catch((cause) => {
+      Alert.alert('Couldn’t compact context', cause instanceof Error ? cause.message : String(cause));
+    });
+  }, []);
+
+  const confirmRollback = useCallback(() => {
+    const current = sessionRef.current;
+    if (!current) return;
+    Alert.alert(
+      `Roll back the last turn in “${displaySessionTitle(current)}”?`,
+      'This rewinds the conversation and workspace to before the previous turn.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Roll back',
+          style: 'destructive',
+          onPress: () => {
+            void runtimeRef.current.rollbackSession(current.id, 1)
+              .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
+              .catch((cause) => {
+                Alert.alert('Couldn’t roll back', cause instanceof Error ? cause.message : String(cause));
+              });
+          },
+        },
+      ],
+    );
+  }, []);
+
   const handleTaskMenuCommand = useCallback(
     (command: string) => {
       if (command === 'terminal' || command === 'files' || command === 'review') {
@@ -233,13 +276,17 @@ export function SessionView({
         setRenaming(true);
       } else if (command === 'copy-last-response') {
         void copyLastResponse();
+      } else if (command === 'compact') {
+        compactSession();
+      } else if (command === 'rollback') {
+        confirmRollback();
       } else if (command === 'reload') {
         void queryRef.current.refetch();
       } else if (command === 'delete') {
         confirmDelete();
       }
     },
-    [confirmDelete, copyLastResponse, openTaskSurface],
+    [compactSession, confirmDelete, confirmRollback, copyLastResponse, openTaskSurface],
   );
 
   const taskState = useTaskState().data;

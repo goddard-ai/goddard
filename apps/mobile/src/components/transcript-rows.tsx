@@ -48,7 +48,7 @@ export const TranscriptRowView = memo(function TranscriptRowView({
     case 'system':
       return (
         <View style={styles.systemFrame}>
-          <Text style={[styles.systemMessage, { backgroundColor: theme.overlay, color: theme.textTertiary }]}>
+          <Text selectable style={[styles.systemMessage, { backgroundColor: theme.overlay, color: theme.textTertiary }]}>
             {row.message.display_content ?? row.message.content}
           </Text>
         </View>
@@ -224,7 +224,7 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
         <View style={[styles.changedFiles, { borderTopColor: theme.border }]}>
           {checkpoint.files.map((file) => (
             <View key={file.path} style={styles.changedFileRow}>
-              <Text numberOfLines={1} style={[styles.changedFilePath, { color: theme.text }]}>
+              <Text numberOfLines={1} selectable style={[styles.changedFilePath, { color: theme.text }]}>
                 {file.path}
               </Text>
               <Text style={styles.changedStats}>

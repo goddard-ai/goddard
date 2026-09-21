@@ -14,6 +14,8 @@ import type {
   ReviewDiffData,
   ReviewDiffSource,
   ResponsePayload,
+  SessionMessageMatch,
+  SessionMessageSearchScope,
   SlashCommand,
   WakuClient,
   WorkingTreeEntry,
@@ -105,6 +107,18 @@ export async function hydrateSession(
   return response.session && { ...response.session, detail_loaded: true };
 }
 
+export async function searchSessionMessages(
+  client: WakuClient,
+  query: string,
+  scope: SessionMessageSearchScope,
+): Promise<SessionMessageMatch[]> {
+  const response = expectResponse(
+    await client.request({ type: 'searchSessionMessages', query, limit: 50, scope }),
+    'sessionMessageMatches',
+  );
+  return response.matches;
+}
+
 export async function listProviderSessions(
   client: WakuClient,
   provider: ProviderKind,
@@ -138,13 +152,21 @@ export function providerSessionKey(cursor: ProviderSessionSummary['cursor']): st
 export async function attachDaemonSession(
   client: WakuClient,
   sessionId: string,
-): Promise<{ runtimeId: string; supportsSteer: boolean } | null> {
+): Promise<{
+  runtimeId: string;
+  supportsSteer: boolean;
+  supportsUserInputActions: boolean;
+} | null> {
   const response = expectResponse(
     await client.request({ type: 'attachSession' }, sessionId),
     'sessionRuntime',
   );
   return response.runtimeId
-    ? { runtimeId: response.runtimeId, supportsSteer: response.supportsSteer }
+    ? {
+        runtimeId: response.runtimeId,
+        supportsSteer: response.supportsSteer,
+        supportsUserInputActions: response.supportsUserInputActions,
+      }
     : null;
 }
 

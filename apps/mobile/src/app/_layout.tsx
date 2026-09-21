@@ -3,13 +3,15 @@ import {
   DefaultTheme,
   Stack,
   ThemeProvider,
+  router,
   type NativeStackNavigationOptions,
 } from "expo-router";
+import * as QuickActions from "expo-quick-actions";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { StyleSheet, useColorScheme } from "react-native";
+import { Platform, StyleSheet, useColorScheme } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { Colors } from "@/constants/theme";
@@ -20,8 +22,13 @@ import {
   type HeaderActionSpec,
 } from "@/components/screen-header";
 import { TaskDrawerHost, useTaskDrawer } from "@/components/task-drawer";
+import { useTaskState } from "@/hooks/use-daemon-data";
 import { DaemonProvider, useDaemon } from "@/lib/daemon-context";
 import { RuntimeProvider } from "@/lib/runtime-context";
+import {
+  displaySessionTitle,
+  sessionHasStarted,
+} from "@/lib/session-presentation";
 
 /** Deep links and state restores keep the new-task home as the stack anchor. */
 export const unstable_settings = { anchor: "index" };
@@ -94,6 +101,7 @@ export default function RootLayout() {
 function AppNavigator() {
   const { phase, profiles } = useDaemon();
   const { openTaskDrawer } = useTaskDrawer();
+  const taskState = useTaskState();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme === "dark" ? "dark" : "light"];
   const daemonRoutesAvailable = phase === "booting" || profiles.length > 0;
@@ -116,6 +124,69 @@ function AppNavigator() {
   useEffect(() => {
     if (phase !== "booting") void SplashScreen.hideAsync();
   }, [phase]);
+
+  // Home-screen quick actions: New task plus the three most recent tasks.
+  // taskState churns during streaming, so items refresh only when the
+  // recent-session list itself changes.
+  const recents = useMemo(() => {
+    const data = taskState.data;
+    if (!data) return [];
+    const projectNames = new Map(
+      data.projects.map((project) => [project.id, project.name]),
+    );
+    return data.sessions
+      .filter((session) => sessionHasStarted(session) && session.archived_at == null)
+      .sort((a, b) =>
+        (b.last_reply_at ?? b.created_at) - (a.last_reply_at ?? a.created_at),
+      )
+      .slice(0, 3)
+      .map((session) => ({
+        id: session.id,
+        title: displaySessionTitle(session),
+        subtitle: projectNames.get(session.project_id) ?? "",
+      }));
+  }, [taskState.data]);
+  const recentsKey = recents.map((item) => `${item.id}:${item.title}`).join("|");
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const icon = (name: string) =>
+      Platform.select({ ios: `symbol:${name}`, default: "ic_recent_task" });
+    void QuickActions.setItems([
+      {
+        id: "new-task",
+        title: "New task",
+        icon: Platform.select({
+          ios: "symbol:square.and.pencil",
+          default: "ic_new_task",
+        }),
+      },
+      ...recents.map((item) => ({
+        id: `session:${item.id}`,
+        title: item.title,
+        subtitle: item.subtitle || null,
+        icon: icon("clock"),
+        params: { sessionId: item.id },
+      })),
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentsKey]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const open = (action: QuickActions.Action | undefined) => {
+      if (!action) return;
+      const sessionId = action.params?.sessionId;
+      if (typeof sessionId === "string" && sessionId) {
+        router.push({ pathname: "/session/[id]", params: { id: sessionId } });
+      } else if (action.id === "new-task") {
+        router.dismissTo("/");
+      }
+    };
+    const subscription = QuickActions.addListener(open);
+    // A press that cold-started the app never reaches the listener.
+    open(QuickActions.initial);
+    return () => subscription.remove();
+  }, []);
 
   return (
     <Stack

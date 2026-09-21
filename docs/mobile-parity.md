@@ -25,39 +25,57 @@ protocol changes.
 
 ## Tier 0 — trivial (hours each, protocol already supports it)
 
-- [ ] **Selectable transcript text** — `selectable` on markdown `Text`
-      nodes in `src/md/render.tsx` (agent messages are currently not
-      selectable; user bubbles and sheets already are).
-- [ ] **Pin sessions** — `AgentSession.pinned_at` exists; persist via
-      `saveTaskState`. Pinned rows float to the top of the task drawer.
-- [ ] **Archive sessions + archived view** — `AgentSession.archived_at`
-      exists. Swipe/menu action plus an archived section or screen.
+- [x] **Selectable transcript text** — markdown nodes were already
+      selectable; added `selectable` to system messages and changed-file
+      paths in `transcript-rows.tsx` to complete coverage.
+- [x] **Pin sessions** — `setSessionPinned` in runtime-context; pinned
+      sessions group under a "Pinned" drawer section; long-press menu
+      action on both platforms.
+- [x] **Archive sessions + archived view** — `setSessionArchived`
+      (closes the runtime first, matching desktop semantics); archived
+      sessions group under an "Archived" drawer section; confirm dialog
+      when archiving a running task.
 - [ ] **Dormant/snooze sessions** — `dormant_at` / `dormant_exempt_until`
-      fields exist; wire a snooze action that hides the task until it
-      needs attention.
-- [ ] **Swipe actions on task rows** — `react-native-gesture-handler` is
-      already a dependency; expose pin/archive/delete on swipe.
-- [ ] **In-session message search** — `searchSessionMessages` command
-      exists; drawer search currently matches titles only. Add a search
-      bar to the session view and/or extend drawer search to content.
-- [ ] **Daemon version / update banner** — `hello` carries
-      `daemonVersion` and `protocolVersion`; compare against the app
-      build and show a notice when the daemon lags.
-- [ ] **Question-card clarify/dismiss** — `clarifyUserInput` and
-      `cancelUserInput` commands plus `supportsUserInputActions` already
-      exist; `UserInputPanel` in `mobile-composer.tsx` doesn't use them.
-- [ ] **Session actions: compact / rollback / rewind / fork** —
-      `compact`, `rollback`, `rewindSessionToMessage`,
-      `forkSessionFromResponse` commands exist; add to the task menu.
-- [ ] **Home-screen quick actions** — `expo-quick-actions` plugin:
-      "New task" + deep links to recent sessions (`goddard://` scheme and
-      expo-router are already configured).
-- [ ] **Pairing approvals on phone** — `getPairing`, `respondPairRequest`,
-      `revokePairedClient`, plus pushed `pairPending` / `pairGranted` /
-      `pairDeclined` events. Let the phone approve a new client pairing.
+      fields exist. NOT a simple flag: desktop cancels work, clears pins,
+      and schedules worktree cleanup. Needs daemon-side semantics wired
+      properly, not a mobile timestamp write.
+- [ ] **Swipe actions on task rows** — deferred: a horizontal swipe
+      conflicts with the drawer's pan-to-close gesture. Pin/archive are
+      on the long-press menu instead; revisit if the drawer gesture
+      changes.
+- [x] **Message-content search** — drawer search now unions local
+      title/project matching with debounced `searchSessionMessages`
+      queries (active + archived scopes). An in-session search bar over
+      the open transcript remains open.
+- [~] **Daemon version display** — `WakuClient` stores
+      `daemonVersion`/`daemonCommit` from `hello`; shown on the daemon
+      editor screen. A true update banner still needs a "latest version"
+      source to compare against — nothing ships one today.
+- [x] **Question-card clarify/dismiss** — `UserInputPanel` renders
+      Clarify/Dismiss when `supportsUserInputActions` is set, matching
+      desktop semantics (Clarify requires typed text).
+- [~] **Session actions** — Compact context and Roll-back-last-turn
+      (with confirm) added to the task menu. Rewind-to-message and
+      fork-from-response are per-turn operations on desktop; they need a
+      per-turn affordance in the transcript, deferred to Tier 1.
+- [x] **Home-screen quick actions** — `expo-quick-actions` configured;
+      "New task" + 3 recent sessions with deep links. Requires a native
+      rebuild (dev client) to take effect — not verifiable in Expo Go.
+- [x] **Pairing approvals on phone** — daemon editor shows pending pair
+      requests (Approve/Deny via `respondPairRequest`) and paired
+      devices (Revoke via `revokePairedClient`), live-updated by
+      `pairingChanged`.
 
 ## Tier 1 — small-medium (days, still protocol-ready)
 
+- [ ] **Per-turn rewind / fork** — `rewindSessionToMessage` and
+      `forkSessionFromResponse` take a turn index; desktop exposes them
+      as per-response buttons. Needs a turn-level affordance (long-press
+      a user message → Rewind here / Fork from here).
+- [ ] **In-session transcript search** — a find bar over the open
+      session's transcript. `searchSessionMessages` covers cross-task
+      content search (wired into the drawer); a per-session scope or
+      client-side scan of loaded blocks both work.
 - [ ] **Git surface sheet** — all ops exist: `inspectGitPanel`,
       `stageFile`, `unstageFile`, `discardFile`, `commit`,
       `generateCommitMessage`, `push`, `checkoutBranch`, `listCommits`,
