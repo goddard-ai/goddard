@@ -1391,52 +1391,21 @@ impl Waku {
         // this frame. Recomputing the row list here would rebuild the whole
         // transcript's row kinds — several allocations proportional to the
         // session — once for every visible row, every frame.
-        let (row_count, kind, starts_followup_turn, consumed_landed, next_landed_index) = {
+        let (row_count, kind, starts_followup_turn) = {
             let kinds = self.transcript_row_kinds.borrow();
             let kind = kinds
                 .get(index)
                 .copied()
                 .unwrap_or(TranscriptRowKind::Message(index));
-            let is_landed_notice = |message_index: usize| {
-                self.selected_session().is_some_and(|session| {
-                    session.messages.get(message_index).is_some_and(|message| {
-                        message.role == MessageRole::System
-                            && matches!(message.notice, Some(TranscriptNotice::Landed { .. }))
-                    })
-                })
-            };
-            // A landed notice directly behind a card row renders inside that
-            // row's column instead — see render_response_footer_row. Its own
-            // row then contributes nothing, not even padding.
-            let consumed_landed = matches!(kind, TranscriptRowKind::Message(ix) if is_landed_notice(ix))
-                && matches!(
-                    kinds.get(index.wrapping_sub(1)),
-                    Some(
-                        TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_)
-                    )
-                );
-            let next_landed_index = kinds.get(index + 1).and_then(|next| match next {
-                TranscriptRowKind::Message(message_index) if is_landed_notice(*message_index) => {
-                    Some(*message_index)
-                }
-                _ => None,
-            });
             let starts_followup_turn = self
                 .selected_session()
                 .is_some_and(|session| row_starts_followup_turn(session, &kinds, index));
-            (
-                kinds.len(),
-                kind,
-                starts_followup_turn,
-                consumed_landed,
-                next_landed_index,
-            )
+            (kinds.len(), kind, starts_followup_turn)
         };
         let response_turn_id = self
             .selected_session()
             .and_then(|session| response_row_turn_id(session, kind));
         let inner = match kind {
-            _ if consumed_landed => div().into_any_element(),
             TranscriptRowKind::Message(message_index) => self
                 .selected_session()
                 .and_then(|session| session.messages.get(message_index))
@@ -1639,35 +1608,10 @@ impl Waku {
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnFold(turn_id) => self.render_turn_fold_row(turn_id, &theme, cx),
             TranscriptRowKind::ResponseFooter(turn_id, message_index) => self
-                .render_response_footer_row(
-                    turn_id,
-                    message_index,
-                    next_landed_index,
-                    &theme,
-                    window,
-                    cx,
-                ),
-            TranscriptRowKind::ChangedFiles(turn_id) => {
-                let card = self.render_changed_files_row(turn_id, &theme, window, cx);
-                let landed = next_landed_index.and_then(|message_index| {
-                    self.selected_session()
-                        .and_then(|session| session.messages.get(message_index))
-                        .map(|message| self.render_landed_notice_message(message, &theme, cx))
-                });
-                match (card, landed) {
-                    (Some(card), Some(landed)) => div()
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap(px(3.0))
-                        .child(div().w_full().mb(px(3.0)).child(card))
-                        .child(landed)
-                        .into_any_element(),
-                    (Some(card), None) => card,
-                    (None, Some(landed)) => landed,
-                    (None, None) => div().into_any_element(),
-                }
-            }
+                .render_response_footer_row(turn_id, message_index, &theme, window, cx),
+            TranscriptRowKind::ChangedFiles(turn_id) => self
+                .render_changed_files_row(turn_id, &theme, window, cx)
+                .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
         };
         let new_content_dot = self
@@ -1719,7 +1663,6 @@ impl Waku {
             .justify_center()
             .px(px(20.0))
             .py(px(8.0))
-            .when(consumed_landed, |element| element.py(px(0.0)))
             .when(
                 matches!(kind, TranscriptRowKind::ResponseFooter(_, _)),
                 |element| element.pt(px(0.0)),
@@ -1758,7 +1701,6 @@ impl Waku {
         &self,
         turn_id: Uuid,
         message_index: usize,
-        landed_message_index: Option<usize>,
         theme: &Theme,
         window: &Window,
         cx: &mut Context<Self>,
@@ -1774,20 +1716,6 @@ impl Waku {
             .group(group_name.clone());
         if let Some(changed_files) = self.render_changed_files_row(turn_id, theme, window, cx) {
             column = column.child(div().w_full().mb(px(3.0)).child(changed_files));
-        }
-        // A landed notice written directly behind this footer joins the
-        // column: it and the changed-files card are the turn's outcome stack,
-        // and on its own row the response's invisible action row would split
-        // them apart.
-        if let Some(landed) =
-            landed_message_index.and_then(|index| session.and_then(|s| s.messages.get(index)))
-        {
-            column = column.child(
-                div()
-                    .w_full()
-                    .mb(px(3.0))
-                    .child(self.render_landed_notice_message(landed, theme, cx)),
-            );
         }
         let Some(message) = session
             .and_then(|session| session.messages.get(message_index))
@@ -1841,79 +1769,8 @@ impl Waku {
         cx.notify();
     }
 
-    /// A `TranscriptNotice::Landed` system message rendered as its card, for
-    /// attachment inside a footer or standalone changed-files row. The card
-    /// keeps the message row's own markdown context and menu so selection and
-    /// the commit links behave the same in either host.
-    fn render_landed_notice_message(
-        &self,
-        message: &Message,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let palette = MarkdownPalette::from_theme(theme);
-        let metrics = self.scaled_markdown_metrics(MarkdownMetrics::BODY);
-        let menu = self.menu_handle(format!("message-{}", message.id), cx);
-        let ctx = self
-            .markdown_ctx(
-                format!("message-{}", message.id),
-                &palette,
-                metrics,
-                false,
-                cx,
-            )
-            .with_context_menu(menu.clone())
-            .with_commit_refs(true);
-        render_message(
-            MessageRender {
-                theme,
-                message,
-                assistant_footer_copy_content: None,
-                assistant_footer_time: None,
-                copied: self.copied_message_feedback.contains_key(&message.id),
-                show_response_token_speed: false,
-                assistant_message_action: None,
-                user_message_action: None,
-                user_message_viewport: None,
-                user_message_expanded: false,
-                user_message_expand_focus: None,
-                message_edit_input: None,
-                attachment_menus: Vec::new(),
-                attachment_images: Vec::new(),
-                attachments_can_reveal: false,
-                markdown: None,
-                work_item_refs: Vec::new(),
-                ctx: &ctx,
-                menu,
-                sent_by_task_link: message
-                    .sent_by_task
-                    .filter(|id| self.sent_by_task_openable(*id)),
-                waku: cx.entity().downgrade(),
-                composer: self.composer.clone(),
-                landed_notice: Some(LandedNoticeState {
-                    expanded: self.expanded_landed_notices.contains(&message.id),
-                    show_all: self.landed_notice_show_all.contains(&message.id),
-                    header_focus: self
-                        .transcript_control_focus(format!("landed-notice-{}", message.id), cx),
-                    commits_focus: self
-                        .transcript_control_focus(format!("landed-commits-{}", message.id), cx),
-                    push: match &message.notice {
-                        Some(TranscriptNotice::Landed { base, .. }) => {
-                            self.landed_push_for_base(base, cx)
-                        }
-                        _ => push_base::LandedPush::Hidden,
-                    },
-                    push_focus: self
-                        .transcript_control_focus(format!("landed-push-{}", message.id), cx),
-                }),
-            },
-            cx,
-        )
-    }
-
-    /// A landed notice lives inside the row that renders its card — its own
-    /// `Message` row, or the card row that consumed it — so both of its
-    /// disclosures remeasure that row.
+    /// A landed notice renders its card on its own `Message` row, so both of
+    /// its disclosures remeasure that row.
     pub(super) fn toggle_landed_notice(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
         self.pin_transcript_for_disclosure();
         if !self.expanded_landed_notices.remove(&message_id) {
@@ -1937,35 +1794,15 @@ impl Waku {
     }
 
     fn remeasure_landed_notice(&self, message_id: Uuid) {
-        let Some((message_index, host_turn)) = self.selected_session().and_then(|session| {
-            let message_index = session
+        let Some(message_index) = self.selected_session().and_then(|session| {
+            session
                 .messages
                 .iter()
-                .position(|message| message.id == message_id)?;
-            // When the row above consumed the notice, expanding it changes
-            // that row's height, not the empty message row's.
-            let host_turn = {
-                let kinds = self.transcript_row_kinds.borrow();
-                kinds
-                    .iter()
-                    .position(|kind| *kind == TranscriptRowKind::Message(message_index))
-                    .and_then(|row| row.checked_sub(1))
-                    .and_then(|previous| kinds.get(previous))
-                    .and_then(|kind| match kind {
-                        TranscriptRowKind::ResponseFooter(turn_id, _)
-                        | TranscriptRowKind::ChangedFiles(turn_id) => Some(*turn_id),
-                        _ => None,
-                    })
-            };
-            Some((message_index, host_turn))
+                .position(|message| message.id == message_id)
         }) else {
             return;
         };
-        if let Some(turn_id) = host_turn {
-            self.remeasure_changed_files(turn_id);
-        } else {
-            self.remeasure_transcript_message(message_index);
-        }
+        self.remeasure_transcript_message(message_index);
     }
 
     /// Track the pointer over a changed-files row. A dwell opens the row's

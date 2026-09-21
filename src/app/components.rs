@@ -1528,13 +1528,10 @@ fn landed_notice_row(
                 .min_w_0()
                 .flex_1()
                 .truncate()
-                .child(md::render::plain_text(
-                    tr!("transcript.landed", base = base),
-                    ctx.families().ui.clone(),
-                    FontWeight::MEDIUM,
-                    theme.text_secondary,
-                    ctx,
-                )),
+                .font_family(ctx.families().ui.clone())
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
+                .child(tr!("transcript.landed", base = base)),
         );
     if let Some(state) = state {
         header = header
