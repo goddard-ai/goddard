@@ -99,6 +99,29 @@ const HIGH_CONTRAST_SUBTLE: f32 = 2.2;
 const HIGH_CONTRAST_BORDER: f32 = 2.6;
 const HIGH_CONTRAST_STRONG: f32 = 3.0;
 
+/// Text-tier floors, in contrast ratios. Primary and secondary hold WCAG
+/// 2.2 §1.4.3's 4.5:1 normal-text line — they carry everything the user is
+/// expected to read. Tertiary (menu headers, shortcut hints, metadata)
+/// keeps the 3:1 large-text floor so muted palettes keep their ramp, and
+/// ghost (disabled, placeholders) stays just above invisible. High
+/// contrast lifts the ladder to the §1.4.6 enhanced line — there is no
+/// authored intensity to relax, so the standard floors are the resting
+/// point a future contrast slider would scale from.
+const TEXT_CONTRAST: f32 = 4.5;
+const TEXT_TERTIARY_CONTRAST: f32 = 3.0;
+const TEXT_GHOST_CONTRAST: f32 = 2.5;
+const HIGH_CONTRAST_TEXT: f32 = 7.0;
+const HIGH_CONTRAST_TERTIARY: f32 = 4.5;
+const HIGH_CONTRAST_GHOST: f32 = 3.0;
+
+/// The menu/picker glass card's specular sheen: `raised` lifted this far in
+/// lightness, painted at this opacity (see `glass_card_bg` in ui::menu.rs).
+/// The text-floor solve needs the real card top — the lightest fill text
+/// can sit on — so the constants live here and the menu reads them back.
+pub(crate) const GLASS_SHEEN_LIFT_DARK: f32 = 0.04;
+pub(crate) const GLASS_SHEEN_LIFT_LIGHT: f32 = 0.05;
+pub(crate) const GLASS_SHEEN_ALPHA: f32 = 0.95;
+
 /// The active mode's floors: (separator, subtle, border, strong). The
 /// "Border intensity" slider scales each floor's distance above 1:1 — the
 /// ratio at which a line is indistinguishable from its surface — so 100%
@@ -123,6 +146,41 @@ fn border_floors() -> (f32, f32, f32, f32) {
             scale(BORDER_STRONG_CONTRAST),
         )
     }
+}
+
+/// The active mode's text floors: (primary, secondary, tertiary, ghost).
+fn text_floors() -> (f32, f32, f32, f32) {
+    if high_contrast() {
+        (
+            HIGH_CONTRAST_TEXT,
+            HIGH_CONTRAST_TEXT,
+            HIGH_CONTRAST_TERTIARY,
+            HIGH_CONTRAST_GHOST,
+        )
+    } else {
+        (
+            TEXT_CONTRAST,
+            TEXT_CONTRAST,
+            TEXT_TERTIARY_CONTRAST,
+            TEXT_GHOST_CONTRAST,
+        )
+    }
+}
+
+/// The glass card's top edge composited over the canvas — the lightest
+/// fill this palette's text can sit on, so floors solved against it hold on
+/// the real menu card, not just the solid `raised`.
+fn glass_sheen_top(raised: Hsla, canvas: Rgba, is_dark: bool) -> Rgba {
+    let mut sheen = raised;
+    sheen.l = (sheen.l
+        + if is_dark {
+            GLASS_SHEEN_LIFT_DARK
+        } else {
+            GLASS_SHEEN_LIFT_LIGHT
+        })
+    .min(1.0);
+    sheen.a = GLASS_SHEEN_ALPHA;
+    canvas.blend(sheen.to_rgb())
 }
 
 fn luminance(rgb: Rgba) -> f32 {
@@ -402,6 +460,19 @@ impl Theme {
         let sidebar_pairs = [(surface, surface), (surface, rgb(spec.sidebar_solid))];
         let sidebar_border =
             contrast_wash(spec.sidebar_border, spec.is_dark, &sidebar_pairs, subtle_c);
+        // Text tiers carry the same solved-floor contract as the lines:
+        // each is the weakest lift of its authored color that clears the
+        // tier's WCAG floor on every surface text can be painted on —
+        // including the glass menu card, whose sheen edge floats above
+        // `raised` and would otherwise drop menu text under the floor.
+        // Palettes already clearing a floor keep their authored color.
+        let (text_c, secondary_c, tertiary_c, ghost_c) = text_floors();
+        let mut text_pairs = border_pairs.to_vec();
+        let glass_top = glass_sheen_top(rgb(spec.raised).into(), rgb(spec.canvas), spec.is_dark);
+        text_pairs.push((glass_top, glass_top));
+        let text_color = |color: u32, floor: f32| {
+            contrast_wash(rgb(color).into(), spec.is_dark, &text_pairs, floor).alpha(1.0)
+        };
         let danger: Hsla = rgb(spec.danger).into();
         Self {
             is_dark: spec.is_dark,
@@ -427,10 +498,10 @@ impl Theme {
             separator,
             sidebar_border,
 
-            text: rgb(spec.text).into(),
-            text_secondary: rgb(spec.text_secondary).into(),
-            text_tertiary: rgb(spec.text_tertiary).into(),
-            text_ghost: rgb(spec.text_ghost).into(),
+            text: text_color(spec.text, text_c),
+            text_secondary: text_color(spec.text_secondary, secondary_c),
+            text_tertiary: text_color(spec.text_tertiary, tertiary_c),
+            text_ghost: text_color(spec.text_ghost, ghost_c),
 
             accent: rgb(spec.accent).into(),
             resize_handle: rgb(spec.info).into(),
@@ -1612,6 +1683,56 @@ mod tests {
                         ratio >= floor,
                         "{name:?} high_contrast={hc} sidebar_border is {ratio:.2}:1 over {neighbor:?}"
                     );
+                }
+            }
+        }
+        HIGH_CONTRAST.store(false, Ordering::Relaxed);
+    }
+
+    /// Every palette's text tiers must clear their WCAG floors on every
+    /// surface text can be painted on — including the glass menu card's
+    /// sheen edge, the lightest fill a dark palette puts under text. This
+    /// is the check `from_spec` solves for; a new or edited scheme that
+    /// authored a too-faint tier fails here instead of shipping faint text.
+    #[test]
+    fn text_tiers_clear_the_contrast_floor() {
+        let _guard = BORDER_STATICS.lock().unwrap();
+        for hc in [false, true] {
+            HIGH_CONTRAST.store(hc, Ordering::Relaxed);
+            let (primary, secondary, tertiary, ghost) = text_floors();
+            for name in ThemeName::LIGHT.into_iter().chain(ThemeName::DARK) {
+                let theme = theme_named(name);
+                let mut surfaces = [
+                    theme.canvas,
+                    theme.surface,
+                    theme.raised,
+                    theme.composer,
+                    theme.inset,
+                    theme.terminal,
+                    theme.sidebar_drag_background,
+                ]
+                .map(Hsla::to_rgb)
+                .to_vec();
+                surfaces.push(glass_sheen_top(
+                    theme.raised,
+                    theme.canvas.to_rgb(),
+                    theme.is_dark,
+                ));
+                for (token, color, target) in [
+                    ("text", theme.text, primary),
+                    ("text_secondary", theme.text_secondary, secondary),
+                    ("text_tertiary", theme.text_tertiary, tertiary),
+                    ("text_ghost", theme.text_ghost, ghost),
+                ] {
+                    let floor = target - 0.01;
+                    let text_rgb = color.to_rgb();
+                    for surface in &surfaces {
+                        let ratio = contrast_ratio(surface.blend(text_rgb), *surface);
+                        assert!(
+                            ratio >= floor,
+                            "{name:?} high_contrast={hc} {token} is {ratio:.2}:1 over {surface:?}"
+                        );
+                    }
                 }
             }
         }

@@ -1,0 +1,1 @@
+- Menu text in dark themes stays legible again: the glass card's specular sheen is shallower, and each palette's text tiers are now solved to WCAG contrast floors over every surface — Zenburn, Rosé Pine Moon, Everforest, Dracula, and GitHub Dark menu items had fallen to 1.8–4.5:1 and now clear the bar. High Contrast mode widens text contrast too, not just borders.

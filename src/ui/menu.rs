@@ -99,7 +99,9 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-use crate::theme::{Theme, hairline, sp};
+use crate::theme::{
+    GLASS_SHEEN_ALPHA, GLASS_SHEEN_LIFT_DARK, GLASS_SHEEN_LIFT_LIGHT, Theme, hairline, sp,
+};
 use crate::ui::icon;
 use crate::ui::motion;
 use crate::ui::shortcut::ShortcutHint;
@@ -1207,16 +1209,24 @@ where
 
 /// The menu card's liquid-glass-style fill: the raised surface let through
 /// enough that content ghosts beneath it, plus a specular sheen at the top
-/// edge — the lit-from-above rim glass is recognized by. Reduce
-/// Transparency keeps the solid card since translucency is the effect.
+/// edge — the lit-from-above rim glass is recognized by. The sheen stays
+/// shallow: every point it lightens the card is a point of contrast taken
+/// from the menu text painted on it. Reduce Transparency keeps the solid
+/// card since translucency is the effect.
 fn glass_card_bg(theme: &Theme) -> gpui::Background {
     if crate::platform::reduce_transparency() {
         return theme.raised.into();
     }
     let mut sheen = theme.raised;
-    sheen.l = (sheen.l + if theme.is_dark { 0.12 } else { 0.05 }).min(1.0);
-    sheen.a = 0.95;
-    let base = theme.raised.opacity(if theme.is_dark { 0.88 } else { 0.9 });
+    sheen.l = (sheen.l
+        + if theme.is_dark {
+            GLASS_SHEEN_LIFT_DARK
+        } else {
+            GLASS_SHEEN_LIFT_LIGHT
+        })
+    .min(1.0);
+    sheen.a = GLASS_SHEEN_ALPHA;
+    let base = theme.raised.opacity(if theme.is_dark { 0.92 } else { 0.9 });
     linear_gradient(
         180.0,
         linear_color_stop(sheen, 0.0),
