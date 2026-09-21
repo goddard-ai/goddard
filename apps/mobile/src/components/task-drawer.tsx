@@ -8,6 +8,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -28,11 +29,20 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Drawer, useDrawerProgress } from 'react-native-drawer-layout';
-import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppSymbol } from '@/components/app-symbol';
-import { ConnectionBanner, useConnectionNotice } from '@/components/connection-banner';
+import {
+  ConnectionBanner,
+  useConnectionNotice,
+  type ConnectionNotice,
+} from '@/components/connection-banner';
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
 import { GlassSurface } from '@/components/glass-surface';
 import { ConnectionStatus, connectionPhaseLabel } from '@/components/connection-status';
@@ -41,6 +51,7 @@ import { RenameDialog } from '@/components/rename-dialog';
 import { TaskRowMenu } from '@/components/task-row-menu';
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useTaskState } from '@/hooks/use-daemon-data';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
 import { useDisplayCornerRadius } from '@/lib/display-corner-radius';
@@ -96,12 +107,16 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
   const params = useGlobalSearchParams<{ id?: string | string[] }>();
   const { width } = useWindowDimensions();
   const [open, setOpen] = useState(false);
+  const [listRefreshTick, setListRefreshTick] = useState(0);
   const drawerWidth = Math.max(0, Math.min(360, width - 44));
   const drawerEnabled = daemon.phase === 'booting' || daemon.profiles.length > 0;
   const openTaskDrawer = useCallback(() => {
     if (drawerEnabled) setOpen(true);
   }, [drawerEnabled]);
   const closeTaskDrawer = useCallback(() => setOpen(false), []);
+  // A swipe fires this the moment the pan activates, while the drawer is still
+  // covered — the list re-renders from live data before the reveal shows it.
+  const refreshTaskList = useCallback(() => setListRefreshTick((tick) => tick + 1), []);
   const controls = useMemo(
     () => ({ openTaskDrawer, closeTaskDrawer }),
     [closeTaskDrawer, openTaskDrawer],
@@ -130,6 +145,7 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
             <TaskDrawerContent
               drawerWidth={drawerWidth}
               open={open}
+              refreshTick={listRefreshTick}
               selectedSessionId={selectedSessionId}
               onClose={closeTaskDrawer}
             />
@@ -137,6 +153,7 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
           swipeEdgeWidth={width}
           swipeEnabled={swipeEnabled}
           onClose={closeTaskDrawer}
+          onGestureStart={refreshTaskList}
           onOpen={openTaskDrawer}>
           <DrawerCard>{children}</DrawerCard>
         </Drawer>
@@ -177,11 +194,13 @@ export function useTaskDrawer(): TaskDrawerContextValue {
 function TaskDrawerContent({
   drawerWidth,
   open,
+  refreshTick,
   selectedSessionId,
   onClose,
 }: {
   drawerWidth: number;
   open: boolean;
+  refreshTick: number;
   selectedSessionId: string | null;
   onClose: () => void;
 }) {
@@ -217,13 +236,16 @@ function TaskDrawerContent({
   }, [open]);
   // The drawer stays mounted while closed, and stream commits rewrite
   // taskState several times a second. Render the list from a snapshot taken
-  // while open so those commits cost nothing until the drawer reopens.
+  // while open — or the moment a swipe starts — so those commits cost nothing
+  // while hidden yet the list is already current as the drawer peels back.
   const frameRef = useRef({
     data: taskState.data,
     runtimes: runtime.runtimes,
     selectedSessionId,
   });
-  if (open) {
+  const lastRefreshTick = useRef(refreshTick);
+  if (open || refreshTick !== lastRefreshTick.current) {
+    lastRefreshTick.current = refreshTick;
     frameRef.current = {
       data: taskState.data,
       runtimes: runtime.runtimes,
@@ -256,6 +278,42 @@ function TaskDrawerContent({
     [frame.data, visibleSessions],
   );
   const rows = useMemo(() => drawerRows(sections), [sections]);
+  const notice = useConnectionNotice();
+  const reducedMotion = useReducedMotion();
+  const hasRows = rows.length > 0;
+  // TaskListEmpty renders nothing while a notice is explaining the wait, so
+  // the empty layer only has content to fade when no notice is blocking it.
+  const emptyShown = !hasRows && !(notice && notice.kind !== 'restored');
+  // The list rests at full opacity in every state so the banner and the
+  // pull-to-refresh spinner stay live while empty; it only dips to 0 for the
+  // beat between the empty state fading out and the fresh rows fading in.
+  const listOpacity = useSharedValue(1);
+  const emptyOpacity = useSharedValue(emptyShown ? 1 : 0);
+  const listFadeStyle = useAnimatedStyle(() => ({ opacity: listOpacity.value }));
+  const emptyFadeStyle = useAnimatedStyle(() => ({ opacity: emptyOpacity.value }));
+  const fadeState = useRef({ emptyShown, hasRows });
+  useLayoutEffect(() => {
+    const prev = fadeState.current;
+    if (prev.hasRows === hasRows && prev.emptyShown === emptyShown) return;
+    const revealed = hasRows && !prev.hasRows;
+    fadeState.current = { emptyShown, hasRows };
+    if (reducedMotion) {
+      listOpacity.value = 1;
+      emptyOpacity.value = emptyShown ? 1 : 0;
+      return;
+    }
+    if (revealed) {
+      // Swap, don't pop: the empty state fades out, then the list fades in.
+      // Setting opacity here in the layout effect beats the first paint of
+      // the new rows, so they never flash before the fade starts.
+      listOpacity.value = 0;
+      emptyOpacity.value = withTiming(0, { duration: 140 });
+      listOpacity.value = withDelay(140, withTiming(1, { duration: 220 }));
+      return;
+    }
+    listOpacity.value = 1;
+    emptyOpacity.value = withTiming(emptyShown ? 1 : 0, { duration: 200 });
+  }, [emptyOpacity, emptyShown, hasRows, listOpacity, reducedMotion]);
   const showNewTask = useCallback(() => {
     onClose();
     router.dismissTo('/');
@@ -348,38 +406,51 @@ function TaskDrawerContent({
         <DaemonPill onPress={() => setDaemonPickerOpen(true)} />
       </View>
 
-      <FlashList
-        data={rows}
-        extraData={listExtraData}
-        getItemType={drawerRowType}
-        keyExtractor={drawerRowKey}
-        contentContainerStyle={[
-          styles.listContent,
+      <Animated.View style={[styles.listHost, listFadeStyle]}>
+        <FlashList
+          data={rows}
+          extraData={listExtraData}
+          getItemType={drawerRowType}
+          keyExtractor={drawerRowKey}
+          contentContainerStyle={[
+            styles.listContent,
+            {
+              paddingTop: insets.top + DaemonPickerHeight + 20,
+            },
+            rows.length === 0 && styles.listContentEmpty,
+          ]}
+          refreshControl={(
+            <RefreshControl
+              colors={[theme.textTertiary]}
+              progressViewOffset={insets.top + DaemonPickerHeight + 12}
+              refreshing={refreshing}
+              tintColor={theme.textTertiary}
+              onRefresh={() => void refreshTasks()}
+            />
+          )}
+          renderItem={renderRow}
+          ListHeaderComponent={<ConnectionBanner />}
+          showsVerticalScrollIndicator={false}
+        />
+      </Animated.View>
+
+      <Animated.View
+        pointerEvents={hasRows ? 'none' : 'box-none'}
+        style={[
+          styles.emptyOverlay,
           {
+            paddingBottom: insets.bottom + 90,
             paddingTop: insets.top + DaemonPickerHeight + 20,
           },
-          rows.length === 0 && styles.listContentEmpty,
-        ]}
-        refreshControl={(
-          <RefreshControl
-            colors={[theme.textTertiary]}
-            progressViewOffset={insets.top + DaemonPickerHeight + 12}
-            refreshing={refreshing}
-            tintColor={theme.textTertiary}
-            onRefresh={() => void refreshTasks()}
-          />
-        )}
-        renderItem={renderRow}
-        ListHeaderComponent={<ConnectionBanner />}
-        ListEmptyComponent={(
-          <TaskListEmpty
-            error={taskState.error}
-            searching={Boolean(search.trim())}
-            onNewTask={showNewTask}
-          />
-        )}
-        showsVerticalScrollIndicator={false}
-      />
+          emptyFadeStyle,
+        ]}>
+        <TaskListEmpty
+          error={taskState.error}
+          notice={notice}
+          searching={Boolean(search.trim())}
+          onNewTask={showNewTask}
+        />
+      </Animated.View>
 
       {(daemon.profiles.length > 0 || daemon.phase === 'booting') && (
         <KeyboardAvoidingView
@@ -494,16 +565,17 @@ function DaemonPill({ onPress }: { onPress: () => void }) {
 
 function TaskListEmpty({
   error,
+  notice,
   searching,
   onNewTask,
 }: {
   error: unknown;
+  notice: ConnectionNotice | null;
   searching: boolean;
   onNewTask: () => void;
 }) {
   const theme = useTheme();
   const { phase } = useDaemon();
-  const notice = useConnectionNotice();
   // The banner above the list is already explaining the wait.
   if (notice && notice.kind !== 'restored') return null;
   if (phase === 'booting' || phase === 'connecting' || phase === 'reconnecting') {
@@ -698,6 +770,14 @@ const styles = StyleSheet.create({
   daemonButtonText: { flexShrink: 1, fontSize: 14, fontWeight: '600' },
   listContent: { paddingBottom: 96 },
   listContentEmpty: { flexGrow: 1 },
+  listHost: { flex: 1 },
+  emptyOverlay: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '500',
