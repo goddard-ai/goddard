@@ -62,11 +62,12 @@ use crate::ui::tooltip::Tooltip;
 use crate::browser::BrowserView;
 use crate::persistence::{
     ArchiveNavigation, CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand,
-    CustomCommandIcon, DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_RIGHT_PANEL_WIDTH,
-    DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource, PersistedFullscreenSurface,
-    PersistedListOffset, PersistedNavigationLocation, PersistedRightPanelState,
-    PersistedRightPanelSurface, PersistedSettingsPage, PersistedState, PersistedWindowState,
-    RecentModelUse, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
+    CustomCommandIcon, DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_GIT_PANEL_WIDTH,
+    DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource,
+    PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
+    PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
+    PersistedWindowState, RecentModelUse, SidebarGrouping, SidebarOrdering, StateStore,
+    TerminalLinkModifier,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -2536,6 +2537,9 @@ pub struct Waku {
     /// The Git panel shares the right panel's slot and never shows with it:
     /// opening one dismisses the other. See `git_panel.rs`.
     git_panel_visible: bool,
+    /// The Git panel's own remembered slot width — it shares the slot, not
+    /// the right panel's width. Seeded from `right_panel_width` on upgrade.
+    git_panel_width: f32,
     /// The persisted height of the panel's top region — commit box or open
     /// commit's file tree — before the frame's viewport clamp applies.
     git_panel_top_height: f32,
@@ -4373,6 +4377,12 @@ impl Waku {
             RIGHT_PANEL_MIN_WIDTH,
             RIGHT_PANEL_MAX_WIDTH,
         );
+        let git_panel_width = sanitize_panel_width(
+            state.git_panel_width,
+            DEFAULT_GIT_PANEL_WIDTH,
+            RIGHT_PANEL_MIN_WIDTH,
+            RIGHT_PANEL_MAX_WIDTH,
+        );
         let git_panel_top_height = sanitize_panel_width(
             state.git_panel_top_height,
             DEFAULT_GIT_PANEL_TOP_HEIGHT,
@@ -4381,6 +4391,7 @@ impl Waku {
         );
         state.sidebar_width = sidebar_width;
         state.right_panel_width = right_panel_width;
+        state.git_panel_width = git_panel_width;
         state.git_panel_top_height = git_panel_top_height;
         // First launch has no persisted frame yet; seed from the freshly
         // opened window so an immediate zoom or fullscreen still has a
@@ -5691,6 +5702,7 @@ impl Waku {
                 right_panel_visible,
                 right_panel_width,
                 git_panel_visible,
+                git_panel_width,
                 git_panel_top_height,
                 git_panel: None,
                 git_panel_operation: None,
@@ -5729,7 +5741,9 @@ impl Waku {
                 sidebar_slide: None,
                 right_panel_slide: None,
                 sidebar_rendered_width: if sidebar_visible { sidebar_width } else { 0.0 },
-                right_panel_rendered_width: if right_panel_visible || git_panel_visible {
+                right_panel_rendered_width: if git_panel_visible {
+                    git_panel_width
+                } else if right_panel_visible {
                     right_panel_width
                 } else {
                     0.0
@@ -5744,7 +5758,9 @@ impl Waku {
                 sidebar_dock_motion: Cell::new(SidebarDockMotion::Hidden),
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
-                panel_fullscreen_rendered_width: if right_panel_visible || git_panel_visible {
+                panel_fullscreen_rendered_width: if git_panel_visible {
+                    git_panel_width
+                } else if right_panel_visible {
                     right_panel_width
                 } else {
                     0.0

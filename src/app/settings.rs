@@ -785,7 +785,7 @@ impl Waku {
             true,
             self.right_panel_visible || self.git_panel_visible || self.right_panel_slide.is_some(),
             self.sidebar_width,
-            self.right_panel_width,
+            self.right_panel_slot_width(),
         )
         .0
     }

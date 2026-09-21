@@ -1,0 +1,1 @@
+- The Git panel now remembers its own width separately from the right panel — resizing one no longer moves the other, and swapping between them slides between their widths

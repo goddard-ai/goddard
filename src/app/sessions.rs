@@ -2503,6 +2503,7 @@ impl Waku {
         self.state.git_panel_visible = self.git_panel_visible;
         self.state.sidebar_width = self.sidebar_width;
         self.state.right_panel_width = self.right_panel_width;
+        self.state.git_panel_width = self.git_panel_width;
         self.state.git_panel_top_height = self.git_panel_top_height;
         self.save();
     }
@@ -2546,7 +2547,7 @@ impl Waku {
             self.sidebar_visible || self.sidebar_slide.is_some(),
             self.right_panel_visible || self.git_panel_visible || self.right_panel_slide.is_some(),
             self.sidebar_width,
-            self.right_panel_width,
+            self.right_panel_slot_width(),
         )
     }
 
@@ -2575,7 +2576,7 @@ impl Waku {
             }
             PanelResizeTarget::RightPanel => {
                 self.right_panel_slide = None;
-                self.right_panel_width = right_panel_width;
+                *self.right_panel_slot_width_mut() = right_panel_width;
                 right_panel_width
             }
             PanelResizeTarget::FileTree => {
@@ -2632,10 +2633,11 @@ impl Waku {
                     .min(viewport_width - MAIN_PANEL_MIN_WIDTH - sidebar_width)
                     .max(RIGHT_PANEL_MIN_WIDTH);
                 let width = (drag.start_size - delta).clamp(RIGHT_PANEL_MIN_WIDTH, maximum);
-                if (self.right_panel_width - width).abs() < 0.5 {
+                let stored = self.right_panel_slot_width_mut();
+                if (*stored - width).abs() < 0.5 {
                     return;
                 }
-                self.right_panel_width = width;
+                *stored = width;
             }
             PanelResizeTarget::FileTree => {
                 let maximum = FILE_TREE_MAX_WIDTH

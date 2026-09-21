@@ -1,10 +1,10 @@
 //! The Git panel: a working-tree surface that shares the right panel's slot.
 //!
 //! The panels are alternatives, not tabs — opening one dismisses the other,
-//! and the Git panel reuses the right panel's width, slide, and resize
-//! affordances. Every Git read and mutation runs on the daemon through
-//! workspace requests on the background executor; render only ever reads the
-//! state those requests landed.
+//! and the Git panel reuses the right panel's slide and resize affordances
+//! while remembering its own width. Every Git read and mutation runs on the
+//! daemon through workspace requests on the background executor; render
+//! only ever reads the state those requests landed.
 
 use std::rc::Rc;
 
@@ -512,8 +512,8 @@ impl Waku {
     }
 
     /// Show or hide the Git panel. It shares the right panel's slot, so the
-    /// two are never visible at once and the slot's width and slide carry
-    /// straight across a swap.
+    /// two are never visible at once and the slide carries straight across
+    /// a swap — between the panels' own remembered widths.
     pub(super) fn set_git_panel_visible(
         &mut self,
         visible: bool,
@@ -563,9 +563,29 @@ impl Waku {
     }
 
     /// Whether the right-side slot is occupied by either panel — used by the
-    /// header's traffic-light controls and the shared width math.
+    /// header's traffic-light controls and the slot's width math.
     pub(super) fn right_panel_slot_visible(&self) -> bool {
         self.right_panel_visible || self.git_panel_visible
+    }
+
+    /// The remembered width of whichever panel owns the slot — the Git
+    /// panel's is its own, so a swap slides between the two widths.
+    pub(super) fn right_panel_slot_width(&self) -> f32 {
+        if self.git_panel_visible {
+            self.git_panel_width
+        } else {
+            self.right_panel_width
+        }
+    }
+
+    /// The mutable half of [`Waku::right_panel_slot_width`] — resize drags
+    /// write through it.
+    pub(super) fn right_panel_slot_width_mut(&mut self) -> &mut f32 {
+        if self.git_panel_visible {
+            &mut self.git_panel_width
+        } else {
+            &mut self.right_panel_width
+        }
     }
 
     /// Build the panel state for the selected session's workspace and start
@@ -2883,7 +2903,7 @@ impl Waku {
         column = column.child(self.render_git_panel_body(column_width, cx));
         // With a commit open this handle lands on the divider between the
         // diff column and the file tree instead of the slot's outer edge;
-        // either way it drags the same fitted panel width.
+        // either way it drags the Git panel's own fitted width.
         column = column.child(self.render_panel_resize_handle(
             "git-panel-resize-handle",
             PanelResizeTarget::RightPanel,

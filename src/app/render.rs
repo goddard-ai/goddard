@@ -871,7 +871,8 @@ impl Render for Waku {
                         // never mounted in two places at once.
                         // The Git panel and the right panel are alternatives
                         // in the same slot — the flag decides which pane is
-                        // mounted; the slot's width and slide are shared.
+                        // mounted; the slide is shared, the width each
+                        // panel's own.
                         .when(!panels.panel_fullscreen, |element| {
                             let pane = if self.git_panel_visible {
                                 self.git_panel_pane.clone()

@@ -38,6 +38,9 @@ const APP_STATE_VERSION: u32 = 1;
 
 pub const DEFAULT_SIDEBAR_WIDTH: f32 = 252.0;
 pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
+/// The Git panel remembers its own width separately; its default matches
+/// the shared slot's.
+pub const DEFAULT_GIT_PANEL_WIDTH: f32 = DEFAULT_RIGHT_PANEL_WIDTH;
 pub const DEFAULT_GIT_PANEL_TOP_HEIGHT: f32 = 280.0;
 
 /// How the desktop groups task history in the sidebar.
@@ -280,6 +283,10 @@ fn default_sidebar_width() -> f32 {
 
 fn default_right_panel_width() -> f32 {
     DEFAULT_RIGHT_PANEL_WIDTH
+}
+
+fn default_git_panel_width() -> f32 {
+    DEFAULT_GIT_PANEL_WIDTH
 }
 
 fn default_git_panel_top_height() -> f32 {
@@ -1095,6 +1102,10 @@ struct AppState {
     sidebar_ordering: SidebarOrdering,
     #[serde(default = "default_right_panel_width")]
     right_panel_width: f32,
+    /// `None` on state files written before the Git panel remembered its
+    /// own width — the shared `right_panel_width` was serving as it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    git_panel_width: Option<f32>,
     /// Whether markdown files in the right panel open as a rendered preview
     /// instead of source. One global mode, not per file.
     #[serde(default)]
@@ -1361,6 +1372,10 @@ pub struct PersistedState {
     pub sidebar_ordering: SidebarOrdering,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
+    /// The Git panel shares the right panel's slot but remembers its own
+    /// width.
+    #[serde(default = "default_git_panel_width")]
+    pub git_panel_width: f32,
     /// Height of the Git panel's top region — the commit box, or an open
     /// commit's file tree — split from the commit log by a drag handle.
     #[serde(default = "default_git_panel_top_height")]
@@ -1571,6 +1586,7 @@ impl PersistedState {
             sidebar_grouping: SidebarGrouping::Date,
             sidebar_ordering: SidebarOrdering::LastUpdated,
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
+            git_panel_width: DEFAULT_GIT_PANEL_WIDTH,
             git_panel_top_height: DEFAULT_GIT_PANEL_TOP_HEIGHT,
             markdown_preview: false,
             window_state: None,
@@ -1931,6 +1947,7 @@ impl PersistedState {
             sidebar_grouping: self.sidebar_grouping,
             sidebar_ordering: self.sidebar_ordering,
             right_panel_width: self.right_panel_width,
+            git_panel_width: Some(self.git_panel_width),
             markdown_preview: self.markdown_preview,
             window_state: self.window_state,
             navigation_back: self.navigation_back.clone(),
@@ -2037,6 +2054,12 @@ impl PersistedState {
         self.sidebar_grouping = app_state.sidebar_grouping;
         self.sidebar_ordering = app_state.sidebar_ordering;
         self.right_panel_width = app_state.right_panel_width;
+        // Pre-split state files have no Git panel width of their own; the
+        // shared width they kept was serving as it, so it seeds the first
+        // launch under the new field.
+        self.git_panel_width = app_state
+            .git_panel_width
+            .unwrap_or(app_state.right_panel_width);
         self.markdown_preview = app_state.markdown_preview;
         self.window_state = app_state.window_state;
         self.navigation_back = app_state.navigation_back;
@@ -3504,6 +3527,27 @@ mod tests {
             restored.remembered_base_branch(project_id),
             Some("main".to_owned())
         );
+    }
+
+    #[test]
+    fn git_panel_width_seeds_from_a_pre_split_app_state() {
+        let mut state = PersistedState::empty();
+        state.right_panel_width = 640.0;
+        state.git_panel_width = 320.0;
+
+        // A state file written before `git_panel_width` existed carried
+        // only the shared slot width; it seeds the panel's own memory.
+        let mut app_state = serde_json::to_value(state.app_state()).unwrap();
+        app_state.as_object_mut().unwrap().remove("git_panel_width");
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+        assert_eq!(restored.git_panel_width, 640.0);
+
+        // Once present it round-trips on its own.
+        let app_state = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+        assert_eq!(restored.git_panel_width, 320.0);
     }
 
     #[test]
