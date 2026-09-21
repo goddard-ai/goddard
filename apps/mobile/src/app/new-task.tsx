@@ -11,13 +11,12 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppSymbol } from '@/components/app-symbol';
@@ -42,6 +41,7 @@ import { Sheet, SheetRow } from '@/components/sheet';
 import { Radius, Spacing } from '@/constants/theme';
 import { useAllProviderModels, useProviderCatalog, useTaskState } from '@/hooks/use-daemon-data';
 import { useComposerPicker } from '@/hooks/use-composer-picker';
+import { useKeyboardPadding } from '@/hooks/use-keyboard-padding';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useTheme } from '@/hooks/use-theme';
 import { daemonKeys, inspectBranches } from '@/lib/daemon-api';
@@ -371,10 +371,11 @@ export default function NewTaskScreen() {
   const startDisabled = !selectedProject || !provider
     || (!prompt.trim() && !draftSync.currentAnnotations().length) || submitting;
 
+  const keyboardPadding = useKeyboardPadding();
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={[styles.screen, { backgroundColor: theme.background }]}>
+    <Animated.View
+      style={[styles.screen, { backgroundColor: theme.background }, keyboardPadding]}>
       {/* Title and back button are the native navigation bar's; keep clear of it. */}
       <View style={{ height: headerInset }} />
       <View style={styles.spacer} />
@@ -569,7 +570,7 @@ export default function NewTaskScreen() {
       />
       {localCommands.sheets}
       <ComposerContextPicker {...contextPicker.picker} />
-    </KeyboardAvoidingView>
+    </Animated.View>
   );
 }
 

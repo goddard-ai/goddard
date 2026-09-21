@@ -10,12 +10,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { ActivitySheetHost } from '@/components/activity-sheet';
 import { ConnectionBanner } from '@/components/connection-banner';
@@ -45,6 +45,7 @@ import {
 } from '@/components/transcript-list';
 import { SessionEmpty } from '@/components/transcript-rows';
 import { useProviderModels, useSession, useTaskState } from '@/hooks/use-daemon-data';
+import { useKeyboardPadding } from '@/hooks/use-keyboard-padding';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
 import { sessionBusy } from '@/lib/mobile-runtime';
@@ -385,10 +386,11 @@ export function SessionView({
     };
   }, [handleTaskMenuCommand, hasSession, modelIcon, modelLabel, openTaskDrawer, subtitle, taskMenuActions, title]);
 
+  const keyboardPadding = useKeyboardPadding();
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={[styles.screen, { backgroundColor: theme.background }]}>
+    <Animated.View
+      style={[styles.screen, { backgroundColor: theme.background }, keyboardPadding]}>
       <Stack.Screen options={headerOptions} />
       <View style={styles.body}>
         {session && transcriptMounted ? (
@@ -458,7 +460,7 @@ export function SessionView({
           visible={renaming}
         />
       )}
-    </KeyboardAvoidingView>
+    </Animated.View>
   );
 }
 

@@ -1,0 +1,1 @@
+- Fix the mobile chat composer snapping into place instead of sliding with the keyboard: the session and new-task screens now drive bottom padding from Reanimated's keyboard observer on the UI thread, so the composer tracks the keyboard's real animation and follows the transcript's interactive swipe-to-dismiss
