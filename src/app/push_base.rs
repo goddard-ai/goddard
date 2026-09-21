@@ -88,35 +88,49 @@ impl Waku {
         }) {
             return LandedPush::Pushing;
         }
+        match self.base_push_state_for(workspace, base, cx) {
+            Some(BasePushState {
+                upstream: Some(upstream),
+                ahead,
+                ..
+            }) => {
+                if ahead == Some(0) {
+                    LandedPush::Pushed
+                } else {
+                    LandedPush::Pushable {
+                        workspace: workspace.to_path_buf(),
+                        base: base.to_owned(),
+                        upstream,
+                    }
+                }
+            }
+            _ => LandedPush::Hidden,
+        }
+    }
+
+    /// The cached `BasePushState` read for `base` in `workspace`, shared by
+    /// the landed notice's push button and the draft's sync strip. A miss
+    /// starts the daemon read and reports `None` until it lands — callers
+    /// degrade to showing nothing.
+    pub(super) fn base_push_state_for(
+        &self,
+        workspace: &Path,
+        base: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<BasePushState> {
         let key = (workspace.to_path_buf(), base.to_owned());
         // Bind before matching: the scrutinee's RefMut would otherwise live
         // through the arms, and `Missing` re-borrows the cache to abandon.
         let query = self.base_push_states.borrow_mut().read(&key);
         match query {
-            Query::Ready(result) => match result.as_ref() {
-                Ok(BasePushState {
-                    upstream: Some(upstream),
-                    ahead,
-                }) => {
-                    if *ahead == Some(0) {
-                        LandedPush::Pushed
-                    } else {
-                        LandedPush::Pushable {
-                            workspace: workspace.to_path_buf(),
-                            base: base.to_owned(),
-                            upstream: upstream.clone(),
-                        }
-                    }
-                }
-                _ => LandedPush::Hidden,
-            },
-            Query::Pending => LandedPush::Hidden,
+            Query::Ready(result) => result.as_ref().clone().ok(),
+            Query::Pending => None,
             Query::Missing(token) => {
                 let Some(client) = self.workspace_client_for_path(workspace) else {
                     // Offline remote owner: abandon so the next read retries
                     // once the host reconnects instead of pending forever.
                     self.base_push_states.borrow_mut().abandon(token);
-                    return LandedPush::Hidden;
+                    return None;
                 };
                 let fetch_workspace = workspace.to_path_buf();
                 let fetch_base = base.to_owned();
@@ -143,7 +157,7 @@ impl Waku {
                     });
                 })
                 .detach();
-                LandedPush::Hidden
+                None
             }
         }
     }

@@ -2,8 +2,8 @@
 
 /**
  * A base branch's relationship to its remote tracking branch — what the
- * transcript's landed notice reads to offer its push affordance. A read,
- * not a fetch: `ahead` counts against the last-known remote-tracking ref.
+ * transcript's landed notice and the draft's sync strip read. A read,
+ * not a fetch: the counts run against the last-known remote-tracking ref.
  */
 export type BasePushState = {
 /**
@@ -16,4 +16,9 @@ upstream: string | null,
  * configured but its remote-tracking ref does not resolve locally —
  * unknown, not zero.
  */
-ahead: number | null, };
+ahead: number | null,
+/**
+ * Commits on the upstream the base lacks; the same `None` semantics
+ * as `ahead`.
+ */
+behind?: number | null, };

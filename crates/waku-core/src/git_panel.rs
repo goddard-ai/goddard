@@ -224,22 +224,41 @@ fn branch_upstream(cwd: &Path, branch: &str) -> anyhow::Result<Option<String>> {
     }))
 }
 
-/// The base branch's upstream and the commits it lacks — what the landed
-/// notice's push affordance reads. Local refs only: `ahead` counts against
-/// the last-known remote-tracking ref, never a fetch.
+/// The base branch's upstream and the commits each side lacks — what the
+/// landed notice's push affordance and the draft's sync strip read.
+/// Local refs only: the counts run against the last-known
+/// remote-tracking ref, never a fetch.
 pub fn base_push_state(cwd: &Path, base: &str) -> anyhow::Result<BasePushState> {
     ensure_repository(cwd)?;
     let upstream = branch_upstream(cwd, base)?;
-    let ahead = upstream.as_deref().and_then(|upstream| {
-        git_optional_stdout(
-            cwd,
-            &["rev-list", "--count", &format!("{upstream}..{base}")],
-        )
-        .ok()
-        .flatten()
-        .and_then(|count| count.parse::<u64>().ok())
-    });
-    Ok(BasePushState { upstream, ahead })
+    let (ahead, behind) = upstream
+        .as_deref()
+        .and_then(|upstream| {
+            git_optional_stdout(
+                cwd,
+                &[
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    &format!("{base}...{upstream}"),
+                ],
+            )
+            .ok()
+            .flatten()
+            .and_then(|counts| {
+                let mut sides = counts.split_whitespace();
+                let ahead = sides.next()?.parse::<u64>().ok()?;
+                let behind = sides.next()?.parse::<u64>().ok()?;
+                Some((ahead, behind))
+            })
+        })
+        .map(|(ahead, behind)| (Some(ahead), Some(behind)))
+        .unwrap_or((None, None));
+    Ok(BasePushState {
+        upstream,
+        ahead,
+        behind,
+    })
 }
 
 /// Push `base` to its tracked upstream — the landed notice's follow-up.
@@ -1430,15 +1449,25 @@ mod tests {
     }
 
     #[test]
-    fn base_push_state_reports_the_upstream_and_ahead_count() {
-        let (root, repository, _remote) = remote_repository();
+    fn base_push_state_reports_the_upstream_and_divergence() {
+        let (root, repository, remote) = remote_repository();
         let state = base_push_state(&repository, "main").unwrap();
         assert_eq!(state.upstream.as_deref(), Some("origin/main"));
         assert_eq!(state.ahead, Some(0));
+        assert_eq!(state.behind, Some(0));
 
         commit_in(&repository, "work.txt", "session\n");
         let state = base_push_state(&repository, "main").unwrap();
         assert_eq!(state.ahead, Some(1));
+        assert_eq!(state.behind, Some(0));
+
+        // Another writer moves the upstream: fetched, the base reads
+        // diverged both ways.
+        let _other = remote_writer(&root, &remote);
+        run_git(&repository, &["fetch", "-q", "origin"]);
+        let state = base_push_state(&repository, "main").unwrap();
+        assert_eq!(state.ahead, Some(1));
+        assert_eq!(state.behind, Some(1));
 
         // A branch that tracks nothing reports no upstream; a branch that
         // does not exist reads the same way.

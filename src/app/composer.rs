@@ -5374,11 +5374,12 @@ impl Waku {
     }
 
     /// The new-task sync strip under the centered greeting: how far the
-    /// workspace's checkout trails (and leads) its upstream, plus the button
-    /// that runs `git pull` in a terminal tab. Counts come from the local
-    /// tracking ref, so they reflect the last fetch. Only drafts show it — a
-    /// started task's checkout state is its agent's concern — and only local
-    /// workspaces, whose checkout a desktop terminal can actually reach.
+    /// branch the task will start from trails (and leads) its upstream,
+    /// plus the button that syncs it in a terminal tab. For a local
+    /// workspace that's the checkout's HEAD; for a planned worktree it's
+    /// the base the worktree will be cut from. Counts come from the local
+    /// tracking ref, so they reflect the last fetch. Only drafts show it —
+    /// a started task's checkout state is its agent's concern.
     pub(super) fn render_sync_notice(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.selected_session()?;
         if session.has_started() || session.is_busy() || self.is_remote_session(session.id) {
@@ -5387,10 +5388,41 @@ impl Waku {
         self.selected_project()
             .filter(|project| !project.is_projectless())?;
         let workspace_path = self.workspace_path_for_session(session)?.to_path_buf();
-        let upstream = self
-            .branch_snapshot_for_workspace(&workspace_path, cx)?
-            .upstream
-            .filter(|upstream| upstream.behind > 0 || upstream.ahead > 0)?;
+        let workspace = session.workspace.clone();
+        let snapshot = self.branch_snapshot_for_workspace(&workspace_path, cx)?;
+
+        // A planned worktree runs from the base it is cut from — the picked
+        // branch, else the repo default — never the checkout's HEAD. The
+        // strip reports that base's divergence and names it, so the numbers
+        // never describe a branch the task will not use.
+        let planned_base = match &workspace {
+            SessionWorkspace::NewWorktree { base_branch } => Some(
+                base_branch
+                    .clone()
+                    .or_else(|| snapshot.default_branch.clone())?,
+            ),
+            _ => None,
+        };
+        let base_is_head =
+            planned_base.is_some() && planned_base.as_deref() == snapshot.current.as_deref();
+        let (label, upstream, ahead, behind) = match (planned_base, base_is_head) {
+            (Some(base), false) => {
+                let state = self.base_push_state_for(&workspace_path, &base, cx)?;
+                (
+                    Some(base),
+                    state.upstream?,
+                    state.ahead.unwrap_or(0),
+                    state.behind.unwrap_or(0),
+                )
+            }
+            (planned_base, _) => {
+                let upstream = snapshot.upstream?;
+                (planned_base, upstream.name, upstream.ahead, upstream.behind)
+            }
+        };
+        if ahead == 0 && behind == 0 {
+            return None;
+        }
         let theme = Theme::current(cx);
         // `-c core.editor/sequence.editor` rather than an env prefix: the
         // script is sourced by the user's shell, and `VAR=x cmd` is not
@@ -5400,46 +5432,82 @@ impl Waku {
         } else {
             "git -c core.editor=true -c sequence.editor=true pull --rebase"
         };
-        let behind = upstream.behind > 0;
-        let (script, action, action_icon, strip_icon, command_icon) = if behind {
-            (
-                pull_script,
-                tr!("sync.pull"),
-                "icons/rotate-cw.svg",
-                "icons/download.svg",
-                CustomCommandIcon::Refresh,
-            )
+        let strip_icon = if behind > 0 {
+            "icons/download.svg"
         } else {
-            (
-                "git push",
-                tr!("sync.push"),
-                "icons/cloud-upload.svg",
-                "icons/cloud-upload.svg",
-                CustomCommandIcon::CloudUpload,
-            )
+            "icons/cloud-upload.svg"
         };
+        // `git pull`/`git push` only move the checkout's own HEAD, so a base
+        // checked out nowhere names its ref explicitly: a fetch refspec
+        // fast-forwards it (a non-ff refusal stays on screen), a push
+        // refspec spells it out. A diverged base has no one-shot fix outside
+        // a checkout — same for an upstream that isn't a remote — and the
+        // strip stays informational there.
+        let action: Option<(String, String, &'static str, CustomCommandIcon)> =
+            if label.is_none() || base_is_head {
+                Some(if behind > 0 {
+                    (
+                        pull_script.to_owned(),
+                        tr!("sync.pull"),
+                        "icons/rotate-cw.svg",
+                        CustomCommandIcon::Refresh,
+                    )
+                } else {
+                    (
+                        "git push".to_owned(),
+                        tr!("sync.push"),
+                        "icons/cloud-upload.svg",
+                        CustomCommandIcon::CloudUpload,
+                    )
+                })
+            } else {
+                match (
+                    label.as_deref(),
+                    upstream.split_once('/'),
+                    behind > 0,
+                    ahead > 0,
+                ) {
+                    (Some(base), Some((remote, remote_branch)), true, false) => Some((
+                        format!("git fetch {remote} {remote_branch}:{base}"),
+                        tr!("sync.pull"),
+                        "icons/rotate-cw.svg",
+                        CustomCommandIcon::Refresh,
+                    )),
+                    (Some(base), Some((remote, remote_branch)), false, true) => Some((
+                        format!("git push {remote} {base}:{remote_branch}"),
+                        tr!("sync.push"),
+                        "icons/cloud-upload.svg",
+                        CustomCommandIcon::CloudUpload,
+                    )),
+                    _ => None,
+                }
+            };
         let mut summary = String::new();
-        if upstream.behind == 1 {
-            summary = tr!("sync.behind_one", upstream = upstream.name);
-        } else if upstream.behind > 1 {
+        if behind == 1 {
+            summary = tr!("sync.behind_one", upstream = upstream.clone());
+        } else if behind > 1 {
             summary = tr!(
                 "sync.behind_many",
-                count = upstream.behind,
-                upstream = upstream.name
+                count = behind,
+                upstream = upstream.clone()
             );
         }
-        if upstream.ahead > 0 {
-            let ahead = if upstream.ahead == 1 {
+        if ahead > 0 {
+            let ahead_text = if ahead == 1 {
                 tr!("sync.ahead_one")
             } else {
-                tr!("sync.ahead_many", count = upstream.ahead)
+                tr!("sync.ahead_many", count = ahead)
             };
             summary = if summary.is_empty() {
-                ahead
+                ahead_text
             } else {
-                format!("{summary} · {ahead}")
+                format!("{summary} · {ahead_text}")
             };
         }
+        let summary = match &label {
+            Some(base) => tr!("sync.on_base", base = base.clone(), summary = summary),
+            None => summary,
+        };
         let focus = self.transcript_control_focus("workspace-sync", cx);
         Some(
             div()
@@ -5460,55 +5528,78 @@ impl Waku {
                         .text_color(theme.text_tertiary)
                         .child(summary),
                 )
-                .child(
-                    div()
-                        .id("sync-changes")
-                        .h(px(20.0))
-                        .px(px(8.0))
-                        .rounded(px(5.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(px(5.0))
-                        .cursor_default()
-                        .track_focus(&focus)
-                        .tab_index(0)
-                        .focus_visible(|style| style.bg(theme.focus_highlight()))
-                        .bg(theme.overlay)
-                        .hover(|element| element.bg(theme.overlay_strong))
-                        .active(|element| element.opacity(0.8))
-                        .child(icon(action_icon, 11.0, theme.text_secondary))
-                        .child(action.clone())
-                        .tooltip(Tooltip::text(tr!("sync.command_hint", command = script)))
-                        .on_click(cx.listener({
-                            let action = action.clone();
-                            move |this, _, _, cx| {
-                                this.sync_workspace(script, action.clone(), command_icon, cx);
-                            }
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.sync_workspace(script, action.clone(), command_icon, cx);
-                                cx.stop_propagation();
-                            }
-                        })),
+                .when_some(
+                    action,
+                    |element, (script, action, action_icon, command_icon)| {
+                        element.child(
+                            div()
+                                .id("sync-changes")
+                                .h(px(20.0))
+                                .px(px(8.0))
+                                .rounded(px(5.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(5.0))
+                                .cursor_default()
+                                .track_focus(&focus)
+                                .tab_index(0)
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                .bg(theme.overlay)
+                                .hover(|element| element.bg(theme.overlay_strong))
+                                .active(|element| element.opacity(0.8))
+                                .child(icon(action_icon, 11.0, theme.text_secondary))
+                                .child(action.clone())
+                                .tooltip(Tooltip::text(tr!(
+                                    "sync.command_hint",
+                                    command = script.clone()
+                                )))
+                                .on_click(cx.listener({
+                                    let action = action.clone();
+                                    let script = script.clone();
+                                    move |this, _, _, cx| {
+                                        this.sync_workspace(
+                                            script.clone(),
+                                            action.clone(),
+                                            command_icon,
+                                            cx,
+                                        );
+                                    }
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, _, cx| {
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                        {
+                                            this.sync_workspace(
+                                                script.clone(),
+                                                action.clone(),
+                                                command_icon,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                )),
+                        )
+                    },
                 )
                 .into_any_element(),
         )
     }
 
-    /// Run the checkout's sync command in a fresh terminal tab — the rebase
-    /// pull by default, the merge form when the setting says so, a push when
-    /// the checkout only leads upstream. The tab closes itself on success; a
-    /// conflict or other failure stays open with its output visible.
+    /// Run the strip's sync command in a fresh terminal tab — the rebase
+    /// pull by default, the merge form when the setting says so, a push or
+    /// base fast-forward when the subject only leads upstream. The tab
+    /// closes itself on success; a conflict or other failure stays open
+    /// with its output visible.
     fn sync_workspace(
         &mut self,
-        script: &'static str,
+        script: String,
         name: String,
         icon: CustomCommandIcon,
         cx: &mut Context<Self>,
     ) {
-        let mut command = CustomCommand::new(script.to_owned());
+        let mut command = CustomCommand::new(script);
         command.name = Some(name);
         command.icon = icon;
         command.close_on_success = true;

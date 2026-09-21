@@ -2680,6 +2680,8 @@ sync.push:
   en: Push changes
 sync.command_hint:
   en: "Runs %{command} in a terminal"
+sync.on_base:
+  en: "%{base} · %{summary}"
 
 terminal.starting:
   en: Starting terminal…

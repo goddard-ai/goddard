@@ -254,8 +254,8 @@ pub enum PullOutcome {
 }
 
 /// A base branch's relationship to its remote tracking branch — what the
-/// transcript's landed notice reads to offer its push affordance. A read,
-/// not a fetch: `ahead` counts against the last-known remote-tracking ref.
+/// transcript's landed notice and the draft's sync strip read. A read,
+/// not a fetch: the counts run against the last-known remote-tracking ref.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BasePushState {
@@ -266,6 +266,10 @@ pub struct BasePushState {
     /// configured but its remote-tracking ref does not resolve locally —
     /// unknown, not zero.
     pub ahead: Option<u64>,
+    /// Commits on the upstream the base lacks; the same `None` semantics
+    /// as `ahead`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u64>,
 }
 
 /// How a `PushBase` operation ended. `base` and `upstream` echo the
