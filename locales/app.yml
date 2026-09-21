@@ -776,6 +776,12 @@ status_markers.failed:
   en: Failed
 status_markers.drifted:
   en: Drifted
+status_markers.needs_review:
+  en: Needs review
+status_markers.thrash:
+  en: Thrashing
+status_markers.assumed:
+  en: Assumed
 routing.backend:
   en: Evaluation backend
 routing.backend_description:

@@ -2331,12 +2331,15 @@ sidebar.automations: 自动化
 sidebar.inbox: 收件箱
 sidebar.needs_auth: 需要密码
 sidebar.offline: 离线
+status_markers.assumed: 按假设执行
 status_markers.awaiting_input: 等待输入
 status_markers.blocked: 受阻
 status_markers.complete: 已完成
 status_markers.drifted: 已偏离
 status_markers.failed: 失败
+status_markers.needs_review: 待复核
 status_markers.partial: 部分完成
+status_markers.thrash: 反复试错
 status_markers.unverified: 未验证
 sync_branch.busy: 另一个 Git 操作仍在运行
 sync_branch.current: 当前分支

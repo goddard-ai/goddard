@@ -2381,12 +2381,15 @@ sidebar.automations: オートメーション
 sidebar.inbox: 受信トレイ
 sidebar.needs_auth: パスワードが必要
 sidebar.offline: オフライン
+status_markers.assumed: 仮定で実行
 status_markers.awaiting_input: 入力待ち
 status_markers.blocked: ブロック中
 status_markers.complete: 完了
 status_markers.drifted: 脱線
 status_markers.failed: 失敗
+status_markers.needs_review: 要レビュー
 status_markers.partial: 一部完了
+status_markers.thrash: 空回り
 status_markers.unverified: 未検証
 sync_branch.busy: 別の Git 操作がまだ実行中です
 sync_branch.current: 現在のブランチ
