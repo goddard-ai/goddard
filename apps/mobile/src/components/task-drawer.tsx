@@ -235,17 +235,29 @@ function TaskDrawerContent({
     };
   }, [open]);
   // The drawer stays mounted while closed, and stream commits rewrite
-  // taskState several times a second. Render the list from a snapshot taken
-  // while open — or the moment a swipe starts — so those commits cost nothing
-  // while hidden yet the list is already current as the drawer peels back.
+  // taskState several times a second. Render the list from a snapshot instead
+  // of the live query so those commits cost nothing while hidden — but keep
+  // the snapshot fresh anyway: once a burst settles (~300ms quiet), refresh
+  // in the background, and a swipe refreshes the instant it starts, so the
+  // list is already current as the drawer peels back.
+  const [settleTick, setSettleTick] = useState(0);
+  useEffect(() => {
+    if (open) return;
+    const timer = setTimeout(() => setSettleTick((tick) => tick + 1), 300);
+    return () => clearTimeout(timer);
+  }, [open, taskState.data, runtime.runtimes, selectedSessionId]);
   const frameRef = useRef({
     data: taskState.data,
     runtimes: runtime.runtimes,
     selectedSessionId,
   });
-  const lastRefreshTick = useRef(refreshTick);
-  if (open || refreshTick !== lastRefreshTick.current) {
-    lastRefreshTick.current = refreshTick;
+  const lastRefresh = useRef({ gesture: refreshTick, settle: 0 });
+  if (
+    open
+    || refreshTick !== lastRefresh.current.gesture
+    || settleTick !== lastRefresh.current.settle
+  ) {
+    lastRefresh.current = { gesture: refreshTick, settle: settleTick };
     frameRef.current = {
       data: taskState.data,
       runtimes: runtime.runtimes,
