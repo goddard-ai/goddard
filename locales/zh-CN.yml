@@ -1784,20 +1784,24 @@ daemon.remote_host_add: 添加主机
 daemon.remote_host_address: 地址
 daemon.remote_host_address_description: 守护进程的 WebSocket URL，或用于未加密连接的 host:port。
 daemon.remote_host_address_placeholder: ws://host.example.com:34123
+daemon.remote_host_direct_required: 请输入地址和令牌。
 daemon.remote_host_edit: 编辑远程主机
 daemon.remote_host_name: 名称
 daemon.remote_host_name_description: 主机的标签。留空时使用地址。
 daemon.remote_host_name_placeholder: build-server
 daemon.remote_host_new: 新建远程主机
 daemon.remote_host_remove: 移除主机
-daemon.remote_host_required: 请输入 SSH 目标，或同时输入地址和令牌。
 daemon.remote_host_save: 保存主机
 daemon.remote_host_ssh: SSH 目标
-daemon.remote_host_ssh_description: 改为通过 SSH 连接 — user@host 目标或 ~/.ssh/config 中的 Host 别名。Goddard 会自动部署并转发守护进程，无需地址和令牌。
+daemon.remote_host_ssh_description: user@host 目标或 ~/.ssh/config 中的 Host 别名。Goddard 会自动部署并转发守护进程。
 daemon.remote_host_ssh_placeholder: user@host 或 ssh config 别名
+daemon.remote_host_ssh_required: 请输入 SSH 目标。
 daemon.remote_host_token: 令牌
 daemon.remote_host_token_description: 该守护进程连接信息中的 bearer 令牌。
 daemon.remote_host_token_placeholder: 粘贴守护进程令牌
+daemon.remote_host_transport: 连接方式
+daemon.remote_host_transport_direct: WebSocket
+daemon.remote_host_transport_ssh: SSH
 daemon.remote_hosts_description: 连接到其他机器上运行的守护进程。它们的项目和任务会与本地的一起显示，在其上的工作会路由到所属的守护进程。
 daemon.remote_hosts_title: 远程主机
 daemon.remote_unreachable: 该主机未连接

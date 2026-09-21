@@ -1834,20 +1834,24 @@ daemon.remote_host_add: ホストを追加
 daemon.remote_host_address: アドレス
 daemon.remote_host_address_description: デーモンの WebSocket URL、または暗号化なしソケット用の host:port です。
 daemon.remote_host_address_placeholder: ws://host.example.com:34123
+daemon.remote_host_direct_required: アドレスとトークンの両方を入力してください。
 daemon.remote_host_edit: リモートホストを編集
 daemon.remote_host_name: 名前
 daemon.remote_host_name_description: ホストのラベルです。空欄の場合はアドレスが使われます。
 daemon.remote_host_name_placeholder: build-server
 daemon.remote_host_new: 新しいリモートホスト
 daemon.remote_host_remove: ホストを削除
-daemon.remote_host_required: SSH 接続先、またはアドレスとトークンの両方を入力してください。
 daemon.remote_host_save: ホストを保存
 daemon.remote_host_ssh: SSH 接続先
-daemon.remote_host_ssh_description: 代わりに SSH 経由で接続します — user@host の宛先または ~/.ssh/config の Host エイリアス。Goddard がデーモンをプロビジョニングして転送するため、アドレスとトークンは不要です。
+daemon.remote_host_ssh_description: user@host の宛先または ~/.ssh/config の Host エイリアス。Goddard がデーモンをプロビジョニングして転送します。
 daemon.remote_host_ssh_placeholder: user@host または ssh config のエイリアス
+daemon.remote_host_ssh_required: SSH 接続先を入力してください。
 daemon.remote_host_token: トークン
 daemon.remote_host_token_description: そのデーモンの接続情報にある bearer トークンです。
 daemon.remote_host_token_placeholder: デーモントークンをペースト
+daemon.remote_host_transport: 接続方法
+daemon.remote_host_transport_direct: WebSocket
+daemon.remote_host_transport_ssh: SSH
 daemon.remote_hosts_description: 他のマシンで動作しているデーモンに接続します。それらのプロジェクトとタスクはローカルのものと並んで表示され、作業は所有するデーモンに振り分けられます。
 daemon.remote_hosts_title: リモートホスト
 daemon.remote_unreachable: そのホストには接続されていません

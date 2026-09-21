@@ -195,25 +195,37 @@ pub(super) struct IntegrationEditor {
     api_key: Option<Entity<TextInput>>,
 }
 
+/// How the editor reaches the host: over the platform `ssh` with
+/// provisioning and a forwarded socket, or a direct WebSocket to an
+/// already-running daemon. Non-unix builds only offer `Direct`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RemoteHostTransport {
+    Ssh,
+    Direct,
+}
+
 /// The Daemon settings page's open remote-host form. Input entities live for
 /// the editor's lifetime rather than being pre-created with the other
 /// settings fields.
 pub(super) struct RemoteHostEditor {
     /// `Some` when re-pointing an existing record; `None` adds a host.
     pub(super) id: Option<Uuid>,
+    /// Which field group is active — `Ssh` uses `destination`, `Direct`
+    /// uses `address`/`token`. Always `Direct` off unix.
+    transport: RemoteHostTransport,
     name: Entity<TextInput>,
     address: Entity<TextInput>,
     token: Entity<TextInput>,
-    /// `user@host` or a `~/.ssh/config` alias. When filled, the connection
-    /// goes over the platform `ssh` and the direct fields are unused.
+    /// `user@host` or a `~/.ssh/config` alias — the SSH transport's only
+    /// required field.
     destination: Entity<TextInput>,
     /// Eye-toggle state for the masked token field.
     token_revealed: bool,
     /// `Host` aliases from `~/.ssh/config`, loaded in the background after
     /// the editor opens; each chips-row entry fills the destination field.
     ssh_hosts: Vec<String>,
-    /// Set when Save was pressed without an SSH destination and without a
-    /// complete direct address + token pair.
+    /// Set when Save was pressed with the active transport's required
+    /// fields incomplete.
     missing_fields: bool,
 }
 
@@ -2398,6 +2410,16 @@ impl Waku {
         });
         self.remote_host_editor = Some(RemoteHostEditor {
             id: host,
+            // SSH is the self-provisioning default on unix; a record with no
+            // destination is a direct host. Other platforms only do direct.
+            transport: if cfg!(unix) {
+                match record {
+                    Some(record) if record.ssh_destination.is_none() => RemoteHostTransport::Direct,
+                    _ => RemoteHostTransport::Ssh,
+                }
+            } else {
+                RemoteHostTransport::Direct
+            },
             name: name.clone(),
             address,
             token,
@@ -2441,9 +2463,19 @@ impl Waku {
             return;
         };
         let name = editor.name.read(cx).content().trim().to_owned();
-        let address = editor.address.read(cx).content().trim().to_owned();
-        let token = editor.token.read(cx).content().trim().to_owned();
-        let destination = editor.destination.read(cx).content().trim().to_owned();
+        // Only the active transport's fields apply; the picker hid the rest.
+        let (address, token, destination) = match editor.transport {
+            RemoteHostTransport::Ssh => (
+                String::new(),
+                String::new(),
+                editor.destination.read(cx).content().trim().to_owned(),
+            ),
+            RemoteHostTransport::Direct => (
+                editor.address.read(cx).content().trim().to_owned(),
+                editor.token.read(cx).content().trim().to_owned(),
+                String::new(),
+            ),
+        };
         // An SSH destination is self-contained: the daemon and its token are
         // provisioned on the remote. A direct connection needs both fields.
         if destination.is_empty() && (address.is_empty() || token.is_empty()) {
@@ -2459,11 +2491,6 @@ impl Waku {
             }
         } else {
             name
-        };
-        let (address, token) = if destination.is_empty() {
-            (address, token)
-        } else {
-            (String::new(), String::new())
         };
         let destination = (!destination.is_empty()).then_some(destination);
         if let Some(id) = editor.id {
@@ -4110,6 +4137,19 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         let editing = editor.id.is_some();
+        let ssh = editor.transport == RemoteHostTransport::Ssh;
+        let ssh_button = self.remote_host_transport_button(
+            RemoteHostTransport::Ssh,
+            editor.transport,
+            theme,
+            cx,
+        );
+        let direct_button = self.remote_host_transport_button(
+            RemoteHostTransport::Direct,
+            editor.transport,
+            theme,
+            cx,
+        );
         let field_label = |text: String| {
             div()
                 .mt(px(12.0))
@@ -4193,78 +4233,106 @@ impl Waku {
                         tr!("daemon.remote_host_new")
                     }),
             )
+            // The transport picker is the field group's switch — off unix
+            // there is only WebSocket, so the row is omitted entirely.
+            .when(cfg!(unix), |element| {
+                element
+                    .child(field_label(tr!("daemon.remote_host_transport")))
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .self_start()
+                            .flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .rounded(px(8.0))
+                            .p(px(2.0))
+                            .bg(theme.inset)
+                            .child(ssh_button)
+                            .child(direct_button),
+                    )
+            })
             .child(field_label(tr!("daemon.remote_host_name")))
             .child(
                 div()
                     .mt(px(5.0))
                     .child(TextField::new("remote-host-name", editor.name.clone()).w_full()),
             )
-            .child(field_label(tr!("daemon.remote_host_ssh")))
-            .child(
-                div()
-                    .mt(px(5.0))
-                    .child(TextField::new("remote-host-ssh", editor.destination.clone()).w_full()),
-            )
-            .child(
-                div()
-                    .mt(px(5.0))
-                    .whitespace_normal()
-                    .text_size(sp(12.0))
-                    .line_height(sp(15.0))
-                    .text_color(theme.text_tertiary)
-                    .child(tr!("daemon.remote_host_ssh_description")),
-            )
-            .when(!editor.ssh_hosts.is_empty(), |element| {
-                element.child(div().mt(px(7.0)).flex().flex_wrap().gap(px(4.0)).children(
-                    editor.ssh_hosts.iter().map(|alias| {
-                        let alias = alias.clone();
-                        let destination = editor.destination.clone();
+            .when(ssh, |element| {
+                element
+                    .child(field_label(tr!("daemon.remote_host_ssh")))
+                    .child(div().mt(px(5.0)).child(
+                        TextField::new("remote-host-ssh", editor.destination.clone()).w_full(),
+                    ))
+                    .child(
                         div()
-                            .id(SharedString::from(format!("ssh-host-{alias}")))
-                            .tab_index(0)
-                            .h(px(22.0))
-                            .px(px(7.0))
-                            .rounded(px(6.0))
-                            .border(hairline())
-                            .border_color(theme.border)
+                            .mt(px(5.0))
+                            .whitespace_normal()
+                            .text_size(sp(12.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("daemon.remote_host_ssh_description")),
+                    )
+                    .when(!editor.ssh_hosts.is_empty(), |element| {
+                        element.child(div().mt(px(7.0)).flex().flex_wrap().gap(px(4.0)).children(
+                            editor.ssh_hosts.iter().map(|alias| {
+                                let alias = alias.clone();
+                                let destination = editor.destination.clone();
+                                div()
+                                    .id(SharedString::from(format!("ssh-host-{alias}")))
+                                    .tab_index(0)
+                                    .h(px(22.0))
+                                    .px(px(7.0))
+                                    .rounded(px(6.0))
+                                    .border(hairline())
+                                    .border_color(theme.border)
+                                    .flex()
+                                    .items_center()
+                                    .cursor_default()
+                                    .font_family(crate::fonts::current(cx).code)
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_secondary)
+                                    .hover(|element| element.bg(theme.overlay))
+                                    .focus_visible(|element| element.bg(theme.focus_highlight()))
+                                    .child(alias.clone())
+                                    .on_click(move |_, _, cx| {
+                                        destination
+                                            .update(cx, |input, cx| input.set_content(&alias, cx));
+                                    })
+                            }),
+                        ))
+                    })
+            })
+            .when(!ssh, |element| {
+                element
+                    .child(field_label(tr!("daemon.remote_host_address")))
+                    .child(div().mt(px(5.0)).child(
+                        TextField::new("remote-host-address", editor.address.clone()).w_full(),
+                    ))
+                    .child(field_label(tr!("daemon.remote_host_token")))
+                    .child(
+                        div()
+                            .mt(px(5.0))
                             .flex()
                             .items_center()
-                            .cursor_default()
-                            .font_family(crate::fonts::current(cx).code)
-                            .text_size(sp(11.5))
-                            .text_color(theme.text_secondary)
-                            .hover(|element| element.bg(theme.overlay))
-                            .focus_visible(|element| element.bg(theme.focus_highlight()))
-                            .child(alias.clone())
-                            .on_click(move |_, _, cx| {
-                                destination.update(cx, |input, cx| input.set_content(&alias, cx));
-                            })
-                    }),
-                ))
+                            .gap(px(6.0))
+                            .child(
+                                TextField::new("remote-host-token", editor.token.clone()).flex_1(),
+                            )
+                            .child(reveal_token_button),
+                    )
             })
-            .child(field_label(tr!("daemon.remote_host_address")))
-            .child(
-                div()
-                    .mt(px(5.0))
-                    .child(TextField::new("remote-host-address", editor.address.clone()).w_full()),
-            )
-            .child(field_label(tr!("daemon.remote_host_token")))
-            .child(
-                div()
-                    .mt(px(5.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(TextField::new("remote-host-token", editor.token.clone()).flex_1())
-                    .child(reveal_token_button),
-            )
             .when(editor.missing_fields, |element| {
                 element.child(
                     div()
                         .mt(px(6.0))
                         .text_size(sp(12.0))
                         .text_color(theme.danger)
-                        .child(tr!("daemon.remote_host_required")),
+                        .child(if ssh {
+                            tr!("daemon.remote_host_ssh_required")
+                        } else {
+                            tr!("daemon.remote_host_direct_required")
+                        }),
                 )
             })
             .child(
@@ -4287,6 +4355,56 @@ impl Waku {
                             .on_activation(cx, |this, _, cx| this.save_remote_host_editor(cx)),
                     ),
             )
+    }
+
+    /// One segment of the remote-host editor's transport picker, styled like
+    /// the Projects header tabs. Switching clears a stale missing-fields
+    /// error since the required set changes with the mode.
+    fn remote_host_transport_button(
+        &self,
+        transport: RemoteHostTransport,
+        current: RemoteHostTransport,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let selected = transport == current;
+        let (id, label) = match transport {
+            RemoteHostTransport::Ssh => (
+                "remote-host-transport-ssh",
+                tr!("daemon.remote_host_transport_ssh"),
+            ),
+            RemoteHostTransport::Direct => (
+                "remote-host-transport-direct",
+                tr!("daemon.remote_host_transport_direct"),
+            ),
+        };
+        div()
+            .id(id)
+            .tab_index(0)
+            .h(px(22.0))
+            .px(px(10.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .cursor_default()
+            .text_size(sp(12.0))
+            .when(selected, |element| {
+                element.bg(theme.surface).text_color(theme.text)
+            })
+            .when(!selected, |element| {
+                element
+                    .text_color(theme.text_secondary)
+                    .hover(|style| style.text_color(theme.text))
+            })
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .child(label)
+            .on_activation(cx, move |this, _, cx| {
+                if let Some(editor) = &mut this.remote_host_editor {
+                    editor.transport = transport;
+                    editor.missing_fields = false;
+                    cx.notify();
+                }
+            })
     }
 
     /// The daemon-scoped opt-in for agent-to-agent commands. Toggling it only
@@ -4694,9 +4812,7 @@ impl Waku {
                         .active(|element| element.opacity(0.8))
                         .focus_visible(|element| element.bg(theme.focus_highlight()))
                         .child(tr!("experiments.gate_confirm"))
-                        .on_activation(cx, |this, _, cx| {
-                            this.acknowledge_experiments_gate(cx)
-                        }),
+                        .on_activation(cx, |this, _, cx| this.acknowledge_experiments_gate(cx)),
                 ),
             )
             .into_any_element()

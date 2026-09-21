@@ -930,6 +930,12 @@ daemon.remote_host_name_description:
   en: A label for the host. The address is used when blank.
 daemon.remote_host_name_placeholder:
   en: build-server
+daemon.remote_host_transport:
+  en: Connect via
+daemon.remote_host_transport_ssh:
+  en: SSH
+daemon.remote_host_transport_direct:
+  en: WebSocket
 daemon.remote_host_address:
   en: Address
 daemon.remote_host_address_description:
@@ -945,11 +951,13 @@ daemon.remote_host_token_placeholder:
 daemon.remote_host_ssh:
   en: SSH destination
 daemon.remote_host_ssh_description:
-  en: Connect over SSH instead — a user@host destination or a Host alias from ~/.ssh/config. Goddard provisions and forwards the daemon itself; address and token are not needed.
+  en: A user@host destination or a Host alias from ~/.ssh/config. Goddard provisions and forwards the daemon itself.
 daemon.remote_host_ssh_placeholder:
   en: user@host or an ssh config alias
-daemon.remote_host_required:
-  en: Enter an SSH destination, or both an address and a token.
+daemon.remote_host_ssh_required:
+  en: Enter an SSH destination.
+daemon.remote_host_direct_required:
+  en: Enter both an address and a token.
 daemon.remote_host_save:
   en: Save host
 daemon.nearby_title:
