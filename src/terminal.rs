@@ -29,7 +29,8 @@ use gpui::{
     KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
     MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
     Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText,
-    Subscription, Task, TextRun, UnderlineStyle, Window, actions, canvas, div, font, px, rgb,
+    Subscription, Task, TextRun, UnderlineStyle, Window, actions, canvas, div, fill, font, point,
+    px, rgb, size,
 };
 use parking_lot::Mutex;
 
@@ -614,6 +615,7 @@ impl TerminalSession {
             && cursor_column < columns)
             .then_some((cursor_row as usize, cursor_column));
         let mut cells = vec![TerminalCell::blank(theme); columns * rows];
+        let mut mosaics = Vec::new();
 
         for indexed in content.display_iter {
             let row = indexed.point.line.0 + content.display_offset as i32;
@@ -622,10 +624,13 @@ impl TerminalSession {
                 continue;
             }
             let cell = indexed.cell;
-            let mut text = if cell.flags.contains(Flags::WIDE_CHAR_SPACER)
+            let spacer = cell.flags.contains(Flags::WIDE_CHAR_SPACER)
                 || cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER)
-                || cell.flags.contains(Flags::HIDDEN)
-            {
+                || cell.flags.contains(Flags::HIDDEN);
+            // Mosaic glyphs keep a space in the text so the run still advances
+            // the cell; the glyph itself is painted as quads.
+            let mosaic = if spacer { None } else { mosaic_glyph(cell.c) };
+            let mut text = if spacer || mosaic.is_some() {
                 " ".to_owned()
             } else {
                 cell.c.to_string()
@@ -661,6 +666,14 @@ impl TerminalSession {
                 foreground = theme.terminal;
             }
 
+            if let Some(glyph) = mosaic {
+                mosaics.push(MosaicInstance {
+                    row: row as usize,
+                    column,
+                    glyph,
+                    foreground,
+                });
+            }
             cells[row as usize * columns + column] = TerminalCell {
                 text,
                 foreground,
@@ -699,6 +712,7 @@ impl TerminalSession {
 
         TerminalSnapshot {
             rows: rendered_rows,
+            mosaics,
             outline_cursor,
         }
     }
@@ -751,6 +765,153 @@ impl scrollbar::Scrollable for TerminalScrollbarTarget {
     }
 }
 
+/// Cell-filling mosaic glyphs (block elements, quadrant and sextant pieces)
+/// the bundled fonts don't cover — painted as quads so their geometry is
+/// exact and never depends on fallback-font metrics.
+#[derive(Clone, Copy)]
+enum MosaicGlyph {
+    /// 2×3 sextant mask — bit i covers column i % 2, row i / 2.
+    Sextant(u8),
+    /// 2×2 quadrant mask — bit i covers column i % 2, row i / 2.
+    Quadrant(u8),
+    /// Filled rect in eighths of the cell.
+    Rect { x0: u8, y0: u8, x1: u8, y1: u8 },
+    /// Full-cell stipple approximated with translucency.
+    Shade(f32),
+}
+
+/// Bit i covers column i % 2, row i / 2 of the 2×3 cell grid, indexed by
+/// codepoint - U+1FB00.
+const SEXTANT_MASKS: [u8; 60] = [
+    0b000001, 0b000010, 0b000011, 0b000100, 0b000101, 0b000110, 0b000111, 0b001000, 0b001001,
+    0b001010, 0b001011, 0b001100, 0b001101, 0b001110, 0b001111, 0b010000, 0b010001, 0b010010,
+    0b010011, 0b010100, 0b010110, 0b010111, 0b011000, 0b011001, 0b011010, 0b011011, 0b011100,
+    0b011101, 0b011110, 0b011111, 0b100000, 0b100001, 0b100010, 0b100011, 0b100100, 0b100101,
+    0b100110, 0b100111, 0b101000, 0b101001, 0b101011, 0b101100, 0b101101, 0b101110, 0b101111,
+    0b110000, 0b110001, 0b110010, 0b110011, 0b110100, 0b110101, 0b110110, 0b110111, 0b111000,
+    0b111001, 0b111010, 0b111011, 0b111100, 0b111101, 0b111110,
+];
+
+fn mosaic_glyph(c: char) -> Option<MosaicGlyph> {
+    const fn rect(x0: u8, y0: u8, x1: u8, y1: u8) -> MosaicGlyph {
+        MosaicGlyph::Rect { x0, y0, x1, y1 }
+    }
+    Some(match c {
+        '\u{2580}' => rect(0, 0, 8, 4),
+        '\u{2581}'..='\u{2587}' => rect(0, (8 - (c as u32 - 0x2580)) as u8, 8, 8),
+        '\u{2588}' => rect(0, 0, 8, 8),
+        '\u{2589}'..='\u{258F}' => rect(0, 0, (8 - (c as u32 - 0x2588)) as u8, 8),
+        '\u{2590}' => rect(4, 0, 8, 8),
+        '\u{2591}' => MosaicGlyph::Shade(0.25),
+        '\u{2592}' => MosaicGlyph::Shade(0.5),
+        '\u{2593}' => MosaicGlyph::Shade(0.75),
+        '\u{2594}' => rect(0, 0, 8, 1),
+        '\u{2595}' => rect(7, 0, 8, 8),
+        // Quadrant bits: 0 = upper left, 1 = upper right, 2 = lower left,
+        // 3 = lower right.
+        '\u{2596}' => MosaicGlyph::Quadrant(0b0100),
+        '\u{2597}' => MosaicGlyph::Quadrant(0b1000),
+        '\u{2598}' => MosaicGlyph::Quadrant(0b0001),
+        '\u{2599}' => MosaicGlyph::Quadrant(0b1101),
+        '\u{259A}' => MosaicGlyph::Quadrant(0b1001),
+        '\u{259B}' => MosaicGlyph::Quadrant(0b0111),
+        '\u{259C}' => MosaicGlyph::Quadrant(0b1011),
+        '\u{259D}' => MosaicGlyph::Quadrant(0b0010),
+        '\u{259E}' => MosaicGlyph::Quadrant(0b0110),
+        '\u{259F}' => MosaicGlyph::Quadrant(0b1110),
+        '\u{1FB00}'..='\u{1FB3B}' => MosaicGlyph::Sextant(SEXTANT_MASKS[c as usize - 0x1FB00]),
+        '\u{1FB70}'..='\u{1FB75}' => {
+            let x0 = (c as u32 - 0x1FB70 + 1) as u8;
+            rect(x0, 0, x0 + 1, 8)
+        }
+        '\u{1FB76}'..='\u{1FB7B}' => {
+            let y0 = (c as u32 - 0x1FB76 + 1) as u8;
+            rect(0, y0, 8, y0 + 1)
+        }
+        '\u{1FB82}' => rect(0, 0, 8, 2),
+        '\u{1FB83}' => rect(0, 0, 8, 3),
+        '\u{1FB84}' => rect(0, 0, 8, 5),
+        '\u{1FB85}' => rect(0, 0, 8, 6),
+        '\u{1FB86}' => rect(0, 0, 8, 7),
+        '\u{1FB87}' => rect(6, 0, 8, 8),
+        '\u{1FB88}' => rect(5, 0, 8, 8),
+        '\u{1FB89}' => rect(3, 0, 8, 8),
+        '\u{1FB8A}' => rect(2, 0, 8, 8),
+        '\u{1FB8B}' => rect(1, 0, 8, 8),
+        _ => return None,
+    })
+}
+
+struct MosaicInstance {
+    row: usize,
+    column: usize,
+    glyph: MosaicGlyph,
+    foreground: Hsla,
+}
+
+fn paint_mosaic(
+    window: &mut Window,
+    origin: Point<Pixels>,
+    cell_width: f32,
+    cell_height: f32,
+    mosaic: &MosaicInstance,
+) {
+    // Sub-rect edges that sit inside the cell overshoot a hair so rasterizing
+    // adjacent fills can't leave bright seams (the same trick the settings QR
+    // uses between modules); edges on the cell boundary stay put so nothing
+    // bleeds into the neighbouring cell.
+    const OVERLAP: f32 = 0.5;
+    let paint = |window: &mut Window, x0: f32, y0: f32, x1: f32, y1: f32, color: Hsla| {
+        let right = x1 * cell_width + if x1 < 1.0 { OVERLAP } else { 0.0 };
+        let bottom = y1 * cell_height + if y1 < 1.0 { OVERLAP } else { 0.0 };
+        window.paint_quad(fill(
+            Bounds::new(
+                point(
+                    origin.x + px(x0 * cell_width),
+                    origin.y + px(y0 * cell_height),
+                ),
+                size(px(right - x0 * cell_width), px(bottom - y0 * cell_height)),
+            ),
+            color,
+        ));
+    };
+    match mosaic.glyph {
+        MosaicGlyph::Sextant(mask) => {
+            for bit in 0..6 {
+                if mask & (1 << bit) == 0 {
+                    continue;
+                }
+                let x0 = (bit % 2) as f32 * 0.5;
+                let y0 = (bit / 2) as f32 / 3.0;
+                paint(window, x0, y0, x0 + 0.5, y0 + 1.0 / 3.0, mosaic.foreground);
+            }
+        }
+        MosaicGlyph::Quadrant(mask) => {
+            for bit in 0..4 {
+                if mask & (1 << bit) == 0 {
+                    continue;
+                }
+                let x0 = (bit % 2) as f32 * 0.5;
+                let y0 = (bit / 2) as f32 * 0.5;
+                paint(window, x0, y0, x0 + 0.5, y0 + 0.5, mosaic.foreground);
+            }
+        }
+        MosaicGlyph::Rect { x0, y0, x1, y1 } => {
+            paint(
+                window,
+                x0 as f32 / 8.0,
+                y0 as f32 / 8.0,
+                x1 as f32 / 8.0,
+                y1 as f32 / 8.0,
+                mosaic.foreground,
+            );
+        }
+        MosaicGlyph::Shade(alpha) => {
+            paint(window, 0.0, 0.0, 1.0, 1.0, mosaic.foreground.opacity(alpha));
+        }
+    }
+}
+
 #[derive(Clone)]
 struct TerminalCell {
     text: String,
@@ -798,6 +959,7 @@ struct TerminalRow {
 
 struct TerminalSnapshot {
     rows: Vec<TerminalRow>,
+    mosaics: Vec<MosaicInstance>,
     outline_cursor: Option<(usize, usize)>,
 }
 
@@ -2169,6 +2331,7 @@ impl Render for TerminalView {
         if let Some(snapshot) = snapshot {
             let TerminalSnapshot {
                 rows: snapshot_rows,
+                mosaics,
                 outline_cursor,
             } = snapshot;
             for row in snapshot_rows {
@@ -2209,6 +2372,29 @@ impl Render for TerminalView {
                         .text_size(px(font_size))
                         .line_height(px(cell_height))
                         .child(StyledText::new(row.text).with_runs(runs)),
+                );
+            }
+            if !mosaics.is_empty() {
+                screen = screen.child(
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, _, window, _| {
+                            for mosaic in &mosaics {
+                                paint_mosaic(
+                                    window,
+                                    point(
+                                        bounds.origin.x + px(mosaic.column as f32 * cell_width),
+                                        bounds.origin.y + px(mosaic.row as f32 * cell_height),
+                                    ),
+                                    cell_width,
+                                    cell_height,
+                                    mosaic,
+                                );
+                            }
+                        },
+                    )
+                    .absolute()
+                    .inset_0(),
                 );
             }
             if let Some((row, column)) = outline_cursor {
@@ -3695,5 +3881,44 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn mosaic_glyph_covers_block_elements_and_sextants() {
+        assert!(matches!(
+            mosaic_glyph('█'),
+            Some(MosaicGlyph::Rect {
+                x0: 0,
+                y0: 0,
+                x1: 8,
+                y1: 8
+            })
+        ));
+        assert!(matches!(
+            mosaic_glyph('▄'),
+            Some(MosaicGlyph::Rect { y0: 4, y1: 8, .. })
+        ));
+        assert!(matches!(
+            mosaic_glyph('▌'),
+            Some(MosaicGlyph::Rect { x1: 4, .. })
+        ));
+        assert!(matches!(
+            mosaic_glyph('▐'),
+            Some(MosaicGlyph::Rect { x0: 4, .. })
+        ));
+        // U+1FB00 BLOCK SEXTANT-1 fills only the top-left cell; U+1FB3B
+        // BLOCK SEXTANT-23456 fills everything else.
+        assert!(matches!(
+            mosaic_glyph('\u{1FB00}'),
+            Some(MosaicGlyph::Sextant(0b000001))
+        ));
+        assert!(matches!(
+            mosaic_glyph('\u{1FB3B}'),
+            Some(MosaicGlyph::Sextant(0b111110))
+        ));
+        // Box drawing stays on the text path — the fonts cover it.
+        assert!(mosaic_glyph('a').is_none());
+        assert!(mosaic_glyph('│').is_none());
+        assert!(mosaic_glyph('─').is_none());
     }
 }
