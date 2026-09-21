@@ -3524,6 +3524,32 @@ git_panel.land_confirm_description:
   en: "Rebase this checkout onto %{base} and fast-forward %{base} to the result — %{count} commits land on the branch."
 git_panel.land_confirm_description_one:
   en: "Rebase this checkout onto %{base} and fast-forward %{base} to the result — 1 commit lands on the branch."
+git_panel.open_changes:
+  en: Open changes
+git_panel.open_file_head:
+  en: Open file (HEAD)
+git_panel.stage_changes:
+  en: Stage changes
+git_panel.unstage_changes:
+  en: Unstage changes
+git_panel.add_to_gitignore:
+  en: Add to .gitignore
+git_panel.reveal_in_files:
+  en: Reveal in Files
+git_panel.discard_changes:
+  en: Discard changes
+git_panel.discard_title:
+  en: Discard changes?
+git_panel.discard_description:
+  en: "%{path} is restored to its HEAD state — this cannot be undone."
+git_panel.discard_confirm:
+  en: Discard
+git_panel.discard_untracked_title:
+  en: Delete untracked file?
+git_panel.discard_untracked_description:
+  en: "%{path} is not tracked by git and will be permanently deleted — this cannot be undone."
+git_panel.discard_untracked_confirm:
+  en: Delete file
 
 sync_branch.current:
   en: Current branch

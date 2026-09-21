@@ -1995,6 +1995,19 @@ git_panel.rebasing_onto: 正在变基到 %{base}…
 git_panel.resolve_merge_onto_prompt: "`%{base}` 合并到此工作区时因冲突而停止。请解决工作区中的冲突并完成合并。"
 git_panel.resolve_rebase_onto_prompt: 此工作区变基到 `%{base}` 时因冲突而停止。请解决工作区中的冲突并运行 `git rebase --continue` 直至变基完成。
 git_panel.up_to_date: 已是最新
+git_panel.open_changes: 打开更改
+git_panel.open_file_head: 打开文件（HEAD）
+git_panel.stage_changes: 暂存更改
+git_panel.unstage_changes: 取消暂存更改
+git_panel.add_to_gitignore: 添加到 .gitignore
+git_panel.reveal_in_files: 在“文件”中显示
+git_panel.discard_changes: 放弃更改
+git_panel.discard_title: 放弃更改？
+git_panel.discard_description: "%{path} 将恢复到其 HEAD 状态 — 此操作无法撤消。"
+git_panel.discard_confirm: 放弃
+git_panel.discard_untracked_title: 删除未跟踪的文件？
+git_panel.discard_untracked_description: "%{path} 未被 Git 跟踪，将被永久删除 — 此操作无法撤消。"
+git_panel.discard_untracked_confirm: 删除文件
 integrations.agents: 智能体
 integrations.api_key: API 密钥
 integrations.api_key_hint: 保存在钥匙串中 — 不会写入服务商配置。

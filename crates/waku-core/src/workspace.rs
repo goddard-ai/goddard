@@ -283,6 +283,17 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::git_panel::unstage(&cwd, &path)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::DiscardFile { cwd, path } => {
+            crate::git_panel::discard(&cwd, &path)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::ReadFileAtRef { cwd, path, git_ref } => WorkspaceResult::TextFile {
+            content: crate::git_panel::file_at_ref(&cwd, &path, &git_ref)?,
+        },
+        WorkspaceOperation::IgnoreFile { cwd, path } => {
+            crate::git_panel::ignore(&cwd, &path)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::PullUpstream { cwd, strategy } => WorkspaceResult::Pull {
             outcome: crate::git_panel::pull(&cwd, strategy)?,
         },

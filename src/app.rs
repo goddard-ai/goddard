@@ -774,6 +774,12 @@ enum RightPanelSurface {
     Files,
     Diff,
     File(String),
+    /// A file's blob at a git ref (`git show ref:path`), read-only. Opened
+    /// from the Git panel's "Open File (HEAD)".
+    FileAtRef {
+        path: String,
+        git_ref: String,
+    },
     /// A project's issue/pull-request detail. Which item it shows lives in
     /// `GitHubBrowser::detail`, so one tab serves every item in the repo.
     GitHub(Uuid),
@@ -1115,6 +1121,18 @@ struct RightPanelFileEditor {
     annotations: Rc<RefCell<Annotations>>,
 }
 
+/// A read-only editor showing a file's blob at a git ref — the `FileAtRef`
+/// surface's backing store, keyed `"{git_ref}:{path}"` in the session's
+/// `ref_editors`.
+struct RightPanelRefEditor {
+    state: Entity<TextInput>,
+    /// The blob read was kicked off — a failure lands its error text, so
+    /// nothing asks twice.
+    requested: bool,
+    scroll: ScrollHandle,
+    scrollbar: Rc<ScrollbarState>,
+}
+
 struct RightPanelSessionState {
     visible: bool,
     surfaces: Vec<RightPanelSurface>,
@@ -1128,6 +1146,7 @@ struct RightPanelSessionState {
     files_selected_path: Option<String>,
     file_tree_width: f32,
     file_editors: HashMap<String, RightPanelFileEditor>,
+    ref_editors: HashMap<String, RightPanelRefEditor>,
     diff_source: ReviewDiffSource,
     diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     diff_selected_file: Option<usize>,
@@ -1147,6 +1166,7 @@ impl RightPanelSessionState {
             files_selected_path: None,
             file_tree_width: DEFAULT_FILE_TREE_WIDTH,
             file_editors: HashMap::new(),
+            ref_editors: HashMap::new(),
             diff_source: ReviewDiffSource::default(),
             diff_snapshot: None,
             diff_selected_file: None,
@@ -1491,6 +1511,12 @@ fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRight
         RightPanelSurface::Files => Some(PersistedRightPanelSurface::Files),
         RightPanelSurface::Diff => Some(PersistedRightPanelSurface::Diff),
         RightPanelSurface::File(path) => Some(PersistedRightPanelSurface::File(path.clone())),
+        RightPanelSurface::FileAtRef { path, git_ref } => {
+            Some(PersistedRightPanelSurface::FileAtRef {
+                path: path.clone(),
+                git_ref: git_ref.clone(),
+            })
+        }
         RightPanelSurface::PullRequest { number } => {
             Some(PersistedRightPanelSurface::PullRequest { number: *number })
         }
@@ -1511,6 +1537,10 @@ fn panel_surface_from_persisted(surface: &PersistedRightPanelSurface) -> RightPa
         PersistedRightPanelSurface::Files => RightPanelSurface::Files,
         PersistedRightPanelSurface::Diff => RightPanelSurface::Diff,
         PersistedRightPanelSurface::File(path) => RightPanelSurface::File(path.clone()),
+        PersistedRightPanelSurface::FileAtRef { path, git_ref } => RightPanelSurface::FileAtRef {
+            path: path.clone(),
+            git_ref: git_ref.clone(),
+        },
         PersistedRightPanelSurface::PullRequest { number } => {
             RightPanelSurface::PullRequest { number: *number }
         }
@@ -2468,6 +2498,8 @@ pub struct Waku {
     /// The land confirmation's target — the base branch and the commit count
     /// the modal names.
     git_panel_land_prompt: Option<waku_client::git::LandTarget>,
+    /// The "Discard Changes" confirmation's target while its modal is open.
+    git_panel_discard_prompt: Option<git_panel::GitPanelDiscard>,
     /// The commit-diff modal, when a commit row is open.
     git_panel_commit_diff: Option<git_panel::GitPanelCommitDiff>,
     /// Focus target the Git panel's modals share — only one is ever open.
@@ -2484,12 +2516,21 @@ pub struct Waku {
     git_panel_unstaged_confirm_focus: FocusHandle,
     git_panel_land_cancel_focus: FocusHandle,
     git_panel_land_confirm_focus: FocusHandle,
+    git_panel_discard_cancel_focus: FocusHandle,
+    git_panel_discard_confirm_focus: FocusHandle,
     git_panel_conflict_abort_focus: FocusHandle,
     git_panel_conflict_merge_focus: FocusHandle,
     git_panel_conflict_resolve_focus: FocusHandle,
     /// A Git panel file row sent to the Review surface; applied to the
     /// surface's next snapshot landing.
     right_panel_pending_diff_file: Option<String>,
+    /// The Git panel's "Reveal in Files" handoff: the relative path the
+    /// Files surface's next tree landing should scroll to.
+    right_panel_pending_tree_reveal: Option<String>,
+    /// The working-tree row index the Files surface scrolls to on its next
+    /// frame — resolved from `right_panel_pending_tree_reveal` once the
+    /// tree's entries land.
+    right_panel_tree_scroll_to: Option<usize>,
     /// The show/hide slide each panel is in the middle of, if any. Driven by
     /// hand from `render` (see [`motion::WidthTween`]) because the width these
     /// produce is what the transcript column between them is laid out against.
@@ -2598,6 +2639,8 @@ pub struct Waku {
     right_panel_files_selected_path: Option<String>,
     right_panel_file_tree_width: f32,
     right_panel_file_editors: HashMap<String, RightPanelFileEditor>,
+    /// Read-only editors behind `FileAtRef` surfaces, keyed `"{git_ref}:{path}"`.
+    right_panel_ref_editors: HashMap<String, RightPanelRefEditor>,
     /// Per-tab chrome for open pull-request surfaces, keyed `(session id, PR
     /// number)` — scroll, focus, and the tab's own comment composer. Not
     /// swapped through `RightPanelSessionState`; the key scopes it instead.
@@ -5563,6 +5606,7 @@ impl Waku {
                 git_panel_conflict_files_scrollbar: ScrollbarState::new(),
                 git_panel_unstaged_prompt: false,
                 git_panel_land_prompt: None,
+                git_panel_discard_prompt: None,
                 git_panel_commit_diff: None,
                 git_panel_modal_focus: cx.focus_handle(),
                 push_base_failure: None,
@@ -5572,10 +5616,14 @@ impl Waku {
                 git_panel_unstaged_confirm_focus: cx.focus_handle(),
                 git_panel_land_cancel_focus: cx.focus_handle(),
                 git_panel_land_confirm_focus: cx.focus_handle(),
+                git_panel_discard_cancel_focus: cx.focus_handle(),
+                git_panel_discard_confirm_focus: cx.focus_handle(),
                 git_panel_conflict_abort_focus: cx.focus_handle(),
                 git_panel_conflict_merge_focus: cx.focus_handle(),
                 git_panel_conflict_resolve_focus: cx.focus_handle(),
                 right_panel_pending_diff_file: None,
+                right_panel_pending_tree_reveal: None,
+                right_panel_tree_scroll_to: None,
                 sidebar_slide: None,
                 right_panel_slide: None,
                 sidebar_rendered_width: if sidebar_visible { sidebar_width } else { 0.0 },
@@ -5635,6 +5683,7 @@ impl Waku {
                 right_panel_files_selected_path: None,
                 right_panel_file_tree_width: DEFAULT_FILE_TREE_WIDTH,
                 right_panel_file_editors: HashMap::new(),
+                right_panel_ref_editors: HashMap::new(),
                 right_panel_pr_states: HashMap::new(),
                 file_search: None,
                 go_to_line: None,

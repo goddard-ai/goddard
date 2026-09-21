@@ -1,0 +1,1 @@
+- Changed-file rows in the Git panel now open a right-click context menu — Open Changes, Open File, Open File (HEAD), Stage/Unstage Changes, Discard Changes behind a confirmation, Add to .gitignore, Reveal in Finder, and Reveal in Files — also reachable with Shift-F10 on a focused row

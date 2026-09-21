@@ -820,6 +820,29 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         path: String,
     },
+    /// Drop every change a path carries — staged and unstaged — restoring it
+    /// to HEAD, or deleting it outright when it is untracked. Destructive;
+    /// callers confirm first. Returns `Ack`.
+    DiscardFile {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        path: String,
+    },
+    /// A file's blob at `git_ref` (`git show ref:path`), for read-only views
+    /// of a committed version. Returns `TextFile`.
+    ReadFileAtRef {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        path: String,
+        git_ref: String,
+    },
+    /// Append `path` to the repository's root `.gitignore` when it is not
+    /// already listed. Returns `Ack`.
+    IgnoreFile {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        path: String,
+    },
     /// Integrate upstream changes (`git pull --rebase` or `--no-rebase`).
     /// Conflict means an integration is still in progress; `AbortSync` or
     /// the agent has to resolve it before anything else can commit.

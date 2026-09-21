@@ -332,6 +332,13 @@ pub(super) struct TranscriptCommitPress {
     pub position: Point<Pixels>,
 }
 
+/// The "Discard Changes" confirmation's target — the path, and whether the
+/// row was untracked, so the modal can say it deletes the file outright.
+pub(super) struct GitPanelDiscard {
+    pub path: String,
+    pub untracked: bool,
+}
+
 /// The open commit view's state. While set, the panel slot expands to fill
 /// the workspace: the diff column on the left, the panel — its commit box
 /// and changes swapped for the commit's file tree — on the right.
@@ -2055,6 +2062,92 @@ impl Waku {
         .detach();
     }
 
+    /// `git restore` a tracked path back to HEAD — or delete an untracked
+    /// one — after the discard modal confirms. Same post-op shape as
+    /// staging: bump the generation so a stale inspect cannot land over the
+    /// re-read.
+    fn discard_git_panel_file(&mut self, path: String, cx: &mut Context<Self>) {
+        let Some(panel) = self.git_panel.as_ref() else {
+            return;
+        };
+        let panel_id = panel.id;
+        let workspace = panel.workspace.clone();
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(WorkspaceOperation::DiscardFile {
+                        cwd: workspace,
+                        path,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                let Some(panel) = waku.git_panel.as_mut() else {
+                    return;
+                };
+                if panel.id != panel_id {
+                    return;
+                }
+                if let Err(error) = result {
+                    panel.error = Some(error.to_string());
+                }
+                waku.git_panel_generation = waku.git_panel_generation.wrapping_add(1);
+                panel.snapshot_loading = false;
+                waku.invalidate_workspace_queries(cx);
+                waku.refresh_git_panel(cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Append the row's path to the repository's `.gitignore`, then re-read
+    /// the panel — the file drops out of the changes list.
+    fn ignore_git_panel_file(&mut self, path: String, cx: &mut Context<Self>) {
+        let Some(panel) = self.git_panel.as_ref() else {
+            return;
+        };
+        let panel_id = panel.id;
+        let workspace = panel.workspace.clone();
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(WorkspaceOperation::IgnoreFile {
+                        cwd: workspace,
+                        path,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                let Some(panel) = waku.git_panel.as_mut() else {
+                    return;
+                };
+                if panel.id != panel_id {
+                    return;
+                }
+                if let Err(error) = result {
+                    panel.error = Some(error.to_string());
+                }
+                waku.git_panel_generation = waku.git_panel_generation.wrapping_add(1);
+                panel.snapshot_loading = false;
+                waku.invalidate_workspace_queries(cx);
+                waku.refresh_git_panel(cx);
+            });
+        })
+        .detach();
+    }
+
     /// Track the pointer over a changed-file row; a dwell opens the diff
     /// preview, and once open gliding to a sibling retargets it immediately.
     fn git_panel_file_row_hovered(
@@ -3271,7 +3364,9 @@ impl Waku {
                 ));
             }
             for file in &snapshot.unstaged {
-                list = list.child(self.render_git_panel_file_row(file, false, width, window, cx));
+                let menu = self.git_panel_file_menu_handle(file, false, cx);
+                let row = self.render_git_panel_file_row(file, false, width, &menu, window, cx);
+                list = list.child(self.git_panel_file_menu(row, &menu, file, false, cx));
             }
         }
         if both_sections {
@@ -3280,10 +3375,181 @@ impl Waku {
                 &theme,
             ));
             for file in &snapshot.staged {
-                list = list.child(self.render_git_panel_file_row(file, true, width, window, cx));
+                let menu = self.git_panel_file_menu_handle(file, true, cx);
+                let row = self.render_git_panel_file_row(file, true, width, &menu, window, cx);
+                list = list.child(self.git_panel_file_menu(row, &menu, file, true, cx));
             }
         }
         list.into_any_element()
+    }
+
+    /// One menu per `(path, staged)` row — the same per-row site the sidebar
+    /// gives sessions, so each card's items close over its own file.
+    fn git_panel_file_menu_handle(
+        &self,
+        file: &GitFileChange,
+        staged: bool,
+        cx: &mut Context<Self>,
+    ) -> ContextMenuHandle {
+        self.menu_handle(
+            format!("git-panel-file-menu-{}-{}", staged as u8, file.path),
+            cx,
+        )
+    }
+
+    /// The row's right-click menu — open the diff, the working file, or its
+    /// committed blob; then stage/discard/ignore; then Finder and the Files
+    /// surface. Items that need the file on disk grey out for a deleted row,
+    /// and "Open File (HEAD)" for a blob HEAD cannot name.
+    fn git_panel_file_menu(
+        &self,
+        row: Stateful<Div>,
+        menu: &ContextMenuHandle,
+        file: &GitFileChange,
+        staged: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let path = file.path.clone();
+        let untracked = file.untracked;
+        let deleted = file.status.starts_with('D');
+        let has_head_blob =
+            !untracked && !matches!(file.status.chars().next(), Some('A' | 'C' | 'R'));
+        let can_reveal = !deleted
+            && self
+                .git_panel
+                .as_ref()
+                .is_some_and(|panel| !self.is_remote_path(&panel.workspace.join(&file.path)));
+        let menu_id = SharedString::from(format!(
+            "git-panel-file-menu-card-{}-{}",
+            staged as u8, file.path
+        ));
+        let menu = menu.clone();
+        let waku = cx.entity().downgrade();
+        context_menu(div().w_full().child(row), menu_id, &menu, move |cx| {
+            let mut items = Vec::new();
+            {
+                let (waku, path) = (waku.clone(), path.clone());
+                items.push(MenuItem::new(
+                    tr!("git_panel.open_changes"),
+                    move |window, cx| {
+                        waku.update(cx, |this, cx| {
+                            this.open_git_panel_file_in_review(path.clone(), staged, window, cx);
+                        })
+                        .ok();
+                    },
+                ));
+            }
+            {
+                let (waku, path) = (waku.clone(), path.clone());
+                items.push(
+                    MenuItem::new(tr!("git_panel.open_file"), move |_, cx| {
+                        waku.update(cx, |this, cx| {
+                            this.open_right_panel_file(path.clone(), cx);
+                        })
+                        .ok();
+                    })
+                    .disabled(deleted),
+                );
+            }
+            {
+                let (waku, path) = (waku.clone(), path.clone());
+                items.push(
+                    MenuItem::new(tr!("git_panel.open_file_head"), move |_, cx| {
+                        waku.update(cx, |this, cx| {
+                            this.open_right_panel_surface(
+                                RightPanelSurface::FileAtRef {
+                                    path: path.clone(),
+                                    git_ref: "HEAD".to_owned(),
+                                },
+                                cx,
+                            );
+                        })
+                        .ok();
+                    })
+                    .disabled(!has_head_blob),
+                );
+            }
+            items.push(MenuItem::Separator);
+            {
+                let (waku, path) = (waku.clone(), path.clone());
+                items.push(MenuItem::new(
+                    tr!("git_panel.discard_changes"),
+                    move |_, cx| {
+                        waku.update(cx, |this, cx| {
+                            this.git_panel_discard_prompt = Some(GitPanelDiscard {
+                                path: path.clone(),
+                                // A path HEAD never knew is deleted, not
+                                // restored — the same arm `discard` takes for
+                                // `??` rows and staged adds.
+                                untracked: untracked || !has_head_blob,
+                            });
+                            cx.notify();
+                        })
+                        .ok();
+                    },
+                ));
+            }
+            {
+                let (waku, path) = (waku.clone(), path.clone());
+                items.push(MenuItem::new(
+                    if staged {
+                        tr!("git_panel.unstage_changes")
+                    } else {
+                        tr!("git_panel.stage_changes")
+                    },
+                    move |_, cx| {
+                        waku.update(cx, |this, cx| {
+                            this.stage_git_panel_file(path.clone(), staged, cx);
+                        })
+                        .ok();
+                    },
+                ));
+            }
+            {
+                let (waku, path) = (waku.clone(), path.clone());
+                items.push(MenuItem::new(
+                    tr!("git_panel.add_to_gitignore"),
+                    move |_, cx| {
+                        waku.update(cx, |this, cx| {
+                            this.ignore_git_panel_file(path.clone(), cx);
+                        })
+                        .ok();
+                    },
+                ));
+            }
+            items.push(MenuItem::Separator);
+            if can_reveal {
+                let absolute = waku
+                    .read_with(cx, |this, _| {
+                        this.git_panel
+                            .as_ref()
+                            .map(|panel| panel.workspace.join(&path))
+                    })
+                    .ok()
+                    .flatten();
+                if let Some(absolute) = absolute {
+                    items.push(
+                        MenuItem::new(tr!("common.reveal_in_finder"), move |_, cx| {
+                            crate::platform::reveal_in_file_manager(&absolute, cx);
+                        })
+                        .icon("icons/folder-open.svg"),
+                    );
+                }
+            }
+            {
+                let (waku, path) = (waku.clone(), path.clone());
+                items.push(
+                    MenuItem::new(tr!("git_panel.reveal_in_files"), move |_, cx| {
+                        waku.update(cx, |this, cx| {
+                            this.reveal_right_panel_file_in_tree(path.clone(), cx);
+                        })
+                        .ok();
+                    })
+                    .disabled(deleted),
+                );
+            }
+            items
+        })
     }
 
     /// The open commit's file tree, standing in for the commit box and
@@ -3524,6 +3790,7 @@ impl Waku {
         file: &GitFileChange,
         staged: bool,
         width: f32,
+        menu: &ContextMenuHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
@@ -3567,6 +3834,7 @@ impl Waku {
         let path_for_action_key = path.clone();
         let path_for_hover = path.clone();
         let path_for_click = path.clone();
+        let menu_for_key = menu.clone();
         div()
             .id(SharedString::from(format!(
                 "git-panel-file-{}-{}",
@@ -3663,6 +3931,9 @@ impl Waku {
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                     this.open_git_panel_file_in_review(path.clone(), staged, window, cx);
+                    cx.stop_propagation();
+                } else if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
+                    menu_for_key.open_context_menu(window, cx);
                     cx.stop_propagation();
                 }
             }))
@@ -4236,6 +4507,7 @@ impl Waku {
         if self.git_panel_sync_conflict.is_some()
             || self.git_panel_unstaged_prompt
             || self.git_panel_land_prompt.is_some()
+            || self.git_panel_discard_prompt.is_some()
         {
             let modal_focus = &self.git_panel_modal_focus;
             if !modal_focus.contains_focused(window, cx) {
@@ -4245,6 +4517,7 @@ impl Waku {
         let mut overlays = Vec::new();
         overlays.extend(self.render_git_panel_unstaged_modal(window, cx));
         overlays.extend(self.render_git_panel_land_modal(window, cx));
+        overlays.extend(self.render_git_panel_discard_modal(window, cx));
         overlays.extend(self.render_git_panel_conflict_modal(window, cx));
         overlays
     }
@@ -4303,6 +4576,9 @@ impl Waku {
         } else if self.git_panel_land_prompt.take().is_some() {
             self.land_git_panel_workspace(PullStrategy::Rebase, cx);
             cx.notify();
+        } else if let Some(discard) = self.git_panel_discard_prompt.take() {
+            self.discard_git_panel_file(discard.path, cx);
+            cx.notify();
         }
     }
 
@@ -4315,6 +4591,8 @@ impl Waku {
             self.git_panel_unstaged_prompt = false;
         } else if self.git_panel_land_prompt.is_some() {
             self.git_panel_land_prompt = None;
+        } else if self.git_panel_discard_prompt.is_some() {
+            self.git_panel_discard_prompt = None;
         } else {
             return;
         }
@@ -4475,6 +4753,90 @@ impl Waku {
                 ),
         );
         Some(self.git_panel_modal_layer("git-panel-land-modal", card, cx))
+    }
+
+    /// "Discard Changes": the one unrecoverable row action — a tracked path
+    /// restores to HEAD, an untracked one is deleted outright, and the modal
+    /// says which before it runs.
+    fn render_git_panel_discard_modal(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let discard = self.git_panel_discard_prompt.as_ref()?;
+        let theme = Theme::current(cx);
+        let (title, description, confirm_label) = if discard.untracked {
+            (
+                tr!("git_panel.discard_untracked_title"),
+                tr!(
+                    "git_panel.discard_untracked_description",
+                    path = discard.path.clone()
+                ),
+                tr!("git_panel.discard_untracked_confirm"),
+            )
+        } else {
+            (
+                tr!("git_panel.discard_title"),
+                tr!("git_panel.discard_description", path = discard.path.clone()),
+                tr!("git_panel.discard_confirm"),
+            )
+        };
+        let confirm = modal_button(
+            "git-panel-discard-confirm",
+            confirm_label,
+            true,
+            &self.git_panel_discard_confirm_focus,
+            theme,
+            cx,
+            |this, _, cx| {
+                if let Some(discard) = this.git_panel_discard_prompt.take() {
+                    this.discard_git_panel_file(discard.path, cx);
+                }
+                cx.notify();
+            },
+        );
+        let cancel = modal_button(
+            "git-panel-discard-cancel",
+            tr!("common.cancel"),
+            false,
+            &self.git_panel_discard_cancel_focus,
+            theme,
+            cx,
+            |this, _, cx| {
+                this.dismiss_git_panel_modal(cx);
+            },
+        );
+        let card = self.git_panel_modal_card(cx).child(
+            div()
+                .px(px(16.0))
+                .py(px(14.0))
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .text_size(sp(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .line_height(sp(17.0))
+                        .text_color(theme.text_secondary)
+                        .child(description),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(px(6.0))
+                        .child(cancel)
+                        .child(confirm),
+                ),
+        );
+        Some(self.git_panel_modal_layer("git-panel-discard-modal", card, cx))
     }
 
     /// The sync conflicted: Resolve in chat, Merge instead (rebase only), or

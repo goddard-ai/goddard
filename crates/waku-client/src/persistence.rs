@@ -618,6 +618,11 @@ pub enum PersistedRightPanelSurface {
     Files,
     Diff,
     File(String),
+    /// A file's blob at a git ref — the read-only `FileAtRef` view.
+    FileAtRef {
+        path: String,
+        git_ref: String,
+    },
     PullRequest {
         number: u64,
     },

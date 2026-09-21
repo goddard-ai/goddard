@@ -1005,7 +1005,7 @@ impl RightPanelSurface {
             Self::PullRequest { .. } => "pull_request",
             Self::Files => "files",
             Self::Diff => "diff",
-            Self::File(_) => "file",
+            Self::File(_) | Self::FileAtRef { .. } => "file",
             Self::GitHub(_) => "github",
             Self::SideChat(_) => "side_chat",
         }
@@ -1030,6 +1030,9 @@ impl RightPanelSurface {
             Self::Diff => tr!("right_panel.diff"),
             Self::PullRequest { number } => format!("#{number}"),
             Self::File(path) => path.rsplit('/').next().unwrap_or(path).to_owned(),
+            Self::FileAtRef { path, git_ref } => {
+                format!("{} ({git_ref})", path.rsplit('/').next().unwrap_or(path))
+            }
             Self::GitHub(_) => tr!("right_panel.github"),
             Self::SideChat(_) => tr!("right_panel.side_chat"),
         }
@@ -1043,7 +1046,7 @@ impl RightPanelSurface {
             Self::PullRequest { .. } => "icons/git-pull-request-arrow.svg",
             Self::Files => "icons/folder.svg",
             Self::Diff => "icons/file-diff.svg",
-            Self::File(path) => file_icon_for_path(path),
+            Self::File(path) | Self::FileAtRef { path, .. } => file_icon_for_path(path),
             Self::GitHub(_) => "icons/github.svg",
             Self::SideChat(_) => "icons/chat.svg",
         }
@@ -1093,6 +1096,7 @@ fn reusable_surface_index(
         RightPanelSurface::Files
         | RightPanelSurface::Diff
         | RightPanelSurface::File(_)
+        | RightPanelSurface::FileAtRef { .. }
         | RightPanelSurface::PullRequest { .. } => {
             surfaces.iter().position(|surface| surface == requested)
         }
@@ -2034,6 +2038,12 @@ impl Waku {
             // its own.
             editor.pending_position = None;
         }
+        // A blob read dropped by the swap left `requested` armed; clearing
+        // it lets the restored surface's render ask again. An editor whose
+        // read already landed just re-fetches the same blob.
+        for editor in self.right_panel_ref_editors.values_mut() {
+            editor.requested = false;
+        }
         // The find bar pointed into the editors that were just swapped out;
         // its match list means nothing here, and restored editors may carry
         // washes stored mid-search. A pending finder focus handoff names one
@@ -2041,6 +2051,11 @@ impl Waku {
         self.reset_file_search_for_session(cx);
         self.reset_go_to_line_for_session(cx);
         self.right_panel_pending_file_focus = None;
+        // A reveal armed just before the swap names a path in the incoming
+        // session's tree, not this one's — drop it rather than scroll to a
+        // coincidental same-named row.
+        self.right_panel_pending_tree_reveal = None;
+        self.right_panel_tree_scroll_to = None;
         self.reload_clean_right_panel_file_editors(cx);
         self.state.right_panel_visible = self.right_panel_visible;
         if self.active_right_panel_surface() == Some(&RightPanelSurface::Diff) {
@@ -2133,6 +2148,7 @@ impl Waku {
             files_selected_path: self.right_panel_files_selected_path.take(),
             file_tree_width: self.right_panel_file_tree_width,
             file_editors: std::mem::take(&mut self.right_panel_file_editors),
+            ref_editors: std::mem::take(&mut self.right_panel_ref_editors),
             diff_source: self.right_panel_diff_source,
             diff_snapshot: self.right_panel_diff_snapshot.take(),
             diff_selected_file: self.right_panel_diff_selected_file.take(),
@@ -2159,6 +2175,7 @@ impl Waku {
         self.right_panel_files_selected_path = state.files_selected_path;
         self.right_panel_file_tree_width = state.file_tree_width;
         self.right_panel_file_editors = state.file_editors;
+        self.right_panel_ref_editors = state.ref_editors;
         self.right_panel_diff_generation = self.right_panel_diff_generation.wrapping_add(1);
         self.right_panel_diff_selection.clear();
         self.right_panel_diff_source = state.diff_source;
@@ -2374,7 +2391,10 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let reusable_index = reusable_surface_index(&self.right_panel_surfaces, &surface);
-        if matches!(&surface, RightPanelSurface::File(_)) {
+        if matches!(
+            &surface,
+            RightPanelSurface::File(_) | RightPanelSurface::FileAtRef { .. }
+        ) {
             self.ensure_initial_right_panel_file_editor_width();
         }
         if surface == RightPanelSurface::Diff {
@@ -2507,6 +2527,49 @@ impl Waku {
             }
             _ => self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx),
         }
+    }
+
+    /// Select `relative_path` in the Files surface's working tree, expanding
+    /// every ancestor directory so the row exists — the Git panel's "Reveal
+    /// in Files". The scroll lands via `right_panel_tree_scroll_to` once the
+    /// refreshed tree's entries arrive.
+    pub(super) fn reveal_right_panel_file_in_tree(
+        &mut self,
+        relative_path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self
+            .selected_workspace_path()
+            .map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+        let absolute = workspace.join(&relative_path);
+        // Every directory between the workspace root and the file must be
+        // expanded for the row to render at all.
+        let mut dir = absolute.parent();
+        while let Some(path) = dir {
+            if path == workspace.as_path() {
+                break;
+            }
+            self.right_panel_expanded_paths.insert(path.to_path_buf());
+            dir = path.parent();
+        }
+        self.right_panel_pending_tree_reveal = Some(relative_path.clone());
+        self.right_panel_files_selected_path = Some(relative_path);
+        self.open_right_panel_surface(RightPanelSurface::Files, cx);
+    }
+
+    /// The tree's next entries resolve the pending reveal to a row index —
+    /// or drop it when the file is not in the tree at all.
+    fn resolve_right_panel_pending_tree_reveal(&mut self) {
+        let Some(path) = self.right_panel_pending_tree_reveal.take() else {
+            return;
+        };
+        self.right_panel_tree_scroll_to = self
+            .right_panel_working_tree
+            .iter()
+            .position(|entry| entry.relative_path == path);
     }
 
     pub(super) fn close_right_panel_surface(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -2728,6 +2791,9 @@ impl Waku {
                 }),
             Some(RightPanelSurface::File(path)) => self
                 .render_right_panel_file(path, width, window, cx)
+                .into_any_element(),
+            Some(RightPanelSurface::FileAtRef { path, git_ref }) => self
+                .render_right_panel_ref_file(&path, &git_ref, width, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::GitHub(project_id)) => self
                 .render_github_detail(project_id, window, cx)
@@ -3609,9 +3675,11 @@ impl Waku {
                     right_panel_tab_icon(&surface, self.right_panel_files_selected_path.as_deref())
                 }
             };
-            let uses_file_icon = matches!(&surface, RightPanelSurface::File(_))
-                || matches!(&surface, RightPanelSurface::Files)
-                    && self.right_panel_files_selected_path.is_some();
+            let uses_file_icon = matches!(
+                &surface,
+                RightPanelSurface::File(_) | RightPanelSurface::FileAtRef { .. }
+            ) || matches!(&surface, RightPanelSurface::Files)
+                && self.right_panel_files_selected_path.is_some();
             let activate_weak = cx.entity().downgrade();
             let close_weak = cx.entity().downgrade();
             tabs = tabs.child(
@@ -4139,7 +4207,45 @@ impl Waku {
                     .child(scrollbar::vertical(
                         &self.right_panel_files_scroll_handle,
                         &self.right_panel_files_scrollbar,
-                    )),
+                    ))
+                    .children(self.right_panel_tree_scroll_to.map(|index| {
+                        // Rows are `h(30)` under the list's `py(6)` — index to
+                        // pixels directly rather than waiting a second frame
+                        // for measured bounds.
+                        let scroll = self.right_panel_files_scroll_handle.clone();
+                        let waku = cx.entity().downgrade();
+                        canvas(
+                            move |_, window, _| {
+                                let viewport = scroll.bounds();
+                                let offset = scroll.offset();
+                                let row_top = px(6.0 + index as f32 * 30.0);
+                                let row_bottom = row_top + px(30.0);
+                                let visible_top = -offset.y;
+                                let visible_bottom =
+                                    visible_top + (viewport.bottom() - viewport.top());
+                                let mut y = offset.y;
+                                if row_top < visible_top {
+                                    y = -row_top;
+                                } else if row_bottom > visible_bottom {
+                                    y = -(row_bottom - (viewport.bottom() - viewport.top()));
+                                }
+                                if y != offset.y {
+                                    scroll.set_offset(point(offset.x, y));
+                                }
+                                window.on_next_frame(move |_, cx| {
+                                    let _ = waku.update(cx, |this, cx| {
+                                        if this.right_panel_tree_scroll_to == Some(index) {
+                                            this.right_panel_tree_scroll_to = None;
+                                            cx.notify();
+                                        }
+                                    });
+                                });
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full()
+                    })),
             )
     }
 
@@ -4499,6 +4605,183 @@ impl Waku {
                         )),
                 )
             })
+    }
+
+    /// The `FileAtRef` surface: a file's blob at a git ref, read-only — the
+    /// working-tree editor's chrome minus everything that needs the file on
+    /// disk (save, reveal, annotations, the tree column).
+    fn render_right_panel_ref_file(
+        &mut self,
+        path: &str,
+        git_ref: &str,
+        _panel_width: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let (editor_state, scroll, scrollbar) =
+            self.ensure_right_panel_ref_editor(path, git_ref, window, cx);
+        // Cheap every frame — the read self-guards once started.
+        self.read_right_panel_ref_file(path.to_owned(), git_ref.to_owned(), cx);
+        let key = format!("{git_ref}:{path}");
+
+        let text_size = self.state.code_font_size;
+        let line_height = (text_size * 1.5).round();
+
+        div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .h(px(42.0))
+                    .flex_none()
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .border_b(hairline())
+                    .border_color(theme.separator)
+                    .child(file_icon(file_icon_for_path(path), 13.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(format!("{path} ({git_ref})")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .bg(theme.surface)
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(px(text_size))
+                    .line_height(px(line_height))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("ref-file-editor-{key}")))
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&scroll)
+                            .child(div().w_full().px(px(16.0)).py(px(6.0)).child(editor_state)),
+                    )
+                    .child(scrollbar::vertical(&scroll, &scrollbar)),
+            )
+    }
+
+    /// The ref surface's editor, created on first render: empty and locked,
+    /// with the blob read kicked off to the background executor — the same
+    /// shape the working-tree editor takes because `render` cannot touch
+    /// the filesystem.
+    fn ensure_right_panel_ref_editor(
+        &mut self,
+        path: &str,
+        git_ref: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<TextInput>, ScrollHandle, Rc<ScrollbarState>) {
+        let key = format!("{git_ref}:{path}");
+        if let Some(editor) = self.right_panel_ref_editors.get(&key) {
+            return (
+                editor.state.clone(),
+                editor.scroll.clone(),
+                editor.scrollbar.clone(),
+            );
+        }
+        let language = file_highlighter_language(path);
+        let state = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .syntax(Some(language))
+                .read_only(true)
+                .accessibility_label(format!("{path} ({git_ref})"))
+        });
+        let editor = RightPanelRefEditor {
+            state: state.clone(),
+            requested: false,
+            scroll: ScrollHandle::new(),
+            scrollbar: ScrollbarState::new(),
+        };
+        let (scroll, scrollbar) = (editor.scroll.clone(), editor.scrollbar.clone());
+        self.right_panel_ref_editors.insert(key, editor);
+        (state, scroll, scrollbar)
+    }
+
+    /// `git show <ref>:<path>` into the surface's read-only editor. The read
+    /// runs on the background executor; the landing drops when the session
+    /// or workspace moved on, mirroring `read_right_panel_file_into_editor`.
+    fn read_right_panel_ref_file(&mut self, path: String, git_ref: String, cx: &mut Context<Self>) {
+        let key = format!("{git_ref}:{path}");
+        let (Some(project_path), Some(session_id)) = (
+            self.selected_workspace_path()
+                .map(std::path::Path::to_path_buf),
+            self.state.selected_session,
+        ) else {
+            return;
+        };
+        let Some(workspace) = self.workspace_client_for_path(&project_path) else {
+            return;
+        };
+        let Some(editor) = self.right_panel_ref_editors.get_mut(&key) else {
+            return;
+        };
+        // One shot: a second asker would only duplicate the read.
+        if editor.requested {
+            return;
+        }
+        editor.requested = true;
+        cx.spawn(async move |waku, cx| {
+            let read = cx
+                .background_executor()
+                .spawn({
+                    let project_path = project_path.clone();
+                    async move {
+                        match workspace.request(waku_client::WorkspaceOperation::ReadFileAtRef {
+                            cwd: project_path,
+                            path,
+                            git_ref,
+                        }) {
+                            Ok(waku_client::WorkspaceResult::TextFile { content }) => content,
+                            Ok(_) => tr!(
+                                "files.unable_to_edit",
+                                error = "the daemon returned an invalid file response"
+                            ),
+                            Err(error) => {
+                                tr!("files.unable_to_edit", error = error.to_string())
+                            }
+                        }
+                    }
+                })
+                .await;
+            waku.update(cx, |waku, cx| {
+                if waku.state.selected_session != Some(session_id)
+                    || waku
+                        .selected_workspace_path()
+                        .is_none_or(|current| current != project_path)
+                {
+                    // The editor swapped out with its session; whatever
+                    // parked state it lives in keeps `requested` set, so a
+                    // later restore skips a re-read — stale is acceptable
+                    // for a committed blob.
+                    return;
+                }
+                let Some(editor) = waku.right_panel_ref_editors.get_mut(&key) else {
+                    return;
+                };
+                let state = editor.state.clone();
+                state.update(cx, |state, cx| state.set_content(read, cx));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn ensure_right_panel_file_editor(
@@ -6418,7 +6701,10 @@ impl Waku {
         // changed, so a cached listing is only good until something asks again.
         self.working_trees.invalidate(&project_path);
         match self.working_trees.read(&project_path) {
-            Query::Ready(entries) => self.right_panel_working_tree = (*entries).clone(),
+            Query::Ready(entries) => {
+                self.right_panel_working_tree = (*entries).clone();
+                self.resolve_right_panel_pending_tree_reveal();
+            }
             Query::Pending => {}
             Query::Missing(token) => {
                 let Some(workspace) = self.workspace_client_for_path(&project_path) else {
@@ -6462,6 +6748,7 @@ impl Waku {
                                 .is_some_and(|path| path == project_path)
                         {
                             waku.right_panel_working_tree = entries;
+                            waku.resolve_right_panel_pending_tree_reveal();
                             cx.notify();
                         }
                     })

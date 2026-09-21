@@ -151,6 +151,69 @@ pub fn unstage(cwd: &Path, path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Drop every change a path carries: `git restore --staged --worktree`
+/// returns a tracked path to HEAD, while a path HEAD never knew — untracked,
+/// or added to the index without a commit — is deleted outright.
+pub fn discard(cwd: &Path, path: &str) -> anyhow::Result<()> {
+    ensure_repository(cwd)?;
+    let status = git_stdout(cwd, &["status", "--porcelain=v1", "--", path])?;
+    let untracked = status
+        .lines()
+        .next()
+        .is_some_and(|line| line.starts_with("??"));
+    if untracked {
+        git_success(cwd, &["clean", "-fd", "--", path])?;
+    } else if ref_exists(cwd, "HEAD")?
+        && git_capture(cwd, &["cat-file", "-e", &format!("HEAD:{path}")])?
+            .status
+            .success()
+    {
+        git_success(
+            cwd,
+            &[
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+                "--",
+                path,
+            ],
+        )?;
+    } else {
+        // No HEAD blob to restore to (a staged add, or a repository with no
+        // commits yet): discarding removes the file from index and worktree.
+        git_success(cwd, &["rm", "-q", "-f", "--", path])?;
+    }
+    Ok(())
+}
+
+/// `git show <ref>:<path>` — the file's blob at a ref, for read-only views
+/// of a committed version.
+pub fn file_at_ref(cwd: &Path, path: &str, git_ref: &str) -> anyhow::Result<String> {
+    ensure_repository(cwd)?;
+    git_stdout(cwd, &["show", &format!("{git_ref}:{path}")])
+}
+
+/// Append `path` to the repository root's `.gitignore`, once. Status paths
+/// are already root-relative, so they land as patterns that anchor to the
+/// file's own directory.
+pub fn ignore(cwd: &Path, path: &str) -> anyhow::Result<()> {
+    ensure_repository(cwd)?;
+    let root = git_stdout(cwd, &["rev-parse", "--show-toplevel"])?;
+    let gitignore = Path::new(root.trim()).join(".gitignore");
+    let mut contents = std::fs::read_to_string(&gitignore).unwrap_or_default();
+    if contents.lines().any(|line| line.trim() == path) {
+        return Ok(());
+    }
+    if !contents.is_empty() && !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+    contents.push_str(path);
+    contents.push('\n');
+    std::fs::write(&gitignore, contents)?;
+    Ok(())
+}
+
 /// Integrate upstream: `git pull --rebase` or `--no-rebase`. A clean pull
 /// reports `Clean`; a conflicted one leaves the integration in progress and
 /// reports `Conflict`, leaving the caller to offer resolve/merge/abort.

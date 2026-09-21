@@ -2045,6 +2045,19 @@ git_panel.rebasing_onto: "%{base} にリベース中…"
 git_panel.resolve_merge_onto_prompt: "`%{base}` のこのワークツリーへのマージが競合で停止しました。作業ツリーの競合を解決してマージを完了してください。"
 git_panel.resolve_rebase_onto_prompt: "このワークツリーの `%{base}` へのリベースが競合で停止しました。作業ツリーの競合を解決し、リベースが完了するまで `git rebase --continue` を実行してください。"
 git_panel.up_to_date: 最新です
+git_panel.open_changes: 変更を開く
+git_panel.open_file_head: ファイルを開く（HEAD）
+git_panel.stage_changes: 変更をステージ
+git_panel.unstage_changes: 変更のステージを解除
+git_panel.add_to_gitignore: .gitignore に追加
+git_panel.reveal_in_files: 「ファイル」で表示
+git_panel.discard_changes: 変更を破棄
+git_panel.discard_title: 変更を破棄しますか？
+git_panel.discard_description: "%{path} を HEAD の状態に戻します — 元に戻せません。"
+git_panel.discard_confirm: 破棄
+git_panel.discard_untracked_title: 追跡されていないファイルを削除しますか？
+git_panel.discard_untracked_description: "%{path} は Git で追跡されていないため、完全に削除されます — 元に戻せません。"
+git_panel.discard_untracked_confirm: ファイルを削除
 integrations.agents: エージェント
 integrations.api_key: API キー
 integrations.api_key_hint: キーチェーンに保存されます — プロバイダーの設定には書き込まれません。
