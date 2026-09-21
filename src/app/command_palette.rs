@@ -6,7 +6,7 @@
 //! SQLite scan. Caret blinks therefore repaint one in-memory snapshot instead
 //! of re-fuzzy-matching history or touching storage every frame.
 
-use gpui::{KeyBinding, StyledText, TextRun, actions};
+use gpui::{Action, KeyBinding, StyledText, TextRun, actions};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef};
@@ -208,6 +208,7 @@ enum PaletteAction {
     SyncBranch,
     CompactContext,
     ToggleUsage,
+    CheckForUpdates,
     CollapseSidebarGroups,
     GoToNextUnreadCompletion,
     MarkAllSessionsRead,
@@ -1680,7 +1681,11 @@ impl Waku {
         .detach();
     }
 
-    fn command_palette_commands(&self, searching: bool) -> Vec<CommandPaletteItem> {
+    fn command_palette_commands(
+        &self,
+        searching: bool,
+        updater_available: bool,
+    ) -> Vec<CommandPaletteItem> {
         let display_section = |suggested| {
             if searching {
                 PaletteSection::Commands
@@ -1999,6 +2004,17 @@ impl Waku {
                 Some(ShortcutHint::action(&ToggleUsagePanel)),
                 PaletteAction::ToggleUsage,
                 "toggle usage limits rate quota panel",
+                next(),
+            ));
+        }
+        if updater_available {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("menu.check_for_updates"),
+                "icons/download.svg",
+                None,
+                PaletteAction::CheckForUpdates,
+                "check for updates update version upgrade latest",
                 next(),
             ));
         }
@@ -3209,7 +3225,7 @@ impl Waku {
         &mut self,
         query: &str,
         preserve_selection: bool,
-        _cx: &App,
+        cx: &App,
     ) {
         match self.command_palette.view {
             CommandPaletteView::Resume => {
@@ -3254,9 +3270,12 @@ impl Waku {
             }
             CommandPaletteView::Commands => {}
         }
+        let updater_available = cx
+            .try_global::<crate::updater::UpdaterState>()
+            .is_some_and(|state| state.0.is_some());
         let query = query.trim();
         if query.is_empty() {
-            self.command_palette.results = self.command_palette_commands(false);
+            self.command_palette.results = self.command_palette_commands(false, updater_available);
             self.command_palette.selected = 0;
             self.command_palette.scroll.scroll_to_item(0);
             return;
@@ -3305,7 +3324,7 @@ impl Waku {
         tasks.truncate(MAX_TASK_RESULTS);
 
         let mut commands = self
-            .command_palette_commands(true)
+            .command_palette_commands(true, updater_available)
             .into_iter()
             .filter_map(|item| {
                 pattern
@@ -3753,6 +3772,9 @@ impl Waku {
                 self.go_to_next_unread_completion_action(&GoToNextUnreadCompletion, window, cx)
             }
             PaletteAction::MarkAllSessionsRead => self.mark_all_sessions_read(cx),
+            PaletteAction::CheckForUpdates => {
+                window.dispatch_action(CheckForUpdates.boxed_clone(), cx)
+            }
             PaletteAction::ToggleSidebar => self.toggle_sidebar_action(&ToggleSidebar, window, cx),
             PaletteAction::ToggleRightPanel => {
                 self.toggle_right_panel_action(&ToggleRightPanel, window, cx)

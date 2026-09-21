@@ -79,7 +79,8 @@ use crate::ui::{
     provider_color, provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{
-    AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
+    AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CheckForUpdates,
+    CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
     CycleFavoriteModel, CycleReasoningEffort, DismissDraftsLayer, DismissInbox,
     DismissProjectsLayer, EffortCycleDirection, ExitPanelFullscreen, FindNext, FindPrevious,

@@ -1,0 +1,1 @@
+- The command palette offers a "Check for Updates" command that runs a manual update check and reports the result
