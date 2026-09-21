@@ -4520,9 +4520,11 @@ impl Waku {
                     .child(
                         div()
                             .flex_1()
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .gap(px(2.0))
+                            .whitespace_normal()
                             .child(
                                 div()
                                     .text_size(sp(12.5))
