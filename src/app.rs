@@ -175,6 +175,11 @@ const BACKGROUND_WORK_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const BACKGROUND_WORK_TICK_INTERVAL: Duration = Duration::from_secs(1);
 const PLAN_USAGE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(30);
 const STREAM_SAVE_INTERVAL: Duration = Duration::from_secs(1);
+/// How long a daemon recovery report stays open so the `RuntimeLost`-driven
+/// resumes it caused can be counted into its `daemon.recovery` event. The
+/// losses surface only after the replacement client answers `AttachSession`
+/// — a local socket roundtrip — so a short window suffices.
+const DAEMON_RECOVERY_COUNT_WINDOW: Duration = Duration::from_secs(3);
 /// Zed keeps status toasts on screen for ten seconds, pausing the countdown
 /// while the pointer is over the toast so a long message remains readable.
 const DEFAULT_TOAST_DURATION: Duration = Duration::from_secs(5);
@@ -1313,6 +1318,17 @@ struct SessionRuntime {
     sandbox_setup: Option<crate::model::SandboxSetupStatus>,
 }
 
+/// A supervisor recovery report held open briefly: `RuntimeLost` arrives
+/// only after the replacement client answers `AttachSession`, so the
+/// analytics event waits out this window to count the resumes it caused.
+struct DaemonRecoveryEpisode {
+    key: waku_client::DaemonKey,
+    cause: waku_client::DaemonRecoveryCause,
+    outcome: waku_client::DaemonRecoveryOutcome,
+    sessions_resumed: usize,
+    flush_at: Instant,
+}
+
 #[derive(Clone)]
 struct PendingUserInput {
     request_id: String,
@@ -2270,6 +2286,10 @@ pub struct Waku {
     /// agent — rewrites it.
     daemon_settings_tx: Sender<(waku_client::DaemonKey, waku_client::DaemonSettings)>,
     daemon_settings_events: Receiver<(waku_client::DaemonKey, waku_client::DaemonSettings)>,
+    /// Supervisor recovery reports, one feed per connected daemon — the
+    /// source for the `daemon.recovery` analytics event.
+    daemon_recovery_tx: Sender<(waku_client::DaemonKey, waku_client::DaemonRecovery)>,
+    daemon_recovery_events: Receiver<(waku_client::DaemonKey, waku_client::DaemonRecovery)>,
     /// `friendsChanged` broadcasts forwarded by the task-state sync worker:
     /// the authoritative daemon document each time a friend request, offer,
     /// or transfer update lands.
@@ -2378,6 +2398,8 @@ pub struct Waku {
     /// Cleared when a turn completes successfully; capped so a daemon that
     /// keeps dying on the resumed prompt cannot loop continuations forever.
     runtime_auto_resumes: HashMap<Uuid, u8>,
+    /// The open daemon recovery episode; see [`DaemonRecoveryEpisode`].
+    daemon_recovery_episode: Option<DaemonRecoveryEpisode>,
     /// Provider-neutral session work which may remain live after a turn ends.
     /// Runtime-only by design: providers reconcile their authoritative state
     /// when the resident transport reconnects.
@@ -4546,6 +4568,7 @@ impl Waku {
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
+        let (daemon_recovery_tx, daemon_recovery_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
         let (pairing_tx, pairing_events) = unbounded();
         let (automations_tx, automations_events) = unbounded();
@@ -5608,6 +5631,8 @@ impl Waku {
                 task_state_sync_events,
                 daemon_settings_tx,
                 daemon_settings_events,
+                daemon_recovery_tx,
+                daemon_recovery_events,
                 friends_state: waku_client::friends::FriendsState::default(),
                 friends_tx,
                 friends_events,
@@ -5642,6 +5667,7 @@ impl Waku {
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),
                 runtime_auto_resumes: HashMap::new(),
+                daemon_recovery_episode: None,
                 background_work: HashMap::new(),
                 last_background_work_tick: Instant::now(),
                 submission_preparations: HashSet::new(),

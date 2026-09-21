@@ -185,6 +185,15 @@ pub enum Event {
         provider: &'static str,
         turn_number: usize,
     },
+    DaemonRecovery {
+        /// `unexpected_exit` | `disconnect` | `rebuild`
+        cause: &'static str,
+        /// `recovered` | `unreachable`
+        outcome: &'static str,
+        /// Sessions whose lost runtime the app auto-resumed onto the
+        /// replacement connection.
+        sessions_resumed: usize,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -392,6 +401,18 @@ impl Event {
                     "turnNumber": turn_number,
                 }),
             ),
+            Self::DaemonRecovery {
+                cause,
+                outcome,
+                sessions_resumed,
+            } => (
+                "daemon.recovery",
+                json!({
+                    "cause": cause,
+                    "outcome": outcome,
+                    "sessionsResumed": sessions_resumed,
+                }),
+            ),
         };
 
         let properties = data
@@ -567,6 +588,11 @@ mod tests {
             Event::TransferFinished {
                 direction: "incoming",
                 outcome: "done",
+            },
+            Event::DaemonRecovery {
+                cause: "unexpected_exit",
+                outcome: "recovered",
+                sessions_resumed: 2,
             },
         ];
 

@@ -312,6 +312,38 @@ pub enum DaemonStatus {
     Unreachable,
 }
 
+/// What made the supervisor recover its daemon connection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DaemonRecoveryCause {
+    /// The managed daemon process exited or its connection dropped.
+    UnexpectedExit,
+    /// A remote daemon's connection dropped; the daemon itself may still be
+    /// running — sessions often survive this and reattach.
+    Disconnect,
+    /// The daemon binary changed on disk and was swapped (development).
+    Rebuild,
+}
+
+/// How one recovery episode resolved.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DaemonRecoveryOutcome {
+    /// A working daemon connection is back.
+    Recovered,
+    /// Recovery attempts crossed the unreachable threshold; slow retries
+    /// continue, so a later report may still announce `Recovered`.
+    Unreachable,
+}
+
+/// One daemon recovery episode, delivered to
+/// [`DaemonSupervisor::subscribe_recovery`] subscribers: once when an outage
+/// first crosses the unreachable threshold, and again when a working
+/// connection is back.
+#[derive(Clone, Copy, Debug)]
+pub struct DaemonRecovery {
+    pub cause: DaemonRecoveryCause,
+    pub outcome: DaemonRecoveryOutcome,
+}
+
 struct SupervisorInner {
     executable: Option<PathBuf>,
     /// The daemon's host is not this machine. An externally managed
@@ -325,6 +357,7 @@ struct SupervisorInner {
     persisted_settings: Mutex<Option<DaemonSettings>>,
     settings_updates: Sender<DaemonSettings>,
     client_updates: Mutex<Vec<Sender<DaemonClient>>>,
+    recovery_reports: Mutex<Vec<Sender<DaemonRecovery>>>,
     status: Mutex<DaemonStatus>,
     running: AtomicBool,
 }
@@ -439,6 +472,7 @@ impl DaemonSupervisor {
             persisted_settings: Mutex::new(None),
             settings_updates,
             client_updates: Mutex::new(Vec::new()),
+            recovery_reports: Mutex::new(Vec::new()),
             status: Mutex::new(DaemonStatus::Connected),
             running: AtomicBool::new(true),
         });
@@ -464,6 +498,15 @@ impl DaemonSupervisor {
         let target = self.inner.target.lock();
         self.inner.client_updates.lock().push(updates.clone());
         let _ = updates.send(target.client());
+        receiver
+    }
+
+    /// Subscribe to daemon recovery episodes. Unlike [`Self::subscribe_clients`]
+    /// there is no initial replay — a supervisor that has never had to recover
+    /// has nothing to report.
+    pub fn subscribe_recovery(&self) -> Receiver<DaemonRecovery> {
+        let (reports, receiver) = unbounded();
+        self.inner.recovery_reports.lock().push(reports);
         receiver
     }
 
@@ -593,13 +636,17 @@ fn monitor_daemon(
                         .retain(|subscriber| subscriber.send(replacement.clone()).is_ok());
                     consecutive_failures = 0;
                     healthy_since = Instant::now();
-                    set_status(&inner, DaemonStatus::Connected);
+                    mark_connected(&inner, DaemonRecoveryCause::Disconnect);
                 }
                 Err(error) => {
                     consecutive_failures += 1;
                     next_retry = Instant::now() + retry_delay(consecutive_failures);
                     eprintln!("could not reconnect to Goddard daemon: {error:#}");
-                    note_recovery_failure(&inner, consecutive_failures);
+                    note_recovery_failure(
+                        &inner,
+                        consecutive_failures,
+                        DaemonRecoveryCause::Disconnect,
+                    );
                 }
             }
             continue;
@@ -624,6 +671,13 @@ fn monitor_daemon(
                     continue;
                 }
                 set_status(&inner, DaemonStatus::Recovering);
+                // A downed daemon owns the cause even when a rebuild is also
+                // pending: the process exit is what interrupted sessions.
+                let cause = if daemon_down {
+                    DaemonRecoveryCause::UnexpectedExit
+                } else {
+                    DaemonRecoveryCause::Rebuild
+                };
                 let _restart = inner.restart.lock();
                 // Re-check under the restart lock: `reconfigure` may have
                 // swapped in a fresh daemon while this thread waited.
@@ -635,7 +689,7 @@ fn monitor_daemon(
                     DaemonTarget::Remote { .. } => false,
                 };
                 if !still_down && !executable_changed {
-                    set_status(&inner, DaemonStatus::Connected);
+                    mark_connected(&inner, cause);
                     continue;
                 }
                 if still_down && !counted_outage {
@@ -648,7 +702,7 @@ fn monitor_daemon(
                     }
                     if consecutive_failures > 0 {
                         next_retry = Instant::now() + retry_delay(consecutive_failures);
-                        note_recovery_failure(&inner, consecutive_failures);
+                        note_recovery_failure(&inner, consecutive_failures, cause);
                         continue;
                     }
                 }
@@ -658,7 +712,7 @@ fn monitor_daemon(
                 match replace_local_daemon(&inner, executable, &exposure) {
                     Ok(()) => {
                         healthy_since = Instant::now();
-                        set_status(&inner, DaemonStatus::Connected);
+                        mark_connected(&inner, cause);
                         queue_settings_refresh(&inner);
                         if let Some(observed_stamp) = observed_stamp {
                             active_stamp = Some(observed_stamp);
@@ -668,7 +722,7 @@ fn monitor_daemon(
                         consecutive_failures += 1;
                         next_retry = Instant::now() + retry_delay(consecutive_failures);
                         eprintln!("could not restart the Goddard daemon: {error:#}");
-                        note_recovery_failure(&inner, consecutive_failures);
+                        note_recovery_failure(&inner, consecutive_failures, cause);
                     }
                 }
                 continue;
@@ -700,15 +754,48 @@ fn set_status(inner: &SupervisorInner, status: DaemonStatus) {
     *inner.status.lock() = status;
 }
 
-fn note_recovery_failure(inner: &SupervisorInner, failures: u32) {
-    set_status(
-        inner,
-        if failures >= UNREACHABLE_AFTER_FAILURES {
+fn report_recovery(
+    inner: &SupervisorInner,
+    cause: DaemonRecoveryCause,
+    outcome: DaemonRecoveryOutcome,
+) {
+    inner
+        .recovery_reports
+        .lock()
+        .retain(|subscriber| subscriber.send(DaemonRecovery { cause, outcome }).is_ok());
+}
+
+/// Recovery succeeded — report it only when the daemon was actually
+/// recovering, so steady-state bookkeeping never reads as an outage.
+fn mark_connected(inner: &SupervisorInner, cause: DaemonRecoveryCause) {
+    let recovered = {
+        let mut status = inner.status.lock();
+        let recovered = *status != DaemonStatus::Connected;
+        *status = DaemonStatus::Connected;
+        recovered
+    };
+    if recovered {
+        report_recovery(inner, cause, DaemonRecoveryOutcome::Recovered);
+    }
+}
+
+fn note_recovery_failure(inner: &SupervisorInner, failures: u32, cause: DaemonRecoveryCause) {
+    let newly_unreachable = {
+        let mut status = inner.status.lock();
+        let unreachable = failures >= UNREACHABLE_AFTER_FAILURES;
+        let newly = unreachable && *status != DaemonStatus::Unreachable;
+        *status = if unreachable {
             DaemonStatus::Unreachable
         } else {
             DaemonStatus::Recovering
-        },
-    );
+        };
+        newly
+    };
+    // Report the crossing once per episode — slow retries keep calling this
+    // and would otherwise repeat the same report.
+    if newly_unreachable {
+        report_recovery(inner, cause, DaemonRecoveryOutcome::Unreachable);
+    }
 }
 
 fn replace_local_daemon(

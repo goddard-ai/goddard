@@ -1400,6 +1400,22 @@ impl Waku {
         let review_updates = self.review_tx.clone();
         let closed_updates = self.friend_session_closed_tx.clone();
         let event_wake = self.event_wake_tx.clone();
+        // Recovery reports feed the `daemon.recovery` analytics event; the
+        // pump does the counting, this thread only forwards.
+        let reports = supervisor.subscribe_recovery();
+        let recovery_updates = self.daemon_recovery_tx.clone();
+        let recovery_wake = self.event_wake_tx.clone();
+        std::thread::Builder::new()
+            .name(format!("waku-daemon-recovery-{key:?}"))
+            .spawn(move || {
+                while let Ok(report) = reports.recv() {
+                    if recovery_updates.send((key, report)).is_err() {
+                        return;
+                    }
+                    signal_event_pump(&recovery_wake);
+                }
+            })
+            .ok();
         std::thread::Builder::new()
             .name(format!("waku-task-state-sync-{key:?}"))
             .spawn(move || {
@@ -1598,6 +1614,62 @@ impl Waku {
             self.apply_remote_daemon_settings(key, settings, cx);
         }
         true
+    }
+
+    /// Supervisor recovery reports. Each opens a [`DaemonRecoveryEpisode`]
+    /// whose short window lets the RuntimeLost-driven resumes it causes be
+    /// counted before the `daemon.recovery` event fires.
+    fn drain_daemon_recovery_events(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok((key, report)) = self.daemon_recovery_events.try_recv() {
+            changed = true;
+            // A new report ends the open episode: its window is over — the
+            // supervisor only reports again once a later outage resolves.
+            self.flush_daemon_recovery_report();
+            self.daemon_recovery_episode = Some(DaemonRecoveryEpisode {
+                key,
+                cause: report.cause,
+                outcome: report.outcome,
+                sessions_resumed: 0,
+                flush_at: Instant::now() + DAEMON_RECOVERY_COUNT_WINDOW,
+            });
+        }
+        changed
+    }
+
+    /// Emit the `daemon.recovery` analytics event for the open episode.
+    fn flush_daemon_recovery_report(&mut self) {
+        let Some(episode) = self.daemon_recovery_episode.take() else {
+            return;
+        };
+        self.analytics.track(crate::analytics::Event::DaemonRecovery {
+            cause: match episode.cause {
+                waku_client::DaemonRecoveryCause::UnexpectedExit => "unexpected_exit",
+                waku_client::DaemonRecoveryCause::Disconnect => "disconnect",
+                waku_client::DaemonRecoveryCause::Rebuild => "rebuild",
+            },
+            outcome: match episode.outcome {
+                waku_client::DaemonRecoveryOutcome::Recovered => "recovered",
+                waku_client::DaemonRecoveryOutcome::Unreachable => "unreachable",
+            },
+            sessions_resumed: episode.sessions_resumed,
+        });
+    }
+
+    /// The soonest timer the pump must wake for: background log output
+    /// batching, or a recovery episode reaching the end of its count window.
+    fn next_timed_pump_delay(&self) -> Option<Duration> {
+        [
+            self.background_output_refresh_delay(),
+            self.daemon_recovery_episode.as_ref().map(|episode| {
+                episode
+                    .flush_at
+                    .saturating_duration_since(Instant::now())
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     /// `reviewChanged` broadcasts — an origin's `qa` state moved here or
@@ -3525,6 +3597,11 @@ impl Waku {
             return false;
         }
         *attempts += 1;
+        if let Some(episode) = self.daemon_recovery_episode.as_mut()
+            && episode.key == self.daemons.session_owner(session_id)
+        {
+            episode.sessions_resumed += 1;
+        }
         self.interrupt_orphaned_runtime(session_id, cx);
         if let Some(session) = self.state.session_mut(session_id) {
             session.push_message(
@@ -6602,7 +6679,11 @@ impl Waku {
     pub(super) fn drain_event_pump(&mut self, cx: &mut Context<Self>) -> EventPumpSchedule {
         // `|` on purpose: a busy provider must not starve the other result
         // queues just because its own drain reported a change first.
-        if self.drain_driver_events(cx)
+        // Recovery reports drain first: they are the cause of the RuntimeLost
+        // driver events in the same batch, and must open their episode before
+        // resume counting runs.
+        if self.drain_daemon_recovery_events()
+            | self.drain_driver_events(cx)
             | self.drain_provider_probe_events()
             | self.drain_provider_version_events()
             | self.drain_provider_detection_events()
@@ -6638,12 +6719,20 @@ impl Waku {
         self.drain_pending_workspace_cleanups(cx);
 
         if self
+            .daemon_recovery_episode
+            .as_ref()
+            .is_some_and(|episode| episode.flush_at <= Instant::now())
+        {
+            self.flush_daemon_recovery_report();
+        }
+
+        if self
             .runtimes
             .values()
             .any(|runtime| !runtime.pending_events.is_empty() || runtime.stream_remeasure_pending)
         {
             EventPumpSchedule::StreamFrame
-        } else if let Some(delay) = self.background_output_refresh_delay() {
+        } else if let Some(delay) = self.next_timed_pump_delay() {
             EventPumpSchedule::BackgroundOutput(delay)
         } else {
             EventPumpSchedule::Idle
