@@ -332,6 +332,7 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
                                 let _ = events.send(DriverEvent::SteerAccepted {
                                     message: text,
                                     sent_by_task: None,
+                                    hidden: false,
                                 });
                             }
                             Err(error) => {
@@ -1089,6 +1090,7 @@ mod tests {
                 DriverEvent::SteerAccepted {
                     message,
                     sent_by_task: None,
+                    ..
                 } => {
                     assert!(message.contains("BANANA"));
                     steer_accepted = true;
