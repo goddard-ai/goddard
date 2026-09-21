@@ -666,9 +666,9 @@ pub fn flatten_plain(
 
 /// Guided-reading tunables, using the scales the bionic-reading tools
 /// popularized: `fixation` is how much of each word is emphasized (1–5,
-/// mapping to ~20–60%), `saccade` is the cadence between emphasized words
-/// (10–50, fixating every `saccade/10`-th word), and `opacity` fades the
-/// unemphasized text (0–100 percent).
+/// mapping to ~20–60%), `saccade` is the letter distance the eye jumps
+/// between emphasized words (10–50), and `opacity` fades the unemphasized
+/// text (0–100 percent).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuidedReading {
     pub fixation: u8,
@@ -704,14 +704,17 @@ pub fn apply_fixation(flat: &mut FlatText, code_family: &SharedString, guided: &
     protected.sort_by_key(|range| range.start);
 
     let alpha = (f32::from(guided.opacity) / 100.0).clamp(0.0, 1.0);
-    // Saccade counts words across the whole element so a word split across
-    // styled runs can't cheat the cadence.
-    let mut word_index = 0usize;
+    // The saccade distance is counted across the whole element so a word
+    // split across styled runs can't cheat the jump — and starts full, so
+    // each element's first word is always anchored.
+    let mut distance = usize::from(guided.saccade.clamp(10, 50));
     let mut runs: Vec<TextRun> = Vec::with_capacity(flat.runs.len() * 2);
     let mut offset = 0;
     for run in flat.runs.drain(..) {
         let end = offset + run.len;
         if run.font.weight >= FontWeight::SEMIBOLD || run.font.family == *code_family {
+            // Untouchable text still occupies space the jump crosses.
+            distance += flat.text[offset..end].graphemes(true).count();
             offset = end;
             runs.push(run);
             continue;
@@ -725,7 +728,7 @@ pub fn apply_fixation(flat: &mut FlatText, code_family: &SharedString, guided: &
                     .any(|range| range.start <= at && at < range.end)
             },
             guided,
-            &mut word_index,
+            &mut distance,
         );
         for (range, fixated) in segments {
             let mut split = run.clone();
@@ -743,26 +746,29 @@ pub fn apply_fixation(flat: &mut FlatText, code_family: &SharedString, guided: &
 }
 
 /// Tile `range` of `text` into `(byte_range, fixated)` segments: each maximal
-/// run of eligible letters becomes a word whose leading share — the
-/// `fixation` fraction — is emphasized, every `saccade/10`-th one. Everything
-/// else — whitespace, digits, punctuation, protected spans, skipped words —
-/// is emitted plain. Splits only ever land on grapheme boundaries; cutting
-/// inside a cluster would shape a dangling combining mark.
+/// run of eligible letters becomes a word, and the word the `saccade` jump
+/// lands on gets its leading share — the `fixation` fraction — emphasized.
+/// `distance` counts the graphemes traversed since the last fixated word,
+/// whitespace included; a word is anchored when the jump crosses it, so a
+/// word longer than the remaining distance still gets anchored at its start.
+/// Everything else — digits, punctuation, protected spans, jumped-over
+/// words — is emitted plain. Splits only ever land on grapheme boundaries;
+/// cutting inside a cluster would shape a dangling combining mark.
 fn fixation_segments(
     text: &str,
     range: Range<usize>,
     in_protected: impl Fn(usize) -> bool,
     guided: &GuidedReading,
-    word_index: &mut usize,
+    distance: &mut usize,
 ) -> Vec<(Range<usize>, bool)> {
-    let saccade_step = usize::from(guided.saccade / 10).max(1);
+    let saccade_letters = usize::from(guided.saccade.clamp(10, 50));
     // Fixation level → share of the word emphasized, in tenths.
     let fraction_tenths = usize::from(guided.fixation.clamp(1, 5)) + 1;
     let mut segments: Vec<(Range<usize>, bool)> = Vec::new();
     let mut word: Vec<Range<usize>> = Vec::new();
     let mut cursor = range.start;
-    // Adjacent plain spans coalesce so a saccade-skipped word and its
-    // whitespace cost one run, not three.
+    // Adjacent plain spans coalesce so a jumped-over word and its whitespace
+    // cost one run, not three.
     let push_plain = |segments: &mut Vec<(Range<usize>, bool)>, range: Range<usize>| {
         if range.is_empty() {
             return;
@@ -778,16 +784,18 @@ fn fixation_segments(
     let flush_word = |word: &mut Vec<Range<usize>>,
                       segments: &mut Vec<(Range<usize>, bool)>,
                       cursor: &mut usize,
-                      word_index: &mut usize| {
+                      distance: &mut usize,
+                      text: &str| {
         let Some(first) = word.first() else { return };
         let start = first.start;
         if *cursor < start {
             push_plain(segments, *cursor..start);
+            *distance += text[*cursor..start].graphemes(true).count();
         }
         let end = word.last().map_or(start, |cluster| cluster.end);
-        let fixate = *word_index % saccade_step == 0;
-        *word_index += 1;
-        if fixate {
+        *distance += word.len();
+        if *distance >= saccade_letters {
+            *distance = 0;
             // Fixation prefix: the level's share of the word's grapheme
             // clusters, at least 1.
             let fix = ((word.len() * fraction_tenths + 9) / 10).max(1);
@@ -809,10 +817,11 @@ fn fixation_segments(
         if eligible {
             word.push(start..start + cluster.len());
         } else {
-            flush_word(&mut word, &mut segments, &mut cursor, word_index);
+            flush_word(&mut word, &mut segments, &mut cursor, distance, text);
         }
     }
-    flush_word(&mut word, &mut segments, &mut cursor, word_index);
+    flush_word(&mut word, &mut segments, &mut cursor, distance, text);
+    *distance += text[cursor..range.end].graphemes(true).count();
     push_plain(&mut segments, cursor..range.end);
     segments
 }
@@ -3274,15 +3283,14 @@ mod tests {
         );
         apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_runs_tile(&flat);
-        // Five-letter words fixate their first two graphemes; a word's
-        // plain tail coalesces with the following whitespace.
+        // "hello" anchors: five-letter words fixate their first two
+        // graphemes. The 10-letter saccade jump then lands past "world",
+        // which is emitted plain.
         assert_eq!(
             run_pieces(&flat),
             vec![
                 ("he".to_owned(), FontWeight::SEMIBOLD),
-                ("llo, ".to_owned(), FontWeight::NORMAL),
-                ("wo".to_owned(), FontWeight::SEMIBOLD),
-                ("rld".to_owned(), FontWeight::NORMAL),
+                ("llo, world".to_owned(), FontWeight::NORMAL),
             ]
         );
     }
@@ -3361,14 +3369,13 @@ mod tests {
         apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_runs_tile(&flat);
         // "café" is four clusters → "ca" fixated; the accent stays with its
-        // base in the trailing segment.
+        // base in the trailing segment, which coalesces with the jumped-over
+        // "nave".
         assert_eq!(
             run_pieces(&flat),
             vec![
                 ("ca".to_owned(), FontWeight::SEMIBOLD),
-                ("fe\u{301} ".to_owned(), FontWeight::NORMAL),
-                ("na".to_owned(), FontWeight::SEMIBOLD),
-                ("ve".to_owned(), FontWeight::NORMAL),
+                ("fe\u{301} nave".to_owned(), FontWeight::NORMAL),
             ]
         );
     }
@@ -3387,20 +3394,20 @@ mod tests {
     }
 
     #[test]
-    fn saccade_fixates_every_nth_word() {
+    fn saccade_counts_letters_between_fixations() {
+        // Saccade is a letter distance, not a word count: the word a
+        // 10-letter jump lands on is anchored.
         let mut flat = flatten_plain(
             "one two three four",
             crate::fonts::DEFAULT_UI_FAMILY,
             FontWeight::NORMAL,
             palette().text,
         );
-        // Saccade 30 → every third word emphasized: "one" and "four";
-        // skipped words and gaps coalesce into one plain segment.
         apply_fixation(
             &mut flat,
             &Fonts::default().code,
             &GuidedReading {
-                saccade: 30,
+                saccade: 10,
                 ..GuidedReading::default()
             },
         );
@@ -3409,9 +3416,36 @@ mod tests {
             run_pieces(&flat),
             vec![
                 ("on".to_owned(), FontWeight::SEMIBOLD),
-                ("e two three ".to_owned(), FontWeight::NORMAL),
-                ("fo".to_owned(), FontWeight::SEMIBOLD),
-                ("ur".to_owned(), FontWeight::NORMAL),
+                ("e two ".to_owned(), FontWeight::NORMAL),
+                ("th".to_owned(), FontWeight::SEMIBOLD),
+                ("ree four".to_owned(), FontWeight::NORMAL),
+            ]
+        );
+
+        // A word longer than the whole jump still anchors — its length is
+        // the distance's floor.
+        let mut flat = flatten_plain(
+            "a supercalifragilistic word",
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        apply_fixation(
+            &mut flat,
+            &Fonts::default().code,
+            &GuidedReading {
+                saccade: 10,
+                ..GuidedReading::default()
+            },
+        );
+        assert_runs_tile(&flat);
+        assert_eq!(
+            run_pieces(&flat),
+            vec![
+                ("a".to_owned(), FontWeight::SEMIBOLD),
+                (" ".to_owned(), FontWeight::NORMAL),
+                ("supercal".to_owned(), FontWeight::SEMIBOLD),
+                ("ifragilistic word".to_owned(), FontWeight::NORMAL),
             ]
         );
     }

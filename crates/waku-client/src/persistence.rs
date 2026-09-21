@@ -200,8 +200,8 @@ fn default_guided_reading_fixation() -> u8 {
     3
 }
 
-/// Guided reading's saccade cadence — fixate every `saccade/10`-th word.
-/// 10–50 in steps of ten; 10 emphasizes every word.
+/// Guided reading's saccade distance — the letters the eye jumps between
+/// emphasized words. 10–50 in steps of ten; 10 anchors nearly every word.
 fn default_guided_reading_saccade() -> u8 {
     10
 }
@@ -859,8 +859,8 @@ pub struct AppSettings {
     /// How much of each word is emphasized: 1–5 mapping to ~20–60% of the
     /// word's graphemes.
     pub guided_reading_fixation: u8,
-    /// Emphasis cadence — every `saccade/10`-th word is fixated: 10–50 in
-    /// steps of ten.
+    /// Emphasis cadence — the letter distance between fixated words: 10–50
+    /// in steps of ten.
     pub guided_reading_saccade: u8,
     /// Opacity percent for the unemphasized text; 100 keeps full contrast.
     pub guided_reading_opacity: u8,
@@ -1965,7 +1965,7 @@ impl PersistedState {
         self.guided_reading_enabled = settings.guided_reading_enabled;
         self.guided_reading_fixation = settings.guided_reading_fixation.clamp(1, 5);
         // Saccade is ten-stepped; a hand-edited value snaps to the nearest
-        // step so the renderer's `saccade/10` cadence stays honest.
+        // step so the renderer's letter distance stays honest.
         self.guided_reading_saccade =
             (settings.guided_reading_saccade.saturating_add(5) / 10 * 10).clamp(10, 50);
         self.guided_reading_opacity = settings.guided_reading_opacity.min(100);
