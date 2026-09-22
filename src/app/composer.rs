@@ -4742,7 +4742,7 @@ impl Waku {
                                         .items_center()
                                         .justify_center()
                                         .cursor_default()
-                                        .bg(gpui::black())
+                                        .bg(theme.inverse)
                                         .hover(|element| element.opacity(0.85))
                                         .active(|element| element.opacity(0.7))
                                         .when(escape_stop_armed, |element| {
@@ -4750,7 +4750,7 @@ impl Waku {
                                                 div()
                                                     .text_size(sp(12.5))
                                                     .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(gpui::white())
+                                                    .text_color(theme.on_inverse)
                                                     .child("Esc"),
                                             )
                                         })
@@ -4758,7 +4758,7 @@ impl Waku {
                                             element.child(icon(
                                                 "icons/stop.svg",
                                                 18.0,
-                                                gpui::white(),
+                                                theme.on_inverse,
                                             ))
                                         })
                                         .on_click(cx.listener(move |this, _, _, cx| {
