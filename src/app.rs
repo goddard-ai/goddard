@@ -1325,6 +1325,9 @@ struct DaemonRecoveryEpisode {
     key: waku_client::DaemonKey,
     cause: waku_client::DaemonRecoveryCause,
     outcome: waku_client::DaemonRecoveryOutcome,
+    /// The process's exit detail when the cause was a real exit — `None`
+    /// for connection loss and rebuilds.
+    exit: Option<waku_client::DaemonExit>,
     sessions_resumed: usize,
     flush_at: Instant,
 }

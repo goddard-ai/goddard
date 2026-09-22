@@ -21,8 +21,8 @@ pub use client::{DaemonClient, PairReply, pair};
 pub use daemons::{DaemonKey, DaemonMap};
 pub use discover::DaemonDiscovery;
 pub use process::{
-    DEFAULT_EXPOSED_DAEMON_PORT, DaemonExposureSettings, DaemonProcess, DaemonRecovery,
-    DaemonRecoveryCause, DaemonRecoveryOutcome, DaemonStatus, DaemonSupervisor,
+    DEFAULT_EXPOSED_DAEMON_PORT, DaemonExit, DaemonExposureSettings, DaemonProcess,
+    DaemonRecovery, DaemonRecoveryCause, DaemonRecoveryOutcome, DaemonStatus, DaemonSupervisor,
     parse_allowed_origins,
 };
 pub use waku_protocol::*;

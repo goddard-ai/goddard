@@ -1630,6 +1630,7 @@ impl Waku {
                 key,
                 cause: report.cause,
                 outcome: report.outcome,
+                exit: report.exit,
                 sessions_resumed: 0,
                 flush_at: Instant::now() + DAEMON_RECOVERY_COUNT_WINDOW,
             });
@@ -1690,6 +1691,8 @@ impl Waku {
                     sessions_resumed: episode.sessions_resumed,
                     daemon_rss_mb: sample.as_ref().and_then(|sample| sample.daemon_rss_mb),
                     children_rss_mb: sample.and_then(|sample| sample.children_rss_mb),
+                    exit_code: episode.exit.and_then(|exit| exit.code),
+                    exit_signal: episode.exit.and_then(|exit| exit.signal),
                 });
             })
             .detach();

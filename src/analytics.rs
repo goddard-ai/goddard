@@ -199,6 +199,12 @@ pub enum Event {
         /// Pre-restart RSS summed over the daemon's descendant tree —
         /// provider runtimes carry their memory under their own pids.
         children_rss_mb: Option<u64>,
+        /// The daemon's exit code when it exited with one — `1` reads as a
+        /// startup failure. Absent for connection-loss episodes.
+        exit_code: Option<i32>,
+        /// The signal that killed the daemon — `9` is jetsam or an admin
+        /// kill, `6` an abort, `11` a crash. Absent for connection loss.
+        exit_signal: Option<i32>,
     },
 }
 
@@ -413,6 +419,8 @@ impl Event {
                 sessions_resumed,
                 daemon_rss_mb,
                 children_rss_mb,
+                exit_code,
+                exit_signal,
             } => {
                 let mut data = json!({
                     "cause": cause,
@@ -424,6 +432,15 @@ impl Event {
                 }
                 if let Some(rss) = children_rss_mb {
                     data["childrenRssMb"] = json!(rss);
+                }
+                if let Some(code) = exit_code {
+                    data["exitCode"] = json!(code);
+                }
+                if let Some(signal) = exit_signal {
+                    if let Some(name) = signal_name(signal) {
+                        data["exitSignal"] = json!(name);
+                    }
+                    data["exitSignalCode"] = json!(signal);
                 }
                 ("daemon.recovery", data)
             }
@@ -446,6 +463,24 @@ impl Event {
         );
         (name, data)
     }
+}
+
+/// Well-known signal names — the number alone reads like noise on a
+/// dashboard. `None` for signals outside the usual suspects.
+fn signal_name(signal: i32) -> Option<&'static str> {
+    Some(match signal {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        4 => "SIGILL",
+        6 => "SIGABRT",
+        8 => "SIGFPE",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        15 => "SIGTERM",
+        _ => return None,
+    })
 }
 
 fn analytics_available() -> bool {
@@ -609,6 +644,8 @@ mod tests {
                 sessions_resumed: 2,
                 daemon_rss_mb: Some(312),
                 children_rss_mb: Some(4096),
+                exit_code: None,
+                exit_signal: Some(9),
             },
         ];
 

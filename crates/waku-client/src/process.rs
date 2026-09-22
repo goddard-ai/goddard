@@ -219,8 +219,14 @@ impl DaemonProcess {
         self.client.clone()
     }
 
-    fn has_exited(&mut self) -> bool {
-        !matches!(self.child.try_wait(), Ok(None))
+    /// The exit status once the child has exited — `Some(None)` when it
+    /// died but the status could not be read — and `None` while it still
+    /// runs. A live daemon whose connection merely dropped reads `None`.
+    fn exit_status(&mut self) -> Option<Option<std::process::ExitStatus>> {
+        match self.child.try_wait() {
+            Ok(status) => status.map(Some),
+            Err(_) => Some(None),
+        }
     }
 
     fn stop(&mut self) {
@@ -315,13 +321,39 @@ pub enum DaemonStatus {
 /// What made the supervisor recover its daemon connection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DaemonRecoveryCause {
-    /// The managed daemon process exited or its connection dropped.
+    /// The managed daemon process exited.
     UnexpectedExit,
-    /// A remote daemon's connection dropped; the daemon itself may still be
-    /// running — sessions often survive this and reattach.
+    /// The daemon's connection dropped while the process may still be
+    /// running — a local daemon gets a reconnect attempt before any
+    /// respawn, and sessions often survive this and reattach.
     Disconnect,
     /// The daemon binary changed on disk and was swapped (development).
     Rebuild,
+}
+
+/// How the managed daemon process ended, when the cause was a real exit:
+/// its exit code, or the signal that killed it. `None` for connection-loss
+/// and rebuild episodes, where no process exited at all.
+#[derive(Clone, Copy, Debug)]
+pub struct DaemonExit {
+    pub code: Option<i32>,
+    pub signal: Option<i32>,
+}
+
+impl DaemonExit {
+    fn from_status(status: &std::process::ExitStatus) -> Self {
+        #[cfg(unix)]
+        let signal = {
+            use std::os::unix::process::ExitStatusExt as _;
+            status.signal()
+        };
+        #[cfg(not(unix))]
+        let signal = None;
+        Self {
+            code: status.code(),
+            signal,
+        }
+    }
 }
 
 /// How one recovery episode resolved.
@@ -342,6 +374,10 @@ pub enum DaemonRecoveryOutcome {
 pub struct DaemonRecovery {
     pub cause: DaemonRecoveryCause,
     pub outcome: DaemonRecoveryOutcome,
+    /// The managed process's exit detail — `Some` only when the daemon
+    /// actually exited, which is what separates a crash from a dropped
+    /// connection.
+    pub exit: Option<DaemonExit>,
 }
 
 struct SupervisorInner {
@@ -575,6 +611,16 @@ impl Drop for DaemonSupervisor {
     }
 }
 
+/// Why the managed daemon needs recovery: a real process exit versus a
+/// dead connection on a process that is still alive.
+#[derive(Clone, Copy)]
+enum LocalDown {
+    /// The process exited; the status is `Some` when the OS reported one.
+    Exited(Option<std::process::ExitStatus>),
+    /// The process is alive but its connection is dead.
+    Disconnected,
+}
+
 fn monitor_daemon(
     weak_inner: std::sync::Weak<SupervisorInner>,
     mut active_stamp: Option<ExecutableStamp>,
@@ -584,7 +630,10 @@ fn monitor_daemon(
     let mut healthy_since = Instant::now();
     let mut consecutive_failures = 0_u32;
     let mut next_retry = Instant::now();
-    let mut counted_outage = false;
+    // The open episode's cause and exit detail, captured at first
+    // detection — mid-respawn the target reads `Restarting`, which has no
+    // process to inspect, so later iterations would report the wrong cause.
+    let mut outage: Option<(DaemonRecoveryCause, Option<DaemonExit>)> = None;
     loop {
         std::thread::sleep(REBUILD_POLL_INTERVAL);
         let Some(inner) = weak_inner.upgrade() else {
@@ -636,7 +685,7 @@ fn monitor_daemon(
                         .retain(|subscriber| subscriber.send(replacement.clone()).is_ok());
                     consecutive_failures = 0;
                     healthy_since = Instant::now();
-                    mark_connected(&inner, DaemonRecoveryCause::Disconnect);
+                    mark_connected(&inner, DaemonRecoveryCause::Disconnect, None);
                 }
                 Err(error) => {
                     consecutive_failures += 1;
@@ -646,54 +695,64 @@ fn monitor_daemon(
                         &inner,
                         consecutive_failures,
                         DaemonRecoveryCause::Disconnect,
+                        None,
                     );
                 }
             }
             continue;
         }
-        let (daemon_down, client) = {
+        let (down, client) = {
             let mut target = inner.target.lock();
             match &mut *target {
-                DaemonTarget::Local(process) => (
-                    process.has_exited() || process.client().is_disconnected(),
-                    process.client(),
-                ),
-                DaemonTarget::Restarting(client) => (true, client.clone()),
-                DaemonTarget::Remote { client, .. } => (false, client.clone()),
+                DaemonTarget::Local(process) => (local_down(process), process.client()),
+                DaemonTarget::Restarting(client) => {
+                    (Some(LocalDown::Exited(None)), client.clone())
+                }
+                DaemonTarget::Remote { client, .. } => (None, client.clone()),
             }
         };
         if let Some(executable) = inner.executable.as_ref() {
             let observed_stamp = ExecutableStamp::read(executable).ok();
             let executable_changed = watch_for_rebuilds
                 && observed_stamp.is_some_and(|observed| Some(observed) != active_stamp);
-            if daemon_down || executable_changed {
+            if down.is_some() || executable_changed {
                 if Instant::now() < next_retry {
                     continue;
                 }
                 set_status(&inner, DaemonStatus::Recovering);
-                // A downed daemon owns the cause even when a rebuild is also
-                // pending: the process exit is what interrupted sessions.
-                let cause = if daemon_down {
-                    DaemonRecoveryCause::UnexpectedExit
-                } else {
-                    DaemonRecoveryCause::Rebuild
-                };
                 let _restart = inner.restart.lock();
                 // Re-check under the restart lock: `reconfigure` may have
                 // swapped in a fresh daemon while this thread waited.
                 let still_down = match &mut *inner.target.lock() {
-                    DaemonTarget::Local(process) => {
-                        process.has_exited() || process.client().is_disconnected()
-                    }
-                    DaemonTarget::Restarting(_) => true,
-                    DaemonTarget::Remote { .. } => false,
+                    DaemonTarget::Local(process) => local_down(process),
+                    DaemonTarget::Restarting(_) => Some(LocalDown::Exited(None)),
+                    DaemonTarget::Remote { .. } => None,
                 };
-                if !still_down && !executable_changed {
-                    mark_connected(&inner, cause);
+                // A downed daemon owns the cause even when a rebuild is also
+                // pending: the process exit is what interrupted sessions.
+                let (cause, exit) = match still_down {
+                    Some(LocalDown::Exited(status)) => (
+                        DaemonRecoveryCause::UnexpectedExit,
+                        Some(status.map_or(
+                            DaemonExit {
+                                code: None,
+                                signal: None,
+                            },
+                            |status| DaemonExit::from_status(&status),
+                        )),
+                    ),
+                    Some(LocalDown::Disconnected) => (DaemonRecoveryCause::Disconnect, None),
+                    None => (DaemonRecoveryCause::Rebuild, None),
+                };
+                if still_down.is_none() && !executable_changed {
+                    mark_connected(&inner, cause, exit);
                     continue;
                 }
-                if still_down && !counted_outage {
-                    counted_outage = true;
+                if still_down.is_some() && outage.is_none() {
+                    // Pin the episode's cause and exit detail at first
+                    // detection — respawn retries observe `Restarting`, not
+                    // the dead process.
+                    outage = Some((cause, exit));
                     // A daemon that dies within STABLE_UPTIME of its own
                     // launch is crash-looping; an older one had a stable run
                     // and gets an immediate replacement.
@@ -702,17 +761,18 @@ fn monitor_daemon(
                     }
                     if consecutive_failures > 0 {
                         next_retry = Instant::now() + retry_delay(consecutive_failures);
-                        note_recovery_failure(&inner, consecutive_failures, cause);
+                        note_recovery_failure(&inner, consecutive_failures, cause, exit);
                         continue;
                     }
                 }
+                let (cause, exit) = outage.unwrap_or((cause, exit));
                 let Some(exposure) = inner.exposure.lock().clone() else {
                     return;
                 };
                 match replace_local_daemon(&inner, executable, &exposure) {
                     Ok(()) => {
                         healthy_since = Instant::now();
-                        mark_connected(&inner, cause);
+                        mark_connected(&inner, cause, exit);
                         queue_settings_refresh(&inner);
                         if let Some(observed_stamp) = observed_stamp {
                             active_stamp = Some(observed_stamp);
@@ -722,12 +782,12 @@ fn monitor_daemon(
                         consecutive_failures += 1;
                         next_retry = Instant::now() + retry_delay(consecutive_failures);
                         eprintln!("could not restart the Goddard daemon: {error:#}");
-                        note_recovery_failure(&inner, consecutive_failures, cause);
+                        note_recovery_failure(&inner, consecutive_failures, cause, exit);
                     }
                 }
                 continue;
             }
-            counted_outage = false;
+            outage = None;
             if consecutive_failures > 0 && healthy_since.elapsed() > STABLE_UPTIME {
                 consecutive_failures = 0;
                 set_status(&inner, DaemonStatus::Connected);
@@ -754,20 +814,40 @@ fn set_status(inner: &SupervisorInner, status: DaemonStatus) {
     *inner.status.lock() = status;
 }
 
+/// The managed daemon's down state, if any — a real exit beats a dead
+/// connection because the exit is what interrupted sessions.
+fn local_down(process: &mut DaemonProcess) -> Option<LocalDown> {
+    match process.exit_status() {
+        Some(status) => Some(LocalDown::Exited(status)),
+        None if process.client().is_disconnected() => Some(LocalDown::Disconnected),
+        None => None,
+    }
+}
+
 fn report_recovery(
     inner: &SupervisorInner,
     cause: DaemonRecoveryCause,
     outcome: DaemonRecoveryOutcome,
+    exit: Option<DaemonExit>,
 ) {
-    inner
-        .recovery_reports
-        .lock()
-        .retain(|subscriber| subscriber.send(DaemonRecovery { cause, outcome }).is_ok());
+    inner.recovery_reports.lock().retain(|subscriber| {
+        subscriber
+            .send(DaemonRecovery {
+                cause,
+                outcome,
+                exit,
+            })
+            .is_ok()
+    });
 }
 
 /// Recovery succeeded — report it only when the daemon was actually
 /// recovering, so steady-state bookkeeping never reads as an outage.
-fn mark_connected(inner: &SupervisorInner, cause: DaemonRecoveryCause) {
+fn mark_connected(
+    inner: &SupervisorInner,
+    cause: DaemonRecoveryCause,
+    exit: Option<DaemonExit>,
+) {
     let recovered = {
         let mut status = inner.status.lock();
         let recovered = *status != DaemonStatus::Connected;
@@ -775,11 +855,16 @@ fn mark_connected(inner: &SupervisorInner, cause: DaemonRecoveryCause) {
         recovered
     };
     if recovered {
-        report_recovery(inner, cause, DaemonRecoveryOutcome::Recovered);
+        report_recovery(inner, cause, DaemonRecoveryOutcome::Recovered, exit);
     }
 }
 
-fn note_recovery_failure(inner: &SupervisorInner, failures: u32, cause: DaemonRecoveryCause) {
+fn note_recovery_failure(
+    inner: &SupervisorInner,
+    failures: u32,
+    cause: DaemonRecoveryCause,
+    exit: Option<DaemonExit>,
+) {
     let newly_unreachable = {
         let mut status = inner.status.lock();
         let unreachable = failures >= UNREACHABLE_AFTER_FAILURES;
@@ -794,7 +879,7 @@ fn note_recovery_failure(inner: &SupervisorInner, failures: u32, cause: DaemonRe
     // Report the crossing once per episode — slow retries keep calling this
     // and would otherwise repeat the same report.
     if newly_unreachable {
-        report_recovery(inner, cause, DaemonRecoveryOutcome::Unreachable);
+        report_recovery(inner, cause, DaemonRecoveryOutcome::Unreachable, exit);
     }
 }
 
