@@ -115,11 +115,9 @@ const HIGH_CONTRAST_TERTIARY: f32 = 4.5;
 const HIGH_CONTRAST_GHOST: f32 = 3.0;
 
 /// The menu card's specular sheen: `raised` lifted this far in lightness
-/// (see `card_bg` in ui::menu.rs). The text-floor solve needs the real card
-/// top — the lightest fill text can sit on — so the constants live here and
-/// the menu reads them back.
-pub(crate) const SHEEN_LIFT_DARK: f32 = 0.04;
-pub(crate) const SHEEN_LIFT_LIGHT: f32 = 0.05;
+/// (see `sheen_top`, which `card_bg` in ui::menu.rs paints).
+const SHEEN_LIFT_DARK: f32 = 0.04;
+const SHEEN_LIFT_LIGHT: f32 = 0.05;
 
 /// The active mode's floors: (separator, subtle, border, strong). The
 /// "Border intensity" slider scales each floor's distance above 1:1 — the
@@ -168,8 +166,14 @@ fn text_floors() -> (f32, f32, f32, f32) {
 
 /// The menu card's top edge — the lightest fill this palette's text can sit
 /// on, so floors solved against it hold on the real menu card, not just the
-/// solid `raised`.
-fn sheen_top(raised: Hsla, is_dark: bool) -> Rgba {
+/// solid `raised`. `card_bg` in ui::menu.rs paints this same value, so the
+/// card and the solve can never drift apart.
+///
+/// The lift is capped where the text pole stops clearing the primary floor:
+/// a pale `raised` (Zenburn) would otherwise lift the edge past the
+/// luminance where even white reaches the high-contrast 7:1, trading a
+/// sliver of sheen for text that can still solve.
+pub(crate) fn sheen_top(raised: Hsla, is_dark: bool) -> Hsla {
     let mut sheen = raised;
     sheen.l = (sheen.l
         + if is_dark {
@@ -178,7 +182,17 @@ fn sheen_top(raised: Hsla, is_dark: bool) -> Rgba {
             SHEEN_LIFT_LIGHT
         })
     .min(1.0);
-    sheen.to_rgb()
+    let (primary, ..) = text_floors();
+    let pole = rgb(if is_dark { 0xFFFFFF } else { 0x000000 });
+    let step = if is_dark { -0.001 } else { 0.001 };
+    while contrast_ratio(pole, sheen.to_rgb()) < primary {
+        let l = (sheen.l + step).clamp(0.0, 1.0);
+        if l == sheen.l {
+            break;
+        }
+        sheen.l = l;
+    }
+    sheen
 }
 
 fn luminance(rgb: Rgba) -> f32 {
@@ -466,7 +480,7 @@ impl Theme {
         // Palettes already clearing a floor keep their authored color.
         let (text_c, secondary_c, tertiary_c, ghost_c) = text_floors();
         let mut text_pairs = border_pairs.to_vec();
-        let sheen = sheen_top(rgb(spec.raised).into(), spec.is_dark);
+        let sheen = sheen_top(rgb(spec.raised).into(), spec.is_dark).to_rgb();
         text_pairs.push((sheen, sheen));
         let text_color = |color: u32, floor: f32| {
             contrast_wash(rgb(color).into(), spec.is_dark, &text_pairs, floor).alpha(1.0)
@@ -1711,7 +1725,7 @@ mod tests {
                 ]
                 .map(Hsla::to_rgb)
                 .to_vec();
-                surfaces.push(sheen_top(theme.raised, theme.is_dark));
+                surfaces.push(sheen_top(theme.raised, theme.is_dark).to_rgb());
                 for (token, color, target) in [
                     ("text", theme.text, primary),
                     ("text_secondary", theme.text_secondary, secondary),

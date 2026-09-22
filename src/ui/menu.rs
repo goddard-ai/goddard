@@ -99,7 +99,7 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-use crate::theme::{SHEEN_LIFT_DARK, SHEEN_LIFT_LIGHT, Theme, hairline, sp};
+use crate::theme::{Theme, hairline, sheen_top, sp};
 use crate::ui::icon;
 use crate::ui::motion;
 use crate::ui::shortcut::ShortcutHint;
@@ -1210,17 +1210,9 @@ where
 /// lightens the card is a point of contrast taken from the menu text painted
 /// on it.
 fn card_bg(theme: &Theme) -> gpui::Background {
-    let mut sheen = theme.raised;
-    sheen.l = (sheen.l
-        + if theme.is_dark {
-            SHEEN_LIFT_DARK
-        } else {
-            SHEEN_LIFT_LIGHT
-        })
-    .min(1.0);
     linear_gradient(
         180.0,
-        linear_color_stop(sheen, 0.0),
+        linear_color_stop(sheen_top(theme.raised, theme.is_dark), 0.0),
         linear_color_stop(theme.raised, 1.0),
     )
 }
