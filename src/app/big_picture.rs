@@ -28,7 +28,7 @@ const EDGE_MARGIN: f32 = 32.0;
 /// Clears the 48px titlebar — and the traffic lights inside it — plus a
 /// comfortable gap before the first card.
 const TOP_MARGIN: f32 = 64.0;
-/// Air between the card grid's bottom edge and the docked composer.
+/// Air between the card grid's bottom edge and the chrome lane below it.
 const CARD_COMPOSER_GAP: f32 = 20.0;
 /// Narrowest a card can get before the layout would rather clip than crush
 /// the header row — only reached on very small windows.
@@ -42,7 +42,7 @@ const CARD_MIN_ROW_HEIGHT: f32 = 240.0;
 /// The composer lane's height before it has ever been measured — a prompt's
 /// single-line footprint, used for the first open's grid math.
 const COMPOSER_HEIGHT_FALLBACK: f32 = 96.0;
-/// The hint line's footprint below the composer.
+/// The hint line's footprint above the composer.
 const HINT_HEIGHT: f32 = 16.0;
 const COMPOSER_BOTTOM_MARGIN: f32 = 28.0;
 const HINT_BOTTOM_MARGIN: f32 = 10.0;
@@ -1854,20 +1854,11 @@ impl Waku {
                     ),
             )
             .child(
-                // Composer and hint rise together on every open.
+                // Hint and composer rise together on every open.
                 div()
                     .flex_none()
                     .flex()
                     .flex_col()
-                    .child(
-                        div()
-                            .flex_none()
-                            .pb(px(COMPOSER_BOTTOM_MARGIN))
-                            .px(px(EDGE_MARGIN))
-                            .flex()
-                            .justify_center()
-                            .child(self.render_big_picture_composer(window, cx)),
-                    )
                     .child(
                         div()
                             .flex_none()
@@ -1880,6 +1871,15 @@ impl Waku {
                                     .text_color(theme.text_ghost)
                                     .child(tr!("big_picture.hint")),
                             ),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .pb(px(COMPOSER_BOTTOM_MARGIN))
+                            .px(px(EDGE_MARGIN))
+                            .flex()
+                            .justify_center()
+                            .child(self.render_big_picture_composer(window, cx)),
                     )
                     .with_animation(
                         SharedString::from(format!(

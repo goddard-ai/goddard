@@ -1,0 +1,1 @@
+- Move the Big Picture shortcut hint above the composer so the composer docks at the bottom of the overlay
