@@ -1,0 +1,1 @@
+- Menu and dialog drop shadows no longer pop in a beat after the card appears — the shadow fades in with the entrance instead of being held back until the card turns opaque.
