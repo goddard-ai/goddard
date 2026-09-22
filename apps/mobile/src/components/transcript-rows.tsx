@@ -8,6 +8,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { ActivityGroup } from '@/components/activity-group';
 import { AppSymbol } from '@/components/app-symbol';
 import { AttachmentTile } from '@/components/attachment-tile';
+import { GoddardThinking } from '@/components/goddard-thinking';
 import {
   MdBlockLive,
   MdBlockSettled,
@@ -317,7 +318,8 @@ function formatElapsed(seconds: number): string {
   return `${Math.floor(clamped / 60)}m ${clamped % 60}s`;
 }
 
-/** The live footer under the streaming tail: spinner, flavour word, elapsed. */
+/** The live footer under the streaming tail: the thinking mark, a flavour
+ * word, and the elapsed count. */
 export function WorkingStrip({ session }: { session: AgentSession }) {
   const theme = useTheme();
   const startedAt = session.turns.at(-1)?.started_at ?? null;
@@ -332,7 +334,7 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
     : `${FLAVOUR_WORDS[(flavourSeed(session.id) + Math.floor(elapsed / 7)) % FLAVOUR_WORDS.length]}…`;
   return (
     <View accessibilityLiveRegion="polite" style={styles.workingStrip}>
-      <ActivityIndicator color={theme.textTertiary} size="small" />
+      <GoddardThinking color={theme.textTertiary} />
       <Text style={[styles.workingText, { color: theme.textTertiary }]}>{word}</Text>
       {startedAt != null && session.status !== 'waiting' && (
         <Text style={[styles.workingElapsed, { color: theme.textGhost }]}>
