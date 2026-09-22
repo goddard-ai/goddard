@@ -3928,6 +3928,7 @@ impl WakuBackend {
             session_id,
             crate::agent::AgentPrompt {
                 prompt: steer.clone(),
+                transport: None,
                 sender: None,
                 queued_id: None,
                 context: Some(if memory.is_some() {
@@ -4090,17 +4091,19 @@ impl WakuBackend {
                 if !driver.supports_steer() {
                     bail!("the task's provider does not support steering");
                 }
+                let transport = agent_prompt_envelope(&self.task_state, target, sender, &prompt);
                 self.agent.record_pending_steer(
                     target,
                     crate::agent::AgentPrompt {
                         prompt: prompt.clone(),
+                        transport: transport.clone(),
                         sender,
                         // A direct steer never parks — no chip to mirror.
                         queued_id: None,
                         context: None,
                     },
                 );
-                driver.steer(prompt);
+                driver.steer(transport.unwrap_or(prompt));
                 Ok(ResponsePayload::Ack)
             }
             AgentPromptDelivery::Queue => {
@@ -4126,6 +4129,9 @@ impl WakuBackend {
             target,
             crate::agent::AgentPrompt {
                 prompt: prompt.clone(),
+                // Wrapped at delivery so a renamed sender and a late
+                // relationship read their current values.
+                transport: None,
                 sender,
                 queued_id: Some(queued_id),
                 context: None,
@@ -4808,6 +4814,13 @@ fn forward_driver_events(
             }
             DriverEvent::SteerAccepted { message, .. } => {
                 let steer = agent.take_pending_steer(session_id, &message);
+                // An enveloped steer echoes the envelope; the transcript and
+                // attached clients show the sender's own words.
+                let message = steer
+                    .as_ref()
+                    .filter(|steer| steer.transport.is_some())
+                    .map(|steer| steer.prompt.clone())
+                    .unwrap_or(message);
                 let sent_by_task = steer.as_ref().and_then(|steer| steer.sender);
                 let hidden = steer.as_ref().is_some_and(|steer| steer.context.is_some());
                 if let Some(sender) = sent_by_task {
@@ -4853,9 +4866,19 @@ fn forward_driver_events(
                 // A daemon-injected context steer is the daemon's own
                 // delivery — swallow the rejection so no client surfaces it;
                 // the session stays eligible and the next prompt retries.
-                if rejected_steer.is_some_and(|steer| steer.context.is_some()) {
+                if rejected_steer
+                    .as_ref()
+                    .is_some_and(|steer| steer.context.is_some())
+                {
                     continue;
                 }
+                // An enveloped steer echoes the envelope; a surfaced
+                // rejection names the sender's own words.
+                let message = rejected_steer
+                    .as_ref()
+                    .filter(|steer| steer.transport.is_some())
+                    .map(|steer| steer.prompt.clone())
+                    .unwrap_or(message);
                 DriverEvent::SteerRejected {
                     message,
                     reason,
@@ -5028,6 +5051,49 @@ fn runtime_evictable(
     entry.resumable || !session.has_started()
 }
 
+/// The provider-facing envelope for a task-to-task prompt: names the
+/// sending task so the receiving agent knows another of the user's agents —
+/// not the user — is talking, and has the id it needs to answer through
+/// `goddard-agent`. The transcript keeps `prompt` verbatim; `None` means
+/// send it unwrapped (unattributed sender, or a task messaging itself).
+fn agent_prompt_envelope(
+    task_state: &Mutex<PersistedState>,
+    target: Uuid,
+    sender: Option<Uuid>,
+    prompt: &str,
+) -> Option<String> {
+    let sender_id = sender.filter(|sender| *sender != target)?;
+    let state = task_state.lock();
+    let sender_session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == sender_id);
+    let relation = if sender_session.is_some_and(|sender| sender.side_chat_of == Some(target)) {
+        "your side chat"
+    } else {
+        "the agent of another Goddard task"
+    };
+    let title = sender_session
+        .map(|session| {
+            session
+                .display_title()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|title| !title.is_empty());
+    let origin = match title {
+        Some(title) => format!("{relation} \"{title}\" (task id {sender_id})"),
+        None => format!("{relation} (task id {sender_id})"),
+    };
+    Some(format!(
+        "The message below is from {origin}, sent through `goddard-agent` on \
+         the user's behalf — the user can see this exchange. To send a \
+         message back, run \
+         `goddard-agent prompt '{{\"task_id\":\"{sender_id}\",\"prompt\":\"<reply>\"}}'`.\n\n{prompt}"
+    ))
+}
+
 /// Deliver one queued agent prompt to a live session. A session with an
 /// open but parked turn is messaged through the provider's steer path so
 /// the prompt folds into the waiting turn; anything else begins a normal
@@ -5043,7 +5109,13 @@ fn deliver_agent_prompt(
     task_store: &StateStore,
 ) -> anyhow::Result<()> {
     if agent.has_parked_turn(session_id) && driver.supports_steer() {
-        let prompt = entry.prompt.clone();
+        let mut entry = entry;
+        entry.transport =
+            agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt);
+        let prompt = entry
+            .transport
+            .clone()
+            .unwrap_or_else(|| entry.prompt.clone());
         agent.record_pending_steer(session_id, entry);
         driver.steer(prompt);
         return Ok(());
@@ -5071,7 +5143,10 @@ fn deliver_agent_prompt(
         hidden: false,
     })?)?;
     send_agent_queue_changed(task_state, sink, session_id);
-    driver.prompt(entry.prompt);
+    driver.prompt(
+        agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt)
+            .unwrap_or(entry.prompt),
+    );
     Ok(())
 }
 
@@ -5208,6 +5283,7 @@ fn rehydrate_agent_queue(
                 crate::model::QueuedMessageSource::Agent { sent_by } => {
                     Some(crate::agent::AgentPrompt {
                         prompt: queued.content.clone(),
+                        transport: None,
                         sender: sent_by,
                         queued_id: Some(queued.id),
                         context: None,
@@ -6582,8 +6658,8 @@ mod tests {
             queued_id,
             crate::agent::AgentPrompt {
                 prompt: "parked".into(),
+                transport: None,
                 sender: None,
-                context: None,
                 queued_id: Some(Uuid::new_v4()),
                 context: None,
             },
@@ -6644,5 +6720,47 @@ mod tests {
             .is_empty()
         );
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn an_agent_prompt_envelope_names_its_sending_task() {
+        let mut state = PersistedState::empty();
+        let target = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let target_id = target.id;
+        let mut sender = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        sender.set_title("Fix the flaky test");
+        let sender_id = sender.id;
+        state.sessions.extend([target, sender]);
+        let state = Mutex::new(state);
+
+        // A task-to-task prompt names the sender and ends in the verbatim
+        // prompt.
+        let wrapped = agent_prompt_envelope(&state, target_id, Some(sender_id), "how is it going?")
+            .expect("an attributed prompt wraps");
+        assert!(wrapped.contains("the agent of another Goddard task"));
+        assert!(wrapped.contains("\"Fix the flaky test\""));
+        assert!(wrapped.contains(&sender_id.to_string()));
+        assert!(wrapped.ends_with("\n\nhow is it going?"));
+
+        // A side chat of the target gets the warmer relation.
+        state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == sender_id)
+            .unwrap()
+            .side_chat_of = Some(target_id);
+        let wrapped = agent_prompt_envelope(&state, target_id, Some(sender_id), "hi")
+            .expect("a side chat's prompt wraps");
+        assert!(wrapped.contains("your side chat"));
+
+        // Unattributed, self-addressed, and unknown senders.
+        assert!(agent_prompt_envelope(&state, target_id, None, "hi").is_none());
+        assert!(agent_prompt_envelope(&state, target_id, Some(target_id), "hi").is_none());
+        let unknown = Uuid::new_v4();
+        let wrapped = agent_prompt_envelope(&state, target_id, Some(unknown), "hi")
+            .expect("a known sender id still wraps without its record");
+        assert!(wrapped.contains(&unknown.to_string()));
+        assert!(wrapped.contains("the agent of another Goddard task"));
     }
 }

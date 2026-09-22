@@ -26,7 +26,14 @@ use crate::model::DriverEvent;
 /// to. The same record tracks steer injections awaiting the provider's
 /// `steerAccepted` echo so the mirrored message keeps its provenance.
 pub struct AgentPrompt {
+    /// The sender's own words — what the transcript and the mirrored queued
+    /// chip show.
     pub prompt: String,
+    /// The provider-facing text when a wrapper — the sender provenance
+    /// envelope on a task-to-task message — replaced `prompt` on the wire.
+    /// The provider's echo resolves the pending steer against this; `None`
+    /// means `prompt` went out verbatim.
+    pub transport: Option<String>,
     /// The task whose agent sent it. `None` is possible only for requests
     /// made with the master token, which carries no session scope.
     pub sender: Option<Uuid>,
@@ -350,7 +357,7 @@ impl AgentState {
         let pending = steers.get_mut(&session_id)?;
         let index = pending
             .iter()
-            .position(|steer| steer.prompt == message)
+            .position(|steer| steer.transport.as_deref().unwrap_or(&steer.prompt) == message)
             .unwrap_or(0);
         let prompt = pending.remove(index);
         if pending.is_empty() {
@@ -575,6 +582,7 @@ mod tests {
     fn prompt(text: &str, sender: Option<Uuid>) -> AgentPrompt {
         AgentPrompt {
             prompt: text.to_owned(),
+            transport: None,
             sender,
             queued_id: Some(Uuid::new_v4()),
             context: None,
@@ -658,6 +666,7 @@ mod tests {
             vec![
                 AgentPrompt {
                     prompt: "one rewritten".into(),
+                    transport: None,
                     sender: None,
                     queued_id: Some(restored_id),
                     context: None,
@@ -689,6 +698,7 @@ mod tests {
             session,
             AgentPrompt {
                 prompt: "direct".into(),
+                transport: None,
                 sender: None,
                 queued_id: None,
                 context: None,
@@ -730,6 +740,7 @@ mod tests {
             session,
             AgentPrompt {
                 prompt: "context".into(),
+                transport: None,
                 sender: None,
                 queued_id: None,
                 context: Some(ContextSteer::Memory),
@@ -805,6 +816,24 @@ mod tests {
         assert_eq!(taken.prompt, "first");
         assert_eq!(taken.sender, Some(sender));
         assert!(state.take_pending_steer(session, "anything").is_none());
+    }
+
+    #[test]
+    fn an_enveloped_steer_resolves_on_the_transport_echo() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        let sender = Uuid::new_v4();
+        let mut wrapped = prompt("the sender's own words", Some(sender));
+        wrapped.transport = Some("envelope\n\nthe sender's own words".into());
+        state.record_pending_steer(session, wrapped);
+
+        // The provider echoes the transport text; the popped record still
+        // carries the sender's own words for the transcript.
+        let taken = state
+            .take_pending_steer(session, "envelope\n\nthe sender's own words")
+            .unwrap();
+        assert_eq!(taken.prompt, "the sender's own words");
+        assert_eq!(taken.sender, Some(sender));
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- Prompts a task's agent sends to another task with `goddard-agent prompt` now arrive labeled for the receiving agent — "from your side chat" or "the agent of another Goddard task," with the sender's task id and how to reply — instead of reading as text the user typed. The transcript still shows the sender's own words under the "Sent by agent" chip.
