@@ -3792,6 +3792,10 @@ impl Waku {
             .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
         self.right_panel_terminal_commands
             .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
+        self.right_panel_terminal_programs
+            .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
+        self.sandbox_sign_in_tabs
+            .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
         self.custom_command_runs
             .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
         for terminal_id in active_terminal_ids {

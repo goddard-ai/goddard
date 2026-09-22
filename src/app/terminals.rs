@@ -304,9 +304,14 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let command = self.right_panel_terminal_commands.get(&terminal_id);
-        let launch = command
-            .cloned()
-            .map(TerminalLaunch::CustomCommand)
+        let launch = self
+            .right_panel_terminal_programs
+            .get(&terminal_id)
+            .map(|(program, args)| TerminalLaunch::Program {
+                program: program.clone(),
+                args: args.clone(),
+            })
+            .or_else(|| command.cloned().map(TerminalLaunch::CustomCommand))
             .unwrap_or(TerminalLaunch::Shell);
         let close_on_exit = command.is_some_and(|command| command.close_on_success);
         let view = cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
@@ -319,6 +324,9 @@ impl Waku {
                 // retire into, so its shell exiting (ctrl+d, `exit`, a
                 // signal) closes it too.
                 TerminalViewEvent::Exited => {
+                    // A sign-in tab's exit resolves the auth gate: probe the
+                    // provider home and resubmit whatever it was holding.
+                    this.sandbox_sign_in_terminal_exited(terminal_id, cx);
                     if close_on_exit || this.selected_terminal == Some(terminal_id) {
                         this.close_terminal_view_surface(&view, cx);
                     }
@@ -508,6 +516,40 @@ impl Waku {
         command: Option<CustomCommand>,
         cx: &mut Context<Self>,
     ) -> Option<Uuid> {
+        self.create_terminal_with_launch(
+            working_directory,
+            session,
+            command.map(TerminalLaunch::CustomCommand),
+            cx,
+        )
+    }
+
+    /// A terminal tab running a bare program rather than a shell or a
+    /// custom-command script — the sandbox sign-in `shuru run` argv lands
+    /// here.
+    pub(super) fn create_program_terminal(
+        &mut self,
+        working_directory: PathBuf,
+        session: Option<Uuid>,
+        program: PathBuf,
+        args: Vec<String>,
+        cx: &mut Context<Self>,
+    ) -> Option<Uuid> {
+        self.create_terminal_with_launch(
+            working_directory,
+            session,
+            Some(TerminalLaunch::Program { program, args }),
+            cx,
+        )
+    }
+
+    fn create_terminal_with_launch(
+        &mut self,
+        working_directory: PathBuf,
+        session: Option<Uuid>,
+        launch: Option<TerminalLaunch>,
+        cx: &mut Context<Self>,
+    ) -> Option<Uuid> {
         // A desktop PTY can only open on a local working directory.
         if self.is_remote_path(&working_directory) {
             return None;
@@ -536,17 +578,20 @@ impl Waku {
             session,
             (!workspace_bound).then(|| working_directory.clone()),
         );
-        let kind = if command.is_some() {
-            "command"
-        } else if session.is_some() {
-            "session"
-        } else {
-            "global"
+        let kind = match &launch {
+            Some(TerminalLaunch::CustomCommand(command)) => {
+                self.right_panel_terminal_commands
+                    .insert(terminal_id, command.clone());
+                "command"
+            }
+            Some(TerminalLaunch::Program { program, args }) => {
+                self.right_panel_terminal_programs
+                    .insert(terminal_id, (program.clone(), args.clone()));
+                "command"
+            }
+            Some(TerminalLaunch::Shell) | None if session.is_some() => "session",
+            _ => "global",
         };
-        if let Some(command) = command {
-            self.right_panel_terminal_commands
-                .insert(terminal_id, command);
-        }
         if let Some(session_id) = session {
             let surface = RightPanelSurface::Terminal(terminal_id);
             if self.right_panel_live_owner == RightPanelOwner::Session(session_id) {

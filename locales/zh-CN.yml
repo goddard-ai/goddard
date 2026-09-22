@@ -875,7 +875,7 @@ sandbox.this_mac: 这台 Mac
 sandbox.this_mac_description: 在此 Mac 上运行命令和编辑
 sandbox.sandbox_vm: 沙箱 VM
 sandbox.sandbox_vm_description: 在隔离的 Linux 虚拟机中运行
-sandbox.sandbox_vm_unsupported: 沙箱任务需要 Codex 或 Claude — {provider} 暂时无法在 VM 中启动。
+sandbox.sandbox_vm_unsupported: "{provider} 暂时无法在 VM 中启动 — 请选择这台 Mac。"
 sandbox.badge: 沙箱中
 sandbox.provider_cloud: "%{provider} 云端"
 sandbox.provider_cloud_description: "在 %{provider} 的托管环境中运行 — 仅包含已推送的提交"
@@ -886,6 +886,9 @@ sandbox.setup_booting: 正在设置沙箱 — 正在启动 VM
 cloud.still_running: "%{provider} 云端仍在运行 — 请等待完成或先取消"
 cloud.not_running: 云端任务未在运行
 cloud.stopped: 已停止
+sandbox.setup_needs_auth: "请在沙箱中登录 {provider}"
+sandbox.sign_in_failed: "无法打开沙箱登录：{error}"
+sandbox.sign_in_incomplete: "尚未在沙箱中登录 {provider} — 消息已放回输入框"
 agent_preset.standard: 标准模式
 agent_preset.code: 代码模式
 agent_preset.minimal: 极简模式
@@ -1188,6 +1191,7 @@ errors.create_worktree: "无法创建工作树：%{error}"
 errors.move_to_worktree: "无法将任务移动到工作树：%{error}"
 errors.prepared_runtime_unavailable: 已准备的智能体运行环境不可用
 errors.start_agent: "无法启动智能体：%{error}"
+errors.sandbox_sign_in_required: "请先在沙箱中登录 %{provider}"
 errors.provider_no_active_turn: "%{provider} 当前没有可补充指示的任务"
 errors.provider_transport_write: "%{provider} 通信写入失败：%{error}"
 errors.provider_transport_write_short: "%{provider} 通信写入失败"

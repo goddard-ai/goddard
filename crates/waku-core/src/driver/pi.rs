@@ -225,7 +225,7 @@ impl PiDriver {
             integrations: _,
             provider_cursor,
             eval: _,
-            sandbox: _,
+            sandbox,
             allow_model_fallback: _,
         } = options;
         if mode != RuntimeMode::FullAccess {
@@ -306,13 +306,19 @@ impl PiDriver {
                 .env("GODDARD_SUBAGENTS", spec_json)
                 .env("GODDARD_PI_BINARY", &binary);
         }
-        let mut command = crate::command_env::guard_command(command);
+        // Inside the guest the VM dying with the session is the teardown
+        // guarantee the host-side guardian script provides locally.
+        let mut command = if sandbox.is_some() {
+            command
+        } else {
+            crate::command_env::guard_command(command)
+        };
         let command = command
             .current_dir(&cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = crate::command_env::spawn(command)
+        let mut child = crate::sandbox::spawn(command, sandbox.as_ref())
             .with_context(|| format!("failed to start `{} --mode rpc`", binary.display()))?;
         let stdin = child
             .stdin

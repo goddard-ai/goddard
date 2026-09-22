@@ -22,7 +22,6 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -45,7 +44,7 @@ enum CommandMessage {
 
 pub struct AmpDriver {
     commands: Sender<CommandMessage>,
-    active_pid: Arc<AtomicU32>,
+    interrupt: Arc<Mutex<Option<crate::sandbox::DriverInterrupt>>>,
 }
 
 /// Amp's thread arguments. The prompt never rides here — it goes in on stdin.
@@ -103,7 +102,7 @@ impl AmpDriver {
             integrations: _,
             provider_cursor,
             eval: _,
-            sandbox: _,
+            sandbox,
             allow_model_fallback: _,
         } = options;
         if mode != RuntimeMode::FullAccess {
@@ -136,12 +135,18 @@ impl AmpDriver {
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
         }
-        let mut command = crate::command_env::guard_command(command);
+        // Inside the guest the VM dying with the session is the teardown
+        // guarantee the host-side guardian script provides locally.
+        let mut command = if sandbox.is_some() {
+            command
+        } else {
+            crate::command_env::guard_command(command)
+        };
         let command = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = crate::command_env::spawn(command)
+        let mut child = crate::sandbox::spawn(command, sandbox.as_ref())
             .context("failed to start `amp` in streaming-input mode")?;
         let stdin = child
             .stdin
@@ -155,7 +160,7 @@ impl AmpDriver {
             .stderr
             .take()
             .ok_or_else(|| anyhow!("Amp stderr unavailable"))?;
-        let active_pid = Arc::new(AtomicU32::new(child.id()));
+        let interrupt = Arc::new(Mutex::new(Some(child.interrupt_handle())));
 
         if let Some(thread_id) = thread_id.clone() {
             let _ = events.send(DriverEvent::Connected {
@@ -337,12 +342,12 @@ impl AmpDriver {
                 }
             })?;
 
-        let process_pid = active_pid.clone();
+        let process_interrupt = interrupt.clone();
         thread::Builder::new()
             .name("waku-amp-process".into())
             .spawn(move || {
                 let status = child.wait();
-                process_pid.store(0, Ordering::Relaxed);
+                *process_interrupt.lock() = None;
                 let _ = reader_thread.join();
                 let _ = stderr_thread.join();
                 if let Ok(status) = status
@@ -360,7 +365,7 @@ impl AmpDriver {
 
         Ok(Self {
             commands,
-            active_pid,
+            interrupt,
         })
     }
 }
@@ -383,14 +388,8 @@ impl DriverControl for AmpDriver {
         // process. The thread survives on Amp's side, and the next prompt
         // resumes it with `threads continue` — which is why Amp's runtime is
         // not retained after a cancel.
-        let pid = self.active_pid.load(Ordering::Relaxed);
-        if pid != 0 {
-            #[cfg(unix)]
-            {
-                let _ = Command::new("/bin/kill")
-                    .args(["-INT", &pid.to_string()])
-                    .status();
-            }
+        if let Some(handle) = self.interrupt.lock().as_ref() {
+            handle.interrupt();
         }
     }
 

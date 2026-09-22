@@ -23,8 +23,8 @@ use agent_client_protocol::schema::v1::{
     StopReason, TextContent,
 };
 use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Handled, LineDirection, Responder,
-    UntypedMessage,
+    AcpAgent, AcpAgentConfig, Agent, Client, ConnectTo, ConnectionTo, Handled, LineDirection,
+    Responder, UntypedMessage,
 };
 use anyhow::{Context as _, anyhow};
 use parking_lot::Mutex;
@@ -145,7 +145,7 @@ impl AcpDriver {
             integrations: _,
             provider_cursor,
             eval,
-            sandbox: _,
+            sandbox,
             allow_model_fallback,
         } = options;
         let fork_context = match &provider_cursor {
@@ -176,14 +176,25 @@ impl AcpDriver {
             .and_then(super::support::HeadlessComputerUseRuntime::grok_home)
             .map(ToOwned::to_owned);
         let stderr_lines = Arc::new(Mutex::new(Vec::<String>::new()));
-        let agent = sdk_agent(
-            &binary,
-            &cwd,
-            launch,
-            computer_use.as_ref().map(|runtime| &runtime.config),
-            agent_env.as_ref(),
-            stderr_lines.clone(),
-        )?;
+        let agent = match &sandbox {
+            Some(vm) => guest_transport(
+                &binary,
+                &cwd,
+                launch,
+                computer_use.as_ref().map(|runtime| &runtime.config),
+                agent_env.as_ref(),
+                vm,
+                stderr_lines.clone(),
+            )?,
+            None => AgentTransport::Host(sdk_agent(
+                &binary,
+                &cwd,
+                launch,
+                computer_use.as_ref().map(|runtime| &runtime.config),
+                agent_env.as_ref(),
+                stderr_lines.clone(),
+            )?),
+        };
         let (commands, command_rx) = smol::channel::unbounded();
         let provider_name = provider.display_name();
         let thread_events = events.clone();
@@ -235,6 +246,142 @@ impl AcpDriver {
             computer_use,
         })
     }
+}
+
+/// What `run_sdk_connection` drives — the SDK-managed host process, or a
+/// line transport over a process spawned inside the session's sandbox VM.
+enum AgentTransport {
+    Host(AcpAgent),
+    Guest(GuestAcpTransport),
+}
+
+type GuestLines = agent_client_protocol::Lines<
+    std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>,
+    std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>>,
+>;
+
+/// The line transport plus the child that owns it: dropping the child kills
+/// the in-guest process — the same teardown the SDK's process-group guard
+/// gives host spawns.
+struct GuestAcpTransport {
+    lines: GuestLines,
+    _child: crate::sandbox::DriverChild,
+}
+
+impl agent_client_protocol::ConnectTo<Client> for AgentTransport {
+    async fn connect_to(
+        self,
+        client: impl agent_client_protocol::ConnectTo<Agent>,
+    ) -> agent_client_protocol::Result<()> {
+        match self {
+            Self::Host(agent) => ConnectTo::<Client>::connect_to(agent, client).await,
+            Self::Guest(transport) => {
+                ConnectTo::<Client>::connect_to(transport.lines, client).await
+            }
+        }
+    }
+}
+
+/// Spawn the ACP agent inside the session's VM and wrap its pipes as the
+/// SDK's `Lines` transport: guest stdin writes are channel sends into the
+/// VM (never blocking), stdout is pumped line-wise onto a stream, and stderr
+/// drains into the shared tail the connection error path reports. The
+/// guardian shell is a host-side teardown aid — a guest process dies with
+/// its VM, so the spawn is the bare provider argv.
+fn guest_transport(
+    binary: &Path,
+    cwd: &Path,
+    mut launch: AcpLaunch,
+    computer_use: Option<&super::support::HeadlessComputerUseConfig>,
+    agent_env: Option<&crate::agent::AgentLaunchEnv>,
+    vm: &Arc<crate::sandbox::ShuruVm>,
+    stderr_lines: Arc<Mutex<Vec<String>>>,
+) -> anyhow::Result<AgentTransport> {
+    use std::io::{BufRead as _, BufReader, Write as _};
+
+    let (computer_args, computer_env) =
+        super::support::grok_computer_use_launch_configuration(computer_use);
+    let mut environment = crate::command_env::shell_environment()
+        .into_iter()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    environment.append(&mut launch.env);
+    environment.extend(computer_env);
+    if let Some(agent_env) = agent_env {
+        crate::command_env::merge_agent_environment(&mut environment, agent_env);
+    }
+    let mut command = std::process::Command::new(binary);
+    command
+        .current_dir(cwd)
+        .args(launch.args.iter().chain(computer_args.iter()))
+        .envs(environment);
+    let mut child = crate::sandbox::spawn(&command, Some(vm))
+        .context("could not spawn the provider process in the sandbox VM")?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("sandboxed {} stdin unavailable", binary.display()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("sandboxed {} stdout unavailable", binary.display()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("sandboxed {} stderr unavailable", binary.display()))?;
+
+    // Mirror the SDK's capped stderr tail so connection errors report the
+    // provider's own diagnostics.
+    thread::Builder::new()
+        .name("waku-acp-guest-stderr".into())
+        .spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let mut lines = stderr_lines.lock();
+                if lines.len() == 128 {
+                    lines.remove(0);
+                }
+                lines.push(line.to_owned());
+            }
+        })
+        .context("could not start the sandbox stderr drain")?;
+
+    let (lines_tx, lines_rx) = futures::channel::mpsc::unbounded();
+    thread::Builder::new()
+        .name("waku-acp-guest-stdout".into())
+        .spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let done = line.is_err();
+                if lines_tx.unbounded_send(line).is_err() || done {
+                    break;
+                }
+            }
+        })
+        .context("could not start the sandbox stdout pump")?;
+
+    let incoming: std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>> =
+        Box::pin(lines_rx);
+    let outgoing: std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>> =
+        Box::pin(futures::sink::unfold(
+            stdin,
+            |mut writer, line: String| async move {
+                writer.write_all(line.as_bytes())?;
+                writer.write_all(b"\n")?;
+                Ok::<_, std::io::Error>(writer)
+            },
+        ));
+
+    Ok(AgentTransport::Guest(GuestAcpTransport {
+        lines: agent_client_protocol::Lines::new(outgoing, incoming),
+        _child: child,
+    }))
 }
 
 fn sdk_agent(
@@ -531,7 +678,7 @@ fn permission_disposition(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_sdk_connection(
-    agent: AcpAgent,
+    agent: AgentTransport,
     provider: ProviderKind,
     cwd: std::path::PathBuf,
     mode: RuntimeMode,

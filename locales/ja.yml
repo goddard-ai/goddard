@@ -890,7 +890,7 @@ sandbox.this_mac: この Mac
 sandbox.this_mac_description: この Mac でコマンドと編集を実行
 sandbox.sandbox_vm: サンドボックス VM
 sandbox.sandbox_vm_description: 分離された Linux VM で実行
-sandbox.sandbox_vm_unsupported: サンドボックス環境で実行できるのは Codex と Claude のみです — {provider} はまだ VM で起動できません。
+sandbox.sandbox_vm_unsupported: "{provider} はまだ VM で起動できません — この Mac を選んでください。"
 sandbox.badge: サンドボックス環境
 sandbox.provider_cloud: "%{provider} クラウド"
 sandbox.provider_cloud_description: "%{provider} のホスト環境で実行 — プッシュ済みのコミットのみ"
@@ -898,6 +898,9 @@ sandbox.cloud_badge: "%{provider} クラウド"
 sandbox.setup_downloading: サンドボックスを準備中 — VM イメージをダウンロードしています
 sandbox.setup_building: サンドボックスを準備中 — {toolchain} をインストールしています
 sandbox.setup_booting: サンドボックスを準備中 — VM を起動しています
+sandbox.setup_needs_auth: "{provider} にサンドボックスでサインインしてください"
+sandbox.sign_in_failed: "サンドボックスのサインインを開けませんでした：{error}"
+sandbox.sign_in_incomplete: "サンドボックスの {provider} にまだサインインしていません — メッセージは入力欄に戻しました"
 
 cloud.still_running: "%{provider} クラウドはまだ作業中です — 完了を待つか、キャンセルしてください"
 cloud.not_running: クラウドタスクは実行されていません
@@ -1219,6 +1222,7 @@ errors.create_worktree: "ワークツリーを作成できませんでした：%
 errors.move_to_worktree: "タスクをワークツリーへ移動できませんでした：%{error}"
 errors.prepared_runtime_unavailable: 準備したエージェントランタイムは利用できません
 errors.start_agent: "エージェントを起動できませんでした：%{error}"
+errors.sandbox_sign_in_required: "サンドボックスの %{provider} にサインインして続行してください"
 errors.provider_no_active_turn: "%{provider} には指示を追加できる実行中のターンがありません"
 errors.provider_transport_write: "%{provider} の通信への書き込みに失敗しました：%{error}"
 errors.provider_transport_write_short: "%{provider} の通信への書き込みに失敗しました"

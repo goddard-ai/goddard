@@ -2375,7 +2375,7 @@ sandbox.sandbox_vm:
 sandbox.sandbox_vm_description:
   en: Run in an isolated Linux VM
 sandbox.sandbox_vm_unsupported:
-  en: Sandboxed tasks need Codex or Claude — {provider} can't start in a VM yet.
+  en: "{provider} can't start in a VM yet — pick This Mac."
 sandbox.badge:
   en: Sandboxed
 sandbox.provider_cloud:
@@ -2396,6 +2396,12 @@ cloud.not_running:
   en: The cloud task is not running
 cloud.stopped:
   en: Stopped
+sandbox.setup_needs_auth:
+  en: Sign in to {provider} in the sandbox
+sandbox.sign_in_failed:
+  en: "Could not open the sandbox sign-in: {error}"
+sandbox.sign_in_incomplete:
+  en: Not signed in to {provider} in the sandbox yet — your message is back in the composer
 agent_preset.standard:
   en: Standard mode
 agent_preset.code:
@@ -3030,6 +3036,8 @@ errors.prepared_runtime_unavailable:
   en: The prepared agent runtime is unavailable
 errors.start_agent:
   en: "Could not start the agent: %{error}"
+errors.sandbox_sign_in_required:
+  en: Sign in to %{provider} in the sandbox to continue
 errors.provider_no_active_turn:
   en: "%{provider} has no active turn to steer"
 errors.provider_transport_write:

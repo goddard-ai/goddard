@@ -6059,7 +6059,7 @@ impl Waku {
         self.submit_submission_for_session(session_id, submission, cx);
     }
 
-    fn submit_submission_for_session(
+    pub(super) fn submit_submission_for_session(
         &mut self,
         session_id: Uuid,
         submission: ComposerSubmission,
@@ -6068,6 +6068,9 @@ impl Waku {
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
+        // A fresh send supersedes whatever the sign-in gate parked — the
+        // exit path must not resurrect the older prompt on top of this one.
+        self.sandbox_pending_submissions.remove(&session_id);
         let selected = self.state.selected_session == Some(session_id);
         // Submitting to an offline remote is use: hold the submission, run
         // the interactive connect, and send when the daemon lands. A failed
@@ -6597,7 +6600,9 @@ impl Waku {
         // while templates expand and skills adopt provider-native syntax.
         // Claude's commands pass through untouched; its CLI owns expansion.
         // `#` mentions resolve here too, into titled GitHub links.
-        let prompt = submission.prompt;
+        // `submission` must stay whole: a sandbox sign-in gate failure
+        // stashes it for the post-login resubmit.
+        let prompt = submission.prompt.clone();
         let driver_prompt = self.expand_work_item_references(
             workspace_path.as_deref(),
             &self.resolve_provider_submission(provider, &prompt),
@@ -6713,6 +6718,53 @@ impl Waku {
                 self.watch_unstarted_turn(session_id, turn_id, cx);
             }
             Err(error) => {
+                // The sandbox sign-in gate: the provider's shared guest
+                // home holds no credentials, so the turn never reached a
+                // provider. Unwind it like a preparation failure, park the
+                // submission, and open the sign-in tab — its exit resubmits.
+                let needs_sandbox_sign_in = self.runtimes.get(&session_id).is_some_and(|runtime| {
+                    matches!(
+                        runtime.sandbox_setup,
+                        Some(crate::model::SandboxSetupStatus::NeedsAuth)
+                    )
+                });
+                if needs_sandbox_sign_in {
+                    let previous_kinds = if selected {
+                        self.transcript_row_kinds.borrow().clone()
+                    } else {
+                        Vec::new()
+                    };
+                    if let Some(session) = self.state.session_mut(session_id)
+                        && session.status == SessionStatus::Connecting
+                    {
+                        if let Some(turn_id) = session.active_turn_id() {
+                            session.unwind_unstarted_turn(turn_id);
+                        }
+                        session.status = SessionStatus::Idle;
+                    }
+                    if let Some(runtime) = self.runtimes.get_mut(&session_id) {
+                        runtime.sandbox_setup = None;
+                    }
+                    if selected
+                        && self
+                            .transcript_anchor
+                            .get()
+                            .is_some_and(|anchor| anchor.session_id == session_id)
+                    {
+                        self.transcript_anchor.set(None);
+                        self.transcript_anchor_following.set(false);
+                    }
+                    if selected {
+                        self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+                    }
+                    self.sandbox_pending_submissions
+                        .insert(session_id, submission);
+                    self.open_sandbox_sign_in(session_id, cx);
+                    self.submission_preparations.remove(&session_id);
+                    self.drain_pending_workspace_cleanups(cx);
+                    cx.notify();
+                    return;
+                }
                 failed_to_start = true;
                 let message = tr!("errors.start_agent", error = error);
                 if let Some(session) = self.state.session_mut(session_id) {

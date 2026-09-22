@@ -247,6 +247,18 @@ pub enum Command {
         discover_models: bool,
         probe_version: bool,
     },
+    /// Resolve how to run the provider's interactive sign-in inside a
+    /// throwaway sandbox VM — the argv a terminal runs on the daemon host.
+    /// Errors when the provider cannot run sandboxed or takes only
+    /// environment credentials.
+    SandboxSignIn {
+        provider: ProviderKind,
+    },
+    /// Whether the provider's shared sandbox home already holds
+    /// credentials — clients check after a sign-in flow exits.
+    SandboxAuthStatus {
+        provider: ProviderKind,
+    },
     FetchPlanUsage {
         provider: ProviderKind,
         binary_override: Option<String>,
@@ -1010,6 +1022,18 @@ pub enum ResponsePayload {
         probe: ProviderProbe,
         version: Option<String>,
     },
+    /// The argv + working directory a terminal runs to sign a provider in
+    /// inside a throwaway sandbox VM.
+    SandboxSignIn {
+        #[ts(type = "string")]
+        program: PathBuf,
+        args: Vec<String>,
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    SandboxAuthStatus {
+        signed_in: bool,
+    },
     PlanUsage {
         usage: Option<PlanUsage>,
     },
@@ -1241,7 +1265,10 @@ pub struct RpcError {
 impl From<anyhow::Error> for RpcError {
     fn from(error: anyhow::Error) -> Self {
         Self {
-            message: error.to_string(),
+            // `{:#}` keeps the whole context chain — `to_string` would shed
+            // the actionable inner cause ("provider cannot run sandboxed")
+            // behind the outermost context ("could not prepare the VM").
+            message: format!("{error:#}"),
             i18n: error
                 .chain()
                 .find_map(|cause| cause.downcast_ref::<KeyedError>())

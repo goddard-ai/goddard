@@ -59,16 +59,31 @@ struct GuestSpec {
     binary: &'static str,
     checkpoint: &'static str,
     /// The shell script run inside a throwaway VM (open network) whose disk
-    /// becomes the checkpoint. Must leave the provider binary installed.
+    /// becomes the checkpoint. Must leave the provider binary installed —
+    /// and must install it outside `/.local`: the builder VM's HOME is `/`,
+    /// while a session VM mounts the provider home over `/root`, so anything
+    /// left under the build-time home is shadowed at runtime.
     install: &'static str,
     allow_hosts: &'static [&'static str],
     /// (guest env name, host env name, allowed hosts) — the guest receives a
     /// placeholder; the proxy swaps in the real value only for these hosts.
-    /// At least one must be set on the host or the guest CLI has no
-    /// credentials at all.
+    /// When every entry is unset on the host, the provider needs credentials
+    /// in its shared sandbox home instead.
     secrets: &'static [(&'static str, &'static str, &'static [&'static str])],
     /// Human-readable name list for the missing-credentials error.
     key_hint: &'static str,
+    /// Credential paths under the provider's guest home — any one that
+    /// exists (file or non-empty directory) marks the provider signed in.
+    /// Checked on the host: no VM boot needed to gate a launch.
+    auth_files: &'static [&'static str],
+    /// argv tail after `binary` for the provider's interactive sign-in, run
+    /// in a throwaway guest attached to a terminal tab. `None` = environment
+    /// secrets are the only way in.
+    login: Option<&'static [&'static str]>,
+    /// Host ports the login flow needs forwarded guest-side — OAuth flows
+    /// that listen on a fixed localhost port. Empty for paste-token and
+    /// device-code flows.
+    login_ports: &'static [u16],
 }
 
 const CODEX_ENDPOINTS: &[&str] = &[
@@ -85,6 +100,78 @@ const CLAUDE_ENDPOINTS: &[&str] = &[
     "claude.ai",
     "*.claude.ai",
 ];
+
+const DEVIN_ENDPOINTS: &[&str] = &[
+    "api.devin.ai",
+    "app.devin.ai",
+    "*.devin.ai",
+    "server.codeium.com",
+    "*.codeium.com",
+];
+
+const CURSOR_ENDPOINTS: &[&str] = &["cursor.com", "*.cursor.com", "cursor.sh", "*.cursor.sh"];
+
+const AMP_ENDPOINTS: &[&str] = &["ampcode.com", "*.ampcode.com"];
+
+const DROID_ENDPOINTS: &[&str] = &["factory.ai", "*.factory.ai"];
+
+/// Fx fans out to whichever backend the user signed into — the Vercel AI
+/// Gateway, Codex, or Grok — so its allowlist is the union.
+const FX_ENDPOINTS: &[&str] = &[
+    "ai-gateway.vercel.sh",
+    "vercel.com",
+    "*.vercel.com",
+    "*.vercel.sh",
+    "fx.sh",
+    "*.fx.sh",
+    "api.openai.com",
+    "*.openai.com",
+    "chatgpt.com",
+    "*.chatgpt.com",
+    "api.x.ai",
+    "*.x.ai",
+];
+
+const GROK_ENDPOINTS: &[&str] = &["x.ai", "*.x.ai"];
+
+const KIMI_ENDPOINTS: &[&str] = &[
+    "api.moonshot.ai",
+    "*.moonshot.ai",
+    "api.moonshot.cn",
+    "*.moonshot.cn",
+    "kimi.com",
+    "*.kimi.com",
+];
+
+/// Goose talks to whichever LLM backend the user configured — the allowlist
+/// is the union of the common providers rather than a vendor's endpoints.
+const GOOSE_ENDPOINTS: &[&str] = &[
+    "api.anthropic.com",
+    "*.anthropic.com",
+    "api.openai.com",
+    "*.openai.com",
+    "chatgpt.com",
+    "*.chatgpt.com",
+    "generativelanguage.googleapis.com",
+    "*.googleapis.com",
+    "api.moonshot.cn",
+    "api.moonshot.ai",
+    "api.deepseek.com",
+    "api.groq.com",
+    "api.mistral.ai",
+    "openrouter.ai",
+    "*.openrouter.ai",
+    "api.x.ai",
+    "ollama.com",
+    "*.ollama.com",
+    "github.com",
+    "*.github.com",
+    "aaif-goose.github.io",
+];
+
+const PI_ENDPOINTS: &[&str] = &["pi.dev", "*.pi.dev"];
+
+const OHMYPI_ENDPOINTS: &[&str] = &["omp.sh", "*.omp.sh"];
 
 const CODEX_INSTALL: &str = "set -eux; \
     apt-get update; \
@@ -104,6 +191,103 @@ const CLAUDE_INSTALL: &str = "set -eux; \
     install -m 755 /.local/bin/claude /usr/local/bin/claude; \
     claude --version";
 
+// Vendor installers may exit nonzero after a successful install (post-install
+// login nudges, telemetry checks) — `|| true` tolerates that while the
+// `--version` check at the end still fails the build when the binary never
+// landed. Binaries are symlinked rather than copied: installers lay out
+// versioned directories whose launcher needs its siblings, and `/.local`
+// stays visible inside session VMs (only `/root` is mounted over).
+
+const DEVIN_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://cli.devin.ai/install.sh | bash || true; \
+    ln -sfn /.local/bin/devin /usr/local/bin/devin; \
+    devin --version";
+
+const CURSOR_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://cursor.com/install | bash || true; \
+    cp -a /.local/share/cursor-agent /opt/cursor-agent; \
+    bin=$(find /opt/cursor-agent -type f \\( -name cursor-agent -o -name agent \\) | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/cursor-agent; \
+    cursor-agent --version";
+
+const AMP_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://ampcode.com/install.sh | bash || true; \
+    command -v amp >/dev/null || { bin=$(find /.local /.amp /opt -maxdepth 4 -name amp 2>/dev/null | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/amp; }; \
+    amp --version";
+
+const DROID_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://app.factory.ai/cli | sh || true; \
+    command -v droid >/dev/null || { bin=$(find /.local /opt /usr/local -maxdepth 4 -name droid 2>/dev/null | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/droid; }; \
+    droid --version";
+
+const FX_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://fx.sh/setup.sh | bash || true; \
+    command -v fx >/dev/null || { bin=$(find /.local /opt /usr/local -maxdepth 4 -name fx 2>/dev/null | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/fx; }; \
+    fx --version";
+
+const GROK_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://x.ai/cli/install.sh | bash || true; \
+    command -v grok >/dev/null || { bin=$(find /.local /opt /usr/local -maxdepth 4 -name grok 2>/dev/null | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/grok; }; \
+    grok --version";
+
+const KIMI_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash || true; \
+    command -v kimi >/dev/null || { bin=$(find /.local /.kimi-code /opt /usr/local -maxdepth 4 -name kimi 2>/dev/null | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/kimi; }; \
+    kimi --version";
+
+// Goose's release tarball is bz2-compressed — the base image lacks bzip2.
+const GOOSE_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates bzip2; \
+    curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash || true; \
+    command -v goose >/dev/null || { bin=$(find /.local /opt /usr/local -maxdepth 4 -name goose 2>/dev/null | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/goose; }; \
+    goose --version";
+
+// pi is a Node CLI — install Node through mise into the same fixed prefix
+// runtime layers use, so `/opt/mise/shims` on the session PATH resolves it.
+const PI_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://mise.jdx.dev/install.sh | sh; \
+    install -m 755 /.local/bin/mise /usr/local/bin/mise; \
+    mkdir -p /opt/mise /opt/mise-config; \
+    export MISE_DATA_DIR=/opt/mise MISE_CONFIG_DIR=/opt/mise-config \
+        MISE_GLOBAL_CONFIG_FILE=/opt/mise-config/config.toml; \
+    mise use -g node@lts; \
+    export PATH=/opt/mise/shims:$PATH; \
+    curl -fsSL https://pi.dev/install.sh | sh || true; \
+    command -v pi >/dev/null || { bin=$(find /.local /.pi /opt /usr/local -maxdepth 8 -name pi 2>/dev/null | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/pi; }; \
+    pi --version";
+
+const OHMYPI_INSTALL: &str = "set -eux; \
+    apt-get update; \
+    apt-get install -y curl ca-certificates; \
+    curl -fsSL https://omp.sh/install | sh || true; \
+    command -v omp >/dev/null || { bin=$(find /.local /opt /usr/local -maxdepth 4 -name omp 2>/dev/null | head -1); \
+    ln -sf \"$bin\" /usr/local/bin/omp; }; \
+    omp --version";
+
 fn guest_spec(provider: ProviderKind) -> Option<GuestSpec> {
     match provider {
         ProviderKind::Codex => Some(GuestSpec {
@@ -116,6 +300,11 @@ fn guest_spec(provider: ProviderKind) -> Option<GuestSpec> {
                 ("CODEX_API_KEY", "CODEX_API_KEY", CODEX_ENDPOINTS),
             ],
             key_hint: "OPENAI_API_KEY or CODEX_API_KEY",
+            auth_files: &[".codex/auth.json"],
+            // Device-code flow — the browser OAuth listener can't receive
+            // a host-browser callback from inside the guest.
+            login: Some(&["login", "--device-auth"]),
+            login_ports: &[],
         }),
         ProviderKind::Claude => Some(GuestSpec {
             binary: "/usr/local/bin/claude",
@@ -131,6 +320,127 @@ fn guest_spec(provider: ProviderKind) -> Option<GuestSpec> {
                 ),
             ],
             key_hint: "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN",
+            auth_files: &[".claude/.credentials.json"],
+            login: Some(&["auth", "login"]),
+            login_ports: &[],
+        }),
+        ProviderKind::Amp => Some(GuestSpec {
+            binary: "/usr/local/bin/amp",
+            checkpoint: "waku-provider-amp",
+            install: AMP_INSTALL,
+            allow_hosts: AMP_ENDPOINTS,
+            secrets: &[("AMP_API_KEY", "AMP_API_KEY", AMP_ENDPOINTS)],
+            key_hint: "AMP_API_KEY",
+            auth_files: &[".config/amp", ".amp"],
+            login: Some(&["login"]),
+            login_ports: &[],
+        }),
+        ProviderKind::Cursor => Some(GuestSpec {
+            binary: "/usr/local/bin/cursor-agent",
+            checkpoint: "waku-provider-cursor",
+            install: CURSOR_INSTALL,
+            allow_hosts: CURSOR_ENDPOINTS,
+            secrets: &[("CURSOR_API_KEY", "CURSOR_API_KEY", CURSOR_ENDPOINTS)],
+            key_hint: "CURSOR_API_KEY",
+            auth_files: &[".config/cursor-agent", ".cursor-agent"],
+            login: Some(&["login"]),
+            login_ports: &[],
+        }),
+        ProviderKind::Devin => Some(GuestSpec {
+            binary: "/usr/local/bin/devin",
+            checkpoint: "waku-provider-devin",
+            install: DEVIN_INSTALL,
+            allow_hosts: DEVIN_ENDPOINTS,
+            secrets: &[],
+            key_hint: "",
+            auth_files: &[".local/share/devin/credentials.toml"],
+            // The manual token flow prints a URL and accepts a pasted
+            // token — the only flow guaranteed to work with no browser
+            // callback into the guest.
+            login: Some(&["auth", "login", "--force-manual-token-flow"]),
+            login_ports: &[],
+        }),
+        ProviderKind::Droid => Some(GuestSpec {
+            binary: "/usr/local/bin/droid",
+            checkpoint: "waku-provider-droid",
+            install: DROID_INSTALL,
+            allow_hosts: DROID_ENDPOINTS,
+            secrets: &[("FACTORY_API_KEY", "FACTORY_API_KEY", DROID_ENDPOINTS)],
+            key_hint: "FACTORY_API_KEY",
+            auth_files: &[".factory", ".config/droid"],
+            // Sign-in happens inside the TUI — the tab just runs `droid`.
+            login: Some(&[]),
+            login_ports: &[],
+        }),
+        ProviderKind::Fx => Some(GuestSpec {
+            binary: "/usr/local/bin/fx",
+            checkpoint: "waku-provider-fx",
+            install: FX_INSTALL,
+            allow_hosts: FX_ENDPOINTS,
+            secrets: &[("AI_GATEWAY_API_KEY", "AI_GATEWAY_API_KEY", FX_ENDPOINTS)],
+            key_hint: "AI_GATEWAY_API_KEY",
+            auth_files: &[".config/fx", ".fx"],
+            login: Some(&["login"]),
+            login_ports: &[],
+        }),
+        ProviderKind::Goose => Some(GuestSpec {
+            binary: "/usr/local/bin/goose",
+            checkpoint: "waku-provider-goose",
+            install: GOOSE_INSTALL,
+            allow_hosts: GOOSE_ENDPOINTS,
+            // Goose is multi-provider — credentials are whatever `goose
+            // configure` writes, not a fixed env name.
+            secrets: &[],
+            key_hint: "",
+            auth_files: &[".config/goose"],
+            login: Some(&["configure"]),
+            login_ports: &[],
+        }),
+        ProviderKind::Grok => Some(GuestSpec {
+            binary: "/usr/local/bin/grok",
+            checkpoint: "waku-provider-grok",
+            install: GROK_INSTALL,
+            allow_hosts: GROK_ENDPOINTS,
+            secrets: &[("XAI_API_KEY", "XAI_API_KEY", GROK_ENDPOINTS)],
+            key_hint: "XAI_API_KEY",
+            auth_files: &[".grok", ".config/grok"],
+            // Device-code flow — no browser can open inside the guest.
+            login: Some(&["login", "--device-auth"]),
+            login_ports: &[],
+        }),
+        ProviderKind::Kimi => Some(GuestSpec {
+            binary: "/usr/local/bin/kimi",
+            checkpoint: "waku-provider-kimi",
+            install: KIMI_INSTALL,
+            allow_hosts: KIMI_ENDPOINTS,
+            secrets: &[],
+            key_hint: "",
+            auth_files: &[".kimi", ".config/kimi"],
+            login: Some(&["login"]),
+            login_ports: &[],
+        }),
+        ProviderKind::OhMyPi => Some(GuestSpec {
+            binary: "/usr/local/bin/omp",
+            checkpoint: "waku-provider-ohmypi",
+            install: OHMYPI_INSTALL,
+            allow_hosts: OHMYPI_ENDPOINTS,
+            secrets: &[],
+            key_hint: "",
+            auth_files: &[".omp", ".config/omp"],
+            login: Some(&["auth-broker", "login"]),
+            login_ports: &[],
+        }),
+        ProviderKind::Pi => Some(GuestSpec {
+            binary: "/usr/local/bin/pi",
+            checkpoint: "waku-provider-pi",
+            install: PI_INSTALL,
+            allow_hosts: PI_ENDPOINTS,
+            secrets: &[],
+            key_hint: "",
+            auth_files: &[".pi", ".config/pi"],
+            // Sign-in is `/login` inside the TUI — the tab runs `pi`.
+            login: Some(&[]),
+            login_ports: &[],
         }),
         _ => None,
     }
@@ -145,9 +455,115 @@ pub fn sandbox_capable(provider: ProviderKind) -> bool {
     provider.supports_sandbox()
 }
 
+/// The provider's persistent guest home — one directory per provider under
+/// the daemon's data dir, mounted at `/root` in every VM that runs that
+/// provider. Credentials a sign-in writes land here and survive across
+/// sessions and VM restarts, which is what makes sign-in a once-per-provider
+/// step. Sharing is per provider, never global: a session mounts only its
+/// own provider's home, so no session can read another provider's creds.
+fn sandbox_home(provider: ProviderKind, data_dir: &Path) -> PathBuf {
+    data_dir.join("sandbox-homes").join(provider.id())
+}
+
+/// Whether any of the spec's credential paths exists under the provider's
+/// sandbox home — a directory counts only when it has entries.
+fn sandbox_signed_in_at(home: &Path, spec: &GuestSpec) -> bool {
+    spec.auth_files.iter().any(|path| {
+        let path = home.join(path);
+        if path.is_file() {
+            return true;
+        }
+        path.is_dir()
+            && std::fs::read_dir(&path)
+                .map(|mut entries| entries.next().is_some())
+                .unwrap_or(false)
+    })
+}
+
+/// Whether the provider's shared sandbox home already holds credentials.
+/// Public for the `sandboxAuthStatus` daemon command.
+pub fn sandbox_signed_in(provider: ProviderKind, data_dir: &Path) -> bool {
+    let Some(spec) = guest_spec(provider) else {
+        return false;
+    };
+    sandbox_signed_in_at(&sandbox_home(provider, data_dir), &spec)
+}
+
+/// The host-side invocation that signs a provider in: `shuru run` a
+/// throwaway VM off the provider checkpoint with its home mounted, running
+/// the spec's login argv. The caller wraps it in a PTY — `shuru run` gives
+/// the guest a real tty, so interactive and browser-assisted flows work.
+/// The returned cwd is the homes root — shuru only mounts host paths
+/// beneath its working directory.
+pub fn sign_in_invocation(
+    provider: ProviderKind,
+    data_dir: &Path,
+) -> anyhow::Result<(PathBuf, Vec<String>, PathBuf)> {
+    let spec = guest_spec(provider)
+        .ok_or_else(|| anyhow!("{} cannot run in the sandbox VM", provider.display_name()))?;
+    let login = spec.login.ok_or_else(|| {
+        anyhow!(
+            "{} takes credentials from the environment ({}), not an interactive sign-in",
+            provider.display_name(),
+            spec.key_hint,
+        )
+    })?;
+    let shuru = shuru_binary()?;
+    let home = sandbox_home(provider, data_dir);
+    std::fs::create_dir_all(&home).with_context(|| {
+        format!(
+            "could not create the sandbox home directory {}",
+            home.display()
+        )
+    })?;
+    let homes_root = home.parent().unwrap_or(data_dir).to_path_buf();
+    let mut args = vec![
+        "run".to_owned(),
+        "--from".to_owned(),
+        spec.checkpoint.to_owned(),
+        // The sign-in VM writes the provider's credentials back through the
+        // mounted home — rw mounts need the explicit opt-in.
+        "--allow-host-writes".to_owned(),
+        "--mount".to_owned(),
+        format!("{}:/root:rw", home.display()),
+        "--allow-net".to_owned(),
+    ];
+    for host in spec.allow_hosts {
+        args.push("--allow-host".to_owned());
+        args.push((*host).to_owned());
+    }
+    for port in spec.login_ports {
+        args.push("-p".to_owned());
+        args.push(format!("{port}:{port}"));
+    }
+    args.push("--".to_owned());
+    // `shuru run` guests default to HOME=/ and a minimal env — the provider's
+    // login must resolve the mounted home, or credentials die with the VM.
+    args.push("env".to_owned());
+    for kv in [
+        "HOME=/root",
+        "USER=root",
+        "SHELL=/bin/sh",
+        "TERM=xterm-256color",
+        "TMPDIR=/tmp",
+        // No browser can open inside the guest — CLIs honoring this fall
+        // back to device-code or printed-URL flows (cursor-agent et al).
+        "NO_OPEN_BROWSER=1",
+        "PATH=/usr/local/sbin:/usr/local/bin:/opt/mise/shims:/usr/bin:/sbin:/bin",
+        "MISE_DATA_DIR=/opt/mise",
+        "MISE_CONFIG_DIR=/opt/mise-config",
+        "MISE_GLOBAL_CONFIG_FILE=/opt/mise-config/config.toml",
+    ] {
+        args.push(kv.to_owned());
+    }
+    args.push(spec.binary.to_owned());
+    args.extend(login.iter().map(|arg| arg.to_string()));
+    Ok((shuru, args, homes_root))
+}
+
 /// The shuru CLI itself: `GODDARD_SHURU_BIN` wins for development, then the
 /// shell's PATH, then the documented install location.
-fn shuru_binary() -> anyhow::Result<PathBuf> {
+pub(crate) fn shuru_binary() -> anyhow::Result<PathBuf> {
     if let Some(path) = std::env::var_os("GODDARD_SHURU_BIN").map(PathBuf::from) {
         return Ok(path);
     }
@@ -491,50 +907,6 @@ fn runtime_install_argv(runtimes: &[RuntimeSpec]) -> Vec<String> {
     ]
 }
 
-/// Keep a guest-state directory out of the worktree's git surface. Uses
-/// `.git/info/exclude` — the repo's local ignore, shared by its worktrees —
-/// so it never touches the `.gitignore` a real commit might ship.
-/// Best-effort: a non-git directory or an unwritable exclude file is not a
-/// launch failure.
-fn exclude_from_git(worktree: &Path, pattern: &str) {
-    let output = crate::command_env::plain_command("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["rev-parse", "--git-path", "info/exclude"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output();
-    let Ok(output) = output else { return };
-    if !output.status.success() {
-        return;
-    }
-    let listed = String::from_utf8_lossy(&output.stdout);
-    let exclude = PathBuf::from(listed.trim());
-    let exclude = if exclude.is_absolute() {
-        exclude
-    } else {
-        worktree.join(exclude)
-    };
-    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
-    if existing
-        .lines()
-        .any(|line| line.trim().trim_end_matches('/') == pattern.trim_end_matches('/'))
-    {
-        return;
-    }
-    if let Some(parent) = exclude.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&exclude)
-        .map(|mut file| {
-            use std::io::Write;
-            let _ = writeln!(file, "{pattern}");
-        });
-}
-
 /// Environment variables that mean something only on the host: the agent
 /// surface points at this daemon's loopback (unreachable in the guest), and
 /// secret names are dropped so the proxy's placeholders are the only values
@@ -579,6 +951,38 @@ pub fn spawn(command: &Command, sandbox: Option<&Arc<ShuruVm>>) -> anyhow::Resul
     }
 }
 
+/// Ensure the OS image and the provider's checkpoint layer exist — the
+/// work a session launch and a sign-in VM share. Reports setup phases only
+/// when work actually runs.
+fn ensure_provider_image(
+    provider: ProviderKind,
+    spec: &GuestSpec,
+    shuru: &Path,
+    progress: &mut impl FnMut(SandboxSetupStatus),
+) -> anyhow::Result<()> {
+    ensure_os_image(shuru, progress)?;
+    ensure_layer(
+        shuru,
+        spec.checkpoint,
+        None,
+        &checkpoint_install_argv(spec),
+        || SandboxSetupStatus::BuildingToolchain {
+            toolchain: provider.display_name().to_owned(),
+        },
+        progress,
+    )
+}
+
+/// Build the OS image and provider checkpoint a sign-in VM boots from —
+/// the first sandboxed touch on a provider pays the install here rather
+/// than mid-login.
+pub fn ensure_sign_in_image(provider: ProviderKind) -> anyhow::Result<()> {
+    let spec = guest_spec(provider)
+        .ok_or_else(|| anyhow!("{} cannot run in the sandbox VM", provider.display_name()))?;
+    let shuru = shuru_binary()?;
+    ensure_provider_image(provider, &spec, &shuru, &mut |_| {})
+}
+
 /// Prepare a sandboxed launch: resolve the toolchain checkpoint, boot the VM
 /// with the worktree mounted, and hand back everything the driver needs to
 /// spawn inside it. Honest failure — a sandboxed session that cannot prepare
@@ -588,6 +992,7 @@ pub fn spawn(command: &Command, sandbox: Option<&Arc<ShuruVm>>) -> anyhow::Resul
 pub fn launch_for_provider(
     provider: ProviderKind,
     worktree: &Path,
+    data_dir: &Path,
     mut progress: impl FnMut(SandboxSetupStatus),
 ) -> anyhow::Result<GuestLaunch> {
     let spec = guest_spec(provider).ok_or_else(|| {
@@ -597,20 +1002,7 @@ pub fn launch_for_provider(
         )
     })?;
     let shuru = shuru_binary()?;
-    ensure_os_image(&shuru, &mut progress)?;
-    // The provider layer, then the toolchain layer the worktree's manifests
-    // ask for — both cached checkpoints, so a later session boots straight
-    // from saved disk state.
-    ensure_layer(
-        &shuru,
-        spec.checkpoint,
-        None,
-        &checkpoint_install_argv(&spec),
-        || SandboxSetupStatus::BuildingToolchain {
-            toolchain: provider.display_name().to_owned(),
-        },
-        &mut progress,
-    )?;
+    ensure_provider_image(provider, &spec, &shuru, &mut progress)?;
     let runtimes = detect_runtimes(worktree);
     let checkpoint = session_checkpoint(&spec, &runtimes);
     if !runtimes.is_empty() {
@@ -629,6 +1021,28 @@ pub fn launch_for_provider(
         )?;
     }
 
+    // The guest HOME is the provider's shared sandbox home — sign-in state
+    // and provider session state (`~/.codex`, `~/.claude`) survive VM
+    // restarts and carry across every task on this provider. First launch
+    // adopts a per-worktree home from before the homes were shared so
+    // existing resume state is not stranded.
+    let guest_home = sandbox_home(provider, data_dir);
+    if !guest_home.exists() {
+        let legacy_home = worktree.join(".goddard").join("sandbox-home");
+        if legacy_home.is_dir()
+            && let Some(parent) = guest_home.parent()
+        {
+            let _ = std::fs::create_dir_all(parent);
+            let _ = std::fs::rename(&legacy_home, &guest_home);
+        }
+    }
+    std::fs::create_dir_all(&guest_home).with_context(|| {
+        format!(
+            "could not create the sandbox home directory {}",
+            guest_home.display()
+        )
+    })?;
+
     let mut secrets = Vec::new();
     let mut scrub = Vec::new();
     for &(guest_name, host_env, hosts) in spec.secrets {
@@ -641,7 +1055,19 @@ pub fn launch_for_provider(
             scrub.push(guest_name.to_owned());
         }
     }
-    if secrets.is_empty() {
+    // No env secret is set and the shared home holds no credentials — the
+    // provider cannot authenticate. When the spec offers an interactive
+    // sign-in, report NeedsAuth so the client can open it in a terminal tab
+    // instead of surfacing a dead end.
+    if secrets.is_empty() && !sandbox_signed_in_at(&guest_home, &spec) {
+        if spec.login.is_some() {
+            progress(SandboxSetupStatus::NeedsAuth);
+            return Err(anyhow!(keyed!(
+                "errors.sandbox_sign_in_required",
+                provider = provider.display_name().to_owned()
+            )))
+            .context("could not start the sandboxed provider");
+        }
         bail!(
             "sandboxed {} needs {} in the environment — \
              the key is proxied to the provider endpoint and never enters the VM",
@@ -649,20 +1075,6 @@ pub fn launch_for_provider(
             spec.key_hint,
         );
     }
-
-    // The guest HOME lives inside the worktree's `.goddard/` directory —
-    // provider session state (`~/.codex`, `~/.claude`) then survives a VM
-    // restart, which is what makes `--resume` work across launches. The
-    // directory is git-excluded via `.git/info/exclude` so it never shows
-    // as worktree noise.
-    let guest_home = worktree.join(".goddard").join("sandbox-home");
-    std::fs::create_dir_all(&guest_home).with_context(|| {
-        format!(
-            "could not create the sandbox home directory {}",
-            guest_home.display()
-        )
-    })?;
-    exclude_from_git(worktree, ".goddard/");
 
     progress(SandboxSetupStatus::BootingVm);
     let vm = ShuruVm::launch(GuestConfig {
@@ -1167,6 +1579,48 @@ impl DriverChild {
             ChildKind::Guest(child) => child.kill(),
         }
     }
+
+    /// A cheap handle for ending the process later — `cancel()` needs one
+    /// after the child itself moved into the reader thread.
+    pub fn interrupt_handle(&self) -> DriverInterrupt {
+        match &self.kind {
+            ChildKind::Host(child) => DriverInterrupt::Host(child.id()),
+            ChildKind::Guest(child) => DriverInterrupt::Guest {
+                vm: child.vm.clone(),
+                pid: child.pid.clone(),
+            },
+        }
+    }
+}
+
+/// How to end a spawned process from elsewhere — SIGINT on the host, the
+/// VM's proc kill inside the guest (the guest exposes no signal path, and
+/// providers with no in-stream interrupt treat either as the process
+/// ending).
+#[derive(Clone)]
+pub enum DriverInterrupt {
+    Host(u32),
+    Guest { vm: Arc<ShuruVm>, pid: String },
+}
+
+impl DriverInterrupt {
+    pub fn interrupt(&self) {
+        match self {
+            Self::Host(pid) => {
+                #[cfg(unix)]
+                {
+                    let _ = Command::new("/bin/kill")
+                        .args(["-INT", &pid.to_string()])
+                        .status();
+                }
+                #[cfg(not(unix))]
+                let _ = pid;
+            }
+            Self::Guest { vm, pid } => {
+                let _ = vm.call("kill", json!({ "pid": pid }));
+            }
+        }
+    }
 }
 
 /// Guest stdin rides the `input` notification — each `write` sends a frame,
@@ -1343,6 +1797,90 @@ mod tests {
             ],
         );
         assert_eq!(name, "waku-provider-codex-node-lts-python-3.12");
+    }
+
+    /// The protocol flag and the guest spec table answer the same question
+    /// for every provider — one must never drift from the other.
+    #[test]
+    fn every_supported_provider_has_a_guest_spec() {
+        for provider in ProviderKind::ALL {
+            assert_eq!(
+                guest_spec(provider).is_some(),
+                provider.supports_sandbox(),
+                "{provider:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sandbox_homes_are_per_provider_under_the_data_dir() {
+        let root = Path::new("/tmp/waku-data");
+        assert_eq!(
+            sandbox_home(ProviderKind::Devin, root),
+            root.join("sandbox-homes/devin")
+        );
+        assert_eq!(
+            sandbox_home(ProviderKind::Codex, root),
+            root.join("sandbox-homes/codex")
+        );
+        assert_ne!(
+            sandbox_home(ProviderKind::Devin, root),
+            sandbox_home(ProviderKind::Claude, root),
+        );
+    }
+
+    #[test]
+    fn signed_in_checks_the_spec_auth_files() {
+        let dir = std::env::temp_dir().join(format!("waku-auth-{}", Uuid::new_v4()));
+        let spec = guest_spec(ProviderKind::Devin).unwrap();
+        let home = dir.join("devin");
+        assert!(!sandbox_signed_in_at(&home, &spec));
+        // The credential path exists only as an empty parent — not signed in.
+        std::fs::create_dir_all(home.join(".local/share/devin")).unwrap();
+        assert!(!sandbox_signed_in_at(&home, &spec));
+        std::fs::write(home.join(".local/share/devin/credentials.toml"), "[auth]\n").unwrap();
+        assert!(sandbox_signed_in_at(&home, &spec));
+
+        // A directory entry counts only once it has contents.
+        let spec = guest_spec(ProviderKind::Amp).unwrap();
+        let home = dir.join("amp");
+        std::fs::create_dir_all(home.join(".config/amp")).unwrap();
+        assert!(!sandbox_signed_in_at(&home, &spec));
+        std::fs::write(home.join(".config/amp/auth.json"), "{}").unwrap();
+        assert!(sandbox_signed_in_at(&home, &spec));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The invocation the sign-in terminal runs: a VM off the provider
+    /// checkpoint, the provider home at /root, the login argv after `--`.
+    #[test]
+    fn sign_in_invocation_mounts_the_provider_home() {
+        let dir = std::env::temp_dir().join(format!("waku-signin-{}", Uuid::new_v4()));
+        // Without shuru installed this test cannot run — the argv itself is
+        // what is under test, so a missing binary skips rather than fails.
+        if shuru_binary().is_err() {
+            return;
+        }
+        let (program, args, cwd) =
+            sign_in_invocation(ProviderKind::Devin, &dir).expect("devin sign-in resolves");
+        assert_eq!(cwd, dir.join("sandbox-homes"));
+        let home = dir.join("sandbox-homes/devin");
+        assert!(home.is_dir());
+        assert_eq!(program, shuru_binary().unwrap(),);
+        assert_eq!(args[0], "run");
+        assert!(args.contains(&"--allow-host-writes".to_owned()));
+        assert!(args.contains(&format!("{}:/root:rw", home.display())));
+        // The guest default HOME=/ would drop credentials on the ephemeral
+        // disk — sign-in env must point at the mounted provider home.
+        assert!(args.contains(&"HOME=/root".to_owned()));
+        assert!(args.ends_with(&[
+            "/usr/local/bin/devin".to_owned(),
+            "auth".to_owned(),
+            "login".to_owned(),
+            "--force-manual-token-flow".to_owned(),
+        ]));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Real end-to-end against the installed shuru binary and the

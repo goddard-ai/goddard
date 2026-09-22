@@ -2810,6 +2810,18 @@ pub struct Waku {
     /// tells `ensure_right_panel_terminal` how to spawn the PTY and carries
     /// the command's close-on-success choice.
     right_panel_terminal_commands: HashMap<Uuid, CustomCommand>,
+    /// A right-panel terminal launched as a bare program — keyed by the
+    /// surface's terminal id like the custom-command map, checked first at
+    /// spawn. Sandbox sign-in tabs use it: the daemon hands back the
+    /// `shuru run` argv and the tab gives the guest a real tty.
+    right_panel_terminal_programs: HashMap<Uuid, (std::path::PathBuf, Vec<String>)>,
+    /// Sandbox sign-in terminals, keyed by their tab's terminal id. A tab's
+    /// exit probes the provider's shared home for credentials and resubmits
+    /// any submission the sign-in gate held.
+    sandbox_sign_in_tabs: HashMap<Uuid, ProviderKind>,
+    /// Submissions parked on the sandbox sign-in gate, keyed by session —
+    /// resubmitted once the provider's shared home holds credentials.
+    sandbox_pending_submissions: HashMap<Uuid, ComposerSubmission>,
     /// Custom commands launched with the panel kept closed, keyed by the
     /// surface's terminal id. The entry retires when the command reports
     /// its exit or the terminal goes away.
@@ -3359,6 +3371,7 @@ mod right_panel;
 mod routing;
 mod run_script;
 mod runtime;
+mod sandbox;
 mod saved_drafts;
 mod send_file_dialog;
 mod sessions;
@@ -5923,6 +5936,9 @@ impl Waku {
                 selected_terminal: None,
                 last_visible_terminal: None,
                 right_panel_terminal_commands: HashMap::new(),
+                right_panel_terminal_programs: HashMap::new(),
+                sandbox_sign_in_tabs: HashMap::new(),
+                sandbox_pending_submissions: HashMap::new(),
                 custom_command_runs: HashMap::new(),
                 provider_setup_terminals: HashMap::new(),
                 provider_setup_outcomes: HashSet::new(),

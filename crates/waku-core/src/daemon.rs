@@ -225,6 +225,9 @@ pub struct WakuBackend {
     /// `daemon-stats.jsonl` debugging file.
     stats: Arc<crate::stats::DaemonStats>,
     usage_rates_dir: std::path::PathBuf,
+    /// `~/Library/Application Support/<app>` — the parent of shared
+    /// per-provider sandbox homes.
+    data_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
     /// Friend-to-friend sharing; lazily binds the iroh endpoint on first
     /// friends command so tests and headless runs pay nothing.
@@ -312,6 +315,7 @@ impl WakuBackend {
                 &data_dir,
                 our_name.clone(),
             )),
+            data_dir,
             our_name,
             automations,
         };
@@ -939,7 +943,15 @@ fn create_transfer_session(
     };
     let mut state = task_state.lock();
     let project_id = friends_project_id(&mut state, share_dir);
-    let mut session = state.new_session(project_id, state.last_provider);
+    // Transfer sessions are unconditionally sandboxed (received files never
+    // reach the host fs), so the provider must be one the sandbox can run —
+    // fall back to Claude rather than minting a session that can never start.
+    let provider = if state.last_provider.supports_sandbox() {
+        state.last_provider
+    } else {
+        ProviderKind::Claude
+    };
+    let mut session = state.new_session(project_id, provider);
     session.title = format!("{} from {}", transfer.title, transfer.peer_name);
     // The receipt is a notification, not a prompt awaiting a reply — a
     // provider turn holds the assistant messages so they render like an
@@ -1414,6 +1426,17 @@ impl Backend for WakuBackend {
                 }
                 Ok(ResponsePayload::ProviderProbe { probe, version })
             }
+            Command::SandboxSignIn { provider } => {
+                // The sign-in VM needs the provider checkpoint — build it if
+                // this is the provider's first sandboxed touch.
+                crate::sandbox::ensure_sign_in_image(provider)?;
+                let (program, args, cwd) =
+                    crate::sandbox::sign_in_invocation(provider, &self.data_dir)?;
+                Ok(ResponsePayload::SandboxSignIn { program, args, cwd })
+            }
+            Command::SandboxAuthStatus { provider } => Ok(ResponsePayload::SandboxAuthStatus {
+                signed_in: crate::sandbox::sandbox_signed_in(provider, &self.data_dir),
+            }),
             Command::FetchPlanUsage {
                 provider,
                 binary_override,
@@ -3541,20 +3564,27 @@ impl WakuBackend {
                     "this task was created with the Sandbox VM environment, but the sandbox experiment is off"
                 );
             }
-            let launch = crate::sandbox::launch_for_provider(provider, &options.cwd, |status| {
-                // Launch progress is ephemeral — it exists to name the
-                // Connecting phase, never to enter the transcript.
-                if let Ok(wire) = event_to_wire(DriverEvent::SandboxSetup(status)) {
-                    let _ = events.send_ephemeral(wire);
-                }
-            })
+            let launch = crate::sandbox::launch_for_provider(
+                provider,
+                &options.cwd,
+                &self.data_dir,
+                |status| {
+                    // Launch progress is ephemeral — it exists to name the
+                    // Connecting phase, never to enter the transcript.
+                    if let Ok(wire) = event_to_wire(DriverEvent::SandboxSetup(status)) {
+                        let _ = events.send_ephemeral(wire);
+                    }
+                },
+            )
             .context("could not prepare the sandbox VM")?;
             options.binary = launch.binary;
             options.cwd = launch.cwd;
             options.sandbox = Some(launch.vm);
             // The agent surface's daemon address is this host's loopback —
-            // unreachable from inside the guest.
+            // unreachable from inside the guest. The headless computer-use
+            // bridge is host-side too, so it is off in the sandbox.
             options.agent = None;
+            options.computer_use_enabled = false;
         }
         // The agent-surface instruction reaches the session through whichever
         // channel its provider offers; first-prompt context needs the launch's
@@ -4917,6 +4947,8 @@ fn handle_driver_command(
         | Command::UpdateSettings { .. }
         | Command::SetDaemonExposure { .. }
         | Command::ProbeProvider { .. }
+        | Command::SandboxSignIn { .. }
+        | Command::SandboxAuthStatus { .. }
         | Command::FetchPlanUsage { .. }
         | Command::ConsumeCodexResetCredit { .. }
         | Command::ProbeComputerPermissions { .. }
@@ -5704,6 +5736,93 @@ fn record_provider_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The auth-status command reads the per-provider shared home — a
+    /// credential file under `sandbox-homes/<id>` flips the answer.
+    #[test]
+    fn sandbox_auth_status_reflects_the_provider_home() {
+        let root = std::env::temp_dir().join(format!("waku-sandbox-auth-{}", Uuid::new_v4()));
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let request = |command| waku_protocol::Request {
+            request_id: Uuid::new_v4(),
+            session_id: Uuid::nil(),
+            runtime_id: Uuid::nil(),
+            command,
+        };
+
+        let status = backend
+            .handle(
+                request(Command::SandboxAuthStatus {
+                    provider: ProviderKind::Devin,
+                }),
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        assert!(matches!(
+            status,
+            ResponsePayload::SandboxAuthStatus { signed_in: false }
+        ));
+
+        let creds = root.join("sandbox-homes/devin/.local/share/devin");
+        std::fs::create_dir_all(&creds).unwrap();
+        std::fs::write(creds.join("credentials.toml"), "[auth]\n").unwrap();
+        let status = backend
+            .handle(
+                request(Command::SandboxAuthStatus {
+                    provider: ProviderKind::Devin,
+                }),
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        assert!(matches!(
+            status,
+            ResponsePayload::SandboxAuthStatus { signed_in: true }
+        ));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Sign-in resolves to the host-side `shuru run` argv the sign-in
+    /// terminal executes. Skipped where shuru is not installed.
+    #[test]
+    fn sandbox_sign_in_returns_the_guest_invocation() {
+        if crate::sandbox::shuru_binary().is_err() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("waku-sandbox-signin-{}", Uuid::new_v4()));
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let response = backend
+            .handle(
+                waku_protocol::Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::SandboxSignIn {
+                        provider: ProviderKind::Devin,
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        let ResponsePayload::SandboxSignIn { program, args, cwd } = response else {
+            panic!("expected SandboxSignIn, got {response:?}");
+        };
+        assert_eq!(program, crate::sandbox::shuru_binary().unwrap());
+        assert_eq!(cwd, root.join("sandbox-homes"));
+        assert!(args.contains(&"HOME=/root".to_owned()));
+        assert!(args.contains(&"--allow-host-writes".to_owned()));
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     #[test]
     fn agent_create_trait_resolution() {

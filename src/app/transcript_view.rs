@@ -2686,6 +2686,12 @@ impl Waku {
                     tr!("sandbox.setup_building", toolchain = toolchain.clone())
                 }
                 crate::model::SandboxSetupStatus::BootingVm => tr!("sandbox.setup_booting"),
+                crate::model::SandboxSetupStatus::NeedsAuth => tr!(
+                    "sandbox.setup_needs_auth",
+                    provider = session
+                        .map(|session| session.provider.display_name())
+                        .unwrap_or_default()
+                ),
                 crate::model::SandboxSetupStatus::Ready => unreachable!("cleared on store"),
             }
         } else if session.is_some_and(|session| session.status == SessionStatus::Background) {

@@ -107,8 +107,29 @@ impl ProviderKind {
     /// Whether this provider's CLI can run inside the sandbox VM. The
     /// daemon enforces it and clients explain it, so the answer lives on
     /// the wire type both sides share.
+    ///
+    /// Providers are excluded when their transport cannot ride the guest's
+    /// stdio channel: DeepSeek and Muse multiplex every session on one
+    /// resident host process, OpenCode and OpenCode 2 speak loopback HTTP
+    /// to a server the daemon must reach over TCP, Copilot's SDK owns its
+    /// process spawn, and Antigravity is its own terminal TUI with no
+    /// daemon driver at all.
     pub fn supports_sandbox(self) -> bool {
-        matches!(self, Self::Codex | Self::Claude)
+        matches!(
+            self,
+            Self::Codex
+                | Self::Claude
+                | Self::Amp
+                | Self::Cursor
+                | Self::Devin
+                | Self::Droid
+                | Self::Fx
+                | Self::Goose
+                | Self::Grok
+                | Self::Kimi
+                | Self::OhMyPi
+                | Self::Pi
+        )
     }
 
     /// Whether the provider offers a hosted cloud environment a task can be
@@ -3124,6 +3145,9 @@ pub enum SandboxSetupStatus {
     BuildingToolchain { toolchain: String },
     /// The VM is booting from a saved checkpoint.
     BootingVm,
+    /// The provider's shared sandbox home holds no credentials and the spec
+    /// offers an interactive sign-in — the session waits on it.
+    NeedsAuth,
     /// The provider process is up — clients clear the transient status.
     Ready,
 }
