@@ -70,6 +70,12 @@ Read the doc before working in its area:
   before touching the event pump, pulse clock (`src/ui/motion.rs`), veils,
   overlay scrollbars, pane caching, or anything else a streaming frame reaches;
   it also records the counter-based measurement playbook.
+  pulse-clock ticks at ≤ 60 Hz (spinners; other pulses stay at ≤ ~30 Hz) —
+  and by what one frame can see. Read
+  [.agents/docs/performance.md](.agents/docs/performance.md) before touching the event pump,
+  the pulse clock (`src/ui/motion.rs`), veils, overlay scrollbars, pane
+  caching, or anything else a streaming frame reaches; it also records the
+  counter-based measurement playbook that actually finds regressions.
 
 ## Accessibility
 
