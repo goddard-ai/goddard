@@ -6079,6 +6079,12 @@ impl Waku {
             this.restore_ui_state(window, cx);
             this.start_task_state_sync(waku_client::DaemonKey::Local, this.daemon.clone());
             this.connect_remote_hosts(cx);
+            // Any daemon crash report the OS wrote while the app was away is
+            // the evidence on why it died.
+            crate::daemon::spawn_crash_report_scan(
+                this.analytics.clone(),
+                cx.background_executor(),
+            );
             for session_id in startup_live_session_ids {
                 // Antigravity's runtime is the app-local TUI terminal, not a
                 // daemon attachment. It respawns lazily — only the selected

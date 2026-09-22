@@ -206,6 +206,16 @@ pub enum Event {
         /// kill, `6` an abort, `11` a crash. Absent for connection loss.
         exit_signal: Option<i32>,
     },
+    /// A crash report the OS wrote for a daemon process — scanned once at
+    /// launch, one event per report the app has not seen. `termination` is
+    /// the report's namespace bucket (`signal`, `exc_resource` for jetsam
+    /// and resource limits, `exc_guard`, `coredump`), `signal` the
+    /// crashing signal name the report recorded.
+    DaemonCrash {
+        termination: &'static str,
+        signal: Option<String>,
+        uptime_secs: Option<u64>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -444,6 +454,22 @@ impl Event {
                 }
                 ("daemon.recovery", data)
             }
+            Self::DaemonCrash {
+                termination,
+                signal,
+                uptime_secs,
+            } => {
+                let mut data = json!({
+                    "termination": termination,
+                });
+                if let Some(signal) = signal {
+                    data["signal"] = json!(signal);
+                }
+                if let Some(uptime) = uptime_secs {
+                    data["uptimeSecs"] = json!(uptime);
+                }
+                ("daemon.crash", data)
+            }
         };
 
         let properties = data
@@ -646,6 +672,11 @@ mod tests {
                 children_rss_mb: Some(4096),
                 exit_code: None,
                 exit_signal: Some(9),
+            },
+            Event::DaemonCrash {
+                termination: "exc_resource",
+                signal: Some("SIGKILL".into()),
+                uptime_secs: Some(86400),
             },
         ];
 
