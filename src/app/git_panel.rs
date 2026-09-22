@@ -235,15 +235,15 @@ pub(super) struct GitPanelOperation {
     pub id: Uuid,
     pub workspace: PathBuf,
     pub pending: GitPanelPending,
-    /// The spinner toast a `/land` raised on the operation's behalf — the
-    /// composer has no pending indicator of its own. `finish_git_panel_op`
+    /// The spinner toast raised on the operation's behalf. `finish_git_panel_op`
     /// settles it to the outcome, or retires it when a modal takes over.
     pub toast_id: Option<u64>,
-    /// The "Sync branch…" modal started this operation — or inherited the
-    /// marker from the modal-origin conflict a "Merge instead" retry came
-    /// from. Its pull conflicts resolve in a fresh chat on the checkout, and
-    /// its completion closes the picker card.
+    /// This operation came from the "Sync branch…" command, so pull conflicts
+    /// resolve in a fresh chat on the checkout.
     pub sync_branch: bool,
+    /// The branch picked by that command, when this is its initial pull. A
+    /// "Merge instead" retry inherits the origin marker but not this name.
+    pub sync_branch_name: Option<String>,
     /// The base a `PushingBase`/`SyncingBase` op targets — the failure
     /// modal quotes it back when the run ends badly.
     pub base: Option<String>,
@@ -1122,6 +1122,7 @@ impl Waku {
             pending,
             toast_id: None,
             sync_branch: false,
+            sync_branch_name: None,
             base: None,
         });
         cx.notify();
@@ -1696,9 +1697,6 @@ impl Waku {
             .git_panel
             .as_ref()
             .is_some_and(|panel| panel.workspace == op.workspace);
-        // The "Sync branch…" picker's pending row: the branch name the card
-        // is holding for its completion toast, taken once the op lands.
-        let picker_sync = self.sync_branch.take_syncing(op_id);
         // Message generation is a step toward a commit, not a user-facing
         // action — its follow-up commit op lands here separately.
         let action = match op.pending {
@@ -1758,6 +1756,7 @@ impl Waku {
             Ok(WorkspaceResult::Pull {
                 outcome: PullOutcome::Conflict { in_progress, files },
             }) => {
+                self.dismiss_operation_toast(op.toast_id);
                 self.git_panel_conflict_files_scroll
                     .set_offset(gpui::Point::default());
                 let conflict = SyncConflict::Pull {
@@ -1772,12 +1771,6 @@ impl Waku {
                     self.auto_resolve_sync_conflict(conflict, cx);
                 } else {
                     self.git_panel_sync_conflict = Some(conflict);
-                }
-                // The conflict modal takes over from the picker card — when
-                // this is the operation the card is waiting on. An inherited
-                // marker (a "Merge instead" retry) leaves an open picker alone.
-                if picker_sync.is_some() {
-                    self.close_sync_branch(cx);
                 }
                 self.invalidate_workspace_queries(cx);
                 cx.notify();
@@ -1900,12 +1893,12 @@ impl Waku {
                             .update(cx, |input, cx| input.set_content("", cx));
                     }
                 }
-                // A clean pull the picker ran retires its card and reports
-                // the branch it synced — even when the card was dismissed
-                // mid-flight.
-                if let Some(branch) = picker_sync {
-                    self.close_sync_branch(cx);
-                    self.show_success_toast(tr!("sync_branch.synced", branch = branch));
+                if let Some(branch) = &op.sync_branch_name {
+                    self.settle_operation_toast(
+                        op.toast_id,
+                        tr!("sync_branch.synced", branch = branch.clone()),
+                        ToastTone::Success,
+                    );
                 }
                 self.invalidate_workspace_queries(cx);
                 self.refresh_git_panel(cx);
@@ -1948,9 +1941,6 @@ impl Waku {
                             error.to_string(),
                             ToastTone::Alert,
                         );
-                    }
-                    if picker_sync.is_some() {
-                        self.close_sync_branch(cx);
                     }
                 }
                 self.invalidate_workspace_queries(cx);

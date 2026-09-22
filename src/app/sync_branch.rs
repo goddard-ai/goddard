@@ -8,9 +8,9 @@
 //! holding it, and only rows with both can take a `git pull`. The session's
 //! checkout leads the list as "Current branch". Confirming runs
 //! `PullUpstream` through the shared panel-operation slot — `pull --rebase`,
-//! or `--no-rebase` when the merge setting is on — while the card stays up on
-//! a pending row. A conflict hands off to the usual conflict modal, whose
-//! Resolve in chat then opens a fresh chat rooted at the syncing folder.
+//! or `--no-rebase` when the merge setting is on — then closes the picker and
+//! shows progress in a toast. A conflict hands off to the usual conflict
+//! modal, whose Resolve in chat opens a fresh chat rooted at the syncing folder.
 
 use gpui::{KeyBinding, deferred};
 
@@ -90,9 +90,6 @@ pub(super) struct SyncBranchUi {
     results: Vec<usize>,
     selected: usize,
     scroll: ScrollHandle,
-    /// The panel operation this modal started — the card stays up on a
-    /// pending row until `finish_git_panel_op` lands it.
-    syncing: Option<(Uuid, String)>,
 }
 
 impl SyncBranchUi {
@@ -108,21 +105,11 @@ impl SyncBranchUi {
             results: Vec::new(),
             selected: 0,
             scroll: ScrollHandle::new(),
-            syncing: None,
         }
     }
 
     pub(super) fn is_open(&self) -> bool {
         self.open
-    }
-
-    /// The branch the pending row shows — `Some` while `op_id` is the
-    /// operation this modal started. `finish_git_panel_op` takes it for the
-    /// success toast.
-    pub(super) fn take_syncing(&mut self, op_id: Uuid) -> Option<String> {
-        self.syncing
-            .take_if(|(id, _)| *id == op_id)
-            .map(|(_, branch)| branch)
     }
 }
 
@@ -237,7 +224,6 @@ impl Waku {
         self.sync_branch.targets.clear();
         self.sync_branch.results.clear();
         self.sync_branch.fetch = SyncBranchFetch::Loading;
-        self.sync_branch.syncing = None;
 
         // Closing an open GPUI menu can call its toggle observers back into
         // this entity, so release this action listener's mutable borrow first.
@@ -309,8 +295,8 @@ impl Waku {
     /// Close the picker. Restoring the previous focus needs a window the
     /// background-completion paths do not have, so it is parked on
     /// `previous_focus` and `render_sync_branch` hands it back next frame.
-    /// `syncing` survives the close — a dismissed card's operation still
-    /// reports its outcome when it lands.
+    /// The progress toast stays attached to the operation after the picker
+    /// closes and reports its outcome when the pull lands.
     pub(super) fn close_sync_branch(&mut self, cx: &mut Context<Self>) {
         if !self.sync_branch.open {
             return;
@@ -388,12 +374,9 @@ impl Waku {
 
     /// Sync the highlighted row (`None`, the keyboard path) or a clicked one:
     /// `pull --rebase` in the branch's checkout — `git merge` when the
-    /// setting says so. The card stays up on a pending row until the
-    /// operation lands.
+    /// setting says so. The picker closes once the pull starts and its
+    /// progress toast settles when the operation lands.
     fn execute_sync_branch(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
-        if self.sync_branch.syncing.is_some() {
-            return;
-        }
         if self.git_panel_operation.is_some() {
             self.show_toast(tr!("sync_branch.busy"));
             cx.notify();
@@ -420,9 +403,16 @@ impl Waku {
         else {
             return;
         };
+        let toast_id = self.show_progress_toast(
+            tr!("sync_branch.syncing", branch = branch.clone()),
+            PROGRESS_TOAST_DURATION,
+        );
         if let Some(operation) = self.git_panel_operation.as_mut() {
             operation.sync_branch = true;
+            operation.sync_branch_name = Some(branch);
+            operation.toast_id = Some(toast_id);
         }
+        self.close_sync_branch(cx);
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             self.finish_git_panel_op(
                 op_id,
@@ -431,7 +421,6 @@ impl Waku {
             );
             return;
         };
-        self.sync_branch.syncing = Some((op_id, branch));
         cx.notify();
         cx.spawn(async move |waku, cx| {
             let result = cx
@@ -456,8 +445,8 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if !self.sync_branch.open {
-            // A background close — a finished sync — still owes the previous
-            // focus its restoration; interactive closes take the same path.
+            // Closing from the command action still owes focus restoration;
+            // interactive closes take the same path.
             if let Some(previous_focus) = self.sync_branch.previous_focus.take() {
                 window.focus(&previous_focus, cx);
             }
@@ -482,106 +471,78 @@ impl Waku {
             .px(px(8.0))
             .pb(px(8.0));
 
-        if let Some((_, branch)) = &self.sync_branch.syncing {
-            let syncing_label = tr!("sync_branch.syncing", branch = branch.clone());
-            body = body
-                .h(px(RESULT_ROW_HEIGHT + RESULTS_BOTTOM_PADDING))
-                .child(
-                    div()
-                        .h(px(RESULT_ROW_HEIGHT))
-                        .px(px(11.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .child(motion::spin(icon(
-                            "icons/loader-circle.svg",
-                            14.0,
-                            theme.text_secondary,
-                        )))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .truncate()
-                                .text_size(sp(13.0))
-                                .text_color(theme.text_secondary)
-                                .child(syncing_label),
-                        ),
-                );
-        } else {
-            let show_placeholder = self.sync_branch.results.is_empty();
-            let results_height =
-                sync_branch_results_height(self.sync_branch.results.len(), show_placeholder)
-                    .min((card_max_height - SEARCH_ROW_HEIGHT).max(0.0));
-            body = body.h(px(results_height));
-            if show_placeholder {
-                let (icon_path, title, hint, spinning) = match &self.sync_branch.fetch {
-                    SyncBranchFetch::Loading => (
-                        "icons/loader-circle.svg",
-                        tr!("sync_branch.loading"),
-                        None,
-                        true,
-                    ),
-                    SyncBranchFetch::Unavailable => (
-                        "icons/git-branch.svg",
-                        tr!("git_panel.not_a_repository"),
-                        None,
-                        false,
-                    ),
-                    SyncBranchFetch::Failed(error) => {
-                        ("icons/git-branch.svg", error.clone(), None, false)
-                    }
-                    SyncBranchFetch::Ready => (
-                        "icons/git-branch.svg",
-                        tr!("sync_branch.no_results"),
-                        Some(tr!("sync_branch.no_results_hint")),
-                        false,
-                    ),
-                };
-                let empty_icon = icon(icon_path, 18.0, theme.text_ghost);
-                body = body.child(
-                    div()
-                        .h(px(EMPTY_RESULTS_HEIGHT))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .child(if spinning {
-                            motion::spin(empty_icon)
-                        } else {
-                            empty_icon.into_any_element()
-                        })
-                        .child(
-                            div()
-                                .mt(px(10.0))
-                                .max_w(px(360.0))
-                                .text_size(sp(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text_secondary)
-                                .child(title),
-                        )
-                        .when_some(hint, |empty, hint| {
-                            empty.child(
-                                div()
-                                    .mt(px(4.0))
-                                    .max_w(px(360.0))
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_tertiary)
-                                    .child(hint),
-                            )
-                        }),
-                );
-            } else {
-                for (index, &target_index) in self.sync_branch.results.iter().enumerate() {
-                    let target = &self.sync_branch.targets[target_index];
-                    body = body.child(self.render_sync_branch_row(
-                        index,
-                        target,
-                        index == selected,
-                        &theme,
-                        cx,
-                    ));
+        let show_placeholder = self.sync_branch.results.is_empty();
+        let results_height =
+            sync_branch_results_height(self.sync_branch.results.len(), show_placeholder)
+                .min((card_max_height - SEARCH_ROW_HEIGHT).max(0.0));
+        body = body.h(px(results_height));
+        if show_placeholder {
+            let (icon_path, title, hint, spinning) = match &self.sync_branch.fetch {
+                SyncBranchFetch::Loading => (
+                    "icons/loader-circle.svg",
+                    tr!("sync_branch.loading"),
+                    None,
+                    true,
+                ),
+                SyncBranchFetch::Unavailable => (
+                    "icons/git-branch.svg",
+                    tr!("git_panel.not_a_repository"),
+                    None,
+                    false,
+                ),
+                SyncBranchFetch::Failed(error) => {
+                    ("icons/git-branch.svg", error.clone(), None, false)
                 }
+                SyncBranchFetch::Ready => (
+                    "icons/git-branch.svg",
+                    tr!("sync_branch.no_results"),
+                    Some(tr!("sync_branch.no_results_hint")),
+                    false,
+                ),
+            };
+            let empty_icon = icon(icon_path, 18.0, theme.text_ghost);
+            body = body.child(
+                div()
+                    .h(px(EMPTY_RESULTS_HEIGHT))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .child(if spinning {
+                        motion::spin(empty_icon)
+                    } else {
+                        empty_icon.into_any_element()
+                    })
+                    .child(
+                        div()
+                            .mt(px(10.0))
+                            .max_w(px(360.0))
+                            .text_size(sp(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(title),
+                    )
+                    .when_some(hint, |empty, hint| {
+                        empty.child(
+                            div()
+                                .mt(px(4.0))
+                                .max_w(px(360.0))
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(hint),
+                        )
+                    }),
+            );
+        } else {
+            for (index, &target_index) in self.sync_branch.results.iter().enumerate() {
+                let target = &self.sync_branch.targets[target_index];
+                body = body.child(self.render_sync_branch_row(
+                    index,
+                    target,
+                    index == selected,
+                    &theme,
+                    cx,
+                ));
             }
         }
 
