@@ -1225,7 +1225,8 @@ errors.answer_provider_permission: "%{provider} の権限リクエストに回�
 errors.answer_provider_question: "%{provider} の質問に回答できませんでした：%{error}"
 errors.initialize_codex_app_server: Codex app-server を初期化できませんでした
 errors.register_computer_use_skill: Goddard のコンピュータ操作スキルを Codex に登録できませんでした
-errors.codex_thread_open_incomplete: Codex はスレッドを開く処理を完了しませんでした
+errors.codex_thread_open_incomplete: "Codex はこのスレッドを開ききれませんでした。ChatGPT アプリまたは Codex CLI で開いている場合は、そこで閉じてから Goddard でもう一度お試しください。"
+errors.codex_thread_active_writer: "この Codex スレッドはすでに使用中です。通常、ChatGPT アプリまたは Codex CLI で開いていると発生します。そこで閉じてから Goddard でもう一度お試しください。"
 errors.codex_goals_unsupported: このバージョンの Codex はスレッドゴールに対応していません
 errors.provider_receive_prompt: "%{provider} はプロンプトを受信できませんでした"
 errors.provider_start_turn: "%{provider} はターンを開始できませんでした"

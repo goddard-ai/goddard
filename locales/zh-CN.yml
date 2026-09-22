@@ -1193,7 +1193,8 @@ errors.answer_provider_permission: "无法响应 %{provider} 的权限请求：%
 errors.answer_provider_question: "无法回答 %{provider} 的问题：%{error}"
 errors.initialize_codex_app_server: 无法初始化 Codex app-server
 errors.register_computer_use_skill: 无法向 Codex 注册 Goddard 电脑操作技能
-errors.codex_thread_open_incomplete: Codex 未能完成线程打开操作
+errors.codex_thread_open_incomplete: "Codex 未能完成此线程的打开。如果此线程已在 ChatGPT 应用或 Codex CLI 中打开，请先在那里关闭，然后在 Goddard 中重试。"
+errors.codex_thread_active_writer: "此 Codex 线程已在其他位置使用。这通常是因为它已在 ChatGPT 应用或 Codex CLI 中打开。请在那里关闭线程，然后在 Goddard 中重试。"
 errors.codex_goals_unsupported: 此版本的 Codex 不支持线程目标
 errors.provider_receive_prompt: "%{provider} 未能接收消息"
 errors.provider_start_turn: "%{provider} 未能开始本轮"

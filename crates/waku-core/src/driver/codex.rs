@@ -623,8 +623,8 @@ impl CodexDriver {
                         }
                         CommandMessage::Rollback { turns, response } => {
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
-                                let _ = response
-                                    .send(Err("Codex did not finish opening its thread.".into()));
+                                let _ =
+                                    response.send(Err(tr!("errors.codex_thread_open_incomplete")));
                                 continue;
                             };
                             next_request_id += 1;
@@ -654,8 +654,8 @@ impl CodexDriver {
                             response,
                         } => {
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
-                                let _ = response
-                                    .send(Err("Codex did not finish opening its thread.".into()));
+                                let _ =
+                                    response.send(Err(tr!("errors.codex_thread_open_incomplete")));
                                 continue;
                             };
                             let last_turn_id = {
@@ -920,7 +920,7 @@ impl CodexDriver {
                     if is_visible_stderr_notice(&line) {
                         let error = clean_stderr(&line);
                         *stderr_last_error.lock() = Some(error.clone());
-                        let _ = stderr_events.send(DriverEvent::Error(error));
+                        let _ = stderr_events.send(codex_error_event(error));
                     }
                 }
             })?;
@@ -1046,11 +1046,11 @@ fn handle_goal_response(
                     goal_rpcs.lock().unsupported = true;
                 }
                 if !quiet {
-                    let _ = events.send(DriverEvent::Error(error.to_owned()));
+                    let _ = events.send(codex_error_event(error.to_owned()));
                 }
             }
             PendingGoalRpc::Set | PendingGoalRpc::Clear | PendingGoalRpc::ClearThenSet { .. } => {
-                let _ = events.send(DriverEvent::Error(error.to_owned()));
+                let _ = events.send(codex_error_event(error.to_owned()));
             }
         }
         return;
@@ -1747,7 +1747,20 @@ fn codex_subagent_work(item: &Value) -> Vec<BackgroundWorkItem> {
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
+fn is_codex_active_writer_error(message: &str) -> bool {
+    message
+        .to_ascii_lowercase()
+        .contains("already has an active writer")
+}
+
+fn codex_error_event(message: String) -> DriverEvent {
+    if is_codex_active_writer_error(&message) {
+        DriverEvent::localized_error(localized!("errors.codex_thread_active_writer"))
+    } else {
+        DriverEvent::Error(message)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_codex_message(
     value: Value,
@@ -1904,14 +1917,14 @@ fn handle_codex_message(
             // once so the client shows it without waiting for a notification.
             let _ = commands.send(CommandMessage::Goal(GoalOperation::Refresh));
         } else if let Some(error) = value.pointer("/error/message").and_then(Value::as_str) {
-            let _ = events.send(DriverEvent::Error(error.to_owned()));
+            let _ = events.send(codex_error_event(error.to_owned()));
         }
         return;
     }
 
     let Some(method) = value.get("method").and_then(Value::as_str) else {
         if let Some(error) = value.pointer("/error/message").and_then(Value::as_str) {
-            let _ = events.send(DriverEvent::Error(error.to_owned()));
+            let _ = events.send(codex_error_event(error.to_owned()));
         }
         return;
     };
@@ -2053,10 +2066,17 @@ fn handle_codex_message(
                 .pointer("/turn/error/message")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
+            let (summary, summary_i18n) =
+                if error.as_deref().is_some_and(is_codex_active_writer_error) {
+                    let (summary, i18n) = localized!("errors.codex_thread_active_writer");
+                    (Some(summary), Some(i18n))
+                } else {
+                    (error, None)
+                };
             let _ = events.send(DriverEvent::TurnFinished {
                 success: status == "completed",
-                summary: error,
-                summary_i18n: None,
+                summary,
+                summary_i18n,
             });
         }
         "thread/name/updated" => {
@@ -2107,7 +2127,7 @@ fn handle_codex_message(
         }
         "error" => {
             if let Some(message) = params.get("message").and_then(Value::as_str) {
-                let _ = events.send(DriverEvent::Error(message.to_owned()));
+                let _ = events.send(codex_error_event(message.to_owned()));
             }
         }
         "mcpServer/startupStatus/updated"
@@ -2115,7 +2135,7 @@ fn handle_codex_message(
         {
             if let Some(message) = params.get("error").and_then(Value::as_str) {
                 let name = params.get("name").and_then(Value::as_str).unwrap_or("MCP");
-                let _ = events.send(DriverEvent::Error(format!("{name}: {message}")));
+                let _ = events.send(codex_error_event(format!("{name}: {message}")));
             }
         }
         "item/tool/requestUserInput" if value.get("id").is_some() => {

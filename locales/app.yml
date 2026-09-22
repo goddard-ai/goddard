@@ -3044,7 +3044,9 @@ errors.initialize_codex_app_server:
 errors.register_computer_use_skill:
   en: Failed to register Goddard Computer Use skill with Codex
 errors.codex_thread_open_incomplete:
-  en: Codex did not finish opening its thread
+  en: "Codex couldn't finish opening this thread. If it's open in the ChatGPT app or Codex CLI, close it there, then try again in Goddard."
+errors.codex_thread_active_writer:
+  en: "This Codex thread is already in use. It usually means the thread is open in the ChatGPT app or Codex CLI. Close it there, then try again in Goddard."
 errors.codex_goals_unsupported:
   en: This Codex version does not support thread goals
 errors.provider_receive_prompt:
