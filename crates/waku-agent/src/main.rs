@@ -54,8 +54,8 @@ USAGE CONTRACT
     half of that surface — use it when another task's transcript holds
     context you need, for example when GODDARD_PARENT_TASK_ID names the
     task this session is a side chat of. Use `create` and `prompt` only
-    when the human asks — never for exploration, convenience, or
-    self-orchestration.
+    when the human has explicitly asked — never for exploration,
+    convenience, or self-orchestration.
     There is no per-call approval gate for either surface; the daemon records
     this task's id on every accepted write, so agent-originated commands and
     turns are visibly attributed to it.
