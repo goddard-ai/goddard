@@ -3371,6 +3371,7 @@ impl Waku {
             }
         }
         self.annotation_editor = None;
+        self.pasted_text_editor = None;
         self.annotation_hover = None;
         self.annotation_ref_hover = None;
         self.annotation_press = None;

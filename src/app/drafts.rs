@@ -410,6 +410,9 @@ impl Waku {
         // The previous target's atoms already folded into its draft text;
         // a restored draft carries them inline, not as atoms.
         self.composer_inline_atoms.clear();
+        // An open paste editor's marker offsets belong to the outgoing
+        // content — the atoms it edited are gone.
+        self.pasted_text_editor = None;
         self.sync_inline_atom_labels(cx);
         if key == self.selected_composer_draft_key() {
             self.restore_draft_annotations(draft.annotations);

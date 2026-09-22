@@ -92,6 +92,7 @@ impl Waku {
                 InputEvent::Submit(_) => this.navigate_transcript_search(false, cx),
                 InputEvent::Focus
                 | InputEvent::BackspaceOnEmpty
+                | InputEvent::InlineAtomClicked(_)
                 | InputEvent::InlineAtomActivated(_) => {}
             },
         )

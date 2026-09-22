@@ -1319,6 +1319,8 @@ a11y.answer:
   en: Your answer
 a11y.comment:
   en: Comment
+a11y.pasted_text:
+  en: Pasted text
 a11y.draft_edit:
   en: Draft text
 

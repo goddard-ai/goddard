@@ -6,8 +6,8 @@ use crate::md::highlight::{self, Lang, TokenClass};
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
 use crate::ui::scrollbar::{self, ScrollbarState};
 use gpui::{
-    App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, DispatchPhase, Element,
-    ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
+    App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners, CursorStyle, DispatchPhase,
+    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
     Focusable, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding, LayoutId,
     Length, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
     ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
@@ -561,6 +561,10 @@ pub enum InputEvent {
     /// behind the field — the composer's attachments — listen for this;
     /// everyone else ignores it.
     BackspaceOnEmpty,
+    /// A single click landed on an [`INLINE_ATOM_MARKER`]'s painted label —
+    /// the byte offset of the marker, so the owner can open the atom's
+    /// popover. The caret still snaps to the marker's edge.
+    InlineAtomClicked(usize),
     /// A double-click landed on an [`INLINE_ATOM_MARKER`]'s painted label —
     /// the byte offset of the marker, so the owner can expand or activate
     /// the atom it stands for.
@@ -1160,6 +1164,54 @@ impl TextInput {
         }
         display.push_str(rest);
         (display.into(), ranges)
+    }
+
+    /// Each atom label's painted range in display coordinates, in marker
+    /// order — the span list without the substituted string
+    /// [`Self::display_text_and_atom_ranges`] also builds.
+    fn atom_display_ranges(&self) -> Vec<Range<usize>> {
+        let marker_len = INLINE_ATOM_MARKER.len_utf8();
+        let mut ranges = Vec::with_capacity(self.inline_atom_labels.len());
+        let mut delta = 0usize;
+        for (position, label) in self.inline_atoms() {
+            let start = position + delta;
+            ranges.push(start..start + label.len());
+            delta += label.len().saturating_sub(marker_len);
+        }
+        ranges
+    }
+
+    /// The painted chip bounds of the label standing in for `marker` — a
+    /// content offset — in window coordinates: the anchor a floating editor
+    /// positions against. `None` before the first paint or once the marker
+    /// is gone.
+    pub fn inline_atom_label_bounds(&self, marker: usize) -> Option<Bounds<Pixels>> {
+        let layout = self.last_layout.as_ref()?;
+        let index = self
+            .inline_atoms()
+            .position(|(position, _)| position == marker)?;
+        let range = self.atom_display_ranges().get(index)?.clone();
+        atom_chip_bounds(layout, &range)
+            .into_iter()
+            .reduce(|bounds, chip| bounds.union(&chip))
+    }
+
+    /// The marker offset of the atom whose painted chip is under
+    /// `position`, in window coordinates — the label's padding counts.
+    fn atom_at_position(&self, position: Point<Pixels>) -> Option<usize> {
+        if self.inline_atom_labels.is_empty() {
+            return None;
+        }
+        let layout = self.last_layout.as_ref()?;
+        let ranges = self.atom_display_ranges();
+        self.inline_atoms()
+            .zip(ranges.iter())
+            .find(|(_, range)| {
+                atom_chip_bounds(layout, range)
+                    .iter()
+                    .any(|bounds| bounds.contains(&position))
+            })
+            .map(|(atom, _)| atom.0)
     }
 
     /// Make Escape clear the field first, the filter-field convention: only
@@ -2584,6 +2636,19 @@ impl TextInput {
             return;
         }
 
+        // A click on an atom's painted chip is button-like: the caret snaps
+        // to the marker's edge, no selection may grow off the label, and
+        // the owner decides what the click means.
+        if !event.modifiers.shift
+            && let Some(marker) = self.atom_at_position(event.position)
+        {
+            self.is_selecting = false;
+            self.focus_click_select_all = false;
+            self.move_to(offset, cx);
+            cx.emit(InputEvent::InlineAtomClicked(marker));
+            return;
+        }
+
         if event.modifiers.shift {
             self.select_to(offset, cx);
         } else {
@@ -2933,6 +2998,69 @@ fn visual_row_count(layout: &TextLayout) -> usize {
         .sum()
 }
 
+/// The chip chrome an atom's label paints: the wash extends this far past
+/// the text horizontally and insets this far vertically, so it reads as a
+/// chip rather than a full-height highlight.
+const ATOM_CHIP_PADDING_X: Pixels = px(2.0);
+const ATOM_CHIP_INSET_Y: Pixels = px(2.0);
+const ATOM_CHIP_RADIUS: Pixels = px(4.0);
+
+/// The chip rect a display-coordinate `range` paints behind an atom's
+/// label — one per visual row the label spans — in the window coordinates
+/// `layout` was laid out into.
+fn atom_chip_bounds(layout: &TextLayout, range: &Range<usize>) -> Vec<Bounds<Pixels>> {
+    let line_height = layout.line_height();
+    let mut chips = Vec::new();
+    let mut line_origin = layout.bounds().origin;
+    let mut line_start = 0usize;
+    for line in layout.line_layouts() {
+        let line_len = line.len();
+        if range.end > line_start && range.start < line_start + line_len {
+            // A wrap boundary's glyph index is the following row's first
+            // byte — the current row's exclusive end.
+            let mut row_start = 0usize;
+            let row_ends = line
+                .wrap_boundaries()
+                .iter()
+                .map(|boundary| line.runs()[boundary.run_ix].glyphs[boundary.glyph_ix].index)
+                .chain([line_len]);
+            for (row_index, row_end) in row_ends.enumerate() {
+                let start = range.start.saturating_sub(line_start).max(row_start);
+                let end = (range.end - line_start).min(row_end);
+                if start < end {
+                    // `position_for_index` resolves a wrap boundary to the
+                    // row it ends, so a fragment starting the row is x=0 by
+                    // construction — asking for its position would return
+                    // the previous row's trailing edge.
+                    let x_start = if start == row_start {
+                        Pixels::ZERO
+                    } else {
+                        line.position_for_index(start, line_height)
+                            .map_or(Pixels::ZERO, |p| p.x)
+                    };
+                    let x_end = line
+                        .position_for_index(end, line_height)
+                        .map_or(x_start, |p| p.x);
+                    chips.push(Bounds::new(
+                        point(
+                            line_origin.x + x_start - ATOM_CHIP_PADDING_X,
+                            line_origin.y + line_height * row_index as f32 + ATOM_CHIP_INSET_Y,
+                        ),
+                        size(
+                            (x_end - x_start).max(Pixels::ZERO) + ATOM_CHIP_PADDING_X * 2.0,
+                            line_height - ATOM_CHIP_INSET_Y * 2.0,
+                        ),
+                    ));
+                }
+                row_start = row_end;
+            }
+        }
+        line_origin.y += line.size(line_height).height;
+        line_start += line_len + 1;
+    }
+    chips
+}
+
 /// Resolve the closest caret offset on one rendered row for a desired x.
 /// GPUI's whole-text `position_for_index` intentionally gives a soft-wrap
 /// boundary to the preceding row, so this works against the concrete wrapped
@@ -3139,10 +3267,15 @@ impl InputElement {
 struct InputLayoutState {
     text: StyledText,
     text_layout_state: (),
+    /// Atom label ranges in display coordinates — prepaint turns them into
+    /// the chip quads the wash paints as.
+    atom_ranges: Vec<Range<usize>>,
 }
 
 struct PrepaintState {
     cursor: Option<PaintQuad>,
+    /// The chip quads under each atom's label, painted beneath the text.
+    atom_chips: Vec<PaintQuad>,
 }
 
 /// Find-match washes layered into [`input_text_runs`]: every match gets
@@ -3167,14 +3300,14 @@ impl SearchPaint<'static> {
     }
 }
 
-/// Inline-atom label washes layered into [`input_text_runs`]: the marker's
-/// substituted text paints as a mention — accent text over an accent wash.
-/// Ranges arrive already in display coordinates from
+/// Inline-atom labels layered into [`input_text_runs`]: the marker's
+/// substituted text paints accent-colored over a rounded chip the element
+/// paints as quads — a `TextRun` background cannot pad or round. Ranges
+/// arrive already in display coordinates from
 /// [`TextInput::display_text_and_atom_ranges`].
 struct AtomPaint<'a> {
     ranges: &'a [Range<usize>],
     color: Hsla,
-    background: Hsla,
 }
 
 impl AtomPaint<'static> {
@@ -3182,7 +3315,6 @@ impl AtomPaint<'static> {
         Self {
             ranges: &[],
             color: gpui::transparent_black(),
-            background: gpui::transparent_black(),
         }
     }
 }
@@ -3290,8 +3422,6 @@ fn input_text_runs(
                 Some(search.active_color)
             } else if selected_range.is_some_and(|range| range.start < end && range.end > start) {
                 Some(selection_color)
-            } else if atom {
-                Some(atoms.background)
             } else if covering_match(start, end) {
                 Some(search.match_color)
             } else {
@@ -3451,7 +3581,6 @@ impl Element for InputElement {
             AtomPaint {
                 ranges: &atom_ranges,
                 color: theme.accent,
-                background: theme.accent.opacity(0.12),
             }
         } else {
             AtomPaint::none()
@@ -3479,6 +3608,7 @@ impl Element for InputElement {
             InputLayoutState {
                 text,
                 text_layout_state,
+                atom_ranges,
             },
         )
     }
@@ -3505,6 +3635,15 @@ impl Element for InputElement {
         );
         let theme = Theme::current(cx);
         let layout = layout_state.text.layout().clone();
+        let atom_chips = layout_state
+            .atom_ranges
+            .iter()
+            .flat_map(|range| atom_chip_bounds(&layout, range))
+            .map(|bounds| {
+                fill(bounds, theme.accent.opacity(0.12))
+                    .corner_radii(Corners::all(ATOM_CHIP_RADIUS))
+            })
+            .collect();
         let (cursor_position, cursor, follow) = {
             let input = self.input.read(cx);
             let cursor = input.cursor_offset();
@@ -3557,7 +3696,7 @@ impl Element for InputElement {
             self.input
                 .update(cx, |input, _| input.caret_reconciled = Some(follow_state));
         }
-        PrepaintState { cursor }
+        PrepaintState { cursor, atom_chips }
     }
 
     fn paint(
@@ -3592,6 +3731,9 @@ impl Element for InputElement {
                 }
             }
         });
+        for chip in prepaint.atom_chips.drain(..) {
+            window.paint_quad(chip);
+        }
         layout_state.text.paint(
             None,
             None,
@@ -3842,6 +3984,10 @@ pub enum ComposerEvent {
     /// Backspace in an already-empty composer — the chat idiom for "remove
     /// the last staged attachment".
     BackspaceOnEmpty,
+    /// A single click landed on an inline atom's painted label — the byte
+    /// offset of its marker. The owner opens a paste atom's editor;
+    /// session atoms keep their double-click activation.
+    InlineAtomClicked(usize),
     /// A double-click landed on an inline atom's painted label — the byte
     /// offset of its marker. The owner expands a paste atom or opens a
     /// session atom.
@@ -3911,6 +4057,9 @@ impl ComposerInput {
                 InputEvent::Focus => cx.emit(ComposerEvent::Focus),
                 InputEvent::Edited => cx.emit(ComposerEvent::Edited),
                 InputEvent::BackspaceOnEmpty => cx.emit(ComposerEvent::BackspaceOnEmpty),
+                InputEvent::InlineAtomClicked(marker) => {
+                    cx.emit(ComposerEvent::InlineAtomClicked(*marker))
+                }
                 InputEvent::InlineAtomActivated(marker) => {
                     cx.emit(ComposerEvent::InlineAtomActivated(*marker))
                 }
@@ -3997,6 +4146,12 @@ impl ComposerInput {
     pub fn set_inline_atom_labels(&mut self, labels: Vec<SharedString>, cx: &mut Context<Self>) {
         self.input
             .update(cx, |input, cx| input.set_inline_atom_labels(labels, cx));
+    }
+
+    /// Forwarded [`TextInput::inline_atom_label_bounds`] — the atom chip's
+    /// painted bounds, for anchoring its floating editor.
+    pub fn inline_atom_label_bounds(&self, marker: usize, cx: &App) -> Option<Bounds<Pixels>> {
+        self.input.read(cx).inline_atom_label_bounds(marker)
     }
 
     pub fn focus(&self) -> FocusHandle {
@@ -4123,13 +4278,13 @@ mod tests {
 
     use gpui::{
         ClipboardEntry, ClipboardItem, Context, Entity, EntityInputHandler, ExternalPaths, Image,
-        ImageFormat, Pixels, Render, TestAppContext, TextRun, Window, div, font, hsla, prelude::*,
-        px,
+        ImageFormat, Modifiers, Pixels, Render, TestAppContext, TextRun, Window, div, font, hsla,
+        point, prelude::*, px,
     };
 
     use super::{
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
-        DeleteToParagraphEnd, EditHistory, FieldMode, Paste, SearchPaint, TextInput,
+        DeleteToParagraphEnd, EditHistory, FieldMode, InputEvent, Paste, SearchPaint, TextInput,
         UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, Undo, collapsible_paste, cursor_should_be_visible,
         input_text_runs, media_paste_entries, next_word_boundary, pasted_text_for_mode,
         previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
@@ -4274,6 +4429,64 @@ mod tests {
                 assert_eq!(input.content_index(input.display_index(index)), index);
             }
         });
+    }
+
+    #[gpui::test]
+    fn a_click_on_an_atom_chip_reports_its_marker(cx: &mut TestAppContext) {
+        use super::INLINE_ATOM_MARKER as A;
+        cx.update(super::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx).multi_line();
+                input.set_content(format!("see {A} now"), cx);
+                input.set_inline_atom_labels(vec!["pasted text".into()], cx);
+                input
+            });
+            InputHarness {
+                input,
+                width: px(200.),
+            }
+        });
+        let input = cx.read_entity(&harness, |harness, _| harness.input.clone());
+        cx.run_until_parked();
+        let marker = input.read_with(cx, |input, _| input.content.find(A).unwrap());
+        let chip = input
+            .read_with(cx, |input, _| input.inline_atom_label_bounds(marker))
+            .expect("a painted label reports chip bounds");
+        assert!(chip.size.width > px(0.) && chip.size.height > px(0.));
+        let events: Rc<RefCell<Vec<InputEvent>>> = Rc::default();
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&input, move |_, event: &InputEvent, _| {
+                sink.borrow_mut().push(event.clone());
+            })
+            .detach();
+        });
+        cx.simulate_click(chip.center(), Modifiers::none());
+        assert!(
+            events
+                .borrow()
+                .iter()
+                .any(|event| matches!(event, InputEvent::InlineAtomClicked(m) if *m == marker))
+        );
+        // Beside the chip is ordinary text — a click there reports nothing.
+        let clicks = events
+            .borrow()
+            .iter()
+            .filter(|event| matches!(event, InputEvent::InlineAtomClicked(_)))
+            .count();
+        cx.simulate_click(
+            point(chip.origin.x + chip.size.width + px(6.0), chip.center().y),
+            Modifiers::none(),
+        );
+        assert_eq!(
+            events
+                .borrow()
+                .iter()
+                .filter(|event| matches!(event, InputEvent::InlineAtomClicked(_)))
+                .count(),
+            clicks
+        );
     }
 
     #[gpui::test]

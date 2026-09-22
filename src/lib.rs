@@ -382,6 +382,7 @@ pub fn run() {
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_send_file_dialog_keys(cx);
             crate::app::init_annotation_keys(cx);
+            crate::app::init_composer_keys(cx);
             crate::app::init_automations_keys(cx);
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);

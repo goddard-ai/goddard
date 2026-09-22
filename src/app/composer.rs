@@ -7,7 +7,9 @@ use waku_client::friends::{TransferDirection, TransferInfo, TransferStatus};
 
 use anyhow::Context as _;
 use base64::Engine as _;
-use gpui::AnyView;
+use gpui::{AnyView, KeyBinding};
+
+use crate::input::Clear;
 
 /// Group on the session column's hitbox: the composer card reads it through
 /// `group_drag_over` so it lights up wherever over the column an OS file drag
@@ -18,6 +20,31 @@ pub(super) const SESSION_DROP_GROUP: &str = "session-file-drop";
 /// stored as a durable `.txt` blob instead — a real file attachment the agent
 /// opens itself, rather than a block of bytes folded into every draft sync.
 const PASTED_TEXT_FILE_BYTES: usize = 64 * 1024;
+
+/// Key context the pasted-text editor card declares, so Escape reaches it
+/// as an action whether the field or the card's own controls hold focus.
+pub(super) const PASTED_TEXT_CONTEXT: &str = "PastedText";
+
+/// The open pasted-text editor: which atom's text the floating field
+/// carries, and the focus to hand back when it closes.
+#[derive(Clone, Debug)]
+pub(super) struct PastedTextEditor {
+    /// The atom's marker byte offset — reseated by [`Waku::remap_inline_atoms`]
+    /// while the editor is open.
+    pub marker: usize,
+    pub previous_focus: Option<FocusHandle>,
+}
+
+/// Bind the editor card's own keys — the same role the annotation card's
+/// binding fills: without it, Escape under the card would fall through to
+/// the root context's `CancelTurn` and kill a running turn.
+pub fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new(
+        "escape",
+        DismissMenu,
+        Some(PASTED_TEXT_CONTEXT),
+    )]);
+}
 
 /// How much of a paste its chip's hover preview shows.
 const PASTED_TEXT_PREVIEW_CHARS: usize = 200;
@@ -3183,36 +3210,168 @@ impl Waku {
         .detach();
     }
 
+    /// A click on an atom's painted label — the field reports the marker's
+    /// byte offset. A paste atom opens its floating editor; a session atom
+    /// keeps double-click as its activation, so the caret placement the
+    /// field already did is the whole answer.
+    pub(super) fn click_inline_atom(&mut self, marker: usize, cx: &mut Context<Self>) {
+        let is_paste = self.composer_inline_atoms.iter().any(|atom| {
+            atom.marker == marker && matches!(atom.kind, ComposerAtomKind::PastedText(_))
+        });
+        if is_paste {
+            self.open_pasted_atom_editor(marker, cx);
+        }
+    }
+
     /// A double-click on an atom's painted label — the field reports the
-    /// marker's byte offset. A pasted block splices back to its text in
-    /// place; a session atom opens its session.
+    /// marker's byte offset. A pasted block opens its editor, same as a
+    /// single click; a session atom opens its session.
     pub(super) fn activate_inline_atom(&mut self, marker: usize, cx: &mut Context<Self>) {
-        let Some(atom) = self
+        let kind = self
             .composer_inline_atoms
             .iter()
             .find(|atom| atom.marker == marker)
-            .map(|atom| atom.kind.clone())
+            .map(|atom| atom.kind.clone());
+        match kind {
+            Some(ComposerAtomKind::PastedText(_)) => self.open_pasted_atom_editor(marker, cx),
+            Some(ComposerAtomKind::SessionRef { session_id, .. }) => {
+                self.select_session(session_id, cx)
+            }
+            None => {}
+        }
+        cx.notify();
+    }
+
+    /// Open the paste atom's floating editor; the card anchors to the
+    /// chip's painted bounds in [`Self::render_pasted_text_editor`]. The
+    /// field carries the atom's text — click-outside commits it back,
+    /// Escape discards.
+    fn open_pasted_atom_editor(&mut self, marker: usize, cx: &mut Context<Self>) {
+        let Some(text) = self
+            .composer_inline_atoms
+            .iter()
+            .find(|atom| atom.marker == marker)
+            .and_then(|atom| match &atom.kind {
+                ComposerAtomKind::PastedText(text) => Some(text.clone()),
+                ComposerAtomKind::SessionRef { .. } => None,
+            })
         else {
             return;
         };
-        match atom {
-            ComposerAtomKind::PastedText(text) => {
-                // The splice that deletes the marker drops the atom through
-                // the usual remap, so there is nothing to remove here.
-                self.composer.update(cx, |composer, cx| {
-                    composer.replace_range(
-                        marker..marker + INLINE_ATOM_MARKER.len_utf8(),
-                        &text,
-                        cx,
-                    );
-                });
-                self.schedule_composer_draft_save(cx);
+        // One editor at a time — an already-open one commits its edit to
+        // its own atom first.
+        self.commit_pasted_text_editor(cx);
+        let previous_focus = self
+            .window_handle
+            .update(cx, |_, window, cx| window.focused(cx))
+            .ok()
+            .flatten();
+        self.pasted_text_editor = Some(PastedTextEditor {
+            marker,
+            previous_focus,
+        });
+        self.pasted_text_input
+            .update(cx, |input, cx| input.set_content(text, cx));
+        // The card is a deferred element; its focus handle joins the
+        // dispatch tree only after the deferred draw, so focus lands two
+        // frames out — the annotation editor's timing.
+        let focus = self.pasted_text_input.read(cx).focus();
+        let _ = self.window_handle.update(cx, |_, window, _| {
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+            });
+        });
+        cx.notify();
+    }
+
+    /// Write the field's text back onto the atom and close the editor — an
+    /// emptied paste deletes the atom outright, the same commit contract the
+    /// annotation editor keeps.
+    pub(super) fn commit_pasted_text_editor(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = self.pasted_text_editor.take() else {
+            return;
+        };
+        let text = self.pasted_text_input.read(cx).content().to_owned();
+        if text.trim().is_empty() {
+            self.remove_atom_marker(editor.marker, cx);
+        } else {
+            let mut updated = false;
+            if let Some(atom) = self
+                .composer_inline_atoms
+                .iter_mut()
+                .find(|atom| atom.marker == editor.marker)
+                && let ComposerAtomKind::PastedText(slot) = &mut atom.kind
+            {
+                *slot = text;
+                updated = true;
             }
-            ComposerAtomKind::SessionRef { session_id, .. } => {
-                self.select_session(session_id, cx);
+            if updated {
+                self.sync_inline_atom_labels(cx);
             }
         }
+        self.schedule_composer_draft_save(cx);
+        self.restore_pasted_editor_focus(editor.previous_focus, cx);
         cx.notify();
+    }
+
+    /// Escape: close without writing — the atom keeps its text.
+    fn discard_pasted_text_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.pasted_text_editor.take() else {
+            return;
+        };
+        self.pasted_text_input
+            .update(cx, |input, cx| input.set_content("", cx));
+        let focus = editor
+            .previous_focus
+            .unwrap_or_else(|| self.composer_focus(cx));
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// The card's trash button: delete the atom outright — the splice that
+    /// removes its marker drops the entry through the usual remap.
+    fn remove_pasted_atom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.pasted_text_editor.take() else {
+            return;
+        };
+        self.pasted_text_input
+            .update(cx, |input, cx| input.set_content("", cx));
+        self.remove_atom_marker(editor.marker, cx);
+        self.schedule_composer_draft_save(cx);
+        let focus = editor
+            .previous_focus
+            .unwrap_or_else(|| self.composer_focus(cx));
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Splice the marker char at `marker` out of the composer when it is
+    /// still there — the splice drops the atom through
+    /// [`Self::remap_inline_atoms`]. Guarded so a stale offset cannot
+    /// delete live text.
+    fn remove_atom_marker(&mut self, marker: usize, cx: &mut Context<Self>) {
+        let marker_len = INLINE_ATOM_MARKER.len_utf8();
+        let live = self
+            .composer
+            .read(cx)
+            .content(cx)
+            .get(marker..)
+            .is_some_and(|rest| rest.starts_with(INLINE_ATOM_MARKER));
+        if live {
+            self.composer.update(cx, |composer, cx| {
+                composer.replace_range(marker..marker + marker_len, "", cx);
+            });
+        }
+    }
+
+    /// Focus hand-back for the floating editor — the same window-handle
+    /// path `restore_annotation_focus` takes when no `&mut Window` is in
+    /// scope.
+    fn restore_pasted_editor_focus(&self, previous: Option<FocusHandle>, cx: &mut Context<Self>) {
+        let focus = previous.unwrap_or_else(|| self.composer_focus(cx));
+        let _ = self
+            .window_handle
+            .update(cx, |_, window, cx| window.focus(&focus, cx));
     }
 
     /// Re-anchor each atom's marker after a field splice — see
@@ -3235,6 +3394,19 @@ impl Waku {
             .map(|atom| atom.marker)
             .collect::<Vec<_>>();
         let seats = remap_marker_seats(&markers, &positions, &splice.0.removed, splice.0.inserted);
+        // Keep the open paste editor on its atom's new seat; a splice that
+        // deleted the marker closes the editor.
+        if let Some(editor) = self.pasted_text_editor.as_mut() {
+            let seat = self
+                .composer_inline_atoms
+                .iter()
+                .position(|atom| atom.marker == editor.marker)
+                .and_then(|index| seats.get(index).copied().flatten());
+            match seat {
+                Some(marker) => editor.marker = marker,
+                None => self.pasted_text_editor = None,
+            }
+        }
         let mut atoms = std::mem::take(&mut self.composer_inline_atoms);
         atoms = atoms
             .into_iter()
@@ -3285,6 +3457,9 @@ impl Waku {
             .map(MessageAttachment::from)
             .collect::<Vec<_>>();
         let atoms = std::mem::take(&mut self.composer_inline_atoms);
+        // The atoms just shipped — an editor still open would be holding a
+        // marker offset that could collide with a fresh atom's.
+        self.pasted_text_editor = None;
         // Markers splice back to their atoms in place — pasted text and
         // session tokens — then the attachment tokens `merged_submission`
         // still trails.
@@ -4690,6 +4865,9 @@ impl Waku {
                 })
                 .children(self.render_annotation_chip(cx))
                 .child(div().pt(px(2.0)).child(self.composer.clone()))
+                // The paste chip's floating editor, anchored below the
+                // atom's painted label.
+                .children(self.render_pasted_text_editor(cx))
                 .child(
                     div()
                         .mt(px(8.0))
@@ -4878,6 +5056,74 @@ impl Waku {
                                 })),
                         }),
                 ),
+        )
+    }
+
+    /// The paste chip's floating editor — the comment-annotation card's
+    /// twin, anchored below the atom's painted label in the composer.
+    fn render_pasted_text_editor(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let editor = self.pasted_text_editor.as_ref()?;
+        let anchor = self
+            .composer
+            .read(cx)
+            .inline_atom_label_bounds(editor.marker, cx)?;
+        let theme = Theme::current(cx);
+        let trash_focus = self.transcript_control_focus("pasted-text-remove", cx);
+        let card = div()
+            .occlude()
+            .key_context(PASTED_TEXT_CONTEXT)
+            .on_action(cx.listener(|this, _: &DismissMenu, window, cx| {
+                this.discard_pasted_text_editor(window, cx);
+            }))
+            // The field's escape arrives as `Clear` — it is not opted into
+            // `clear_on_escape`, so the action propagates up to the card.
+            .on_action(cx.listener(|this, _: &Clear, window, cx| {
+                this.discard_pasted_text_editor(window, cx);
+            }))
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                this.commit_pasted_text_editor(cx);
+            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .id("pasted-text-editor-card")
+                    .w(px(360.0))
+                    .p(px(6.0))
+                    .font_family(crate::fonts::current(cx).ui)
+                    .rounded(px(11.0))
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .bg(theme.raised)
+                    .shadow_lg()
+                    .flex()
+                    .items_start()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.pasted_text_input.clone()),
+                    )
+                    .child(
+                        icon_button("pasted-text-remove", "icons/trash.svg", theme)
+                            .track_focus(&trash_focus)
+                            .tab_index(0)
+                            .tooltip(Tooltip::text(tr!("composer.remove_pasted_block")))
+                            .on_activation(cx, |this, window, cx| {
+                                this.remove_pasted_atom(window, cx);
+                            }),
+                    ),
+            );
+        Some(
+            deferred(FloatingSurface::new(
+                motion::surface_enter("pasted-text-editor-enter", card).into_any_element(),
+                anchor,
+                MenuAlign::BelowLeft,
+                px(6.0),
+                px(8.0),
+            ))
+            .with_priority(3)
+            .into_any_element(),
         )
     }
 

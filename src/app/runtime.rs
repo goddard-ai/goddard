@@ -4684,7 +4684,9 @@ impl Waku {
                 }
                 ComposerEvent::Edited => cx.notify(),
                 ComposerEvent::Focus => {}
-                ComposerEvent::BackspaceOnEmpty | ComposerEvent::InlineAtomActivated(_) => {}
+                ComposerEvent::BackspaceOnEmpty
+                | ComposerEvent::InlineAtomClicked(_)
+                | ComposerEvent::InlineAtomActivated(_) => {}
             },
         )
         .detach();

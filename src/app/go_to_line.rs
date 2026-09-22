@@ -97,7 +97,9 @@ impl Waku {
                 InputEvent::Edited => this.preview_go_to_line(cx),
                 InputEvent::Submit(_) => this.commit_go_to_line(cx),
                 InputEvent::Focus => {}
-                InputEvent::BackspaceOnEmpty | InputEvent::InlineAtomActivated(_) => {}
+                InputEvent::BackspaceOnEmpty
+                | InputEvent::InlineAtomClicked(_)
+                | InputEvent::InlineAtomActivated(_) => {}
             },
         )
         .detach();

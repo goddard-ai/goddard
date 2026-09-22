@@ -1719,6 +1719,7 @@ a11y.task_name: タスク名
 a11y.task_description: タスクの説明
 a11y.answer: あなたの回答
 a11y.comment: コメント
+a11y.pasted_text: ペーストしたテキスト
 keybind.category.projects: プロジェクト
 keybind.category.git: Git
 keybind.category.skills: スキル

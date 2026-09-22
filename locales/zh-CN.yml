@@ -1671,6 +1671,7 @@ a11y.task_name: 任务名称
 a11y.task_description: 任务描述
 a11y.answer: 你的回答
 a11y.comment: 评论
+a11y.pasted_text: 粘贴的文本
 keybind.category.projects: 项目
 keybind.category.git: Git
 keybind.category.skills: 技能

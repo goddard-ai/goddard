@@ -923,6 +923,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     Some("SessionRename > TextInput"),
                 ),
                 bound(tr!("shortcuts.dismiss"), DismissMenu, Some("Annotation")),
+                bound(tr!("shortcuts.dismiss"), DismissMenu, Some("PastedText")),
                 bound(
                     tr!("shortcuts.close_preview"),
                     image_preview::DismissImagePreview,
@@ -1210,6 +1211,7 @@ mod tests {
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_send_file_dialog_keys(cx);
             crate::app::init_annotation_keys(cx);
+            crate::app::init_composer_keys(cx);
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_skills_keys(cx);

@@ -3212,6 +3212,10 @@ pub struct Waku {
     /// and whether it has ever been confirmed.
     annotation_editor: Option<annotations::AnnotationEditor>,
     annotation_comment_input: Entity<TextInput>,
+    /// The pasted-text chip's floating editor — which atom is being edited
+    /// and the field that carries its text.
+    pasted_text_editor: Option<composer::PastedTextEditor>,
+    pasted_text_input: Entity<TextInput>,
     /// Highlight under the pointer; `visible` once the hover delay elapsed.
     annotation_hover: Option<annotations::AnnotationHover>,
     /// A mouse-down that landed on a highlight, pending its mouse-up.
@@ -3356,6 +3360,7 @@ pub use close_dialog::init as init_close_dialog_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 use components::*;
+pub use composer::init as init_composer_keys;
 pub use element_inspector::init as init_element_inspector;
 pub use file_finder::init as init_file_finder;
 pub use full_access_dialog::init as init_full_access_dialog_keys;
@@ -4154,6 +4159,15 @@ impl Waku {
                 .accessibility_label(tr!("a11y.comment"))
                 .placeholder(tr!("annotations.comment_placeholder"))
         });
+        // Pasted text is usually several lines — Enter must break lines,
+        // so committing is click-outside and Escape is discard.
+        let pasted_text_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .auto_height()
+                .max_lines(10)
+                .accessibility_label(tr!("a11y.pasted_text"))
+        });
         let command_palette_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -4904,6 +4918,9 @@ impl Waku {
                             cx.notify();
                         }
                     }
+                    ComposerEvent::InlineAtomClicked(marker) => {
+                        this.click_inline_atom(*marker, cx);
+                    }
                     ComposerEvent::InlineAtomActivated(marker) => {
                         this.activate_inline_atom(*marker, cx);
                     }
@@ -4923,6 +4940,7 @@ impl Waku {
                     }
                     InputEvent::Focus
                     | InputEvent::BackspaceOnEmpty
+                    | InputEvent::InlineAtomClicked(_)
                     | InputEvent::InlineAtomActivated(_) => {}
                 },
             )
@@ -4935,6 +4953,7 @@ impl Waku {
                     InputEvent::Edited
                     | InputEvent::Focus
                     | InputEvent::BackspaceOnEmpty
+                    | InputEvent::InlineAtomClicked(_)
                     | InputEvent::InlineAtomActivated(_) => {}
                 },
             )
@@ -6026,6 +6045,8 @@ impl Waku {
                 annotation_next_id,
                 annotation_editor: None,
                 annotation_comment_input,
+                pasted_text_editor: None,
+                pasted_text_input,
                 annotation_hover: None,
                 annotation_press: None,
                 sent_annotations: HashMap::new(),
