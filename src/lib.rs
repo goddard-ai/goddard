@@ -207,10 +207,18 @@ pub struct SelectFavoriteModel {
 }
 
 /// Step the composer session through its starred model+effort combos plus
-/// the most recently used selection, wrapping at the end (⌥Tab).
+/// the most recently used selection, wrapping at the ends (⌥Tab / ⌥⇧Tab).
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = waku, no_json)]
-pub struct CycleFavoriteModel;
+pub struct CycleFavoriteModel {
+    pub direction: FavoriteModelCycleDirection,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FavoriteModelCycleDirection {
+    Forward,
+    Backward,
+}
 
 /// Step the composer session's reasoning effort through the current model's
 /// ladder, wrapping at the ends. ⌘E moves `Forward`, ⌘⇧E `Backward`.
@@ -696,7 +704,16 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // selections plus the most recently used one.
         KeyBinding::new(
             "alt-tab",
-            CycleFavoriteModel,
+            CycleFavoriteModel {
+                direction: FavoriteModelCycleDirection::Forward,
+            },
+            Some("ComposerExists && !Terminal"),
+        ),
+        KeyBinding::new(
+            "alt-shift-tab",
+            CycleFavoriteModel {
+                direction: FavoriteModelCycleDirection::Backward,
+            },
             Some("ComposerExists && !Terminal"),
         ),
         // Page-scoped list conventions — active only while focus is

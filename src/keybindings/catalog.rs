@@ -1760,8 +1760,25 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     },
     CommandDescriptor {
         id: "model.cycle_favorite",
-        action: || Box::new(crate::CycleFavoriteModel),
+        action: || {
+            Box::new(crate::CycleFavoriteModel {
+                direction: crate::FavoriteModelCycleDirection::Forward,
+            })
+        },
         title_key: "keybind.command.cycle_favorite",
+        title_index: None,
+        category: C::Workspace,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "model.cycle_favorite_backward",
+        action: || {
+            Box::new(crate::CycleFavoriteModel {
+                direction: crate::FavoriteModelCycleDirection::Backward,
+            })
+        },
+        title_key: "keybind.command.cycle_favorite_backward",
         title_index: None,
         category: C::Workspace,
         editability: EDITABLE,
@@ -2578,6 +2595,12 @@ pub static ENTRIES: &[CatalogEntry] = &[
         ComposerScope,
     ),
     e("model.cycle_favorite", All, "alt-tab", ComposerScope),
+    e(
+        "model.cycle_favorite_backward",
+        All,
+        "alt-shift-tab",
+        ComposerScope,
+    ),
     e("projects.select_all", All, "secondary-a", ProjectsPage),
     e("projects.focus_filter", All, "secondary-f", ProjectsPage),
     e("projects.dismiss_layer", All, "escape", ProjectsPage),

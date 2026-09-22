@@ -3978,7 +3978,7 @@ impl Waku {
     /// adds nothing.
     pub(super) fn cycle_favorite_model_action(
         &mut self,
-        _: &CycleFavoriteModel,
+        action: &CycleFavoriteModel,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -4036,10 +4036,16 @@ impl Waku {
             .map(|(model, effort, fast)| (session.provider, model, effort, fast));
         let position =
             current.and_then(|current| combos.iter().position(|combo| *combo == current));
-        // Off-rotation selections start the cycle from the top.
-        let next = position
-            .map(|index| (index + 1) % combos.len())
-            .unwrap_or(0);
+        // Off-rotation selections start at the first or last stop depending
+        // on the requested direction.
+        let next = match action.direction {
+            FavoriteModelCycleDirection::Forward => position
+                .map(|index| (index + 1) % combos.len())
+                .unwrap_or(0),
+            FavoriteModelCycleDirection::Backward => position
+                .map(|index| (index + combos.len() - 1) % combos.len())
+                .unwrap_or(combos.len() - 1),
+        };
         let (provider, model, effort, fast) = combos[next].clone();
         self.choose_model(provider, model, effort, fast, cx);
     }

@@ -1,0 +1,1 @@
+- Add Alt+Shift+Tab to cycle favorite models backward.
