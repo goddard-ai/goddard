@@ -563,7 +563,8 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              separate task (e.g. `{command} create '{{\"prompt\": \"...\"}}')\n\
              - `prompt` — when the user asks you to send a message to \
              another task\n\
-             - `read` — to read a task's transcript"
+             - `read` — to read a task's transcript\n\
+             - `search` — to search this project's task transcripts"
         ));
     } else {
         // Every scoped credential reads its own task's transcript — the
@@ -585,7 +586,9 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
             "\n\n`create`, `prompt`, and `read` act on the user's other \
              tasks under this task's name — use them only when the user \
              asks, never for exploration, convenience, or \
-             self-orchestration.",
+             self-orchestration. `search` is read-only and confined to \
+             this task's project — use it to find which sibling tasks are \
+             worth `read`ing.",
         );
     }
     if let Some(parent) = scope.parent_task_id {
@@ -594,6 +597,11 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              transcript when you need its context."
         ));
     }
+    instruction.push_str(&format!(
+        " Link a task in your reply as `[title]({}<task_id>)` and Goddard \
+         renders it as a link that opens it.",
+        waku_protocol::TASK_LINK_PREFIX
+    ));
     instruction.push_str("\n</goddard-agent>");
     instruction
 }

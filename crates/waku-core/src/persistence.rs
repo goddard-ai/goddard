@@ -924,9 +924,14 @@ fn search_session_messages(
     query: &str,
     limit: usize,
     scope: SessionMessageSearchScope,
+    session_ids: Option<Vec<Uuid>>,
 ) -> io::Result<Vec<SessionMessageMatch>> {
     let query = query.trim();
-    if query.is_empty() || limit == 0 {
+    // An empty needle still scans when a session-id allowlist narrows the
+    // corpus — the daemon sends that for filter-only queries like
+    // `status:idle` — and each session's newest user message becomes the
+    // excerpt. Callers guard truly blank queries.
+    if limit == 0 || session_ids.as_ref().is_some_and(Vec::is_empty) {
         return Ok(Vec::new());
     }
 
@@ -938,11 +943,24 @@ fn search_session_messages(
     )
     .map_err(to_io_error)?;
     // The two surfaces are complementary: the palette scans active tasks, the
-    // Archived settings page scans the archive.
+    // Archived settings page scans the archive. `archived:any` lifts that
+    // partition for filtered queries.
     let archive_clause = match scope {
         SessionMessageSearchScope::Active => "sessions.archived_at IS NULL",
         SessionMessageSearchScope::Archived => "sessions.archived_at IS NOT NULL",
+        SessionMessageSearchScope::Any => "1",
     };
+    // Allowlist values are validated Uuids — their Display form is hex and
+    // dashes only, so inlining them cannot inject SQL.
+    let session_clause = session_ids
+        .map(|ids| {
+            ids.iter()
+                .map(|id| format!("'{id}'"))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .map(|ids| format!("sessions.id IN ({ids})"))
+        .unwrap_or_else(|| "1".to_owned());
     let mut statement = connection
         .prepare(&format!(
             "WITH ranked AS (
@@ -962,6 +980,7 @@ fn search_session_messages(
                    INNER JOIN sessions ON sessions.id = messages.session_id
                   WHERE messages.streaming = 0
                     AND {archive_clause}
+                    AND {session_clause}
                     AND messages.role IN ('user', 'assistant')
                     AND messages.hidden = 0
                     AND messages.notice IS NULL
@@ -1158,14 +1177,17 @@ impl StateStore {
     ///
     /// Constructing the job only clones the database path; opening SQLite and
     /// scanning message text happen when the returned closure runs off-thread.
+    /// `session_ids` is the caller-resolved allowlist behind `project:` and
+    /// `status:` filters — `None` scans every session in `scope`.
     pub fn session_message_search(
         &self,
         query: String,
         limit: usize,
         scope: SessionMessageSearchScope,
+        session_ids: Option<Vec<Uuid>>,
     ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
         let path = self.path.clone();
-        move || search_session_messages(&path, &query, limit, scope)
+        move || search_session_messages(&path, &query, limit, scope, session_ids)
     }
 
     pub fn blobs(&self) -> Arc<BlobStore> {
@@ -3653,6 +3675,7 @@ mod tests {
             "needle".into(),
             50,
             SessionMessageSearchScope::Active,
+            None,
         )()
         .unwrap();
         assert_eq!(
@@ -3673,7 +3696,8 @@ mod tests {
             reopened.session_message_search(
                 "100%_literal".into(),
                 50,
-                SessionMessageSearchScope::Active
+                SessionMessageSearchScope::Active,
+                None,
             )()
             .unwrap()
             .iter()
@@ -3686,7 +3710,8 @@ mod tests {
             reopened.session_message_search(
                 "Hidden continue".into(),
                 50,
-                SessionMessageSearchScope::Active
+                SessionMessageSearchScope::Active,
+                None,
             )()
             .unwrap()
             .is_empty(),
@@ -3696,7 +3721,8 @@ mod tests {
             reopened.session_message_search(
                 "reattached".into(),
                 50,
-                SessionMessageSearchScope::Active
+                SessionMessageSearchScope::Active,
+                None,
             )()
             .unwrap()
             .is_empty(),
@@ -3941,9 +3967,14 @@ mod tests {
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
         assert_eq!(
-            store.session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
-                .unwrap()
-                .len(),
+            store.session_message_search(
+                "needle".into(),
+                50,
+                SessionMessageSearchScope::Active,
+                None
+            )()
+            .unwrap()
+            .len(),
             1
         );
 
@@ -3955,17 +3986,22 @@ mod tests {
         let mut restored = reopened.load().unwrap();
         assert_eq!(restored.sessions[0].archived_at, Some(archived_at));
         assert!(
-            reopened
-                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
-                .unwrap()
-                .is_empty(),
+            reopened.session_message_search(
+                "needle".into(),
+                50,
+                SessionMessageSearchScope::Active,
+                None
+            )()
+            .unwrap()
+            .is_empty(),
             "archived sessions are hidden from the active transcript search"
         );
         assert_eq!(
             reopened.session_message_search(
                 "needle".into(),
                 50,
-                SessionMessageSearchScope::Archived
+                SessionMessageSearchScope::Archived,
+                None,
             )()
             .unwrap()
             .len(),
@@ -3979,17 +4015,22 @@ mod tests {
         let reopened = store_in(&directory);
         assert_eq!(reopened.load().unwrap().sessions[0].archived_at, None);
         assert_eq!(
-            reopened
-                .session_message_search("needle".into(), 50, SessionMessageSearchScope::Active)()
-                .unwrap()
-                .len(),
+            reopened.session_message_search(
+                "needle".into(),
+                50,
+                SessionMessageSearchScope::Active,
+                None
+            )()
+            .unwrap()
+            .len(),
             1
         );
         assert!(
             reopened.session_message_search(
                 "needle".into(),
                 50,
-                SessionMessageSearchScope::Archived
+                SessionMessageSearchScope::Archived,
+                None,
             )()
             .unwrap()
             .is_empty(),

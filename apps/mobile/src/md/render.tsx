@@ -29,6 +29,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { router } from 'expo-router';
+
 import { applyAlpha } from './color';
 import { PENDING_LINK_URL } from './mend';
 import { splitRunAtSpans, type RowVeil, type VeilSpan } from './veil';
@@ -83,7 +85,21 @@ interface InlineContext {
   ink: string;
 }
 
+const TASK_LINK_PREFIX = 'goddard://task/';
+const TASK_LINK_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function openLinkExternally(url: string) {
+  // `[title](goddard://task/<id>)` — the same task-link format the desktop
+  // renders — navigates to the task instead of opening a browser.
+  const taskId = url.startsWith(TASK_LINK_PREFIX)
+    ? url.slice(TASK_LINK_PREFIX.length).replace(/\/$/, '')
+    : null;
+  if (taskId !== null && TASK_LINK_ID.test(taskId)) {
+    router.push({ pathname: '/session/[id]', params: { id: taskId } });
+    return;
+  }
+  if (taskId !== null) return;
   Linking.openURL(url).catch(() => {});
 }
 

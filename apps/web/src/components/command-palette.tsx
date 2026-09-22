@@ -15,6 +15,7 @@ import {
 import { useDaemon } from '@/lib/daemon-context'
 import { useDaemonSettings, useProviderDetections } from '@/hooks/use-daemon-data'
 import { useI18n } from '@/lib/i18n'
+import { parseSessionMessageSearch, resolveNamedSearchProject } from '@waku/client/session-search'
 import { fuzzyScore, shouldKeepPreviousPaletteItems } from '@/lib/palette-search'
 import { useMacLikePlatform } from '@/lib/platform'
 import { projectDisplayName } from '@/lib/project-presentation'
@@ -588,7 +589,9 @@ function PaletteRows({
 }
 
 function Highlighted({ text, query }: { text: string; query: string }) {
-  const normalized = query.trim()
+  // The highlight needle is the parsed free text — `status:idle retry`
+  // should emphasize "retry" in the excerpt, not hunt for the filter.
+  const normalized = parseSessionMessageSearch(query).text.trim()
   if (!normalized) return text
   const at = text.toLowerCase().indexOf(normalized.toLowerCase())
   if (at < 0) return text
@@ -659,10 +662,27 @@ function buildItems({
   }
 
   if (!searching) return commands
+  // `field:value` filters lift out of the free text — fuzzy scoring and
+  // highlighting run against the remaining needle only, and a filters-only
+  // query lists the surviving tasks verbatim.
+  const parsed = parseSessionMessageSearch(query)
+  const needle = parsed.text
+  const scope = parsed.scope ?? 'active'
+  const projectIds = parsed.projects.length
+    ? new Set(
+      parsed.projects
+        .map((value) => resolveNamedSearchProject(taskState.projects, value))
+        .filter((id): id is string => id !== undefined),
+    )
+    : null
   const matchBySession = new Map(matches.map((match) => [match.session_id, match]))
   const projectById = new Map(taskState.projects.map((project) => [project.id, project]))
   const tasks = taskState.sessions
-    .filter(sessionHasStarted)
+    .filter((session) => sessionHasStarted(session)
+      && !session.side_chat_of
+      && (scope === 'any' || (scope === 'archived') === Boolean(session.archived_at))
+      && (!projectIds || projectIds.has(session.project_id))
+      && (parsed.statuses.length === 0 || parsed.statuses.includes(session.status)))
     .map((session, order) => {
       const project = projectById.get(session.project_id)
       const projectName = project
@@ -673,8 +693,8 @@ function buildItems({
       const worktreeLabel = worktree ? worktree.name || worktree.branch : null
       const detail = [projectName, worktreeLabel ? `#${worktreeLabel}` : null, session.id === selectedSessionId ? t('command_palette.current') : null].filter(Boolean).join(' · ')
       const keywords = `${displayTitle(session)} ${project?.name ?? ''} ${project?.path ?? ''} ${worktree?.path ?? ''} ${worktree?.name ?? ''} ${worktree?.branch ?? ''} ${session.provider} ${session.model ?? ''} task session chat conversation`
-      const metadataScore = fuzzyScore(query, keywords)
-      const contentScore = match ? fuzzyScore(query, match.snippet) ?? 0 : null
+      const metadataScore = needle ? fuzzyScore(needle, keywords) : 0
+      const contentScore = match && needle ? fuzzyScore(needle, match.snippet) ?? 0 : null
       const score = Math.max(metadataScore ?? -1, contentScore ?? -1)
       return score < 0 ? null : {
         id: `task-${session.id}`,
@@ -705,11 +725,11 @@ function buildItems({
     suggested: 1,
     settings: 2,
   }
-  const matchingCommands = commands
+  const matchingCommands = !needle ? [] : commands
     .map((item, order) => ({
       item,
       order,
-      score: fuzzyScore(query, `${item.label} ${item.keywords}`),
+      score: fuzzyScore(needle, `${item.label} ${item.keywords}`),
     }))
     .filter((scored): scored is typeof scored & { score: number } => scored.score !== null)
     .sort((left, right) => sectionRank[left.item.section] - sectionRank[right.item.section]

@@ -1127,6 +1127,7 @@ errors.capture_pre_turn_checkpoint: "无法创建任务开始前的检查点：%
 errors.capture_turn_checkpoint: "无法创建本轮任务的检查点：%{error}"
 errors.save_local_state: "无法保存本地状态：%{error}"
 errors.task_project_not_found: 找不到该任务所属的项目
+errors.task_link_unknown: 找不到该任务
 errors.provider_native_session_unavailable: "%{provider} 的原生会话不可用"
 errors.provider_native_thread_unavailable: "%{provider} 的原生线程不可用"
 errors.provider_native_cursor_unavailable: "%{provider} 的原生会话位置不可用"

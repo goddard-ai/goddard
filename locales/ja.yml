@@ -1158,6 +1158,7 @@ errors.capture_pre_turn_checkpoint: "ターン開始前のチェックポイン�
 errors.capture_turn_checkpoint: "ターンのチェックポイントを取得できませんでした：%{error}"
 errors.save_local_state: "ローカルの状態を保存できませんでした：%{error}"
 errors.task_project_not_found: タスクのプロジェクトが見つかりませんでした
+errors.task_link_unknown: そのタスクが見つかりませんでした
 errors.provider_native_session_unavailable: "%{provider} のネイティブセッションは利用できません"
 errors.provider_native_thread_unavailable: "%{provider} のネイティブスレッドは利用できません"
 errors.provider_native_cursor_unavailable: "%{provider} のネイティブセッションカーソルは利用できません"

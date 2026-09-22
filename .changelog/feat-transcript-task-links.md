@@ -1,0 +1,1 @@
+- Transcripts can link to another task with `[title](goddard://task/<task-id>)`: the link renders like any other and opens that task when clicked, which `goddard-agent search` results suggest so agent replies can point at the tasks they cite

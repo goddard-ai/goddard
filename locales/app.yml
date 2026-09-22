@@ -2895,6 +2895,8 @@ errors.save_local_state:
   en: "Could not save local state: %{error}"
 errors.task_project_not_found:
   en: The task's project could not be found
+errors.task_link_unknown:
+  en: That task could not be found
 errors.provider_native_session_unavailable:
   en: "%{provider}'s native session is unavailable"
 errors.provider_native_thread_unavailable:

@@ -37,6 +37,8 @@ pub(super) struct WorkingTreeEntry {
 enum TranscriptLinkRoute {
     ProjectFile(String),
     Finder(PathBuf),
+    /// A `goddard://task/<id>` reference — `None` when the id is malformed.
+    Task(Option<Uuid>),
     External,
 }
 
@@ -189,6 +191,11 @@ fn workspace_relative_file_path(workspace: &Path, target: &Path) -> Option<Strin
 }
 
 fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLinkRoute {
+    // A task reference never reaches the file or browser paths — a malformed
+    // id is reported as a bad task link rather than opened externally.
+    if let Some(rest) = target.strip_prefix(waku_protocol::TASK_LINK_PREFIX) {
+        return TranscriptLinkRoute::Task(Uuid::parse_str(rest.trim_end_matches('/')).ok());
+    }
     let Some(path) = markdown_file_link_path(target) else {
         return TranscriptLinkRoute::External;
     };
@@ -1964,6 +1971,17 @@ impl Waku {
                     cx.notify();
                 } else {
                     crate::platform::reveal_in_file_manager(&path, cx);
+                }
+            }
+            TranscriptLinkRoute::Task(task_id) => {
+                let known = task_id
+                    .is_some_and(|id| self.state.sessions.iter().any(|session| session.id == id));
+                match (task_id, known) {
+                    (Some(id), true) => self.select_session(id, cx),
+                    _ => {
+                        self.show_toast(tr!("errors.task_link_unknown"));
+                        cx.notify();
+                    }
                 }
             }
             TranscriptLinkRoute::External => return false,

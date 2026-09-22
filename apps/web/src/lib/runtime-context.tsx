@@ -746,6 +746,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                 contextWindow: session.context_window ?? null,
                 agentPreset: session.agent_preset ?? null,
                 computerUseEnabled: false,
+                readOwnTranscript: session.side_chat_of != null
+                  || Boolean(session.suspended_provider_sessions?.length)
+                  || session.pending_provider_context != null,
                 providerCursor: session.provider_cursor as never,
               },
             },
@@ -966,6 +969,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               contextWindow: session.context_window ?? null,
               agentPreset: session.agent_preset ?? null,
               computerUseEnabled: false,
+              readOwnTranscript: session.side_chat_of != null
+                || Boolean(session.suspended_provider_sessions?.length)
+                || session.pending_provider_context != null,
               providerCursor: session.provider_cursor as never,
             },
           },

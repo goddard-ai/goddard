@@ -12,9 +12,9 @@ use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
 use crate::eval::{EvalQuestion, EvalSettings, EvalUsageStats, Evaluation};
 use crate::model::{
-    AgentSession, AgentSessionTranscript, GoalOperation, MessageAttachment, Project, ProviderKind,
-    ProviderProbe, ProviderResumeCursor, ProviderSessionCatalogStatus, ProviderSessionHistory,
-    ProviderSessionSummary, UserInputAnswer,
+    AgentSession, AgentSessionSearchHit, AgentSessionTranscript, GoalOperation, MessageAttachment,
+    Project, ProviderKind, ProviderProbe, ProviderResumeCursor, ProviderSessionCatalogStatus,
+    ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -45,6 +45,11 @@ pub const AGENT_TASK_ENV: &str = "GODDARD_TASK_ID";
 /// sessions, so their agents can discover the linkage without parsing the
 /// intro note out of a prompt.
 pub const AGENT_PARENT_TASK_ENV: &str = "GODDARD_PARENT_TASK_ID";
+/// Markdown-link target prefix for referencing a task in transcript text:
+/// `[title](goddard://task/<task-id>)` renders as a link that opens that
+/// task. Surfaced to agents through `goddard-agent` so a reply can point at
+/// another task the way it would point at a file.
+pub const TASK_LINK_PREFIX: &str = "goddard://task/";
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -628,6 +633,15 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn: Option<usize>,
     },
+    /// Scoped agent credential only: search the transcripts of the tasks in
+    /// the caller's own project — the same corpus the command palette's
+    /// session search scans. `query` is free text plus `field:value`
+    /// filters (`project:`, `status:`, `archived:`, `limit:`); see
+    /// [`crate::persistence::parse_session_message_search`]. Hits identify
+    /// tasks for [`Self::AgentReadSession`] to open.
+    AgentSearchSessions {
+        query: String,
+    },
     /// Share one of my projects with a friend. The daemon resolves the
     /// project's name and `origin` URL from `project_path` and re-sends
     /// the friend our full shared set.
@@ -1127,6 +1141,11 @@ pub enum ResponsePayload {
     /// scoped agent caller reads.
     AgentSessionTranscript {
         transcript: AgentSessionTranscript,
+    },
+    /// The hits an `agentSearchSessions` resolved, ranked the way the
+    /// command palette ranks session matches.
+    AgentSessionSearch {
+        hits: Vec<AgentSessionSearchHit>,
     },
 }
 

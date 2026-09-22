@@ -1,9 +1,20 @@
 export type TranscriptLinkRoute =
   | { kind: 'projectFile'; path: string }
   | { kind: 'remoteFile'; path: string }
+  | { kind: 'session'; sessionId: string | null }
   | { kind: 'external' }
 
+const TASK_LINK_PREFIX = 'goddard://task/'
+const TASK_LINK_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export function transcriptLinkRoute(target: string, workspace?: string): TranscriptLinkRoute {
+  // A task reference never reaches the file or browser paths — a malformed
+  // id surfaces as a bad task link rather than an external open.
+  if (target.startsWith(TASK_LINK_PREFIX)) {
+    const rest = target.slice(TASK_LINK_PREFIX.length).replace(/\/$/, '')
+    return { kind: 'session', sessionId: TASK_LINK_ID.test(rest) ? rest : null }
+  }
   const path = markdownFilePath(target)
   if (!path) return { kind: 'external' }
   const normalizedPath = normalizePath(path)

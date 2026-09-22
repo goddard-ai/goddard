@@ -5,4 +5,4 @@
  * stay complementary: the command palette searches active tasks, the
  * Archived settings page searches the archive.
  */
-export type SessionMessageSearchScope = "active" | "archived";
+export type SessionMessageSearchScope = "active" | "archived" | "any";

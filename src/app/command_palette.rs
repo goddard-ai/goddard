@@ -423,6 +423,9 @@ pub(super) fn palette_content_match_text(
         strikethrough: None,
     }];
 
+    // The highlight needle is the parsed free text — `status:idle retry`
+    // should emphasize "retry" in the excerpt, not hunt for the filter.
+    let query = crate::persistence::parse_session_message_search(query).text;
     let query = query.trim();
     let match_range = (!query.is_empty())
         .then(|| {
@@ -2357,7 +2360,10 @@ impl Waku {
         })
     }
 
-    fn command_palette_task_candidates(&self) -> Vec<CommandPaletteItem> {
+    fn command_palette_task_candidates(
+        &self,
+        search: &crate::persistence::SessionMessageSearchQuery,
+    ) -> Vec<CommandPaletteItem> {
         let projects = self
             .state
             .projects
@@ -2372,11 +2378,41 @@ impl Waku {
                 )
             })
             .collect::<HashMap<_, _>>();
+        // The same `field:value` filters the daemon applies to transcript
+        // hits narrow the candidate rows here — a `project:`/`status:` query
+        // must not resurrect a filtered-out task through its title.
+        let project_ids: Option<HashSet<Uuid>> = (!search.projects.is_empty()).then(|| {
+            search
+                .projects
+                .iter()
+                .filter_map(|value| {
+                    crate::persistence::resolve_named_search_project(&self.state.projects, value)
+                })
+                .collect()
+        });
+        let scope = search
+            .scope
+            .unwrap_or(crate::persistence::SessionMessageSearchScope::Active);
         self.state
             .sessions
             .iter()
             .filter(|session| {
-                session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+                session.has_started()
+                    && !session.is_side_chat()
+                    && match scope {
+                        crate::persistence::SessionMessageSearchScope::Active => {
+                            session.archived_at.is_none()
+                        }
+                        crate::persistence::SessionMessageSearchScope::Archived => {
+                            session.archived_at.is_some()
+                        }
+                        crate::persistence::SessionMessageSearchScope::Any => true,
+                    }
+                    && project_ids
+                        .as_ref()
+                        .is_none_or(|ids| ids.contains(&session.project_id))
+                    && (search.statuses.is_empty()
+                        || search.statuses.contains(&session.status))
             })
             .enumerate()
             .map(|(order, session)| {
@@ -3282,14 +3318,22 @@ impl Waku {
             return;
         }
 
-        let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+        // `field:value` filters lift out of the free text — the fuzzy pattern
+        // scores titles and excerpts against the remaining needle only.
+        let search = crate::persistence::parse_session_message_search(query);
+        let needle = search.text.as_str();
+        let pattern = Pattern::parse(needle, CaseMatching::Ignore, Normalization::Smart);
         let message_matches_are_current =
             self.command_palette.message_matches_query.as_deref() == Some(query);
         let mut utf32 = Vec::new();
         let mut tasks = self
-            .command_palette_task_candidates()
+            .command_palette_task_candidates(&search)
             .into_iter()
             .filter_map(|mut item| {
+                if needle.is_empty() {
+                    // A filters-only query lists the surviving tasks verbatim.
+                    return Some(ScoredPaletteItem { score: 0, item });
+                }
                 let metadata_score = pattern.score(
                     Utf32Str::new(&item.search_text, &mut utf32),
                     &mut self.command_palette.matcher,
@@ -3324,18 +3368,23 @@ impl Waku {
         });
         tasks.truncate(MAX_TASK_RESULTS);
 
-        let mut commands = self
-            .command_palette_commands(true, updater_available)
-            .into_iter()
-            .filter_map(|item| {
-                pattern
-                    .score(
-                        Utf32Str::new(&item.search_text, &mut utf32),
-                        &mut self.command_palette.matcher,
-                    )
-                    .map(|score| ScoredPaletteItem { score, item })
-            })
-            .collect::<Vec<_>>();
+        // A filters-only query is a task search — matching every command
+        // against an empty needle would bury it.
+        let mut commands = if needle.is_empty() {
+            Vec::new()
+        } else {
+            self.command_palette_commands(true, updater_available)
+                .into_iter()
+                .filter_map(|item| {
+                    pattern
+                        .score(
+                            Utf32Str::new(&item.search_text, &mut utf32),
+                            &mut self.command_palette.matcher,
+                        )
+                        .map(|score| ScoredPaletteItem { score, item })
+                })
+                .collect::<Vec<_>>()
+        };
         commands.sort_by(|a, b| b.score.cmp(&a.score).then(a.item.order.cmp(&b.item.order)));
 
         let selected_action = preserve_selection.then(|| {

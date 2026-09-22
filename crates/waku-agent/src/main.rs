@@ -38,6 +38,7 @@ USAGE
     goddard-agent create '<json>'            Create a task and start its first prompt
     goddard-agent prompt '<json>'            Send a prompt to an existing task
     goddard-agent read '<json>'              Read a task's transcript
+    goddard-agent search '<json>'            Search this project's task transcripts
     goddard-agent command list               List the user's custom commands
     goddard-agent command upsert '<json>'    Add or update a custom command
     goddard-agent command remove '<json>'    Remove a custom command
@@ -55,9 +56,10 @@ USAGE CONTRACT
     context you need, for example when GODDARD_PARENT_TASK_ID names the
     task this session is a side chat of; with no address fields it reads
     this task's own transcript, which is how context handed off across a
-    provider switch stays reachable. Use `create` and `prompt` only when
-    the human you are working for has explicitly asked — never for
-    exploration,
+    provider switch stays reachable. `search` is read-only and confined to
+    this task's project — use it to find which sibling tasks are worth
+    `read`ing. Use `create` and `prompt` only when the human you are
+    working for has explicitly asked — never for exploration,
     convenience, or self-orchestration.
     There is no per-call approval gate for either surface; the daemon records
     this task's id on every accepted write, so agent-originated commands and
@@ -116,6 +118,14 @@ fn schema() -> serde_json::Value {
             },
             "example": "{\"turn\":3}",
             "returns": {"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "items": [{"turn": "1-based turn number when the entry belongs to one", "kind": "message|activity", "role": "user|assistant|system on message items", "content": "string"}], "truncated": "true when the size cap dropped the oldest items"}
+        },
+        "search": {
+            "description": "Search the transcripts of every task in this task's project. `query` is free text — a single case-insensitive substring over user and assistant messages — plus `field:value` filters: `project:<name>` (may only name this project), `status:<idle|connecting|working|waiting|background|failed|busy>` (`busy` unions the working set), `archived:<true|false|any>` (default: active tasks only), `limit:<n>` (default 20). Repeated project:/status: tokens union; different filters intersect; unrecognized tokens stay literal text. A filters-only query lists matching tasks.",
+            "fields": {
+                "query": {"type": "string", "required": true}
+            },
+            "example": "{\"query\":\"status:idle retry logic\"}",
+            "returns": {"results": [{"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
         },
         "command": {
             "description": "Manage the user's custom commands — shell scripts they can run from the command palette in a terminal. Commands are daemon-owned and shared across the user's clients.",
@@ -200,6 +210,11 @@ struct ReadPayload {
 }
 
 #[derive(Deserialize)]
+struct SearchPayload {
+    query: String,
+}
+
+#[derive(Deserialize)]
 struct CommandUpsertPayload {
     #[serde(default)]
     id: Option<Uuid>,
@@ -260,7 +275,7 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         "command" => command(arguments.next().as_deref(), arguments.next()),
-        "create" | "prompt" | "read" => {
+        "create" | "prompt" | "read" | "search" => {
             let payload = arguments
                 .next()
                 .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
@@ -275,6 +290,15 @@ fn run() -> anyhow::Result<()> {
                 }
                 ResponsePayload::AgentSessionTranscript { transcript } => {
                     println!("{}", serde_json::to_string_pretty(&transcript)?);
+                }
+                ResponsePayload::AgentSessionSearch { hits } => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({
+                            "results": hits,
+                            "session_link_hint": session_link_hint(),
+                        }))?
+                    );
                 }
                 ResponsePayload::Ack => {
                     println!("{}", serde_json::json!({ "ok": true }));
@@ -393,8 +417,26 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 turn: payload.turn,
             })
         }
+        "search" => {
+            let payload: SearchPayload = serde_json::from_str(payload).context(
+                "`search` takes a JSON object; run `goddard-agent schema` for its shape",
+            )?;
+            Ok(Command::AgentSearchSessions {
+                query: payload.query,
+            })
+        }
         _ => unreachable!("checked by run()"),
     }
+}
+
+/// One line appended to `search` output so the agent knows how to turn a
+/// hit into a transcript link — the app renders `[title](goddard://task/<id>)`
+/// as a link that opens that task.
+fn session_link_hint() -> String {
+    format!(
+        "Reference a task in your reply as [title]({}<task_id>) and Goddard renders it as a link that opens the task.",
+        waku_protocol::TASK_LINK_PREFIX
+    )
 }
 
 fn provider_kind(id: &str) -> anyhow::Result<ProviderKind> {
@@ -555,6 +597,26 @@ mod tests {
             }
             other => panic!("expected AgentReadSession, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_search_payload_becomes_an_agent_search_command() {
+        let command = build_command("search", r#"{"query":"status:idle retry logic"}"#)
+            .expect("a query payload parses");
+
+        match command {
+            Command::AgentSearchSessions { query } => {
+                assert_eq!(query, "status:idle retry logic");
+            }
+            other => panic!("expected AgentSearchSessions, got {other:?}"),
+        }
+        assert!(build_command("search", "{}").is_err());
+    }
+
+    #[test]
+    fn the_link_hint_names_the_task_link_format() {
+        let hint = session_link_hint();
+        assert!(hint.contains(waku_protocol::TASK_LINK_PREFIX));
     }
 
     #[test]

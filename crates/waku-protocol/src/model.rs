@@ -2838,6 +2838,24 @@ pub struct AgentTranscriptItem {
     pub content: String,
 }
 
+/// One hit [`crate::Command::AgentSearchSessions`] returns to a scoped agent
+/// caller: enough of a matching task to decide whether its transcript is
+/// worth reading in full.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionSearchHit {
+    pub task_id: Uuid,
+    pub title: String,
+    pub provider: ProviderKind,
+    pub status: SessionStatus,
+    pub updated_at: u64,
+    /// Which side of the conversation `snippet` came from.
+    pub source: MessageRole,
+    /// The matched message text excerpted around the query, like the
+    /// command palette shows.
+    pub snippet: String,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentTranscriptItemKind {

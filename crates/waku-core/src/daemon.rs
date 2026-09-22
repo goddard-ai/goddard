@@ -17,9 +17,9 @@ use crate::attachments::AttachmentStore;
 use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
-    AgentSession, Checkpoint, CheckpointStatus, DriverEvent, Project, ProjectMapStatus,
-    ProviderKind, ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus,
-    SessionStatus, SessionWorkspace, TurnStatus,
+    AgentSession, AgentSessionSearchHit, Checkpoint, CheckpointStatus, DriverEvent, Project,
+    ProjectMapStatus, ProviderKind, ProviderModelOption, ProviderResumeCursor,
+    ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace, TurnStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -28,6 +28,10 @@ use serde_json::json;
 use waku_protocol::custom_commands::CustomCommand;
 #[cfg(test)]
 use waku_protocol::event_from_wire;
+use waku_protocol::persistence::{
+    SessionMessageMatch, SessionMessageSearchScope, parse_session_message_search,
+    resolve_named_search_project,
+};
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 use waku_protocol::{decode_enum, event_to_wire};
 
@@ -48,6 +52,10 @@ const IDLE_REAPER_INTERVAL: std::time::Duration = std::time::Duration::from_secs
 /// unset. Thirty minutes covers stepping away without keeping every browsed
 /// task's process alive for the whole workday.
 const DEFAULT_RUNTIME_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Default cap for an agent's transcript search when its query carries no
+/// `limit:` token.
+const AGENT_SEARCH_DEFAULT_LIMIT: usize = 20;
 
 /// How long an archived task is kept, in seconds, before it is removed
 /// entirely. The sweep runs whenever task state loads rather than on a
@@ -1768,7 +1776,7 @@ impl Backend for WakuBackend {
                 limit,
                 scope,
             } => {
-                let matches = self.task_store.session_message_search(query, limit, scope)()?;
+                let matches = self.search_session_messages(&query, limit, scope, None)?;
                 Ok(ResponsePayload::SessionMessageMatches { matches })
             }
             Command::ListProviderSessions { provider, limit } => {
@@ -2282,6 +2290,9 @@ impl Backend for WakuBackend {
                 provider,
                 turn,
             } => self.agent_read_session(agent, task_id, thread_id, provider, turn),
+            Command::AgentSearchSessions { query } => {
+                self.agent_search_sessions(agent, session_id, &query)
+            }
             Command::CancelQueuedPrompt { queued_message_id } => {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
             }
@@ -4435,6 +4446,126 @@ impl WakuBackend {
         })
     }
 
+    /// The scoped credential's transcript search: the same corpus and
+    /// filters as `SearchSessionMessages`, confined to the calling task's
+    /// project. A scoped caller may still write `project:` — it just has to
+    /// name that project.
+    fn agent_search_sessions(
+        &self,
+        agent: Option<Uuid>,
+        session_id: Uuid,
+        query: &str,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.require_agent_tools()?;
+        // A scoped token names its owning session; a master-token request may
+        // scope the search to `session_id` when it is a known task.
+        let caller = agent.or_else(|| {
+            (!session_id.is_nil() && self.known_session(session_id)).then_some(session_id)
+        });
+        let Some(caller) = caller else {
+            bail!("task search needs a calling task to scope to");
+        };
+        let project_id = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == caller)
+            .map(|session| session.project_id)
+            .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
+        let matches = self.search_session_messages(
+            query,
+            AGENT_SEARCH_DEFAULT_LIMIT,
+            SessionMessageSearchScope::Active,
+            Some(project_id),
+        )?;
+        let state = self.task_state.lock();
+        let hits = matches
+            .into_iter()
+            .filter_map(|matched| {
+                state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == matched.session_id)
+                    .map(|session| AgentSessionSearchHit {
+                        task_id: session.id,
+                        title: session.display_title().to_owned(),
+                        provider: session.provider,
+                        status: session.status,
+                        updated_at: session.updated_at,
+                        source: matched.source,
+                        snippet: matched.snippet,
+                    })
+            })
+            .collect();
+        Ok(ResponsePayload::AgentSessionSearch { hits })
+    }
+
+    /// Run a transcript search after lifting `field:value` filters out of
+    /// `query` — the shared implementation behind the palette-facing
+    /// `SearchSessionMessages` and the agent-scoped `AgentSearchSessions`.
+    /// `project_scope` confines the search to one project (the agent
+    /// credential's own); `None` lets `project:` tokens select any project.
+    fn search_session_messages(
+        &self,
+        query: &str,
+        limit: usize,
+        scope: SessionMessageSearchScope,
+        project_scope: Option<Uuid>,
+    ) -> anyhow::Result<Vec<SessionMessageMatch>> {
+        let parsed = parse_session_message_search(query);
+        if parsed.is_blank() {
+            return Ok(Vec::new());
+        }
+        // `project:`/`status:` resolve against live task state into a
+        // session-id allowlist; the store scan then only sees the survivors.
+        let allowed = {
+            let state = self.task_state.lock();
+            let project_ids: Option<Vec<Uuid>> = match project_scope {
+                Some(own) => {
+                    for value in &parsed.projects {
+                        if resolve_named_search_project(&state.projects, value) != Some(own) {
+                            bail!("project `{value}` is not this task's project");
+                        }
+                    }
+                    Some(vec![own])
+                }
+                None if parsed.projects.is_empty() => None,
+                None => Some(
+                    parsed
+                        .projects
+                        .iter()
+                        .filter_map(|value| resolve_named_search_project(&state.projects, value))
+                        .collect(),
+                ),
+            };
+            if project_ids.as_ref().is_some_and(Vec::is_empty) {
+                return Ok(Vec::new());
+            }
+            (project_ids.is_some() || !parsed.statuses.is_empty()).then(|| {
+                state
+                    .sessions
+                    .iter()
+                    .filter(|session| {
+                        project_ids
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(&session.project_id))
+                            && (parsed.statuses.is_empty()
+                                || parsed.statuses.contains(&session.status))
+                    })
+                    .map(|session| session.id)
+                    .collect::<Vec<_>>()
+            })
+        };
+        let matches = self.task_store.session_message_search(
+            parsed.text,
+            parsed.limit.unwrap_or(limit),
+            parsed.scope.unwrap_or(scope),
+            allowed,
+        )()?;
+        Ok(matches)
+    }
+
     /// Resolve an agent prompt's target: an explicit Waku task id, or a
     /// provider-native Agent CLI thread id matched against every
     /// daemon-known task's stored resume cursor.
@@ -4814,6 +4945,7 @@ fn handle_driver_command(
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
         | Command::AgentReadSession { .. }
+        | Command::AgentSearchSessions { .. }
         | Command::CancelQueuedPrompt { .. }
         | Command::UpsertCustomCommand { .. }
         | Command::RemoveCustomCommand { .. }
@@ -6983,6 +7115,7 @@ mod tests {
                 transport: None,
                 sender: None,
                 queued_id: Some(Uuid::new_v4()),
+                context: None,
             },
         );
 
@@ -7083,5 +7216,98 @@ mod tests {
             .expect("a known sender id still wraps without its record");
         assert!(wrapped.contains(&unknown.to_string()));
         assert!(wrapped.contains("the agent of another Goddard task"));
+    }
+
+    #[test]
+    fn agent_search_stays_inside_the_callers_project() {
+        let root = std::env::temp_dir().join(format!("waku-agent-search-{}", Uuid::new_v4()));
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("repo"));
+        // The caller's own task — its prompt does not carry the needle.
+        let caller_id = state.sessions[0].id;
+        let project_id = state.projects[0].id;
+        let project_name = state.projects[0].name.clone();
+        state.sessions[0].begin_turn("caller prompt");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        // A sibling in the same project carries it.
+        let mut sibling = AgentSession::new(project_id, ProviderKind::Codex);
+        sibling.begin_turn("the rare needle phrase");
+        sibling.finish_active_turn(crate::model::TurnStatus::Completed);
+        let sibling_id = sibling.id;
+        state.push_session(sibling);
+        // A task in another project matches the text but is out of scope.
+        let other_project = Project::from_path(root.join("other"));
+        let mut other = AgentSession::new(other_project.id, ProviderKind::Codex);
+        other.begin_turn("the rare needle phrase");
+        other.finish_active_turn(crate::model::TurnStatus::Completed);
+        let other_id = other.id;
+        state.projects.push(other_project.clone());
+        state.push_session(other);
+        store.save(&mut state).unwrap();
+
+        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+        let mut daemon_settings = settings.get();
+        daemon_settings.agent_tools_enabled = true;
+        settings.replace(daemon_settings).unwrap();
+        let backend = WakuBackend::new(settings, store).unwrap();
+
+        let hits = |query: &str, agent: Uuid| match backend
+            .agent_search_sessions(Some(agent), Uuid::nil(), query)
+            .unwrap()
+        {
+            ResponsePayload::AgentSessionSearch { hits } => hits,
+            other => panic!("unexpected payload {other:?}"),
+        };
+
+        // The needle only surfaces the sibling, never the foreign project.
+        assert_eq!(
+            hits("rare needle", caller_id)
+                .iter()
+                .map(|hit| hit.task_id)
+                .collect::<Vec<_>>(),
+            vec![sibling_id]
+        );
+        // The same query scoped to the other project's task finds its own
+        // sibling instead — the confinement follows the caller.
+        assert_eq!(
+            hits("rare needle", other_id)
+                .iter()
+                .map(|hit| hit.task_id)
+                .collect::<Vec<_>>(),
+            vec![other_id]
+        );
+        // Naming the caller's own project is accepted; naming a foreign
+        // one is an error, not a silent empty result.
+        assert_eq!(
+            hits(&format!("project:{project_name} rare needle"), caller_id)
+                .iter()
+                .map(|hit| hit.task_id)
+                .collect::<Vec<_>>(),
+            vec![sibling_id]
+        );
+        assert!(
+            backend
+                .agent_search_sessions(Some(caller_id), Uuid::nil(), "project:other rare needle")
+                .is_err()
+        );
+        // `status:` intersects the project allowlist: every task here is
+        // idle, so `busy` finds nothing and an idle-only query lists both.
+        assert!(hits("status:busy rare needle", caller_id).is_empty());
+        let mut listed = hits("status:idle", caller_id)
+            .iter()
+            .map(|hit| hit.task_id)
+            .collect::<Vec<_>>();
+        listed.sort();
+        let mut expected = vec![caller_id, sibling_id];
+        expected.sort();
+        assert_eq!(listed, expected);
+        // An anonymous request has nothing to scope to.
+        assert!(
+            backend
+                .agent_search_sessions(None, Uuid::nil(), "rare needle")
+                .is_err()
+        );
+
+        std::fs::remove_dir_all(root).ok();
     }
 }

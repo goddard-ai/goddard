@@ -548,6 +548,17 @@ export function WakuApp() {
       : undefined
     const route = transcriptLinkRoute(target, workspace)
     if (route.kind === 'external') return false
+    if (route.kind === 'session') {
+      const sessionId = route.sessionId
+      const known = sessionId !== null
+        && taskState.data?.sessions.some((session) => session.id === sessionId)
+      if (sessionId !== null && known) {
+        selectSession(sessionId)
+      } else {
+        toast.error(t('errors.task_link_unknown'))
+      }
+      return true
+    }
     if (route.kind === 'remoteFile') {
       toast.error(t('errors.path_outside_workspace'))
       return true

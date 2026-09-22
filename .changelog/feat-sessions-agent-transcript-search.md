@@ -1,0 +1,1 @@
+- Agents can now search the transcripts of sibling tasks in their own project through `goddard-agent search` — the same full-text corpus ⌘K scans — returning matching task ids, titles, status, and excerpts so an agent can find prior work without loading every transcript, then `read` the one that matters
