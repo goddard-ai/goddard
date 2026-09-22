@@ -719,14 +719,26 @@ fn monitor_daemon(
             }
             continue;
         }
-        let (down, client) = {
+        let (down, client, endpoint) = {
             let mut target = inner.target.lock();
             match &mut *target {
-                DaemonTarget::Local(process) => (local_down(process), process.client()),
+                DaemonTarget::Local(process) => (
+                    local_down(process),
+                    process.client(),
+                    Some((process.address.clone(), process.token.clone())),
+                ),
                 DaemonTarget::Restarting(client) => {
-                    (Some(LocalDown::Exited(None)), client.clone())
+                    (Some(LocalDown::Exited(None)), client.clone(), None)
                 }
-                DaemonTarget::Remote { client, .. } => (None, client.clone()),
+                DaemonTarget::Remote {
+                    client,
+                    address,
+                    token,
+                } => (
+                    None,
+                    client.clone(),
+                    Some((address.clone(), token.clone())),
+                ),
             }
         };
         if let Some(executable) = inner.executable.as_ref() {
@@ -838,10 +850,38 @@ fn monitor_daemon(
         if last_probe.elapsed() >= PROBE_INTERVAL && !client.is_disconnected() {
             last_probe = Instant::now();
             if !client.probe(PROBE_TIMEOUT) {
-                client.force_disconnect();
+                // A stalled pipeline on the app's busy socket says nothing
+                // about the daemon — confirm on a fresh connection before
+                // declaring it dead.
+                let daemon_dead = endpoint.as_ref().is_none_or(|(address, token)| {
+                    !probe_daemon_endpoint(address, token, PROBE_TIMEOUT)
+                });
+                if daemon_dead {
+                    client.force_disconnect();
+                }
             }
         }
     }
+}
+
+/// A second opinion on daemon liveness through a brand-new connection —
+/// the accept loop plus one request — run on a helper thread so a wedged
+/// listener cannot stall the supervisor past `timeout`.
+fn probe_daemon_endpoint(address: &str, token: &str, timeout: Duration) -> bool {
+    let (done, done_rx) = mpsc::sync_channel(1);
+    let _ = std::thread::Builder::new()
+        .name("goddard-daemon-probe".into())
+        .spawn({
+            let address = address.to_owned();
+            let token = token.to_owned();
+            move || {
+                let answered = DaemonClient::connect(&address, token)
+                    .map(|client| client.probe(timeout))
+                    .unwrap_or(false);
+                let _ = done.send(answered);
+            }
+        });
+    done_rx.recv_timeout(timeout).unwrap_or(false)
 }
 
 fn retry_delay(failures: u32) -> Duration {
