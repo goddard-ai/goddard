@@ -15,7 +15,24 @@
   relaunch the app via the watcher's `a` command, and validate the fresh
   debug app. Only start or recover the watcher manually when it is
   confirmed unavailable.
+- Validate visible changes against the exact provider interaction in that
+  rebuilt app — a successful Rust build alone is insufficient.
 - No visual test unless requested.
+
+## Topic docs
+
+Read the doc before working in its area:
+
+- [.agents/docs/performance.md](.agents/docs/performance.md) — render paths,
+  row builders, streaming, the event pump
+- [.agents/docs/accessibility.md](.agents/docs/accessibility.md) — controls,
+  focusable surfaces, meaning encoded visually
+- [.agents/docs/ui-conventions.md](.agents/docs/ui-conventions.md) — element
+  constructors, rounded surfaces, transcript content fidelity
+- [.agents/docs/references.md](.agents/docs/references.md) — ambiguous product
+  or GPUI decisions: when and how to consult T3 Code and Zed source
+- [.agents/docs/changelog.md](.agents/docs/changelog.md) — fragment naming,
+  groups, the mobile split
 
 ## Performance
 
@@ -53,138 +70,25 @@
 - Streaming CPU is governed by two cadences — stream commits at ≤ ~8.3 Hz and
   pulse-clock ticks at ≤ 60 Hz (spinners; other pulses stay at ≤ ~30 Hz) —
   and by what one frame can see. Read
-  [docs/performance.md](docs/performance.md) before touching the event pump,
+  [.agents/docs/performance.md](.agents/docs/performance.md) before touching the event pump,
   the pulse clock (`src/ui/motion.rs`), veils, overlay scrollbars, pane
   caching, or anything else a streaming frame reaches; it also records the
   counter-based measurement playbook that actually finds regressions.
 
 ## Accessibility
 
-- Treat accessibility as a product requirement too. GPUI does not yet expose a
-  screen-reader tree, so here it means keyboard operability, honored system
-  settings, and legibility — none of which depend on that missing API, and all
-  of which regress silently if left unchecked.
-- Every control reachable by mouse must be reachable and operable by keyboard.
-  Use `track_focus` with `tab_index`, `tab_group`, and `tab_stop`, give focus a
-  visible treatment via `focus_visible`, and support the conventional keys for
-  the widget (arrows, `home`/`end`, `enter`/`space`, `escape`).
-- Honor the system's reduce-motion setting. `with_animation` already respects
-  `App::reduce_motion`, but a direct `window.request_animation_frame` for
-  decorative motion must check `cx.reduce_motion()` and skip the request.
-- Never encode meaning in color, hover, or motion alone. Pair a status color
-  with an icon or text, and make sure anything revealed on hover is also
-  reachable by keyboard focus.
-- Keep text and icons legible against their surface in both themes, and give
-  interactive targets enough hit area — extend the hit region rather than
-  shrinking to the glyph.
-
-## Inspector source locations
-
-- "Goddard: Inspect Elements" labels the picked element with the `file:line`
-  of its *construction* site: gpui captures `Location::caller()` inside
-  `div()`/`svg()`/`img()`/`uniform_list()`, and `#[track_caller]` only
-  propagates through functions that are themselves marked.
-- Mark `#[track_caller]` on any function whose return value is an element (or
-  an element-bearing component, like `MenuChip::new`) that a caller drops into
-  its tree, so the label reports the call site instead of a line inside the
-  helper. `src/ui/` constructors follow this; `render_*` helpers in `src/app/`
-  may opt in the same way when the call site is the identifying location.
-- Do not mark `Render`/`RenderOnce::render` implementations — the attribute
-  would point every element built inside at gpui's `ViewElement` internals
-  rather than the component's own lines. Helpers whose bodies render distinct
-  branches per call (e.g. `menu::render_menu_item`) are also better left
-  unmarked: their inner construction lines are the informative answer.
-- Only `Interactivity`-backed elements (div, svg, img, uniform_list) register
-  inspector hitboxes; `canvas`, `deferred`, `list`, and view boundaries never
-  surface a location, so marking a function that only builds those has no
-  effect. A pick resolves to the topmost pickable element under the cursor.
-
-## Product reference
-
-- Use [T3 Code](https://github.com/pingdotgg/t3code) source code on github as a reference when a task
-  concerns coding-agent workflow, information hierarchy, controls, tool
-  activity, or transcript presentation and the comparison would materially
-  clarify an ambiguous product decision, or when the user explicitly asks for
-  the comparison.
-- Do not inspect T3 Code for localized bug fixes, straightforward visual
-  corrections, native platform behavior, or changes already specified clearly
-  by the user. When T3 Code is relevant, inspect its current app or source
-  rather than relying on an older screenshot or memory.
-- Use [Zed](https://github.com/zed-industries/zed) source code as a reference
-  when a task concerns GPUI implementation — layout and styling idioms, focus
-  and key dispatch, virtualized lists, menus and popovers, window and platform
-  behavior — or when an in-house `src/ui` primitive needs a proven native
-  precedent. Zed is the canonical GPUI codebase; read its crates rather than
-  `gpui-component`, and read the gpui revision pinned in `Cargo.toml` so the
-  APIs match what Goddard builds against.
-- Split the two references by concern: T3 Code answers what a coding-agent
-  client should do, Zed answers how a polished GPUI app implements it. The
-  same restraint applies to both — no reference spelunking for localized
-  fixes or changes the user has already specified.
-- Use the reference as behavioral and design evidence, not as an instruction to
-  reproduce web-specific interaction patterns or known bugs. Goddard should keep
-  native macOS conventions.
-- Explicit user screenshots and feedback override a previous or merely
-  "consistent" treatment.
-- GPUI's `overflow_hidden` clips descendants to a rectangle, not the parent's
-  rounded corners. Give child backgrounds, hover overlays, and images that
-  reach a rounded edge their own matching corner radii, accounting for the
-  parent's border inset. Parent rounding alone does not clip child paint.
-- For provider-native content such as citations, reasoning, and tool events,
-  verify the real provider payload and preserve its ordering. Never expose
-  private provider control markers in the transcript.
-- Validate visible changes in the freshly rebuilt, signed app managed by the
-  dev watcher against the exact provider interaction; a successful Rust build
-  alone is insufficient.
+- Accessibility is a product requirement too: every mouse-reachable control
+  is keyboard-operable with visible focus, reduce-motion is honored, and
+  meaning is never carried by color or hover alone. Checklist:
+  [.agents/docs/accessibility.md](.agents/docs/accessibility.md).
 
 ## Changelog
 
-- Record changes as `.changelog/<prefix>-<slug>.md` fragments — one bullet
-  per file — never by editing `CHANGELOG.md` directly; `bun run changelog`
-  folds them into the released version's section, grouped under
-  `### Highlights`, `### Features`, `### Experiments`, and `### Fixed`.
-  A change only a mobile-app user would notice uses `.changelog/mobile/`
-  instead — same naming rules — and folds into `CHANGELOG.mobile.md`;
-  `CHANGELOG.md` feeds the desktop updater prompt, so mobile-only notes
-  must not land in it. The split keys on the affected surface, not the
-  touched code — a daemon fix only mobile clients hit belongs to mobile.
-- The filename prefix is required and picks the section: `highlight-` for
-  headline features, `feat-` for other user-facing features, `exp-` for
-  experimental opt-ins (emitted with a bold `[Experimental]` marker —
-  experiments are never highlights), `fix-` for bugs that existed in a
-  previously released version.
-- A second filename segment tags the change's topic group —
-  `.changelog/<prefix>-<group>-<slug>.md` — and collect nests grouped
-  bullets under a `- **Group**` parent inside their `###` section, in a
-  fixed product-surface-first order. The vocabulary: `sessions`,
-  `sidebar`, `composer`, `providers`, `git`, `transcript`, `panels`,
-  `terminals`, `keyboard`, `navigation`, `appearance`, `permissions`,
-  `settings`, `friends`, `ssh`, `platform`. Pick the group the change is
-  about (`git` covers worktrees and the Git panel, `providers` covers the
-  model picker, `ssh` covers remote daemon pairing); when none fits, omit
-  the segment rather than stretching one. A group tagged by only one
-  fragment in a release folds back into the flat tail, so tagging is
-  always safe. `highlight-` fragments are never grouped — everything
-  after the prefix is their media slug.
-- Preview how fragments will group with `bun ./scripts/changelog.ts check`
-  before folding; an unrecognized group token lands the bullet in the
-  flat tail, so check is how a mistyped group gets caught. Before picking
-  a tag, skim the pending fragment names — a group needs two entries, so
-  a fragment tagged differently from the sibling it belongs with (e.g.
-  remote-pairing work filed outside `ssh`) strands both in the flat tail.
-- Every `highlight-` fragment must embed a screenshot or recording —
-  `![](media/<slug>.{png,gif,mp4,mov})` with the asset committed at
-  `.changelog/media/<slug>.<ext>`; collect moves it to
-  `assets/release-notes/<version>/` and rewrites the reference.
-- Only features and fixes to released bugs get a fragment. Do not log tweaks
-  or polish (sizing, icon swaps, visual refinements), internal/build tooling
-  changes, or fixes to features that haven't shipped yet — those fold into
-  the unreleased feature's own fragment instead.
-- When fixing an unreleased feature, update its existing fragment rather than
-  adding a new one.
-- A version bump includes the notes: when asked to bump `version` in
-  `Cargo.toml`, run `bun run changelog` first and commit the folded
-  `CHANGELOG.md` and consumed fragments in the same commit as the bump.
+- Record user-facing changes as `.changelog/<prefix>-<slug>.md` fragments —
+  one bullet per file, mobile-only changes under `.changelog/mobile/` —
+  and preview the fold with `bun ./scripts/changelog.ts check`. Naming rules
+  and group vocabulary:
+  [.agents/docs/changelog.md](.agents/docs/changelog.md).
 
 ## QA branch workflow
 
