@@ -1,4 +1,5 @@
 import type { AgentSession } from '@waku/client';
+import { useQuery } from '@tanstack/react-query';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { router, useGlobalSearchParams, usePathname } from 'expo-router';
@@ -54,7 +55,7 @@ import { useTaskState } from '@/hooks/use-daemon-data';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { useUnseenReplyWatermarks } from '@/hooks/use-unseen-replies';
-import { searchSessionMessages } from '@/lib/daemon-api';
+import { daemonKeys, listNotifications, searchSessionMessages } from '@/lib/daemon-api';
 import { useDaemon } from '@/lib/daemon-context';
 import { useDisplayCornerRadius } from '@/lib/display-corner-radius';
 import { sessionIsRunning } from '@/lib/mobile-runtime';
@@ -526,6 +527,19 @@ function TaskDrawerContent({
         style={[styles.daemonFloat, { top: insets.top + 8 }]}>
         <DaemonPill onPress={() => setDaemonPickerOpen(true)} />
       </View>
+      {daemon.phase === 'connected' && (
+        <View
+          pointerEvents="box-none"
+          style={[styles.inboxFloat, { top: insets.top + 8 }]}>
+          <InboxButton
+            enabled={open}
+            onPress={() => {
+              onClose();
+              router.push('/notifications');
+            }}
+          />
+        </View>
+      )}
 
       <Animated.View style={[styles.listHost, listFadeStyle]}>
         <FlashList
@@ -679,6 +693,52 @@ function DaemonPill({ onPress }: { onPress: () => void }) {
           size={12}
           tintColor={theme.textTertiary}
         />
+      </Pressable>
+    </GlassSurface>
+  );
+}
+
+/** Inbox shortcut mirroring the daemon pill — polls for unread threads
+ * only while the drawer is open, so a closed drawer costs nothing. */
+function InboxButton({
+  enabled,
+  onPress,
+}: {
+  enabled: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const daemon = useDaemon();
+  const profileId = daemon.activeProfile?.id ?? 'disconnected';
+  const unread = useQuery({
+    queryKey: daemonKeys.notifications(profileId, false),
+    queryFn: () => listNotifications(daemon.client!, false),
+    enabled: enabled && Boolean(daemon.client && daemon.phase === 'connected'),
+    staleTime: 60_000,
+  });
+  const hasUnread =
+    unread.data?.status === 'changed' &&
+    unread.data.threads.some((thread) => thread.unread);
+  return (
+    <GlassSurface interactive style={styles.inboxButton}>
+      <Pressable
+        accessibilityHint="Opens the GitHub inbox"
+        accessibilityLabel={hasUnread ? 'Notifications, unread' : 'Notifications'}
+        accessibilityRole="button"
+        hitSlop={8}
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.inboxButtonInner,
+          { opacity: pressed ? 0.62 : 1 },
+        ]}>
+        <AppSymbol
+          name={{ ios: 'bell', android: 'notifications', web: 'notifications' }}
+          size={16}
+          tintColor={theme.text}
+        />
+        {hasUnread ? (
+          <View style={[styles.inboxBadge, { backgroundColor: theme.accent }]} />
+        ) : null}
       </Pressable>
     </GlassSurface>
   );
@@ -891,6 +951,26 @@ const styles = StyleSheet.create({
     left: 12,
     position: 'absolute',
     zIndex: 30,
+  },
+  inboxFloat: {
+    position: 'absolute',
+    right: 12,
+    zIndex: 30,
+  },
+  inboxButton: { borderRadius: Radius.pill },
+  inboxButtonInner: {
+    alignItems: 'center',
+    height: DaemonPickerHeight,
+    justifyContent: 'center',
+    width: DaemonPickerHeight,
+  },
+  inboxBadge: {
+    borderRadius: 4,
+    height: 8,
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    width: 8,
   },
   roundInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
   searchDockAvoider: {
