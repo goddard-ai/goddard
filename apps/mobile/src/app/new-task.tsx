@@ -286,7 +286,7 @@ export default function NewTaskScreen() {
         display = annotationBubbleContent(submittedAnnotations, value);
         providerPrompt = (annotationPromptPrefix(submittedAnnotations) + (expanded ?? value)).trimEnd();
       }
-      const session = await runtime.createTask(
+      await runtime.createTask(
         selectedProject.id,
         provider,
         isolated && !projectless,
@@ -300,36 +300,38 @@ export default function NewTaskScreen() {
           baseBranch,
         },
         providerPrompt,
-      );
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      const address = daemon.activeProfile?.address;
-      if (address) {
-        void loadComposerPreferences(address).then((stored) => {
-          const prefs = preferencesRef.current ?? stored;
-          let next = rememberComposerSession(prefs, session);
-          if (!session.model) {
-            next = {
-              ...next,
-              lastProvider: session.provider,
-              lastModel: null,
-              lastReasoningEffort: session.reasoning_effort ?? null,
-              lastServiceTier: session.service_tier ?? null,
-              lastContextWindow: session.context_window ?? null,
-            };
+        (session) => {
+          router.push({ pathname: '/session/[id]', params: { id: session.id } });
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          const address = daemon.activeProfile?.address;
+          if (address) {
+            void loadComposerPreferences(address).then((stored) => {
+              const prefs = preferencesRef.current ?? stored;
+              let next = rememberComposerSession(prefs, session);
+              if (!session.model) {
+                next = {
+                  ...next,
+                  lastProvider: session.provider,
+                  lastModel: null,
+                  lastReasoningEffort: session.reasoning_effort ?? null,
+                  lastServiceTier: session.service_tier ?? null,
+                  lastContextWindow: session.context_window ?? null,
+                };
+              }
+              preferencesRef.current = next;
+              return saveComposerPreferences(address, next);
+            }).catch(() => {});
+            void saveNewTaskExtras(address, {
+              runtimeMode,
+              isolated: isolated && !projectless,
+              projectId: selectedProject.id,
+            }).catch(() => {});
           }
-          preferencesRef.current = next;
-          return saveComposerPreferences(address, next);
-        }).catch(() => {});
-        void saveNewTaskExtras(address, {
-          runtimeMode,
-          isolated: isolated && !projectless,
-          projectId: selectedProject.id,
-        }).catch(() => {});
-      }
-      draftSync.removeSubmittedDraft();
-      setPrompt('');
-      setSubmitting(false);
-      router.push({ pathname: '/session/[id]', params: { id: session.id } });
+          draftSync.removeSubmittedDraft();
+          setPrompt('');
+          setSubmitting(false);
+        },
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -352,9 +354,10 @@ export default function NewTaskScreen() {
       if (!selectedProject || !provider) throw new Error('Choose a project and model first');
       const session = await runtime.createTask(selectedProject.id, provider, isolated && !projectless, '', {
         model, reasoningEffort, serviceTier, contextWindow, runtimeMode, baseBranch,
+      }, undefined, (created) => {
+        router.push({ pathname: '/session/[id]', params: { id: created.id } });
       });
       await runtime.sendGoalOperation(session, operation);
-      router.push({ pathname: '/session/[id]', params: { id: session.id } });
     },
     onClear: () => {
       draftSync.markEdited();

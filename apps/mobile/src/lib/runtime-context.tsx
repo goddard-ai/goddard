@@ -117,6 +117,7 @@ interface RuntimeContextValue {
     prompt: string,
     options?: NewSessionOptions,
     providerPromptOverride?: string,
+    onCreated?: (session: AgentSession) => void,
   ) => Promise<AgentSession>;
   cancel: (sessionId: string) => Promise<void>;
   compactSession: (sessionId: string) => Promise<void>;
@@ -708,6 +709,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     prompt: string,
     options: NewSessionOptions = {},
     providerPromptOverride?: string,
+    onCreated?: (session: AgentSession) => void,
   ): Promise<AgentSession> => {
     const profileId = daemon.activeProfile?.id;
     if (!profileId || !daemon.client || daemon.phase !== 'connected') {
@@ -716,6 +718,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const draft = createSession(projectId, provider, isolated, clock, options);
     cacheSession(draft);
     const saved = await persistOrdered(draft);
+    onCreated?.(saved);
     try {
       return await sendPrompt(saved, prompt, [], providerPromptOverride);
     } catch (cause) {
