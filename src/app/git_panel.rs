@@ -5018,6 +5018,7 @@ impl Waku {
                         .child(path.clone()),
                     &self.transcript_control_focus(format!("git-panel-conflict-file-{path}"), cx),
                     absolute,
+                    self,
                     &weak,
                     format!("file-link-menu-conflict-file-{path}"),
                     cx,

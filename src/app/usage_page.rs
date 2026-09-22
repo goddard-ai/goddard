@@ -1484,6 +1484,7 @@ impl Waku {
                                 cx,
                             ),
                             project.path.clone(),
+                            self,
                             &cx.entity().downgrade(),
                             format!("file-link-menu-usage-project-path-{index}"),
                             cx,

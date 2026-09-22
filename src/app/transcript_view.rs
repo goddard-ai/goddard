@@ -2560,6 +2560,7 @@ impl Waku {
                     cx,
                 ),
                 file.path.clone(),
+                self,
                 &cx.entity().downgrade(),
                 format!(
                     "file-link-menu-changed-files-preview-{turn_id}-{}",
@@ -3276,6 +3277,7 @@ impl Waku {
                                     detail.id(SharedString::from(format!("activity-detail-{id}"))),
                                     &detail_focus,
                                     path.clone(),
+                                    self,
                                     &weak,
                                     format!("file-link-menu-activity-detail-{id}"),
                                     cx,

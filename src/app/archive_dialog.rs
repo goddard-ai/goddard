@@ -238,6 +238,7 @@ impl Waku {
                                     .child(file.path.clone()),
                                 &focus,
                                 absolute.to_string_lossy().into_owned(),
+                                self,
                                 &weak,
                                 format!("file-link-menu-archive-file-{}", file.path),
                                 cx,

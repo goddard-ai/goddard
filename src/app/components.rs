@@ -413,14 +413,15 @@ pub(super) fn file_link(
     element: Stateful<Div>,
     focus: &FocusHandle,
     path: String,
+    this: &Waku,
     waku: &gpui::WeakEntity<Waku>,
     menu_id: impl Into<SharedString>,
     cx: &mut App,
 ) -> AnyElement {
     let menu_id = menu_id.into();
-    let menu = waku
-        .update(cx, |this, cx| this.menu_handle(menu_id.clone(), cx))
-        .ok();
+    // `waku` is leased while transcript rows render, so the menu handle must be
+    // resolved on the already-borrowed entity — `waku.update` here panics.
+    let menu = this.menu_handle(menu_id.clone(), cx);
     let click_waku = waku.clone();
     let key_waku = waku.clone();
     let click_path = path.clone();
@@ -446,15 +447,10 @@ pub(super) fn file_link(
                 });
                 cx.stop_propagation();
             } else if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
-                if let Some(menu) = &key_menu {
-                    menu.open_context_menu(window, cx);
-                    cx.stop_propagation();
-                }
+                key_menu.open_context_menu(window, cx);
+                cx.stop_propagation();
             }
         });
-    let Some(menu) = menu else {
-        return element.into_any_element();
-    };
     let menu_waku = waku.clone();
     context_menu(element, menu_id, &menu, move |cx| {
         menu_waku

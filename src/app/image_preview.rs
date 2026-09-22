@@ -268,6 +268,7 @@ impl Waku {
                     .child(name),
                 &name_focus,
                 path.to_string_lossy().into_owned(),
+                self,
                 &weak,
                 "file-link-menu-image-preview",
                 cx,

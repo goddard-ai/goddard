@@ -47,6 +47,34 @@ the root rather than expect root notifies to reach them; and a cached pane
 lays its content out **as a root**, so a `flex_1`-sized subtree collapses to
 its zero flex basis without a `size_full` flex wrapper.
 
+## Entity leases in render paths
+
+`entity.update`/`read`/`read_with` panic if the entity is already leased, and
+that panic crosses a non-unwinding boundary — it aborts the app instead of
+unwinding. Two render paths lease `Waku` itself: the transcript `list()` row
+renderer wraps each row in `entity.update`, so `transcript_row` and everything
+it calls runs under the lease; and `WakuPane::render` leases the root while
+its content fn builds the pane's tree.
+
+Safe vs. unsafe:
+
+- **Unsafe during render:** `waku.update(...)`, `waku.read_with(...)`,
+  `cx.entity().update(...)` on `Waku`, or any call chain that reaches them —
+  including "cheap" ones like a `menu_handle` lookup (the 0.7.0 activity-row
+  crash: `file_link` resolved its context menu via `waku.update` while a
+  transcript row rendered under the lease).
+- **Safe:** closures captured for later dispatch — `on_click`,
+  `on_key_down`, `on_mouse_down`, `MenuItem` actions, `context_menu` items
+  builders, `cx.spawn` continuations after `.await`, and `canvas` paint
+  callbacks. These run at event or paint time, outside the lease.
+- **Preferred at build time:** thread `&Waku`/`&mut Context<Waku>` — or the
+  already-resolved value, e.g. a `ContextMenuHandle` — into helpers. Reach for
+  `&WeakEntity` only when the use is genuinely deferred.
+
+When unsure whether a callsite is deferred: if the closure is *stored* on the
+element (`on_*`, `MenuItem::new`, `set_context_items` builders) it's safe; if
+it executes while the element is *constructed*, it's under the lease.
+
 ## The two cadences
 
 Everything during a stream happens at one of two rates, and every change to
