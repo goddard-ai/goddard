@@ -126,11 +126,13 @@ fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOpt
 
 /// The exact Grok models the hardcoded reasoning menu is known to cover.
 /// `grok models` also lists user-defined custom models, whose effort support
-/// is not knowable from the ID, so they get no menu.
+/// is not knowable from the ID, so they get no menu. Discovery prefers the
+/// CLI's own cached catalog; this table only stands in when that cache is
+/// absent or does not describe the model.
 pub fn grok_model_reasoning_efforts(id: &str) -> Option<&'static [&'static str]> {
     match id.to_ascii_lowercase().as_str() {
         "grok-4.5" => Some(&["low", "medium", "high"]),
-        "grok-4.6" => Some(&["low", "medium", "high", "xhigh"]),
+        "grok-4.6" | "grok-4.7" => Some(&["low", "medium", "high", "xhigh"]),
         _ => None,
     }
 }
@@ -332,6 +334,10 @@ mod tests {
         );
         assert_eq!(
             grok_model_reasoning_efforts("grok-4.6"),
+            Some(&["low", "medium", "high", "xhigh"][..])
+        );
+        assert_eq!(
+            grok_model_reasoning_efforts("grok-4.7"),
             Some(&["low", "medium", "high", "xhigh"][..])
         );
         // Custom models and unknown spellings get no menu.

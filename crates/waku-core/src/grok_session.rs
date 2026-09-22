@@ -200,7 +200,7 @@ fn find_session_directory(session_id: &str) -> anyhow::Result<PathBuf> {
     find_session_directory_in(&grok_home_directory()?, session_id)
 }
 
-fn grok_home_directory() -> anyhow::Result<PathBuf> {
+pub(crate) fn grok_home_directory() -> anyhow::Result<PathBuf> {
     std::env::var_os("GROK_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)

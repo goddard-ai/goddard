@@ -1,6 +1,6 @@
 //! Provider model and agent-preset discovery.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -1785,10 +1785,13 @@ fn discover_grok_models(binary: &Path) -> Vec<ProviderModel> {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    parse_grok_models(&combined)
+    parse_grok_models(&combined, &grok_models_cache())
 }
 
-fn parse_grok_models(output: &str) -> Vec<ProviderModel> {
+fn parse_grok_models(
+    output: &str,
+    cached_efforts: &HashMap<String, GrokCachedEfforts>,
+) -> Vec<ProviderModel> {
     let cleaned = strip_ansi(output);
     let default_model = cleaned.lines().find_map(|line| {
         line.trim()
@@ -1822,9 +1825,101 @@ fn parse_grok_models(output: &str) -> Vec<ProviderModel> {
             }
             let mut model = ProviderModel::new(id, display_name_from_slug(id));
             model.is_default = default_model.as_deref() == Some(id);
-            Some(grok_reasoning_model(model))
+            Some(grok_reasoning_model(
+                model,
+                cached_efforts.get(&id.to_ascii_lowercase()),
+            ))
         })
         .collect()
+}
+
+/// A model's effort ladder as Grok's own catalog states it.
+struct GrokCachedEfforts {
+    efforts: Vec<String>,
+    default: Option<String>,
+}
+
+/// Grok's cached model catalog, keyed by lowercase model id. The CLI rewrites
+/// `models_cache.json` under its home directory on every successful catalog
+/// fetch, so it knows models added since this binary shipped — the hardcoded
+/// `grok_model_reasoning_efforts` table only stands in when the cache is
+/// absent or silent on a model.
+fn grok_models_cache() -> HashMap<String, GrokCachedEfforts> {
+    let Ok(home) = crate::grok_session::grok_home_directory() else {
+        return HashMap::new();
+    };
+    let Ok(bytes) = std::fs::read(home.join("models_cache.json")) else {
+        return HashMap::new();
+    };
+    parse_grok_models_cache(&bytes)
+}
+
+fn parse_grok_models_cache(bytes: &[u8]) -> HashMap<String, GrokCachedEfforts> {
+    let Ok(cache) = serde_json::from_slice::<Value>(bytes) else {
+        return HashMap::new();
+    };
+    let mut parsed = HashMap::new();
+    let Some(models) = cache.get("models").and_then(Value::as_object) else {
+        return parsed;
+    };
+    let effort_id = |effort: &Value| {
+        effort
+            .get("value")
+            .or_else(|| effort.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .filter(|value| !value.is_empty())
+    };
+    for (key, entry) in models {
+        let info = entry.get("info").unwrap_or(entry);
+        let id = info
+            .get("id")
+            .or_else(|| info.get("model"))
+            .and_then(Value::as_str)
+            .unwrap_or(key)
+            .to_ascii_lowercase();
+        // An explicit opt-out is the cache describing the model too — it
+        // suppresses even a hardcoded menu for a known id.
+        if info
+            .get("supports_reasoning_effort")
+            .and_then(Value::as_bool)
+            == Some(false)
+        {
+            parsed.insert(
+                id,
+                GrokCachedEfforts {
+                    efforts: Vec::new(),
+                    default: None,
+                },
+            );
+            continue;
+        }
+        let Some(efforts) = info.get("reasoning_efforts").and_then(Value::as_array) else {
+            continue;
+        };
+        let values: Vec<String> = efforts.iter().filter_map(&effort_id).collect();
+        if values.is_empty() {
+            continue;
+        }
+        let default = efforts
+            .iter()
+            .filter(|effort| effort.get("default").and_then(Value::as_bool) == Some(true))
+            .find_map(&effort_id)
+            .or_else(|| {
+                info.get("reasoning_effort")
+                    .and_then(Value::as_str)
+                    .filter(|default| values.iter().any(|value| value == *default))
+                    .map(str::to_owned)
+            });
+        parsed.insert(
+            id,
+            GrokCachedEfforts {
+                efforts: values,
+                default,
+            },
+        );
+    }
+    parsed
 }
 
 /// Kimi Code resolves models through its own provider config, which covers the
@@ -2371,10 +2466,25 @@ fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOpt
         .collect()
 }
 
-/// The hardcoded reasoning menu is limited to the exact built-in models it
-/// was verified against. `grok models` also lists user-defined custom models,
-/// whose effort support is not knowable from the ID, so they get no menu.
-fn grok_reasoning_model(model: ProviderModel) -> ProviderModel {
+/// Grok's own catalog cache carries each model's effort ladder — including
+/// models released after this binary shipped and custom entries whose
+/// `reasoning_efforts` the server reports. The hardcoded menu covers only the
+/// exact built-in ids it was verified against, so a model the cache does not
+/// describe still falls back to it.
+fn grok_reasoning_model(model: ProviderModel, cached: Option<&GrokCachedEfforts>) -> ProviderModel {
+    if let Some(cached) = cached {
+        let mut model = model;
+        model.reasoning_efforts = cached
+            .efforts
+            .iter()
+            .map(|effort| {
+                let (label, i18n) = reasoning_effort_pair(effort);
+                ProviderModelOption::new(effort.clone(), label).with_label_i18n(i18n)
+            })
+            .collect();
+        model.default_reasoning_effort = cached.default.clone();
+        return model;
+    }
     match waku_protocol::model_catalog::grok_model_reasoning_efforts(&model.id) {
         Some(efforts) => model.reasoning(
             efforts.iter().copied().map(|effort| {
@@ -3306,6 +3416,7 @@ opencode/big-pickle
     fn parses_grok_default_and_available_models() {
         let models = parse_grok_models(
             "You are logged in with grok.com.\n\nDefault model: grok-4.6\n\nAvailable models:\n  * grok-4.6 (default)\n  - grok-4.5\n  - my-custom-test\n",
+            &HashMap::new(),
         );
         assert_eq!(models.len(), 3);
         assert_eq!(models[0].id, "grok-4.6");
@@ -3335,6 +3446,69 @@ opencode/big-pickle
         // the listing.
         assert_eq!(models[2].id, "my-custom-test");
         assert!(models[2].reasoning_efforts.is_empty());
+        assert_eq!(models[2].default_reasoning_effort, None);
+    }
+
+    #[test]
+    fn grok_models_take_efforts_from_the_clis_cached_catalog() {
+        let cached = parse_grok_models_cache(
+            &serde_json::to_vec(&json!({
+                "models": {
+                    // Written by `grok` itself on every catalog fetch; new
+                    // models the hardcoded table predates get their real
+                    // ladder, as do server-reported custom entries.
+                    "grok-4.7": {
+                        "info": {
+                            "id": "grok-4.7",
+                            "supports_reasoning_effort": true,
+                            "reasoning_effort": "high",
+                            "reasoning_efforts": [
+                                {"value": "xhigh", "label": "Extra High"},
+                                {"value": "high", "label": "High", "default": true},
+                                {"value": "medium", "label": "Medium"},
+                                {"value": "low", "label": "Low"}
+                            ]
+                        }
+                    },
+                    "my-custom-test": {
+                        "info": {
+                            "id": "my-custom-test",
+                            "reasoning_efforts": [
+                                {"id": "low"},
+                                {"id": "high"}
+                            ]
+                        }
+                    },
+                    "grok-4.5": {
+                        "info": {
+                            "id": "grok-4.5",
+                            "supports_reasoning_effort": false,
+                            "reasoning_efforts": [{"value": "low"}]
+                        }
+                    }
+                }
+            }))
+            .unwrap(),
+        );
+        let models = parse_grok_models(
+            "Available models:\n  * grok-4.7 (default)\n  - grok-4.5\n  - my-custom-test\n",
+            &cached,
+        );
+        fn efforts(model: &ProviderModel) -> Vec<&str> {
+            model
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect()
+        }
+        // The cache supplies the ladder a hardcoded entry predates.
+        assert_eq!(efforts(&models[0]), ["xhigh", "high", "medium", "low"]);
+        assert_eq!(models[0].default_reasoning_effort.as_deref(), Some("high"));
+        // An explicit `supports_reasoning_effort: false` suppresses the menu
+        // outright — even for an id the hardcoded table knows.
+        assert!(efforts(&models[1]).is_empty());
+        // A custom model the cache describes gets its menu too.
+        assert_eq!(efforts(&models[2]), ["low", "high"]);
         assert_eq!(models[2].default_reasoning_effort, None);
     }
 
