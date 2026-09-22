@@ -573,6 +573,23 @@ fn commit_references(flat: &FlatText) -> Vec<(Range<usize>, String)> {
         .collect()
 }
 
+/// Whether `text` names a commit — the plain-text form of
+/// [`commit_references`], for callers that ask "does this message cite a
+/// SHA" without rendering it. With no flat context there is no link or math
+/// range to exclude; hyphenated tokens still do not count.
+pub fn contains_commit_reference(text: &str) -> bool {
+    let hyphenated: Vec<Range<usize>> = HYPHENATED_HEX
+        .find_iter(text)
+        .map(|found| found.range())
+        .collect();
+    COMMIT_REFERENCE.find_iter(text).any(|found| {
+        let range = found.range();
+        !hyphenated
+            .iter()
+            .any(|token| token.start < range.end && range.start < token.end)
+    })
+}
+
 /// An `@path` token — the composer file mention's submitted form. The `@`
 /// must not follow a word character, so `user@host` is not a mention, and the
 /// path runs to whitespace; punctuation typed right after it is prose, not
@@ -3998,6 +4015,17 @@ mod tests {
             commit_references(&flat),
             vec![(19..26, "abcdef1".to_owned())]
         );
+    }
+
+    #[test]
+    fn contains_commit_reference_scans_plain_text() {
+        assert!(contains_commit_reference("committed as abc1234"));
+        assert!(contains_commit_reference("see ABCDEF1"));
+        assert!(!contains_commit_reference("see abcdef"));
+        assert!(!contains_commit_reference(
+            "id 3f8a2b1c-9d4e-4f5a-8b6c-7d8e9f0a1b2c done"
+        ));
+        assert!(!contains_commit_reference("no refs here"));
     }
 
     fn file_refs(text: &str) -> Vec<(Range<usize>, String)> {

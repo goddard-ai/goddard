@@ -1213,6 +1213,10 @@ settings.land_conflict_handling_description:
   en: Send the resolution prompt to the chat that owns the checkout, queued behind a running turn — the sync setting applies when no session owns it
 settings.conflict_handling_task_chat:
   en: Resolve in the task's chat
+settings.land_commit_reminder:
+  en: Remind the task to commit after an empty land
+settings.land_commit_reminder_description:
+  en: When a land reports the base already contains every commit, send the owning task's chat a commit reminder — unless its last message already names a commit
 settings.default_workspace:
   en: Default workspace
 settings.default_workspace_description:
@@ -3676,6 +3680,8 @@ git_panel.land_local_checkout:
   en: This task works directly in the project checkout — there's nothing to land
 git_panel.already_landed:
   en: "%{base} already contains every commit here"
+git_panel.already_landed_commit_prompt:
+  en: Commit your changes if you haven't already
 git_panel.land_conflict_description:
   en: Landing onto %{base} stopped midway — the conflicts are still in the working tree.
 git_panel.resolve_land_rebase_prompt:

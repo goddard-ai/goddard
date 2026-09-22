@@ -820,6 +820,10 @@ pub struct AppSettings {
     /// prompt to the owning task's chat instead of showing the conflict
     /// dialog.
     pub auto_resolve_land_conflicts: bool,
+    /// When a land reports the base already contains every commit, send the
+    /// owning task's chat a commit reminder — unless its last message
+    /// already names a commit.
+    pub auto_commit_reminder_on_land: bool,
     /// Which workspace a fresh task draft opens with: the mode last chosen
     /// for the project, always the local checkout, or always a new
     /// worktree.
@@ -982,6 +986,7 @@ impl Default for AppSettings {
             auto_fetch_remotes: true,
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
+            auto_commit_reminder_on_land: false,
             default_workspace: DefaultWorkspace::default(),
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
@@ -1322,6 +1327,11 @@ pub struct PersistedState {
     /// dialog.
     #[serde(default)]
     pub auto_resolve_land_conflicts: bool,
+    /// When a land reports the base already contains every commit, send the
+    /// owning task's chat a commit reminder — unless its last message
+    /// already names a commit.
+    #[serde(default)]
+    pub auto_commit_reminder_on_land: bool,
     /// Which workspace a fresh task draft opens with: the mode last chosen
     /// for the project, always the local checkout, or always a new
     /// worktree.
@@ -1718,6 +1728,7 @@ impl PersistedState {
             auto_fetch_remotes: true,
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
+            auto_commit_reminder_on_land: false,
             default_workspace: DefaultWorkspace::default(),
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
@@ -2083,6 +2094,7 @@ impl PersistedState {
             auto_fetch_remotes: self.auto_fetch_remotes,
             auto_resolve_in_chat: self.auto_resolve_in_chat,
             auto_resolve_land_conflicts: self.auto_resolve_land_conflicts,
+            auto_commit_reminder_on_land: self.auto_commit_reminder_on_land,
             default_workspace: self.default_workspace,
             new_worktree_default_branch: self.new_worktree_default_branch,
             new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
@@ -2194,6 +2206,7 @@ impl PersistedState {
         self.auto_fetch_remotes = settings.auto_fetch_remotes;
         self.auto_resolve_in_chat = settings.auto_resolve_in_chat;
         self.auto_resolve_land_conflicts = settings.auto_resolve_land_conflicts;
+        self.auto_commit_reminder_on_land = settings.auto_commit_reminder_on_land;
         self.default_workspace = settings.default_workspace;
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
@@ -3222,6 +3235,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.auto_resolve_land_conflicts);
+    }
+
+    #[test]
+    fn auto_commit_reminder_on_land_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.auto_commit_reminder_on_land);
+        let mut state = PersistedState::empty();
+        assert!(!state.auto_commit_reminder_on_land);
+        state.auto_commit_reminder_on_land = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["auto_commit_reminder_on_land"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("auto_commit_reminder_on_land")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.auto_commit_reminder_on_land);
     }
 
     #[test]

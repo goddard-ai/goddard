@@ -380,6 +380,8 @@ settings.conflict_handling_new_chat: 在新聊天中解决
 settings.land_conflict_handling: 合入遇到冲突时
 settings.land_conflict_handling_description: 将解决提示发送到拥有该检出目录的聊天，排在正在进行的回合之后 — 没有会话拥有该检出时按同步设置处理
 settings.conflict_handling_task_chat: 在该任务的聊天中解决
+settings.land_commit_reminder: 合入为空时提醒任务提交更改
+settings.land_commit_reminder_description: 当合入报告基准分支已包含所有提交时，向拥有该检出的任务的聊天发送提交提醒 — 除非其最后一条消息已提及提交
 settings.default_workspace: 默认工作区
 settings.default_workspace_description: 新任务启动时所在的工作区。“上次使用的工作区”会打开每个项目上次选择的工作区；在编辑器中另选工作区仍会对该任务生效
 settings.default_workspace_last_used: 上次使用的工作区
@@ -1712,6 +1714,7 @@ git_panel.landing_onto: "正在合入 %{base}…"
 git_panel.landed: 已合入 %{base}
 git_panel.land_local_checkout: 此任务直接在项目检出目录中工作，没有需要合入的内容
 git_panel.already_landed: "%{base} 已包含此处的所有提交"
+git_panel.already_landed_commit_prompt: 如果尚未提交更改，请提交
 git_panel.land_conflict_description: 合入 %{base} 中途停止——冲突仍留在工作区中。
 git_panel.resolve_land_rebase_prompt: "此工作区变基到 `%{base}` 时因冲突而停止。请解决工作区中的冲突并运行 `git rebase --continue` 直至变基完成，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"
 git_panel.resolve_land_merge_prompt: "`%{base}` 合并到此工作区时因冲突而停止。请解决工作区中的冲突并完成合并，然后将 `%{base}` 快进到当前 HEAD 以完成合入：用 `git worktree list` 找到 `%{base}` 被签出的位置，在该处运行 `git -C <path> merge --ff-only HEAD`；若它未被任何工作区签出，则运行 `git branch -f %{base} HEAD`。不要在另一个检出中切换分支。"

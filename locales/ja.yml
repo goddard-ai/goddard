@@ -382,6 +382,8 @@ settings.conflict_handling_new_chat: 新しいチャットで解決
 settings.land_conflict_handling: 取り込みが競合したとき
 settings.land_conflict_handling_description: 解決プロンプトをチェックアウトを所有するチャットへ送信し、実行中のターンの後ろにキューします — 所有するセッションがないときは同期の設定が適用されます
 settings.conflict_handling_task_chat: タスクのチャットで解決
+settings.land_commit_reminder: 取り込むものがないときタスクにコミットを促す
+settings.land_commit_reminder_description: ベースがすべてのコミットをすでに含んでいると取り込みが報告したとき、チェックアウトを所有するタスクのチャットへコミットのリマインダーを送信します — 最後のメッセージがすでにコミットを挙げている場合は送信しません
 settings.default_workspace: デフォルトのワークスペース
 settings.default_workspace_description: 新しいタスクを開始するワークスペース。「前回使用したワークスペース」はプロジェクトごとに最後に選んだワークスペースを開きます。コンポーザーで別のワークスペースを選ぶとそのタスクにはそちらが適用されます
 settings.default_workspace_last_used: 前回使用したワークスペース
@@ -1760,6 +1762,7 @@ git_panel.landing_onto: "%{base} に取り込み中…"
 git_panel.landed: "%{base} に取り込みました"
 git_panel.land_local_checkout: このタスクはプロジェクトのチェックアウトで直接作業しています — 取り込むものはありません
 git_panel.already_landed: "%{base} にはすでにすべてのコミットが含まれています"
+git_panel.already_landed_commit_prompt: まだコミットしていない場合は、変更をコミットしてください
 git_panel.land_conflict_description: "%{base} への取り込みが途中で停止しました — 競合は作業ツリーに残っています。"
 git_panel.resolve_land_rebase_prompt: "このワークツリーの `%{base}` へのリベースが競合で停止しました。作業ツリーの競合を解決し、リベースが完了するまで `git rebase --continue` を実行してください。その後、`%{base}` をこの HEAD に fast-forward して取り込みを完了させてください：`git worktree list` で `%{base}` がチェックアウトされている場所を探し、そこで `git -C <path> merge --ff-only HEAD` を実行します。どこにもチェックアウトされていない場合は `git branch -f %{base} HEAD` を実行してください。その他のチェックアウトでブランチを切り替えないでください。"
 git_panel.resolve_land_merge_prompt: "`%{base}` のこのワークツリーへのマージが競合で停止しました。作業ツリーの競合を解決してマージを完了させてください。その後、`%{base}` をこの HEAD に fast-forward して取り込みを完了させてください：`git worktree list` で `%{base}` がチェックアウトされている場所を探し、そこで `git -C <path> merge --ff-only HEAD` を実行します。どこにもチェックアウトされていない場合は `git branch -f %{base} HEAD` を実行してください。その他のチェックアウトでブランチを切り替えないでください。"

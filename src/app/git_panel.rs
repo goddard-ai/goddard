@@ -1649,7 +1649,7 @@ impl Waku {
             ),
             SyncConflict::Pull { .. } => return false,
         };
-        let Some(session_id) = self.land_conflict_session(workspace) else {
+        let Some(session_id) = self.land_workspace_session(workspace) else {
             return false;
         };
         let prompt = sync_conflict_prompt(conflict);
@@ -1661,11 +1661,11 @@ impl Waku {
         true
     }
 
-    /// The session whose checkout a stopped land ran in — the selected one
-    /// first, then any started session bound to the path. An unstarted
-    /// session cannot have produced a conflict, and a quarantined one
-    /// cannot take the prompt.
-    fn land_conflict_session(&self, workspace: &Path) -> Option<Uuid> {
+    /// The session whose checkout a land ran in — the selected one first,
+    /// then any started session bound to the path. An unstarted session
+    /// cannot have produced land output, and a quarantined one cannot take
+    /// the prompt.
+    fn land_workspace_session(&self, workspace: &Path) -> Option<Uuid> {
         let owns = |session: &AgentSession| {
             session.has_started()
                 && !session.quarantined
@@ -1677,6 +1677,39 @@ impl Waku {
             .filter(|session| owns(session))
             .or_else(|| self.state.sessions.iter().find(|session| owns(session)))
             .map(|session| session.id)
+    }
+
+    /// The `auto_commit_reminder_on_land` follow-up to an `AlreadyLanded`
+    /// outcome: the base holding every commit usually means the task's work
+    /// is still uncommitted in the checkout. When the owning session's last
+    /// message already names a commit the reminder would be noise —
+    /// otherwise send the commit prompt, queued behind a running turn like
+    /// any follow-up.
+    fn remind_land_session_to_commit(&mut self, workspace: &Path, cx: &mut Context<Self>) {
+        let Some(session_id) = self.land_workspace_session(workspace) else {
+            return;
+        };
+        let names_commit = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.messages.last())
+            .is_some_and(|message| {
+                crate::md::render::contains_commit_reference(message.visible_content())
+                    || matches!(
+                        &message.notice,
+                        Some(TranscriptNotice::Landed { commits, .. }) if !commits.is_empty()
+                    )
+            });
+        if names_commit {
+            return;
+        }
+        self.submit_composer_submission_to(
+            session_id,
+            ComposerSubmission::plain(tr!("git_panel.already_landed_commit_prompt")),
+            cx,
+        );
     }
 
     /// Every panel operation lands here: drop the pending marker, apply the
@@ -1836,6 +1869,9 @@ impl Waku {
                         ToastTone::Notice,
                     );
                     self.mark_workspace_sessions_landed(&op.workspace, cx);
+                    if self.state.auto_commit_reminder_on_land {
+                        self.remind_land_session_to_commit(&op.workspace, cx);
+                    }
                     self.invalidate_workspace_queries(cx);
                 }
             },

@@ -1927,6 +1927,23 @@ impl Waku {
                 theme,
                 search,
             ),
+            setting_card(
+                tr!("settings.land_commit_reminder"),
+                tr!("settings.land_commit_reminder_description"),
+                toggle_switch(
+                    "land-commit-reminder-toggle",
+                    self.state.auto_commit_reminder_on_land,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.auto_commit_reminder_on_land;
+                        move |this, _, cx| this.set_auto_commit_reminder_on_land(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
         ]
         .into_iter()
         .flatten()
@@ -8646,6 +8663,15 @@ impl Waku {
             return;
         }
         self.state.auto_resolve_land_conflicts = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_auto_commit_reminder_on_land(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.auto_commit_reminder_on_land == enabled {
+            return;
+        }
+        self.state.auto_commit_reminder_on_land = enabled;
         self.save();
         cx.notify();
     }
