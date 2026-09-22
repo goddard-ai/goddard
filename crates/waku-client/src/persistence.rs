@@ -1455,6 +1455,11 @@ pub struct PersistedState {
     pub agent_tools_enabled: bool,
     #[serde(default = "default_agent_settings_enabled")]
     pub agent_settings_enabled: bool,
+    /// Whether the daemon's host refuses sleep so remote clients stay
+    /// reachable. Daemon-owned; mirrored here so clients can render the
+    /// toggle.
+    #[serde(default)]
+    pub keep_awake: bool,
     /// Experimental: whether sessions get named subagents injected. Daemon-
     /// owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
@@ -1638,6 +1643,7 @@ impl PersistedState {
             provider_binary_overrides: HashMap::new(),
             agent_tools_enabled: false,
             agent_settings_enabled: true,
+            keep_awake: false,
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
             project_map_enabled: default_experiment_enabled(),
@@ -1850,6 +1856,7 @@ impl PersistedState {
             provider_binary_overrides: self.provider_binary_overrides.clone(),
             agent_tools_enabled: self.agent_tools_enabled,
             agent_settings_enabled: self.agent_settings_enabled,
+            keep_awake: self.keep_awake,
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
             project_map_enabled: self.project_map_enabled,
@@ -1878,6 +1885,7 @@ impl PersistedState {
         self.provider_binary_overrides = settings.provider_binary_overrides;
         self.agent_tools_enabled = settings.agent_tools_enabled;
         self.agent_settings_enabled = settings.agent_settings_enabled;
+        self.keep_awake = settings.keep_awake;
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
         self.project_map_enabled = settings.project_map_enabled;

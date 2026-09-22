@@ -681,6 +681,10 @@ daemon.hide_qr:
   en: Hide
 daemon.security_warning:
   en: The token grants full access to tasks, files, Git, attachments, and coding agents on this machine. Use WSS through a trusted TLS proxy outside a private network.
+daemon.keep_awake_title:
+  en: Keep awake
+daemon.keep_awake_description:
+  en: Stop this machine from sleeping so the mobile and web apps can reach it. On AC power it stays awake even with the lid closed.
 daemon.external_title:
   en: External daemon
 daemon.external_description:

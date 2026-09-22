@@ -106,4 +106,12 @@ sandbox_default_enabled: boolean,
  * one-time resume delay against resident process memory. Runtimes
  * whose session is busy or cannot resume are never evicted.
  */
-runtime_idle_timeout_secs?: number | null, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+runtime_idle_timeout_secs?: number | null,
+/**
+ * Keep the daemon's host awake so remote clients — the mobile and web
+ * apps — can still reach it. While on, the daemon holds the platform
+ * sleep assertions `caffeinate -is` would: idle sleep is prevented on
+ * battery and AC, and on AC the host stays awake even with the lid
+ * closed. Off by default — it trades battery for reachability.
+ */
+keep_awake: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });

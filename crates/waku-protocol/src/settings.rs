@@ -94,6 +94,13 @@ pub struct DaemonSettings {
     /// whose session is busy or cannot resume are never evicted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_idle_timeout_secs: Option<u64>,
+    /// Keep the daemon's host awake so remote clients — the mobile and web
+    /// apps — can still reach it. While on, the daemon holds the platform
+    /// sleep assertions `caffeinate -is` would: idle sleep is prevented on
+    /// battery and AC, and on AC the host stays awake even with the lid
+    /// closed. Off by default — it trades battery for reachability.
+    #[serde(default)]
+    pub keep_awake: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -126,6 +133,7 @@ impl Default for DaemonSettings {
             sandbox_experiment_enabled: default_experiment_enabled(),
             sandbox_default_enabled: false,
             runtime_idle_timeout_secs: None,
+            keep_awake: false,
             extra: BTreeMap::new(),
         }
     }

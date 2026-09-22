@@ -1,0 +1,1 @@
+- New "Keep awake" toggle in Settings → Daemon: while on, the daemon holds the host's sleep assertions so the mobile and web apps stay reachable — on AC power the machine stays awake even with the lid closed

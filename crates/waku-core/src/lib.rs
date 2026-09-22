@@ -94,6 +94,7 @@ pub mod pairing;
 pub mod permission_review;
 pub mod persistence;
 pub mod pi_session;
+pub mod power;
 pub mod projectless;
 pub mod pull_requests;
 pub mod repo;

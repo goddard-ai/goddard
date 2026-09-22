@@ -171,6 +171,9 @@ pub struct WakuBackend {
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
     settings: Arc<DaemonSettingsStore>,
+    /// The host sleep assertion held while `DaemonSettings::keep_awake` is
+    /// on — released on drop or when the setting flips off.
+    wake: Mutex<Option<crate::power::SleepAssertion>>,
     /// MCP integrations: catalog state, the credential store, and the local
     /// proxy agents reach through `goddard_<id>` server entries.
     integrations: crate::integrations::IntegrationService,
@@ -274,6 +277,7 @@ impl WakuBackend {
                 task_store.clone(),
             ),
             settings,
+            wake: Mutex::new(None),
             integrations,
             task_store,
             task_state,
@@ -426,7 +430,23 @@ impl WakuBackend {
                     }),
                 });
         }
+        backend.apply_wake_setting();
         Ok(backend)
+    }
+
+    /// Acquire or release the host sleep assertion to match the stored
+    /// `keep_awake` flag. Runs at construction and after every settings
+    /// write that can carry the flag.
+    fn apply_wake_setting(&self) {
+        let enabled = self.settings.get().keep_awake;
+        let mut wake = self.wake.lock();
+        if enabled != wake.is_some() {
+            *wake = enabled.then(|| {
+                crate::power::SleepAssertion::acquire(
+                    "Goddard keeps this host awake so connected devices stay reachable",
+                )
+            });
+        }
     }
 
     /// Record the daemon's bound address for `GODDARD_DAEMON_ADDRESS`
@@ -1292,6 +1312,7 @@ impl Backend for WakuBackend {
             }
             Command::UpdateSettings { settings } => {
                 self.settings.replace(settings)?;
+                self.apply_wake_setting();
                 events.settings_changed(self.settings.get());
                 Ok(ResponsePayload::Ack)
             }

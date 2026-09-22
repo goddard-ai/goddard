@@ -260,6 +260,8 @@ daemon.qr_hint: 使用 Goddard 移动应用扫码连接。
 daemon.show_qr: 显示二维码
 daemon.hide_qr: 隐藏
 daemon.security_warning: 此令牌可完全访问本机上的任务、文件、Git、附件和编程智能体。在私有网络之外请通过受信任的 TLS 代理使用 WSS。
+daemon.keep_awake_title: 保持唤醒
+daemon.keep_awake_description: 防止本机睡眠，让移动应用和 Web 应用保持可连接。接通电源时即使合上盖子也不会睡眠。
 daemon.external_title: 外部守护进程
 daemon.external_description: 此桌面应用连接到由 Goddard 之外管理的守护进程。请在对应主机上配置监听地址、浏览器来源和令牌。
 daemon.web_external_description: Goddard Web 连接到由浏览器之外管理的守护进程。请在对应主机上配置监听地址、浏览器来源和令牌。

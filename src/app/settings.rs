@@ -3125,6 +3125,7 @@ impl Waku {
     fn render_daemon_settings(&self, search: &SettingSearch, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let agent_tools_card = self.agent_tools_card(theme, search, cx);
+        let keep_awake_card = self.keep_awake_card(theme, search, cx);
         let agent_settings_card = self.agent_settings_card(theme, search, cx);
         let sandbox_default_card = self.sandbox_default_card(theme, search, cx);
         let remote_hosts_card = self.render_remote_hosts_card(theme, search, cx);
@@ -3151,6 +3152,7 @@ impl Waku {
                 .gap(px(12.0))
                 .children(remote_hosts_card)
                 .children(external_card)
+                .children(keep_awake_card)
                 .children(agent_tools_card)
                 .children(agent_settings_card)
                 .children(sandbox_default_card)
@@ -3798,6 +3800,7 @@ impl Waku {
             .children(connection_card)
             .children(credentials_card)
             .children(remote_hosts_card)
+            .children(keep_awake_card)
             .children(agent_tools_card)
             .children(agent_settings_card)
             .children(sandbox_default_card)
@@ -4678,6 +4681,48 @@ impl Waku {
 
     fn set_agent_tools_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.agent_tools_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The daemon-scoped Caffeine switch: while on, the daemon holds the
+    /// host's sleep assertions so the mobile and web apps can still connect.
+    fn keep_awake_card(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let enabled = self.state.keep_awake;
+        let title = tr!("daemon.keep_awake_title");
+        let description = tr!("daemon.keep_awake_description");
+        let matched = search.matched(&title, &description)?;
+        let toggle = toggle_switch(
+            "keep-awake-toggle",
+            enabled,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| this.set_keep_awake(!enabled, cx),
+        );
+        Some(
+            div()
+                .min_h(px(66.0))
+                .px(px(20.0))
+                .py(px(13.0))
+                .rounded(px(16.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .gap(px(24.0))
+                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(toggle)
+                .into_any_element(),
+        )
+    }
+
+    fn set_keep_awake(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.keep_awake = enabled;
         self.save();
         cx.notify();
     }
