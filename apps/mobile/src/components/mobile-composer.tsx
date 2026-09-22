@@ -586,12 +586,12 @@ export function MobileComposer({
                 onPress={() => void stop()}
                 style={({ pressed }) => [
                   styles.sendButton,
-                  { backgroundColor: theme.dangerSoft, opacity: pressed ? 0.55 : 1 },
+                  { backgroundColor: '#000000', opacity: pressed ? 0.55 : 1 },
                 ]}>
                 <AppSymbol
                   name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
                   size={14}
-                  tintColor={theme.danger}
+                  tintColor="#ffffff"
                 />
               </Pressable>
             )}
