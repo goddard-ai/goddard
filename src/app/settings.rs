@@ -5839,18 +5839,18 @@ impl Waku {
         let class_rows = [
             (
                 TaskClass::Routine,
-                tr!("routing.class_routine"),
-                tr!("routing.class_routine_description"),
+                tr!("routing.class_easy"),
+                tr!("routing.class_easy_description"),
             ),
             (
                 TaskClass::General,
-                tr!("routing.class_general"),
-                tr!("routing.class_general_description"),
+                tr!("routing.class_medium"),
+                tr!("routing.class_medium_description"),
             ),
             (
                 TaskClass::Demanding,
-                tr!("routing.class_demanding"),
-                tr!("routing.class_demanding_description"),
+                tr!("routing.class_hard"),
+                tr!("routing.class_hard_description"),
             ),
         ];
         let class_row_elements: Vec<Option<AnyElement>> = class_rows

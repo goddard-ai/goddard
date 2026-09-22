@@ -2256,12 +2256,12 @@ right_panel.side_chat_unavailable: サイドチャットを利用できません
 right_panel.side_chat_unavailable_description: チャットは親タスクとともに削除されたか、このタブから閉じられました
 routing.backend: 評価バックエンド
 routing.backend_description: 各タスクの最初のプロンプトを分類するサービスです。3 つとも同じ型付きの評価質問に回答します。違いは認証情報だけです。
-routing.class_demanding: 要求の高いタスク
-routing.class_demanding_description: 繊細で重要度が高い、または長期の作業 — 最強の組み合わせに振り分けます。
-routing.class_general: 一般的なタスク
-routing.class_general_description: 堅実なモデルの恩恵がある通常のタスク — デフォルトのクラスです。
-routing.class_routine: 定型タスク
-routing.class_routine_description: 機械的、低リスク、または単一ステップの作業 — 安く速く振り分けます。
+routing.class_hard: 難しい
+routing.class_hard_description: 繊細で重要度が高い、または長期の作業 — 最強の組み合わせに振り分けます。
+routing.class_medium: 中程度
+routing.class_medium_description: 堅実なモデルの恩恵がある通常のタスク — デフォルトのクラスです。
+routing.class_easy: 簡単
+routing.class_easy_description: 機械的、低リスク、または単一ステップの作業 — 安く速く振り分けます。
 routing.cloudflare_account: アカウント ID
 routing.cloudflare_account_description: Workers AI の評価バインディングを所有する Cloudflare アカウントです。
 routing.cloudflare_account_placeholder: Cloudflare アカウント ID

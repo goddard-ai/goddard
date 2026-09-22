@@ -2207,12 +2207,12 @@ right_panel.side_chat_unavailable: 侧聊不可用
 right_panel.side_chat_unavailable_description: 该聊天已随其父任务删除，或已在此标签页中关闭
 routing.backend: 评估后端
 routing.backend_description: 对每个任务首条提示词进行分类的服务。三者回答同一套类型化评估问题，仅凭据不同。
-routing.class_demanding: 高要求任务
-routing.class_demanding_description: 微妙、高风险或长周期的工作 — 路由到最强的组合。
-routing.class_general: 普通任务
-routing.class_general_description: 适合稳定模型的普通任务 — 默认类别。
-routing.class_routine: 常规任务
-routing.class_routine_description: 机械、低风险或单步骤的工作 — 路由到便宜快速的组合。
+routing.class_hard: 困难
+routing.class_hard_description: 微妙、高风险或长周期的工作 — 路由到最强的组合。
+routing.class_medium: 中等
+routing.class_medium_description: 适合稳定模型的普通任务 — 默认类别。
+routing.class_easy: 简单
+routing.class_easy_description: 机械、低风险或单步骤的工作 — 路由到便宜快速的组合。
 routing.cloudflare_account: 账户 ID
 routing.cloudflare_account_description: 拥有 Workers AI 评估绑定的 Cloudflare 账户。
 routing.cloudflare_account_placeholder: Cloudflare 账户 ID

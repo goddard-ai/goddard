@@ -12,19 +12,21 @@ use ts_rs::TS;
 use crate::eval::EvalBackend;
 use crate::model::ProviderKind;
 
-/// How much of a model the task deserves. `general` is the unmarked middle;
-/// `routine` routes cheap/fast, `demanding` routes to the strongest model.
+/// Difficulty tier for automatic model routing: easy, medium, or hard.
 #[derive(
     Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, TS,
 )]
 #[serde(rename_all = "camelCase")]
 pub enum TaskClass {
     /// Mechanical, low-risk, or single-step work.
+    #[serde(rename = "easy", alias = "routine")]
     Routine,
     /// The default: ordinary tasks that benefit from a solid model.
     #[default]
+    #[serde(rename = "medium", alias = "general")]
     General,
     /// Subtle, high-stakes, or long-horizon work where mistakes are costly.
+    #[serde(rename = "hard", alias = "demanding")]
     Demanding,
 }
 
@@ -36,9 +38,9 @@ impl TaskClass {
     /// The stable id the classifier answers with and the class map keys on.
     pub fn id(&self) -> &'static str {
         match self {
-            TaskClass::Routine => "routine",
-            TaskClass::General => "general",
-            TaskClass::Demanding => "demanding",
+            TaskClass::Routine => "easy",
+            TaskClass::General => "medium",
+            TaskClass::Demanding => "hard",
         }
     }
 }

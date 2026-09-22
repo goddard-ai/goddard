@@ -27,10 +27,10 @@ pub struct RouteRun {
     pub record: EvalDecisionRecord,
 }
 
-const CLASS_INSTRUCTIONS: &str = "How much model does this task deserve? routine is mechanical, \
-low-risk, or single-step work where a fast cheap model suffices. demanding is subtle, high-stakes, \
-or long-horizon work where mistakes are costly. general is the unmarked middle — pick it when the \
-task is ordinary or the choice is unclear.";
+const CLASS_INSTRUCTIONS: &str = "How difficult is this task? easy is mechanical, low-risk, or \
+single-step work where a fast cheap model suffices. hard is subtle, high-stakes, or long-horizon \
+work where mistakes are costly. medium is the middle — pick it when the task is ordinary or the \
+choice is unclear.";
 
 /// The class answer must clear this confidence before it routes; below it
 /// the session keeps the default route.
@@ -131,15 +131,15 @@ pub fn routing_questions() -> BTreeMap<String, EvalQuestion> {
             instructions: CLASS_INSTRUCTIONS.to_owned(),
             criteria: BTreeMap::from([
                 (
-                    "routine".to_owned(),
+                    "easy".to_owned(),
                     Some("mechanical, low-risk, or single-step work".to_owned()),
                 ),
                 (
-                    "general".to_owned(),
+                    "medium".to_owned(),
                     Some("ordinary work; the default".to_owned()),
                 ),
                 (
-                    "demanding".to_owned(),
+                    "hard".to_owned(),
                     Some("subtle, high-stakes, or long-horizon work".to_owned()),
                 ),
             ]),

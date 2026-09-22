@@ -861,17 +861,17 @@ routing.connection_ok:
   en: "Connected — %{model} answered in %{latency} ms"
 routing.connection_failed:
   en: "Connection failed: %{error}"
-routing.class_routine:
-  en: Routine tasks
-routing.class_routine_description:
+routing.class_easy:
+  en: Easy
+routing.class_easy_description:
   en: Mechanical, low-risk, or single-step work — routed cheap and fast.
-routing.class_general:
-  en: General tasks
-routing.class_general_description:
+routing.class_medium:
+  en: Medium
+routing.class_medium_description:
   en: Ordinary tasks that benefit from a solid model — the default class.
-routing.class_demanding:
-  en: Demanding tasks
-routing.class_demanding_description:
+routing.class_hard:
+  en: Hard
+routing.class_hard_description:
   en: Subtle, high-stakes, or long-horizon work — routed to the strongest combo.
 routing.providers:
   en: Providers
