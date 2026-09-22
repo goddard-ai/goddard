@@ -173,7 +173,9 @@ impl DefaultWorkspace {
 }
 
 /// One of the bundled sounds the desktop can play when a task the user is
-/// not looking at finishes its turn.
+/// not looking at finishes its turn. `Crystal` is reserved for starred
+/// projects' completions — it plays in place of the configured sound and is
+/// not a picker choice.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompletionSound {
@@ -183,6 +185,7 @@ pub enum CompletionSound {
     Bubble,
     Chime,
     Retro,
+    Crystal,
 }
 
 impl CompletionSound {
@@ -202,6 +205,7 @@ impl CompletionSound {
             Self::Bubble => "Bubble",
             Self::Chime => "Chime",
             Self::Retro => "Retro",
+            Self::Crystal => "Crystal",
         }
     }
 }
@@ -323,6 +327,10 @@ fn resolve_last_environment(
 
 fn default_completion_sound_volume() -> f32 {
     DEFAULT_COMPLETION_SOUND_VOLUME
+}
+
+fn default_starred_completion_sound() -> bool {
+    true
 }
 
 fn default_sidebar_width() -> f32 {
@@ -893,6 +901,9 @@ pub struct AppSettings {
     /// Whether a session blocked on a permission or a question sends an OS
     /// notification while the app is in the background.
     pub notify_waiting_input: bool,
+    /// A task in a starred project plays `CompletionSound::Crystal` instead
+    /// of `completion_sound` when it finishes its turn.
+    pub starred_completion_sound: bool,
     /// User-owned terminal commands surfaced in the command palette.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
@@ -997,6 +1008,7 @@ impl Default for AppSettings {
             completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             notify_turn_finished: default_notification_enabled(),
             notify_waiting_input: default_notification_enabled(),
+            starred_completion_sound: true,
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -1401,6 +1413,8 @@ pub struct PersistedState {
     pub notify_turn_finished: bool,
     #[serde(default = "default_notification_enabled")]
     pub notify_waiting_input: bool,
+    #[serde(default = "default_starred_completion_sound")]
+    pub starred_completion_sound: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental feature opt-ins from the Experiments settings page.
@@ -1730,6 +1744,7 @@ impl PersistedState {
             completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             notify_turn_finished: default_notification_enabled(),
             notify_waiting_input: default_notification_enabled(),
+            starred_completion_sound: true,
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -2094,6 +2109,7 @@ impl PersistedState {
             completion_sound_volume: self.completion_sound_volume,
             notify_turn_finished: self.notify_turn_finished,
             notify_waiting_input: self.notify_waiting_input,
+            starred_completion_sound: self.starred_completion_sound,
             custom_commands: self.custom_commands.clone(),
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
@@ -2206,6 +2222,7 @@ impl PersistedState {
             sanitized_completion_sound_volume(settings.completion_sound_volume);
         self.notify_turn_finished = settings.notify_turn_finished;
         self.notify_waiting_input = settings.notify_waiting_input;
+        self.starred_completion_sound = settings.starred_completion_sound;
         self.custom_commands = settings.custom_commands;
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;

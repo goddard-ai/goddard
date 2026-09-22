@@ -1291,6 +1291,10 @@ settings.waiting_input_notification:
   en: Waiting for input
 settings.waiting_input_notification_description:
   en: Send a system notification when a task in the background is blocked on your approval or a question
+settings.completion_sound_starred:
+  en: Distinct sound for starred projects
+settings.completion_sound_starred_description:
+  en: Play a different sound when a task in a starred project finishes its turn
 settings.theme_system:
   en: System
 settings.theme_light:
@@ -1348,6 +1352,10 @@ a11y.draft_edit:
 
 common.checking:
   en: Checking…
+common.star:
+  en: Star
+common.unstar:
+  en: Unstar
 common.refresh:
   en: Refresh
 common.recheck:

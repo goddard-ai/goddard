@@ -5963,7 +5963,7 @@ impl Waku {
                         .filter(|project| !project.is_projectless())
                         .filter(|project| Some(project.id) != subject_project_id),
                 )
-                .map(|project| (project.id, project.display_name()))
+                .map(|project| (project.id, project.display_name(), project.starred))
                 .collect::<Vec<_>>();
             let weak = cx.entity().downgrade();
             dropdown_menu(
@@ -5975,8 +5975,9 @@ impl Waku {
                     let mut items = project_options
                         .clone()
                         .into_iter()
-                        .map(|(project_id, project_name)| {
+                        .map(|(project_id, project_name, starred)| {
                             let weak = weak.clone();
+                            let star_weak = weak.clone();
                             MenuItem::new(project_name, move |window, cx| {
                                 if Some(project_id) != subject_project_id {
                                     let _ = weak.update(cx, |this, cx| {
@@ -5985,6 +5986,11 @@ impl Waku {
                                 }
                             })
                             .selected(Some(project_id) == subject_project_id)
+                            .star(starred, move |_, cx| {
+                                let _ = star_weak.update(cx, |this, cx| {
+                                    this.toggle_project_starred(project_id, cx);
+                                });
+                            })
                         })
                         .collect::<Vec<_>>();
                     if !items.is_empty() {

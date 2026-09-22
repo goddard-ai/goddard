@@ -1,0 +1,1 @@
+- Projects can be starred from the New task project picker. A starred project's tasks lead ⌘D navigation — even ahead of unread completions elsewhere — and its group sits at the top of the sidebar's Project grouping; ⌘D shows a star next to the bell when it will land on one, and an off-screen starred completion plays a distinct sound (toggleable in Settings → Sounds).

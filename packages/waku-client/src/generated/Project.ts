@@ -16,4 +16,10 @@ created_at: number,
  * references them; `false` for every project persisted before the flag
  * existed.
  */
-temporary: boolean, };
+temporary: boolean,
+/**
+ * Starred projects lead the ⌘D next-completion navigation — even an
+ * already-seen idle task in one outranks an unread completion elsewhere —
+ * and hoist above unstarred projects in the sidebar's Project grouping.
+ */
+starred: boolean, };

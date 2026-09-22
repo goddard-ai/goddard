@@ -1323,7 +1323,7 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at, bookmark, temporary FROM projects ORDER BY position")
+            .prepare("SELECT id, name, path, created_at, bookmark, temporary, starred FROM projects ORDER BY position")
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1334,20 +1334,24 @@ impl StateStore {
                     row.get::<_, i64>(3)?,
                     row.get::<_, Option<Vec<u8>>>(4)?,
                     row.get::<_, bool>(5)?,
+                    row.get::<_, bool>(6)?,
                 ))
             })
             .map_err(to_io_error)?
             .filter_map(Result::ok)
-            .filter_map(|(id, name, path, created_at, bookmark, temporary)| {
-                Some(Project {
-                    id: Uuid::parse_str(&id).ok()?,
-                    name,
-                    path: PathBuf::from(path),
-                    bookmark,
-                    created_at: created_at as u64,
-                    temporary,
-                })
-            })
+            .filter_map(
+                |(id, name, path, created_at, bookmark, temporary, starred)| {
+                    Some(Project {
+                        id: Uuid::parse_str(&id).ok()?,
+                        name,
+                        path: PathBuf::from(path),
+                        bookmark,
+                        created_at: created_at as u64,
+                        temporary,
+                        starred,
+                    })
+                },
+            )
             .collect();
         drop(projects);
 
@@ -1590,7 +1594,8 @@ impl StateStore {
                             project.bookmark,
                             position as i64,
                             project.created_at as i64,
-                            project.temporary
+                            project.temporary,
+                            project.starred
                         ],
                     )
                     .map_err(to_io_error)?;
@@ -2105,15 +2110,16 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          side_chat_of  = excluded.side_chat_of";
 
 const INSERT_PROJECT: &str =
-    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
          bookmark   = excluded.bookmark,
          position   = excluded.position,
          created_at = excluded.created_at,
-         temporary  = excluded.temporary";
+         temporary  = excluded.temporary,
+         starred    = excluded.starred";
 
 /// The transcript, written alongside the list row it belongs to.
 const UPSERT_SESSION_DETAIL: &str = "INSERT INTO session_details(session_id, data)
@@ -2512,6 +2518,7 @@ mod tests {
         let directory = temporary_directory();
         let store = store_in(&directory);
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/some project"));
+        state.projects[0].starred = true;
         let project = state.projects[0].clone();
         assert!(project.created_at > 0, "a new project is dated");
         store.save(&mut state).unwrap();
@@ -2534,6 +2541,7 @@ mod tests {
         assert_eq!(restored.projects[0].name, project.name);
         assert_eq!(restored.projects[0].path, project.path);
         assert_eq!(restored.projects[0].created_at, project.created_at);
+        assert!(restored.projects[0].starred);
 
         fs::remove_dir_all(directory).ok();
     }

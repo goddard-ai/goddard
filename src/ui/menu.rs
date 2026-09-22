@@ -103,6 +103,17 @@ use crate::theme::{Theme, hairline, sheen_top, sp};
 use crate::ui::icon;
 use crate::ui::motion;
 use crate::ui::shortcut::ShortcutHint;
+use crate::ui::tooltip::Tooltip;
+
+/// A trailing star toggle on an entry row — a picker's "favorite this
+/// choice" affordance. The rendered button is the mouse path; `right` on
+/// the highlighted row toggles it for keyboard users without picking.
+#[derive(Clone)]
+pub struct MenuStar {
+    pub starred: bool,
+    #[allow(clippy::type_complexity)]
+    pub on_toggle: Rc<dyn Fn(&mut Window, &mut App)>,
+}
 
 /// One row of a menu.
 #[derive(Clone)]
@@ -120,6 +131,9 @@ pub enum MenuItem {
         disabled: bool,
         /// Right-aligned shortcut hint, resolved at render.
         shortcut: Option<ShortcutHint>,
+        /// A trailing star button; toggling it never picks or dismisses the
+        /// row.
+        star: Option<MenuStar>,
         #[allow(clippy::type_complexity)]
         on_click: Rc<dyn Fn(&mut Window, &mut App)>,
         /// Runs when the row becomes the highlighted choice — hovered onto or
@@ -162,6 +176,7 @@ impl MenuItem {
             selected: false,
             disabled: false,
             shortcut: None,
+            star: None,
             on_click: Rc::new(on_click),
             on_highlight: None,
         }
@@ -257,6 +272,22 @@ impl MenuItem {
         self
     }
 
+    /// A trailing star toggle on the row — the mouse path is the rendered
+    /// button; `right` on the highlighted row toggles it for keyboard users.
+    pub fn star(
+        mut self,
+        starred: bool,
+        on_toggle: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        if let Self::Entry { star, .. } = &mut self {
+            *star = Some(MenuStar {
+                starred,
+                on_toggle: Rc::new(on_toggle),
+            });
+        }
+        self
+    }
+
     fn is_focusable(&self) -> bool {
         match self {
             Self::Entry { disabled, .. } => !disabled,
@@ -276,6 +307,17 @@ impl MenuItem {
             Self::Entry { disabled: true, .. } => None,
             Self::Custom { on_click, .. } => on_click,
             Self::Submenu { .. } | Self::Header(_) | Self::Separator => None,
+        }
+    }
+
+    fn star_handler(&self) -> Option<Rc<dyn Fn(&mut Window, &mut App)>> {
+        match self {
+            Self::Entry {
+                disabled: false,
+                star: Some(star),
+                ..
+            } => Some(star.on_toggle.clone()),
+            _ => None,
         }
     }
 
@@ -1396,6 +1438,7 @@ fn render_menu_item(
             selected,
             disabled,
             shortcut,
+            star,
             on_click,
             on_highlight,
         } => {
@@ -1431,6 +1474,9 @@ fn render_menu_item(
             })
             .when(selected, |element| {
                 element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+            })
+            .when_some(star, |element, star| {
+                element.child(menu_star_button(index, star, theme, handle.clone()))
             });
             track_pointer_highlight(entry, index, in_submenu, disabled, handle, on_highlight)
                 .into_any_element()
@@ -1600,6 +1646,59 @@ fn swallow_held_release(handle: &ContextMenuHandle, event: &MouseUpEvent, cx: &m
     if handle.held_release(event).is_some() {
         cx.stop_propagation();
     }
+}
+
+/// An entry row's star toggle. Its press is swallowed so pointing at the
+/// star never picks the row, and a release left over from a drag-opened
+/// menu is swallowed too — it would otherwise read as a pick on the row
+/// beneath it.
+#[allow(clippy::type_complexity)]
+fn menu_star_button(
+    index: usize,
+    star: MenuStar,
+    theme: &Theme,
+    handle: ContextMenuHandle,
+) -> gpui::Stateful<gpui::Div> {
+    let starred = star.starred;
+    let tooltip_label = if starred {
+        tr!("common.unstar")
+    } else {
+        tr!("common.star")
+    };
+    let up_handle = handle;
+    div()
+        .id(SharedString::from(format!("menu-star-{index}")))
+        .flex_none()
+        .size(px(20.0))
+        .rounded(px(6.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_default()
+        .hover(move |element| element.bg(theme.overlay_strong))
+        .tooltip(Tooltip::text(tooltip_label))
+        .child(icon(
+            if starred {
+                "icons/star-filled.svg"
+            } else {
+                "icons/star.svg"
+            },
+            12.0,
+            if starred {
+                theme.favorite
+            } else {
+                theme.text_ghost
+            },
+        ))
+        .on_mouse_down(MouseButton::Left, move |_, _, cx| cx.stop_propagation())
+        .on_mouse_up(MouseButton::Left, move |event, _, cx| {
+            swallow_held_release(&up_handle, event, cx);
+            cx.stop_propagation();
+        })
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            (star.on_toggle)(window, cx);
+        })
 }
 
 /// The shared row: consistent insets, plus hover, keyboard highlight and
@@ -1814,6 +1913,15 @@ fn on_menu_key(
                 state.submenu_focused = true;
                 window.refresh();
             }
+            item if key == "right" => {
+                // `right` already opens a submenu above; on an entry it
+                // toggles the row's star — a press that must not pick the
+                // row or close the menu.
+                if let Some(on_toggle) = item.star_handler() {
+                    on_toggle(window, cx);
+                    window.refresh();
+                }
+            }
             item if matches!(key, "enter" | "space") => {
                 if let Some(on_click) = item.click_handler() {
                     handle.close(window, cx);
@@ -1856,6 +1964,12 @@ mod tests {
     struct SubmenuHarness {
         handle: ContextMenuHandle,
         activated: Rc<Cell<bool>>,
+    }
+
+    struct StarHarness {
+        handle: ContextMenuHandle,
+        toggled: Rc<Cell<bool>>,
+        picked: Rc<Cell<bool>>,
     }
 
     struct HighlightHarness {
@@ -2049,6 +2163,29 @@ mod tests {
                             })]
                         },
                     )]
+                },
+            )
+        }
+    }
+
+    impl Render for StarHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let toggled = self.toggled.clone();
+            let picked = self.picked.clone();
+            dropdown_menu(
+                div().w(px(120.0)).h(px(32.0)),
+                "star-dropdown",
+                &self.handle,
+                MenuAlign::BelowLeft,
+                move |_| {
+                    let toggled = toggled.clone();
+                    vec![
+                        MenuItem::new("Entry", {
+                            let picked = picked.clone();
+                            move |_, _| picked.set(true)
+                        })
+                        .star(false, move |_, _| toggled.set(true)),
+                    ]
                 },
             )
         }
@@ -2385,6 +2522,33 @@ mod tests {
 
         assert!(activated.get());
         assert!(!handle.is_open());
+    }
+
+    #[gpui::test]
+    fn right_arrow_toggles_a_row_star_without_picking(cx: &mut TestAppContext) {
+        let handle = cx.update(ContextMenuHandle::new);
+        let toggled = Rc::new(Cell::new(false));
+        let picked = Rc::new(Cell::new(false));
+        let harness = StarHarness {
+            handle: handle.clone(),
+            toggled: toggled.clone(),
+            picked: picked.clone(),
+        };
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+
+        cx.simulate_mouse_down(
+            point(px(10.0), px(10.0)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        cx.run_until_parked();
+        cx.update(|window, cx| window.focus(&handle.focus, cx));
+        cx.simulate_keystrokes("down");
+        cx.simulate_keystrokes("right");
+
+        assert!(toggled.get());
+        assert!(!picked.get());
+        assert!(handle.is_open(), "a star toggle must not dismiss the menu");
     }
 
     #[gpui::test]

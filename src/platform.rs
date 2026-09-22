@@ -284,15 +284,17 @@ fn completion_sound_data(sound: waku_client::persistence::CompletionSound) -> &'
         CompletionSound::Bubble => include_bytes!("../assets/sounds/bubble.mp3").as_slice(),
         CompletionSound::Chime => include_bytes!("../assets/sounds/chime.mp3").as_slice(),
         CompletionSound::Retro => include_bytes!("../assets/sounds/retro.mp3").as_slice(),
+        CompletionSound::Crystal => include_bytes!("../assets/sounds/crystal.mp3").as_slice(),
     }
 }
 
 /// Per-sound loudness compensation, multiplied with the user's volume so the
-/// bundled set lands at a comparable level. Retro's recording runs hot.
+/// bundled set lands at a comparable level. Retro and Crystal run hot.
 #[cfg(target_os = "macos")]
 fn completion_sound_gain(sound: waku_client::persistence::CompletionSound) -> f32 {
     match sound {
-        waku_client::persistence::CompletionSound::Retro => 0.5,
+        waku_client::persistence::CompletionSound::Retro
+        | waku_client::persistence::CompletionSound::Crystal => 0.5,
         _ => 1.0,
     }
 }

@@ -2102,11 +2102,33 @@ impl Waku {
                             )
                     })
                 };
+                let starred_row = if !enabled {
+                    None
+                } else {
+                    let starred_sound = self.state.starred_completion_sound;
+                    settings_row(
+                        tr!("settings.completion_sound_starred"),
+                        tr!("settings.completion_sound_starred_description"),
+                        toggle_switch(
+                            "completion-sound-starred-toggle",
+                            starred_sound,
+                            false,
+                            theme,
+                            cx,
+                            move |this, _, cx| {
+                                this.set_starred_completion_sound(!starred_sound, cx)
+                            },
+                        ),
+                        theme,
+                        search,
+                    )
+                };
                 settings_row_card(
                     vec![
                         toggle_row,
                         sound_row.map(|row| row.into_any_element()),
                         volume_row.map(|row| row.into_any_element()),
+                        starred_row,
                     ],
                     theme,
                 )
@@ -2363,6 +2385,15 @@ impl Waku {
         }
         // Picking from the menu previews the sound.
         crate::platform::play_completion_sound(sound, self.state.completion_sound_volume);
+        cx.notify();
+    }
+
+    fn set_starred_completion_sound(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.starred_completion_sound == enabled {
+            return;
+        }
+        self.state.starred_completion_sound = enabled;
+        self.save();
         cx.notify();
     }
 

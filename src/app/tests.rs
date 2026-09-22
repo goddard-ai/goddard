@@ -7,7 +7,9 @@ use super::composer::{
     visible_branch_entries, workspace_subject_for,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
-use super::sessions::{next_idle_session, next_non_busy_session, next_unread_completion};
+use super::sessions::{
+    next_attention_target, next_idle_session, next_non_busy_session, next_unread_completion,
+};
 use super::settings::{filter_archived_sessions, visible_settings_pages};
 use super::sidebar::SidebarRow;
 use super::streaming::session_accepts_steer_result;
@@ -37,7 +39,7 @@ use super::{
 use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, Checkpoint, CheckpointFile, CheckpointStatus,
-    DriverEvent, Message, MessageAttachment, MessageRole, ProviderKind, QueuedMessage,
+    DriverEvent, Message, MessageAttachment, MessageRole, Project, ProviderKind, QueuedMessage,
     ReasoningBlock, RuntimeEventCursor, SessionStatus, SessionWorkspace, TranscriptBlock,
     TurnStatus, UserInputOption, UserInputQuestion,
 };
@@ -890,23 +892,31 @@ fn next_unread_completion_returns_the_topmost_unread_row() {
     // never matter.
     for selected in [None, Some(second), Some(third)] {
         assert_eq!(
-            next_unread_completion(&sessions, &unseen, &rows, selected, None, None),
+            next_unread_completion(&sessions, &unseen, &rows, selected, None, None, None),
             Some(first)
         );
     }
     // The selected session never targets itself, even while unread.
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, Some(first), None, None),
+        next_unread_completion(&sessions, &unseen, &rows, Some(first), None, None, None),
         Some(third)
     );
     // A pending activation is treated as on-screen too.
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, Some(third), Some(first), None),
+        next_unread_completion(
+            &sessions,
+            &unseen,
+            &rows,
+            Some(third),
+            Some(first),
+            None,
+            None
+        ),
         None
     );
     // No candidates: the caller falls to the idle rotation.
     assert_eq!(
-        next_unread_completion(&sessions, &HashMap::new(), &rows, None, None, None),
+        next_unread_completion(&sessions, &HashMap::new(), &rows, None, None, None, None),
         None
     );
 }
@@ -936,21 +946,29 @@ fn next_unread_completion_lets_pinned_rows_lead_by_position() {
     let unseen = HashMap::from([(pinned_bottom, 100), (below, 400)]);
     for selected in [None, Some(current), Some(below)] {
         assert_eq!(
-            next_unread_completion(&sessions, &unseen, &rows, selected, None, None),
+            next_unread_completion(&sessions, &unseen, &rows, selected, None, None, None),
             Some(pinned_bottom)
         );
     }
     // Two unread pinned tasks take their sidebar order.
     let both_pinned = HashMap::from([(pinned_top, 50), (pinned_bottom, 500)]);
     assert_eq!(
-        next_unread_completion(&sessions, &both_pinned, &rows, None, None, None),
+        next_unread_completion(&sessions, &both_pinned, &rows, None, None, None, None),
         Some(pinned_top)
     );
     // A blocked pinned task counts as unread too.
     let mut sessions = sessions;
     sessions[0].status = SessionStatus::Waiting;
     assert_eq!(
-        next_unread_completion(&sessions, &HashMap::new(), &rows, Some(current), None, None),
+        next_unread_completion(
+            &sessions,
+            &HashMap::new(),
+            &rows,
+            Some(current),
+            None,
+            None,
+            None
+        ),
         Some(pinned_top)
     );
 }
@@ -980,7 +998,7 @@ fn next_unread_completion_skips_ineligible_sessions() {
         (settled_id, 100),
     ]);
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, None, None, None),
+        next_unread_completion(&sessions, &unseen, &rows, None, None, None, None),
         Some(settled_id)
     );
 
@@ -1001,7 +1019,7 @@ fn next_unread_completion_skips_ineligible_sessions() {
     ];
     let queued_only = HashMap::from([(queued_id, 300), (blocked_id, 400)]);
     assert_eq!(
-        next_unread_completion(&sessions, &queued_only, &rows, None, None, None),
+        next_unread_completion(&sessions, &queued_only, &rows, None, None, None, None),
         None
     );
 }
@@ -1027,19 +1045,19 @@ fn next_unread_completion_skips_chain_seen_sessions() {
     // The ⌘⇧D chain and the departure fallback pass a seen row over for the
     // next genuinely unread one, even though it sits higher in the sidebar.
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, None, None, Some(&sweep)),
+        next_unread_completion(&sessions, &unseen, &rows, None, None, Some(&sweep), None),
         Some(unread)
     );
     // With every unread row seen there is no unread target, so the caller
     // falls to the idle rotation.
     let only_seen = HashMap::from([(seen, 100)]);
     assert_eq!(
-        next_unread_completion(&sessions, &only_seen, &rows, None, None, Some(&sweep)),
+        next_unread_completion(&sessions, &only_seen, &rows, None, None, Some(&sweep), None),
         None
     );
     // ⌘D proper keeps seen rows as candidates.
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, None, None, None),
+        next_unread_completion(&sessions, &unseen, &rows, None, None, None, None),
         Some(seen)
     );
 }
@@ -1067,22 +1085,22 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
 
     // ⌘⇧D's jump: below the marked session's row, busy rows skipped.
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(top), None, 1, None),
+        next_non_busy_session(&sessions, &rows, Some(top), None, 1, None, None),
         Some(middle)
     );
     // It wraps to the top at the bottom of the list — including rows above
     // the anchor — but never lands on the selected session itself.
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(bottom), None, 4, None),
+        next_non_busy_session(&sessions, &rows, Some(bottom), None, 4, None, None),
         Some(top)
     );
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(top), None, 4, None),
+        next_non_busy_session(&sessions, &rows, Some(top), None, 4, None, None),
         Some(middle)
     );
     // A pending activation counts as on-screen.
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(top), Some(middle), 1, None),
+        next_non_busy_session(&sessions, &rows, Some(top), Some(middle), 1, None, None),
         Some(bottom)
     );
     // The chain's seen set is skipped on the wrap: the jump can never land
@@ -1090,7 +1108,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
     // from.
     let seen = HashSet::from([top, middle]);
     assert_eq!(
-        next_non_busy_session(&sessions, &rows, Some(bottom), None, 4, Some(&seen)),
+        next_non_busy_session(&sessions, &rows, Some(bottom), None, 4, Some(&seen), None),
         None
     );
     assert_eq!(
@@ -1101,6 +1119,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
             None,
             4,
             Some(&HashSet::from([top])),
+            None,
         ),
         Some(middle)
     );
@@ -1110,7 +1129,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
         session.status = SessionStatus::Working;
     }
     assert_eq!(
-        next_non_busy_session(&all_busy, &rows, Some(top), None, 1, None),
+        next_non_busy_session(&all_busy, &rows, Some(top), None, 1, None, None),
         None
     );
 }
@@ -1134,28 +1153,28 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
     // With no current session — the New task page, or just after an archive —
     // the rotation enters at the topmost non-busy row.
     assert_eq!(
-        next_idle_session(&sessions, &rows, None, None, None),
+        next_idle_session(&sessions, &rows, None, None, None, None),
         Some(top)
     );
     // On an idle session the walk continues below it.
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(top), None, None),
+        next_idle_session(&sessions, &rows, Some(top), None, None, None),
         Some(middle)
     );
     // …and wraps to the top at the bottom of the list.
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), None, None),
+        next_idle_session(&sessions, &rows, Some(bottom), None, None, None),
         Some(top)
     );
     // …but never onto a row the ⌘⇧D chain has already shown.
     let seen = HashSet::from([top]);
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), None, Some(&seen)),
+        next_idle_session(&sessions, &rows, Some(bottom), None, Some(&seen), None),
         Some(middle)
     );
     let seen = HashSet::from([top, middle, bottom]);
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), None, Some(&seen)),
+        next_idle_session(&sessions, &rows, Some(bottom), None, Some(&seen), None),
         None
     );
 
@@ -1164,28 +1183,28 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
     let mut sessions = sessions;
     sessions[0].status = SessionStatus::Working;
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(top), None, None),
+        next_idle_session(&sessions, &rows, Some(top), None, None, None),
         Some(middle)
     );
     // Busy rows are skipped outright: wrapping from the bottom lands past
     // the busy top row on middle.
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), None, None),
+        next_idle_session(&sessions, &rows, Some(bottom), None, None, None),
         Some(middle)
     );
     // A pending activation counts as on-screen, and when every other row is
     // busy or claimed there is no target.
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), Some(middle), None),
+        next_idle_session(&sessions, &rows, Some(bottom), Some(middle), None, None),
         None
     );
     sessions[1].status = SessionStatus::Waiting;
     assert_eq!(
-        next_idle_session(&sessions, &rows, None, None, None),
+        next_idle_session(&sessions, &rows, None, None, None, None),
         Some(bottom)
     );
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(bottom), None, None),
+        next_idle_session(&sessions, &rows, Some(bottom), None, None, None),
         None
     );
 
@@ -1201,12 +1220,146 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
         SidebarRow::Session(unpinned),
     ];
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(pinned_top), None, None),
+        next_idle_session(&sessions, &rows, Some(pinned_top), None, None, None),
         Some(unpinned)
     );
     assert_eq!(
-        next_idle_session(&sessions, &rows, Some(unpinned), None, None),
+        next_idle_session(&sessions, &rows, Some(unpinned), None, None, None),
         Some(pinned_top)
+    );
+}
+
+/// A session skeleton bound to a project, as the session list holds them.
+fn project_session(id: Uuid, project_id: Uuid) -> AgentSession {
+    let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+    session.id = id;
+    session.detail_loaded = false;
+    session
+}
+
+fn project(project_id: Uuid, starred: bool) -> Project {
+    let mut project = Project::from_path(std::path::PathBuf::from("/tmp/waku-test"));
+    project.id = project_id;
+    project.starred = starred;
+    project
+}
+
+#[test]
+fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
+    let starred_project = Uuid::new_v4();
+    let plain_project = Uuid::new_v4();
+    let projects = vec![
+        project(starred_project, true),
+        project(plain_project, false),
+    ];
+    let starred_idle = Uuid::new_v4();
+    let starred_unseen = Uuid::new_v4();
+    let plain_unseen = Uuid::new_v4();
+    let sessions = vec![
+        project_session(plain_unseen, plain_project),
+        project_session(starred_idle, starred_project),
+        project_session(starred_unseen, starred_project),
+    ];
+    // The unstarred unread sits at the top of the sidebar, then the starred
+    // project's seen idle task, then its unseen one.
+    let rows = vec![
+        SidebarRow::Session(plain_unseen),
+        SidebarRow::Session(starred_idle),
+        SidebarRow::Session(starred_unseen),
+    ];
+    let unseen = HashMap::from([(plain_unseen, 100), (starred_unseen, 200)]);
+
+    // Starred unseen beats everything, then the starred project's already-seen
+    // idle task outranks even the unstarred unread.
+    assert_eq!(
+        next_attention_target(&sessions, &projects, &unseen, &rows, None, None, None),
+        Some(starred_unseen)
+    );
+    let only_plain_unseen = HashMap::from([(plain_unseen, 100)]);
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &only_plain_unseen,
+            &rows,
+            None,
+            None,
+            None
+        ),
+        Some(starred_idle)
+    );
+    // Unstarred unread only leads once the starred project has nothing.
+    let starred_rows = vec![SidebarRow::Session(plain_unseen)];
+    let only_plain = vec![project_session(plain_unseen, plain_project)];
+    assert_eq!(
+        next_attention_target(
+            &only_plain,
+            &projects,
+            &unseen,
+            &starred_rows,
+            None,
+            None,
+            None
+        ),
+        Some(plain_unseen)
+    );
+    // Nothing starred: today's unread-then-idle order is unchanged.
+    let unstarred = vec![
+        project(starred_project, false),
+        project(plain_project, false),
+    ];
+    assert_eq!(
+        next_attention_target(&sessions, &unstarred, &unseen, &rows, None, None, None),
+        Some(plain_unseen)
+    );
+}
+
+#[test]
+fn next_unread_completion_scopes_to_a_starred_tier() {
+    let starred_project = Uuid::new_v4();
+    let plain_project = Uuid::new_v4();
+    let starred_set = HashSet::from([starred_project]);
+    let starred_id = Uuid::new_v4();
+    let plain_id = Uuid::new_v4();
+    let sessions = vec![
+        project_session(plain_id, plain_project),
+        project_session(starred_id, starred_project),
+    ];
+    let rows = vec![
+        SidebarRow::Session(plain_id),
+        SidebarRow::Session(starred_id),
+    ];
+    let unseen = HashMap::from([(plain_id, 100), (starred_id, 200)]);
+
+    // The starred tier ignores a higher unstarred row; the unstarred tier
+    // returns it; no tier keeps the original topmost-unread answer.
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &unseen,
+            &rows,
+            None,
+            None,
+            None,
+            Some((&starred_set, true)),
+        ),
+        Some(starred_id)
+    );
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &unseen,
+            &rows,
+            None,
+            None,
+            None,
+            Some((&starred_set, false)),
+        ),
+        Some(plain_id)
+    );
+    assert_eq!(
+        next_unread_completion(&sessions, &unseen, &rows, None, None, None, None),
+        Some(plain_id)
     );
 }
 

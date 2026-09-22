@@ -1028,6 +1028,11 @@ pub struct Project {
     /// existed.
     #[serde(default)]
     pub temporary: bool,
+    /// Starred projects lead the ⌘D next-completion navigation — even an
+    /// already-seen idle task in one outranks an unread completion elsewhere —
+    /// and hoist above unstarred projects in the sidebar's Project grouping.
+    #[serde(default)]
+    pub starred: bool,
 }
 
 /// Filesystem context a task runs in.
@@ -1125,6 +1130,7 @@ impl Project {
             bookmark: None,
             created_at: unix_time(),
             temporary: false,
+            starred: false,
         }
     }
 
@@ -5014,6 +5020,18 @@ mod tests {
 
         assert_eq!(mode, RuntimeMode::Ask);
         assert_eq!(serde_json::to_string(&mode).unwrap(), r#""ask""#);
+    }
+
+    #[test]
+    fn project_json_without_starred_defaults_to_false() {
+        // Projects persisted before the flag existed carry no `starred` key.
+        let project: Project = serde_json::from_str(&format!(
+            r#"{{"id": "{}", "name": "waku", "path": "/tmp/waku"}}"#,
+            Uuid::new_v4()
+        ))
+        .unwrap();
+
+        assert!(!project.starred);
     }
 
     #[test]

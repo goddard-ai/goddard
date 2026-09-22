@@ -26,6 +26,8 @@ export const projects = sqliteTable("projects", {
   createdAt: integer("created_at").notNull(),
   /** Picked ad hoc for a task rather than registered; swept with its last session. */
   temporary: integer("temporary", { mode: "boolean" }).notNull().default(false),
+  /** User-marked priority: leads attention navigation and sidebar grouping. */
+  starred: integer("starred", { mode: "boolean" }).notNull().default(false),
 });
 
 export const sessions = sqliteTable(

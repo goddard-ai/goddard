@@ -865,17 +865,30 @@ impl Waku {
                 // The selected session's finish is already on screen; only a
                 // turn settling out of view gets the sound. A queued follow-up
                 // means the task keeps working, so that settle stays quiet.
+                let finished = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id);
                 if self.state.completion_sound_enabled
                     && self.state.selected_session != Some(session_id)
-                    && self
-                        .state
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == session_id)
-                        .is_some_and(|session| session.queued_messages.is_empty())
+                    && finished.is_some_and(|session| session.queued_messages.is_empty())
                 {
+                    // A starred project's finish plays its own sound unless
+                    // the user disabled the override.
+                    let starred = finished.is_some_and(|session| {
+                        self.state
+                            .projects
+                            .iter()
+                            .any(|project| project.id == session.project_id && project.starred)
+                    });
+                    let sound = if starred && self.state.starred_completion_sound {
+                        waku_client::persistence::CompletionSound::Crystal
+                    } else {
+                        self.state.completion_sound
+                    };
                     crate::platform::play_completion_sound(
-                        self.state.completion_sound,
+                        sound,
                         self.state.completion_sound_volume,
                     );
                 }

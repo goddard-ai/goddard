@@ -84,7 +84,7 @@ function fixture(options: { attached?: boolean } = {}) {
             type: 'taskState',
             defaultCwd: '/repo',
             projectlessRoot: null,
-            projects: [{ id: 'project', name: 'Project', path: '/repo', created_at: 0, temporary: false }],
+            projects: [{ id: 'project', name: 'Project', path: '/repo', created_at: 0, temporary: false, starred: false }],
             sessions: [history],
           };
         case 'probeProvider':

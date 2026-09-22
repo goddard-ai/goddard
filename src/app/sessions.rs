@@ -106,6 +106,16 @@ const TYPING_OWNED_CONTEXTS: &[&str] = &[
     "FileEditorPane",
 ];
 
+/// The projects the user starred — the set `next_attention_target` and the
+/// sidebar's Project grouping rank ahead of everything else.
+pub(super) fn starred_project_ids(projects: &[Project]) -> HashSet<Uuid> {
+    projects
+        .iter()
+        .filter(|project| project.starred)
+        .map(|project| project.id)
+        .collect()
+}
+
 /// The topmost unread target in the sidebar — shared by
 /// GoToNextUnreadCompletion (⌘D / ctrl-backtick), the unseen-completion
 /// bell, and the session-departure fallbacks. "Unread" is the
@@ -117,6 +127,11 @@ const TYPING_OWNED_CONTEXTS: &[&str] = &[
 /// the sessions the chain has already shown, so neither can land back on
 /// one of them; ⌘D itself keeps them as candidates.
 ///
+/// `starred_tier` scopes the scan: `Some((set, true))` considers only
+/// sessions in starred projects, `Some((set, false))` only sessions in
+/// unstarred ones, and `None` ignores starring. Sessions whose project is
+/// gone sort as unstarred.
+///
 /// Sidebar order is the importance order — pinned tasks sort to the top of
 /// the sidebar and lead automatically — and landing on a session clears its
 /// stamp, so repeated presses drain the queue top-down.
@@ -127,6 +142,7 @@ pub(super) fn next_unread_completion(
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
+    starred_tier: Option<(&HashSet<Uuid>, bool)>,
 ) -> Option<Uuid> {
     let by_id = sessions
         .iter()
@@ -140,10 +156,53 @@ pub(super) fn next_unread_completion(
                 session.has_started()
                     && session.archived_at.is_none()
                     && session.queued_messages.is_empty()
+                    && starred_tier
+                        .is_none_or(|(starred, want)| starred.contains(&session.project_id) == want)
                     && (session.status == SessionStatus::Waiting
                         || unseen_completions.contains_key(&session_id))
             })
     })
+}
+
+/// The ⌘D landing, tiered by starred projects: starred unseen completions,
+/// then even already-seen idle sessions in starred projects, then unstarred
+/// unseen completions, then the unstarred idle rotation. With nothing
+/// starred the tiers collapse to today's unread-then-idle order.
+pub(super) fn next_attention_target(
+    sessions: &[AgentSession],
+    projects: &[Project],
+    unseen_completions: &HashMap<Uuid, u64>,
+    rows: &[sidebar::SidebarRow],
+    selected_session: Option<Uuid>,
+    pending_activation: Option<Uuid>,
+    excluded: Option<&HashSet<Uuid>>,
+) -> Option<Uuid> {
+    let starred = starred_project_ids(projects);
+    for want in [true, false] {
+        let tier = Some((&starred, want));
+        if let Some(session_id) = next_unread_completion(
+            sessions,
+            unseen_completions,
+            rows,
+            selected_session,
+            pending_activation,
+            excluded,
+            tier,
+        )
+        .or_else(|| {
+            next_idle_session(
+                sessions,
+                rows,
+                selected_session,
+                pending_activation,
+                excluded,
+                tier,
+            )
+        }) {
+            return Some(session_id);
+        }
+    }
+    None
 }
 
 /// The next non-busy session at-or-below `start_row` in the sidebar's
@@ -158,6 +217,7 @@ pub(super) fn next_non_busy_session(
     pending_activation: Option<Uuid>,
     start_row: usize,
     excluded: Option<&HashSet<Uuid>>,
+    starred_tier: Option<(&HashSet<Uuid>, bool)>,
 ) -> Option<Uuid> {
     let by_id = sessions
         .iter()
@@ -167,9 +227,11 @@ pub(super) fn next_non_busy_session(
         Some(session_id) != selected_session
             && Some(session_id) != pending_activation
             && excluded.map_or(true, |excluded| !excluded.contains(&session_id))
-            && by_id
-                .get(&session_id)
-                .is_some_and(|session| !session.is_busy())
+            && by_id.get(&session_id).is_some_and(|session| {
+                !session.is_busy()
+                    && starred_tier
+                        .is_none_or(|(starred, want)| starred.contains(&session.project_id) == want)
+            })
     })
 }
 
@@ -185,6 +247,7 @@ pub(super) fn next_idle_session(
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
+    starred_tier: Option<(&HashSet<Uuid>, bool)>,
 ) -> Option<Uuid> {
     let start = selected_session
         .filter(|session_id| {
@@ -201,6 +264,7 @@ pub(super) fn next_idle_session(
         pending_activation,
         start,
         excluded,
+        starred_tier,
     )
 }
 
@@ -1590,23 +1654,15 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
-        if let Some(session_id) = next_unread_completion(
+        if let Some(session_id) = next_attention_target(
             &self.state.sessions,
+            &self.state.projects,
             &self.state.unseen_completions,
             &rows,
             self.state.selected_session,
             pending,
             Some(&self.sweep_visited),
-        )
-        .or_else(|| {
-            next_idle_session(
-                &self.state.sessions,
-                &rows,
-                None,
-                pending,
-                Some(&self.sweep_visited),
-            )
-        }) {
+        ) {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         } else {
             self.compose_new_task(project_id, projectless, window, cx);
@@ -2410,6 +2466,23 @@ impl Waku {
         self.create_session_for(project_id, self.state.last_provider, cx);
     }
 
+    /// Flips a project's starred flag. The mutation rides the ordinary
+    /// `SaveTaskState` partition, so a remote-owned project's star reaches
+    /// its owning daemon on the same save as a local one's.
+    pub(super) fn toggle_project_starred(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let Some(project) = self
+            .state
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+        else {
+            return;
+        };
+        project.starred = !project.starred;
+        self.save();
+        cx.notify();
+    }
+
     /// The project's new-task draft — an unstarted one it already had, or a
     /// fresh session — bound to a materialized worktree, with the composer
     /// focused. The draft owns the checkout from there.
@@ -2926,15 +2999,15 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
-        let target = next_unread_completion(
+        let target = next_attention_target(
             &self.state.sessions,
+            &self.state.projects,
             &self.state.unseen_completions,
             &rows,
             selected,
             pending,
             None,
-        )
-        .or_else(|| next_idle_session(&self.state.sessions, &rows, selected, pending, None));
+        );
         match target {
             Some(target) => self.go_to_unread_target(target, window, cx),
             None => self.new_session_action(&NewSession, window, cx),
@@ -3035,23 +3108,15 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
-        let target = next_unread_completion(
+        let target = next_attention_target(
             &self.state.sessions,
+            &self.state.projects,
             &self.state.unseen_completions,
             &rows,
             selected,
             pending,
             Some(&self.sweep_visited),
-        )
-        .or_else(|| {
-            next_idle_session(
-                &self.state.sessions,
-                &rows,
-                selected,
-                pending,
-                Some(&self.sweep_visited),
-            )
-        });
+        );
         match target {
             Some(target) => {
                 self.sweep_target = Some(target);

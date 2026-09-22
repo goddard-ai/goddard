@@ -2041,17 +2041,15 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
-        if sessions::next_unread_completion(
+        if sessions::next_attention_target(
             &self.state.sessions,
+            &self.state.projects,
             &self.state.unseen_completions,
             &rows,
             selected,
             pending,
             None,
         )
-        .or_else(|| {
-            sessions::next_idle_session(&self.state.sessions, &rows, selected, pending, None)
-        })
         .is_some()
         {
             commands.push(CommandPaletteItem::command(

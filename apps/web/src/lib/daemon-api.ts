@@ -621,6 +621,7 @@ export function createProject(path: string): Project {
     path: normalized,
     created_at: unixTime(),
     temporary: false,
+    starred: false,
   }
 }
 

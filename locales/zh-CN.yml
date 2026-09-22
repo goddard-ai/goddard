@@ -410,6 +410,8 @@ settings.finished_turn_notification: 回合完成
 settings.finished_turn_notification_description: 当应用处于后台时，任务完成回合后发送系统通知
 settings.waiting_input_notification: 等待输入
 settings.waiting_input_notification_description: 当后台任务因等待你的批准或回答而暂停时发送系统通知
+settings.completion_sound_starred: 星标项目使用独立提示音
+settings.completion_sound_starred_description: 星标项目中的任务完成回合时播放不同的提示音
 settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
@@ -426,6 +428,8 @@ input.find: 查找
 input.replace: 替换
 input.go_to_line: 行号或 行:列
 common.checking: 正在检查…
+common.star: 加星标
+common.unstar: 取消星标
 common.refresh: 刷新
 common.recheck: 重新检查
 common.reset: 重置

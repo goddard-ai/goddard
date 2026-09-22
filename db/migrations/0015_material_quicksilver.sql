@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `starred` integer DEFAULT false NOT NULL;

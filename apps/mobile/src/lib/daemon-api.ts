@@ -268,7 +268,7 @@ export function createProject(
   }
   const path = input === '/' ? input : input.replace(/[\\/]+$/, '');
   const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Project';
-  return { id, name, path, created_at: createdAt, temporary: false };
+  return { id, name, path, created_at: createdAt, temporary: false, starred: false };
 }
 
 export async function persistProject(

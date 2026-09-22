@@ -418,6 +418,7 @@ mod tests {
             bookmark: None,
             created_at,
             temporary: false,
+            starred: false,
         };
         let current = project(0);
         let recent_a = project(0);

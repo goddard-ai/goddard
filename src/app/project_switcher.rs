@@ -763,6 +763,7 @@ mod tests {
             bookmark: None,
             created_at,
             temporary: false,
+            starred: false,
         };
         let current = project(0);
         let recent = (0..12).map(|_| project(0)).collect::<Vec<_>>();
@@ -794,6 +795,7 @@ mod tests {
             bookmark: None,
             created_at,
             temporary: false,
+            starred: false,
         };
         let current = project(10);
         let recent = [project(20), project(30)];
@@ -832,6 +834,7 @@ mod tests {
             bookmark: None,
             created_at,
             temporary: false,
+            starred: false,
         };
         let first = projectless("first", 10);
         let second = projectless("second", 20);
@@ -842,6 +845,7 @@ mod tests {
             bookmark: None,
             created_at: 30,
             temporary: false,
+            starred: false,
         };
         let projects = vec![first.clone(), second.clone(), ordinary.clone()];
 

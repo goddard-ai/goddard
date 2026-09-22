@@ -78,6 +78,7 @@ describe('mobile daemon API', () => {
       path: '/srv/waku',
       created_at: 10,
       temporary: false,
+      starred: false,
     });
     expect(createProject('C:\\dev\\waku\\', 'two', 10).name).toBe('waku');
     expect(() => createProject('dev/waku', 'three')).toThrow('absolute path');

@@ -412,6 +412,8 @@ settings.finished_turn_notification: ターン完了
 settings.finished_turn_notification_description: アプリがバックグラウンドにあるとき、タスクがターンを完了したらシステム通知を送信します
 settings.waiting_input_notification: 入力待ち
 settings.waiting_input_notification_description: バックグラウンドのタスクが承認や質問への回答を待って停止したときにシステム通知を送信します
+settings.completion_sound_starred: スター付きプロジェクト専用サウンド
+settings.completion_sound_starred_description: スター付きプロジェクトのタスクがターンを完了したときに、別のサウンドを再生します
 settings.theme_system: システム
 settings.theme_light: ライト
 settings.theme_dark: ダーク
@@ -430,6 +432,8 @@ input.replace: 置換
 input.go_to_line: 行番号または 行:列
 
 common.checking: 確認中…
+common.star: スターを付ける
+common.unstar: スターを外す
 common.refresh: 更新
 common.recheck: 再確認
 common.reset: リセット

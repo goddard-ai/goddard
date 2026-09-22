@@ -374,6 +374,7 @@ fn date_sidebar_groups(sessions: &[&AgentSession], today: NaiveDate) -> [Vec<Uui
 fn project_sidebar_groups(
     sessions: &[&AgentSession],
     projectless_project_ids: &HashSet<Uuid>,
+    starred: &HashSet<Uuid>,
 ) -> Vec<(SidebarGroup, Vec<Uuid>)> {
     let mut groups: Vec<(SidebarGroup, Vec<Uuid>)> = Vec::new();
     let mut indexes = HashMap::new();
@@ -393,6 +394,14 @@ fn project_sidebar_groups(
     if !projectless_sessions.is_empty() {
         groups.push((SidebarGroup::Projectless, projectless_sessions));
     }
+    // Starred projects hoist above the rest — a stable sort, so first-seen
+    // order keeps describing recency inside each half. "No project" stays
+    // at the foot either way.
+    groups.sort_by_key(|(group, _)| match group {
+        SidebarGroup::Project(id) if starred.contains(id) => 0,
+        SidebarGroup::Projectless => 2,
+        _ => 1,
+    });
     groups
 }
 
@@ -958,23 +967,39 @@ impl Waku {
 
     /// Mouse twin of GoToNextUnreadCompletion (⌘D / ctrl-backtick): live
     /// while an off-screen task is unread — blocked on its user, or holding an
-    /// unseen finished turn. A blocked target earns a red X; anything else
-    /// carries the same informational-blue dot the sidebar draws in that
-    /// row's status slot.
+    /// unseen finished turn. A blocked target earns a red X; a target in a
+    /// starred project — even an already-seen idle task outranking unread
+    /// work elsewhere — carries a star; anything else carries the same
+    /// informational-blue dot the sidebar draws in that row's status slot.
     fn render_unseen_completion_bell(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let selected = self.state.selected_session;
-        let target = sessions::next_unread_completion(
+        let pending = self
+            .pending_session_activation
+            .map(|pending| pending.session_id);
+        let starred = sessions::starred_project_ids(&self.state.projects);
+        let unread_target = sessions::next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
             &rows,
             selected,
-            self.pending_session_activation
-                .map(|pending| pending.session_id),
+            pending,
+            None,
             None,
         );
-        let enabled = target.is_some();
+        // The badge describes where ⌘D actually lands — which may be a
+        // starred project's seen-but-idle task ahead of an unstarred unread.
+        let target = sessions::next_attention_target(
+            &self.state.sessions,
+            &self.state.projects,
+            &self.state.unseen_completions,
+            &rows,
+            selected,
+            pending,
+            None,
+        );
+        let enabled = unread_target.is_some();
         // A blocked or failed task outranks plain completions, so the
         // target being one is what the badge warns about.
         let blocked = target.is_some_and(|session_id| {
@@ -985,6 +1010,12 @@ impl Waku {
                         SessionStatus::Waiting | SessionStatus::Failed
                     )
             })
+        });
+        let starred_target = target.is_some_and(|session_id| {
+            self.state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id && starred.contains(&session.project_id))
         });
         div()
             .id("unseen-completion-bell")
@@ -1025,6 +1056,12 @@ impl Waku {
                         "icons/x-bold.svg",
                         8.0,
                         theme.danger,
+                    ))
+                } else if starred_target {
+                    div().absolute().top(px(1.0)).right(px(1.0)).child(icon(
+                        "icons/star-filled.svg",
+                        9.0,
+                        theme.favorite,
                     ))
                 } else {
                     div()
@@ -2656,9 +2693,11 @@ impl Waku {
                     })
                     .map(|project| project.id)
                     .collect::<HashSet<_>>();
-                for (group, sessions) in
-                    project_sidebar_groups(&sorted_sessions, &projectless_project_ids)
-                {
+                for (group, sessions) in project_sidebar_groups(
+                    &sorted_sessions,
+                    &projectless_project_ids,
+                    &sessions::starred_project_ids(&self.state.projects),
+                ) {
                     let Some(position) = sessions
                         .iter()
                         .filter(|id| dormant_set.contains(id))
@@ -2861,6 +2900,7 @@ impl Waku {
         if self.state.sidebar_grouping == SidebarGrouping::Project {
             for project in &self.state.projects {
                 fingerprint = mix_uuid(fingerprint, project.id);
+                fingerprint = mix(fingerprint, u64::from(project.starred));
             }
             // A map has no stable iteration order; combine order-independently.
             let revealed =
@@ -3065,9 +3105,11 @@ impl Waku {
                     })
                     .map(|project| project.id)
                     .collect::<HashSet<_>>();
-                for (group, sessions) in
-                    project_sidebar_groups(&sorted_sessions, &projectless_project_ids)
-                {
+                for (group, sessions) in project_sidebar_groups(
+                    &sorted_sessions,
+                    &projectless_project_ids,
+                    &sessions::starred_project_ids(&self.state.projects),
+                ) {
                     let collapsed = self.sidebar_collapsed_groups.contains(&group);
                     if collapsed {
                         collapsed_members.insert(group, sessions.clone());
@@ -3435,6 +3477,11 @@ impl Waku {
         };
         let folder_missing =
             matches!(group, SidebarGroup::Project(id) if self.missing_projects.contains(&id));
+        let project_starred = matches!(group, SidebarGroup::Project(id) if self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == id && project.starred));
         // Remote projects carry their host's name — and an offline or
         // needs-auth marker while that host is disconnected — so the merged
         // catalog never hides which machine a row belongs to. The marker is
@@ -3596,6 +3643,13 @@ impl Waku {
                         .items_center()
                         .gap(px(2.0))
                         .child(div().min_w_0().truncate().child(label))
+                        .when(project_starred, |element| {
+                            element.child(div().flex_none().child(icon(
+                                "icons/star-filled.svg",
+                                11.0,
+                                theme.text_secondary,
+                            )))
+                        })
                         .when(folder_missing, |element| {
                             element.child(
                                 div()
@@ -5294,7 +5348,7 @@ impl Waku {
                     .filter(|project| !project.is_projectless())
                     .filter(|project| Some(project.id) != selected_project_id),
             )
-            .map(|project| (project.id, project.display_name()))
+            .map(|project| (project.id, project.display_name(), project.starred))
             .collect::<Vec<_>>();
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("empty-state-project", cx);
@@ -5309,8 +5363,9 @@ impl Waku {
                 let mut items = project_options
                     .clone()
                     .into_iter()
-                    .map(|(project_id, project_name)| {
+                    .map(|(project_id, project_name, starred)| {
                         let weak = weak.clone();
+                        let star_weak = weak.clone();
                         MenuItem::new(project_name, move |_, cx| {
                             if Some(project_id) == selected_project_id {
                                 return;
@@ -5318,6 +5373,11 @@ impl Waku {
                             let _ = weak.update(cx, |this, cx| this.select_project(project_id, cx));
                         })
                         .selected(Some(project_id) == selected_project_id)
+                        .star(starred, move |_, cx| {
+                            let _ = star_weak.update(cx, |this, cx| {
+                                this.toggle_project_starred(project_id, cx);
+                            });
+                        })
                     })
                     .collect::<Vec<_>>();
                 if !items.is_empty() {
@@ -5654,7 +5714,8 @@ mod tests {
         let second = AgentSession::new(second_project, ProviderKind::Codex);
         let third = AgentSession::new(first_project, ProviderKind::Codex);
 
-        let groups = project_sidebar_groups(&[&second, &first, &third], &HashSet::new());
+        let groups =
+            project_sidebar_groups(&[&second, &first, &third], &HashSet::new(), &HashSet::new());
 
         assert_eq!(
             groups,
@@ -5664,6 +5725,37 @@ mod tests {
                     SidebarGroup::Project(first_project),
                     vec![first.id, third.id]
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn starred_projects_lead_the_group_order() {
+        let starred_project = Uuid::from_u128(1);
+        let ordinary_project = Uuid::from_u128(2);
+        let late_starred_project = Uuid::from_u128(3);
+        let ordinary = AgentSession::new(ordinary_project, ProviderKind::Codex);
+        let starred = AgentSession::new(starred_project, ProviderKind::Codex);
+        let late_starred = AgentSession::new(late_starred_project, ProviderKind::Codex);
+
+        // First-seen order keeps describing recency inside each half: both
+        // starred groups lead in their original order, the unstarred group
+        // trails.
+        let groups = project_sidebar_groups(
+            &[&ordinary, &starred, &late_starred],
+            &HashSet::new(),
+            &HashSet::from([starred_project, late_starred_project]),
+        );
+
+        assert_eq!(
+            groups,
+            vec![
+                (SidebarGroup::Project(starred_project), vec![starred.id]),
+                (
+                    SidebarGroup::Project(late_starred_project),
+                    vec![late_starred.id]
+                ),
+                (SidebarGroup::Project(ordinary_project), vec![ordinary.id]),
             ]
         );
     }
@@ -5680,6 +5772,7 @@ mod tests {
         let groups = project_sidebar_groups(
             &[&first_projectless, &ordinary, &second_projectless],
             &HashSet::from([first_projectless_project, second_projectless_project]),
+            &HashSet::new(),
         );
 
         assert_eq!(
@@ -5704,6 +5797,7 @@ mod tests {
             bookmark: None,
             created_at: 0,
             temporary: false,
+            starred: false,
         };
         let ordinary = Project {
             id: Uuid::from_u128(2),
@@ -5712,6 +5806,7 @@ mod tests {
             bookmark: None,
             created_at: 0,
             temporary: false,
+            starred: false,
         };
 
         assert!(sidebar_project_is_projectless(&projectless, Some(root)));
