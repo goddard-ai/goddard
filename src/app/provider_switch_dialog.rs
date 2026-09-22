@@ -30,6 +30,13 @@ pub(super) struct ProviderSwitchDialogState {
     pub returning: bool,
     /// Transcript items and rough token count the target would ingest.
     pub estimate: (usize, u64),
+    /// The session's daemon has no usable eval backend — confirming would
+    /// only fail at the transcript eval, so the dialog warns and offers
+    /// the fix instead of a Switch row.
+    pub eval_missing: bool,
+    /// `eval_missing` on a remote host — the Jev page edits the local
+    /// daemon's backend, so this UI's setup path can't repair it.
+    pub eval_missing_remote: bool,
     switch_focus: FocusHandle,
     cancel_focus: FocusHandle,
 }
@@ -58,12 +65,27 @@ impl Waku {
                 )
             })
             .unwrap_or((false, (0, 0)));
+        // A daemon that can't be inspected (offline remote) isn't "missing a
+        // backend" — its state is unknown, and confirm reports disconnected.
+        let eval_missing = self
+            .daemons
+            .daemon_for_session(session_id)
+            .is_some_and(|daemon| {
+                daemon
+                    .settings()
+                    .eval
+                    .is_none_or(|eval| eval.credential_missing())
+            });
+        let eval_missing_remote =
+            eval_missing && self.daemons.session_owner(session_id).is_remote();
         let switch_focus = cx.focus_handle();
         self.provider_switch_dialog = Some(ProviderSwitchDialogState {
             session_id,
             pick,
             returning,
             estimate,
+            eval_missing,
+            eval_missing_remote,
             cancel_focus: cx.focus_handle(),
             switch_focus: switch_focus.clone(),
         });
@@ -77,6 +99,35 @@ impl Waku {
         }
         self.refocus_composer(window, cx);
         cx.notify();
+    }
+
+    /// The dialog's Enter: confirm when the backend can run the eval. A
+    /// missing backend makes the fix primary instead — Jev settings for a
+    /// local daemon; a remote host can't be configured from this UI, so
+    /// Enter dismisses like Cancel.
+    fn provider_switch_primary_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = self.provider_switch_dialog.as_ref() else {
+            return;
+        };
+        if !dialog.eval_missing {
+            self.confirm_provider_switch(window, cx);
+        } else if dialog.eval_missing_remote {
+            self.close_provider_switch_dialog(window, cx);
+        } else {
+            self.open_jev_settings_from_switch_dialog(window, cx);
+        }
+    }
+
+    /// The warning's fix path: dismiss the dialog and deep-link to the Jev
+    /// page, bypassing its navigation gate — provider switching is shipped,
+    /// so its backend surface can't depend on an experiment being on.
+    fn open_jev_settings_from_switch_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.provider_switch_dialog = None;
+        self.open_settings_page_direct(SettingsPage::Jev, window, cx);
     }
 
     pub(super) fn render_provider_switch_dialog(
@@ -95,6 +146,11 @@ impl Waku {
             .unwrap_or_default();
         let (items, tokens) = dialog.estimate;
 
+        let eval_missing = dialog.eval_missing;
+        let eval_missing_remote = dialog.eval_missing_remote;
+        // With no usable backend the fix is the primary action — the Switch
+        // row would only toast a failure. The remote-host variant gets no
+        // setup row at all: the Jev page edits the local daemon only.
         let switch_row = render_provider_switch_action_row(
             "provider-switch-dialog-confirm",
             &dialog.switch_focus,
@@ -106,6 +162,15 @@ impl Waku {
             weak.clone(),
             &theme,
             |waku, window, cx| waku.confirm_provider_switch(window, cx),
+        );
+        let jev_row = render_provider_switch_action_row(
+            "provider-switch-dialog-jev-settings",
+            &dialog.switch_focus,
+            "icons/settings.svg",
+            tr!("experiments.open_jev_settings"),
+            weak.clone(),
+            &theme,
+            |waku, window, cx| waku.open_jev_settings_from_switch_dialog(window, cx),
         );
         let cancel_row = render_provider_switch_action_row(
             "provider-switch-dialog-cancel",
@@ -135,7 +200,7 @@ impl Waku {
             .key_context(DIALOG_CONTEXT)
             .on_action(
                 cx.listener(|waku, _: &ConfirmProviderSwitchDialog, window, cx| {
-                    waku.confirm_provider_switch(window, cx)
+                    waku.provider_switch_primary_action(window, cx)
                 }),
             )
             .on_action(
@@ -184,7 +249,29 @@ impl Waku {
                                 items = items,
                                 tokens = format_tokens_compact(tokens as f64)
                             )),
-                    ),
+                    )
+                    .when(eval_missing, |header| {
+                        header.child(
+                            div()
+                                .pt(px(4.0))
+                                .flex()
+                                .gap(px(7.0))
+                                .child(icon("icons/alert.svg", 12.0, theme.warning).mt(px(2.0)))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(17.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(if eval_missing_remote {
+                                            tr!("provider_switch.needs_eval_backend_remote")
+                                        } else {
+                                            tr!("provider_switch.needs_eval_backend")
+                                        }),
+                                ),
+                        )
+                    }),
             )
             .child(div().mx(px(8.0)).h(hairline()).bg(theme.separator))
             .child(
@@ -193,7 +280,10 @@ impl Waku {
                     .flex()
                     .flex_col()
                     .gap(px(2.0))
-                    .child(switch_row)
+                    .when(eval_missing && !eval_missing_remote, |rows| {
+                        rows.child(jev_row)
+                    })
+                    .when(!eval_missing, |rows| rows.child(switch_row))
                     .child(cancel_row),
             );
 

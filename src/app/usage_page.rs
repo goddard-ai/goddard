@@ -56,6 +56,29 @@ impl Waku {
         if page == SettingsPage::Integrations && !self.state.integrations_enabled {
             return;
         }
+        self.open_settings_page_ungated(page, window, cx);
+    }
+
+    /// `open_settings_page` without the opt-in gates — a deep link lands on
+    /// the page even while the sidebar doesn't list it. Fix paths for
+    /// shipped features use this: the provider-switch dialog's "Open Jev
+    /// settings" must reach the backend configuration even when no eval
+    /// experiment happens to be on.
+    pub(super) fn open_settings_page_direct(
+        &mut self,
+        page: SettingsPage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings_page_ungated(page, window, cx);
+    }
+
+    fn open_settings_page_ungated(
+        &mut self,
+        page: SettingsPage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if page != SettingsPage::Integrations {
             self.integration_editor = None;
         }

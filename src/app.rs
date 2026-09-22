@@ -304,27 +304,6 @@ impl SettingsPage {
             _ => true,
         }
     }
-
-    /// A persisted page whose navigation gate closed falls back to General
-    /// rather than rendering a surface the sidebar no longer lists.
-    fn into_visible(
-        self,
-        computer_use_experiment_enabled: bool,
-        friends_enabled: bool,
-        jev_in_use: bool,
-        integrations_enabled: bool,
-    ) -> Self {
-        if self.is_visible_in_navigation(
-            computer_use_experiment_enabled,
-            friends_enabled,
-            jev_in_use,
-            integrations_enabled,
-        ) {
-            self
-        } else {
-            Self::General
-        }
-    }
 }
 
 /// Which presentation the Usage page shows: the daily dashboard, the monthly

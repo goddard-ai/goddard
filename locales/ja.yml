@@ -859,6 +859,8 @@ provider_switch.estimate: "約 %{items} 件のトランスクリプト項目、�
 provider_switch.confirm: "%{provider} に切り替える"
 provider_switch.working: "%{provider} 用に履歴を圧縮しています…"
 provider_switch.failed: "プロバイダーの切り替えに失敗しました — %{error}"
+provider_switch.needs_eval_backend: プロバイダーの切り替えにはトランスクリプトを圧縮する評価バックエンドが必要です — 構成されていません。
+provider_switch.needs_eval_backend_remote: プロバイダーの切り替えにはトランスクリプトを圧縮する評価バックエンドが必要です — リモートホストで構成されていません。
 provider_switch.no_eval_backend: プロバイダーの切り替えには評価（Jev）バックエンドが必要です — 設定 → Jev で構成してください。
 sandbox.environment: 環境
 sandbox.this_mac: この Mac

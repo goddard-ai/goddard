@@ -1071,24 +1071,17 @@ impl Waku {
 
     fn render_settings_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        // A persisted page whose navigation gate closed (e.g. the Computer
-        // Use experiment was switched back off) falls back to General instead
-        // of rendering a surface the sidebar no longer lists.
+        // `settings_page` is trusted as written: every setter is either
+        // `open_settings_page` (gated, so a persisted page whose opt-in is
+        // off falls back to General) or `open_settings_page_direct`, which
+        // deliberately renders a page the sidebar doesn't list.
         let query = self.settings_search_query(cx);
         if !query.is_empty() {
             return self.render_settings_search_results(&query, window, cx);
         }
         self.settings_search_sections.clear();
         self.settings_search_target = None;
-        let page = self
-            .settings_page
-            .unwrap_or(SettingsPage::General)
-            .into_visible(
-                self.state.computer_use_experiment_enabled,
-                self.state.friends_enabled,
-                self.jev_in_use(),
-                self.state.integrations_enabled,
-            );
+        let page = self.settings_page.unwrap_or(SettingsPage::General);
         let search = SettingSearch::inactive().for_page(
             page,
             &self.settings_scroll,

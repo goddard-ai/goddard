@@ -2307,6 +2307,10 @@ provider_switch.working:
   en: Compacting history for %{provider}…
 provider_switch.failed:
   en: "Provider switch failed — %{error}"
+provider_switch.needs_eval_backend:
+  en: Provider switching needs an evaluation backend to compact the transcript — none is configured.
+provider_switch.needs_eval_backend_remote:
+  en: Provider switching needs an evaluation backend to compact the transcript — none is configured on the remote host.
 provider_switch.no_eval_backend:
   en: Provider switching needs an evaluation (Jev) backend — configure it in Settings → Jev.
 sandbox.environment:

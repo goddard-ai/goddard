@@ -843,6 +843,8 @@ provider_switch.estimate: "约 %{items} 条记录项，约 %{tokens} 个 token�
 provider_switch.confirm: "切换到 %{provider}"
 provider_switch.working: "正在为 %{provider} 压缩历史记录…"
 provider_switch.failed: "切换 provider 失败 — %{error}"
+provider_switch.needs_eval_backend: 切换 provider 需要评估后端来压缩转录 — 尚未配置。
+provider_switch.needs_eval_backend_remote: 切换 provider 需要评估后端来压缩转录 — 远程主机上尚未配置。
 provider_switch.no_eval_backend: 切换 provider 需要评估（Jev）后端 — 请在“设置 → Jev”中配置。
 sandbox.environment: 环境
 sandbox.this_mac: 这台 Mac
