@@ -2339,12 +2339,24 @@ sandbox.sandbox_vm_unsupported:
   en: Sandboxed tasks need Codex or Claude — {provider} can't start in a VM yet.
 sandbox.badge:
   en: Sandboxed
+sandbox.provider_cloud:
+  en: "%{provider} Cloud"
+sandbox.provider_cloud_description:
+  en: "Run in %{provider}'s hosted environment — pushed commits only"
+sandbox.cloud_badge:
+  en: "%{provider} Cloud"
 sandbox.setup_downloading:
   en: Setting up the sandbox — downloading the VM image
 sandbox.setup_building:
   en: Setting up the sandbox — installing {toolchain}
 sandbox.setup_booting:
   en: Setting up the sandbox — booting the VM
+cloud.still_running:
+  en: "%{provider} Cloud is still working — wait for it or cancel first"
+cloud.not_running:
+  en: The cloud task is not running
+cloud.stopped:
+  en: Stopped
 agent_preset.standard:
   en: Standard mode
 agent_preset.code:

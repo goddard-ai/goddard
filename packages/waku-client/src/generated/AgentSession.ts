@@ -9,6 +9,7 @@ import type { ReportedCommand } from "./ReportedCommand";
 import type { RouteDecision } from "./RouteDecision";
 import type { RuntimeEventCursor } from "./RuntimeEventCursor";
 import type { RuntimeMode } from "./RuntimeMode";
+import type { SessionEnvironment } from "./SessionEnvironment";
 import type { SessionStatus } from "./SessionStatus";
 import type { SessionWorkspace } from "./SessionWorkspace";
 import type { SuspendedProviderSession } from "./SuspendedProviderSession";
@@ -45,9 +46,16 @@ workspace_moved_from?: string | null,
  */
 side_chat_of?: string | null, provider: ProviderKind, model?: string | null, runtime_mode: RuntimeMode,
 /**
- * The task's commands run inside the sandbox VM rather than on the
- * host. Fixed when the session boots — a started task can report where
- * it runs, not move.
+ * Where the task's work runs — this Mac, the sandbox VM, or the
+ * provider's hosted cloud. Fixed when the session boots — a started
+ * task can report where it runs, not move. Read through
+ * [`Self::environment`], which folds in the legacy `sandboxed` flag.
+ */
+environment?: SessionEnvironment,
+/**
+ * Read-only compatibility field for state written before
+ * `environment` existed; new saves omit it. Never read directly — use
+ * [`Self::environment`].
  */
 sandboxed?: boolean, reasoning_effort?: string | null, service_tier?: string | null,
 /**

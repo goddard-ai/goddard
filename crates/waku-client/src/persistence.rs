@@ -22,7 +22,7 @@ use waku_protocol::identity::DATA_DIRECTORY_NAME;
 use waku_protocol::model::{
     AgentSession, FavoriteModel, Project, ProviderKind, ProviderResumeCursor,
     ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, RuntimeMode,
-    SessionWorkspace,
+    SessionEnvironment, SessionWorkspace,
 };
 use waku_protocol::theme::ThemeSettings;
 
@@ -280,6 +280,19 @@ fn default_agent_settings_enabled() -> bool {
 
 fn default_provider() -> ProviderKind {
     ProviderKind::Codex
+}
+
+/// The remembered environment pick, resolved. State written before
+/// `SessionEnvironment` existed carries only the `last_sandboxed` bool.
+fn resolve_last_environment(
+    environment: SessionEnvironment,
+    legacy_sandboxed: bool,
+) -> SessionEnvironment {
+    if environment == SessionEnvironment::Local && legacy_sandboxed {
+        SessionEnvironment::Sandbox
+    } else {
+        environment
+    }
 }
 
 fn default_completion_sound_volume() -> f32 {
@@ -1086,7 +1099,12 @@ struct AppState {
     /// the modal, not the mode — the mode itself is `last_runtime_mode`.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     full_access_acknowledged: bool,
-    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    /// The environment the last session ran in, seeded into the next draft.
+    #[serde(default, skip_serializing_if = "SessionEnvironment::is_local")]
+    last_environment: SessionEnvironment,
+    /// Read-only compatibility field for state saved before
+    /// `last_environment` existed. New saves omit it.
+    #[serde(default, skip_serializing)]
     last_sandboxed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_model: Option<String>,
@@ -1186,7 +1204,14 @@ pub struct PersistedState {
     /// the modal, not the mode — the mode itself is `last_runtime_mode`.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub full_access_acknowledged: bool,
-    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    /// The environment the last session ran in, seeded into the next draft.
+    /// Read through [`Self::last_environment`], which folds in the legacy
+    /// `last_sandboxed` flag.
+    #[serde(default, skip_serializing_if = "SessionEnvironment::is_local")]
+    pub last_environment: SessionEnvironment,
+    /// Read-only compatibility field for state saved before
+    /// `last_environment` existed. New saves omit it.
+    #[serde(default, skip_serializing)]
     pub last_sandboxed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_model: Option<String>,
@@ -1623,6 +1648,7 @@ impl PersistedState {
             last_auto_route: false,
             last_runtime_mode: RuntimeMode::default(),
             full_access_acknowledged: false,
+            last_environment: SessionEnvironment::Local,
             last_sandboxed: false,
             last_model: None,
             last_reasoning_effort: None,
@@ -1745,11 +1771,29 @@ impl PersistedState {
         }
     }
 
+    /// The remembered environment pick, resolved through the legacy
+    /// `last_sandboxed` flag — read this instead of the field.
+    pub fn last_environment(&self) -> SessionEnvironment {
+        resolve_last_environment(self.last_environment, self.last_sandboxed)
+    }
+
     pub fn new_session(&self, project_id: Uuid, provider: ProviderKind) -> AgentSession {
         let mut session = AgentSession::new(project_id, provider);
         session.runtime_mode = self.last_runtime_mode;
-        session.sandboxed = self.sandbox_experiment_enabled
-            && (self.sandbox_default_enabled || self.last_sandboxed);
+        session.environment = if !self.sandbox_experiment_enabled {
+            SessionEnvironment::Local
+        } else if self.sandbox_default_enabled {
+            // The daemon pref arms the Sandbox VM for a fresh task even
+            // when the picked provider cannot run there yet — the
+            // environment menu explains the failure.
+            SessionEnvironment::Sandbox
+        } else {
+            match self.last_environment() {
+                SessionEnvironment::Cloud if provider.supports_cloud() => SessionEnvironment::Cloud,
+                SessionEnvironment::Cloud => SessionEnvironment::Local,
+                remembered => remembered,
+            }
+        };
         // An Auto pick carries to the next draft like the provider/model do;
         // the seeded provider/model stay as the route's last-used hint.
         session.auto_route = self.last_auto_route && self.model_router_enabled;
@@ -2047,7 +2091,8 @@ impl PersistedState {
             last_auto_route: self.last_auto_route,
             last_runtime_mode: self.last_runtime_mode,
             full_access_acknowledged: self.full_access_acknowledged,
-            last_sandboxed: self.last_sandboxed,
+            last_environment: self.last_environment(),
+            last_sandboxed: false,
             last_model: self.last_model.clone(),
             last_reasoning_effort: self.last_reasoning_effort.clone(),
             last_service_tier: self.last_service_tier.clone(),
@@ -2157,7 +2202,9 @@ impl PersistedState {
         self.last_auto_route = app_state.last_auto_route;
         self.last_runtime_mode = app_state.last_runtime_mode;
         self.full_access_acknowledged = app_state.full_access_acknowledged;
-        self.last_sandboxed = app_state.last_sandboxed;
+        self.last_environment =
+            resolve_last_environment(app_state.last_environment, app_state.last_sandboxed);
+        self.last_sandboxed = false;
         self.last_model = app_state.last_model;
         self.last_reasoning_effort = app_state.last_reasoning_effort;
         self.last_service_tier = app_state.last_service_tier;
@@ -3774,15 +3821,29 @@ mod tests {
     fn sandbox_pick_seeds_the_next_draft() {
         let mut state = PersistedState::empty();
         state.sandbox_experiment_enabled = true;
-        state.last_sandboxed = true;
+        state.last_environment = SessionEnvironment::Sandbox;
 
         let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
-        assert!(session.sandboxed);
+        assert_eq!(session.environment(), SessionEnvironment::Sandbox);
 
-        // Without the experiment the remembered flag cannot arm a draft.
+        // Without the experiment the remembered pick cannot arm a draft.
         state.sandbox_experiment_enabled = false;
         let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
-        assert!(!session.sandboxed);
+        assert_eq!(session.environment(), SessionEnvironment::Local);
+    }
+
+    #[test]
+    fn cloud_pick_seeds_the_next_draft_only_when_supported() {
+        let mut state = PersistedState::empty();
+        state.sandbox_experiment_enabled = true;
+        state.last_environment = SessionEnvironment::Cloud;
+
+        let session = state.new_session(Uuid::new_v4(), ProviderKind::Devin);
+        assert_eq!(session.environment(), SessionEnvironment::Cloud);
+
+        // A provider with no hosted environment falls back to the host.
+        let session = state.new_session(Uuid::new_v4(), ProviderKind::Pi);
+        assert_eq!(session.environment(), SessionEnvironment::Local);
     }
 
     #[test]
@@ -3804,7 +3865,7 @@ mod tests {
 
         // The daemon pref arms a draft even when nothing was remembered.
         let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
-        assert!(session.sandboxed);
+        assert_eq!(session.environment(), SessionEnvironment::Sandbox);
 
         // And it round-trips through the daemon settings mirror.
         let mut mirror = PersistedState::empty();
@@ -3814,7 +3875,7 @@ mod tests {
         // The experiment gate still wins over the default.
         state.sandbox_experiment_enabled = false;
         let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
-        assert!(!session.sandboxed);
+        assert_eq!(session.environment(), SessionEnvironment::Local);
     }
 
     #[test]

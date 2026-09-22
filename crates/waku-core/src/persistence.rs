@@ -1472,6 +1472,8 @@ impl StateStore {
         // Detail rows predate worktree names; the list row's migration is
         // overwritten when the stored workspace is copied over it.
         stored.workspace.backfill_worktree_name();
+        // Resolved before the field moves — `environment()` borrows `stored`.
+        let stored_environment = stored.environment();
         session.transcript_blocks = stored.transcript_blocks;
         session.turns = stored.turns;
         session.queued_messages = stored.queued_messages;
@@ -1487,7 +1489,7 @@ impl StateStore {
         // Quarantine is detail, not a list column — the skeleton's flag is a
         // placeholder and the stored blob carries the real value.
         session.quarantined = stored.quarantined;
-        session.sandboxed = stored.sandboxed;
+        session.environment = stored_environment;
 
         let mut statement = connection
             .prepare(
@@ -1796,6 +1798,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         model,
         // Hydration replaces these; the list never reads them.
         runtime_mode: RuntimeMode::default(),
+        environment: crate::model::SessionEnvironment::Local,
         sandboxed: false,
         reasoning_effort: None,
         service_tier: None,

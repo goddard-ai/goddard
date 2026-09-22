@@ -963,7 +963,7 @@ fn create_transfer_session(
     session.quarantined = true;
     // Received files stay in the sandbox VM even once trusted — the agent
     // never works on them with this Mac's filesystem in reach.
-    session.sandboxed = true;
+    session.environment = crate::model::SessionEnvironment::Sandbox;
     let session_id = session.id;
     state.push_session(session);
     task_store.save(&mut state)?;
@@ -3451,9 +3451,23 @@ impl WakuBackend {
             options.computer_use_enabled,
             daemon_settings.computer_use_experiment_enabled,
         );
-        if daemon_settings.agent_tools_enabled
-            || daemon_settings.agent_settings_enabled
-            || options.read_own_transcript
+        let environment = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(AgentSession::environment)
+            .unwrap_or_default();
+        // A cloud task runs on the provider's hosted environment — nothing
+        // local executes, so the launch injections below (agent surface,
+        // subagents, project map, integrations) would all point at a host
+        // the remote side cannot see. They stay off for cloud launches.
+        let cloud_launch = environment.is_cloud();
+        if !cloud_launch
+            && (daemon_settings.agent_tools_enabled
+                || daemon_settings.agent_settings_enabled
+                || options.read_own_transcript)
         {
             match self.agent_launch_env(session_id) {
                 Ok(launch) => options.agent = Some(launch),
@@ -3467,7 +3481,7 @@ impl WakuBackend {
         // routing and subagents share one user-editable map. Drivers without
         // an injection channel simply ignore it. Still experimental —
         // injected only when the opt-in is on.
-        if daemon_settings.subagents_enabled {
+        if !cloud_launch && daemon_settings.subagents_enabled {
             options.subagents = Some(crate::subagents::spec_for(
                 provider,
                 &daemon_settings.route_classes,
@@ -3485,7 +3499,7 @@ impl WakuBackend {
         // The project map is experimental the same way: record the session's
         // workspace for first-prompt injection and warm the index in the
         // background so it can beat the provider's launch.
-        if daemon_settings.project_map_enabled {
+        if !cloud_launch && daemon_settings.project_map_enabled {
             let ready = {
                 let mut maps = self.repo_maps.0.lock();
                 maps.sessions
@@ -3515,18 +3529,13 @@ impl WakuBackend {
         // Connected integrations ride the launch too; drivers that take file
         // delivery instead see nothing here because their entries were
         // written at connect time.
-        options.integrations = self.integrations.launch_integrations(provider);
+        if !cloud_launch {
+            options.integrations = self.integrations.launch_integrations(provider);
+        }
         // A sandboxed session runs its provider inside a shuru VM — never on
         // the host. Every setup failure fails the task rather than silently
         // falling back to a local process.
-        if self
-            .task_state
-            .lock()
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .is_some_and(|session| session.sandboxed)
-        {
+        if environment.is_sandbox() {
             if !daemon_settings.sandbox_experiment_enabled {
                 bail!(
                     "this task was created with the Sandbox VM environment, but the sandbox experiment is off"
@@ -3556,7 +3565,11 @@ impl WakuBackend {
         }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
-        let handle = match driver::start_local(provider, options, event_sender) {
+        let handle = match if cloud_launch {
+            driver::start_cloud(provider, options, event_sender)
+        } else {
+            driver::start_local(provider, options, event_sender)
+        } {
             Ok(handle) => handle,
             Err(error) => {
                 self.agent.revoke_session(session_id);
@@ -6049,7 +6062,7 @@ mod tests {
                 .expect("the transfer's session");
             assert!(session.quarantined, "received files start untrusted");
             assert!(
-                session.sandboxed,
+                session.environment().is_sandbox(),
                 "received files run in the sandbox VM once trusted"
             );
             assert_eq!(session.status, SessionStatus::Idle);
@@ -6110,10 +6123,10 @@ mod tests {
             .position(|session| session.id == session_id)
             .unwrap();
         assert!(!reloaded.sessions[index].quarantined);
-        assert!(!reloaded.sessions[index].sandboxed);
+        assert!(!reloaded.sessions[index].environment().is_sandbox());
         reload_store.hydrate(&mut reloaded.sessions[index]).unwrap();
         assert!(reloaded.sessions[index].quarantined);
-        assert!(reloaded.sessions[index].sandboxed);
+        assert!(reloaded.sessions[index].environment().is_sandbox());
 
         std::fs::remove_dir_all(root).ok();
     }

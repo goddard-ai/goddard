@@ -19,17 +19,28 @@ fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode
         .unwrap_or(remembered)
 }
 
-fn new_task_sandboxed(
+fn new_task_environment(
     current: Option<&AgentSession>,
-    remembered: bool,
+    remembered: SessionEnvironment,
     enabled: bool,
     default: bool,
-) -> bool {
-    enabled
-        && (default
-            || current
-                .map(|session| session.sandboxed)
-                .unwrap_or(remembered))
+    provider: ProviderKind,
+) -> SessionEnvironment {
+    if !enabled {
+        return SessionEnvironment::Local;
+    }
+    if default {
+        return SessionEnvironment::Sandbox;
+    }
+    match current
+        .map(|session| session.environment())
+        .unwrap_or(remembered)
+    {
+        // A Cloud pick only carries to providers with a hosted environment
+        // — carrying it to a local-only provider would fail at submit.
+        SessionEnvironment::Cloud if !provider.supports_cloud() => SessionEnvironment::Local,
+        environment => environment,
+    }
 }
 
 /// The workspace a planned worktree keeps when its draft retargets to
@@ -526,7 +537,7 @@ impl Waku {
             provider,
             auto_route,
             runtime_mode,
-            sandboxed,
+            environment,
             model,
             reasoning_effort,
             service_tier,
@@ -537,7 +548,7 @@ impl Waku {
                 session.provider,
                 session.auto_route,
                 session.runtime_mode,
-                session.sandboxed,
+                session.environment(),
                 session.model.clone(),
                 session.reasoning_effort.clone(),
                 session.service_tier.clone(),
@@ -548,7 +559,7 @@ impl Waku {
             self.state.last_provider = provider;
             self.state.last_auto_route = auto_route;
             self.state.last_runtime_mode = runtime_mode;
-            self.state.last_sandboxed = sandboxed;
+            self.state.last_environment = environment;
             self.state.last_model = model;
             self.state.last_reasoning_effort = reasoning_effort;
             self.state.last_service_tier = service_tier;
@@ -948,15 +959,16 @@ impl Waku {
         // a selected source task.
         let runtime_mode =
             new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
-        let sandboxed = new_task_sandboxed(
+        let environment = new_task_environment(
             self.selected_session(),
-            self.state.last_sandboxed,
+            self.state.last_environment(),
             self.state.sandbox_experiment_enabled,
             self.state.sandbox_default_enabled,
+            provider,
         );
         let mut session = self.state.new_session(project_id, provider);
         session.runtime_mode = runtime_mode;
-        session.sandboxed = sandboxed;
+        session.environment = environment;
         let id = session.id;
         self.daemons
             .claim_session(id, self.daemons.project_owner(project_id));
@@ -1039,7 +1051,7 @@ impl Waku {
         let mut session = AgentSession::new(parent.project_id, parent.provider);
         session.model = parent.model.clone();
         session.runtime_mode = parent.runtime_mode;
-        session.sandboxed = parent.sandboxed;
+        session.environment = parent.environment();
         session.reasoning_effort = parent.reasoning_effort.clone();
         session.service_tier = parent.service_tier.clone();
         session.context_window = parent.context_window.clone();
@@ -3900,10 +3912,11 @@ impl Waku {
         );
     }
 
-    /// Primary modifier + Shift + .: flip the draft between this Mac and
-    /// the sandbox VM — the two rows the mode menu's Environment section
-    /// offers. `set_sandboxed` carries the guards: no session to retarget,
-    /// or a task already started, leaves the flag untouched.
+    /// Primary modifier + Shift + .: cycle the draft through the rows the
+    /// mode menu's Environment section offers — This Mac, the Sandbox VM,
+    /// and the provider's cloud when it has one. `set_environment` carries
+    /// the guards: no session to retarget, or a task already started,
+    /// leaves the pick untouched.
     pub(super) fn toggle_environment_action(
         &mut self,
         _: &ToggleEnvironment,
@@ -3913,10 +3926,19 @@ impl Waku {
         if self.settings_page.is_some() || !self.state.sandbox_experiment_enabled {
             return;
         }
-        let Some(sandboxed) = self.composer_session().map(|session| session.sandboxed) else {
+        let Some((environment, provider)) = self
+            .composer_session()
+            .map(|session| (session.environment(), session.provider))
+        else {
             return;
         };
-        self.set_sandboxed(!sandboxed, cx);
+        let options = SessionEnvironment::options_for(provider);
+        let next = options
+            .iter()
+            .position(|option| *option == environment)
+            .map(|index| options[(index + 1) % options.len()])
+            .unwrap_or(SessionEnvironment::Local);
+        self.set_environment(next, cx);
     }
 
     /// A keyboard toggle produces no mouse-down for another open menu's
@@ -4273,27 +4295,40 @@ impl Waku {
 
     /// The environment is fixed when the session boots; once a task has
     /// started it can only report where it runs, not move. The experiment
-    /// gate is absolute — no client path may mark a task sandboxed while the
-    /// surface that would explain the claim is hidden.
-    pub(super) fn set_sandboxed(&mut self, sandboxed: bool, cx: &mut Context<Self>) {
+    /// gate is absolute — no client path may mark a task sandboxed or
+    /// cloud-run while the surface that would explain the claim is hidden.
+    pub(super) fn set_environment(
+        &mut self,
+        environment: SessionEnvironment,
+        cx: &mut Context<Self>,
+    ) {
         if !self.state.sandbox_experiment_enabled {
             return;
         }
-        let Some(session_changed) = self
+        let Some((current, provider)) = self
             .composer_session()
             .filter(|session| !session.has_started())
-            .map(|session| session.sandboxed != sandboxed)
+            .map(|session| (session.environment(), session.provider))
         else {
             return;
         };
-        let remembered_changed = self.state.last_sandboxed != sandboxed;
+        // A Cloud pick only exists where the provider can host it — callers
+        // that cycle the list never send it, but guard anyway.
+        let environment = if environment.is_cloud() && !provider.supports_cloud() {
+            SessionEnvironment::Local
+        } else {
+            environment
+        };
+        let session_changed = current != environment;
+        let remembered_changed = self.state.last_environment() != environment;
         if session_changed {
             self.composer_session_mut()
                 .expect("composer session still exists")
-                .sandboxed = sandboxed;
+                .environment = environment;
         }
         if session_changed || remembered_changed {
-            self.state.last_sandboxed = sandboxed;
+            self.state.last_environment = environment;
+            self.state.last_sandboxed = false;
             self.save();
             cx.notify();
         }
@@ -5156,18 +5191,60 @@ mod tests {
     #[test]
     fn new_task_carries_the_current_tasks_environment() {
         let mut current = AgentSession::new(Uuid::new_v4(), ProviderKind::OpenCode);
-        current.sandboxed = true;
+        current.environment = SessionEnvironment::Sandbox;
 
-        assert!(new_task_sandboxed(Some(&current), false, true, false));
-        assert!(!new_task_sandboxed(None, false, true, false));
-        assert!(new_task_sandboxed(None, true, true, false));
+        let environment = |current, remembered, enabled, default| {
+            new_task_environment(current, remembered, enabled, default, ProviderKind::Codex)
+        };
+        assert_eq!(
+            environment(Some(&current), SessionEnvironment::Local, true, false),
+            SessionEnvironment::Sandbox
+        );
+        assert_eq!(
+            environment(None, SessionEnvironment::Local, true, false),
+            SessionEnvironment::Local
+        );
+        assert_eq!(
+            environment(None, SessionEnvironment::Sandbox, true, false),
+            SessionEnvironment::Sandbox
+        );
         // The experiment gate keeps remembered or inherited intent from
         // reaching a draft while the surface is hidden.
-        assert!(!new_task_sandboxed(Some(&current), true, false, false));
+        assert_eq!(
+            environment(Some(&current), SessionEnvironment::Sandbox, false, false),
+            SessionEnvironment::Local
+        );
         // The daemon's sandbox-by-default pref overrides the remembered
         // choice for fresh tasks; the experiment gate still wins over it.
-        assert!(new_task_sandboxed(None, false, true, true));
-        assert!(!new_task_sandboxed(None, false, false, true));
+        assert_eq!(
+            environment(None, SessionEnvironment::Local, true, true),
+            SessionEnvironment::Sandbox
+        );
+        assert_eq!(
+            environment(None, SessionEnvironment::Local, false, true),
+            SessionEnvironment::Local
+        );
+        // A Cloud pick only carries to providers that can host it.
+        assert_eq!(
+            new_task_environment(
+                None,
+                SessionEnvironment::Cloud,
+                true,
+                false,
+                ProviderKind::Codex
+            ),
+            SessionEnvironment::Cloud
+        );
+        assert_eq!(
+            new_task_environment(
+                None,
+                SessionEnvironment::Cloud,
+                true,
+                false,
+                ProviderKind::Pi
+            ),
+            SessionEnvironment::Local
+        );
     }
 
     #[test]

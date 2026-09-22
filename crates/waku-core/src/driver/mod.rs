@@ -4,6 +4,7 @@ mod acp;
 mod activity;
 mod amp;
 mod claude;
+mod cloud;
 mod codex;
 mod computer_use;
 mod copilot;
@@ -320,6 +321,18 @@ pub struct SessionOptions {
     pub reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
     pub context_window: Option<String>,
+}
+
+/// A cloud-environment session: no local process, no VM — the driver owns
+/// a remote task's lifecycle through the provider's hosted API or CLI.
+pub(crate) fn start_cloud(
+    provider: ProviderKind,
+    options: DriverStartOptions,
+    events: DriverEventSender,
+) -> anyhow::Result<DriverHandle> {
+    Ok(DriverHandle {
+        inner: Arc::new(cloud::CloudDriver::start(provider, options, events)?),
+    })
 }
 
 pub(crate) fn start_local(

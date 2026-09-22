@@ -2451,10 +2451,11 @@ impl Waku {
         let selected_mode = session
             .map(|session| session.runtime_mode)
             .unwrap_or_default();
-        let sandboxed = session.is_some_and(|session| session.sandboxed);
+        let environment = session.map(AgentSession::environment).unwrap_or_default();
         let sandbox_enabled = self.state.sandbox_experiment_enabled;
         let provider = session.map(|session| session.provider).unwrap_or_default();
         let provider_sandboxable = provider.supports_sandbox();
+        let provider_cloud = provider.supports_cloud();
         // The environment is provisioned when the session boots — a started
         // task's section still shows where it runs, but no longer changes it.
         let started = session.is_some_and(AgentSession::has_started);
@@ -2519,12 +2520,13 @@ impl Waku {
         );
         dropdown_menu(
             MenuChip::new("runtime-mode")
-                // Sandboxed sessions trade the mode glyph for the container —
-                // the same icon the badge wears while the task runs. The
-                // experiment gate keeps a hidden feature from leaking an icon.
+                // Non-local sessions trade the mode glyph for the
+                // environment's — the same icon the badge wears while the
+                // task runs. The experiment gate keeps a hidden feature
+                // from leaking an icon.
                 .icon(
-                    if sandboxed && sandbox_enabled {
-                        "icons/container.svg"
+                    if sandbox_enabled && !environment.is_local() {
+                        environment.icon()
                     } else {
                         selected_mode.icon()
                     },
@@ -2571,24 +2573,35 @@ impl Waku {
                 if sandbox_enabled {
                     items.push(MenuItem::Separator);
                     items.push(MenuItem::Header(tr!("sandbox.environment").into()));
-                    for (icon_path, label, description, value) in [
+                    let mut rows = vec![
                         (
-                            "icons/laptop.svg",
+                            SessionEnvironment::Local,
                             tr!("sandbox.this_mac"),
                             tr!("sandbox.this_mac_description"),
-                            false,
                         ),
                         (
-                            "icons/container.svg",
+                            SessionEnvironment::Sandbox,
                             tr!("sandbox.sandbox_vm"),
                             tr!("sandbox.sandbox_vm_description"),
-                            true,
                         ),
-                    ] {
+                    ];
+                    // The cloud row names its provider — the remote
+                    // environment is provider-owned, not interchangeable.
+                    if provider_cloud {
+                        rows.push((
+                            SessionEnvironment::Cloud,
+                            tr!("sandbox.provider_cloud", provider = provider.display_name()),
+                            tr!(
+                                "sandbox.provider_cloud_description",
+                                provider = provider.display_name()
+                            ),
+                        ));
+                    }
+                    for (value, label, description) in rows {
                         // A provider without a guest build still lists the
                         // choice — the row explains why starting it would
                         // fail rather than silently disabling.
-                        let description = if value && !provider_sandboxable {
+                        let description = if value.is_sandbox() && !provider_sandboxable {
                             tr!(
                                 "sandbox.sandbox_vm_unsupported",
                                 provider = provider.display_name()
@@ -2596,7 +2609,8 @@ impl Waku {
                         } else {
                             description
                         };
-                        let selected = value == sandboxed;
+                        let icon_path = value.icon();
+                        let selected = value == environment;
                         let weak = weak.clone();
                         let choice_row = choice_row.clone();
                         let row = MenuItem::custom(move |_, _| {
@@ -2614,7 +2628,7 @@ impl Waku {
                             row
                         } else {
                             row.on_click(move |_, cx| {
-                                let _ = weak.update(cx, |this, cx| this.set_sandboxed(value, cx));
+                                let _ = weak.update(cx, |this, cx| this.set_environment(value, cx));
                             })
                         });
                     }

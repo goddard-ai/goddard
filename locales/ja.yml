@@ -877,9 +877,16 @@ sandbox.sandbox_vm: サンドボックス VM
 sandbox.sandbox_vm_description: 分離された Linux VM で実行
 sandbox.sandbox_vm_unsupported: サンドボックス環境で実行できるのは Codex と Claude のみです — {provider} はまだ VM で起動できません。
 sandbox.badge: サンドボックス環境
+sandbox.provider_cloud: "%{provider} クラウド"
+sandbox.provider_cloud_description: "%{provider} のホスト環境で実行 — プッシュ済みのコミットのみ"
+sandbox.cloud_badge: "%{provider} クラウド"
 sandbox.setup_downloading: サンドボックスを準備中 — VM イメージをダウンロードしています
 sandbox.setup_building: サンドボックスを準備中 — {toolchain} をインストールしています
 sandbox.setup_booting: サンドボックスを準備中 — VM を起動しています
+
+cloud.still_running: "%{provider} クラウドはまだ作業中です — 完了を待つか、キャンセルしてください"
+cloud.not_running: クラウドタスクは実行されていません
+cloud.stopped: 停止しました
 
 agent_preset.standard: 標準モード
 agent_preset.code: コードモード

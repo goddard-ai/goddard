@@ -4988,9 +4988,12 @@ impl Waku {
             && !self.automations_page
             && self.projects_page.is_none()
             && !self.notifications.open;
-        let sandboxed = session_surface
-            && session.is_some_and(|session| session.sandboxed)
-            && self.state.sandbox_experiment_enabled;
+        let environment = if session_surface && self.state.sandbox_experiment_enabled {
+            session.map(AgentSession::environment)
+        } else {
+            None
+        }
+        .unwrap_or_default();
         let left_window_controls = (!self.sidebar_visible)
             .then(|| {
                 self.render_client_window_controls(
@@ -5105,12 +5108,23 @@ impl Waku {
                                 .child(icon("icons/bot.svg", 10.5, theme.text_tertiary))
                                 .child(div().min_w_0().truncate().child(SharedString::from(label)))
                         }))
-                        // The container glyph only — the same icon the access
-                        // menu and its chip use, with the word on the tooltip.
-                        .when(sandboxed, |element| {
+                        // The environment's glyph only — the same icon the
+                        // access menu and its chip use, with the name on the
+                        // tooltip.
+                        .when(!environment.is_local(), |element| {
+                            let badge_label = match environment {
+                                SessionEnvironment::Sandbox => tr!("sandbox.badge"),
+                                SessionEnvironment::Cloud => tr!(
+                                    "sandbox.cloud_badge",
+                                    provider = session
+                                        .map(|session| session.provider.display_name())
+                                        .unwrap_or_default()
+                                ),
+                                SessionEnvironment::Local => unreachable!("filtered above"),
+                            };
                             element.child(
                                 div()
-                                    .id("sandboxed-badge")
+                                    .id("environment-badge")
                                     .h(px(22.0))
                                     .w(px(22.0))
                                     .rounded(px(8.0))
@@ -5119,8 +5133,8 @@ impl Waku {
                                     .items_center()
                                     .justify_center()
                                     .bg(theme.overlay)
-                                    .child(icon("icons/container.svg", 11.0, theme.text_secondary))
-                                    .tooltip(Tooltip::text(tr!("sandbox.badge"))),
+                                    .child(icon(environment.icon(), 11.0, theme.text_secondary))
+                                    .tooltip(Tooltip::text(badge_label)),
                             )
                         }),
                     cx,

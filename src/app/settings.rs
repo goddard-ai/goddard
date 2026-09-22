@@ -5549,11 +5549,12 @@ impl Waku {
     fn set_sandbox_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.sandbox_experiment_enabled = enabled;
         if !enabled {
+            self.state.last_environment = SessionEnvironment::Local;
             self.state.last_sandboxed = false;
             if let Some(session) = self.composer_session_mut()
                 && !session.has_started()
             {
-                session.sandboxed = false;
+                session.environment = SessionEnvironment::Local;
             }
         }
         self.save();

@@ -111,6 +111,16 @@ impl ProviderKind {
         matches!(self, Self::Codex | Self::Claude)
     }
 
+    /// Whether the provider offers a hosted cloud environment a task can be
+    /// submitted to — the third Environment choice beside This Mac and the
+    /// Sandbox VM. Same shared-type reasoning as [`Self::supports_sandbox`].
+    pub fn supports_cloud(self) -> bool {
+        matches!(
+            self,
+            Self::Claude | Self::Codex | Self::Copilot | Self::Cursor | Self::Devin | Self::Droid
+        )
+    }
+
     pub fn short_name(self) -> &'static str {
         match self {
             Self::Antigravity => "Antigravity",
@@ -629,6 +639,51 @@ impl RuntimeMode {
             Self::AutoAcceptEdits => "icons/pencil.svg",
             Self::Auto => "icons/sparkle.svg",
             Self::FullAccess => "icons/lock-open.svg",
+        }
+    }
+}
+
+/// Where a task's work runs: the host, the local sandbox VM, or the
+/// provider's hosted cloud. Picked on the draft and fixed once the session
+/// boots — a started task can report where it runs, not move.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionEnvironment {
+    #[default]
+    Local,
+    Sandbox,
+    Cloud,
+}
+
+impl SessionEnvironment {
+    /// `skip_serializing_if` borrows — this takes `&self` for that.
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local)
+    }
+
+    pub fn is_sandbox(self) -> bool {
+        matches!(self, Self::Sandbox)
+    }
+
+    pub fn is_cloud(self) -> bool {
+        matches!(self, Self::Cloud)
+    }
+
+    /// The environments a draft may pick for `provider`: Cloud joins only
+    /// when the provider has a hosted environment to submit to.
+    pub fn options_for(provider: ProviderKind) -> Vec<Self> {
+        let mut options = vec![Self::Local, Self::Sandbox];
+        if provider.supports_cloud() {
+            options.push(Self::Cloud);
+        }
+        options
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::Local => "icons/laptop.svg",
+            Self::Sandbox => "icons/container.svg",
+            Self::Cloud => "icons/cloud-upload.svg",
         }
     }
 }
@@ -1430,10 +1485,16 @@ pub struct AgentSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     pub runtime_mode: RuntimeMode,
-    /// The task's commands run inside the sandbox VM rather than on the
-    /// host. Fixed when the session boots — a started task can report where
-    /// it runs, not move.
-    #[serde(default, skip_serializing_if = "is_false")]
+    /// Where the task's work runs — this Mac, the sandbox VM, or the
+    /// provider's hosted cloud. Fixed when the session boots — a started
+    /// task can report where it runs, not move. Read through
+    /// [`Self::environment`], which folds in the legacy `sandboxed` flag.
+    #[serde(default, skip_serializing_if = "SessionEnvironment::is_local")]
+    pub environment: SessionEnvironment,
+    /// Read-only compatibility field for state written before
+    /// `environment` existed; new saves omit it. Never read directly — use
+    /// [`Self::environment`].
+    #[serde(default, skip_serializing)]
     pub sandboxed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
@@ -1616,6 +1677,7 @@ impl AgentSession {
             provider,
             model: None,
             runtime_mode: RuntimeMode::default(),
+            environment: SessionEnvironment::Local,
             sandboxed: false,
             reasoning_effort: None,
             service_tier: None,
@@ -1670,7 +1732,8 @@ impl AgentSession {
             provider: self.provider,
             model: self.model.clone(),
             runtime_mode: RuntimeMode::default(),
-            sandboxed: self.sandboxed,
+            environment: self.environment(),
+            sandboxed: false,
             reasoning_effort: None,
             service_tier: None,
             context_window: None,
@@ -1700,6 +1763,17 @@ impl AgentSession {
             turns: Vec::new(),
             queued_messages: Vec::new(),
             detail_loaded: false,
+        }
+    }
+
+    /// The resolved run environment. State written before `environment`
+    /// existed carries only the `sandboxed` bool — map it forward instead
+    /// of silently unsandboxing those sessions.
+    pub fn environment(&self) -> SessionEnvironment {
+        if self.environment == SessionEnvironment::Local && self.sandboxed {
+            SessionEnvironment::Sandbox
+        } else {
+            self.environment
         }
     }
 
