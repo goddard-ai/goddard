@@ -76,6 +76,7 @@ pub fn init(cx: &mut App) {
 /// `git log` page size for the commits section; more arrive as the list
 /// scrolls to its end.
 const GIT_PANEL_COMMIT_PAGE: usize = 100;
+const MACOS_TRAFFIC_LIGHTS_RIGHT_EDGE: f32 = 72.0;
 const GIT_PANEL_FILE_ROW_HEIGHT: f32 = 26.0;
 const GIT_PANEL_COMMIT_ROW_HEIGHT: f32 = 26.0;
 /// How far a file row's diff preview crosses the panel's left edge — the
@@ -5083,6 +5084,11 @@ impl Waku {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
+        let header_left_padding = if cfg!(target_os = "macos") {
+            (MACOS_TRAFFIC_LIGHTS_RIGHT_EDGE - self.sidebar_rendered_width).max(14.0)
+        } else {
+            14.0
+        };
         // `…/commit/<sha>` and `#<n>` issue links only make sense when the
         // workspace's origin remote is a github.com repository.
         let github_base = self
@@ -5166,7 +5172,8 @@ impl Waku {
                 div()
                     .h(px(40.0))
                     .flex_none()
-                    .px(px(14.0))
+                    .pl(px(header_left_padding))
+                    .pr(px(14.0))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
