@@ -2329,6 +2329,14 @@ impl Waku {
                 })
                 .label(trigger_label)
                 .label_color(theme.text_tertiary)
+                .tooltip(tr!("models.options"))
+                // ⌘E only cycles effort — a tier/window-only model has no
+                // ladder for it to step through, so the hint stays off.
+                .when(!model.reasoning_efforts.is_empty(), |trigger| {
+                    trigger.shortcut_action(&CycleReasoningEffort {
+                        direction: EffortCycleDirection::Forward,
+                    })
+                })
                 .caret(false)
                 .selected(handle.is_open()),
             "model-traits-menu",

@@ -935,6 +935,7 @@ models.standard: 標準
 models.reasoning: 推論レベル
 models.service_tier: サービスティア
 models.context_window: コンテキストウィンドウ
+models.options: モデルオプション
 
 model_option.none: なし
 model_option.minimal: 最小

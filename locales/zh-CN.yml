@@ -913,6 +913,7 @@ models.standard: 标准
 models.reasoning: 推理强度
 models.service_tier: 服务等级
 models.context_window: 上下文窗口
+models.options: 模型选项
 model_option.none: 无
 model_option.minimal: 最低
 model_option.low: 低

@@ -2456,6 +2456,8 @@ models.service_tier:
   en: Service Tier
 models.context_window:
   en: Context Window
+models.options:
+  en: Model options
 
 model_option.none:
   en: None
