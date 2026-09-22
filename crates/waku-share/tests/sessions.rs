@@ -52,7 +52,7 @@ async fn spawn_node(
     )
     .with_session_handlers(on_list, on_subscribe);
     let secret = waku_share::identity::load_or_create(dir).unwrap();
-    ShareNode::spawn(dir, secret, RelayMode::Disabled, proto)
+    ShareNode::spawn(dir, secret, RelayMode::Disabled, proto, None)
         .await
         .unwrap()
 }

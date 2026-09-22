@@ -94,10 +94,10 @@ async fn share_nodes_friend_request_over_n0() {
     let secret_a = waku_share::identity::load_or_create(dir_a.path()).unwrap();
     let secret_b = waku_share::identity::load_or_create(dir_b.path()).unwrap();
 
-    let node_a = ShareNode::spawn(dir_a.path(), secret_a, RelayMode::Default, proto_a)
+    let node_a = ShareNode::spawn(dir_a.path(), secret_a, RelayMode::Default, proto_a, None)
         .await
         .unwrap();
-    let node_b = ShareNode::spawn(dir_b.path(), secret_b, RelayMode::Default, proto_b)
+    let node_b = ShareNode::spawn(dir_b.path(), secret_b, RelayMode::Default, proto_b, None)
         .await
         .unwrap();
 
@@ -171,7 +171,7 @@ fn share_nodes_on_current_thread_runtimes() {
                     store,
                 );
                 let secret = waku_share::identity::load_or_create(&dir).unwrap();
-                let node = ShareNode::spawn(&dir, secret, RelayMode::Default, proto)
+                let node = ShareNode::spawn(&dir, secret, RelayMode::Default, proto, None)
                     .await
                     .unwrap();
                 tx.send(node.endpoint().clone()).unwrap();
