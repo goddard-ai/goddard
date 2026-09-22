@@ -173,7 +173,7 @@ function HeaderBarAction({ icon, label, unseen, onPress }: HeaderActionSpec) {
       onPress={onPress}
       style={({ pressed }) => [styles.barAction, { opacity: pressed ? 0.5 : 1 }]}
     >
-      <AppSymbol name={icon} size={17} tintColor={theme.text} />
+      <AppSymbol name={icon} scale="large" size={22} tintColor={theme.text} />
       {unseen ? (
         <View style={[styles.barActionDot, { backgroundColor: theme.info }]} />
       ) : null}
@@ -258,8 +258,8 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     height: 8,
     position: "absolute",
-    right: 2,
-    top: 4,
+    right: 0,
+    top: 0,
     width: 8,
   },
 });
