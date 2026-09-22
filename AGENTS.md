@@ -40,17 +40,20 @@ Read the doc before working in its area:
   app competing with web clients, and staying smooth under a long transcript on
   a high-refresh display is the point of being native. Prefer the faster design
   when it costs nothing in clarity, and measure before assuming a cost is fine.
-- Anything a frame can reach must already be in memory: no subprocesses,
-  filesystem walks, network, blocking locks, or synchronous IPC. Row builders
-  and measurement paths run for every visible item on every frame, so I/O from
-  `render` is a defect even when cached or limited to some rows.
-- Render paths must not call `.update`, `.read`, or `.read_with` on `Waku` or
-  any entity leased above them in the same render. Transcript rows render under
+- Never block the UI thread with heavy work. Anything a frame can reach must
+  already be in memory: no subprocess spawns, filesystem walks, network, blocking
+  locks, or synchronous IPC. Row builders and measurement paths run for every
+  visible item on every frame, so I/O reached from `render` is a defect even when
+  cached or limited to some rows.
+- Render paths must not call `.update`, `.read`, or `.read_with` on `Waku` or any
+  entity leased above them in the same render. Transcript rows render under
   `entity.update` and `WakuPane` content runs inside `waku.update`, so a nested
   update on the same entity aborts the process (`double_lease_panic`, no unwind).
   Helpers that need `Waku` state while building elements take `&Waku` or
-  `&mut Context<Waku>`; a `&WeakEntity<Waku>` parameter signals deferred use
-  only — callbacks and continuations run outside the lease and may update freely.
+  `&mut Context<Waku>`; a `&WeakEntity<Waku>` parameter signals deferred use only
+  — callbacks and continuations such as `on_click`, `on_key_down`, `spawn`
+  continuations, menu-item callbacks, and canvas paint closures run outside the
+  lease and may update freely.
 - Move background work to `cx.background_executor().spawn`, store results on the
   entity, and `cx.notify()` when they land. Render reads only that store, and a
   miss means “not known yet” and must degrade gracefully. Resolve whole sessions
