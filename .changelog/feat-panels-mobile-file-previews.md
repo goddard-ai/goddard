@@ -1,0 +1,1 @@
+- The mobile Files surface now previews images inline and opens text files for editing — Edit and Save write through the daemon and refresh the diff and Git panel

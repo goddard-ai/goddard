@@ -1,0 +1,1 @@
+- The mobile task menu gains a Git surface covering the working-tree half of the desktop Git panel: branch and upstream status, pull (rebase) when behind and push when the remote allows, staged and unstaged file lists with stage, unstage, and confirmed discard, and a commit bar that can generate the message through the session's provider

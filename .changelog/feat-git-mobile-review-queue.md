@@ -1,0 +1,1 @@
+- The mobile task menu gains a Review queue listing the repo's `origin/qa` commits with status badges — approve or reject per commit, then promote the approved prefix onto the base branch behind a confirmation

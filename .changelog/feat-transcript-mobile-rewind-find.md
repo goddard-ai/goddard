@@ -1,0 +1,1 @@
+- The mobile transcript gains per-turn conversation editing and find: rewind from an eligible user message or fork from a closing response — gated on the same eligibility rules as desktop — plus text search within the transcript

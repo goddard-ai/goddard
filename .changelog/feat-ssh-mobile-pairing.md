@@ -1,0 +1,1 @@
+- The mobile daemon editor now shows the connected daemon's version and commit and gains a Pairing section — approve or deny pending pair requests and revoke paired devices, live as they change
