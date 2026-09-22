@@ -182,38 +182,6 @@ const EAR_BACK_PATH =
 const EAR_PATH =
   'M119.394447,21.2945077 C121.72048,22.678465 124.735875,26.1634247 126.203633,28.9735585 C127.506468,31.4679242 128.839816,34.9497257 130.051542,38.9623641 L130.058023,38.9838262 L130.064335,39.0053386 L130.484624,40.4377476 L130.489886,40.4556799 L130.49503,40.4736463 C131.598319,44.3271819 132.97675,49.7643287 133.627477,52.8432414 L133.634398,52.8759886 L133.640934,52.9088148 L133.974307,54.5831222 L133.977499,54.5991553 L133.9806,54.6152064 C135.030578,60.0511678 135.339815,62.7988887 135.194069,65.8743714 L135.192536,65.9067238 L135.190635,65.9390568 L135.154768,66.5491841 L135.152972,66.5797329 L135.150848,66.6102606 C134.965113,69.2800961 134.613814,71.1362786 133.848805,73.4246116 L133.843062,73.4417893 L133.83721,73.4589301 L133.608786,74.1280328 L133.597209,74.1619434 L133.585207,74.1957057 C133.212014,75.2455112 132.876527,75.9177601 132.254943,76.8917141 L132.246103,76.9055654 L132.237183,76.9193655 L131.994713,77.2945027 L131.984043,77.3109485 C130.307201,79.8858005 127.5042,82.1176358 124.650724,83.1226252 C122.825713,83.7654023 119.699239,83.8276103 117.792406,83.3128063 C115.362159,82.6566833 113.406829,81.3954999 111.420379,79.3361713 C109.848114,77.7062111 108.986295,76.5075574 107.86593,74.4058637 C106.440473,71.731855 105.689407,69.4390249 104.954708,65.6375741 L104.022797,60.9244152 L104.014503,60.8824674 L104.00684,60.8404 L102.719281,53.7723059 L102.714,53.7433132 L102.709019,53.7142674 L101.458611,46.4233193 L101.450543,46.3762732 L101.443264,46.3290986 L100.879799,42.6775518 L100.72239,41.7507861 C100.085263,37.9728011 99.9053887,32.592949 100.479885,30.1968268 C101.405173,26.3376127 103.258427,23.3099209 106.145043,21.4014006 C107.848117,20.2753824 109.104387,19.8269891 111.257141,19.531567 C114.079411,19.1442762 116.828035,19.7675301 119.394447,21.2945077 Z M112.032089,25.178642 C110.691052,25.3626723 110.245895,25.5232602 109.288712,26.156119 C107.743786,27.1775649 106.64189,28.9436556 106.022793,31.5257985 C105.669748,32.9982896 105.816191,37.6789358 106.343025,40.8029109 L106.506545,41.7656332 L107.07659,45.4598286 L108.326997,52.7507768 L109.614556,59.8188709 L110.546396,64.5320439 C111.183818,67.8359531 111.763174,69.5996804 112.895874,71.7245077 C113.772973,73.3698602 114.325588,74.1377372 115.52284,75.3789229 C116.849051,76.7537895 117.939714,77.4484929 119.278109,77.8098354 C120.113212,78.0352953 122.063166,77.9907703 122.757172,77.7463383 C124.411479,77.1636941 126.207543,75.7360112 127.207619,74.2003581 L127.450089,73.825221 C127.839503,73.2150529 127.986718,72.9271436 128.214469,72.2864723 L128.442893,71.6173696 C129.048427,69.8060669 129.310944,68.4232715 129.464592,66.2146796 L129.500459,65.6045522 C129.619989,63.0822702 129.356856,60.7326626 128.384043,55.6962048 L128.05067,54.0218975 C127.425874,51.0656747 126.076927,45.7509228 125.0152,42.0425528 L124.594911,40.6101438 C123.474424,36.8996443 122.262167,33.7393138 121.151285,31.6124572 C120.126204,29.6498606 117.793637,26.9746748 116.4799,26.1930193 C114.97849,25.299702 113.519018,24.9745956 112.032089,25.178642 Z';
 
-/** Value of a `(keyTime, value)` track at `phase ∈ [0,1)` — the keyframes the
- * source SVG declares per group. `eased` applies its cubic-bezier
- * (0.42, 0, 0.58, 1) timing to the segment; the twitch tracks run linear. */
-function track(phase: number, keys: Track, eased: boolean): number {
-  'worklet';
-  for (let ix = 0; ix + 1 < keys.length; ix += 1) {
-    const [t0, v0] = keys[ix];
-    const [t1, v1] = keys[ix + 1];
-    if (phase <= t1) {
-      const progress = Math.min(1, Math.max(0, (phase - t0) / (t1 - t0)));
-      return v0 + (v1 - v0) * (eased ? easeInOut(progress) : progress);
-    }
-  }
-  return keys.length ? keys[keys.length - 1][1] : 0;
-}
-
-/** cubic-bezier(0.42, 0, 0.58, 1) — CSS `ease-in-out`. */
-function easeInOut(x: number): number {
-  'worklet';
-  // Invert the curve's x(t) by bisection, then read y(t).
-  let lo = 0;
-  let hi = 1;
-  for (let ix = 0; ix < 20; ix += 1) {
-    const t = (lo + hi) * 0.5;
-    const xt = 3 * (1 - t) * t * (0.42 * (1 - t) + 0.58 * t) + t ** 3;
-    if (xt < x) lo = t;
-    else hi = t;
-  }
-  const t = (lo + hi) * 0.5;
-  return t * t * (3 - 2 * t);
-}
-
 /** A rigid 2D transform in element pixels —
  * `(x, y) ↦ (xx·x + xy·y + tx, yx·x + yy·y + ty)`. Only rotations occur
  * here, so the linear part stays orthonormal. */
@@ -226,59 +194,17 @@ type Affine = {
   ty: number;
 };
 
-/** `degrees` of rotation about `pivot`, like SVG `rotate(a, px, py)`. */
-function rotateAbout(pivot: Pivot, degrees: number): Affine {
-  'worklet';
-  const radians = (degrees * Math.PI) / 180;
-  const sin = Math.sin(radians);
-  const cos = Math.cos(radians);
-  const [px, py] = pivot;
-  return {
-    xx: cos,
-    xy: -sin,
-    yx: sin,
-    yy: cos,
-    tx: px - px * cos + py * sin,
-    ty: py - px * sin - py * cos,
-  };
-}
-
-/** `self ∘ other`: `other` applies first, like an inner SVG group nested
- * under the group carrying `self`. */
-function thenAffine(self: Affine, other: Affine): Affine {
-  'worklet';
-  return {
-    xx: self.xx * other.xx + self.xy * other.yx,
-    xy: self.xx * other.xy + self.xy * other.yy,
-    yx: self.yx * other.xx + self.yy * other.yx,
-    yy: self.yx * other.xy + self.yy * other.yy,
-    tx: self.xx * other.tx + self.xy * other.ty + self.tx,
-    ty: self.yx * other.tx + self.yy * other.ty + self.ty,
-  };
-}
-
-/** The transform list painting a layer with this affine. React Native
- * applies the composed transform about the view's center, so with the
- * translates listed ahead of the rotate the point is rotated about the
- * center first and offset after — the same center-rotate-plus-translate the
- * desktop's `svg_transformation` emits. */
-function affineTransform(a: Affine) {
-  'worklet';
-  const theta = Math.atan2(a.yx, a.xx);
-  const sin = Math.sin(theta);
-  const cos = Math.cos(theta);
-  return [
-    { translateX: a.tx + CENTER_X * (cos - 1) - CENTER_Y * sin },
-    { translateY: a.ty + CENTER_X * sin + CENTER_Y * (cos - 1) },
-    { rotate: `${theta}rad` },
-  ];
-}
-
-/** User-space `u` to element px. */
-function toPx(u: number): number {
-  'worklet';
-  return (u + 10) * UNITS_TO_PX;
-}
+/** One frame's worth of paint: the transform list for each layer and the
+ * eyes layer's blink opacity. Computed inside a single worklet whose helpers
+ * are local — the worklets plugin binds a worklet's captured functions at
+ * declaration time, so module-level helpers reach it frozen (or undefined
+ * when declared later in the file); local closures are always live. */
+type Frame = {
+  head: NonNullable<ViewStyle['transform']>;
+  ear: NonNullable<ViewStyle['transform']>;
+  earBack: NonNullable<ViewStyle['transform']>;
+  blink: number;
+};
 
 /** The animated mark, tinted like the row's text. The clock runs on the UI
  * thread at vsync — the blink holds shut for only ~100 ms, and a coarser
@@ -294,47 +220,122 @@ export function GoddardThinking({ color }: { color: string }) {
     if (reducedMotion) clock.value = 0;
   }, [clock, frame, reducedMotion]);
 
-  const head = useDerivedValue<Affine>(() => {
+  const derived = useDerivedValue<Frame>(() => {
+    'worklet';
+    const toPx = (u: number) => (u + 10) * UNITS_TO_PX;
     const phase = (period: number) => (clock.value / period) % 1;
+
+    // cubic-bezier(0.42, 0, 0.58, 1) — CSS `ease-in-out`: invert the curve's
+    // x(t) by bisection, then read y(t).
+    const easeInOut = (x: number) => {
+      let lo = 0;
+      let hi = 1;
+      for (let ix = 0; ix < 20; ix += 1) {
+        const t = (lo + hi) * 0.5;
+        const xt = 3 * (1 - t) * t * (0.42 * (1 - t) + 0.58 * t) + t ** 3;
+        if (xt < x) lo = t;
+        else hi = t;
+      }
+      const t = (lo + hi) * 0.5;
+      return t * t * (3 - 2 * t);
+    };
+
+    // Value of a `(keyTime, value)` track at `ph ∈ [0,1)` — the keyframes the
+    // source SVG declares per group. `eased` applies its ease-in-out timing to
+    // the segment; the twitch tracks run linear.
+    const track = (ph: number, keys: Track, eased: boolean) => {
+      for (let ix = 0; ix + 1 < keys.length; ix += 1) {
+        const [t0, v0] = keys[ix];
+        const [t1, v1] = keys[ix + 1];
+        if (ph <= t1) {
+          const progress = Math.min(1, Math.max(0, (ph - t0) / (t1 - t0)));
+          return v0 + (v1 - v0) * (eased ? easeInOut(progress) : progress);
+        }
+      }
+      return keys.length ? keys[keys.length - 1][1] : 0;
+    };
+
+    // `degrees` of rotation about `pivot`, like SVG `rotate(a, px, py)`.
+    const rotateAbout = (pivot: Pivot, degrees: number): Affine => {
+      const radians = (degrees * Math.PI) / 180;
+      const sin = Math.sin(radians);
+      const cos = Math.cos(radians);
+      const [px, py] = pivot;
+      return {
+        xx: cos,
+        xy: -sin,
+        yx: sin,
+        yy: cos,
+        tx: px - px * cos + py * sin,
+        ty: py - px * sin - py * cos,
+      };
+    };
+
+    // `self ∘ other`: `other` applies first, like an inner SVG group nested
+    // under the group carrying `self`.
+    const then = (self: Affine, other: Affine): Affine => ({
+      xx: self.xx * other.xx + self.xy * other.yx,
+      xy: self.xx * other.xy + self.xy * other.yy,
+      yx: self.yx * other.xx + self.yy * other.yx,
+      yy: self.yx * other.xy + self.yy * other.yy,
+      tx: self.xx * other.tx + self.xy * other.ty + self.tx,
+      ty: self.yx * other.tx + self.yy * other.ty + self.ty,
+    });
+
+    // The transform list painting a layer with this affine. React Native
+    // applies the composed transform about the view's center, so with the
+    // translates listed ahead of the rotate the point is rotated about the
+    // center first and offset after — the same center-rotate-plus-translate
+    // the desktop's `svg_transformation` emits.
+    const toTransform = (a: Affine) => {
+      const theta = Math.atan2(a.yx, a.xx);
+      const sin = Math.sin(theta);
+      const cos = Math.cos(theta);
+      return [
+        { translateX: a.tx + CENTER_X * (cos - 1) - CENTER_Y * sin },
+        { translateY: a.ty + CENTER_X * sin + CENTER_Y * (cos - 1) },
+        { rotate: `${theta}rad` },
+      ];
+    };
+
     const sway = track(phase(SWAY_PERIOD), SWAY, true);
     // Rock and the head toss share their pivot, so they compose by summing
     // angles.
     const rock =
       track(phase(ROCK_PERIOD), ROCK, true) + track(phase(HEAD_PERIOD), HEAD, false);
-    return thenAffine(
+    const head = then(
       rotateAbout([toPx(SWAY_PIVOT[0]), toPx(SWAY_PIVOT[1])], sway),
       rotateAbout([toPx(HEAD_PIVOT[0]), toPx(HEAD_PIVOT[1])], rock),
     );
-  });
-  const ear = useDerivedValue<Affine>(() =>
-    thenAffine(
-      head.value,
+    const ear = then(
+      head,
       rotateAbout(
         [toPx(EAR_PIVOT[0]), toPx(EAR_PIVOT[1])],
-        track((clock.value / EAR_PERIOD) % 1, EAR, false),
+        track(phase(EAR_PERIOD), EAR, false),
       ),
-    ),
-  );
-  const earBack = useDerivedValue<Affine>(() =>
-    thenAffine(
-      head.value,
+    );
+    const earBack = then(
+      head,
       rotateAbout(
         [toPx(EAR_BACK_PIVOT[0]), toPx(EAR_BACK_PIVOT[1])],
-        track((clock.value / EAR_PERIOD) % 1, EAR_BACK, false),
+        track(phase(EAR_PERIOD), EAR_BACK, false),
       ),
-    ),
-  );
-  const blink = useDerivedValue(() =>
-    track((clock.value / BLINK_PERIOD) % 1, BLINK, true),
-  );
+    );
+    return {
+      head: toTransform(head),
+      ear: toTransform(ear),
+      earBack: toTransform(earBack),
+      blink: track(phase(BLINK_PERIOD), BLINK, true),
+    };
+  });
 
-  const faceStyle = useAnimatedStyle(() => ({ transform: affineTransform(head.value) }));
+  const faceStyle = useAnimatedStyle(() => ({ transform: derived.value.head }));
   const eyesStyle = useAnimatedStyle(() => ({
-    opacity: blink.value,
-    transform: affineTransform(head.value),
+    opacity: derived.value.blink,
+    transform: derived.value.head,
   }));
-  const earBackStyle = useAnimatedStyle(() => ({ transform: affineTransform(earBack.value) }));
-  const earStyle = useAnimatedStyle(() => ({ transform: affineTransform(ear.value) }));
+  const earBackStyle = useAnimatedStyle(() => ({ transform: derived.value.earBack }));
+  const earStyle = useAnimatedStyle(() => ({ transform: derived.value.ear }));
 
   return (
     <View
