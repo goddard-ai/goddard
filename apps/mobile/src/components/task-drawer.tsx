@@ -156,6 +156,11 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
               onClose={closeTaskDrawer}
             />
           )}
+          // The container behind the drawer is transparent, so the default
+          // white root view shows through wherever the drawer doesn't reach —
+          // the card's corner cutouts at the reveal seam — glaring in dark
+          // mode. Paint it so the backdrop matches the theme.
+          style={{ backgroundColor: theme.background }}
           swipeEdgeWidth={width}
           swipeEnabled={swipeEnabled}
           onClose={closeTaskDrawer}
