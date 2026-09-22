@@ -1010,6 +1010,7 @@ commands.fast_disabled: 高速モードを無効にしました
 commands.goal_description: このタスクが継続して追求するゴールを設定
 commands.resume_description: ターミナルのエージェントセッションを再開
 commands.land_description: ベースブランチにリベースしてこのタスクのコミットを取り込む
+commands.side_description: このタスクのパネルでサイドチャットを開く
 commands.compact_description: 会話のコンテキストを圧縮
 commands.compact_context: コンテキストを圧縮
 commands.compact_turn_running: 圧縮する前に現在のターンの終了を待ってください

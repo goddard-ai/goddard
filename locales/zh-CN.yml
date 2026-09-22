@@ -984,6 +984,7 @@ commands.fast_disabled: 已关闭快速模式
 commands.goal_description: 为此任务设定一个持续追求的目标
 commands.resume_description: 恢复终端智能体会话
 commands.land_description: 变基到基础分支并将此任务的提交合入该分支
+commands.side_description: 在此任务的面板中打开侧聊
 commands.compact_description: 压缩会话上下文
 commands.compact_context: 压缩上下文
 commands.compact_turn_running: 请等待当前轮次结束后再压缩

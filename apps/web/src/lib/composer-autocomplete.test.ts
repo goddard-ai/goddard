@@ -86,6 +86,19 @@ describe('composer autocomplete', () => {
     expect(toggledFastServiceTier(null, [])).toBeNull()
   })
 
+  test('keeps desktop-only commands out of the picker', () => {
+    const commands = [
+      command('side', 'Waku', 'Open a side chat', null),
+      command('review', 'Project', 'Review changes', 'Review $ARGUMENTS'),
+    ]
+    const browse = { kind: 'command' as const, query: '', start: 0, end: 1 }
+    expect(composerAutocompleteRows(browse, commands, [])).toEqual([
+      { kind: 'command', command: commands[1] },
+    ])
+    const typed = { kind: 'command' as const, query: 'si', start: 0, end: 3 }
+    expect(composerAutocompleteRows(typed, commands, [])).toEqual([])
+  })
+
   test('filters by fuzzy path and caps the result count', () => {
     const files: FileEntry[] = Array.from({ length: 100 }, (_, index) => ({
       path: `src/component-${index}.tsx`,

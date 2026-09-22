@@ -2600,6 +2600,8 @@ commands.resume_description:
   en: Resume a terminal agent session
 commands.land_description:
   en: Rebase onto the base branch and land this task's commits on it
+commands.side_description:
+  en: Open a side chat in this task's panel
 commands.compact_description:
   en: Compact the conversation context
 commands.compact_context:

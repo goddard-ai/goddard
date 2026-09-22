@@ -139,19 +139,26 @@ export function toggledFastServiceTier(
   return current === fast.id ? 'default' : fast.id
 }
 
+/** Goddard commands the daemon lists that only the desktop app can run —
+ * picking one here would send its literal name to the agent. */
+const DESKTOP_ONLY_COMMANDS = new Set(['side'])
+
 export function composerAutocompleteRows(
   trigger: ComposerTrigger,
   commands: SlashCommand[],
   files: FileEntry[],
   cap = COMPOSER_AUTOCOMPLETE_CAP,
 ): ComposerAutocompleteRow[] {
+  const listed = trigger.kind === 'command'
+    ? commands.filter((command) => !DESKTOP_ONLY_COMMANDS.has(command.name))
+    : commands
   if (!trigger.query.trim()) {
     return trigger.kind === 'command'
-      ? commands.slice(0, cap).map((command) => ({ kind: 'command', command }))
+      ? listed.slice(0, cap).map((command) => ({ kind: 'command', command }))
       : files.slice(0, cap).map((file) => ({ kind: 'file', file }))
   }
   const source = trigger.kind === 'command'
-    ? commands.map((command) => ({
+    ? listed.map((command) => ({
         row: { kind: 'command' as const, command },
         candidate: command.name,
       }))

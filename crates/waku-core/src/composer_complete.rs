@@ -383,11 +383,13 @@ fn assemble_slash_commands(
     }
     commands.extend(cli_commands);
     let mut commands = dedup_and_sort_commands(commands);
-    // `/resume` and `/land` belong to Goddard rather than any one provider.
-    // Reserve the names after provider/project discovery so every composer
-    // exposes the same picker and submitting them can never leak into an
-    // agent turn.
-    commands.retain(|command| command.name != "resume" && command.name != "land");
+    // `/resume`, `/land`, and `/side` belong to Goddard rather than any one
+    // provider. Reserve the names after provider/project discovery so every
+    // composer exposes the same picker and submitting them can never leak
+    // into an agent turn.
+    commands.retain(|command| {
+        command.name != "resume" && command.name != "land" && command.name != "side"
+    });
     commands.push(SlashCommand {
         name: "resume".to_owned(),
         description: crate::i18n::translate("commands.resume_description"),
@@ -400,6 +402,13 @@ fn assemble_slash_commands(
         description: crate::i18n::translate("commands.land_description"),
         scope: CommandScope::Waku,
         argument_hint: None,
+        template: None,
+    });
+    commands.push(SlashCommand {
+        name: "side".to_owned(),
+        description: crate::i18n::translate("commands.side_description"),
+        scope: CommandScope::Waku,
+        argument_hint: Some("[prompt]".to_owned()),
         template: None,
     });
     // `/compact` is reserved on the transports with a dedicated daemon RPC —
@@ -1536,6 +1545,31 @@ mod tests {
             assert_eq!(
                 resume[0].description,
                 crate::i18n::translate("commands.resume_description")
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn waku_side_is_reserved_and_listed_for_every_provider() {
+        let root = std::env::temp_dir().join(format!("waku-side-command-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".waku/commands")).unwrap();
+        std::fs::write(root.join(".waku/commands/side.md"), "Project override").unwrap();
+
+        for provider in ProviderKind::ALL {
+            let commands = assemble_slash_commands(provider, &root, Vec::new());
+            let side = commands
+                .iter()
+                .filter(|command| command.name == "side")
+                .collect::<Vec<_>>();
+            assert_eq!(side.len(), 1, "{provider:?} has duplicate Side commands");
+            assert_eq!(side[0].scope, CommandScope::Waku);
+            assert_eq!(side[0].template, None);
+            assert_eq!(
+                side[0].description,
+                crate::i18n::translate("commands.side_description")
             );
         }
 
