@@ -99,9 +99,7 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-use crate::theme::{
-    SHEEN_LIFT_DARK, SHEEN_LIFT_LIGHT, Theme, hairline, sp,
-};
+use crate::theme::{SHEEN_LIFT_DARK, SHEEN_LIFT_LIGHT, Theme, hairline, sp};
 use crate::ui::icon;
 use crate::ui::motion;
 use crate::ui::shortcut::ShortcutHint;

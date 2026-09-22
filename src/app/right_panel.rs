@@ -1860,7 +1860,10 @@ mod tests {
         terminal_state.surfaces = vec![RightPanelSurface::Terminal(terminal_id)];
         terminal_state.active_surface = Some(0);
         terminal_state.file_tree_width = 248.0;
-        states.insert(RightPanelOwner::Session(session_with_terminal), terminal_state);
+        states.insert(
+            RightPanelOwner::Session(session_with_terminal),
+            terminal_state,
+        );
 
         let other_state = RightPanelSessionState::take_or_closed(
             &mut states,
@@ -4591,32 +4594,29 @@ impl Waku {
                 cx,
             )
         };
-        let github_url = self
-            .right_panel_files_root
-            .clone()
-            .and_then(|workspace| {
-                let snapshot = self.branch_snapshot_for_workspace(&workspace, cx)?;
-                match self.remote_file_for(&workspace, &relative_path, cx) {
-                    // Verified against the remote-tracking refs — the remote
-                    // serves the file at this ref + repo-relative path.
-                    Some(Ok(Some(remote))) => {
-                        let base = branches::github_remote_base(snapshot.origin_url.as_deref()?)?;
-                        Some(format!(
-                            "{base}/blob/{}/{}",
-                            branches::github_url_path_encode(&remote.reference),
-                            branches::github_url_path_encode(&remote.path)
-                        ))
-                    }
-                    // Verified absent — untracked, uncommitted, or unpushed.
-                    Some(Ok(None)) => None,
-                    // Unverifiable — keep the optimistic guess rather than
-                    // drop an affordance that used to render unconditionally.
-                    Some(Err(_)) => branches::github_file_url(&snapshot, &relative_path),
-                    // Answer in flight; drawing the old guess here would
-                    // flash a button that can vanish a frame later.
-                    None => None,
+        let github_url = self.right_panel_files_root.clone().and_then(|workspace| {
+            let snapshot = self.branch_snapshot_for_workspace(&workspace, cx)?;
+            match self.remote_file_for(&workspace, &relative_path, cx) {
+                // Verified against the remote-tracking refs — the remote
+                // serves the file at this ref + repo-relative path.
+                Some(Ok(Some(remote))) => {
+                    let base = branches::github_remote_base(snapshot.origin_url.as_deref()?)?;
+                    Some(format!(
+                        "{base}/blob/{}/{}",
+                        branches::github_url_path_encode(&remote.reference),
+                        branches::github_url_path_encode(&remote.path)
+                    ))
                 }
-            });
+                // Verified absent — untracked, uncommitted, or unpushed.
+                Some(Ok(None)) => None,
+                // Unverifiable — keep the optimistic guess rather than
+                // drop an affordance that used to render unconditionally.
+                Some(Err(_)) => branches::github_file_url(&snapshot, &relative_path),
+                // Answer in flight; drawing the old guess here would
+                // flash a button that can vanish a frame later.
+                None => None,
+            }
+        });
         let github_button = github_url.map(|url| {
             let focus = self.transcript_control_focus("file-open-on-github", cx);
             let label = tr!("files.open_on_github");

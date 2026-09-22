@@ -10,10 +10,7 @@ use crate::identity::APP_NAME;
 
 use super::*;
 
-actions!(
-    waku_close_dialog,
-    [ConfirmAppClose, DismissAppClose]
-);
+actions!(waku_close_dialog, [ConfirmAppClose, DismissAppClose]);
 
 const DIALOG_CONTEXT: &str = "AppCloseDialog";
 
@@ -179,10 +176,7 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn render_close_dialog(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_close_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.close_dialog.as_ref()?;
         let theme = Theme::current(cx);
         let weak = cx.entity().downgrade();
@@ -221,12 +215,8 @@ impl Waku {
         }
 
         let (confirm_label, confirm_icon) = match dialog.intent {
-            CloseDialogIntent::Quit => {
-                (tr!("menu.quit", app = APP_NAME), "icons/unplug.svg")
-            }
-            CloseDialogIntent::HideWindow => {
-                (tr!("menu.close_window"), "icons/eye-off.svg")
-            }
+            CloseDialogIntent::Quit => (tr!("menu.quit", app = APP_NAME), "icons/unplug.svg"),
+            CloseDialogIntent::HideWindow => (tr!("menu.close_window"), "icons/eye-off.svg"),
         };
         let confirm_row = render_close_dialog_row(
             "close-dialog-confirm",

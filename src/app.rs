@@ -1206,9 +1206,7 @@ impl RightPanelSessionState {
     }
 
     fn take_or_closed(states: &mut HashMap<RightPanelOwner, Self>, owner: RightPanelOwner) -> Self {
-        states
-            .remove(&owner)
-            .unwrap_or_else(|| Self::empty(false))
+        states.remove(&owner).unwrap_or_else(|| Self::empty(false))
     }
 }
 
@@ -4786,9 +4784,7 @@ impl Waku {
             {
                 let this = cx.entity().downgrade();
                 window.on_window_should_close(cx, move |window, cx| {
-                    let _ = this.update(cx, |waku, cx| {
-                        waku.request_window_close(window, cx)
-                    });
+                    let _ = this.update(cx, |waku, cx| waku.request_window_close(window, cx));
                     false
                 });
             }

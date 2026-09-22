@@ -734,11 +734,7 @@ fn monitor_daemon(
                     client,
                     address,
                     token,
-                } => (
-                    None,
-                    client.clone(),
-                    Some((address.clone(), token.clone())),
-                ),
+                } => (None, client.clone(), Some((address.clone(), token.clone()))),
             }
         };
         if let Some(executable) = inner.executable.as_ref() {
@@ -922,11 +918,7 @@ fn report_recovery(
 
 /// Recovery succeeded — report it only when the daemon was actually
 /// recovering, so steady-state bookkeeping never reads as an outage.
-fn mark_connected(
-    inner: &SupervisorInner,
-    cause: DaemonRecoveryCause,
-    exit: Option<DaemonExit>,
-) {
+fn mark_connected(inner: &SupervisorInner, cause: DaemonRecoveryCause, exit: Option<DaemonExit>) {
     let recovered = {
         let mut status = inner.status.lock();
         let recovered = *status != DaemonStatus::Connected;

@@ -70,8 +70,8 @@ pub use protocol::{
     AgentPromptDelivery, AgentWorkspace, ClientMessage, Command, DAEMON_ADDRESS_ENV,
     DAEMON_TOKEN_ENV, DaemonReady, DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION,
     ReplayCursor, Request, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent,
-    ServerMessage,
-    WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
+    ServerMessage, WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions,
+    WireSessionOptions,
 };
 pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;

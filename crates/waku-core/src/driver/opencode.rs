@@ -170,12 +170,8 @@ fn reject_prompt(error: impl std::fmt::Display, events: &impl DriverEventSink, t
 fn write_agent_surface_instruction(
     agent: &crate::agent::AgentLaunchEnv,
 ) -> anyhow::Result<std::path::PathBuf> {
-    crate::fs_ext::create_private_dir_all(&agent.shim_directory).with_context(|| {
-        format!(
-            "could not create {}",
-            agent.shim_directory.display()
-        )
-    })?;
+    crate::fs_ext::create_private_dir_all(&agent.shim_directory)
+        .with_context(|| format!("could not create {}", agent.shim_directory.display()))?;
     let path = agent.shim_directory.join("goddard-agent.md");
     std::fs::write(
         &path,

@@ -1709,11 +1709,9 @@ impl Waku {
     fn next_timed_pump_delay(&self) -> Option<Duration> {
         [
             self.background_output_refresh_delay(),
-            self.daemon_recovery_episode.as_ref().map(|episode| {
-                episode
-                    .flush_at
-                    .saturating_duration_since(Instant::now())
-            }),
+            self.daemon_recovery_episode
+                .as_ref()
+                .map(|episode| episode.flush_at.saturating_duration_since(Instant::now())),
         ]
         .into_iter()
         .flatten()

@@ -287,14 +287,10 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
             // exists — the system-message append is this provider's
             // announcement channel.
             if let Some(agent) = &agent {
-                config.system_message = Some(
-                    SystemMessageConfig::new()
-                        .with_mode("append")
-                        .with_content(crate::agent::surface_instruction(
-                            "goddard-agent",
-                            &agent.scope(),
-                        )),
-                );
+                config.system_message =
+                    Some(SystemMessageConfig::new().with_mode("append").with_content(
+                        crate::agent::surface_instruction("goddard-agent", &agent.scope()),
+                    ));
             }
             client.create_session(config).await
         }

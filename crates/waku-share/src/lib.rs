@@ -352,10 +352,7 @@ fn sanitize_component(raw: &str) -> Option<String> {
 /// export target. `used` tracks already-claimed destinations so sanitizing
 /// can't silently overwrite an earlier entry; collisions get a `-n`
 /// suffix on the file name.
-fn collection_entry_path(
-    raw: &str,
-    used: &mut std::collections::HashSet<PathBuf>,
-) -> PathBuf {
+fn collection_entry_path(raw: &str, used: &mut std::collections::HashSet<PathBuf>) -> PathBuf {
     let mut rel = PathBuf::new();
     for part in raw.split('/') {
         if let Some(part) = sanitize_component(part) {

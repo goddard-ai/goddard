@@ -4543,8 +4543,12 @@ impl Waku {
                     .into_any_element(),
                 ),
                 SessionStatus::Failed => Some(
-                    icon("icons/x-bold.svg", 12.0, status_color(&theme, session.status))
-                        .into_any_element(),
+                    icon(
+                        "icons/x-bold.svg",
+                        12.0,
+                        status_color(&theme, session.status),
+                    )
+                    .into_any_element(),
                 ),
                 SessionStatus::Idle if self.state.unseen_completions.contains_key(&session_id) => {
                     Some(

@@ -87,9 +87,7 @@ impl DaemonStats {
     }
 
     /// `(latest, previous_boot, previous_boot_clean)` for `getDaemonStats`.
-    pub(crate) fn snapshot(
-        &self,
-    ) -> (Option<DaemonStatsSample>, Option<DaemonStatsSample>, bool) {
+    pub(crate) fn snapshot(&self) -> (Option<DaemonStatsSample>, Option<DaemonStatsSample>, bool) {
         let state = self.state.lock();
         (
             state.latest.clone(),
@@ -116,18 +114,20 @@ impl DaemonStats {
         let boot = self.boot.clone();
         let _ = std::thread::Builder::new()
             .name("waku-stats".into())
-            .spawn(move || loop {
-                let sample = stats.current_sample();
-                stats.state.lock().latest = Some(sample.clone());
-                let _ = append_json_line(
-                    &path,
-                    &StatsLine {
-                        boot: boot.clone(),
-                        sample,
-                        shutdown: false,
-                    },
-                );
-                std::thread::sleep(SAMPLE_INTERVAL);
+            .spawn(move || {
+                loop {
+                    let sample = stats.current_sample();
+                    stats.state.lock().latest = Some(sample.clone());
+                    let _ = append_json_line(
+                        &path,
+                        &StatsLine {
+                            boot: boot.clone(),
+                            sample,
+                            shutdown: false,
+                        },
+                    );
+                    std::thread::sleep(SAMPLE_INTERVAL);
+                }
             });
     }
 
@@ -253,10 +253,7 @@ fn memory_footprint_mb() -> (Option<u64>, Option<u64>) {
             stack.extend_from_slice(children);
         }
     }
-    (
-        own.map(|bytes| bytes / (1 << 20)),
-        Some(total / (1 << 20)),
-    )
+    (own.map(|bytes| bytes / (1 << 20)), Some(total / (1 << 20)))
 }
 
 /// pid → (parent pid, resident bytes) for every readable process.
@@ -331,7 +328,12 @@ fn process_table() -> Option<HashMap<i32, (i32, u64)>> {
             if let Some(value) = line.strip_prefix("PPid:") {
                 ppid = value.trim().parse::<i32>().ok();
             } else if let Some(value) = line.strip_prefix("VmRSS:") {
-                rss_kb = value.trim().trim_end_matches(" kB").trim().parse::<u64>().ok();
+                rss_kb = value
+                    .trim()
+                    .trim_end_matches(" kB")
+                    .trim()
+                    .parse::<u64>()
+                    .ok();
             }
         }
         if let (Some(ppid), Some(rss_kb)) = (ppid, rss_kb) {
@@ -453,7 +455,10 @@ mod tests {
             .filter(|line| !line.is_empty())
             .count();
         assert!(parsed > 0);
-        for line in kept.split(|byte| *byte == b'\n').filter(|line| !line.is_empty()) {
+        for line in kept
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+        {
             serde_json::from_slice::<StatsLine>(line).unwrap();
         }
     }

@@ -47,8 +47,7 @@ const IDLE_REAPER_INTERVAL: std::time::Duration = std::time::Duration::from_secs
 /// Resident provider runtime lifetime when `runtime_idle_timeout_secs` is
 /// unset. Thirty minutes covers stepping away without keeping every browsed
 /// task's process alive for the whole workday.
-const DEFAULT_RUNTIME_IDLE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(30 * 60);
+const DEFAULT_RUNTIME_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// How long an archived task is kept, in seconds, before it is removed
 /// entirely. The sweep runs whenever task state loads rather than on a
@@ -1054,18 +1053,20 @@ impl Backend for WakuBackend {
         let agent = self.agent.clone();
         let _ = std::thread::Builder::new()
             .name("waku-idle-reaper".into())
-            .spawn(move || loop {
-                std::thread::sleep(IDLE_REAPER_INTERVAL);
-                for (session_id, runtime_id, driver) in
-                    reap_idle_runtimes(&sessions, &task_state, &settings, &agent)
-                {
-                    // The scoped credential was valid only while the
-                    // provider process carrying it lived.
-                    agent.revoke_session(session_id);
-                    events
-                        .for_session(session_id, runtime_id)
-                        .end_session_runtime();
-                    drop_detached(driver);
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(IDLE_REAPER_INTERVAL);
+                    for (session_id, runtime_id, driver) in
+                        reap_idle_runtimes(&sessions, &task_state, &settings, &agent)
+                    {
+                        // The scoped credential was valid only while the
+                        // provider process carrying it lived.
+                        agent.revoke_session(session_id);
+                        events
+                            .for_session(session_id, runtime_id)
+                            .end_session_runtime();
+                        drop_detached(driver);
+                    }
                 }
             });
     }
@@ -3905,11 +3906,15 @@ impl WakuBackend {
             let _ = sink.send(wire);
         }
         let memory = self.memory.context_block(session_id, task);
-        let block = [map, memory.clone(), self.agent_surface_block(session_id, driver)]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let block = [
+            map,
+            memory.clone(),
+            self.agent_surface_block(session_id, driver),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n");
         if block.is_empty() {
             return;
         }
@@ -6264,7 +6269,12 @@ mod tests {
 
         // The accepted echo marks the surface delivered; the next prompt
         // owes no block, so nothing steers at all.
-        assert!(backend.agent.take_pending_steer(session_id, &steers[0]).is_some());
+        assert!(
+            backend
+                .agent
+                .take_pending_steer(session_id, &steers[0])
+                .is_some()
+        );
         backend.agent.mark_surface_announced(session_id);
         backend.steer_first_prompt_context(
             session_id,
@@ -6308,8 +6318,7 @@ mod tests {
         let capture = Arc::new(CaptureDriver::default());
         let driver = crate::driver::DriverHandle::from_control(capture.clone());
 
-        let prompt =
-            backend.prepend_agent_surface(session_id, &driver, "create a task".to_owned());
+        let prompt = backend.prepend_agent_surface(session_id, &driver, "create a task".to_owned());
         assert!(prompt.starts_with("<goddard-agent>"));
         assert!(prompt.ends_with("create a task"));
 
@@ -6625,8 +6634,13 @@ mod tests {
             },
         );
         assert!(
-            reap_idle_runtimes(&sessions, &backend.task_state, &backend.settings, &backend.agent)
-                .is_empty()
+            reap_idle_runtimes(
+                &sessions,
+                &backend.task_state,
+                &backend.settings,
+                &backend.agent
+            )
+            .is_empty()
         );
         std::fs::remove_dir_all(&root).ok();
     }

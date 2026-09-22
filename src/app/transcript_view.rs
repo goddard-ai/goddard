@@ -2561,7 +2561,10 @@ impl Waku {
                 ),
                 file.path.clone(),
                 &cx.entity().downgrade(),
-                format!("file-link-menu-changed-files-preview-{turn_id}-{}", file.path),
+                format!(
+                    "file-link-menu-changed-files-preview-{turn_id}-{}",
+                    file.path
+                ),
                 cx,
             ))
             .child(
