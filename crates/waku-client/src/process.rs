@@ -27,6 +27,9 @@ const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 const STABLE_UPTIME: Duration = Duration::from_secs(30);
 const UNREACHABLE_AFTER_FAILURES: u32 = 4;
+/// Reconnect attempts an alive-but-disconnected daemon earns before the
+/// supervisor falls back to killing and respawning it.
+const LOCAL_RECONNECT_ATTEMPTS: u32 = 3;
 pub const DEFAULT_EXPOSED_DAEMON_PORT: u16 = 34_123;
 
 /// Desktop-owned launch configuration for the daemon it supervises.
@@ -108,6 +111,11 @@ pub use waku_protocol::parse_allowed_origins;
 pub struct DaemonProcess {
     client: DaemonClient,
     child: Child,
+    /// The bound address and bearer token — kept so a dropped connection on
+    /// a live daemon can be re-established in place instead of respawning
+    /// the process and orphaning every provider runtime.
+    address: String,
+    token: String,
 }
 
 impl DaemonProcess {
@@ -204,7 +212,7 @@ impl DaemonProcess {
                 return Err(error);
             }
         };
-        let client = match DaemonClient::connect(&client_address, token) {
+        let client = match DaemonClient::connect(&client_address, token.clone()) {
             Ok(client) => client,
             Err(error) => {
                 let _ = child.kill();
@@ -212,11 +220,21 @@ impl DaemonProcess {
                 return Err(error);
             }
         };
-        Ok(Self { client, child })
+        Ok(Self {
+            client,
+            child,
+            address: client_address,
+            token,
+        })
     }
 
     pub fn client(&self) -> DaemonClient {
         self.client.clone()
+    }
+
+    /// Swap in a re-established connection on the same process.
+    fn set_client(&mut self, client: DaemonClient) {
+        self.client = client;
     }
 
     /// The exit status once the child has exited — `Some(None)` when it
@@ -766,6 +784,27 @@ fn monitor_daemon(
                     }
                 }
                 let (cause, exit) = outage.unwrap_or((cause, exit));
+                // A daemon whose process is still alive only lost its
+                // connection — reconnect in place; killing it would take
+                // every provider runtime down for nothing.
+                if matches!(still_down, Some(LocalDown::Disconnected))
+                    && consecutive_failures < LOCAL_RECONNECT_ATTEMPTS
+                {
+                    match reconnect_local_daemon(&inner) {
+                        Ok(()) => {
+                            consecutive_failures = 0;
+                            healthy_since = Instant::now();
+                            mark_connected(&inner, cause, exit);
+                        }
+                        Err(error) => {
+                            consecutive_failures += 1;
+                            next_retry = Instant::now() + retry_delay(consecutive_failures);
+                            eprintln!("could not reconnect to the Goddard daemon: {error:#}");
+                            note_recovery_failure(&inner, consecutive_failures, cause, exit);
+                        }
+                    }
+                    continue;
+                }
                 let Some(exposure) = inner.exposure.lock().clone() else {
                     return;
                 };
@@ -881,6 +920,39 @@ fn note_recovery_failure(
     if newly_unreachable {
         report_recovery(inner, cause, DaemonRecoveryOutcome::Unreachable, exit);
     }
+}
+
+/// The managed daemon's connection died but the process is alive: open a
+/// fresh session-bearing connection in place instead of killing it and
+/// every provider runtime with it. Sessions keep their runtimes — the new
+/// client resumes replay from the dead one's cursors.
+fn reconnect_local_daemon(inner: &SupervisorInner) -> anyhow::Result<()> {
+    let (address, token, resume_from, expected) = {
+        let target = inner.target.lock();
+        match &*target {
+            DaemonTarget::Local(process) if process.client().is_disconnected() => (
+                process.address.clone(),
+                process.token.clone(),
+                process.client().last_sequences(),
+                process.client(),
+            ),
+            _ => bail!("the daemon no longer needs reconnecting"),
+        }
+    };
+    let client = DaemonClient::connect_with_resume(&address, token, resume_from)?;
+    let mut target = inner.target.lock();
+    let DaemonTarget::Local(process) = &mut *target else {
+        bail!("the daemon changed while reconnecting");
+    };
+    if !process.client().same_connection(&expected) {
+        bail!("the daemon changed while reconnecting");
+    }
+    process.set_client(client.clone());
+    inner
+        .client_updates
+        .lock()
+        .retain(|subscriber| subscriber.send(client.clone()).is_ok());
+    Ok(())
 }
 
 fn replace_local_daemon(
