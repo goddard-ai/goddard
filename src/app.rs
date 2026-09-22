@@ -6119,6 +6119,11 @@ impl Waku {
             // the UI state carried across the last quit — history, scroll
             // positions, open panels.
             this.restore_ui_state(window, cx);
+            // A dormant task keeps its collapsed home on relaunch — the
+            // reveal only gives the restored selection a visible row.
+            if let Some(session_id) = this.state.selected_session {
+                this.reveal_dormant_sidebar_session(session_id, cx);
+            }
             this.start_task_state_sync(waku_client::DaemonKey::Local, this.daemon.clone());
             this.connect_remote_hosts(cx);
             // Any daemon crash report the OS wrote while the app was away is

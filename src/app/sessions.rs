@@ -284,16 +284,10 @@ impl Waku {
         {
             self.unarchive_session(session_id, false, cx);
         }
-        // Opening a dormant task wakes it — the same promise archive makes:
-        // explicit activation is the session's way back to the list.
-        if self
-            .state
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id && self.session_dormant_now(session))
-        {
-            self.restore_dormant_sessions(&[session_id], cx);
-        }
+        // Opening a dormant task does not wake it: selection is browsing,
+        // not use — the Dormant group holds it until a prompt's `updated_at`
+        // bump overtakes `dormant_at`. Explicit restores (the context menu,
+        // ⌥-click) still go through `restore_dormant_sessions`.
         // Selecting a chat folds the Terminals group; the terminal keeps its
         // last-visible memory for the next expand.
         if self
@@ -302,6 +296,9 @@ impl Waku {
         {
             self.sidebar_rows_fingerprint.set(None);
         }
+        // Dormant containers stay put — the reveal only makes the selected
+        // row exist inside them.
+        self.reveal_dormant_sidebar_session(session_id, cx);
         self.reveal_sidebar_session(session_id);
         let needs_hydration = self
             .state
@@ -600,6 +597,11 @@ impl Waku {
             } else {
                 self.start_runtime_attachment(session_id, cx);
             }
+        }
+        // A dormant task's queued worktree teardown defers while it is
+        // selected; moving off it lets the drain proceed.
+        if session_changed {
+            self.drain_pending_workspace_cleanups(cx);
         }
         cx.notify();
     }

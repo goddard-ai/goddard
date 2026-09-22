@@ -547,6 +547,14 @@ impl Waku {
             if session.archived_at.is_none() && !self.session_dormant_now(session) {
                 continue;
             }
+            // Selecting a dormant task no longer wakes it, but its
+            // worktree must not vanish while the task is on screen — the
+            // dormant sweep's own candidate list skips the selection for
+            // the same reason. The next drain after deselection retries.
+            if Some(session_id) == self.state.selected_session {
+                deferred.insert(session_id);
+                continue;
+            }
             let quiet = !session.is_busy()
                 && !self.submission_preparations.contains(&session_id)
                 && !self.session_has_live_detached_work(session_id)

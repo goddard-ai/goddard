@@ -2590,6 +2590,86 @@ impl Waku {
         }
     }
 
+    /// A dormant task keeps its group on selection — but the selected row
+    /// has to exist to highlight. Under Date grouping dormant sessions sit
+    /// in the Dormant section, collapsed by default, so it expands; under
+    /// Project grouping the session's dormant tail raises its reveal count
+    /// far enough to include the row. Neither wakes the task.
+    pub(super) fn reveal_dormant_sidebar_session(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let dormant = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| self.session_dormant_now(session));
+        if !dormant {
+            return;
+        }
+        match self.state.sidebar_grouping {
+            SidebarGrouping::Date => {
+                self.set_sidebar_group_collapsed(SidebarGroup::Dormant, false, cx);
+            }
+            SidebarGrouping::Project => {
+                // Rebuild the session ordering so the dormant-tail position
+                // — and therefore the reveal count the row needs — matches
+                // what `sidebar_rows` will render.
+                let mut sorted_sessions = self
+                    .state
+                    .sessions
+                    .iter()
+                    .filter(|session| {
+                        session.has_started()
+                            && session.archived_at.is_none()
+                            && !session.is_side_chat()
+                            && !self.friend_sessions.contains_key(&session.id)
+                    })
+                    .collect::<Vec<_>>();
+                sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
+                let now = unix_time();
+                let threshold = dormant_threshold_secs(self.state.dormant_after_days);
+                let dormant_set = sorted_sessions
+                    .iter()
+                    .filter(|session| session_dormant(session, now, threshold))
+                    .map(|session| session.id)
+                    .collect::<HashSet<_>>();
+                let projectless_root = crate::projectless::workspace_root();
+                let projectless_project_ids = self
+                    .state
+                    .projects
+                    .iter()
+                    .filter(|project| {
+                        sidebar_project_is_projectless(project, projectless_root.as_deref())
+                    })
+                    .map(|project| project.id)
+                    .collect::<HashSet<_>>();
+                for (group, sessions) in
+                    project_sidebar_groups(&sorted_sessions, &projectless_project_ids)
+                {
+                    let Some(position) = sessions
+                        .iter()
+                        .filter(|id| dormant_set.contains(id))
+                        .position(|id| *id == session_id)
+                    else {
+                        continue;
+                    };
+                    let reveals = self
+                        .sidebar_project_dormant_reveals
+                        .entry(group)
+                        .or_default();
+                    if *reveals <= position {
+                        *reveals = position + 1;
+                        self.sidebar_rows_fingerprint.set(None);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
     /// ⌘n — activate the nth task currently listed in the sidebar.
     pub(super) fn select_sidebar_session_action(
         &mut self,
