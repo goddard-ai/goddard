@@ -100,6 +100,8 @@ export type HeaderActionSpec = {
   icon: Parameters<typeof AppSymbol>[0]["name"];
   label: string;
   onPress: () => void;
+  /** New-content dot on the glyph — unseen replies in another task. */
+  unseen?: boolean;
 };
 
 /** Native bar button items for iOS: SF Symbol glyphs in the system's shared
@@ -108,6 +110,15 @@ export function nativeHeaderButtons(
   actions: HeaderActionSpec[],
 ): NativeStackHeaderItem[] {
   return actions.map((action) => {
+    if (action.unseen) {
+      // UIBarButtonItemBadge renders text only — never the bare indicator —
+      // so a flagged action mounts as a custom view instead. The shared
+      // capsule still wraps it (hidesSharedBackground stays unset).
+      return {
+        type: "custom",
+        element: <HeaderBarAction {...action} />,
+      };
+    }
     const symbol =
       typeof action.icon === "string" ? action.icon : action.icon.ios;
     return {
@@ -130,7 +141,7 @@ export function HeaderActionGroup({ children }: { children: ReactNode }) {
   );
 }
 
-export function HeaderAction({ icon, label, onPress }: HeaderActionSpec) {
+export function HeaderAction({ icon, label, unseen, onPress }: HeaderActionSpec) {
   const theme = useTheme();
   return (
     <Pressable
@@ -141,6 +152,31 @@ export function HeaderAction({ icon, label, onPress }: HeaderActionSpec) {
       style={({ pressed }) => [styles.action, { opacity: pressed ? 0.5 : 1 }]}
     >
       <AppSymbol name={icon} size={17} tintColor={theme.text} />
+      {unseen ? (
+        <View style={[styles.actionDot, { backgroundColor: theme.info }]} />
+      ) : null}
+    </Pressable>
+  );
+}
+
+/** Glyph-sized pressable for `custom` header items: a native `button` item
+ * can't carry the unseen dot, and the shared capsule UIKit draws around the
+ * view already supplies the chrome — so the frame hugs the glyph instead of
+ * HeaderAction's 44pt touch box. */
+function HeaderBarAction({ icon, label, unseen, onPress }: HeaderActionSpec) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      hitSlop={8}
+      onPress={onPress}
+      style={({ pressed }) => [styles.barAction, { opacity: pressed ? 0.5 : 1 }]}
+    >
+      <AppSymbol name={icon} size={17} tintColor={theme.text} />
+      {unseen ? (
+        <View style={[styles.barActionDot, { backgroundColor: theme.info }]} />
+      ) : null}
     </Pressable>
   );
 }
@@ -203,5 +239,27 @@ const styles = StyleSheet.create({
     height: 44,
     justifyContent: "center",
     width: 42,
+  },
+  actionDot: {
+    borderRadius: 4,
+    height: 8,
+    position: "absolute",
+    right: 8,
+    top: 10,
+    width: 8,
+  },
+  barAction: {
+    alignItems: "center",
+    height: 30,
+    justifyContent: "center",
+    width: 30,
+  },
+  barActionDot: {
+    borderRadius: 4,
+    height: 8,
+    position: "absolute",
+    right: 2,
+    top: 4,
+    width: 8,
   },
 });

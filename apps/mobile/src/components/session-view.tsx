@@ -52,6 +52,7 @@ import { SessionEmpty } from '@/components/transcript-rows';
 import { useProviderModels, useSession, useTaskState } from '@/hooks/use-daemon-data';
 import { useKeyboardPadding } from '@/hooks/use-keyboard-padding';
 import { useTheme } from '@/hooks/use-theme';
+import { useHasUnseenReplies } from '@/hooks/use-unseen-replies';
 import { Radius } from '@/constants/theme';
 import { useDaemon } from '@/lib/daemon-context';
 import { listSessionTurnRefs } from '@/lib/daemon-api';
@@ -462,6 +463,7 @@ export function SessionView({
       : daemon.phase === 'error' ? 'Not connected' : null;
   const subtitle = linkSubtitle ?? (subtitleParts.length ? subtitleParts.join(' · ') : null);
   const hasSession = Boolean(session);
+  const unseenReplies = useHasUnseenReplies(sessionId);
   const transcriptMounted = Boolean(
     session && mountedTranscriptSessionId === session.id,
   );
@@ -497,6 +499,7 @@ export function SessionView({
     const drawer: HeaderActionSpec = {
       icon: { ios: 'sidebar.left', android: 'menu', web: 'menu' },
       label: 'Task history',
+      unseen: unseenReplies,
       onPress: openTaskDrawer,
     };
     const newTask: HeaderActionSpec = {
@@ -601,7 +604,7 @@ export function SessionView({
           ]
         : undefined,
     };
-  }, [handleTaskMenuCommand, hasSession, modelIcon, modelLabel, openTaskDrawer, subtitle, taskMenuActions, title]);
+  }, [handleTaskMenuCommand, hasSession, modelIcon, modelLabel, openTaskDrawer, subtitle, taskMenuActions, title, unseenReplies]);
 
   const keyboardPadding = useKeyboardPadding();
 

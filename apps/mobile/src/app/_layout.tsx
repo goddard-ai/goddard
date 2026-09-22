@@ -4,6 +4,8 @@ import {
   Stack,
   ThemeProvider,
   router,
+  useGlobalSearchParams,
+  usePathname,
   type NativeStackNavigationOptions,
 } from "expo-router";
 import * as QuickActions from "expo-quick-actions";
@@ -23,6 +25,7 @@ import {
 } from "@/components/screen-header";
 import { TaskDrawerHost, useTaskDrawer } from "@/components/task-drawer";
 import { useTaskState } from "@/hooks/use-daemon-data";
+import { useHasUnseenReplies } from "@/hooks/use-unseen-replies";
 import { DaemonProvider, useDaemon } from "@/lib/daemon-context";
 import { RuntimeProvider } from "@/lib/runtime-context";
 import {
@@ -105,11 +108,20 @@ function AppNavigator() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme === "dark" ? "dark" : "light"];
   const daemonRoutesAvailable = phase === "booting" || profiles.length > 0;
+  const pathname = usePathname();
+  const params = useGlobalSearchParams<{ id?: string | string[] }>();
+  // The dot advertises other chats only — the open transcript stamps its own
+  // watermark, so flagging the chat already on screen would be noise.
+  const viewedSessionId = pathname.startsWith("/session/")
+    ? (Array.isArray(params.id) ? params.id[0] : params.id) ?? null
+    : null;
+  const unseenReplies = useHasUnseenReplies(viewedSessionId);
   const drawerAction = useMemo<HeaderActionSpec>(() => ({
     icon: { ios: "sidebar.left", android: "menu", web: "menu" },
     label: "Task history",
+    unseen: unseenReplies,
     onPress: openTaskDrawer,
-  }), [openTaskDrawer]);
+  }), [openTaskDrawer, unseenReplies]);
   const drawerHeader = useMemo<NativeStackNavigationOptions>(() => ({
     ...floatingHeader,
     gestureEnabled: false,
