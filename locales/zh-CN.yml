@@ -429,6 +429,8 @@ common.creating: 正在创建…
 settings.local_by_default: 默认存储在本地
 settings.local_by_default_description: 项目、对话和设置均存储在这台电脑上
 settings.local_by_default_web_description: 项目、对话和附件保留在所连接的守护进程主机上。Goddard Web 的偏好设置保留在此浏览器中。
+settings.local_workspace_accent: 本地工作区强调色
+settings.local_workspace_accent_description: 当新任务面向本地检出而非工作树时，用主题强调色渲染工作区标签的图标和文字
 settings.automatic_updates: 自动更新
 settings.automatic_updates_description: 在后台检查新版本，并在发现更新时提示安装
 settings.check_for_updates: 检查更新
@@ -1954,6 +1956,7 @@ friends.confirm_disable_sync: "停用 %{name} 与 %{peer} 之间的同步？"
 friends.confirm_disable_sync_detail: 两侧的链接都会被拆除 — 重新建立前分支不再更新。
 friends.confirm_remove: "移除 %{name}？"
 friends.confirm_remove_detail: 对方将从你的好友列表中移除 — 想恢复需重新添加。
+friends.confirm_send_chat: "将此消息发送给 %{name}？"
 friends.confirm_unshare: "停止分享 %{name}？"
 friends.confirm_unshare_detail: 该好友将失去此项目的访问权限 — 同步链接和共享会话都会停止。
 friends.decline: 拒绝
@@ -1987,6 +1990,7 @@ friends.send_dialog_title: 发送给 %{name}
 friends.send_file: 发送文件或文件夹…
 friends.send_file_prompt: 选择要发送的文件或文件夹
 friends.send_request: 发送请求
+friends.send_to_friend: 发送给好友
 friends.session_running: 运行中
 friends.sessions: 会话
 friends.sessions_empty: 还没有会话。

@@ -434,6 +434,8 @@ common.creating: 作成中…
 settings.local_by_default: デフォルトでローカルに保存
 settings.local_by_default_description: プロジェクト、会話、設定はこのコンピュータに保存されます
 settings.local_by_default_web_description: プロジェクト、会話、添付ファイルは接続先デーモンのホストに保存されます。Goddard Web の設定はこのブラウザに保存されます。
+settings.local_workspace_accent: ローカルワークスペースのアクセント
+settings.local_workspace_accent_description: 新しいタスクがワークツリーではなくローカルのチェックアウトを対象にするとき、ワークスペースチップのアイコンとラベルをテーマのアクセントカラーで染めます
 settings.automatic_updates: 自動アップデート
 settings.automatic_updates_description: バックグラウンドで新しいバージョンを確認し、インストールを案内します
 settings.check_for_updates: アップデートの確認
@@ -2003,6 +2005,7 @@ friends.confirm_disable_sync: "%{name} と %{peer} の同期を無効にしま�
 friends.confirm_disable_sync_detail: リンクは両側で切断されます — 再設定するまでブランチの更新は止まります。
 friends.confirm_remove: "%{name} を削除しますか？"
 friends.confirm_remove_detail: フレンドリストから外れます — もう一度ペアリングすれば戻れます。
+friends.confirm_send_chat: "このメッセージを %{name} に送信しますか？"
 friends.confirm_unshare: "%{name} の共有を停止しますか？"
 friends.confirm_unshare_detail: フレンドはこのプロジェクトへのアクセスを失います — 同期リンクと共有セッションが停止します。
 friends.decline: 拒否
@@ -2036,6 +2039,7 @@ friends.send_dialog_title: "%{name} に送信"
 friends.send_file: ファイルまたはフォルダを送信…
 friends.send_file_prompt: 送信するファイルまたはフォルダを選択
 friends.send_request: リクエストを送信
+friends.send_to_friend: フレンドに送信
 friends.session_running: 実行中
 friends.sessions: セッション
 friends.sessions_empty: セッションはまだありません。
