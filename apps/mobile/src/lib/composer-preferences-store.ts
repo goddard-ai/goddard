@@ -28,6 +28,7 @@ let hydratedDone = false;
 const PERSISTED_KEYS = [
   'waku.composer-preferences.v1',
   'waku.provider-probes.v1',
+  'waku.mobile.unseen-replies.v1',
   EXTRAS_KEY,
 ];
 

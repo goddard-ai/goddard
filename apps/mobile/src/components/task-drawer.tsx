@@ -53,6 +53,7 @@ import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useTaskState } from '@/hooks/use-daemon-data';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { useUnseenReplyWatermarks } from '@/hooks/use-unseen-replies';
 import { searchSessionMessages } from '@/lib/daemon-api';
 import { useDaemon } from '@/lib/daemon-context';
 import { useDisplayCornerRadius } from '@/lib/display-corner-radius';
@@ -66,6 +67,10 @@ import {
   type SessionGroup,
   type SessionListItem,
 } from '@/lib/session-presentation';
+import {
+  seedUnseenReplyWatermarks,
+  sessionHasUnseenReply,
+} from '@/lib/unseen-replies';
 
 const DaemonPickerHeight = 38;
 const SearchDockGap = 14;
@@ -267,9 +272,23 @@ function TaskDrawerContent({
     };
   }
   const frame = frameRef.current;
+  const watermarks = useUnseenReplyWatermarks();
+  // New sessions join the tracked set from the full list, not the search
+  // filter — a hidden row still needs its watermark seeded.
+  useEffect(() => {
+    const address = daemon.activeProfile?.address;
+    if (address && frame.data) {
+      void seedUnseenReplyWatermarks(address, frame.data.sessions);
+    }
+  }, [daemon.activeProfile?.address, frame.data]);
   const listExtraData = useMemo(
-    () => ({ runtimes: frame.runtimes, now, selected: frame.selectedSessionId }),
-    [frame.runtimes, frame.selectedSessionId, now],
+    () => ({
+      runtimes: frame.runtimes,
+      now,
+      selected: frame.selectedSessionId,
+      watermarks,
+    }),
+    [frame.runtimes, frame.selectedSessionId, now, watermarks],
   );
   // Local fields catch title/project/provider hits instantly; the daemon's
   // message-store search adds tasks whose transcript content matches.
@@ -464,6 +483,7 @@ function TaskDrawerContent({
         running={frame.runtimes[session.id]?.running ?? sessionIsRunning(session)}
         selected={session.id === frame.selectedSessionId}
         session={session}
+        unseen={sessionHasUnseenReply(session, watermarks)}
         onDelete={confirmDelete}
         onRename={renameSession}
         onSelect={selectSession}
@@ -481,6 +501,7 @@ function TaskDrawerContent({
     selectSession,
     toggleArchive,
     togglePin,
+    watermarks,
   ]);
 
   async function refreshTasks() {
@@ -747,6 +768,7 @@ const SessionRow = memo(function SessionRow({
   lastReplyLabel,
   running,
   selected,
+  unseen,
   onDelete,
   onRename,
   onSelect,
@@ -759,6 +781,7 @@ const SessionRow = memo(function SessionRow({
   lastReplyLabel: string | null;
   running: boolean;
   selected: boolean;
+  unseen: boolean;
   onDelete: (session: AgentSession) => void;
   onRename: (session: AgentSession) => void;
   onSelect: (session: AgentSession) => void;
@@ -771,7 +794,7 @@ const SessionRow = memo(function SessionRow({
   const archived = session.archived_at != null;
   return (
     <TaskRowMenu
-      accessibilityLabel={`${displaySessionTitle(session)}, ${providerLabel(session.provider)} in ${projectName}${running ? ', Running' : ''}${lastReplyLabel ? `, Last reply: ${lastReplyLabel}` : ''}`}
+      accessibilityLabel={`${displaySessionTitle(session)}, ${providerLabel(session.provider)} in ${projectName}${running ? ', Running' : ''}${unseen ? ', New content' : ''}${lastReplyLabel ? `, Last reply: ${lastReplyLabel}` : ''}`}
       archived={archived}
       pinned={pinned}
       onDelete={() => onDelete(session)}
@@ -808,6 +831,11 @@ const SessionRow = memo(function SessionRow({
                 color={theme.textTertiary}
                 size="small"
                 style={styles.sessionSpinner}
+              />
+            )}
+            {!running && unseen && (
+              <View
+                style={[styles.unseenDot, { backgroundColor: theme.info }]}
               />
             )}
           </View>
@@ -947,6 +975,7 @@ const styles = StyleSheet.create({
   sessionProject: { flex: 1, fontSize: 13.5, lineHeight: 17 },
   sessionTime: { flexShrink: 0, fontSize: 13.5, lineHeight: 17, marginLeft: 3 },
   sessionSpinner: { height: 14, transform: [{ scale: 0.72 }], width: 14 },
+  unseenDot: { borderRadius: 4, height: 8, width: 8 },
   sessionTitle: {
     flex: 1,
     fontSize: 17.5,

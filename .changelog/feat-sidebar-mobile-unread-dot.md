@@ -1,0 +1,1 @@
+- The mobile chat list now marks tasks that received new replies since you last opened them with the same informational-blue dot the desktop sidebar shows, clearing when you open the chat

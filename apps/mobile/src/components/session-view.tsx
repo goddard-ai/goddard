@@ -62,6 +62,7 @@ import {
   forkableTurnIds,
   rewindableTurnIds,
 } from '@/lib/session-presentation';
+import { markSessionRepliesSeen } from '@/lib/unseen-replies';
 
 const SURFACE_MENU_COMMANDS = [
   { id: 'terminal', title: 'Terminal', symbol: 'terminal' },
@@ -154,6 +155,16 @@ export function SessionView({
     // Re-runs when the session starts working (another client may have
     // started the runtime after this screen mounted).
   }, [daemon.phase, runtime.attachSession, session?.id, running]);
+
+  // The drawer's new-content dot tracks `last_reply_at` against the newest
+  // stamp the user has had on screen; keep that watermark current for as
+  // long as this transcript is showing.
+  const daemonAddress = daemon.activeProfile?.address;
+  useEffect(() => {
+    if (session && daemonAddress) {
+      void markSessionRepliesSeen(daemonAddress, session);
+    }
+  }, [daemonAddress, session?.id, session?.last_reply_at]);
 
   // Transient task chrome belongs to one session. A route reuse must not show
   // the previous task's file, review, or terminal surface.
