@@ -317,19 +317,16 @@ impl Waku {
         let view = cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
         cx.subscribe(&view, move |this, view, event: &TerminalViewEvent, cx| {
             match event {
-                // The command's startup line ends in `&& exit`, so the
-                // shell only goes away on its own when the script
-                // succeeded — the exit event is the close signal. A
-                // terminal filling the main area has no tab strip to
-                // retire into, so its shell exiting (ctrl+d, `exit`, a
-                // signal) closes it too.
+                // The PTY exiting retires whatever surface held it — a
+                // right-panel tab whose shell or program ended (ctrl+d,
+                // `exit`, a signal), a terminal filling the main area,
+                // or a close-on-success command whose launch line's
+                // `&& exit` already reported through CommandFinished.
                 TerminalViewEvent::Exited => {
                     // A sign-in tab's exit resolves the auth gate: probe the
                     // provider home and resubmit whatever it was holding.
                     this.sandbox_sign_in_terminal_exited(terminal_id, cx);
-                    if close_on_exit || this.selected_terminal == Some(terminal_id) {
-                        this.close_terminal_view_surface(&view, cx);
-                    }
+                    this.close_terminal_view_surface(&view, cx);
                 }
                 TerminalViewEvent::CommandFinished(code) => {
                     // A finished command may have changed the
