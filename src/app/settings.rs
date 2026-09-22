@@ -1623,6 +1623,23 @@ impl Waku {
                     search,
                 )
             },
+            setting_card(
+                tr!("settings.local_workspace_accent"),
+                tr!("settings.local_workspace_accent_description"),
+                toggle_switch(
+                    "local-workspace-accent-toggle",
+                    self.state.local_workspace_accent,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.local_workspace_accent;
+                        move |this, _, cx| this.set_local_workspace_accent(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
             {
                 let navigation = self.state.archive_navigation;
                 let weak = cx.entity().downgrade();
@@ -8483,6 +8500,15 @@ impl Waku {
             return;
         }
         self.state.new_worktree_default_branch = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_local_workspace_accent(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.local_workspace_accent == enabled {
+            return;
+        }
+        self.state.local_workspace_accent = enabled;
         self.save();
         cx.notify();
     }

@@ -249,6 +249,10 @@ fn default_sidebar_shortcut_tags() -> bool {
     true
 }
 
+fn default_local_workspace_accent() -> bool {
+    true
+}
+
 fn default_dormant_after_days() -> Option<u32> {
     Some(DEFAULT_DORMANT_AFTER_DAYS)
 }
@@ -778,6 +782,9 @@ pub struct AppSettings {
     /// a new worktree's base.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub new_worktree_sync_branches: Vec<String>,
+    /// Tint the composer's workspace chip with the accent color while a
+    /// fresh task targets the local checkout instead of a new worktree.
+    pub local_workspace_accent: bool,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
@@ -916,6 +923,7 @@ impl Default for AppSettings {
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
+            local_workspace_accent: true,
             sidebar_transparency: default_sidebar_transparency(),
             sidebar_transparency_amount: DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT,
             thick_borders: false,
@@ -1252,6 +1260,11 @@ pub struct PersistedState {
     /// a new worktree's base.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub new_worktree_sync_branches: Vec<String>,
+    /// Whether the composer's workspace chip tints with the accent color
+    /// while a fresh task targets the local checkout instead of a new
+    /// worktree.
+    #[serde(default = "default_local_workspace_accent")]
+    pub local_workspace_accent: bool,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
@@ -1543,6 +1556,7 @@ impl PersistedState {
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
             new_worktree_sync_branches: Vec::new(),
+            local_workspace_accent: true,
             sidebar_transparency: default_sidebar_transparency(),
             sidebar_transparency_amount: DEFAULT_SIDEBAR_TRANSPARENCY_AMOUNT,
             thick_borders: false,
@@ -1882,6 +1896,7 @@ impl PersistedState {
             new_worktree_default_branch: self.new_worktree_default_branch,
             new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
             new_worktree_sync_branches: self.new_worktree_sync_branches.clone(),
+            local_workspace_accent: self.local_workspace_accent,
             sidebar_transparency: self.sidebar_transparency,
             sidebar_transparency_amount: self.sidebar_transparency_amount,
             thick_borders: self.thick_borders,
@@ -1987,6 +2002,7 @@ impl PersistedState {
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
         self.new_worktree_sync_branches = settings.new_worktree_sync_branches;
+        self.local_workspace_accent = settings.local_workspace_accent;
         self.sidebar_transparency = settings.sidebar_transparency;
         self.sidebar_transparency_amount =
             sanitized_sidebar_transparency_amount(settings.sidebar_transparency_amount);
@@ -3122,6 +3138,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.sidebar_shortcut_tags);
+    }
+
+    #[test]
+    fn local_workspace_accent_defaults_on_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(defaults.local_workspace_accent);
+        let mut state = PersistedState::empty();
+        assert!(state.local_workspace_accent);
+        state.local_workspace_accent = false;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["local_workspace_accent"], false);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("local_workspace_accent")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(!restored.local_workspace_accent);
     }
 
     #[test]

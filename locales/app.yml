@@ -443,7 +443,7 @@ settings.commands:
 settings.terminal:
   en: Terminal
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel preview math latex formula expression markdown file rendered source transcript content token speed tokens per second rate footer
 settings.terminal_keywords:
@@ -1188,6 +1188,10 @@ settings.default_workspace_description:
   en: The workspace new tasks start in. "Last used workspace" reopens the workspace picked for each project; a different pick in the composer still applies to that task
 settings.default_workspace_last_used:
   en: Last used workspace
+settings.local_workspace_accent:
+  en: Local workspace accent
+settings.local_workspace_accent_description:
+  en: Tint the workspace chip's icon and label with the theme's accent color when a new task targets the local checkout instead of a worktree
 settings.new_worktree_base:
   en: Base for new worktrees
 settings.new_worktree_base_description:

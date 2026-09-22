@@ -5760,6 +5760,7 @@ impl Waku {
         } else {
             "icons/fork.svg"
         };
+        let workspace_accented = workspace.is_local() && self.state.local_workspace_accent;
         let worktree_name_input = self.worktree_name_input.clone();
         let worktree_handle = {
             let toggle_weak = cx.entity().downgrade();
@@ -5802,7 +5803,14 @@ impl Waku {
         };
         let creating_worktree = self.worktree_creation_pending;
         let worktree_trigger = MenuChip::new("workspace-worktree")
-            .icon(workspace_icon, theme.text_tertiary)
+            .icon(
+                workspace_icon,
+                if workspace_accented {
+                    theme.accent
+                } else {
+                    theme.text_tertiary
+                },
+            )
             .label(if creating_worktree {
                 SharedString::from(tr!("workspace.creating"))
             } else if moving_to_worktree {
@@ -5813,6 +5821,7 @@ impl Waku {
             .caret(false)
             .disabled(!can_pick_worktree || creating_worktree || moving_to_worktree)
             .selected(can_pick_worktree && !creating_worktree && worktree_handle.is_open())
+            .when(workspace_accented, |chip| chip.label_color(theme.accent))
             .max_w(px(180.0))
             .when(can_pick_worktree, |chip| {
                 chip.tooltip(tr!("menu.toggle_workspace"))

@@ -1,0 +1,1 @@
+- A new task's workspace chip now tints its icon and label with the theme's accent color while the local checkout is selected instead of a new worktree — toggle it with "Local workspace accent" in Settings → General
