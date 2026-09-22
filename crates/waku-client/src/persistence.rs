@@ -97,6 +97,32 @@ impl ArchiveNavigation {
     }
 }
 
+/// The color the sidebar's draft preview line wears.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidebarDraftPreviewColor {
+    /// The same tertiary ink as the row's detail line — a draft reads as
+    /// metadata, not an alert.
+    #[default]
+    Subtle,
+    /// The theme's accent.
+    Accent,
+    /// The theme's alert color — the treatment the preview shipped with.
+    Loud,
+}
+
+impl SidebarDraftPreviewColor {
+    pub const ALL: [Self; 3] = [Self::Subtle, Self::Accent, Self::Loud];
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::Subtle => "settings.sidebar_draft_preview_color_subtle",
+            Self::Accent => "settings.sidebar_draft_preview_color_accent",
+            Self::Loud => "settings.sidebar_draft_preview_color_loud",
+        }
+    }
+}
+
 /// The key that opens links and file paths in the integrated terminal.
 /// Only one key owns the gesture at a time — the other keeps its
 /// plain-click meaning, so the pick is a partition rather than an extra
@@ -830,8 +856,10 @@ pub struct AppSettings {
     /// Where selection lands after the viewed task is archived.
     pub archive_navigation: ArchiveNavigation,
     /// Show a task's unsent composer draft on its own line under the sidebar
-    /// row's title, in the theme's alert color.
+    /// row's title.
     pub sidebar_composer_drafts: bool,
+    /// The color the sidebar's draft preview line wears.
+    pub sidebar_draft_preview_color: SidebarDraftPreviewColor,
     /// Days without a reply before a session groups as dormant; `None`
     /// disables auto-dormancy.
     pub dormant_after_days: Option<u32>,
@@ -957,6 +985,7 @@ impl Default for AppSettings {
             sidebar_shortcut_tags: true,
             archive_navigation: ArchiveNavigation::default(),
             sidebar_composer_drafts: false,
+            sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
             terminal_link_modifier: TerminalLinkModifier::default(),
@@ -1335,9 +1364,12 @@ pub struct PersistedState {
     #[serde(default)]
     pub archive_navigation: ArchiveNavigation,
     /// Whether a task's unsent composer draft shows on its own line under
-    /// the sidebar row's title, in the theme's alert color.
+    /// the sidebar row's title.
     #[serde(default)]
     pub sidebar_composer_drafts: bool,
+    /// The color the sidebar's draft preview line wears.
+    #[serde(default)]
+    pub sidebar_draft_preview_color: SidebarDraftPreviewColor,
     /// Days without a reply before a session groups as dormant; `None`
     /// disables auto-dormancy.
     #[serde(default = "default_dormant_after_days")]
@@ -1686,6 +1718,7 @@ impl PersistedState {
             sidebar_shortcut_tags: true,
             archive_navigation: ArchiveNavigation::default(),
             sidebar_composer_drafts: false,
+            sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
             terminal_link_modifier: TerminalLinkModifier::default(),
@@ -2049,6 +2082,7 @@ impl PersistedState {
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             archive_navigation: self.archive_navigation,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
+            sidebar_draft_preview_color: self.sidebar_draft_preview_color,
             dormant_after_days: self.dormant_after_days,
             terminal_open_links_in_mouse_mode: self.terminal_open_links_in_mouse_mode,
             terminal_link_modifier: self.terminal_link_modifier,
@@ -2159,6 +2193,7 @@ impl PersistedState {
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.archive_navigation = settings.archive_navigation;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
+        self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
         self.dormant_after_days = settings.dormant_after_days;
         self.terminal_open_links_in_mouse_mode = settings.terminal_open_links_in_mouse_mode;
         self.terminal_link_modifier = settings.terminal_link_modifier;
@@ -3353,6 +3388,35 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.sidebar_composer_drafts);
+    }
+
+    #[test]
+    fn sidebar_draft_preview_color_defaults_subtle_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            defaults.sidebar_draft_preview_color,
+            SidebarDraftPreviewColor::Subtle
+        );
+        let mut state = PersistedState::empty();
+        assert_eq!(
+            state.sidebar_draft_preview_color,
+            SidebarDraftPreviewColor::Subtle
+        );
+        state.sidebar_draft_preview_color = SidebarDraftPreviewColor::Loud;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["sidebar_draft_preview_color"], "loud");
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("sidebar_draft_preview_color")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(
+            restored.sidebar_draft_preview_color,
+            SidebarDraftPreviewColor::Loud
+        );
     }
 
     #[test]

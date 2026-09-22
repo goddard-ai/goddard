@@ -2340,6 +2340,11 @@ settings.integrations_keywords: 連携 インテグレーション mcp サーバ
 settings.search_empty: 検索に一致する設定はありません。
 settings.sidebar_composer_drafts: サイドバーの下書きプレビュー
 settings.sidebar_composer_drafts_description: タスクの未送信の下書きをサイドバーのタイトルの下に表示します
+settings.sidebar_draft_preview_color: 下書きプレビューの色
+settings.sidebar_draft_preview_color_description: サイドバーに表示するタスクの未送信の下書き行の色
+settings.sidebar_draft_preview_color_subtle: 控えめ
+settings.sidebar_draft_preview_color_accent: アクセント
+settings.sidebar_draft_preview_color_loud: 強調
 shortcuts.add_to_chat: 選択範囲をチャットに追加
 shortcuts.archive_task: タスクをアーカイブ
 shortcuts.big_picture: 全体表示を切り替える

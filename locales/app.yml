@@ -1249,6 +1249,16 @@ settings.sidebar_composer_drafts:
   en: Sidebar draft previews
 settings.sidebar_composer_drafts_description:
   en: Show a task's unsent composer draft under its title in the sidebar
+settings.sidebar_draft_preview_color:
+  en: Draft preview color
+settings.sidebar_draft_preview_color_description:
+  en: The color of a task's unsent draft line in the sidebar
+settings.sidebar_draft_preview_color_subtle:
+  en: Subtle
+settings.sidebar_draft_preview_color_accent:
+  en: Accent
+settings.sidebar_draft_preview_color_loud:
+  en: Loud
 settings.terminal_mouse_mode_click:
   en: "%{modifier}-click in mouse-aware programs"
 settings.terminal_mouse_mode_click_description:

@@ -2290,6 +2290,11 @@ settings.integrations_keywords: 集成 integrations mcp 服务器 servers 工具
 settings.search_empty: 没有匹配的设置。
 settings.sidebar_composer_drafts: 侧边栏草稿预览
 settings.sidebar_composer_drafts_description: 在侧边栏的任务标题下显示未发送的输入框草稿
+settings.sidebar_draft_preview_color: 草稿预览颜色
+settings.sidebar_draft_preview_color_description: 侧边栏中任务未发送草稿行的颜色
+settings.sidebar_draft_preview_color_subtle: 低调
+settings.sidebar_draft_preview_color_accent: 强调色
+settings.sidebar_draft_preview_color_loud: 醒目
 shortcuts.add_to_chat: 将所选内容添加到对话
 shortcuts.archive_task: 归档任务
 shortcuts.big_picture: 显示或隐藏概览

@@ -1749,6 +1749,30 @@ impl Waku {
                 theme,
                 search,
             ),
+            // The color row only exists while previews do — same gating as
+            // the transparency amount and completion volume rows.
+            self.state
+                .sidebar_composer_drafts
+                .then(|| {
+                    setting_card(
+                        tr!("settings.sidebar_draft_preview_color"),
+                        tr!("settings.sidebar_draft_preview_color_description"),
+                        self.setting_selector(
+                            "sidebar-draft-preview-color-selector",
+                            SidebarDraftPreviewColor::ALL
+                                .into_iter()
+                                .map(|option| (option, tr!(option.label_key())))
+                                .collect(),
+                            self.state.sidebar_draft_preview_color,
+                            160.0,
+                            cx,
+                            |this, value, _, cx| this.set_sidebar_draft_preview_color(value, cx),
+                        ),
+                        theme,
+                        search,
+                    )
+                })
+                .flatten(),
         ]
         .into_iter()
         .flatten()
@@ -8651,6 +8675,19 @@ impl Waku {
             return;
         }
         self.state.sidebar_composer_drafts = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_sidebar_draft_preview_color(
+        &mut self,
+        color: SidebarDraftPreviewColor,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.sidebar_draft_preview_color == color {
+            return;
+        }
+        self.state.sidebar_draft_preview_color = color;
         self.save();
         cx.notify();
     }

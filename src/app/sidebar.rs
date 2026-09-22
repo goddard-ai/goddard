@@ -576,6 +576,16 @@ pub(super) fn sidebar_pull_request_icon(state: SidebarPullRequestState) -> &'sta
     }
 }
 
+/// The ink a row's draft preview line wears: Subtle blends with the detail
+/// line, Loud keeps the alert-red treatment the preview shipped with.
+pub(super) fn sidebar_draft_preview_color(theme: &Theme, color: SidebarDraftPreviewColor) -> Hsla {
+    match color {
+        SidebarDraftPreviewColor::Subtle => theme.text_tertiary,
+        SidebarDraftPreviewColor::Accent => theme.accent,
+        SidebarDraftPreviewColor::Loud => theme.danger,
+    }
+}
+
 pub(super) fn sidebar_pull_request_color(theme: &Theme, state: SidebarPullRequestState) -> Hsla {
     match state {
         SidebarPullRequestState::Open => theme.success,
@@ -4810,6 +4820,8 @@ impl Waku {
                     }),
             )
             .when_some(draft_preview, |element, preview| {
+                let draft_color =
+                    sidebar_draft_preview_color(&theme, self.state.sidebar_draft_preview_color);
                 element.child(
                     div()
                         .w_full()
@@ -4819,8 +4831,8 @@ impl Waku {
                         .gap(px(4.0))
                         .text_size(sp(12.5))
                         .line_height(sp(15.0))
-                        .text_color(theme.danger)
-                        .child(icon("icons/pencil.svg", 12.0, theme.danger))
+                        .text_color(draft_color)
+                        .child(icon("icons/pencil.svg", 12.0, draft_color))
                         .child(div().flex_1().min_w_0().truncate().child(preview)),
                 )
             })

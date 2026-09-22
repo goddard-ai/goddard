@@ -1,0 +1,1 @@
+- Sidebar draft previews get a "Draft preview color" setting (General, under "Sidebar draft previews") with Subtle — now the default, matching the row's detail line — Accent, and Loud, the alert red they shipped with
