@@ -546,6 +546,12 @@ pub enum Command {
         path: PathBuf,
         note: Option<String>,
     },
+    /// Send a chat message to a friend — lands on their side as a session
+    /// in the Friends project, like a delivered transfer's note.
+    SendMessageToFriend {
+        node_id: String,
+        text: String,
+    },
     CancelTransfer {
         transfer_id: Uuid,
     },

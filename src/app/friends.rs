@@ -1043,6 +1043,24 @@ impl Waku {
         .detach();
     }
 
+    /// Forward a transcript message to a friend — confirm first, then the
+    /// daemon dials; failures arrive through the friends toast.
+    pub(super) fn confirm_send_chat_to_friend(
+        &mut self,
+        node_id: String,
+        peer_name: String,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.friends_confirm_command(
+            tr!("friends.confirm_send_chat", name = peer_name),
+            None,
+            tr!("common.send"),
+            waku_client::Command::SendMessageToFriend { node_id, text },
+            cx,
+        );
+    }
+
     /// Expand/collapse the per-friend sharing panel — project toggles,
     /// their shares of matching repos, and the sync links between you.
     fn toggle_friend_share_panel(&mut self, node_id: String, cx: &mut Context<Self>) {
@@ -1981,7 +1999,7 @@ impl Waku {
 
 /// What this install shows for a friend: local nickname, else their
 /// self-reported name.
-fn friend_display_name(friend: &FriendInfo) -> &str {
+pub(super) fn friend_display_name(friend: &FriendInfo) -> &str {
     friend
         .nickname
         .as_deref()

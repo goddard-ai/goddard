@@ -317,6 +317,26 @@ impl WakuBackend {
             ));
         }
         {
+            let task_state = backend.task_state.clone();
+            let task_store = backend.task_store.clone();
+            let share_dir = share_dir.clone();
+            backend.share.set_chat_hook(Arc::new(
+                move |peer_name, text| match create_chat_session(
+                    &task_state,
+                    &task_store,
+                    &share_dir,
+                    &peer_name,
+                    &text,
+                ) {
+                    Ok(session_id) => Some(session_id),
+                    Err(error) => {
+                        eprintln!("could not create chat session: {error:#}");
+                        None
+                    }
+                },
+            ));
+        }
+        {
             // The share layer's view of local projects — paths, names,
             // and `origin` URLs for share matching. Resolving every
             // remote is a git call per project, so cache briefly.
@@ -867,21 +887,7 @@ fn create_transfer_session(
         bail!("incoming transfer completed without a destination");
     };
     let mut state = task_state.lock();
-    let project_id = match state
-        .projects
-        .iter()
-        .find(|project| project.path == share_dir)
-        .map(|project| project.id)
-    {
-        Some(id) => id,
-        None => {
-            let mut project = Project::from_path(share_dir.to_path_buf());
-            project.name = "Friends".to_owned();
-            let id = project.id;
-            state.projects.push(project);
-            id
-        }
-    };
+    let project_id = friends_project_id(&mut state, share_dir);
     let mut session = state.new_session(project_id, state.last_provider);
     session.title = format!("{} from {}", transfer.title, transfer.peer_name);
     // The receipt is a notification, not a prompt awaiting a reply — a
@@ -907,6 +913,51 @@ fn create_transfer_session(
     // Received files stay in the sandbox VM even once trusted — the agent
     // never works on them with this Mac's filesystem in reach.
     session.sandboxed = true;
+    let session_id = session.id;
+    state.push_session(session);
+    task_store.save(&mut state)?;
+    Ok(session_id)
+}
+
+/// The "Friends" project transfer and chat sessions live in — found by
+/// path or registered on first delivery.
+fn friends_project_id(state: &mut PersistedState, share_dir: &Path) -> Uuid {
+    match state
+        .projects
+        .iter()
+        .find(|project| project.path == share_dir)
+        .map(|project| project.id)
+    {
+        Some(id) => id,
+        None => {
+            let mut project = Project::from_path(share_dir.to_path_buf());
+            project.name = "Friends".to_owned();
+            let id = project.id;
+            state.projects.push(project);
+            id
+        }
+    }
+}
+
+/// An incoming chat message materializes like a delivered transfer — a
+/// session in the "Friends" project with the text rendered as an agent
+/// reply. There is nothing to trust or hand off, so unlike a transfer it
+/// is neither quarantined nor sandboxed — just an idle chat.
+fn create_chat_session(
+    task_state: &Arc<Mutex<PersistedState>>,
+    task_store: &Arc<StateStore>,
+    share_dir: &Path,
+    peer_name: &str,
+    text: &str,
+) -> anyhow::Result<Uuid> {
+    let mut state = task_state.lock();
+    let project_id = friends_project_id(&mut state, share_dir);
+    let mut session = state.new_session(project_id, state.last_provider);
+    session.title = format!("Message from {peer_name}");
+    session.begin_provider_turn();
+    session.push_message(crate::model::MessageRole::Assistant, text);
+    session.finish_active_turn(TurnStatus::Completed);
+    session.status = SessionStatus::Idle;
     let session_id = session.id;
     state.push_session(session);
     task_store.save(&mut state)?;
@@ -1098,6 +1149,10 @@ impl Backend for WakuBackend {
                 note,
             } => {
                 self.share.send_file(node_id, path, note)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SendMessageToFriend { node_id, text } => {
+                self.share.send_chat(node_id, text)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::CancelTransfer { transfer_id } => {
@@ -4561,6 +4616,7 @@ fn handle_driver_command(
         | Command::WithdrawFriendRequest { .. }
         | Command::RemoveFriend { .. }
         | Command::SendFileToFriend { .. }
+        | Command::SendMessageToFriend { .. }
         | Command::CancelTransfer { .. }
         | Command::ProbeFriend { .. }
         | Command::SetFriendDisplayName { .. }
@@ -5636,6 +5692,69 @@ mod tests {
         reload_store.hydrate(&mut reloaded.sessions[index]).unwrap();
         assert!(reloaded.sessions[index].quarantined);
         assert!(reloaded.sessions[index].sandboxed);
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn incoming_chat_materializes_a_session() {
+        let root = std::env::temp_dir().join(format!("waku-chat-{}", Uuid::new_v4()));
+        let share_dir = root.join("share");
+        let store = Arc::new(StateStore::daemon(root.join("app.db")));
+        let task_state = Arc::new(Mutex::new(PersistedState::fresh(root.join("repo"))));
+
+        let session_id = create_chat_session(
+            &task_state,
+            &store,
+            &share_dir,
+            "maya",
+            "shipping the update tonight — changelog attached",
+        )
+        .unwrap();
+
+        let state = task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("the message's session");
+        assert_eq!(
+            session.project_id,
+            state
+                .projects
+                .iter()
+                .find(|project| project.path == share_dir)
+                .expect("a Friends project at the share dir")
+                .id
+        );
+        assert_eq!(session.title, "Message from maya");
+        assert_eq!(session.status, SessionStatus::Idle);
+        // A message has nothing to quarantine or sandbox — it is just an
+        // idle chat holding the friend's text as an agent reply.
+        assert!(!session.quarantined);
+        assert!(!session.sandboxed);
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(
+            session.messages[0].role,
+            crate::model::MessageRole::Assistant
+        );
+        assert_eq!(
+            session.messages[0].content,
+            "shipping the update tonight — changelog attached"
+        );
+        drop(state);
+
+        // A second message reuses the same Friends project.
+        create_chat_session(&task_state, &store, &share_dir, "maya", "and the pdf").unwrap();
+        assert_eq!(
+            task_state
+                .lock()
+                .projects
+                .iter()
+                .filter(|project| project.path == share_dir)
+                .count(),
+            1
+        );
 
         std::fs::remove_dir_all(root).ok();
     }

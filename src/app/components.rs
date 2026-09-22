@@ -1756,6 +1756,62 @@ fn message_menu_items(
         }));
     }
 
+    // A bot reply can ride the friends channel like a sent file — pick the
+    // friend, confirm, and the daemon lands it as a chat on their side.
+    if role == MessageRole::Assistant {
+        let friends = waku
+            .upgrade()
+            .map(|waku| {
+                let this = waku.read(_cx);
+                this.state
+                    .friends_enabled
+                    .then(|| {
+                        this.friends_state
+                            .friends
+                            .iter()
+                            .map(|friend| {
+                                (
+                                    friend.node_id.clone(),
+                                    friends::friend_display_name(friend).to_owned(),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        if !friends.is_empty() {
+            items.push(MenuItem::Separator);
+            let text = content.to_owned();
+            let waku = waku.clone();
+            items.push(MenuItem::Submenu {
+                label: tr!("friends.send_to_friend").into(),
+                value: None,
+                items: Rc::new(move |_cx| {
+                    friends
+                        .iter()
+                        .map(|(node_id, name)| {
+                            let waku = waku.clone();
+                            let node_id = node_id.clone();
+                            let name = name.clone();
+                            let text = text.clone();
+                            MenuItem::new(name.clone(), move |_, cx| {
+                                let _ = waku.update(cx, |this, cx| {
+                                    this.confirm_send_chat_to_friend(
+                                        node_id.clone(),
+                                        name.clone(),
+                                        text.clone(),
+                                        cx,
+                                    );
+                                });
+                            })
+                        })
+                        .collect()
+                }),
+            });
+        }
+    }
+
     if let Some(action) = user_message_action {
         let waku = waku.clone();
         items.push(MenuItem::Separator);

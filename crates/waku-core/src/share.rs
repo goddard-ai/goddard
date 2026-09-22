@@ -184,6 +184,11 @@ pub type FriendsSink = Arc<dyn Fn(FriendsState) + Send + Sync>;
 /// returns its id, which is recorded on the transfer for clients.
 pub type TransferHook = Arc<dyn Fn(&TransferInfo) -> Option<Uuid> + Send + Sync>;
 
+/// Fired when an incoming chat message arrives — `(peer name, text)`.
+/// The daemon creates the message's agent session from this hook and
+/// returns its id, recorded on the row like a transfer's.
+pub type ChatHook = Arc<dyn Fn(String, String) -> Option<Uuid> + Send + Sync>;
+
 /// Fired when the share layer changed session/project state — the hub
 /// translates it into a `TaskStateChanged` bump for every client.
 pub type TaskNotifier = Arc<dyn Fn() + Send + Sync>;
@@ -249,6 +254,11 @@ enum ShareCommand {
         node_id: String,
         path: PathBuf,
         note: Option<String>,
+        reply: Sender<anyhow::Result<()>>,
+    },
+    SendChat {
+        node_id: String,
+        text: String,
         reply: Sender<anyhow::Result<()>>,
     },
     CancelTransfer {
@@ -362,6 +372,7 @@ struct ShareInner {
     /// for the transfer's lifetime.
     outgoing_tags: HashMap<Uuid, TempTag>,
     transfer_hook: Option<TransferHook>,
+    chat_hook: Option<ChatHook>,
     task_notifier: Option<TaskNotifier>,
     review_notifier: Option<ReviewNotifier>,
     /// Session summaries/snapshots for friends we share with.
@@ -542,6 +553,7 @@ impl ShareService {
                 outgoing_tickets: HashMap::new(),
                 outgoing_tags: HashMap::new(),
                 transfer_hook: None,
+                chat_hook: None,
                 task_notifier: None,
                 review_notifier: None,
                 session_source: None,
@@ -565,6 +577,12 @@ impl ShareService {
     /// transfers.
     pub fn set_transfer_hook(&self, hook: TransferHook) {
         self.state.lock().transfer_hook = Some(hook);
+    }
+
+    /// Where the daemon installs session creation for incoming chat
+    /// messages.
+    pub fn set_chat_hook(&self, hook: ChatHook) {
+        self.state.lock().chat_hook = Some(hook);
     }
 
     /// Where the server installs the `TaskStateChanged` bump.
@@ -770,6 +788,14 @@ impl ShareService {
             node_id,
             path,
             note,
+            reply,
+        })
+    }
+
+    pub fn send_chat(&self, node_id: String, text: String) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::SendChat {
+            node_id,
+            text,
             reply,
         })
     }
@@ -1053,6 +1079,24 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Transfer rows title a chat message by its first non-blank line — the
+/// full text rides the row's `note` and lands in the materialized session.
+fn chat_title(text: &str) -> String {
+    const MAX: usize = 60;
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("message");
+    if first.chars().count() > MAX {
+        let mut title: String = first.chars().take(MAX).collect();
+        title.push('…');
+        title
+    } else {
+        first.to_string()
+    }
 }
 
 /// `~/Documents/Goddard/From Friends` — the human-readable mirror of the
@@ -2377,6 +2421,47 @@ fn run_runtime(
                     },
                 )
             },
+        )
+        .with_chat_handler(
+            // on_chat: record the message as a finished incoming row, then
+            // materialize its session through the daemon-installed hook —
+            // the same shape a completed transfer takes.
+            {
+                let state = state.clone();
+                let sink = sink.clone();
+                Arc::new(move |from: EndpointId, name: String, text: String| {
+                    let id = Uuid::new_v4();
+                    let (hook, notifier) = {
+                        let mut s = state.lock();
+                        s.transfers.push(TransferInfo {
+                            id,
+                            direction: TransferDirection::Incoming,
+                            peer_id: from.to_string(),
+                            peer_name: name.clone(),
+                            title: chat_title(&text),
+                            note: Some(text.clone()),
+                            status: TransferStatus::Done,
+                            bytes_done: 0,
+                            bytes_total: 0,
+                            dest_dir: None,
+                            session_id: None,
+                        });
+                        (s.chat_hook.clone(), s.task_notifier.clone())
+                    };
+                    if let Some(hook) = hook {
+                        if let Some(session_id) = hook(name, text) {
+                            let mut s = state.lock();
+                            if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
+                                t.session_id = Some(session_id);
+                            }
+                        }
+                        if let Some(notifier) = notifier {
+                            notifier();
+                        }
+                    }
+                    publish(&state, &sink);
+                })
+            },
         );
 
         let link = {
@@ -2717,6 +2802,71 @@ fn run_runtime(
                             s.outgoing_tags.remove(&failed_id);
                         }
                     }
+                    publish(&state, &sink);
+                    let _ = reply.send(result);
+                }
+                ShareCommand::SendChat {
+                    node_id,
+                    text,
+                    reply,
+                } => {
+                    let result = async {
+                        let id: EndpointId = node_id.parse()?;
+                        if !state.lock().store.lock().is_friend(&id) {
+                            anyhow::bail!("no friend with that code");
+                        }
+                        let transfer_id = Uuid::new_v4();
+                        {
+                            let mut s = state.lock();
+                            let peer_name = s
+                                .store
+                                .lock()
+                                .friends
+                                .get(&id)
+                                .map(|f| f.name.clone())
+                                .unwrap_or_default();
+                            s.transfers.push(TransferInfo {
+                                id: transfer_id,
+                                direction: TransferDirection::Outgoing,
+                                peer_id: node_id.clone(),
+                                peer_name,
+                                title: chat_title(&text),
+                                note: Some(text.clone()),
+                                status: TransferStatus::Transferring,
+                                bytes_done: 0,
+                                bytes_total: 0,
+                                dest_dir: None,
+                                session_id: None,
+                            });
+                        }
+                        publish(&state, &sink);
+                        // Same dial path as offers — wait briefly for a
+                        // reachable address, then bound the send.
+                        let _ =
+                            tokio::time::timeout(ONLINE_WAIT, share_node.wait_online()).await;
+                        let our_name = state.lock().store.lock().display_name.clone();
+                        let result = tokio::time::timeout(
+                            OFFER_TIMEOUT,
+                            friends::send_chat(share_node.endpoint(), id, &our_name, &text),
+                        )
+                        .await
+                        .map_err(|_| anyhow::anyhow!("message send timed out"))
+                        .and_then(|r| r);
+                        {
+                            let mut s = state.lock();
+                            if let Some(t) =
+                                s.transfers.iter_mut().find(|t| t.id == transfer_id)
+                            {
+                                t.status = if result.is_ok() {
+                                    TransferStatus::Done
+                                } else {
+                                    TransferStatus::Failed
+                                };
+                            }
+                        }
+                        result
+                    }
+                    .await;
                     publish(&state, &sink);
                     let _ = reply.send(result);
                 }

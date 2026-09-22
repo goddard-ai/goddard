@@ -29,6 +29,11 @@ use waku_protocol::{ReplayCursor, SequencedEvent};
 pub const ALPN_FRIENDS: &[u8] = b"goddard/friends/1";
 
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+
+/// The first frame on a connection may carry a `Chat` body — chat text is
+/// bounded well past the control-message cap so long forwarded responses
+/// still land. Replies and follow-up frames keep `MAX_MESSAGE_BYTES`.
+const MAX_CHAT_BYTES: usize = 1024 * 1024;
 /// Session list replies stay small — summaries only.
 const MAX_SESSION_LIST_BYTES: usize = 4 * 1024 * 1024;
 /// Frames on a session subscription. Snapshots carry a whole transcript,
@@ -187,6 +192,13 @@ pub enum FriendsMessage {
     Ack,
     /// Liveness probe — presence is lazy (dial on demand), never heartbeated.
     Ping,
+    /// A chat message — the receiver materializes it as a session in their
+    /// Friends project, same as a delivered transfer's note.
+    Chat {
+        /// Sender's display name.
+        name: String,
+        text: String,
+    },
     /// The sender's full shared-repo set for us — replaces what we
     /// recorded, so removing a repo from the list unshares it.
     ShareProjects {
@@ -283,6 +295,10 @@ pub type OfferHandler = Arc<dyn Fn(OfferInfo) + Send + Sync>;
 /// Fired when the receiver reports a finished, verified download.
 pub type DoneHandler = Arc<dyn Fn(EndpointId, String) + Send + Sync>;
 
+/// Callback the host app installs for incoming chat messages — `(sender,
+/// display name, text)`. Only fires for peers in the friend store.
+pub type ChatHandler = Arc<dyn Fn(EndpointId, String, String) + Send + Sync>;
+
 /// Fired when a friend sends their full shared-repo set — replaces what
 /// we recorded for that peer.
 pub type ShareListHandler = Arc<dyn Fn(EndpointId, Vec<crate::projects::SharedRepo>) + Send + Sync>;
@@ -331,6 +347,7 @@ pub struct FriendsProtocol {
     on_request: RequestHandler,
     on_offer: OfferHandler,
     on_done: DoneHandler,
+    on_chat: Option<ChatHandler>,
     on_share: Option<ShareListHandler>,
     on_sync_state: Option<SyncStateHandler>,
     on_push: Option<PushHandler>,
@@ -361,6 +378,7 @@ impl FriendsProtocol {
             on_request,
             on_offer,
             on_done,
+            on_chat: None,
             on_share: None,
             on_sync_state: None,
             on_push: None,
@@ -400,6 +418,13 @@ impl FriendsProtocol {
         self
     }
 
+    /// Install the chat handler — incoming `Chat` messages from friends
+    /// land on it. Without one they are acked and dropped.
+    pub fn with_chat_handler(mut self, on_chat: ChatHandler) -> Self {
+        self.on_chat = Some(on_chat);
+        self
+    }
+
     /// Friend-gate + mark-seen shared by the one-way messages; returns
     /// false for non-friends (whose messages get no reply and a closed
     /// stream).
@@ -418,7 +443,9 @@ impl ProtocolHandler for FriendsProtocol {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         let remote = conn.remote_id();
         let (mut send, mut recv) = conn.accept_bi().await?;
-        let msg = read_message(&mut recv).await.map_err(accept_err)?;
+        let msg = read_frame(&mut recv, MAX_CHAT_BYTES)
+            .await
+            .map_err(accept_err)?;
         match msg {
             FriendsMessage::FriendRequest { name } => {
                 let decision_rx = (self.on_request)(remote, name.clone());
@@ -493,6 +520,17 @@ impl ProtocolHandler for FriendsProtocol {
                 write_message(&mut send, &FriendsMessage::Ack)
                     .await
                     .map_err(accept_err)?;
+                send.finish()?;
+            }
+            FriendsMessage::Chat { name, text } => {
+                if self.touch_friend(&remote) {
+                    if let Some(on_chat) = &self.on_chat {
+                        on_chat(remote, name, text);
+                    }
+                    write_message(&mut send, &FriendsMessage::Ack)
+                        .await
+                        .map_err(accept_err)?;
+                }
                 send.finish()?;
             }
             FriendsMessage::TransferDone { ticket } => {
@@ -779,6 +817,34 @@ pub async fn notify_transfer_done(
     match reply? {
         FriendsMessage::Ack => Ok(()),
         _ => bail!("unexpected reply to TransferDone"),
+    }
+}
+
+/// Deliver a chat message to a friend — one-way, acknowledged. `name` is
+/// our display name as the receiver should show it.
+pub async fn send_chat(
+    endpoint: &Endpoint,
+    addr: impl Into<EndpointAddr>,
+    name: &str,
+    text: &str,
+) -> anyhow::Result<()> {
+    let conn = endpoint.connect(addr.into(), ALPN_FRIENDS).await?;
+    let (mut send, mut recv) = conn.open_bi().await?;
+    write_frame(
+        &mut send,
+        &FriendsMessage::Chat {
+            name: name.to_string(),
+            text: text.to_string(),
+        },
+        MAX_CHAT_BYTES,
+    )
+    .await?;
+    send.finish()?;
+    let reply = read_message(&mut recv).await;
+    conn.close(0u32.into(), b"done");
+    match reply? {
+        FriendsMessage::Ack => Ok(()),
+        _ => bail!("unexpected reply to chat message"),
     }
 }
 

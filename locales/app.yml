@@ -4432,6 +4432,10 @@ friends.send_dialog_message_placeholder:
   en: Add a message (optional)
 friends.send_dialog_send:
   en: Send
+friends.send_to_friend:
+  en: Send to Friend
+friends.confirm_send_chat:
+  en: "Send this message to %{name}?"
 friends.remove:
   en: Remove
 friends.confirm_remove:
