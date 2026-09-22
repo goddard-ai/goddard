@@ -1,6 +1,9 @@
 # Changelog
 
-All notable changes to Goddard. This file is the **source of truth for the release
+All notable changes to Goddard — desktop app and everything shared. Changes
+only a mobile-app user would notice live in
+[CHANGELOG.mobile.md](CHANGELOG.mobile.md) instead. This file is the
+**source of truth for the release
 notes shown in the in-app updater**: [`scripts/release.ts`](scripts/release.ts)
 extracts the section whose heading matches the version being released
 (`MARKETING_VERSION`) and publishes it next to the update, so Sparkle shows it in
@@ -35,25 +38,16 @@ the original feature bullet instead of adding separate entries for them.
 
 ### Features
 
-- **Sidebar**
-  - Swiping right for task history in the mobile app now slides the current screen away as a floating card already rounded to the device's display corners — like iOS's own back gesture — with a soft edge shadow marking the card instead of a dim over the transcript
-  - The mobile task list now fades its empty state out and the fresh rows in instead of popping when chats load, and it refreshes the moment a drawer swipe starts so the reveal already shows the current rows
-  - The mobile task-history button now carries the same informational-blue dot as the chat list when another task has replies you haven't seen, so new activity is visible without opening the drawer
-  - The mobile chat list now marks tasks that received new replies since you last opened them with the same informational-blue dot the desktop sidebar shows, clearing when you open the chat
 - **Composer**
   - Tasks are now inline `session:` mentions in the composer — drag one from the sidebar or accept it from `@` autocomplete and it lands at the caret, holds its place in the prompt, and deletes atomically with Backspace.
   - Collapsed pastes join them: a folded paste now sits inline as a `pasted text` mention wherever the caret was — deletable with one Backspace, and a double-click splices it back into the field.
   - A new task's workspace chip now tints its icon and label with the theme's accent color while the local checkout is selected instead of a new worktree — toggle it with "Local workspace accent" in Settings → General
 - **Git**
   - Changed-file rows in the Git panel now open a right-click context menu — Open Changes, Open File, Open File (HEAD), Stage/Unstage Changes, Discard Changes behind a confirmation, Add to .gitignore, Reveal in Finder, and Reveal in Files — also reachable with Shift-F10 on a focused row
-  - The mobile app gains a notifications inbox off the daemon editor — and a bell on the Daemons screen — with unread/all scopes, per-repo grouping, mark-read and mark-done per thread, and deep links to the resolved GitHub URL
-  - The mobile task menu gains a Review queue listing the repo's `origin/qa` commits with status badges — approve or reject per commit, then promote the approved prefix onto the base branch behind a confirmation
-  - The mobile task menu gains a Git surface covering the working-tree half of the desktop Git panel: branch and upstream status, pull (rebase) when behind and push when the remote allows, staged and unstaged file lists with stage, unstage, and confirmed discard, and a commit bar that can generate the message through the session's provider
   - The Git panel now remembers its own width separately from the right panel — resizing one no longer moves the other, and swapping between them slides between their widths
 - **Panels**
   - Tasks, main-area terminals, and the Projects page each keep their own right panel — tabs park and restore per context instead of sharing one strip. The panel no longer lingers over Drafts, Automations, and the Inbox, and the Projects page hosts issue/PR details plus files rooted at the project.
   - File-name links — the file viewer's top bar, diff file headers, and file paths in chat activity rows and @-mentions — now open the file browser's right-click menu (Open In, Open With, Save As, Copy Path, Copy File Contents, Reveal in Finder), also reachable with Shift-F10 on a focused link
-  - The mobile Files surface now previews images inline and opens text files for editing — Edit and Save write through the daemon and refresh the diff and Git panel
 - **Terminals**
   - ⌘T pressed while a right-panel terminal has focus now opens another terminal tab in the panel — rooted in that terminal's directory — instead of taking over the main area
   - `Cmd+P` and the Files panel now work while a terminal fills the main area, searching and browsing the shell's current directory — a `cd` re-roots the panel, which keeps each directory's open files and unsaved edits parked for when you come back
@@ -67,12 +61,7 @@ the original feature bullet instead of adding separate entries for them.
     the text lands on their side as a session in the Friends project, like
     a delivered transfer's note
   - Send folders to friends, not just files — the share picker accepts either, and a folder crosses the wire as a blake3-verified collection that lands as a real directory tree on the other side
-- **Platform**
-  - Long-pressing the mobile app icon now offers New task plus your three most recent tasks as home-screen quick actions that deep-link straight into the app
-  - Quitting (⌘Q) or closing the window (⌘W / close button) now asks for confirmation while task sessions or terminals still have work in progress.
-- The mobile task drawer reaches desktop session-management parity: long-press a task to pin it into a "Pinned" section or archive it into "Archived" (archiving a running task confirms before stopping its runtime), drawer search unions title matches with a debounced full-text search across active and archived scopes, agent question cards answer with a typed Clarify or a Dismiss, and the task menu gains Compact context and a confirmed Roll back last turn
-- The mobile daemon editor now shows the connected daemon's version and commit and gains a Pairing section — approve or deny pending pair requests and revoke paired devices, live as they change
-- The mobile transcript gains per-turn conversation editing and find: rewind from an eligible user message or fork from a closing response — gated on the same eligibility rules as desktop — plus text search within the transcript
+- Quitting (⌘Q) or closing the window (⌘W / close button) now asks for confirmation while task sessions or terminals still have work in progress.
 
 ### Experiments
 
@@ -86,34 +75,12 @@ the original feature bullet instead of adding separate entries for them.
   - A dropped daemon connection on a still-running daemon no longer restarts the process — the app reconnects in place instead, so a momentary socket blip stops interrupting every in-progress turn
   - A task whose provider process exited on its own no longer leaks the runtime's event replay backlog — the daemon now retires it the way an explicit close does, instead of holding it until restart
   - Provider runtimes a task leaves idle are now reclaimed after 30 minutes instead of living until the daemon exits — the next prompt resumes the provider from its cursor, and sessions that are busy or cannot resume are never killed. Tune with `runtime_idle_timeout_secs` in daemon settings; `0` disables eviction
-  - Fix the mobile chat list showing archived sessions: the drawer now filters them out like the desktop sidebar, in both the grouped list and search results
-  - Fix the mobile chat list ignoring taps: Expo Go's bundled menu never delivered the tap event, so the row now also handles taps through a native-RN press target, and switching sessions while viewing one closes the drawer instead of leaving it open over the new chat
   - Full-text session search no longer matches synthesized transcript notices — status lines like "the Goddard daemon restarted and this turn could not be reattached" were indexed as ordinary messages and surfaced tasks whose real content never mentioned the query
-- **Sidebar**
-  - Fix scroll jitter in the mobile task drawer: the session list now recycles rows through FlashList instead of mounting a SwiftUI menu host per row, rows memoize on primitive props so stream commits only repaint the session that changed, and the hidden drawer renders from a frozen snapshot instead of re-laying out on every transcript commit
-  - The sidebar's branch labels and dirty/unpushed badges now re-scan when any session's turn ends, not only the selected one — commits an agent makes on your behalf no longer leave stale git status on its row.
 - **Composer**
   - Pasting a large or multi-line copy (20+ lines or 4 KB+) into the composer no longer swallows it — the splice that seats the pasted block's marker was dropping the block it had just created, leaving an invisible marker and losing the pasted text on submit
-  - Fix the mobile chat composer snapping into place instead of sliding with the keyboard: the session and new-task screens now drive bottom padding from Reanimated's keyboard observer on the UI thread, so the composer tracks the keyboard's real animation and follows the transcript's interactive swipe-to-dismiss
   - Wrapped text no longer strands closing punctuation on its own line — `!`, `?`, `)`, `]`, `"`, `—`, and similar characters now carry down with the word they belong to, most visibly in the annotation comment card
 - **Transcript**
   - The post-turn "Saving changed files…" row is gone — while Goddard reads the worktree after a turn, the changed-files card itself appears in its normal spot reading "Checking for changes…" and fills in place when the checkpoint lands, across the transcript, Big Picture, and side chat
-  - Fix a crash opening a task in the mobile app under Expo Go: the transcript's
-    scroll-edge-effect marker isn't in Expo Go's bundled react-native-screens, so
-    mounting it threw inside createNode — it now falls back to a plain wrapper
-    there and keeps the native marker in development builds
-  - Remove the mobile transcript's blurred backdrop under the navigation bar:
-    it appeared the moment the transcript became scrollable and read as the
-    transcript itself fading out
-  - Give the mobile chat's floating header a permanent solid surface with a
-    hairline instead of a blur: the transcript sits below it rather than
-    scrolling underneath, so the bar stays legible and no overlay ever covers
-    the text
-  - Stop the mobile transcript's faded look the moment it becomes scrollable:
-    iOS 26 blurs scrollable content that runs under the navigation bar — the
-    transcript's scroll view now sits below the bar so the effect never
-    engages in any build, with the scroll-edge marker and screen option still
-    suppressing it wherever the native hooks exist
   - Assistant replies no longer splinter into one row per fragment while streaming — progress updates for tool rows already on screen no longer close the running message, and text that resumes mid-sentence across a tool call rejoins the message it was cut from
 - **Terminals**
   - Terminals now draw block-mosaic glyphs — sextants, quadrant and eighth blocks, and shade fills — as exact cell-filling shapes instead of text, so output like Expo's dev-server QR code renders correctly instead of showing missing-glyph boxes
@@ -126,7 +93,7 @@ the original feature bullet instead of adding separate entries for them.
   card: the text column now wraps within the banner instead of pushing past
   its edge
 - Turn checkpoints on large repositories now land in seconds instead of minutes: captures reuse a per-worktree Git index so unchanged files aren't re-hashed, a turn that touched nothing commits the existing tree outright, and snapshots on the same worktree can no longer run concurrently
-- Fix the mobile app's daemon handshake: it marked itself `X-Goddard-Client` while the daemon's origin check looks for `x-waku-client`, so its React Native `Origin` header was rejected — the marker matches again
+- The sidebar's branch labels and dirty/unpushed badges now re-scan when any session's turn ends, not only the selected one — commits an agent makes on your behalf no longer leave stale git status on its row.
 
 ## [0.6.0]
 

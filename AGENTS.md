@@ -134,6 +134,11 @@
   per file — never by editing `CHANGELOG.md` directly; `bun run changelog`
   folds them into the released version's section, grouped under
   `### Highlights`, `### Features`, `### Experiments`, and `### Fixed`.
+  A change only a mobile-app user would notice uses `.changelog/mobile/`
+  instead — same naming rules — and folds into `CHANGELOG.mobile.md`;
+  `CHANGELOG.md` feeds the desktop updater prompt, so mobile-only notes
+  must not land in it. The split keys on the affected surface, not the
+  touched code — a daemon fix only mobile clients hit belongs to mobile.
 - The filename prefix is required and picks the section: `highlight-` for
   headline features, `feat-` for other user-facing features, `exp-` for
   experimental opt-ins (emitted with a bold `[Experimental]` marker —

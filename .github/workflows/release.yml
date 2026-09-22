@@ -477,9 +477,19 @@ jobs:
             const notes = (await file.exists())
               ? extractReleaseNotes(await file.text(), version)
               : null;
+            // Mobile fragments fold into their own changelog so they stay
+            // out of the desktop updater prompt; the release covers the
+            // whole tag, so the body still carries them under ### Mobile.
+            const mobileFile = Bun.file("CHANGELOG.mobile.md");
+            const mobile = (await mobileFile.exists())
+              ? extractReleaseNotes(await mobileFile.text(), version)
+              : null;
+            const mobileNotes = mobile
+              ? `\n### Mobile\n\n${mobile.replace(/^### /gm, "#### ")}\n`
+              : "";
             await Bun.write(
               "release-notes.md",
-              `${notes ?? "See CHANGELOG.md for details."}\n`,
+              `${notes ?? "See CHANGELOG.md for details."}\n${mobileNotes}`,
             );
           '
 

@@ -130,7 +130,11 @@ GitHub release at the end — that stays a human's click.
    `sessions`, `sidebar`, `composer`, `providers`, `git`, `transcript`,
    `panels`, `terminals`, `keyboard`, `navigation`, `appearance`,
    `permissions`, `settings`, `friends`, `ssh`, `platform` — files it under a
-   `- **Group**` subsection. Rename mis-tagged fragments, then preview the fold:
+   `- **Group**` subsection. A fragment that only concerns the mobile app
+   goes in `.changelog/mobile/` instead — same naming rules — and folds into
+   `CHANGELOG.mobile.md`, keeping mobile-only notes out of the desktop
+   changelog that feeds the in-app updater prompt. Rename mis-tagged
+   fragments, then preview the fold:
    ```sh
    bun ./scripts/changelog.ts check
    ```
@@ -172,13 +176,14 @@ GitHub release at the end — that stays a human's click.
    `<prefix>-<group>-<slug>.md` to also file under a `- **Group**`
    subsection; highlights
    must also commit a screenshot or recording at `.changelog/media/<slug>`
-   and embed it via `![](media/<slug>.<ext>)`). Fold them into `CHANGELOG.md`:
+   and embed it via `![](media/<slug>.<ext>)`; mobile-only changes use
+   `.changelog/mobile/` and fold into `CHANGELOG.mobile.md`). Fold them:
    ```sh
    bun run changelog
    ```
-   This creates the `## [<version>]` section for the Cargo version and deletes
-   the consumed fragments. Commit it with the version bump
-   (`chore: release v<version>`).
+   This creates the `## [<version>]` section for the Cargo version in each
+   changelog that has fragments and deletes the consumed ones. Commit it with
+   the version bump (`chore: release v<version>`).
 7. **Promote `dev` to `main`** — `dev` is a shared branch, so commits can land
    after the audit. Re-check the delta first, and give any new arrival the same
    fragment audit (a missed fragment just means a missing release-notes bullet —
@@ -296,8 +301,9 @@ Moving those jobs to a newer runner silently drops support for everything
 older.
 
 The workflow opens (or updates) a **draft** GitHub release with those files and
-the matching `CHANGELOG.md` section. Publishing the GitHub release syncs the
-assets — including every signed update feed — to R2.
+the matching `CHANGELOG.md` section, plus the `CHANGELOG.mobile.md` section
+under a `### Mobile` heading when the release has one. Publishing the GitHub
+release syncs the assets — including every signed update feed — to R2.
 
 Every GitHub release's notes open with a **### Downloads** section — direct
 links to the macOS DMG, the Windows installers and portable zips, and the Linux
