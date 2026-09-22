@@ -202,6 +202,10 @@ impl MemoryService {
         if !settings.memory_experiment_enabled {
             return None;
         }
+        // Incognito sessions neither read nor feed project memory.
+        if self.session_incognito(session_id) {
+            return None;
+        }
         let project_path = self.project_path(self.session_project(session_id)?)?;
         let store = memory_dir(&project_path);
         if !store.join(MEMORY_FILE).exists() && !store.join(LOG_FILE).exists() {
@@ -244,6 +248,15 @@ impl MemoryService {
             .iter()
             .find(|session| session.id == session_id)
             .map(|session| session.project_id)
+    }
+
+    fn session_incognito(&self, session_id: Uuid) -> bool {
+        let state = self.task_state.lock();
+        state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| session.incognito)
     }
 
     fn project_path(&self, project_id: Uuid) -> Option<PathBuf> {
@@ -296,7 +309,8 @@ impl MemoryService {
         {
             let mut state = self.task_state.lock();
             for index in 0..state.sessions.len() {
-                if state.sessions[index].project_id != project_id {
+                if state.sessions[index].project_id != project_id || state.sessions[index].incognito
+                {
                     continue;
                 }
                 self.task_store
@@ -1344,6 +1358,45 @@ mod tests {
         assert!(!notes_only.contains("## Memory"));
         assert!(notes_only.contains("## Notes"));
         assert!(compose_block("  ", &[], log).is_none());
+    }
+
+    #[test]
+    fn incognito_sessions_neither_read_nor_inject_memory() {
+        let root = std::env::temp_dir().join(format!("waku-memory-svc-{}", Uuid::new_v4()));
+        let project_path = root.join("repo");
+        std::fs::create_dir_all(&project_path).unwrap();
+        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+        let mut current = settings.get();
+        current.memory_experiment_enabled = true;
+        settings.replace(current).unwrap();
+
+        let store = memory_dir(&project_path);
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(store.join(MEMORY_FILE), "# Facts\n- uses bun").unwrap();
+
+        let task_store = Arc::new(StateStore::daemon(root.join("app.db")));
+        let mut state = PersistedState::fresh(project_path);
+        state.sessions[0].begin_turn("ordinary task");
+        let ordinary_id = state.sessions[0].id;
+
+        let mut incognito = waku_protocol::model::AgentSession::new(
+            state.sessions[0].project_id,
+            ProviderKind::Codex,
+        );
+        incognito.incognito = true;
+        incognito.begin_turn("secret task");
+        let incognito_id = incognito.id;
+        state.push_session(incognito);
+
+        let service =
+            MemoryService::new(Arc::new(settings), Arc::new(Mutex::new(state)), task_store);
+        assert_eq!(service.prompt_with_memory(incognito_id, "do it"), "do it");
+        assert!(
+            service
+                .prompt_with_memory(ordinary_id, "do it")
+                .contains("<project-memory>")
+        );
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

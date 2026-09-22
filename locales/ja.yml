@@ -66,6 +66,9 @@ command_palette.custom_commands: カスタムコマンド
 command_palette.settings: 設定
 command_palette.new_task: 新規タスク
 command_palette.new_task_in_same_worktree: 同じワークツリーで新しいタスク
+command_palette.new_incognito_task: 新しいシークレットタスク
+command_palette.new_incognito_task_in: フォルダを指定して新しいシークレットタスク…
+command_palette.new_incognito_task_in_same_worktree: 同じワークツリーで新しいシークレットタスク
 command_palette.resume: 再開…
 command_palette.change_provider: プロバイダーを変更
 command_palette.current_provider: 現在のプロバイダー
@@ -507,6 +510,8 @@ common.undo: 取り消す
 common.rename: 名前を変更
 
 session.new_task: 新規タスク
+session.incognito: シークレット
+session.incognito_hint: このタスクはシークレットです — 保存されず、プロジェクトメモリの読み書きも行いません
 session.copy_working_directory: 作業ディレクトリをコピー
 session.move_to_worktree: ワークツリーへ移動
 session.archive: アーカイブ
@@ -1045,6 +1050,9 @@ commands.resume_description: ターミナルのエージェントセッション
 commands.land_description: ベースブランチにリベースしてこのタスクのコミットを取り込む
 commands.side_description: このタスクのパネルでサイドチャットを開く
 commands.compact_description: 会話のコンテキストを圧縮
+commands.incognito_description: シークレットタスクを開始 — メモリ上のみで、プロジェクトメモリの対象外
+commands.incognito_no_draft: シークレットは新しいタスクに適用します — 下書きが選択されていません
+commands.incognito_too_late: シークレットはタスク作成時に設定します — このタスクは開始済みです
 commands.compact_context: コンテキストを圧縮
 commands.compact_turn_running: 圧縮する前に現在のターンの終了を待ってください
 commands.compact_nothing_to_compact: まだ圧縮できるものがありません — まずメッセージを送信してください

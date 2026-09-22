@@ -135,13 +135,27 @@ pub fn is_compact_submission(prompt: &str, commands: &[SlashCommand]) -> bool {
 /// and `Some(Some(prompt))` when a prompt follows. Reserved like `/resume`
 /// and `/land`, so it never crosses into a provider transport.
 pub fn parse_side_submission(prompt: &str) -> Option<Option<String>> {
+    parse_waku_invocation(prompt, "side")
+}
+
+/// Parse the submitted text as a `/incognito` invocation: `None` when it is
+/// not the command, `Some(None)` for a bare `/incognito` — flag the current
+/// draft only — and `Some(Some(prompt))` when a prompt follows, which flags
+/// the draft and submits the prompt as its first turn. Reserved daemon-side
+/// like `/side`, so it never crosses into a provider transport.
+pub fn parse_incognito_submission(prompt: &str) -> Option<Option<String>> {
+    parse_waku_invocation(prompt, "incognito")
+}
+
+/// Shared `/name [arguments]` split for reserved Goddard commands.
+fn parse_waku_invocation(prompt: &str, name: &str) -> Option<Option<String>> {
     let invocation = prompt.trim().strip_prefix('/')?;
-    let (name, arguments) = invocation
+    let (invocation_name, arguments) = invocation
         .split_once(char::is_whitespace)
         .map_or((invocation, ""), |(name, arguments)| {
             (name, arguments.trim())
         });
-    if name != "side" {
+    if invocation_name != name {
         return None;
     }
     Some((!arguments.is_empty()).then(|| arguments.to_owned()))
@@ -644,6 +658,19 @@ mod tests {
         assert_eq!(parse_side_submission("side"), None);
         assert_eq!(parse_side_submission("/sidebar"), None);
         assert_eq!(parse_side_submission("/other /side"), None);
+    }
+
+    #[test]
+    fn incognito_submission_distinguishes_bare_command_from_prompt() {
+        assert_eq!(parse_incognito_submission("/incognito"), Some(None));
+        assert_eq!(parse_incognito_submission("  /incognito  "), Some(None));
+        assert_eq!(
+            parse_incognito_submission("/incognito sketch a cache plan"),
+            Some(Some("sketch a cache plan".to_owned()))
+        );
+        assert_eq!(parse_incognito_submission("incognito"), None);
+        assert_eq!(parse_incognito_submission("/incognito-mode"), None);
+        assert_eq!(parse_incognito_submission("/other /incognito"), None);
     }
 
     #[test]

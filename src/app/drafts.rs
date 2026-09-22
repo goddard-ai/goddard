@@ -217,12 +217,43 @@ impl Waku {
         }
     }
 
+    /// Whether the draft behind `key` belongs to an incognito session —
+    /// `Session` directly, `NewSession` through the project's live draft.
+    /// Incognito draft text is never stored: it would persist on the daemon
+    /// past the session's lifetime.
+    pub(super) fn draft_key_incognito(&self, key: crate::persistence::ComposerDraftKey) -> bool {
+        match key {
+            crate::persistence::ComposerDraftKey::Session(session_id) => {
+                self.session_incognito(session_id)
+            }
+            crate::persistence::ComposerDraftKey::NewSession(project_id) => {
+                // Big Picture's untargeted composer files under the pending
+                // destination project — when it is flagged incognito the
+                // session does not exist yet, but the text is already off
+                // the record.
+                (self.big_picture.is_open()
+                    && self.big_picture.new_task_incognito
+                    && self.big_picture.new_task_project == Some(project_id))
+                    || self.state.sessions.iter().any(|session| {
+                        session.project_id == project_id
+                            && !session.has_started()
+                            && session.incognito
+                    })
+            }
+        }
+    }
+
     /// Copy the visible composer into its in-memory slot. No I/O happens here;
     /// callers can use this on every real edit and on navigation boundaries.
+    /// An incognito draft's text lives only in the mounted composer — leaving
+    /// the session drops it rather than stashing it in the draft store.
     pub(super) fn capture_current_composer_draft(&mut self, cx: &App) -> bool {
         let Some(key) = self.composer_draft_key() else {
             return false;
         };
+        if self.draft_key_incognito(key) {
+            return false;
+        }
         let draft = self.current_composer_draft(Some(key), cx);
         self.composer_drafts.set(key, draft)
     }
@@ -348,6 +379,7 @@ impl Waku {
         self.create_projectless_session_inner(
             draft_id.filter(|draft_id| collapse_draft != Some(*draft_id)),
             source,
+            false,
             cx,
         );
         // Reusing an existing projectless draft resolves synchronously; a

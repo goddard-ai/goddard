@@ -1582,7 +1582,7 @@ impl Waku {
             self.set_workspace_base_branch(workspace, base, cx);
         }
         if let Some(workspace) = new_chat_workspace {
-            self.create_task_in_directory(workspace, window, cx);
+            self.create_task_in_directory(workspace, false, window, cx);
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -1606,7 +1606,7 @@ impl Waku {
         if let SyncConflict::Rebase { base, .. } = &conflict {
             self.set_workspace_base_branch(&workspace, base, cx);
         }
-        self.create_task_in_directory_unfocused(workspace, cx);
+        self.create_task_in_directory_unfocused(workspace, false, cx);
         if let Some(submission) = self.submission_with_attachments(&prompt, cx)
             && let Some(session_id) = self.state.selected_session
         {

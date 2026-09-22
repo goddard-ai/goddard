@@ -181,8 +181,11 @@ impl PaletteIdentifier {
 enum PaletteAction {
     NewTask,
     NewTaskIn,
-    NewTaskInDirectory(PathBuf),
+    NewTaskInDirectory(PathBuf, bool),
     NewTaskInSameWorktree,
+    NewIncognitoTask,
+    NewIncognitoTaskIn,
+    NewIncognitoTaskInSameWorktree,
     Resume,
     ChooseResumeProvider,
     SelectResumeProvider(ProviderKind),
@@ -544,6 +547,9 @@ pub(super) struct CommandPaletteUi {
     new_task_directories: Vec<PathBuf>,
     new_task_directories_pending: bool,
     new_task_directories_generation: u64,
+    /// Set by "New incognito task in…" — the directory pick creates an
+    /// incognito draft instead of an ordinary one.
+    new_task_incognito: bool,
     /// The new-issue flow's resolved repository and the template scan it
     /// kicked off. `issue_repo` doubles as the availability gate: the
     /// dialog only opens once the host answered a repo.
@@ -594,6 +600,7 @@ impl CommandPaletteUi {
             new_task_directories: Vec::new(),
             new_task_directories_pending: false,
             new_task_directories_generation: 0,
+            new_task_incognito: false,
             issue_target: None,
             issue_repo: None,
             issue_templates: Vec::new(),
@@ -667,7 +674,7 @@ impl Waku {
         if !self.command_palette.open {
             self.open_command_palette(window, cx);
         }
-        self.open_command_palette_new_task_view(cx);
+        self.open_command_palette_new_task_view(false, cx);
     }
 
     pub(super) fn toggle_command_palette_action(
@@ -740,6 +747,7 @@ impl Waku {
             .command_palette
             .new_task_directories_generation
             .wrapping_add(1);
+        self.command_palette.new_task_incognito = false;
         self.command_palette.issue_target = None;
         self.command_palette.issue_repo = None;
         self.command_palette.issue_templates.clear();
@@ -809,6 +817,7 @@ impl Waku {
             .command_palette
             .new_task_directories_generation
             .wrapping_add(1);
+        self.command_palette.new_task_incognito = false;
         self.command_palette.issue_templates_pending = false;
         self.command_palette.issue_generation =
             self.command_palette.issue_generation.wrapping_add(1);
@@ -1156,8 +1165,9 @@ impl Waku {
     /// the search roots, the picker fuzzy-filters the result per keystroke.
     /// The generation guard keeps a superseded scan from landing after Esc
     /// or a re-entry.
-    fn open_command_palette_new_task_view(&mut self, cx: &mut Context<Self>) {
+    fn open_command_palette_new_task_view(&mut self, incognito: bool, cx: &mut Context<Self>) {
         self.command_palette.view = CommandPaletteView::NewTaskIn;
+        self.command_palette.new_task_incognito = incognito;
         self.command_palette.new_task_directories.clear();
         self.command_palette.new_task_directories_pending = true;
         self.command_palette.new_task_directories_generation = self
@@ -1730,6 +1740,24 @@ impl Waku {
             ),
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
+                tr!("command_palette.new_incognito_task"),
+                "icons/hat-glasses.svg",
+                None,
+                PaletteAction::NewIncognitoTask,
+                "new incognito task session chat private ephemeral off the record no memory",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.new_incognito_task_in"),
+                "icons/hat-glasses.svg",
+                None,
+                PaletteAction::NewIncognitoTaskIn,
+                "new incognito task in directory folder private ephemeral",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
                 tr!("command_palette.resume"),
                 "icons/rotate-cw.svg",
                 None,
@@ -1868,6 +1896,17 @@ impl Waku {
             );
             item.detail = Some(format!("#{worktree_name}"));
             commands.push(item);
+            let mut incognito_item = CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.new_incognito_task_in_same_worktree"),
+                "icons/hat-glasses.svg",
+                None,
+                PaletteAction::NewIncognitoTaskInSameWorktree,
+                "new incognito task worktree same current shared checkout private ephemeral",
+                next(),
+            );
+            incognito_item.detail = Some(format!("#{worktree_name}"));
+            commands.push(incognito_item);
         }
 
         // Same gate as the composer's `/land`: the session the composer
@@ -3111,7 +3150,10 @@ impl Waku {
                 detail: Some(detail),
                 icon: PaletteIcon::Asset(icon),
                 shortcut: None,
-                action: PaletteAction::NewTaskInDirectory(path.clone()),
+                action: PaletteAction::NewTaskInDirectory(
+                    path.clone(),
+                    self.command_palette.new_task_incognito,
+                ),
                 content_match: None,
                 search_text: format!("{name} {path_label} directory folder project"),
                 order: current,
@@ -3771,7 +3813,11 @@ impl Waku {
                 return;
             }
             PaletteAction::NewTaskIn => {
-                self.open_command_palette_new_task_view(cx);
+                self.open_command_palette_new_task_view(false, cx);
+                return;
+            }
+            PaletteAction::NewIncognitoTaskIn => {
+                self.open_command_palette_new_task_view(true, cx);
                 return;
             }
             PaletteAction::ChooseRunScriptProject(project_id) => {
@@ -3817,10 +3863,14 @@ impl Waku {
         self.close_command_palette(window, cx);
         match action {
             PaletteAction::NewTask => self.new_session_action(&NewSession, window, cx),
-            PaletteAction::NewTaskInDirectory(path) => {
-                self.create_task_in_directory(path, window, cx)
+            PaletteAction::NewIncognitoTask => self.new_incognito_session_action(window, cx),
+            PaletteAction::NewTaskInDirectory(path, incognito) => {
+                self.create_task_in_directory(path, incognito, window, cx)
             }
             PaletteAction::NewTaskInSameWorktree => self.new_task_in_same_worktree(window, cx),
+            PaletteAction::NewIncognitoTaskInSameWorktree => {
+                self.new_incognito_task_in_same_worktree(window, cx)
+            }
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
             PaletteAction::RemoveProject(project_id) => self.remove_project(project_id, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
@@ -4023,6 +4073,7 @@ impl Waku {
             | PaletteAction::ChooseRunScriptProject(_)
             | PaletteAction::OpenRemoveProject
             | PaletteAction::NewTaskIn
+            | PaletteAction::NewIncognitoTaskIn
             | PaletteAction::CreateGitHubIssue
             | PaletteAction::ChooseIssueProject(_)
             | PaletteAction::OpenSavePrompt

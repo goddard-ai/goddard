@@ -411,6 +411,17 @@ fn assemble_slash_commands(
         argument_hint: Some("[prompt]".to_owned()),
         template: None,
     });
+    // `/incognito` is draft-scoped — the picker hides it once the session
+    // has started — but the name is reserved unconditionally so a provider
+    // or project command can never route it into an agent turn.
+    commands.retain(|command| command.name != "incognito");
+    commands.push(SlashCommand {
+        name: "incognito".to_owned(),
+        description: crate::i18n::translate("commands.incognito_description"),
+        scope: CommandScope::Waku,
+        argument_hint: None,
+        template: None,
+    });
     // `/compact` is reserved on the transports with a dedicated daemon RPC —
     // the Waku entry shadows any provider-reported `compact` so submission
     // always routes through `Command::Compact`. Every other provider keeps

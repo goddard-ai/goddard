@@ -125,7 +125,17 @@ quarantined?: boolean,
  * When the session's workspace landed on its base branch, unix seconds.
  * `None` while the session's work has not been landed through the app.
  */
-landed_at?: number | null, provider_cursor: ProviderResumeCursor | null,
+landed_at?: number | null,
+/**
+ * Incognito sessions are held in memory only: the daemon never writes
+ * them to its store, never injects project memory, and never feeds them
+ * to distillation. The flag is fixed at creation — a session that has
+ * already persisted rows cannot be made incognito retroactively.
+ * A connected client keeps the only copy and re-registers it after a
+ * daemon restart, so the session can still resume through
+ * `provider_cursor`.
+ */
+incognito?: boolean, provider_cursor: ProviderResumeCursor | null,
 /**
  * Provider conversations this session ran on before switching away.
  * Each holds a resumable cursor and the transcript boundary the return

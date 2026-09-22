@@ -406,6 +406,8 @@ impl PersistedState {
     /// consumer reloads from the store when `detail_loaded` is false — so the
     /// daemon keeps only a small recency window resident. Pinned sessions
     /// (live runtimes) and dirty sessions (unsaved work) are never released.
+    /// Incognito sessions are never released either: nothing on disk could
+    /// restore them, so a release would silently drop the live transcript.
     ///
     /// Returns the number of transcripts released.
     pub fn trim_idle_transcripts(&mut self, pinned: &HashSet<Uuid>, keep: usize) -> usize {
@@ -420,6 +422,7 @@ impl PersistedState {
                     && session.queued_messages.is_empty());
                 if session.detail_loaded
                     && has_transcript
+                    && !session.incognito
                     && !self.dirty_sessions.contains(&session.id)
                     && !pinned.contains(&session.id)
                 {
@@ -1532,12 +1535,14 @@ impl StateStore {
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
         // Only changed sessions can hold a new inline payload, so the blob walk
         // follows the same set rather than every transcript on every save.
+        // Incognito sessions are excluded here too — externalizing would leak
+        // message payloads to the blob store even with no session row written.
         let dirty = state.dirty_sessions.clone();
         externalize_blobs(
             state
                 .sessions
                 .iter_mut()
-                .filter(|session| dirty.contains(&session.id)),
+                .filter(|session| dirty.contains(&session.id) && !session.incognito),
             &self.blobs,
         );
 
@@ -1604,7 +1609,10 @@ impl StateStore {
         }
 
         // Only sessions the app reported as changed are written. A draft that
-        // has not started yet owns no row, so it counts as removed until it does.
+        // has not started yet owns no row, so it counts as removed until it
+        // does. Incognito sessions never own rows: they stay out of `live`
+        // (harmless — the delete sweep only walks `persisted_sessions`, which
+        // they never enter) and skip both upserts.
         let mut live = HashSet::with_capacity(state.sessions.len());
         // Applied only after the commit below, so a transaction that rolls back
         // does not leave this connection believing rows it never wrote are on
@@ -1613,7 +1621,7 @@ impl StateStore {
         for session in state
             .sessions
             .iter()
-            .filter(|session| session.has_started())
+            .filter(|session| session.has_started() && !session.incognito)
         {
             live.insert(session.id);
             // A skeleton's empty transcript means "not fetched", not "empty".
@@ -1838,6 +1846,9 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         turns: Vec::new(),
         queued_messages: Vec::new(),
         detail_loaded: false,
+        // Stored rows are always ordinary sessions — incognito ones never
+        // reach the store, so nothing persisted can deserialize as one.
+        incognito: false,
     })
 }
 
@@ -2543,6 +2554,53 @@ mod tests {
         assert_eq!(restored.projects[0].created_at, project.created_at);
         assert!(restored.projects[0].starred);
 
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn incognito_sessions_never_reach_the_store() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+
+        let mut incognito = AgentSession::new(state.projects[0].id, ProviderKind::Codex);
+        incognito.incognito = true;
+        incognito.begin_turn("off the record");
+        incognito.push_message(MessageRole::Assistant, "a secret answer");
+        incognito.finish_active_turn(crate::model::TurnStatus::Completed);
+        let incognito_id = incognito.id;
+        state.push_session(incognito);
+        store.save(&mut state).unwrap();
+
+        // No session row, and no message rows either — the transcript went
+        // nowhere near SQLite.
+        let connection = Connection::open(directory.join("app.db")).unwrap();
+        let session_rows: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE id = ?1",
+                params![incognito_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_rows, 0);
+        let secret_rows: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE content LIKE '%secret%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(secret_rows, 0);
+        drop(connection);
+
+        let restored = store_in(&directory).load().unwrap();
+        assert!(
+            !restored
+                .sessions
+                .iter()
+                .any(|session| session.id == incognito_id),
+            "an incognito session must not survive a store round-trip"
+        );
         fs::remove_dir_all(directory).ok();
     }
 

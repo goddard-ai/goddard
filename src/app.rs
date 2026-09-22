@@ -2302,13 +2302,19 @@ pub struct Waku {
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
     event_wake_tx: smol::channel::Sender<()>,
+    /// The bool marks a snapshot loaded over a fresh daemon connection —
+    /// true on first connect and every replacement after a restart, false
+    /// for same-daemon revision bumps. Incognito sessions read it to tell
+    /// "the daemon forgot me" apart from "someone deleted me".
     task_state_sync_tx: Sender<(
         waku_client::DaemonKey,
         Result<RemoteTaskStateSnapshot, String>,
+        bool,
     )>,
     task_state_sync_events: Receiver<(
         waku_client::DaemonKey,
         Result<RemoteTaskStateSnapshot, String>,
+        bool,
     )>,
     /// `settingsChanged` broadcasts forwarded by the task-state sync worker:
     /// the authoritative daemon document each time another client — or an

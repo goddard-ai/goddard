@@ -139,6 +139,9 @@ pub(super) struct BigPictureUi {
     /// deliberate card choice — arming or disarming a target — so merely
     /// hovering a card in another project never migrates a half-typed draft.
     pub(super) new_task_project: Option<Uuid>,
+    /// `/incognito` or "New incognito task" on the untargeted composer: the
+    /// next task the overlay starts is flagged at creation.
+    pub(super) new_task_incognito: bool,
     focus: FocusHandle,
     previous_focus: Option<FocusHandle>,
     focus_generation: u64,
@@ -193,6 +196,7 @@ impl BigPictureUi {
             target: None,
             draft_key: None,
             new_task_project: None,
+            new_task_incognito: false,
             focus,
             previous_focus: None,
             focus_generation: 0,
@@ -465,15 +469,18 @@ impl Waku {
         // a card's session draft or the new-task draft — before the selected
         // session's draft takes the composer back.
         if let Some(key) = self.big_picture.draft_key.take() {
-            let draft = self.current_composer_draft(Some(key), cx);
-            if self.composer_drafts.set(key, draft) {
-                self.schedule_composer_draft_save(cx);
+            if !self.draft_key_incognito(key) {
+                let draft = self.current_composer_draft(Some(key), cx);
+                if self.composer_drafts.set(key, draft) {
+                    self.schedule_composer_draft_save(cx);
+                }
             }
         }
         self.big_picture.open = false;
         self.big_picture.slots.clear();
         self.big_picture.highlighted = None;
         self.big_picture.target = None;
+        self.big_picture.new_task_incognito = false;
         self.big_picture.pending_submission = None;
         self.big_picture.backdrop = None;
         self.composer.update(cx, |composer, cx| {
@@ -496,15 +503,18 @@ impl Waku {
         // just drop the overlay state.
         self.project_switcher.dismiss();
         if let Some(key) = self.big_picture.draft_key.take() {
-            let draft = self.current_composer_draft(Some(key), cx);
-            if self.composer_drafts.set(key, draft) {
-                self.schedule_composer_draft_save(cx);
+            if !self.draft_key_incognito(key) {
+                let draft = self.current_composer_draft(Some(key), cx);
+                if self.composer_drafts.set(key, draft) {
+                    self.schedule_composer_draft_save(cx);
+                }
             }
         }
         self.big_picture.open = false;
         self.big_picture.slots.clear();
         self.big_picture.highlighted = None;
         self.big_picture.target = None;
+        self.big_picture.new_task_incognito = false;
         self.big_picture.pending_submission = None;
         self.big_picture.backdrop = None;
         self.big_picture.previous_focus = None;
@@ -591,9 +601,13 @@ impl Waku {
             return;
         }
         if let Some(previous) = self.big_picture.draft_key {
-            let draft = self.current_composer_draft(Some(previous), cx);
-            if self.composer_drafts.set(previous, draft) {
-                self.schedule_composer_draft_save(cx);
+            // Incognito drafts never enter the store — the text dies with
+            // the mounted composer like the main lane's gate.
+            if !self.draft_key_incognito(previous) {
+                let draft = self.current_composer_draft(Some(previous), cx);
+                if self.composer_drafts.set(previous, draft) {
+                    self.schedule_composer_draft_save(cx);
+                }
             }
         }
         self.big_picture.draft_key = next;
@@ -887,7 +901,15 @@ impl Waku {
                     .map(|project| (project.id, project.is_projectless()));
                 match project {
                     Some((project_id, false)) => {
-                        self.create_session_for(project_id, self.state.last_provider, cx);
+                        if self.big_picture.new_task_incognito {
+                            self.create_incognito_session_for(
+                                project_id,
+                                self.state.last_provider,
+                                cx,
+                            );
+                        } else {
+                            self.create_session_for(project_id, self.state.last_provider, cx);
+                        }
                         if let Some(session_id) = self.state.selected_session {
                             self.submit_composer_submission(submission, cx);
                             // Keep the composer on the task it just started so

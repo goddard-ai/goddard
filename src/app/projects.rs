@@ -1372,6 +1372,7 @@ impl Waku {
                 branch,
                 base_branch: None,
             },
+            false,
             window,
             cx,
         );

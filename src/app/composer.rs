@@ -3563,6 +3563,7 @@ impl Waku {
             || self.execute_land_composer_command(prompt, cx)
             || self.execute_compact_composer_command(prompt, cx)
             || self.execute_side_composer_command(prompt, cx)
+            || self.execute_incognito_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
     }
@@ -3673,6 +3674,63 @@ impl Waku {
         if let Some(prompt) = side_prompt {
             self.submit_composer_submission_to(side_chat_id, ComposerSubmission::plain(prompt), cx);
         }
+        true
+    }
+
+    /// `/incognito [prompt]` — flag the current draft so the task it starts
+    /// stays in memory only. A bare invocation just flags the draft; a
+    /// prompt submits as the draft's first turn. Incognito is fixed at
+    /// creation, so on a started session the command is consumed with an
+    /// explanation rather than reaching the provider.
+    fn execute_incognito_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        let Some(incognito_prompt) = crate::composer_complete::parse_incognito_submission(prompt)
+        else {
+            return false;
+        };
+        let Some(session) = self.composer_session() else {
+            // An untargeted Big Picture composer has no draft session yet —
+            // the flag rides the overlay's pending new-task destination and
+            // lands on whatever session the submit creates.
+            if self.big_picture.is_open() {
+                self.big_picture.new_task_incognito = true;
+                self.composer.update(cx, |input, cx| input.clear(cx));
+                if let Some(prompt) = incognito_prompt {
+                    self.submit_composer_submission(ComposerSubmission::plain(prompt), cx);
+                }
+                cx.notify();
+                return true;
+            }
+            self.show_toast(tr!("commands.incognito_no_draft"));
+            return true;
+        };
+        if session.has_started() {
+            self.show_toast(tr!("commands.incognito_too_late"));
+            return true;
+        }
+        if session.incognito {
+            self.composer.update(cx, |input, cx| input.clear(cx));
+            if let Some(prompt) = incognito_prompt {
+                self.submit_composer_submission_to(
+                    session.id,
+                    ComposerSubmission::plain(prompt),
+                    cx,
+                );
+            }
+            return true;
+        }
+        let session_id = session.id;
+        let draft_key = crate::persistence::ComposerDraftKey::for_session(session);
+        self.state
+            .session_mut(session_id)
+            .map(|session| session.incognito = true);
+        // Flagging purges the persisted draft row — unsent incognito text
+        // lives only in the mounted composer.
+        self.remove_composer_draft(draft_key, cx);
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        if let Some(prompt) = incognito_prompt {
+            self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
+        }
+        cx.notify();
         true
     }
 
@@ -3840,6 +3898,41 @@ impl Waku {
         self.sync_inline_atom_labels(cx);
         self.schedule_composer_draft_save(cx);
         cx.notify();
+    }
+
+    /// The composer's incognito marker: a non-interactive chip, since the
+    /// flag is fixed at creation and there is nothing to toggle. It also
+    /// shows on Big Picture's untargeted composer while the overlay's
+    /// pending new-task destination is flagged.
+    fn render_composer_incognito_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let incognito = self
+            .composer_session()
+            .is_some_and(|session| session.incognito)
+            || (self.big_picture.is_open()
+                && self.big_picture.target().is_none()
+                && self.big_picture.new_task_incognito);
+        if !incognito {
+            return None;
+        }
+        let theme = Theme::current(cx);
+        Some(
+            div()
+                .id("composer-incognito")
+                .h(px(22.0))
+                .px(px(6.0))
+                .rounded(px(6.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .bg(theme.overlay)
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .child(icon("icons/hat-glasses.svg", 11.0, theme.text_secondary))
+                .child(tr!("session.incognito"))
+                .tooltip(Tooltip::text(tr!("session.incognito_hint")))
+                .into_any_element(),
+        )
     }
 
     /// The staged-attachment chips above the input: a thumbnail tile per
@@ -4915,6 +5008,7 @@ impl Waku {
                         .children(self.render_model_traits_control(cx))
                         .children(self.render_agent_preset_control(cx))
                         .child(self.render_access_control(cx))
+                        .children(self.render_composer_incognito_chip(cx))
                         .children(self.render_drafts_count_button(cx))
                         .children(self.render_goal_control(cx))
                         .children(self.render_project_map_control(cx))

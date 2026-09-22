@@ -533,6 +533,10 @@ impl Waku {
     /// distribution honest" at analysis time. `taskType` is logged for the
     /// same reason and never read at runtime.
     fn log_prediction(&mut self, session_id: Uuid, turn_id: Uuid, evaluation: &Evaluation) {
+        // Incognito sessions write nothing to the prediction log either.
+        if self.session_incognito(session_id) {
+            return;
+        }
         let Some(EvalAnswer::Choice {
             choice,
             probabilities,
@@ -585,6 +589,11 @@ impl Waku {
     /// Nothing is journaled while the experiment is off.
     pub(super) fn record_action(&mut self, session: Option<Uuid>, action: JournalAction) {
         if !self.state.action_predictions_enabled {
+            return;
+        }
+        // Incognito sessions leave no trace — a journaled row would persist
+        // the session id past the session's own lifetime.
+        if session.is_some_and(|id| self.session_incognito(id)) {
             return;
         }
         let at = unix_time();

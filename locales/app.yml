@@ -147,6 +147,12 @@ command_palette.directory_search_failed:
   en: "Directory search failed: %{error}"
 command_palette.new_task_in_same_worktree:
   en: New task in same worktree
+command_palette.new_incognito_task:
+  en: New incognito task
+command_palette.new_incognito_task_in:
+  en: New incognito task in…
+command_palette.new_incognito_task_in_same_worktree:
+  en: New incognito task in same worktree
 command_palette.resume:
   en: Resume…
 command_palette.change_provider:
@@ -1513,6 +1519,10 @@ common.rename:
 
 session.new_task:
   en: New task
+session.incognito:
+  en: Incognito
+session.incognito_hint:
+  en: This task is incognito — nothing is saved and project memory is neither read nor written
 session.copy_working_directory:
   en: Copy Working Directory
 session.move_to_worktree:
@@ -2677,6 +2687,12 @@ commands.side_description:
   en: Open a side chat in this task's panel
 commands.compact_description:
   en: Compact the conversation context
+commands.incognito_description:
+  en: Start an incognito task — in memory only, outside project memory
+commands.incognito_no_draft:
+  en: Incognito applies to a new task — no draft is selected
+commands.incognito_too_late:
+  en: Incognito is set at task creation — this task has already started
 commands.compact_context:
   en: Compact context
 commands.compact_turn_running:

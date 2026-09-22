@@ -1584,6 +1584,15 @@ pub struct AgentSession {
     /// `None` while the session's work has not been landed through the app.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub landed_at: Option<u64>,
+    /// Incognito sessions are held in memory only: the daemon never writes
+    /// them to its store, never injects project memory, and never feeds them
+    /// to distillation. The flag is fixed at creation — a session that has
+    /// already persisted rows cannot be made incognito retroactively.
+    /// A connected client keeps the only copy and re-registers it after a
+    /// daemon restart, so the session can still resume through
+    /// `provider_cursor`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub incognito: bool,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// Provider conversations this session ran on before switching away.
@@ -1722,6 +1731,7 @@ impl AgentSession {
             dormant_exempt_until: None,
             quarantined: false,
             landed_at: None,
+            incognito: false,
             detail_loaded: true,
             provider_cursor: None,
             suspended_provider_sessions: Vec::new(),
@@ -1777,7 +1787,16 @@ impl AgentSession {
             dormant_exempt_until: self.dormant_exempt_until,
             quarantined: self.quarantined,
             landed_at: self.landed_at,
-            provider_cursor: None,
+            // A list column: the sidebar and drafts list badge incognito rows.
+            incognito: self.incognito,
+            // Incognito sessions persist nowhere, so the client's skeleton
+            // may be the only surviving copy after a daemon restart — it
+            // must carry the resume cursor, or survival depends on whether
+            // the session happened to be hydrated.
+            provider_cursor: self
+                .incognito
+                .then(|| self.provider_cursor.clone())
+                .flatten(),
             suspended_provider_sessions: Vec::new(),
             pending_provider_context: None,
             available_commands: Vec::new(),

@@ -124,6 +124,9 @@ struct ResultsMemo {
     query: String,
     /// `Rc::as_ptr` identity of the source index the rows were filtered from.
     source: usize,
+    /// Whether `/incognito` was offered — the draft-only command is filtered
+    /// out once the composer session has started, so it keys the memo too.
+    incognito_offered: bool,
     rows: Rc<Vec<AutocompleteRow>>,
 }
 
@@ -482,10 +485,18 @@ impl Waku {
                 .map(|items| Rc::as_ptr(items) as usize)
                 .unwrap_or(0),
         };
+        // `/incognito` only exists on drafts — a started session's boundary
+        // is fixed at creation.
+        let incognito_offered = self
+            .composer_session()
+            .is_none_or(|session| !session.has_started());
         {
             let memo = self.composer_autocomplete.results.borrow();
             if let Some(memo) = memo.as_ref().filter(|memo| {
-                memo.kind == trigger.kind && memo.query == trigger.query && memo.source == source
+                memo.kind == trigger.kind
+                    && memo.query == trigger.query
+                    && memo.source == source
+                    && memo.incognito_offered == incognito_offered
             }) {
                 return memo.rows.clone();
             }
@@ -498,6 +509,7 @@ impl Waku {
                 &mut matcher,
             )
             .into_iter()
+            .filter(|scored| incognito_offered || scored.item.name != "incognito")
             .map(AutocompleteRow::Command)
             .collect::<Vec<_>>(),
             TriggerKind::File => {
@@ -551,6 +563,7 @@ impl Waku {
             kind: trigger.kind,
             query: trigger.query.clone(),
             source,
+            incognito_offered,
             rows: rows.clone(),
         });
         rows

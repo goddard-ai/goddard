@@ -65,6 +65,9 @@ command_palette.custom_commands: 自定义命令
 command_palette.settings: 设置
 command_palette.new_task: 新建任务
 command_palette.new_task_in_same_worktree: 在同一工作树中新建任务
+command_palette.new_incognito_task: 新建无痕任务
+command_palette.new_incognito_task_in: 在指定目录中新建无痕任务…
+command_palette.new_incognito_task_in_same_worktree: 在同一工作树中新建无痕任务
 command_palette.resume: 恢复…
 command_palette.change_provider: 更改服务商
 command_palette.current_provider: 当前服务商
@@ -498,6 +501,8 @@ common.unarchive: 取消归档
 common.undo: 撤销
 common.rename: 重命名
 session.new_task: 新任务
+session.incognito: 无痕
+session.incognito_hint: 此任务为无痕模式 — 不会保存，也不会读写项目记忆
 session.copy_working_directory: 复制工作目录
 session.move_to_worktree: 移动到工作树
 session.archive: 归档
@@ -1019,6 +1024,9 @@ commands.resume_description: 恢复终端智能体会话
 commands.land_description: 变基到基础分支并将此任务的提交合入该分支
 commands.side_description: 在此任务的面板中打开侧聊
 commands.compact_description: 压缩会话上下文
+commands.incognito_description: 开始无痕任务 — 仅存在于内存中，不读写项目记忆
+commands.incognito_no_draft: 无痕模式适用于新任务 — 未选择草稿
+commands.incognito_too_late: 无痕模式需在任务创建时设置 — 此任务已开始
 commands.compact_context: 压缩上下文
 commands.compact_turn_running: 请等待当前轮次结束后再压缩
 commands.compact_nothing_to_compact: 还没有可压缩的内容 — 请先发送一条消息

@@ -131,6 +131,7 @@ fn remote_task_catalog_adds_web_tasks_without_replacing_hydrated_detail() {
         vec![local_projection, web_task],
         |_| false,
         |_| false,
+        false,
     );
 
     assert!(removed.is_empty());
@@ -178,6 +179,7 @@ fn remote_task_catalog_adopts_workspace_for_skeletons_only() {
         vec![remote, stale_remote],
         |_| false,
         |_| false,
+        false,
     );
 
     assert_eq!(
@@ -194,6 +196,55 @@ fn remote_task_catalog_adopts_workspace_for_skeletons_only() {
             .map(|session| &session.workspace),
         Some(&worktree)
     );
+}
+
+#[test]
+fn fresh_catalog_keeps_incognito_sessions_but_still_removes_ordinary_ones() {
+    let project_id = Uuid::new_v4();
+    // A daemon restart: the fresh catalog knows only what the store held,
+    // so both of these rows are absent from it.
+    let mut incognito = AgentSession::new(project_id, ProviderKind::Codex);
+    incognito.incognito = true;
+    incognito.detail_loaded = true;
+    incognito.begin_turn("off the record");
+    let incognito_id = incognito.id;
+
+    let mut ordinary = AgentSession::new(project_id, ProviderKind::Codex);
+    ordinary.detail_loaded = true;
+    ordinary.begin_turn("on the record");
+    let ordinary_id = ordinary.id;
+
+    // The incognito skeleton another client learned about is not kept — it
+    // lacks the transcript a re-push needs and returns with its owner's.
+    let mut skeleton = incognito.list_projection();
+    skeleton.id = Uuid::new_v4();
+    let skeleton_id = skeleton.id;
+
+    let mut catalog = vec![incognito, ordinary, skeleton];
+    let removed = merge_remote_session_catalog(&mut catalog, Vec::new(), |_| true, |_| false, true);
+
+    assert_eq!(removed, vec![ordinary_id, skeleton_id]);
+    assert_eq!(catalog.len(), 1);
+    assert!(catalog.iter().any(|session| session.id == incognito_id));
+}
+
+#[test]
+fn non_fresh_catalog_removes_incognito_sessions_like_any_other() {
+    let project_id = Uuid::new_v4();
+    // Same-daemon revision: a deleted incognito task stays deleted — the
+    // restart survival is not a resurrection.
+    let mut incognito = AgentSession::new(project_id, ProviderKind::Codex);
+    incognito.incognito = true;
+    incognito.detail_loaded = true;
+    incognito.begin_turn("off the record");
+    let incognito_id = incognito.id;
+
+    let mut catalog = vec![incognito];
+    let removed =
+        merge_remote_session_catalog(&mut catalog, Vec::new(), |_| true, |_| false, false);
+
+    assert_eq!(removed, vec![incognito_id]);
+    assert!(catalog.is_empty());
 }
 
 #[test]

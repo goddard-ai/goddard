@@ -2892,6 +2892,7 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, session.project_id);
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
             fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
+            fingerprint = mix(fingerprint, u64::from(session.incognito));
             fingerprint = mix(
                 fingerprint,
                 u64::from(session_dormant(session, now, dormant_threshold)),
@@ -4656,7 +4657,14 @@ impl Waku {
                 _ => None,
             }
         };
-        let has_indicator = status_indicator.is_some();
+        let has_indicator = status_indicator.is_some() || session.incognito;
+        // The pinned right-edge cluster holds the status indicator and the
+        // incognito glyph — reserve room for both when a task shows each.
+        let indicator_margin = if status_indicator.is_some() && session.incognito {
+            px(22.0)
+        } else {
+            px(6.0)
+        };
         let rename_input =
             (self.session_rename == Some(session_id)).then(|| self.session_rename_input.clone());
         let title = if let Some(rename_input) = rename_input {
@@ -4680,7 +4688,7 @@ impl Waku {
                 .items_center()
                 .text_size(sp(13.5))
                 .text_color(theme.text)
-                .when(has_indicator, |element| element.mr(px(6.0)))
+                .when(has_indicator, |element| element.mr(indicator_margin))
                 .child(rename_input)
                 .into_any_element()
         } else {
@@ -4701,7 +4709,7 @@ impl Waku {
                         }
                     }),
                 )
-                .when(has_indicator, |element| element.mr(px(6.0)))
+                .when(has_indicator, |element| element.mr(indicator_margin))
                 .child(SharedString::from(localized_session_title(session)))
                 .into_any_element()
         };
@@ -4877,24 +4885,52 @@ impl Waku {
                     .child(title)
                     .child(pin_button)
                     .child(archive_button)
-                    .when_some(status_indicator, |element, indicator| {
-                        // The indicator is pinned to the row's right edge
+                    .when(has_indicator, |element| {
+                        // The indicators are pinned to the row's right edge
                         // rather than participating in the flex flow: the
                         // zero-width pin/archive pair can expand under a
-                        // stale hover or focus state and must never push the
-                        // indicator off the timestamp edge.
+                        // stale hover or focus state and must never push
+                        // them off the timestamp edge.
                         element.child(
                             div()
                                 .absolute()
                                 .top_0()
                                 .bottom_0()
                                 .right_0()
-                                .w(px(12.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
+                                .gap(px(4.0))
                                 .group_hover(group_name.clone(), |style| style.invisible())
-                                .child(indicator),
+                                .when(session.incognito, |element| {
+                                    element.child(
+                                        div()
+                                            .id(SharedString::from(format!(
+                                                "session-incognito-{session_id}"
+                                            )))
+                                            .flex_none()
+                                            .size(px(12.0))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .tooltip(Tooltip::text(tr!("session.incognito")))
+                                            .child(icon(
+                                                "icons/hat-glasses.svg",
+                                                12.0,
+                                                theme.text_tertiary,
+                                            )),
+                                    )
+                                })
+                                .when_some(status_indicator, |element, indicator| {
+                                    element.child(
+                                        div()
+                                            .w(px(12.0))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(indicator),
+                                    )
+                                }),
                         )
                     }),
             )
@@ -5227,7 +5263,30 @@ impl Waku {
                                     .child(icon(environment.icon(), 11.0, theme.text_secondary))
                                     .tooltip(Tooltip::text(badge_label)),
                             )
-                        }),
+                        })
+                        .when(
+                            session_surface && session.is_some_and(|session| session.incognito),
+                            |element| {
+                                element.child(
+                                    div()
+                                        .id("incognito-badge")
+                                        .h(px(22.0))
+                                        .w(px(22.0))
+                                        .rounded(px(8.0))
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .bg(theme.overlay)
+                                        .child(icon(
+                                            "icons/hat-glasses.svg",
+                                            11.0,
+                                            theme.text_secondary,
+                                        ))
+                                        .tooltip(Tooltip::text(tr!("session.incognito"))),
+                                )
+                            },
+                        ),
                     cx,
                 ),
             )

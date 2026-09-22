@@ -258,25 +258,41 @@ pub(super) fn session_has_active_provider_turn(session: &AgentSession) -> bool {
 /// drained.
 /// `owns` scopes deletions to the merging daemon's rows: a remote host's
 /// session must never vanish because the *local* daemon's snapshot lacks it.
+/// `fresh` marks a snapshot loaded over a new connection — a daemon restart
+/// drops its in-memory incognito sessions from the catalog, and the client
+/// holds the only copy, so they survive the merge to be re-registered. On a
+/// same-daemon revision their absence means deletion, which applies as usual.
 pub(super) fn merge_remote_session_catalog(
     local: &mut Vec<AgentSession>,
     remote: Vec<AgentSession>,
     owns: impl Fn(Uuid) -> bool,
     has_local_runtime: impl Fn(Uuid) -> bool,
+    fresh: bool,
 ) -> Vec<Uuid> {
     let remote_ids = remote
         .iter()
         .map(|session| session.id)
         .collect::<HashSet<_>>();
+    // Re-registration needs the transcript, so only detail-loaded copies
+    // survive; an incognito skeleton learned from another client comes back
+    // through the catalog when its owner re-pushes it.
+    let survives_restart =
+        |session: &AgentSession| fresh && session.incognito && session.detail_loaded;
     let removed = local
         .iter()
         .filter(|session| {
-            session.has_started() && owns(session.id) && !remote_ids.contains(&session.id)
+            session.has_started()
+                && owns(session.id)
+                && !remote_ids.contains(&session.id)
+                && !survives_restart(session)
         })
         .map(|session| session.id)
         .collect::<Vec<_>>();
     local.retain(|session| {
-        !session.has_started() || !owns(session.id) || remote_ids.contains(&session.id)
+        !session.has_started()
+            || !owns(session.id)
+            || remote_ids.contains(&session.id)
+            || survives_restart(session)
     });
 
     for remote in remote {
@@ -324,6 +340,7 @@ pub(super) fn prepare_submission(
     turn_count: usize,
     sync_default_branch: bool,
     sync_branches: Vec<String>,
+    incognito: bool,
 ) -> anyhow::Result<PreparedSubmission> {
     let mut worktree_restored = false;
     let mut lfs_warning = None;
@@ -436,17 +453,22 @@ pub(super) fn prepare_submission(
 
     // Every turn gets its own immutable starting snapshot. Reusing the prior
     // response's ending ref would attribute branch switches or terminal edits
-    // made between turns to the next response.
-    let checkpoint_warning = workspace_ack(
-        &workspace_client,
-        waku_client::WorkspaceOperation::CaptureTurnStart {
-            cwd: project_path.to_path_buf(),
-            session_id,
-            turn_count,
-        },
-    )
-    .err()
-    .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error));
+    // made between turns to the next response. Incognito sessions skip the
+    // capture — a checkpoint ref outlives a session that must leave no trace.
+    let checkpoint_warning = if incognito {
+        None
+    } else {
+        workspace_ack(
+            &workspace_client,
+            waku_client::WorkspaceOperation::CaptureTurnStart {
+                cwd: project_path.to_path_buf(),
+                session_id,
+                turn_count,
+            },
+        )
+        .err()
+        .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error))
+    };
 
     // A routed session's turn-level effort check rides the same boundary as
     // the first turn's full route: one bounded daemon round trip, answered
@@ -1463,7 +1485,9 @@ impl Waku {
                         }
                     }
                     let result = load_remote_task_state(&client).map_err(|error| error.to_string());
-                    if results.send((key, result)).is_err() {
+                    // Fresh connection: the daemon may have restarted and
+                    // lost its in-memory incognito sessions.
+                    if results.send((key, result, true)).is_err() {
                         return;
                     }
                     signal_event_pump(&event_wake);
@@ -1492,7 +1516,7 @@ impl Waku {
                                 while revisions.try_recv().is_ok() {}
                                 let result = load_remote_task_state(&client)
                                     .map_err(|error| error.to_string());
-                                if results.send((key, result)).is_err() {
+                                if results.send((key, result, false)).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1582,17 +1606,28 @@ impl Waku {
     fn drain_task_state_sync_events(&mut self, cx: &mut Context<Self>) -> bool {
         // Snapshots from several daemons interleave on one channel; keep the
         // newest per daemon rather than only the newest overall.
-        let mut latest: HashMap<waku_client::DaemonKey, Result<RemoteTaskStateSnapshot, String>> =
-            HashMap::new();
-        while let Ok((key, result)) = self.task_state_sync_events.try_recv() {
-            latest.insert(key, result);
+        let mut latest: HashMap<
+            waku_client::DaemonKey,
+            (Result<RemoteTaskStateSnapshot, String>, bool),
+        > = HashMap::new();
+        while let Ok((key, result, fresh)) = self.task_state_sync_events.try_recv() {
+            // Keep the newest snapshot but OR the fresh marker: a same-daemon
+            // revision that overtakes a post-reconnect load must not strip it
+            // — a wrongly retained incognito session self-heals on the next
+            // sync, a wrongly dropped one is lost.
+            if let Some((slot, was_fresh)) = latest.get_mut(&key) {
+                *slot = result;
+                *was_fresh |= fresh;
+            } else {
+                latest.insert(key, (result, fresh));
+            }
         }
         if latest.is_empty() {
             return false;
         }
-        for (key, result) in latest {
+        for (key, (result, fresh)) in latest {
             match result {
-                Ok(snapshot) => self.apply_remote_task_state(key, snapshot, cx),
+                Ok(snapshot) => self.apply_remote_task_state(key, snapshot, fresh, cx),
                 Err(error) => {
                     eprintln!("could not refresh daemon task state: {error}");
                 }
@@ -2326,11 +2361,17 @@ impl Waku {
         &mut self,
         key: waku_client::DaemonKey,
         snapshot: RemoteTaskStateSnapshot,
+        fresh: bool,
         cx: &mut Context<Self>,
     ) {
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
         let known_session_ids = self
             .state
+            .sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<HashSet<_>>();
+        let remote_ids = snapshot
             .sessions
             .iter()
             .map(|session| session.id)
@@ -2347,7 +2388,33 @@ impl Waku {
                     && !self.friend_sessions.contains_key(&session_id)
             },
             |session_id| runtime_ids.contains(&session_id),
+            fresh,
         );
+        // Incognito rows the restarted daemon forgot ride the next save back:
+        // SaveTaskState adopts a detail-loaded started session it does not
+        // know, `provider_cursor` included, so an idle one simply reappears
+        // and a busy one's attach misses fall into `resume_lost_runtime`.
+        if fresh {
+            let reregister: Vec<Uuid> = self
+                .state
+                .sessions
+                .iter()
+                .filter(|session| {
+                    session.incognito
+                        && session.detail_loaded
+                        && session.has_started()
+                        && !remote_ids.contains(&session.id)
+                        && self.daemons.session_owner(session.id) == key
+                })
+                .map(|session| session.id)
+                .collect();
+            for session_id in &reregister {
+                self.state.mark_session_dirty(*session_id);
+            }
+            if !reregister.is_empty() {
+                self.save();
+            }
+        }
         for session_id in &removed {
             self.runtime_attach_pending.remove(session_id);
             self.runtime_attach_misses.remove(session_id);
@@ -2637,7 +2704,12 @@ impl Waku {
 
     /// Persist the per-host catalog cache off the UI thread.
     pub(super) fn save_remote_catalogs(&self) {
-        let catalogs = self.remote_catalogs.clone();
+        // Incognito projections exist only to keep a live client connected —
+        // they never touch the catalog cache on disk.
+        let mut catalogs = self.remote_catalogs.clone();
+        for catalog in catalogs.values_mut() {
+            catalog.sessions.retain(|session| !session.incognito);
+        }
         let path = self.remote_catalogs_path.clone();
         std::thread::Builder::new()
             .name("waku-remote-catalogs".into())
@@ -3678,6 +3750,14 @@ impl Waku {
         self.state.sessions.iter().find(|session| session.id == id)
     }
 
+    pub(super) fn session_incognito(&self, session_id: Uuid) -> bool {
+        self.state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| session.incognito)
+    }
+
     fn active_turn_finished_event(
         &self,
         session_id: Uuid,
@@ -4252,6 +4332,11 @@ impl Waku {
         else {
             return;
         };
+        // Incognito sessions leave no artifacts behind — a checkpoint is a
+        // git ref that outlives the session.
+        if session.incognito {
+            return;
+        }
         if self.checkpoint_capture_pending(session_id, turn_count) {
             return;
         }
@@ -5456,6 +5541,7 @@ impl Waku {
         cx.notify();
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
+        let incognito = self.session_incognito(session_id);
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -5470,6 +5556,7 @@ impl Waku {
                         next_turn_count,
                         sync_default_branch,
                         sync_branches,
+                        incognito,
                     )
                 })
                 .await;
@@ -6355,6 +6442,7 @@ impl Waku {
         };
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
+        let incognito = self.session_incognito(session_id);
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -6369,6 +6457,7 @@ impl Waku {
                         next_turn_count,
                         sync_default_branch,
                         sync_branches,
+                        incognito,
                     )
                 })
                 .await;

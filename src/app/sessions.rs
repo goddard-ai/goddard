@@ -315,6 +315,7 @@ impl Waku {
             self.create_projectless_session_inner(
                 draft_id,
                 Some(crate::persistence::ComposerDraftKey::NewSession(project_id)),
+                false,
                 cx,
             );
             return;
@@ -979,7 +980,7 @@ impl Waku {
             .iter()
             .any(|project| project.id == project_id && project.is_projectless())
         {
-            self.create_projectless_session_inner(None, None, cx);
+            self.create_projectless_session_inner(None, None, false, cx);
             return;
         }
         self.create_session_under_project(project_id, provider, cx);
@@ -1040,6 +1041,47 @@ impl Waku {
         self.record_action(Some(id), action_predictions::JournalAction::SessionNew);
         self.state.push_session(session);
         self.select_session(id, cx);
+    }
+
+    /// `create_session_for` for an incognito task — always a fresh draft.
+    /// The project's standing draft is never reused: it may already hold
+    /// persisted composer text, and incognito text must never reach the
+    /// draft store.
+    pub(super) fn create_incognito_session_for(
+        &mut self,
+        project_id: Uuid,
+        provider: ProviderKind,
+        cx: &mut Context<Self>,
+    ) -> Uuid {
+        if let waku_client::DaemonKey::Remote(host) = self.daemons.project_owner(project_id)
+            && self.daemons.daemon_for_project(project_id).is_none()
+        {
+            self.use_remote_host(host, cx);
+        }
+        let runtime_mode =
+            new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
+        let environment = new_task_environment(
+            self.selected_session(),
+            self.state.last_environment(),
+            self.state.sandbox_experiment_enabled,
+            self.state.sandbox_default_enabled,
+            provider,
+        );
+        let mut session = self.state.new_session(project_id, provider);
+        session.incognito = true;
+        session.runtime_mode = runtime_mode;
+        session.environment = environment;
+        let id = session.id;
+        self.daemons
+            .claim_session(id, self.daemons.project_owner(project_id));
+        self.track_task_created(&session, "interactive");
+        self.state.push_session(session);
+        // SessionNew journals only for ordinary tasks — `record_action`
+        // itself skips incognito sessions, but the ordering here also keeps
+        // the check honest: the row must exist before the gate can see it.
+        self.record_action(Some(id), action_predictions::JournalAction::SessionNew);
+        self.select_session(id, cx);
+        id
     }
 
     /// Report a session record joining the catalog. `origin` names the path
@@ -1121,6 +1163,9 @@ impl Waku {
         session.context_window = parent.context_window.clone();
         session.agent_preset = parent.agent_preset.clone();
         session.auto_route = parent.auto_route;
+        // The parent's privacy boundary applies: a side chat of an incognito
+        // session is incognito too.
+        session.incognito = parent.incognito;
         session.side_chat_of = Some(parent.id);
         session.workspace = match &parent.workspace {
             // A materialized or plain checkout is a place the chat can share.
@@ -2401,12 +2446,64 @@ impl Waku {
         window.focus(&focus_handle, cx);
     }
 
+    /// The palette's "New incognito task": same destination rules as
+    /// `new_session_action`, but the draft is always fresh — the standing
+    /// draft may already hold persisted text — and starts off the record.
+    pub(super) fn new_incognito_session_action(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.big_picture.is_open() {
+            self.set_big_picture_target(None, cx);
+            self.big_picture.new_task_incognito = true;
+            let focus_handle = self.composer_focus(cx);
+            window.focus(&focus_handle, cx);
+            cx.notify();
+            return;
+        }
+        self.settings_page = None;
+        let current_project = self
+            .projects_page
+            .or(self.state.selected_project)
+            .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
+            .map(|project| (project.id, project.is_projectless()));
+        match current_project {
+            Some((_, true)) => self.create_incognito_projectless_session(cx),
+            Some((project_id, false)) => {
+                self.create_incognito_session_for(project_id, self.state.last_provider, cx);
+            }
+            None => self.create_incognito_projectless_session(cx),
+        }
+        let focus_handle = self.composer_focus(cx);
+        window.focus(&focus_handle, cx);
+    }
+
     /// "New task in same worktree": hand the selected task's materialized
     /// worktree to the project's next draft. The palette only offers this
     /// while the selected task has one; the lookup repeats here because the
     /// clicked item is a snapshot.
     pub(super) fn new_task_in_same_worktree(
         &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.new_task_in_same_worktree_inner(false, window, cx);
+    }
+
+    /// The incognito counterpart — a fresh off-the-record draft bound to the
+    /// same worktree.
+    pub(super) fn new_incognito_task_in_same_worktree(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.new_task_in_same_worktree_inner(true, window, cx);
+    }
+
+    fn new_task_in_same_worktree_inner(
+        &mut self,
+        incognito: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2422,7 +2519,7 @@ impl Waku {
         else {
             return;
         };
-        self.bind_new_draft_to_worktree(project_id, workspace, window, cx);
+        self.bind_new_draft_to_worktree(project_id, workspace, incognito, window, cx);
     }
 
     /// "New task in…": a task draft in the picked directory. An existing
@@ -2431,10 +2528,11 @@ impl Waku {
     pub(super) fn create_task_in_directory(
         &mut self,
         path: PathBuf,
+        incognito: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.create_task_in_directory_unfocused(path, cx);
+        self.create_task_in_directory_unfocused(path, incognito, cx);
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
     }
@@ -2444,6 +2542,7 @@ impl Waku {
     pub(super) fn create_task_in_directory_unfocused(
         &mut self,
         path: PathBuf,
+        incognito: bool,
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
@@ -2463,7 +2562,11 @@ impl Waku {
                 project_id
             }
         };
-        self.create_session_for(project_id, self.state.last_provider, cx);
+        if incognito {
+            self.create_incognito_session_for(project_id, self.state.last_provider, cx);
+        } else {
+            self.create_session_for(project_id, self.state.last_provider, cx);
+        }
     }
 
     /// Flips a project's starred flag. The mutation rides the ordinary
@@ -2490,10 +2593,15 @@ impl Waku {
         &mut self,
         project_id: Uuid,
         workspace: SessionWorkspace,
+        incognito: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.create_session_for(project_id, self.state.last_provider, cx);
+        if incognito {
+            self.create_incognito_session_for(project_id, self.state.last_provider, cx);
+        } else {
+            self.create_session_for(project_id, self.state.last_provider, cx);
+        }
         if let Some(session_id) = self.state.selected_session
             && let Some(session) = self.state.session_mut(session_id)
             && !session.has_started()
@@ -5062,7 +5170,13 @@ impl Waku {
     }
 
     pub(super) fn create_projectless_session(&mut self, cx: &mut Context<Self>) {
-        self.create_projectless_session_inner(None, None, cx);
+        self.create_projectless_session_inner(None, None, false, cx);
+    }
+
+    /// `create_projectless_session` for an incognito task — the shared draft
+    /// reuse is skipped for the same reason as `create_incognito_session_for`.
+    pub(super) fn create_incognito_projectless_session(&mut self, cx: &mut Context<Self>) {
+        self.create_projectless_session_inner(None, None, true, cx);
     }
 
     /// The draft `create_projectless_session` reuses — a composer's "No
@@ -5095,9 +5209,10 @@ impl Waku {
         &mut self,
         retarget_draft: Option<Uuid>,
         draft_source: Option<crate::persistence::ComposerDraftKey>,
+        incognito: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(draft_id) = self.reusable_projectless_draft() {
+        if !incognito && let Some(draft_id) = self.reusable_projectless_draft() {
             self.select_session(draft_id, cx);
             self.move_composer_draft_after_project_change(draft_source, cx);
             return;
@@ -5144,7 +5259,11 @@ impl Waku {
                     // The provisioned project is itself projectless, so it
                     // must take the direct creation path — `create_session_for`
                     // would route it back through here.
-                    waku.create_session_under_project(project_id, waku.state.last_provider, cx);
+                    if incognito {
+                        waku.create_incognito_session_for(project_id, waku.state.last_provider, cx);
+                    } else {
+                        waku.create_session_under_project(project_id, waku.state.last_provider, cx);
+                    }
                     waku.move_composer_draft_after_project_change(draft_source, cx);
                     // A "no project" pick from the overlay's composer
                     // retargets its new-task destination to the provisioned

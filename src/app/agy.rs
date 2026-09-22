@@ -105,7 +105,9 @@ impl Waku {
         // the same rule the driver path follows; a failed preparation
         // unwinds them together.
         let prompt = submission.prompt.clone();
+        let mut incognito = false;
         let message_id = if let Some(session) = self.state.session_mut(session_id) {
+            incognito = session.incognito;
             if !submission.hidden {
                 session.set_title_from_prompt(&submission.human_prompt());
             }
@@ -134,6 +136,7 @@ impl Waku {
                         next_turn_count,
                         sync_default_branch,
                         sync_branches,
+                        incognito,
                     )
                 })
                 .await;
