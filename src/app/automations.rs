@@ -2136,6 +2136,9 @@ impl Waku {
                             this.reveal_selected_picker_model(cx);
                         } else {
                             this.model_picker_target = composer::ModelPickerTarget::Composer;
+                            // Same rule as the composer picker: parked
+                            // unstars hold their slot only while open.
+                            this.pinned_unfavorites.clear();
                             if let Some(editor) = this.automations_editor.as_ref() {
                                 let focus = editor.name.read(cx).focus_handle(cx);
                                 window.focus(&focus, cx);

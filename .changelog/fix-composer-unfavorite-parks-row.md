@@ -1,0 +1,1 @@
+- Unstarring a model in the model picker no longer drops its row out of the favorites block — the star empties and the ⌘⌥ shortcuts compact immediately, but the row stays put until the picker closes so re-starring is a one-click undo.

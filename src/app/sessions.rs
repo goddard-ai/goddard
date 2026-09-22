@@ -4111,7 +4111,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let default_effort = self.model_default_effort(provider, &model);
-        if let Some(index) = self.state.favorite_models.iter().position(|favorite| {
+        let matches = |favorite: &FavoriteModel| {
             super::composer::favorite_matches_row(
                 favorite,
                 provider,
@@ -4120,8 +4120,45 @@ impl Waku {
                 fast,
                 default_effort.as_deref(),
             )
-        }) {
-            self.state.favorite_models.remove(index);
+        };
+        if let Some(index) = self
+            .state
+            .favorite_models
+            .iter()
+            .position(|favorite| matches(favorite))
+        {
+            // Unstarring parks the row where it sits until the picker hides:
+            // the entry leaves `favorite_models` — the star empties and the
+            // ⌘⌥ chords compact — but pins its block slot so a re-star can
+            // restore it whole instead of digging it back up.
+            let favorite = self.state.favorite_models.remove(index);
+            let mut position = index;
+            for pinned in &self.pinned_unfavorites {
+                if pinned.position <= position {
+                    position += 1;
+                }
+            }
+            self.pinned_unfavorites
+                .push(composer::PinnedUnfavorite { favorite, position });
+            self.pinned_unfavorites
+                .sort_by_key(|pinned| pinned.position);
+        } else if let Some(parked) = self
+            .pinned_unfavorites
+            .iter()
+            .position(|pinned| matches(&pinned.favorite))
+        {
+            // Re-starring a parked row undoes the removal at its old slot —
+            // original position, original chord.
+            let pinned = self.pinned_unfavorites.remove(parked);
+            let index = pinned.position
+                - self
+                    .pinned_unfavorites
+                    .iter()
+                    .filter(|other| other.position < pinned.position)
+                    .count();
+            self.state
+                .favorite_models
+                .insert(index.min(self.state.favorite_models.len()), pinned.favorite);
         } else {
             self.state.favorite_models.push(FavoriteModel {
                 provider,

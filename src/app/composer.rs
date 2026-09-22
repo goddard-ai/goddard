@@ -1352,6 +1352,10 @@ impl Waku {
                         reset_search.update(cx, |search, cx| search.clear(cx));
                         this.reveal_selected_picker_model(cx);
                     } else {
+                        // The picker's parked unstars only hold their slots
+                        // while it's open — hiding the panel lets them fall
+                        // to their natural position.
+                        this.pinned_unfavorites.clear();
                         let focus_handle = this.composer.read(cx).focus();
                         window.focus(&focus_handle, cx);
                     }
@@ -1438,12 +1442,14 @@ impl Waku {
         let remote = self.daemon.is_remote();
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
         let favorites = self.state.favorite_models.clone();
+        let pinned = self.pinned_unfavorites.clone();
         let recents = self.state.recent_model_uses.clone();
         let search = self.model_search.clone();
         let locked_provider = self.model_picker_locked_provider();
-        let available_rows = Rc::new(visible_picker_rows(
+        let available_rows = Rc::new(visible_picker_rows_with_pins(
             &probes,
             &favorites,
+            &pinned,
             &recents,
             &disabled_providers,
             locked_provider,
@@ -1459,9 +1465,10 @@ impl Waku {
         // no rail button, and neither does a favorites or recents section
         // with nothing to scroll to.
         let section_rows = if searching {
-            Rc::new(visible_picker_rows(
+            Rc::new(visible_picker_rows_with_pins(
                 &probes,
                 &favorites,
+                &pinned,
                 &recents,
                 &disabled_providers,
                 locked_provider,
@@ -2021,9 +2028,10 @@ impl Waku {
     /// once they arrive. Without a row to reveal it falls back to the top, so
     /// a scroll offset from an earlier open never leaks into a fresh list.
     pub(super) fn reveal_selected_picker_model(&self, cx: &App) {
-        let rows = visible_picker_rows(
+        let rows = visible_picker_rows_with_pins(
             &self.probes,
             &self.state.favorite_models,
+            &self.pinned_unfavorites,
             &self.state.recent_model_uses,
             &self.state.disabled_providers,
             self.model_picker_locked_provider(),
@@ -2055,9 +2063,10 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.model_search.update(cx, |search, cx| search.clear(cx));
-        let rows = visible_picker_rows(
+        let rows = visible_picker_rows_with_pins(
             &self.probes,
             &self.state.favorite_models,
+            &self.pinned_unfavorites,
             &self.state.recent_model_uses,
             &self.state.disabled_providers,
             self.model_picker_locked_provider(),
@@ -2100,9 +2109,10 @@ impl Waku {
         if !self.model_search.read(cx).content().trim().is_empty() {
             return;
         }
-        let rows = visible_picker_rows(
+        let rows = visible_picker_rows_with_pins(
             &self.probes,
             &self.state.favorite_models,
+            &self.pinned_unfavorites,
             &self.state.recent_model_uses,
             &self.state.disabled_providers,
             self.model_picker_locked_provider(),
@@ -7048,13 +7058,26 @@ enum ModelPickerSection {
 fn picker_row_section(row: &ModelPickerRow) -> ModelPickerSection {
     if row.auto {
         ModelPickerSection::Auto
-    } else if row.favorite_index.is_some() {
+    } else if row.favorite_rank.is_some() {
         ModelPickerSection::Favorites
     } else if row.recent_rank.is_some() {
         ModelPickerSection::Recents
     } else {
         ModelPickerSection::Provider(row.provider)
     }
+}
+
+/// A selection unstarred while the picker is open. The entry leaves
+/// `favorite_models` at once — the star empties and the ⌘⌥ chords compact —
+/// but `position` parks its row in the favorites block until the picker
+/// hides, so re-starring restores the exact slot rather than appending.
+#[derive(Clone)]
+pub(super) struct PinnedUnfavorite {
+    pub favorite: FavoriteModel,
+    /// Slot in the merged favorites block — where the entry sat counting
+    /// earlier parked entries — so several parked rows keep their relative
+    /// order when more than one star comes off in a session.
+    pub position: usize,
 }
 
 /// One selectable row in the merged model picker: a model pinned to a
@@ -7073,7 +7096,13 @@ pub(super) struct ModelPickerRow {
     /// Whether the row selects the `fast` service tier.
     pub fast: bool,
     /// Position in `favorite_models` when this exact selection is starred.
+    /// Stays `None` on a parked unstar — the row renders unstarred and
+    /// claims no chord even though `favorite_rank` still holds its slot.
     pub favorite_index: Option<usize>,
+    /// Slot the row occupies in the favorites block: a live favorite's rank
+    /// counting the parked entries ahead of it, or the slot a parked unstar
+    /// holds until the picker hides. `None` outside the block.
+    pub favorite_rank: Option<usize>,
     /// Rank among recently used selections — present only on the fast-variant
     /// that was actually started last, so one of `effort` and `effort-fast`
     /// ever carries it.
@@ -7092,6 +7121,7 @@ impl ModelPickerRow {
             effort: None,
             fast: false,
             favorite_index: None,
+            favorite_rank: None,
             recent_rank: None,
             auto: true,
         }
@@ -7294,6 +7324,7 @@ fn picker_model_rows(provider: ProviderKind, model: ProviderModel) -> Vec<ModelP
                 effort: effort.clone(),
                 fast: *fast,
                 favorite_index: None,
+                favorite_rank: None,
                 recent_rank: None,
                 auto: false,
             });
@@ -7341,6 +7372,34 @@ pub(super) fn visible_picker_rows(
     auto_route: bool,
     granularity: PickerGranularity,
 ) -> Vec<ModelPickerRow> {
+    visible_picker_rows_with_pins(
+        probes,
+        favorites,
+        &[],
+        recents,
+        disabled_providers,
+        locked_provider,
+        normalized_query,
+        auto_route,
+        granularity,
+    )
+}
+
+/// [`visible_picker_rows`] plus the picker's parked unstars: entries already
+/// out of `favorites` that still hold their slots until the picker hides.
+/// A parked row sorts where it sat — after every live favorite ranked ahead
+/// of it — so only its star and chord change, never its place in the list.
+pub(super) fn visible_picker_rows_with_pins(
+    probes: &[ProviderProbe],
+    favorites: &[FavoriteModel],
+    pinned: &[PinnedUnfavorite],
+    recents: &[RecentModelUse],
+    disabled_providers: &[ProviderKind],
+    locked_provider: Option<ProviderKind>,
+    normalized_query: &str,
+    auto_route: bool,
+    granularity: PickerGranularity,
+) -> Vec<ModelPickerRow> {
     let searching = !normalized_query.is_empty();
     let mut rows: Vec<ModelPickerRow> = probes
         .iter()
@@ -7358,6 +7417,7 @@ pub(super) fn visible_picker_rows(
                         effort: None,
                         fast: false,
                         favorite_index: None,
+                        favorite_rank: None,
                         recent_rank: None,
                         auto: false,
                     }],
@@ -7407,31 +7467,57 @@ pub(super) fn visible_picker_rows(
     // before the catalog folded aliases into base models — resolve each back
     // to base plus the traits its suffix carries so stars and recents still
     // land on their combo row.
+    let normalize = |favorite: &FavoriteModel| {
+        let (model, effort, fast) = normalize_model_combo(
+            probes,
+            favorite.provider,
+            &favorite.model,
+            favorite.effort.clone(),
+            favorite.fast,
+        );
+        FavoriteModel {
+            provider: favorite.provider,
+            model,
+            effort,
+            fast,
+        }
+    };
+    let normalized_favorites: Vec<FavoriteModel> = favorites.iter().map(&normalize).collect();
+    let mut normalized_pinned: Vec<(usize, FavoriteModel)> = pinned
+        .iter()
+        .map(|parked| (parked.position, normalize(&parked.favorite)))
+        .collect();
+    normalized_pinned.sort_by_key(|(position, _)| *position);
     for row in &mut rows {
         let default_effort = model_default_effort(&row.model);
-        row.favorite_index = favorites.iter().position(|favorite| {
-            let (model, effort, fast) = normalize_model_combo(
-                probes,
-                favorite.provider,
-                &favorite.model,
-                favorite.effort.clone(),
-                favorite.fast,
-            );
-            let normalized = FavoriteModel {
-                provider: favorite.provider,
-                model,
-                effort,
-                fast,
-            };
+        let matches_row = |favorite: &FavoriteModel| {
             favorite_matches_row(
-                &normalized,
+                favorite,
                 row.provider,
                 &row.model.id,
                 row.effort.as_deref(),
                 row.fast,
                 default_effort.as_deref(),
             )
-        });
+        };
+        row.favorite_index = normalized_favorites.iter().position(&matches_row);
+        let parked_position = normalized_pinned
+            .iter()
+            .find(|(_, favorite)| matches_row(favorite))
+            .map(|(position, _)| *position);
+        row.favorite_rank = if let Some(index) = row.favorite_index {
+            // A live favorite's display slot counts the parked entries
+            // holding positions ahead of it — they still occupy real rows.
+            let mut rank = index;
+            for (position, _) in &normalized_pinned {
+                if *position <= rank {
+                    rank += 1;
+                }
+            }
+            Some(rank)
+        } else {
+            parked_position
+        };
         row.recent_rank = recents.iter().position(|use_| {
             let (model, effort, fast) = normalize_model_combo(
                 probes,
@@ -7448,8 +7534,8 @@ pub(super) fn visible_picker_rows(
     }
     rows.sort_by_key(|row| {
         (
-            row.favorite_index.is_none(),
-            row.favorite_index.unwrap_or(usize::MAX),
+            row.favorite_rank.is_none(),
+            row.favorite_rank.unwrap_or(usize::MAX),
             row.recent_rank.is_none(),
             row.recent_rank.unwrap_or(usize::MAX),
             provider_sort_rank(row.provider),

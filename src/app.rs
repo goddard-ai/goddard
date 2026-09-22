@@ -2132,6 +2132,11 @@ pub struct Waku {
     /// Which surface a picker pick lands on — the composer session or the
     /// automation editor's provider/model fields.
     model_picker_target: composer::ModelPickerTarget,
+    /// Selections unstarred while a model picker is open. Each leaves
+    /// `favorite_models` at once — empty star, compacted ⌘⌥ chords — but
+    /// parks its row in place until the picker hides, so re-starring is a
+    /// one-click undo. Cleared when either model-picker menu closes.
+    pinned_unfavorites: Vec<composer::PinnedUnfavorite>,
     model_picker_list: ListState,
     model_picker_scrollbar: Rc<ScrollbarState>,
     /// The class-target picker's drawn selection and list state — same shape
@@ -5606,6 +5611,7 @@ impl Waku {
                 open_in_apps: Rc::new(Vec::new()),
                 model_picker_highlight: None,
                 model_picker_target: composer::ModelPickerTarget::Composer,
+                pinned_unfavorites: Vec::new(),
                 model_picker_list: ListState::new(0, ListAlignment::Top, px(512.0))
                     .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
                 model_picker_scrollbar: ScrollbarState::new(),

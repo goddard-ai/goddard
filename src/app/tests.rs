@@ -4108,6 +4108,98 @@ fn picker_rows_match_a_bare_legacy_favorite_to_the_default_effort_row() {
 }
 
 #[test]
+fn picker_rows_park_unstarred_selections_in_their_favorites_slot() {
+    use super::composer::{PickerGranularity, PinnedUnfavorite, visible_picker_rows_with_pins};
+    use crate::model::FavoriteModel;
+
+    let probes = [
+        picker_probe(ProviderKind::Claude, "claude-a", &[], false),
+        picker_probe(ProviderKind::Claude, "claude-b", &[], false),
+        picker_probe(ProviderKind::Claude, "claude-c", &[], false),
+        picker_probe(ProviderKind::Claude, "claude-d", &[], false),
+    ];
+    let favorite = |model: &str| FavoriteModel {
+        provider: ProviderKind::Claude,
+        model: model.into(),
+        effort: None,
+        fast: false,
+    };
+    // B came off the middle of [A, B, C]: it leaves `favorite_models` so the
+    // ⌘⌥ chords compact, but parks at its old slot until the picker hides.
+    let favorites = [favorite("claude-a"), favorite("claude-c")];
+    let pinned = [PinnedUnfavorite {
+        favorite: favorite("claude-b"),
+        position: 1,
+    }];
+
+    let rows = visible_picker_rows_with_pins(
+        &probes,
+        &favorites,
+        &pinned,
+        &[],
+        &[],
+        None,
+        "",
+        false,
+        PickerGranularity::Combos,
+    );
+
+    assert_eq!(
+        rows
+            .iter()
+            .take(3)
+            .map(|row| row.model.id.as_str())
+            .collect::<Vec<_>>(),
+        ["claude-a", "claude-b", "claude-c"]
+    );
+    // The parked row reads unstarred — no star, no chord — while the
+    // favorite after it claims the compacted index, and all three keep
+    // their display slots.
+    assert_eq!(rows[0].favorite_index, Some(0));
+    assert_eq!(rows[0].favorite_rank, Some(0));
+    assert_eq!(rows[1].favorite_index, None);
+    assert_eq!(rows[1].favorite_rank, Some(1));
+    assert_eq!(rows[2].favorite_index, Some(1));
+    assert_eq!(rows[2].favorite_rank, Some(2));
+
+    // Two stars off keeps both parked rows ordered — A and C hold their
+    // original slots even though C left the array first.
+    let favorites = [favorite("claude-b")];
+    let pinned = [
+        PinnedUnfavorite {
+            favorite: favorite("claude-a"),
+            position: 0,
+        },
+        PinnedUnfavorite {
+            favorite: favorite("claude-c"),
+            position: 2,
+        },
+    ];
+    let rows = visible_picker_rows_with_pins(
+        &probes,
+        &favorites,
+        &pinned,
+        &[],
+        &[],
+        None,
+        "",
+        false,
+        PickerGranularity::Combos,
+    );
+    assert_eq!(
+        rows
+            .iter()
+            .take(3)
+            .map(|row| row.model.id.as_str())
+            .collect::<Vec<_>>(),
+        ["claude-a", "claude-b", "claude-c"]
+    );
+    assert!(rows[0].favorite_index.is_none() && rows[2].favorite_index.is_none());
+    assert_eq!(rows[1].favorite_index, Some(0));
+    assert_eq!(rows[1].favorite_rank, Some(1));
+}
+
+#[test]
 fn normalize_model_combo_decodes_packed_alias_traits() {
     use super::composer::normalize_model_combo;
 
