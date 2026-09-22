@@ -4,10 +4,14 @@
 //!
 //! 1. The transcript the target provider has never seen — everything for a
 //!    first-time target, or the delta past a suspended session's recorded
-//!    boundary — becomes evaluation `state`, one `Noul` question per item.
-//! 2. Jev scores each item; the survivors are assembled *verbatim* into a
-//!    `goddard-session-context` envelope. Extraction, not summarization, is
-//!    what keeps the handoff lossless enough to trust.
+//!    boundary — becomes candidate context.
+//! 2. A resumed target still receives the missed work verbatim in a
+//!    `goddard-session-context` envelope. A fresh start instead receives
+//!    the user's messages verbatim plus a compact per-turn index of
+//!    representative spans Jev selects — the agent pulls a turn's
+//!    authoritative text with `goddard-agent read` when it needs it.
+//!    Extraction, not summarization, is what keeps the handoff lossless
+//!    enough to trust.
 //! 3. The envelope rides the next outbound prompt as a one-shot prepend
 //!    (`AgentSession::take_provider_context`), the same delivery a
 //!    worktree-move notice uses, so every provider receives it identically.
@@ -19,6 +23,13 @@
 //! to a fresh session seeded with the full extract, and the transcript
 //! marker notes the restart.
 //!
+//! Degradation, in order: a daemon that cannot place `goddard-agent` on the
+//! session's PATH (a remote host provisioned with the daemon alone) keeps
+//! the verbatim push — the index would point at a tool the agent does not
+//! have. A small segment skips the eval call and pushes verbatim anyway. A
+//! missing eval backend or an answer set too thin to trust degrades the
+//! index to a pointer-only handoff — the switch still proceeds.
+//!
 //! The eval call and the resumability probe run on the session's daemon via
 //! `Command::Evaluate` / `Command::LoadProviderSession`, off the UI thread.
 
@@ -29,7 +40,7 @@ use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{
     ActivityItem, AgentSession, Message, MessageRole, ProviderKind, SuspendedProviderSession,
-    TranscriptBoundary, TranscriptNotice,
+    TranscriptBoundary, TranscriptNotice, truncate_chars,
 };
 
 use super::*;
@@ -44,6 +55,15 @@ const SWITCH_EVAL_TIMEOUT_SECS: u64 = 180;
 const KEEP_THRESHOLD: f64 = 0.5;
 /// Per-item text cap so one giant tool output cannot dominate the state.
 const ITEM_TEXT_CAP: usize = 2_000;
+/// One index span's cap — a sentence or an activity line clipped to a few
+/// lines of text.
+const SPAN_TEXT_CAP: usize = 320;
+/// The index lists at most this many scored spans under one turn — it is a
+/// map of what to retrieve, not the transcript itself.
+const INDEX_SPANS_PER_TURN: usize = 6;
+/// Below this size a fresh-start segment is cheaper to push verbatim than
+/// to index — and the eval call is skipped entirely.
+const PUSH_FLOOR_BYTES: usize = 16 * 1024;
 /// The serialized `items` array stays under this; the oldest scored items
 /// drop first (always-kept user text never does).
 const MAX_STATE_BYTES: usize = 256 * 1024;
@@ -60,6 +80,10 @@ struct ContextItem {
     position: ItemPosition,
     /// User-authored text is always carried verbatim, never scored.
     always: bool,
+    /// The 1-based turn the item belongs to — `goddard-agent read`'s `turn`
+    /// argument selects by this number. Unturned content (markers, legacy
+    /// rows) groups under `None`.
+    turn: Option<usize>,
     text: String,
 }
 
@@ -85,60 +109,37 @@ impl ContextItem {
 /// bounded detail fields, clipped so a megabyte of tool output becomes a
 /// page.
 fn activity_text(activity: &ActivityItem) -> Option<String> {
-    if activity.reasoning.is_some() {
-        // Private reasoning stays with the provider that produced it.
-        return None;
-    }
-    let mut text = activity.title.trim().to_owned();
-    for field in [&activity.detail, &activity.arguments, &activity.output]
-        .into_iter()
-        .flatten()
-    {
-        let field = field.trim();
-        if field.is_empty() {
-            continue;
-        }
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str(field);
-    }
-    if text.is_empty() {
-        return None;
-    }
-    Some(truncate_chars(&text, ITEM_TEXT_CAP))
-}
-
-/// Byte-cap a string on a char boundary, marking the clip.
-fn truncate_chars(text: &str, cap: usize) -> String {
-    if text.len() <= cap {
-        return text.to_owned();
-    }
-    let mut end = cap;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    let mut text = text[..end].to_owned();
-    text.push('…');
-    text
+    activity.condensed_text(ITEM_TEXT_CAP)
 }
 
 /// Flatten the transcript into scoreable items in reading order: blocks
 /// render after `after_message` messages, so a block precedes the message at
-/// that index. Hidden provider-facing nudges are not context.
+/// that index. Hidden provider-facing nudges are not context. Each item
+/// carries its 1-based turn so the index can point at
+/// `goddard-agent read '{"turn": N}'`; unturned content (markers, legacy
+/// rows) belongs to the turn it follows.
 fn context_items(session: &AgentSession) -> Vec<ContextItem> {
+    let turn_numbers: std::collections::HashMap<Uuid, usize> = session
+        .turns
+        .iter()
+        .map(|entry| (entry.id, entry.turn_count))
+        .collect();
+    let turn_of = |turn_id: Option<Uuid>| turn_id.and_then(|id| turn_numbers.get(&id)).copied();
     let mut items = Vec::new();
+    let mut last_turn = None;
     for position in 0..=session.messages.len() {
         for (block_index, block) in session.transcript_blocks.iter().enumerate() {
             if block.after_message != position {
                 continue;
             }
+            let block_turn = turn_of(block.turn_id).or(last_turn);
             for (activity_index, activity) in block.activities.iter().enumerate() {
                 if let Some(text) = activity_text(activity) {
                     items.push(ContextItem {
                         id: format!("b{block_index}.{activity_index}"),
                         position: ItemPosition::Block(block_index),
                         always: false,
+                        turn: block_turn,
                         text,
                     });
                 }
@@ -147,6 +148,10 @@ fn context_items(session: &AgentSession) -> Vec<ContextItem> {
         let Some(message) = session.messages.get(position) else {
             continue;
         };
+        let message_turn = turn_of(message.turn_id).or(last_turn);
+        if message_turn.is_some() {
+            last_turn = message_turn;
+        }
         if message.hidden || message.visible_content().trim().is_empty() {
             continue;
         }
@@ -159,10 +164,87 @@ fn context_items(session: &AgentSession) -> Vec<ContextItem> {
             id: format!("m{position}"),
             position: ItemPosition::Message(position),
             always: message.role == MessageRole::User,
+            turn: message_turn,
             text: format!("{role}: {}", message.visible_content().trim()),
         });
     }
     items
+}
+
+/// One verbatim fragment an index entry may carry: a line or sentence of an
+/// assistant message, or one line of a condensed activity. Spans are what
+/// Jev selects — never generated text — and each inherits its parent item's
+/// turn for grouping.
+struct IndexSpan {
+    /// Question key: the parent item's id plus its own index, `m12.3`.
+    id: String,
+    text: String,
+}
+
+/// Split one scored item's text into span candidates: line by line, with
+/// long lines broken at sentence boundaries so a dense paragraph still
+/// offers quotable pieces.
+fn item_spans(item: &ContextItem) -> Vec<IndexSpan> {
+    let mut spans = Vec::new();
+    let mut push = |text: &str| {
+        let text = text.trim();
+        if !text.is_empty() {
+            spans.push(IndexSpan {
+                id: format!("{}.{}", item.id, spans.len()),
+                text: truncate_chars(text, SPAN_TEXT_CAP),
+            });
+        }
+    };
+    for line in item.text.lines() {
+        if line.trim().chars().count() <= SPAN_TEXT_CAP {
+            push(line);
+        } else {
+            for piece in line.split_inclusive(['.', '!', '?']) {
+                push(piece);
+            }
+        }
+    }
+    spans
+}
+
+/// The eval `state`/`questions` pair for the index's span candidates —
+/// same shape as [`compaction_eval`], one `Noul` per span.
+fn span_eval(spans: &[IndexSpan]) -> (Value, BTreeMap<String, EvalQuestion>) {
+    let mut size = spans.iter().map(|span| span.text.len() + 64).sum::<usize>();
+    let mut kept: Vec<&IndexSpan> = spans.iter().collect();
+    // The serialized state stays bounded the same way: oldest spans drop.
+    let mut oldest = 0usize;
+    while size > MAX_STATE_BYTES && oldest < kept.len() {
+        size -= kept.remove(oldest).text.len() + 64;
+        oldest += 1;
+    }
+    let state = json!({
+        "task": "session-context-index",
+        "items": kept
+            .iter()
+            .map(|span| json!({ "id": span.id, "text": span.text }))
+            .collect::<Vec<_>>(),
+    });
+    let questions = kept
+        .iter()
+        .map(|span| {
+            (
+                span.id.clone(),
+                EvalQuestion::Noul {
+                    instructions: "This span is from an agent coding session migrating to a \
+                        different provider. The new agent starts fresh but can pull any turn's \
+                        full transcript on demand. Answer true when the span is worth indexing \
+                        as a pointer: a decision, requirement, file change and its path, an \
+                        error and how it was resolved, a command's outcome, or a fact the new \
+                        agent cannot re-derive from the repository. Answer false for \
+                        acknowledgements, pleasantries, and superseded attempts."
+                        .to_owned(),
+                    criteria: None,
+                },
+            )
+        })
+        .collect();
+    (state, questions)
 }
 
 /// The eval `state`/`questions` pair for one segment. When the serialized
@@ -229,28 +311,26 @@ impl SwitchOutcome {
     }
 }
 
-/// Assemble the provider-facing envelope from the segment the target missed:
-/// every always-kept item plus each scored item Jev kept, verbatim and in
-/// transcript order. An answer set too thin to trust fails the switch.
-fn assemble_envelope(
+/// A `Noul` response that answered so few questions its selections cannot be
+/// trusted — the handoff degrades rather than shipping an arbitrary subset.
+fn answers_too_thin(asked: usize, evaluation: &Evaluation) -> bool {
+    asked > 0 && (evaluation.answers.len() as f64) < asked as f64 * MIN_ANSWERED_FRACTION
+}
+
+/// The verbatim push envelope: every always-kept item plus each scored item
+/// Jev kept, in transcript order. `evaluation: None` pushes the segment
+/// unfiltered — the degradation path when nothing could score it.
+fn assemble_push_envelope(
     segment: &[ContextItem],
     resumed: bool,
     from: ProviderKind,
-    evaluation: &Evaluation,
-) -> anyhow::Result<String> {
-    let asked = segment.iter().filter(|item| !item.always).count();
-    let answered = segment
-        .iter()
-        .filter(|item| !item.always && evaluation.answers.contains_key(&item.id))
-        .count();
-    if asked > 0 && (answered as f64) < asked as f64 * MIN_ANSWERED_FRACTION {
-        anyhow::bail!("the evaluation answered {answered} of {asked} selection questions");
-    }
+    evaluation: Option<&Evaluation>,
+) -> String {
     let kept: Vec<&str> = segment
         .iter()
         .filter(|item| {
             item.always
-                || match evaluation.answers.get(&item.id) {
+                || match evaluation.and_then(|evaluation| evaluation.answers.get(&item.id)) {
                     Some(EvalAnswer::Noul { noul }) => *noul >= KEEP_THRESHOLD,
                     // An unanswered or mistyped item errs toward retention.
                     _ => true,
@@ -275,11 +355,118 @@ fn assemble_envelope(
         )
     };
     let kind = if resumed { "delta" } else { "full" };
-    Ok(format!(
+    format!(
         "{intro}\n\n<goddard-session-context source=\"{}\" kind=\"{kind}\">\n{}\n</goddard-session-context>",
         from.id(),
         kept.join("\n\n")
-    ))
+    )
+}
+
+/// Turn-grouped index lines for one segment: `lines_of` yields each item's
+/// `(line, scored)` pairs — scored lines cap at [`INDEX_SPANS_PER_TURN`]
+/// per turn, always-kept user text never does. Returns the rendered body
+/// plus the `turns="low-high"` attribute for the envelope tag.
+fn index_body(
+    segment: &[ContextItem],
+    lines_of: impl Fn(&ContextItem) -> Vec<(String, bool)>,
+) -> (String, String) {
+    let mut groups: Vec<(Option<usize>, Vec<String>, usize)> = Vec::new();
+    let group = |groups: &mut Vec<(Option<usize>, Vec<String>, usize)>, turn: Option<usize>| {
+        groups
+            .iter()
+            .position(|(group_turn, ..)| *group_turn == turn)
+            .unwrap_or_else(|| {
+                groups.push((turn, Vec::new(), 0));
+                groups.len() - 1
+            })
+    };
+    for item in segment {
+        for (line, scored_line) in lines_of(item) {
+            let index = group(&mut groups, item.turn);
+            let (.., lines, scored) = &mut groups[index];
+            if !scored_line || *scored < INDEX_SPANS_PER_TURN {
+                *scored += usize::from(scored_line);
+                lines.push(line);
+            }
+        }
+    }
+    let mut body = String::new();
+    for (turn, lines, ..) in &groups {
+        // Unturned content — markers, legacy rows — has no `read` address;
+        // it lists plainly rather than pointing at a turn that is not its.
+        if let Some(turn) = turn {
+            body.push_str(&format!("turn {turn}\n"));
+        }
+        for line in lines {
+            body.push_str("  ");
+            body.push_str(line);
+            body.push('\n');
+        }
+        body.push('\n');
+    }
+    let range = match (
+        groups.iter().filter_map(|(turn, ..)| *turn).min(),
+        groups.iter().filter_map(|(turn, ..)| *turn).max(),
+    ) {
+        (Some(low), Some(high)) if low == high => format!(" turns=\"{low}\""),
+        (Some(low), Some(high)) => format!(" turns=\"{low}-{high}\""),
+        _ => String::new(),
+    };
+    (body, range)
+}
+
+/// The pull-model handoff: the user's own messages verbatim plus a per-turn
+/// index of the spans Jev kept, and the exact `goddard-agent read`
+/// invocations that pull a turn's authoritative text. `evaluation: None`
+/// produces the pointer-only degradation — the same skeleton with no scored
+/// spans.
+fn assemble_index_envelope(
+    segment: &[ContextItem],
+    resumed: bool,
+    from: ProviderKind,
+    evaluation: Option<&Evaluation>,
+) -> String {
+    let (body, range) = index_body(segment, |item| {
+        if item.always {
+            return vec![(item.text.clone(), false)];
+        }
+        let Some(evaluation) = evaluation else {
+            return Vec::new();
+        };
+        item_spans(item)
+            .into_iter()
+            .filter(|span| {
+                matches!(
+                    evaluation.answers.get(&span.id),
+                    Some(EvalAnswer::Noul { noul }) if *noul >= KEEP_THRESHOLD
+                )
+            })
+            .map(|span| (format!("— {}", span.text), true))
+            .collect()
+    });
+    let intro = if resumed {
+        format!(
+            "This task ran on {} while you were away. The turns it added are indexed \
+             below — read their full text with `goddard-agent read '{{\"turn\": N}}'` \
+             before relying on details; your own earlier context is still intact.",
+            from.display_name()
+        )
+    } else {
+        format!(
+            "This task was migrated to you from {}. Its earlier conversation is not in \
+             your context — Goddard keeps it. `goddard-agent read '{{}}'` returns the \
+             transcript listing; `goddard-agent read '{{\"turn\": N}}'` returns one \
+             turn's full messages and tool output. Below are the user's own words \
+             verbatim and an index of verbatim excerpts by turn — read a turn before \
+             relying on its details.",
+            from.display_name()
+        )
+    };
+    format!(
+        "{intro}\n\n<goddard-session-context source=\"{}\" kind=\"index\"{range}>\n{}</goddard-session-context>",
+        from.id(),
+        body
+    )
 }
 
 /// A picker pick routed through the switch flow: explicit model when the row
@@ -291,13 +478,9 @@ pub(super) struct ProviderSwitchPick {
     pub fast: bool,
 }
 
-/// Estimate shown in the confirm dialog: how much of the transcript the
-/// target would ingest, counting only the segment it has never seen. The
-/// second value is a rough token count.
-pub(super) fn provider_switch_estimate(
-    session: &AgentSession,
-    target: ProviderKind,
-) -> (usize, u64) {
+/// Estimate shown in the confirm dialog: how many turns the handoff covers,
+/// counting only the segment the target has never seen.
+pub(super) fn provider_switch_estimate(session: &AgentSession, target: ProviderKind) -> usize {
     let boundary = session
         .suspended_provider_sessions
         .iter()
@@ -305,12 +488,19 @@ pub(super) fn provider_switch_estimate(
         .map(|entry| entry.boundary)
         .unwrap_or_default();
     let items = context_items(session);
-    let segment = items
+    let mut turns = items
         .iter()
         .filter(|item| item.in_segment(boundary))
-        .collect::<Vec<_>>();
-    let chars = segment.iter().map(|item| item.text.len()).sum::<usize>() as u64;
-    (segment.len(), chars / 4)
+        .filter_map(|item| item.turn)
+        .collect::<std::collections::BTreeSet<_>>();
+    // Unturned items (markers, legacy rows) count as one group.
+    if items
+        .iter()
+        .any(|item| item.in_segment(boundary) && item.turn.is_none())
+    {
+        turns.insert(usize::MAX);
+    }
+    turns.len()
 }
 
 impl Waku {
@@ -359,16 +549,15 @@ impl Waku {
             self.refocus_composer(window, cx);
             return;
         };
-        if daemon
+        // Neither the eval backend nor the read surface is required to
+        // switch: a missing backend degrades the index to a pointer, and a
+        // daemon without `goddard-agent` falls back to the verbatim push.
+        let eval_available = daemon
             .settings()
             .eval
-            .is_none_or(|eval| eval.credential_missing())
-        {
-            self.show_toast(tr!("provider_switch.no_eval_backend"));
-            self.refocus_composer(window, cx);
-            return;
-        }
+            .is_some_and(|eval| !eval.credential_missing());
         let client = daemon.client();
+        let cli_available = client.agent_cli_available();
         let suspended = session
             .suspended_provider_sessions
             .iter()
@@ -411,28 +600,75 @@ impl Waku {
                         .into_iter()
                         .filter(|item| item.in_segment(boundary))
                         .collect();
-                    let (state, questions) = compaction_eval(&segment);
-                    let evaluation = client
-                        .request(
-                            Uuid::nil(),
-                            session_id,
-                            waku_client::Command::Evaluate {
-                                state,
-                                questions,
-                                feature: Some(SWITCH_EVAL_FEATURE.to_owned()),
-                                timeout_secs: Some(SWITCH_EVAL_TIMEOUT_SECS),
-                            },
-                        )
-                        .map_err(|error| anyhow::anyhow!("{error:#}"))
-                        .and_then(|payload| match payload {
-                            waku_client::ResponsePayload::Evaluation { evaluation } => {
-                                Ok(evaluation)
+                    let small = segment.iter().map(|item| item.text.len()).sum::<usize>()
+                        <= PUSH_FLOOR_BYTES;
+                    // Which handoff the segment gets:
+                    // - no `goddard-agent` on the daemon's host: verbatim push,
+                    //   filtered when the eval ran — the index would point at
+                    //   a tool the agent does not have;
+                    // - resumed: the verbatim delta, same as always;
+                    // - fresh + small: the verbatim push, no eval needed;
+                    // - fresh + large: the index of Jev-selected spans.
+                    let use_index = !resumed && cli_available && !small;
+                    let evaluate = eval_available && (resumed || !small);
+                    let (state, questions) = if !evaluate {
+                        (json!({}), BTreeMap::new())
+                    } else if use_index {
+                        let spans: Vec<IndexSpan> = segment
+                            .iter()
+                            .filter(|item| !item.always)
+                            .flat_map(item_spans)
+                            .collect();
+                        span_eval(&spans)
+                    } else {
+                        compaction_eval(&segment)
+                    };
+                    let asked = questions.len();
+                    // An eval failure — no backend, a transport error, an
+                    // unparseable reply — degrades to the pointer/unfiltered
+                    // handoff rather than aborting the switch.
+                    let evaluation = if evaluate {
+                        client
+                            .request(
+                                Uuid::nil(),
+                                session_id,
+                                waku_client::Command::Evaluate {
+                                    state,
+                                    questions,
+                                    feature: Some(SWITCH_EVAL_FEATURE.to_owned()),
+                                    timeout_secs: Some(SWITCH_EVAL_TIMEOUT_SECS),
+                                },
+                            )
+                            .ok()
+                            .and_then(|payload| match payload {
+                                waku_client::ResponsePayload::Evaluation { evaluation } => {
+                                    Some(evaluation)
+                                }
+                                _ => None,
+                            })
+                    } else {
+                        None
+                    };
+                    // An answer set too thin to trust counts as no answers —
+                    // pointer-only when the agent can read, unfiltered push
+                    // when it cannot.
+                    let evaluation = evaluation.filter(|eval| !answers_too_thin(asked, eval));
+                    let envelope = if !cli_available {
+                        assemble_push_envelope(&segment, resumed, from, evaluation.as_ref())
+                    } else if resumed {
+                        match evaluation {
+                            Some(evaluation) => {
+                                assemble_push_envelope(&segment, true, from, Some(&evaluation))
                             }
-                            _ => {
-                                anyhow::bail!("the daemon returned an invalid evaluation response")
-                            }
-                        })?;
-                    let envelope = assemble_envelope(&segment, resumed, from, &evaluation)?;
+                            // Nothing usable scored the delta — the resumed
+                            // agent reads it back itself.
+                            None => assemble_index_envelope(&segment, true, from, None),
+                        }
+                    } else if small {
+                        assemble_push_envelope(&segment, false, from, None)
+                    } else {
+                        assemble_index_envelope(&segment, false, from, evaluation.as_ref())
+                    };
                     anyhow::Ok(SwitchOutcome {
                         envelope,
                         resumed,
@@ -678,23 +914,108 @@ mod tests {
     }
 
     #[test]
-    fn envelope_keeps_user_text_and_selected_items_verbatim() {
+    fn push_envelope_keeps_user_text_and_selected_items_verbatim() {
         let session = session_with_history();
         let items = context_items(&session);
         let evaluation = evaluation(&[("m1", 0.9), ("b0.0", 0.1)]);
-        let envelope = assemble_envelope(&items, false, ProviderKind::Claude, &evaluation).unwrap();
+        let envelope =
+            assemble_push_envelope(&items, false, ProviderKind::Claude, Some(&evaluation));
         assert!(envelope.contains("User: fix the build"));
         assert!(envelope.contains("Assistant: done"));
         assert!(!envelope.contains("Ran cargo build"));
         assert!(envelope.contains("kind=\"full\""));
+
+        // No evaluation pushes the segment unfiltered.
+        let envelope = assemble_push_envelope(&items, false, ProviderKind::Claude, None);
+        assert!(envelope.contains("Ran cargo build"));
     }
 
     #[test]
-    fn thin_answer_set_fails_the_switch() {
+    fn a_thin_answer_set_is_detected_not_fatal() {
         let session = session_with_history();
         let items = context_items(&session);
-        let evaluation = evaluation(&[]);
-        assert!(assemble_envelope(&items, false, ProviderKind::Claude, &evaluation).is_err());
+        let asked = items.iter().filter(|item| !item.always).count();
+        assert!(answers_too_thin(asked, &evaluation(&[])));
+        assert!(!answers_too_thin(
+            asked,
+            &evaluation(&[("m1", 0.9), ("b0.0", 0.2)])
+        ));
+    }
+
+    #[test]
+    fn the_index_envelope_groups_verbatim_spans_by_turn() {
+        let project = waku_protocol::model::Project::from_path(std::path::PathBuf::from("/tmp/p"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        session.begin_turn("fix the build");
+        // One long line — the sentence splitter offers its pieces as
+        // separate spans.
+        session.push_message(
+            MessageRole::Assistant,
+            format!(
+                "The lock ordering inverts in sync(). {}",
+                "noise ".repeat(80)
+            ),
+        );
+        session.finish_active_turn(waku_protocol::model::TurnStatus::Completed);
+        session.begin_turn("and the tests?");
+        session.push_message(MessageRole::Assistant, "All green now.");
+        session.finish_active_turn(waku_protocol::model::TurnStatus::Completed);
+
+        let items = context_items(&session);
+        // Turn one keeps its first assistant sentence; the filler tail and
+        // turn two's reply drop.
+        let evaluation = evaluation(&[("m1.0", 0.9), ("m1.1", 0.1), ("m3.0", 0.1)]);
+        let envelope =
+            assemble_index_envelope(&items, false, ProviderKind::Claude, Some(&evaluation));
+
+        assert!(envelope.contains("kind=\"index\""));
+        assert!(envelope.contains("turns=\"1-2\""));
+        assert!(envelope.contains("turn 1\n  User: fix the build"));
+        assert!(envelope.contains("turn 2\n  User: and the tests?"));
+        assert!(envelope.contains("The lock ordering inverts in sync()."));
+        assert!(!envelope.contains("noise"));
+        assert!(!envelope.contains("All green"));
+        // The pull contract is named exactly.
+        assert!(envelope.contains("goddard-agent read '{\"turn\": N}'"));
+
+        // No evaluation is the pointer-only degradation: user text and the
+        // turn map remain, nothing else is claimed.
+        let envelope = assemble_index_envelope(&items, false, ProviderKind::Claude, None);
+        assert!(envelope.contains("kind=\"index\""));
+        assert!(envelope.contains("User: fix the build"));
+        assert!(!envelope.contains("lock ordering"));
+    }
+
+    #[test]
+    fn a_span_kept_past_the_turn_cap_still_names_its_turn() {
+        let project = waku_protocol::model::Project::from_path(std::path::PathBuf::from("/tmp/p"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        session.begin_turn("go");
+        session.push_message(
+            MessageRole::Assistant,
+            (0..10)
+                .map(|index| format!("detail {index}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        session.finish_active_turn(waku_protocol::model::TurnStatus::Completed);
+
+        let items = context_items(&session);
+        // Every span kept — the per-turn cap bounds what the index lists.
+        let pairs: Vec<(String, f64)> = (0..10).map(|index| (format!("m1.{index}"), 0.9)).collect();
+        let evaluation = evaluation(
+            &pairs
+                .iter()
+                .map(|(id, noul)| (id.as_str(), *noul))
+                .collect::<Vec<_>>(),
+        );
+        let envelope =
+            assemble_index_envelope(&items, false, ProviderKind::Claude, Some(&evaluation));
+        let kept = (0..10)
+            .filter(|index| envelope.contains(&format!("detail {index}")))
+            .count();
+        assert_eq!(kept, INDEX_SPANS_PER_TURN);
+        assert!(envelope.contains("turn 1\n"));
     }
 
     #[test]

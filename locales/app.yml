@@ -2298,23 +2298,21 @@ full_access.confirm_enable:
 provider_switch.title:
   en: Switch to %{provider}?
 provider_switch.description_new:
-  en: Jev will compact this task's transcript and seed a new %{provider} session with the extracted context — one ingestion at %{provider}'s input rates, which can be expensive on a long task. The %{from} session stays resumable; switching back restores it.
+  en: A new %{provider} session receives your messages plus a compact per-turn index of the transcript, and pulls any turn's full text on demand — much cheaper than ingesting it whole. The %{from} session stays resumable; switching back restores it.
 provider_switch.description_return:
   en: Jev will compact the work %{provider} missed and resume your earlier %{provider} session with it — one ingestion at %{provider}'s input rates, which can be expensive on a long task.
 provider_switch.estimate:
-  en: About %{items} transcript items, roughly %{tokens} tokens.
+  en: About %{turns} turns of transcript.
 provider_switch.confirm:
   en: Switch to %{provider}
 provider_switch.working:
-  en: Compacting history for %{provider}…
+  en: Preparing history for %{provider}…
 provider_switch.failed:
   en: "Provider switch failed — %{error}"
 provider_switch.needs_eval_backend:
-  en: Provider switching needs an evaluation backend to compact the transcript — none is configured.
+  en: No Jev backend is configured — %{provider} will start with a bare transcript pointer instead of a reviewed index. Configure one in Settings → Jev.
 provider_switch.needs_eval_backend_remote:
-  en: Provider switching needs an evaluation backend to compact the transcript — none is configured on the remote host.
-provider_switch.no_eval_backend:
-  en: Provider switching needs an evaluation (Jev) backend — configure it in Settings → Jev.
+  en: No Jev backend is configured on the remote host — %{provider} will start with a bare transcript pointer instead of a reviewed index.
 sandbox.environment:
   en: Environment
 sandbox.this_mac:

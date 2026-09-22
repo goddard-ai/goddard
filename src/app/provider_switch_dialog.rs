@@ -5,7 +5,6 @@
 use gpui::{KeyBinding, actions};
 
 use super::provider_switch::{ProviderSwitchPick, provider_switch_estimate};
-use super::usage_page::format_tokens_compact;
 use super::*;
 
 actions!(
@@ -28,11 +27,11 @@ pub(super) struct ProviderSwitchDialogState {
     /// The target already has a suspended provider session: confirming
     /// resumes it with the compacted delta rather than seeding fresh.
     pub returning: bool,
-    /// Transcript items and rough token count the target would ingest.
-    pub estimate: (usize, u64),
-    /// The session's daemon has no usable eval backend — confirming would
-    /// only fail at the transcript eval, so the dialog warns and offers
-    /// the fix instead of a Switch row.
+    /// How many turns of transcript the handoff covers.
+    pub estimate: usize,
+    /// The session's daemon has no usable eval backend — the switch still
+    /// proceeds, degraded to a pointer-only handoff, so this is a warning
+    /// with an optional fix path, not a gate.
     pub eval_missing: bool,
     /// `eval_missing` on a remote host — the Jev page edits the local
     /// daemon's backend, so this UI's setup path can't repair it.
@@ -64,7 +63,7 @@ impl Waku {
                     provider_switch_estimate(session, pick.provider),
                 )
             })
-            .unwrap_or((false, (0, 0)));
+            .unwrap_or((false, 0));
         // A daemon that can't be inspected (offline remote) isn't "missing a
         // backend" — its state is unknown, and confirm reports disconnected.
         let eval_missing = self
@@ -101,20 +100,12 @@ impl Waku {
         cx.notify();
     }
 
-    /// The dialog's Enter: confirm when the backend can run the eval. A
-    /// missing backend makes the fix primary instead — Jev settings for a
-    /// local daemon; a remote host can't be configured from this UI, so
-    /// Enter dismisses like Cancel.
+    /// The dialog's Enter: confirm the switch. A missing eval backend
+    /// degrades the handoff to a transcript pointer instead of failing, so
+    /// confirming is always primary.
     fn provider_switch_primary_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.provider_switch_dialog.as_ref() else {
-            return;
-        };
-        if !dialog.eval_missing {
+        if self.provider_switch_dialog.is_some() {
             self.confirm_provider_switch(window, cx);
-        } else if dialog.eval_missing_remote {
-            self.close_provider_switch_dialog(window, cx);
-        } else {
-            self.open_jev_settings_from_switch_dialog(window, cx);
         }
     }
 
@@ -144,13 +135,14 @@ impl Waku {
             .find(|session| session.id == dialog.session_id)
             .map(|session| session.provider)
             .unwrap_or_default();
-        let (items, tokens) = dialog.estimate;
+        let turns = dialog.estimate;
 
         let eval_missing = dialog.eval_missing;
         let eval_missing_remote = dialog.eval_missing_remote;
-        // With no usable backend the fix is the primary action — the Switch
-        // row would only toast a failure. The remote-host variant gets no
-        // setup row at all: the Jev page edits the local daemon only.
+        // The missing-backend warning is informational — the switch still
+        // runs, degraded to a pointer-only handoff. The Jev settings row
+        // stays as an optional fix for local daemons only: a remote host's
+        // backend can't be configured from this UI.
         let switch_row = render_provider_switch_action_row(
             "provider-switch-dialog-confirm",
             &dialog.switch_focus,
@@ -244,11 +236,7 @@ impl Waku {
                             .text_size(sp(12.5))
                             .line_height(sp(17.0))
                             .text_color(theme.text_secondary)
-                            .child(tr!(
-                                "provider_switch.estimate",
-                                items = items,
-                                tokens = format_tokens_compact(tokens as f64)
-                            )),
+                            .child(tr!("provider_switch.estimate", turns = turns)),
                     )
                     .when(eval_missing, |header| {
                         header.child(
@@ -265,9 +253,15 @@ impl Waku {
                                         .line_height(sp(17.0))
                                         .text_color(theme.text_secondary)
                                         .child(if eval_missing_remote {
-                                            tr!("provider_switch.needs_eval_backend_remote")
+                                            tr!(
+                                                "provider_switch.needs_eval_backend_remote",
+                                                provider = dialog.pick.provider.display_name()
+                                            )
                                         } else {
-                                            tr!("provider_switch.needs_eval_backend")
+                                            tr!(
+                                                "provider_switch.needs_eval_backend",
+                                                provider = dialog.pick.provider.display_name()
+                                            )
                                         }),
                                 ),
                         )
@@ -280,10 +274,10 @@ impl Waku {
                     .flex()
                     .flex_col()
                     .gap(px(2.0))
+                    .child(switch_row)
                     .when(eval_missing && !eval_missing_remote, |rows| {
                         rows.child(jev_row)
                     })
-                    .when(!eval_missing, |rows| rows.child(switch_row))
                     .child(cancel_row),
             );
 
