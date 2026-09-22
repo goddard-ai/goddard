@@ -1654,7 +1654,7 @@ impl Waku {
         let analytics = self.analytics.clone();
         cx.background_executor()
             .spawn(async move {
-                let sample = match (episode.outcome, client) {
+                let (sample, previous_boot_clean) = match (episode.outcome, client) {
                     (waku_client::DaemonRecoveryOutcome::Recovered, Some(client)) => client
                         .request(
                             Uuid::nil(),
@@ -1666,17 +1666,22 @@ impl Waku {
                             waku_client::ResponsePayload::DaemonStats {
                                 current,
                                 previous_boot,
-                            } => match episode.cause {
-                                // A disconnect means the daemon never died —
-                                // its own latest sample is the honest reading.
-                                waku_client::DaemonRecoveryCause::Disconnect => {
-                                    current.or(previous_boot)
-                                }
-                                _ => previous_boot.or(current),
-                            },
+                                previous_boot_clean,
+                            } => Some((
+                                match episode.cause {
+                                    // A disconnect means the daemon never died —
+                                    // its own latest sample is the honest reading.
+                                    waku_client::DaemonRecoveryCause::Disconnect => {
+                                        current.or(previous_boot)
+                                    }
+                                    _ => previous_boot.or(current),
+                                },
+                                Some(previous_boot_clean),
+                            )),
                             _ => None,
-                        }),
-                    _ => None,
+                        })
+                        .unwrap_or_default(),
+                    _ => (None, None),
                 };
                 analytics.track(crate::analytics::Event::DaemonRecovery {
                     cause: match episode.cause {
@@ -1693,6 +1698,7 @@ impl Waku {
                     children_rss_mb: sample.and_then(|sample| sample.children_rss_mb),
                     exit_code: episode.exit.and_then(|exit| exit.code),
                     exit_signal: episode.exit.and_then(|exit| exit.signal),
+                    previous_boot_clean,
                 });
             })
             .detach();

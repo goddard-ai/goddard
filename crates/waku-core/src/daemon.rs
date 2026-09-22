@@ -432,6 +432,13 @@ impl WakuBackend {
         *self.daemon_address.lock() = Some(address);
     }
 
+    /// Append the clean-exit marker to `daemon-stats.jsonl` — the next boot
+    /// reads its absence as an abnormal death. Called by the daemon
+    /// executable after `serve` returns on an orderly shutdown.
+    pub fn mark_clean_shutdown(&self) {
+        self.stats.mark_clean_shutdown();
+    }
+
     /// Start the automation scheduler: reconcile runs a previous daemon
     /// left open, then tick. Called once by the daemon executable before it
     /// starts serving — the service needs the backend's `Arc` for dispatch.
@@ -1111,10 +1118,11 @@ impl Backend for WakuBackend {
                 settings: self.settings.get(),
             }),
             Command::GetDaemonStats => {
-                let (current, previous_boot) = self.stats.snapshot();
+                let (current, previous_boot, previous_boot_clean) = self.stats.snapshot();
                 Ok(ResponsePayload::DaemonStats {
                     current,
                     previous_boot,
+                    previous_boot_clean,
                 })
             }
             Command::GetFriends => {

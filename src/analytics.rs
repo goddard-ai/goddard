@@ -205,6 +205,10 @@ pub enum Event {
         /// The signal that killed the daemon — `9` is jetsam or an admin
         /// kill, `6` an abort, `11` a crash. Absent for connection loss.
         exit_signal: Option<i32>,
+        /// The previous daemon boot's last stats line carried the
+        /// clean-exit marker — `false` reads as an abnormal death.
+        /// Absent when the daemon can't be asked.
+        previous_boot_clean: Option<bool>,
     },
     /// A crash report the OS wrote for a daemon process — scanned once at
     /// launch, one event per report the app has not seen. `termination` is
@@ -431,6 +435,7 @@ impl Event {
                 children_rss_mb,
                 exit_code,
                 exit_signal,
+                previous_boot_clean,
             } => {
                 let mut data = json!({
                     "cause": cause,
@@ -442,6 +447,9 @@ impl Event {
                 }
                 if let Some(rss) = children_rss_mb {
                     data["childrenRssMb"] = json!(rss);
+                }
+                if let Some(clean) = previous_boot_clean {
+                    data["previousBootClean"] = json!(clean);
                 }
                 if let Some(code) = exit_code {
                     data["exitCode"] = json!(code);
@@ -672,6 +680,7 @@ mod tests {
                 children_rss_mb: Some(4096),
                 exit_code: None,
                 exit_signal: Some(9),
+                previous_boot_clean: Some(false),
             },
             Event::DaemonCrash {
                 termination: "exc_resource",

@@ -949,6 +949,10 @@ pub enum ResponsePayload {
         current: Option<DaemonStatsSample>,
         #[serde(default)]
         previous_boot: Option<DaemonStatsSample>,
+        /// The previous boot's last line carried the clean-exit marker —
+        /// `false` reads as an abnormal death (jetsam, SIGKILL, crash).
+        #[serde(default)]
+        previous_boot_clean: bool,
     },
     /// The bound port after `setDaemonExposure` — `None` once unexposed.
     Exposure {

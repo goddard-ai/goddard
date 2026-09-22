@@ -24,58 +24,78 @@ use waku_protocol::DaemonStatsSample;
 /// growth between turns; eviction leaks move on hour timescales anyway.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 /// ~512 KB at ~150 bytes a line is several days of minute-cadence samples;
-/// the tail rewrite keeps the freshest half.
+/// the tail rewrite keeps the freshest half. The panic log shares the cap.
 const STATS_FILE_CAP: u64 = 512 * 1024;
 const STATS_FILE_NAME: &str = "daemon-stats.jsonl";
+const PANIC_FILE_NAME: &str = "daemon-panics.jsonl";
 
 /// The sampler's shared state: what it last wrote, and the previous boot's
 /// final line captured before this process appended anything.
-pub(crate) struct DaemonStats {
+pub struct DaemonStats {
     boot: String,
     path: PathBuf,
+    /// Session/terminal counters for samples and the shutdown marker —
+    /// set when the sampler starts.
+    counts: Mutex<Option<Box<dyn Fn() -> (u32, u32) + Send + Sync>>>,
     state: Mutex<DaemonStatsState>,
 }
 
 #[derive(Default)]
 struct DaemonStatsState {
     previous_boot: Option<DaemonStatsSample>,
+    /// Whether the previous boot's last line carried the clean-exit
+    /// marker — `false` reads as an abnormal death: jetsam, a SIGKILL,
+    /// or a hard crash.
+    previous_boot_clean: bool,
     latest: Option<DaemonStatsSample>,
 }
 
-/// The on-disk line: the sample plus the boot id that wrote it.
+/// The on-disk line: the sample plus the boot id that wrote it. A line
+/// flagged `shutdown` is the clean-exit marker written as the process
+/// winds down — its sample is that boot's final reading.
 #[derive(Deserialize, Serialize)]
 struct StatsLine {
     boot: String,
     #[serde(flatten)]
     sample: DaemonStatsSample,
+    #[serde(default)]
+    shutdown: bool,
 }
 
 impl DaemonStats {
     pub(crate) fn open(data_dir: &Path) -> Arc<Self> {
         let path = data_dir.join(STATS_FILE_NAME);
         // The file is append-only and this process has not written yet, so
-        // its last line is the previous boot's final reading.
-        let previous_boot = std::fs::read(&path).ok().and_then(|bytes| {
+        // its last line is the previous boot's final reading — a shutdown
+        // marker means that boot exited orderly.
+        let last_line = std::fs::read(&path).ok().and_then(|bytes| {
             bytes
                 .rsplit(|byte| *byte == b'\n')
                 .find(|line| !line.is_empty())
                 .and_then(|line| serde_json::from_slice::<StatsLine>(line).ok())
-                .map(|line| line.sample)
         });
         Arc::new(Self {
             boot: Uuid::new_v4().simple().to_string(),
             path,
+            counts: Mutex::new(None),
             state: Mutex::new(DaemonStatsState {
-                previous_boot,
+                previous_boot: last_line.as_ref().map(|line| line.sample.clone()),
+                previous_boot_clean: last_line.is_some_and(|line| line.shutdown),
                 latest: None,
             }),
         })
     }
 
-    /// `(latest, previous_boot)` for `getDaemonStats`.
-    pub(crate) fn snapshot(&self) -> (Option<DaemonStatsSample>, Option<DaemonStatsSample>) {
+    /// `(latest, previous_boot, previous_boot_clean)` for `getDaemonStats`.
+    pub(crate) fn snapshot(
+        &self,
+    ) -> (Option<DaemonStatsSample>, Option<DaemonStatsSample>, bool) {
         let state = self.state.lock();
-        (state.latest.clone(), state.previous_boot.clone())
+        (
+            state.latest.clone(),
+            state.previous_boot.clone(),
+            state.previous_boot_clean,
+        )
     }
 
     /// Spawn the sampling thread. Only the maps' lengths are read — the
@@ -88,33 +108,105 @@ impl DaemonStats {
         V: Send + 'static,
         T: Send + 'static,
     {
+        *self.counts.lock() = Some(Box::new(move || {
+            (sessions.lock().len() as u32, terminals.lock().len() as u32)
+        }));
         let stats = self.clone();
         let path = self.path.clone();
         let boot = self.boot.clone();
         let _ = std::thread::Builder::new()
             .name("waku-stats".into())
             .spawn(move || loop {
-                let (daemon_rss_mb, children_rss_mb) = memory_footprint_mb();
-                let sample = DaemonStatsSample {
-                    at: crate::model::unix_time(),
-                    daemon_rss_mb,
-                    children_rss_mb,
-                    runtimes: sessions.lock().len() as u32,
-                    terminals: terminals.lock().len() as u32,
-                };
+                let sample = stats.current_sample();
                 stats.state.lock().latest = Some(sample.clone());
-                let _ = append_sample(&path, &boot, &sample);
+                let _ = append_json_line(
+                    &path,
+                    &StatsLine {
+                        boot: boot.clone(),
+                        sample,
+                        shutdown: false,
+                    },
+                );
                 std::thread::sleep(SAMPLE_INTERVAL);
             });
     }
+
+    /// Appends the clean-exit marker: the final sample flagged `shutdown`.
+    /// The next boot reads its absence as an abnormal death — jetsam and
+    /// SIGKILL leave no chance to write it.
+    pub fn mark_clean_shutdown(&self) {
+        let _ = append_json_line(
+            &self.path,
+            &StatsLine {
+                boot: self.boot.clone(),
+                sample: self.current_sample(),
+                shutdown: true,
+            },
+        );
+    }
+
+    fn current_sample(&self) -> DaemonStatsSample {
+        let (runtimes, terminals) = self
+            .counts
+            .lock()
+            .as_ref()
+            .map(|counts| counts())
+            .unwrap_or_default();
+        let (daemon_rss_mb, children_rss_mb) = memory_footprint_mb();
+        DaemonStatsSample {
+            at: crate::model::unix_time(),
+            daemon_rss_mb,
+            children_rss_mb,
+            runtimes,
+            terminals,
+        }
+    }
 }
 
-fn append_sample(path: &Path, boot: &str, sample: &DaemonStatsSample) -> std::io::Result<()> {
-    let line = serde_json::to_string(&StatsLine {
-        boot: boot.to_owned(),
-        sample: sample.clone(),
-    })
-    .map_err(std::io::Error::other)?;
+/// Install a panic hook that appends each panic — thread, source location,
+/// truncated first message line — to `daemon-panics.jsonl`, then defers to
+/// the default hook. Request-thread panics unwind without killing the
+/// daemon, so without this a wedged handler leaves no trace.
+pub fn install_panic_log(data_dir: &Path) {
+    let path = data_dir.join(PANIC_FILE_NAME);
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|text| *text)
+            .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+            .unwrap_or_default()
+            .lines()
+            .next()
+            .unwrap_or_default();
+        let message: String = message.chars().take(400).collect();
+        let location = info
+            .location()
+            .map(|location| {
+                format!(
+                    "{}:{}:{}",
+                    location.file(),
+                    location.line(),
+                    location.column()
+                )
+            })
+            .unwrap_or_default();
+        let _ = append_json_line(
+            &path,
+            &serde_json::json!({
+                "at": crate::model::unix_time(),
+                "thread": std::thread::current().name().unwrap_or_default(),
+                "location": location,
+                "message": message,
+            }),
+        );
+        default(info);
+    }));
+}
+
+fn append_json_line(path: &Path, line: &impl Serialize) -> std::io::Result<()> {
+    let line = serde_json::to_string(line).map_err(std::io::Error::other)?;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -268,6 +360,18 @@ mod tests {
         assert!(*rss > 0);
     }
 
+    fn append(path: &Path, boot: &str, sample: &DaemonStatsSample, shutdown: bool) {
+        append_json_line(
+            path,
+            &StatsLine {
+                boot: boot.to_owned(),
+                sample: sample.clone(),
+                shutdown,
+            },
+        )
+        .unwrap();
+    }
+
     #[test]
     fn the_stats_file_keeps_the_previous_boots_last_sample() {
         let dir = std::env::temp_dir().join(format!("waku-stats-{}", Uuid::new_v4()));
@@ -280,18 +384,41 @@ mod tests {
             runtimes: 3,
             terminals: 1,
         };
-        append_sample(&path, "boot-a", &first).unwrap();
+        append(&path, "boot-a", &first, false);
         let mut second = first.clone();
         second.at = 160;
         second.children_rss_mb = Some(1600);
-        append_sample(&path, "boot-a", &second).unwrap();
+        append(&path, "boot-a", &second, false);
 
         let stats = DaemonStats::open(&dir);
-        let (latest, previous_boot) = stats.snapshot();
+        let (latest, previous_boot, clean) = stats.snapshot();
         assert!(latest.is_none());
+        assert!(!clean);
         let previous = previous_boot.expect("the previous boot's last line");
         assert_eq!(previous.at, 160);
         assert_eq!(previous.children_rss_mb, Some(1600));
+    }
+
+    #[test]
+    fn a_shutdown_marker_marks_the_previous_boot_clean() {
+        let dir = std::env::temp_dir().join(format!("waku-stats-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(STATS_FILE_NAME);
+        let sample = DaemonStatsSample {
+            at: 200,
+            daemon_rss_mb: Some(300),
+            children_rss_mb: Some(700),
+            runtimes: 2,
+            terminals: 0,
+        };
+        append(&path, "boot-a", &sample, false);
+        append(&path, "boot-a", &sample, true);
+
+        let stats = DaemonStats::open(&dir);
+        let (_, previous_boot, clean) = stats.snapshot();
+        assert!(clean);
+        // The marker carries the boot's final reading.
+        assert_eq!(previous_boot.expect("final sample").at, 200);
     }
 
     #[test]
@@ -309,13 +436,14 @@ mod tests {
         let line_len = serde_json::to_string(&StatsLine {
             boot: "boot".into(),
             sample: sample.clone(),
+            shutdown: false,
         })
         .unwrap()
         .len()
             + 1;
         let lines_to_overflow = (STATS_FILE_CAP as usize / line_len) + 2;
         for _ in 0..lines_to_overflow {
-            append_sample(&path, "boot", &sample).unwrap();
+            append(&path, "boot", &sample, false);
         }
         let kept = std::fs::read(&path).unwrap();
         assert!(kept.len() as u64 <= STATS_FILE_CAP);

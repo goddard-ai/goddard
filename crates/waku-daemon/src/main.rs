@@ -67,6 +67,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     let task_path = waku_core::persistence::StateStore::default_path();
+    // Request-thread panics unwind without killing the daemon — the log is
+    // the only trace a wedged handler leaves.
+    waku_core::stats::install_panic_log(task_path.parent().unwrap_or(&task_path));
     let settings = waku_core::DaemonSettingsStore::open_with_legacy(
         waku_core::DaemonSettings::default_path(),
         [task_path.with_file_name("settings.json")],
@@ -84,14 +87,19 @@ fn main() -> anyhow::Result<()> {
     waku_core::serve(
         listener,
         token,
-        backend,
+        backend.clone(),
         shutdown,
         waku_core::ServerOptions {
             allowed_origins: arguments.allowed_origins.into_iter().collect(),
             allow_shutdown: arguments.parent_pid.is_some(),
             build_commit: option_env!("GODDARD_COMMIT_SHA").map(str::to_owned),
         },
-    )
+    )?;
+    // Reached only on an orderly exit — a shutdown command or parent
+    // death. The marker is how the next boot tells this from a jetsam
+    // kill or a hard crash, which leave no chance to write one.
+    backend.mark_clean_shutdown();
+    Ok(())
 }
 
 fn ensure_bind_allowed(address: SocketAddr, allow_non_loopback: bool) -> anyhow::Result<()> {
