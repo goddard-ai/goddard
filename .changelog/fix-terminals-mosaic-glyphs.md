@@ -1,1 +1,0 @@
-- Terminals now draw block-mosaic glyphs — sextants, quadrant and eighth blocks, and shade fills — as exact cell-filling shapes instead of text, so output like Expo's dev-server QR code renders correctly instead of showing missing-glyph boxes

@@ -1,1 +1,0 @@
-- Deleting a task or project now closes its daemon-hosted terminals too — a web or mobile terminal whose client disconnected before closing it used to keep its shell running on the daemon until restart

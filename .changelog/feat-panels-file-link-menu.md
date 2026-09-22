@@ -1,1 +1,0 @@
-- File-name links — the file viewer's top bar, diff file headers, and file paths in chat activity rows and @-mentions — now open the file browser's right-click menu (Open In, Open With, Save As, Copy Path, Copy File Contents, Reveal in Finder), also reachable with Shift-F10 on a focused link

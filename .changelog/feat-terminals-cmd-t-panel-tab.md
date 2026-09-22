@@ -1,1 +1,0 @@
-- ⌘T pressed while a right-panel terminal has focus now opens another terminal tab in the panel — rooted in that terminal's directory — instead of taking over the main area

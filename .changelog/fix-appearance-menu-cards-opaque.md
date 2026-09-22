@@ -1,1 +1,0 @@
-- Menu cards no longer let the content beneath ghost through at 90–95% alpha — the fill is opaque again, with the top-edge sheen kept as a lightness gradient

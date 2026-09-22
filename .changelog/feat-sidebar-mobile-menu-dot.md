@@ -1,1 +1,0 @@
-- The mobile task-history button now carries the same informational-blue dot as the chat list when another task has replies you haven't seen, so new activity is visible without opening the drawer

@@ -1,1 +1,0 @@
-- Fix the mobile chat list showing archived sessions: the drawer now filters them out like the desktop sidebar, in both the grouped list and search results

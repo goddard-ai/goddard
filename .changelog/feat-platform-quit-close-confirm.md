@@ -1,1 +1,0 @@
-- Quitting (⌘Q) or closing the window (⌘W / close button) now asks for confirmation while task sessions or terminals still have work in progress.

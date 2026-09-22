@@ -1,1 +1,0 @@
-- Long-pressing the mobile app icon now offers New task plus your three most recent tasks as home-screen quick actions that deep-link straight into the app

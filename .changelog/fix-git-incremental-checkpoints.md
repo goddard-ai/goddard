@@ -1,1 +1,0 @@
-- Turn checkpoints on large repositories now land in seconds instead of minutes: captures reuse a per-worktree Git index so unchanged files aren't re-hashed, a turn that touched nothing commits the existing tree outright, and snapshots on the same worktree can no longer run concurrently

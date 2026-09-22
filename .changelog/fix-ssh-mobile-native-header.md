@@ -1,1 +1,0 @@
-- Fix the mobile app's daemon handshake: it marked itself `X-Goddard-Client` while the daemon's origin check looks for `x-waku-client`, so its React Native `Origin` header was rejected — the marker matches again

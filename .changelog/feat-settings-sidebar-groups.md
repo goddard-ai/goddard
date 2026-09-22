@@ -1,1 +1,0 @@
-- Settings pages in the sidebar now group by concern — personalization (General, Appearance, Keybindings), agent workflow (Providers, Skills, Commands, Terminal, Git), data (Usage, Archived), then Daemon — with experiment opt-in pages sitting directly above the Experiments page that enables them

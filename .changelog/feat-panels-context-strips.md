@@ -1,1 +1,0 @@
-- Tasks, main-area terminals, and the Projects page each keep their own right panel — tabs park and restore per context instead of sharing one strip. The panel no longer lingers over Drafts, Automations, and the Inbox, and the Projects page hosts issue/PR details plus files rooted at the project.

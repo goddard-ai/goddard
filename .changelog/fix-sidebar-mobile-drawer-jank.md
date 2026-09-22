@@ -1,1 +1,0 @@
-- Fix scroll jitter in the mobile task drawer: the session list now recycles rows through FlashList instead of mounting a SwiftUI menu host per row, rows memoize on primitive props so stream commits only repaint the session that changed, and the hidden drawer renders from a frozen snapshot instead of re-laying out on every transcript commit

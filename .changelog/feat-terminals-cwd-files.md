@@ -1,1 +1,0 @@
-- `Cmd+P` and the Files panel now work while a terminal fills the main area, searching and browsing the shell's current directory — a `cd` re-roots the panel, which keeps each directory's open files and unsaved edits parked for when you come back

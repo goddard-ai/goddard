@@ -1,1 +1,0 @@
-- The mobile app gains a notifications inbox off the daemon editor — and a bell on the Daemons screen — with unread/all scopes, per-repo grouping, mark-read and mark-done per thread, and deep links to the resolved GitHub URL

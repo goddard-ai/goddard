@@ -1,1 +1,0 @@
-- Assistant replies no longer splinter into one row per fragment while streaming — progress updates for tool rows already on screen no longer close the running message, and text that resumes mid-sentence across a tool call rejoins the message it was cut from

@@ -1,1 +1,0 @@
-- A task whose provider process exited on its own no longer leaks the runtime's event replay backlog — the daemon now retires it the way an explicit close does, instead of holding it until restart

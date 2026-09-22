@@ -1,1 +1,0 @@
-- Settings → Jev now stays in the sidebar whenever a feature that runs on the evaluation backend is enabled — Turn status markers and Action predictions count alongside Auto model routing — instead of only while the routing experiment is on

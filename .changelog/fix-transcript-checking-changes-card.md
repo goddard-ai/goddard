@@ -1,1 +1,0 @@
-- The post-turn "Saving changed files…" row is gone — while Goddard reads the worktree after a turn, the changed-files card itself appears in its normal spot reading "Checking for changes…" and fills in place when the checkpoint lands, across the transcript, Big Picture, and side chat

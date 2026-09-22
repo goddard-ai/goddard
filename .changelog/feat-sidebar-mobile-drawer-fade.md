@@ -1,1 +1,0 @@
-- The mobile task list now fades its empty state out and the fresh rows in instead of popping when chats load, and it refreshes the moment a drawer swipe starts so the reveal already shows the current rows

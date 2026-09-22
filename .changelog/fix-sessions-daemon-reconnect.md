@@ -1,1 +1,0 @@
-- A dropped daemon connection on a still-running daemon no longer restarts the process — the app reconnects in place instead, so a momentary socket blip stops interrupting every in-progress turn
