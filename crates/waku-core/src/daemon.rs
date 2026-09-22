@@ -2306,13 +2306,20 @@ impl Backend for WakuBackend {
                         self.steer_first_prompt_context(session_id, &task, &driver, &events);
                         return result;
                     }
-                    // The agent-surface note, project memory, and the project
-                    // map ride the first visible prompt: the wire event above
-                    // already published the user's text, so the injected
-                    // blocks reach the provider without entering the
-                    // transcript as a user message.
+                    // The agent-surface note, a side chat's parent index,
+                    // project memory, and the project map ride the first
+                    // visible prompt: the wire event above already
+                    // published the user's text, so the injected blocks
+                    // reach the provider without entering the transcript as
+                    // a user message.
                     *prompt =
                         self.prepend_agent_surface(session_id, &driver, std::mem::take(prompt));
+                    if let Some(index) = self.side_chat_parent_block(session_id) {
+                        *prompt = format!("{index}\n\n{}", std::mem::take(prompt));
+                        // The prompt carries it — delivered once sent, no
+                        // accept echo to wait on.
+                        self.agent.mark_parent_index_prepended(session_id);
+                    }
                     *prompt = self.memory.prompt_with_memory(session_id, prompt);
                     let (mapped, status) = self.inject_repo_map(session_id, std::mem::take(prompt));
                     *prompt = mapped;
@@ -3921,9 +3928,11 @@ impl WakuBackend {
             let _ = sink.send(wire);
         }
         let memory = self.memory.context_block(session_id, task);
+        let parent_index = self.side_chat_parent_block(session_id);
         let block = [
             map,
             memory.clone(),
+            parent_index.clone(),
             self.agent_surface_block(session_id, driver),
         ]
         .into_iter()
@@ -3932,6 +3941,11 @@ impl WakuBackend {
         .join("\n\n");
         if block.is_empty() {
             return;
+        }
+        // The index rides this steer — an accept settles it, a rejection
+        // leaves the flag so the next prompt retries.
+        if parent_index.is_some() {
+            self.agent.note_index_steer(session_id);
         }
         // The steer lands as a user message mid-turn — frame the blocks as
         // context so the provider does not read them as a new instruction.
@@ -3954,6 +3968,75 @@ impl WakuBackend {
             },
         );
         driver.steer(steer);
+    }
+
+    /// A side chat's context block: the parent task's user messages verbatim
+    /// plus a per-turn cue index — extractive pointers, never a summary —
+    /// snapshot at the side chat's first prompt. When the session's launch
+    /// carried the `goddard-agent` surface the block names the `read`
+    /// invocations that reach the parent's current text; without it the
+    /// index degrades to plain context. `None` for ordinary sessions and
+    /// parents with nothing to show.
+    fn side_chat_parent_block(&self, session_id: Uuid) -> Option<String> {
+        if !self.agent.parent_index_owed(session_id) {
+            return None;
+        }
+        let parent = {
+            let mut state = self.task_state.lock();
+            let parent_id = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)?
+                .side_chat_of?;
+            let index = state
+                .sessions
+                .iter()
+                .position(|session| session.id == parent_id)?;
+            self.task_store.hydrate(&mut state.sessions[index]).ok()?;
+            state.sessions[index].clone()
+        };
+        let groups = parent.transcript_index();
+        if groups.is_empty() {
+            return None;
+        }
+        let mut body = String::new();
+        for (turn, lines) in &groups {
+            if let Some(turn) = turn {
+                body.push_str(&format!("turn {turn}\n"));
+            }
+            for line in lines {
+                body.push_str("  ");
+                body.push_str(line);
+                body.push('\n');
+            }
+            body.push('\n');
+        }
+        let range = match (
+            groups.iter().filter_map(|(turn, ..)| *turn).min(),
+            groups.iter().filter_map(|(turn, ..)| *turn).max(),
+        ) {
+            (Some(low), Some(high)) if low == high => format!(" turns=\"{low}\""),
+            (Some(low), Some(high)) => format!(" turns=\"{low}-{high}\""),
+            _ => String::new(),
+        };
+        let read_note = if self.agent.has_surface(session_id) {
+            format!(
+                " — a snapshot taken now; `goddard-agent read \
+                 '{{\"task_id\":\"{}\"}}'` always returns its current text, and \
+                 `goddard-agent read '{{\"task_id\":\"{}\",\"turn\":N}}'` returns \
+                 one turn's full messages and tool output.",
+                parent.id, parent.id
+            )
+        } else {
+            String::from(".")
+        };
+        Some(format!(
+            "This session is a side chat of the task \"{}\"; its transcript is \
+             indexed below{read_note}\n\n<goddard-session-context source=\"{}\" \
+             kind=\"index\"{range}>\n{body}</goddard-session-context>",
+            parent.display_title(),
+            parent.provider.id(),
+        ))
     }
 
     /// The launch-scoped `goddard-agent` instruction for a session whose
@@ -4888,6 +4971,9 @@ fn forward_driver_events(
                 // delivered it; a rejection leaves it pending to retry.
                 if steer.as_ref().is_some_and(|steer| steer.context.is_some()) {
                     agent.mark_surface_announced(session_id);
+                    // A pending parent-index carry settles with the steer
+                    // that shipped it.
+                    agent.mark_parent_index_delivered(session_id);
                 }
                 // A queue-drained prompt folded into the parked turn: its
                 // mirrored chip's wait is over even when the steer carried
@@ -6490,6 +6576,73 @@ mod tests {
             &EventSink::detached(),
         );
         assert_eq!(capture.steers.lock().len(), 1, "nothing re-injects");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_side_chats_parent_index_rides_the_context_steer_once() {
+        let root = std::env::temp_dir().join(format!("waku-context-steer-{}", Uuid::new_v4()));
+        let (backend, session_id, side_id) = read_scope_test_backend(&root);
+        // The launch minted the side chat's env — the index names the read
+        // surface the credential actually carries.
+        backend.agent.note_surface(
+            side_id,
+            crate::agent::AgentSurfaceScope {
+                task_tools: false,
+                settings_writes: false,
+                parent_task_id: Some(session_id),
+            },
+        );
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = crate::driver::DriverHandle::from_control(capture.clone());
+
+        backend.steer_first_prompt_context(
+            side_id,
+            "side question",
+            &driver,
+            &EventSink::detached(),
+        );
+
+        let steers = capture.steers.lock().clone();
+        assert_eq!(steers.len(), 1);
+        let steer = &steers[0];
+        assert!(steer.contains("kind=\"index\""));
+        // The parent's user text verbatim, its reply as a cue line, and the
+        // read invocations pointed at the parent's task id.
+        assert!(steer.contains("User: seed"));
+        assert!(steer.contains("— Assistant: seeded answer"));
+        assert!(steer.contains(&format!("\"task_id\":\"{session_id}\"")));
+        assert!(steer.contains("\"turn\":N"));
+
+        // An accepted carry settles the index — the next prompt's steer adds
+        // nothing once every other block has also delivered.
+        backend.agent.take_pending_steer(side_id, steer).unwrap();
+        backend.agent.mark_parent_index_delivered(side_id);
+        backend.agent.mark_surface_announced(side_id);
+        backend.steer_first_prompt_context(side_id, "follow up", &driver, &EventSink::detached());
+        assert_eq!(
+            capture.steers.lock().len(),
+            1,
+            "the index does not re-steer"
+        );
+
+        // A session with no parent owes no index at all.
+        assert!(backend.side_chat_parent_block(session_id).is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_parent_index_without_the_cli_names_no_read_surface() {
+        let root = std::env::temp_dir().join(format!("waku-context-steer-{}", Uuid::new_v4()));
+        let (backend, _session_id, side_id) = read_scope_test_backend(&root);
+        // No surface was noted — a daemon that never minted the env — so the
+        // index is plain context, not a pointer to a missing command.
+        let block = backend.side_chat_parent_block(side_id).unwrap();
+        assert!(block.contains("kind=\"index\""));
+        assert!(block.contains("User: seed"));
+        assert!(!block.contains("goddard-agent read"));
 
         let _ = std::fs::remove_dir_all(&root);
     }

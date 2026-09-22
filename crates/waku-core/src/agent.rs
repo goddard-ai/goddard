@@ -12,7 +12,7 @@
 //! is also what marks each accepted prompt with the sending task's id so
 //! agent-originated turns stay attributable in the transcript.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, anyhow};
@@ -94,6 +94,14 @@ pub struct AgentState {
     queues: Mutex<HashMap<Uuid, VecDeque<AgentPrompt>>>,
     /// Steer injections in flight, oldest first.
     pending_steers: Mutex<HashMap<Uuid, VecDeque<AgentPrompt>>>,
+    /// Sessions whose in-flight context steer carries the side-chat parent
+    /// index — an accept marks it delivered, a rejection clears the flag so
+    /// the next prompt retries.
+    index_steers: Mutex<HashSet<Uuid>>,
+    /// Sessions whose parent index a delivered steer or prepend already
+    /// shipped — the index is a once-per-runtime snapshot, cleared when the
+    /// runtime's credentials are revoked.
+    parent_indexes: Mutex<HashSet<Uuid>>,
     turns: Mutex<HashMap<Uuid, AgentTurn>>,
 }
 
@@ -124,6 +132,34 @@ impl AgentState {
     pub fn revoke_session(&self, session_id: Uuid) {
         self.tokens.lock().retain(|_, owner| *owner != session_id);
         self.surfaces.lock().remove(&session_id);
+        // A revoked runtime loses everything its steers carried — the
+        // restarted process gets the parent index again.
+        self.index_steers.lock().remove(&session_id);
+        self.parent_indexes.lock().remove(&session_id);
+    }
+
+    /// Whether the session's side-chat parent index is still undelivered.
+    pub fn parent_index_owed(&self, session_id: Uuid) -> bool {
+        !self.parent_indexes.lock().contains(&session_id)
+    }
+
+    /// The composed context steer carries the session's parent index — an
+    /// accept settles it through [`Self::mark_parent_index_delivered`].
+    pub fn note_index_steer(&self, session_id: Uuid) {
+        self.index_steers.lock().insert(session_id);
+    }
+
+    /// An accepted context steer settles a pending index carry; a prepend
+    /// path marks delivery directly since its prompt already shipped.
+    pub fn mark_parent_index_delivered(&self, session_id: Uuid) {
+        if self.index_steers.lock().remove(&session_id) {
+            self.parent_indexes.lock().insert(session_id);
+        }
+    }
+
+    /// The non-steer path's mark — the index rode the prompt itself.
+    pub fn mark_parent_index_prepended(&self, session_id: Uuid) {
+        self.parent_indexes.lock().insert(session_id);
     }
 
     /// Record the scopes a launch carried so first-prompt context can
@@ -137,6 +173,12 @@ impl AgentState {
                 announced: false,
             },
         );
+    }
+
+    /// Whether this session's launch carried the `goddard-agent` env —
+    /// pointer-style context only names the read surface when it exists.
+    pub fn has_surface(&self, session_id: Uuid) -> bool {
+        self.surfaces.lock().contains_key(&session_id)
     }
 
     /// The `goddard-agent` instruction a session is still owed — `None` when
@@ -174,6 +216,8 @@ impl AgentState {
         self.surfaces.lock().clear();
         self.queues.lock().clear();
         self.pending_steers.lock().clear();
+        self.index_steers.lock().clear();
+        self.parent_indexes.lock().clear();
         self.turns.lock().clear();
     }
 
@@ -204,8 +248,12 @@ impl AgentState {
                 // Steers can no longer be acknowledged; drop them so a
                 // restarted runtime does not attribute an unrelated echo.
                 self.pending_steers.lock().remove(&session_id);
+                self.index_steers.lock().remove(&session_id);
             }
             DriverEvent::SteerRejected { message, .. } => {
+                // A refused steer settles without delivering: the parent
+                // index flag drops so the next prompt retries the carry.
+                self.index_steers.lock().remove(&session_id);
                 // A queue-drained prompt whose steer was refused goes back to
                 // the head of the queue — its mirrored chip never left the
                 // session, so the wait stays visible and ordered. A direct
