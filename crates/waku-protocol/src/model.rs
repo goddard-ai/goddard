@@ -1714,45 +1714,189 @@ impl AgentSession {
     }
 
     /// The provider-facing note a side chat prepends to its first outbound
-    /// prompt: it names the parent task and explains how to read — and, when
-    /// asked, message — it through `goddard-agent`. The transcript keeps the
+    /// prompt: it names the parent task and explains how to reach it. The
+    /// `read` surface is always in scope for a side chat when the daemon can
+    /// deliver the CLI (`read_available`); `prompt` stays gated on the
+    /// cross-task tools flag (`task_tools`). The transcript keeps the
     /// user's text; this rides the driver's prompt like the workspace-move
     /// notice. `None` once the first turn is behind it.
-    pub fn side_chat_intro(&self, parent: &AgentSession) -> Option<String> {
+    pub fn side_chat_intro(
+        &self,
+        parent: &AgentSession,
+        task_tools: bool,
+        read_available: bool,
+    ) -> Option<String> {
         if self.side_chat_of != Some(parent.id) || self.turns.len() > 1 {
             return None;
         }
-        Some(format!(
+        let mut intro = format!(
             "You are a side chat of the Goddard task \"{}\" (task id {}). \
-             Its transcript is not in your context. Read it with \
-             `goddard-agent read '{{\"task_id\":\"{}\"}}'` when you need it, \
-             and send it a message with `goddard-agent prompt` only when the \
-             user asks.",
+             Its transcript is not in your context.",
             parent.display_title(),
             parent.id,
-            parent.id,
-        ))
+        );
+        if read_available {
+            intro.push_str(&format!(
+                " Read it with `goddard-agent read '{{\"task_id\":\"{}\"}}'` when you \
+                 need it",
+                parent.id,
+            ));
+            if task_tools {
+                intro.push_str(
+                    ", and send it a message with `goddard-agent prompt` only when the \
+                     user asks",
+                );
+            }
+            intro.push('.');
+        }
+        Some(intro)
+    }
+
+    /// The flattening [`Self::agent_transcript`] and [`Self::transcript_index`]
+    /// share: messages and condensed tool activity in reading order — blocks
+    /// render after `after_message` messages, so a block precedes the message
+    /// at its index — each item tagged with its 1-based turn number. Hidden
+    /// provider-facing nudges and private reasoning are omitted.
+    fn transcript_items(&self, turn: Option<usize>) -> Vec<AgentTranscriptItem> {
+        let turn_numbers: std::collections::HashMap<Uuid, usize> = self
+            .turns
+            .iter()
+            .map(|entry| (entry.id, entry.turn_count))
+            .collect();
+        let turn_of = |turn_id: Option<Uuid>| turn_id.and_then(|id| turn_numbers.get(&id)).copied();
+        let in_turn = |turn_id: Option<Uuid>| match turn {
+            Some(want) => turn_of(turn_id) == Some(want),
+            None => true,
+        };
+        let mut items = Vec::new();
+        for position in 0..=self.messages.len() {
+            for block in &self.transcript_blocks {
+                if block.after_message != position || !in_turn(block.turn_id) {
+                    continue;
+                }
+                for activity in &block.activities {
+                    if let Some(text) = activity.condensed_text(AGENT_TRANSCRIPT_ACTIVITY_CAP) {
+                        items.push(AgentTranscriptItem {
+                            turn: turn_of(block.turn_id),
+                            kind: AgentTranscriptItemKind::Activity,
+                            role: None,
+                            content: text,
+                        });
+                    }
+                }
+            }
+            let Some(message) = self.messages.get(position) else {
+                continue;
+            };
+            if message.hidden || !in_turn(message.turn_id) {
+                continue;
+            }
+            let content = message.visible_content().trim();
+            if content.is_empty() {
+                continue;
+            }
+            items.push(AgentTranscriptItem {
+                turn: turn_of(message.turn_id),
+                kind: AgentTranscriptItemKind::Message,
+                role: Some(message.role),
+                content: truncate_chars(content, AGENT_TRANSCRIPT_MESSAGE_CAP),
+            });
+        }
+        items
     }
 
     /// The compact transcript `goddard-agent read` hands to a scoped agent
-    /// caller: visible message text in order, without transport or provider
-    /// internals. Hidden provider-facing nudges are omitted.
-    pub fn agent_transcript(&self) -> AgentSessionTranscript {
+    /// caller. Entry text is capped per item and the listing is capped in
+    /// total — when the total cap drops the oldest entries the transcript
+    /// reports `truncated`, and per-turn reads reach what fell off.
+    pub fn agent_transcript(&self, turn: Option<usize>) -> AgentSessionTranscript {
+        let mut items = self.transcript_items(turn);
+        // The total cap bounds the listing only — a per-turn read must
+        // reach exactly the content the capped listing dropped.
+        let mut truncated = false;
+        if turn.is_none() {
+            let mut size = items.iter().map(|item| item.content.len()).sum::<usize>();
+            while size > AGENT_TRANSCRIPT_TOTAL_CAP && !items.is_empty() {
+                size -= items.remove(0).content.len();
+                truncated = true;
+            }
+        }
         AgentSessionTranscript {
             task_id: self.id,
             title: self.display_title().to_owned(),
             provider: self.provider,
             status: self.status,
-            messages: self
-                .messages
-                .iter()
-                .filter(|message| !message.hidden)
-                .map(|message| AgentTranscriptMessage {
-                    role: message.role,
-                    content: message.visible_content().to_owned(),
-                })
-                .collect(),
+            items,
+            truncated,
         }
+    }
+
+    /// The per-turn index a handoff injects: each turn's user text verbatim
+    /// (capped per entry) plus one extractive cue line per other entry — an
+    /// activity's condensed title, a reply's first line — capped per turn.
+    /// These are pointers into `goddard-agent read`, never a summary, and
+    /// the listing cap does not apply: an index must name every turn.
+    ///
+    /// Returns `(turn, lines)` groups in first-seen order; `None` groups
+    /// hold content outside a turn (markers, legacy rows).
+    pub fn transcript_index(&self) -> Vec<(Option<usize>, Vec<String>)> {
+        let mut groups: Vec<(Option<usize>, Vec<String>, usize)> = Vec::new();
+        let group = |groups: &mut Vec<(Option<usize>, Vec<String>, usize)>, turn: Option<usize>| {
+            groups
+                .iter()
+                .position(|(group_turn, ..)| *group_turn == turn)
+                .unwrap_or_else(|| {
+                    groups.push((turn, Vec::new(), 0));
+                    groups.len() - 1
+                })
+        };
+        // Unturned entries — markers, legacy rows — index under the turn
+        // they follow; a `turn` read stays strictly by `turn_id`, but a
+        // pointer map is better served by proximity.
+        let mut last_turn = None;
+        for item in self.transcript_items(None) {
+            let (line, counted) = match item.kind {
+                AgentTranscriptItemKind::Message if item.role == Some(MessageRole::User) => (
+                    format!(
+                        "User: {}",
+                        truncate_chars(&item.content, AGENT_INDEX_USER_CAP)
+                    ),
+                    false,
+                ),
+                AgentTranscriptItemKind::Message => {
+                    let role = match item.role {
+                        Some(MessageRole::Assistant) => "Assistant: ",
+                        Some(MessageRole::System) => "System: ",
+                        _ => "",
+                    };
+                    let first = item.content.lines().next().unwrap_or_default();
+                    (
+                        format!("— {role}{}", truncate_chars(first, AGENT_INDEX_CUE_CAP)),
+                        true,
+                    )
+                }
+                AgentTranscriptItemKind::Activity => {
+                    let first = item.content.lines().next().unwrap_or_default();
+                    (
+                        format!("— {}", truncate_chars(first, AGENT_INDEX_CUE_CAP)),
+                        true,
+                    )
+                }
+            };
+            let index = group(&mut groups, item.turn.or(last_turn));
+            if item.turn.is_some() {
+                last_turn = item.turn;
+            }
+            let (.., lines, cues) = &mut groups[index];
+            if !counted || *cues < AGENT_INDEX_CUES_PER_TURN {
+                *cues += usize::from(counted);
+                lines.push(line);
+            }
+        }
+        groups
+            .into_iter()
+            .map(|(turn, lines, ..)| (turn, lines))
+            .collect()
     }
 
     /// Derives [`Self::last_reply_at`] from the turn history when it is not
@@ -2634,9 +2778,33 @@ impl Message {
     }
 }
 
+/// Per-entry and whole-listing bounds for `goddard-agent read`: the read
+/// surface is for retrieval, so one pasted log or a long transcript must not
+/// blow past what a scoped caller can usefully ingest.
+const AGENT_TRANSCRIPT_MESSAGE_CAP: usize = 8 * 1024;
+const AGENT_TRANSCRIPT_ACTIVITY_CAP: usize = 4 * 1024;
+const AGENT_TRANSCRIPT_TOTAL_CAP: usize = 128 * 1024;
+
+/// Bounds for [`AgentSession::transcript_index`]: the index is a map of
+/// pointers, so one cue line and one turn's cue count stay small — the full
+/// text is one `read` away.
+const AGENT_INDEX_USER_CAP: usize = 2_000;
+const AGENT_INDEX_CUE_CAP: usize = 320;
+const AGENT_INDEX_CUES_PER_TURN: usize = 8;
+
+/// Clip `text` to `cap` characters on a char boundary, marking the cut.
+pub fn truncate_chars(text: &str, cap: usize) -> String {
+    if text.chars().count() <= cap {
+        return text.to_owned();
+    }
+    let mut clipped: String = text.chars().take(cap).collect();
+    clipped.push_str(" […]");
+    clipped
+}
+
 /// The compact transcript view [`crate::Command::AgentReadSession`] returns
-/// to a scoped agent caller: enough of another task to answer questions
-/// about it, with transport fields and provider internals stripped.
+/// to a scoped agent caller: enough of a task to answer questions about it,
+/// with transport fields and provider internals stripped.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionTranscript {
@@ -2644,15 +2812,37 @@ pub struct AgentSessionTranscript {
     pub title: String,
     pub provider: ProviderKind,
     pub status: SessionStatus,
-    pub messages: Vec<AgentTranscriptMessage>,
+    /// Transcript entries in reading order — messages and condensed tool
+    /// activity. The oldest entries drop off when the listing exceeds its
+    /// total cap; per-turn reads reach them.
+    pub items: Vec<AgentTranscriptItem>,
+    /// True when the total cap dropped entries from the front.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
 }
 
-/// One message in an [`AgentSessionTranscript`].
+/// One entry in an [`AgentSessionTranscript`].
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentTranscriptMessage {
-    pub role: MessageRole,
+pub struct AgentTranscriptItem {
+    /// The 1-based turn number this entry belongs to — absent for entries
+    /// outside a turn (system markers, pre-first-turn rows). `read`'s `turn`
+    /// argument selects entries by this number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<usize>,
+    pub kind: AgentTranscriptItemKind,
+    /// The message role — present on `message` items only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<MessageRole>,
+    /// Message text, or a condensed tool-activity line for `activity` items.
     pub content: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentTranscriptItemKind {
+    Message,
+    Activity,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -3568,6 +3758,36 @@ impl ActivityItem {
                 .output
                 .take()
                 .and_then(normalize_command_activity_output);
+        }
+    }
+
+    /// The activity's text as an agent-readable excerpt: its title plus the
+    /// bounded detail fields, capped at `cap` characters. Reasoning entries
+    /// stay private to the provider that produced them and return `None`.
+    pub fn condensed_text(&self, cap: usize) -> Option<String> {
+        if self.reasoning.is_some() {
+            return None;
+        }
+        let mut text = self.title.clone();
+        for field in [
+            self.detail.as_deref(),
+            self.arguments.as_deref(),
+            self.output.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let field = field.trim();
+            if !field.is_empty() {
+                text.push_str("\n    ");
+                text.push_str(field);
+            }
+        }
+        let text = text.trim();
+        if text.is_empty() {
+            None
+        } else {
+            Some(truncate_chars(text, cap))
         }
     }
 }
@@ -5656,6 +5876,190 @@ mod tests {
         assert_eq!(session.transcript_blocks.len(), 1);
         assert_eq!(session.transcript_blocks[0].turn_id, Some(first_turn));
         assert_eq!(session.transcript_blocks[0].after_message, 2);
+    }
+
+    #[test]
+    fn agent_transcript_interleaves_activity_and_tags_turns() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+
+        let first = session.begin_turn("first prompt");
+        session.transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: Some(first),
+            activities: vec![
+                ActivityItem::new(None, ActivityKind::Command, "Ran ls", None, true)
+                    .with_output(Some("src/\nREADME.md".into())),
+                ActivityItem::from_reasoning(
+                    ReasoningBlock {
+                        content: "private chain of thought".into(),
+                        started_at_ms: 0,
+                        finished_at_ms: 1,
+                    },
+                    true,
+                ),
+            ],
+        });
+        session.push_message(MessageRole::Assistant, "first answer");
+        session.finish_active_turn(TurnStatus::Completed);
+
+        session.begin_turn("second prompt");
+        session.push_message(MessageRole::Assistant, "second answer");
+        session.finish_active_turn(TurnStatus::Completed);
+        // A provider-facing nudge is recorded but never readable.
+        let mut hidden = Message::new(MessageRole::User, "internal continue");
+        hidden.hidden = true;
+        session.messages.push(hidden);
+
+        let transcript = session.agent_transcript(None);
+        let kinds: Vec<_> = transcript
+            .items
+            .iter()
+            .map(|item| (item.kind, item.role, item.turn))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                (
+                    AgentTranscriptItemKind::Message,
+                    Some(MessageRole::User),
+                    Some(1)
+                ),
+                (AgentTranscriptItemKind::Activity, None, Some(1)),
+                (
+                    AgentTranscriptItemKind::Message,
+                    Some(MessageRole::Assistant),
+                    Some(1)
+                ),
+                (
+                    AgentTranscriptItemKind::Message,
+                    Some(MessageRole::User),
+                    Some(2)
+                ),
+                (
+                    AgentTranscriptItemKind::Message,
+                    Some(MessageRole::Assistant),
+                    Some(2)
+                ),
+            ]
+        );
+        assert!(transcript.items[1].content.contains("Ran ls"));
+        assert!(transcript.items[1].content.contains("src/"));
+        assert!(
+            !transcript
+                .items
+                .iter()
+                .any(|item| item.content.contains("private chain of thought")
+                    || item.content.contains("internal continue"))
+        );
+        assert!(!transcript.truncated);
+
+        let turn_two = session.agent_transcript(Some(2));
+        assert_eq!(turn_two.items.len(), 2);
+        assert!(turn_two.items.iter().all(|item| item.turn == Some(2)));
+    }
+
+    #[test]
+    fn agent_transcript_drops_the_oldest_items_past_the_total_cap() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        // Each capped message contributes ~8KB; twenty clear the 128KB cap.
+        for index in 0..20 {
+            session.begin_turn(format!("prompt {index}"));
+            session.push_message(MessageRole::Assistant, "x".repeat(20 * 1024));
+            session.finish_active_turn(TurnStatus::Completed);
+        }
+
+        let transcript = session.agent_transcript(None);
+        assert!(transcript.truncated);
+        let size: usize = transcript.items.iter().map(|item| item.content.len()).sum();
+        assert!(size <= 128 * 1024);
+        // The newest turn survives; the dropped prefix keeps turn tagging.
+        assert_eq!(transcript.items.last().and_then(|item| item.turn), Some(20));
+        assert!(transcript.items.iter().all(|item| item.turn.is_some()));
+
+        // A per-turn read reaches what the capped listing dropped.
+        let first = session.agent_transcript(Some(1));
+        assert!(!first.truncated);
+        assert_eq!(first.items.len(), 2);
+        assert!(first.items[0].content.contains("prompt 0"));
+    }
+
+    #[test]
+    fn transcript_index_groups_cues_per_turn_and_keeps_user_verbatim() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+
+        let first = session.begin_turn("first prompt");
+        session.transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: Some(first),
+            activities: vec![
+                ActivityItem::new(None, ActivityKind::Command, "Ran ls", None, true)
+                    .with_output(Some("src/\nREADME.md".into())),
+            ],
+        });
+        session.push_message(MessageRole::Assistant, "first answer\nmore detail");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.begin_turn("second prompt");
+        session.push_message(MessageRole::Assistant, "second answer");
+        session.finish_active_turn(TurnStatus::Completed);
+        // A hidden nudge never reaches the index, and the per-turn cue cap
+        // bounds a busy turn's lines.
+        let mut hidden = Message::new(MessageRole::User, "internal continue");
+        hidden.hidden = true;
+        session.messages.push(hidden);
+        let second = session.begin_turn("busy prompt");
+        session.transcript_blocks.push(TranscriptBlock {
+            after_message: session.messages.len(),
+            turn_id: Some(second),
+            activities: (0..12)
+                .map(|index| {
+                    ActivityItem::new(
+                        None,
+                        ActivityKind::Command,
+                        format!("step {index}"),
+                        None,
+                        true,
+                    )
+                })
+                .collect(),
+        });
+        session.finish_active_turn(TurnStatus::Completed);
+
+        let index = session.transcript_index();
+        assert_eq!(index.len(), 3);
+        assert_eq!(index[0].0, Some(1));
+        assert_eq!(
+            index[0].1,
+            vec![
+                "User: first prompt".to_owned(),
+                "— Ran ls".to_owned(),
+                "— Assistant: first answer".to_owned(),
+            ]
+        );
+        assert_eq!(
+            index[1].1,
+            vec![
+                "User: second prompt".to_owned(),
+                "— Assistant: second answer".to_owned(),
+            ]
+        );
+        assert_eq!(index[2].1.len(), 1 + AGENT_INDEX_CUES_PER_TURN);
+        assert!(
+            !index
+                .iter()
+                .any(|(_, lines)| { lines.iter().any(|line| line.contains("internal continue")) })
+        );
+
+        // The listing cap does not shrink an index — every turn is named.
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        for turn in 0..20 {
+            session.begin_turn(format!("prompt {turn}"));
+            session.push_message(MessageRole::Assistant, "x".repeat(20 * 1024));
+            session.finish_active_turn(TurnStatus::Completed);
+        }
+        assert_eq!(session.transcript_index().len(), 20);
     }
 
     #[test]

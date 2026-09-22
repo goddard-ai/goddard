@@ -27,7 +27,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
@@ -596,15 +596,16 @@ pub enum Command {
     RunAutomationNow {
         automation_id: Uuid,
     },
-    /// Scoped agent credential only: read another task's transcript.
+    /// Scoped agent credential only: read a task's transcript.
     ///
-    /// Side chats use this to pull their parent task's context on demand —
-    /// they are fresh sessions with a reference, not forks, so nothing of
-    /// the parent's history is in their context natively. Addressed the
-    /// same way as [`Self::AgentPrompt`].
+    /// A caller may omit both ids to read its own task. Side chats use this
+    /// to pull their parent task's context on demand — they are fresh
+    /// sessions with a reference, not forks, so nothing of the parent's
+    /// history is in their context natively. Addressed the same way as
+    /// [`Self::AgentPrompt`].
     AgentReadSession {
         /// Waku task id. Exactly one of `task_id` and `thread_id` is
-        /// required.
+        /// required for a foreign read.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task_id: Option<Uuid>,
         /// Provider-native Agent CLI thread id, resolved against
@@ -614,6 +615,11 @@ pub enum Command {
         thread_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<ProviderKind>,
+        /// Restrict the answer to one turn's entries, by its 1-based turn
+        /// number — `items` each carry it, so a full read names the turn to
+        /// revisit.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn: Option<usize>,
     },
     /// Share one of my projects with a friend. The daemon resolves the
     /// project's name and `origin` URL from `project_path` and re-sends
@@ -748,6 +754,12 @@ pub struct WireDriverStartOptions {
     pub context_window: Option<String>,
     pub agent_preset: Option<String>,
     pub computer_use_enabled: bool,
+    /// The session carries history its agent should be able to read back —
+    /// suspended prior providers or a side-chat parent — so the daemon
+    /// mints the scoped credential for the read surface even when the
+    /// cross-task agent tools are off.
+    #[serde(default)]
+    pub read_own_transcript: bool,
     pub provider_cursor: Option<Value>,
 }
 
@@ -811,6 +823,12 @@ pub enum ServerMessage {
         /// The commit the daemon binary was built from, when its build had a
         /// git checkout to stamp. Dev builds surface it beside the app's own.
         daemon_commit: Option<String>,
+        /// Whether this daemon can place `goddard-agent` on a session's
+        /// PATH — false for remote hosts provisioned with the daemon alone.
+        /// Clients fall back to push context when reads would have nothing
+        /// to retrieve through.
+        #[serde(default)]
+        agent_cli_available: bool,
     },
     Rejected {
         message: String,
@@ -1256,7 +1274,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 12);
+        assert_eq!(PROTOCOL_VERSION, 13);
     }
 
     #[test]
@@ -1265,7 +1283,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 12);
+        assert_eq!(PROTOCOL_VERSION, 13);
     }
 
     #[test]
@@ -1302,10 +1320,12 @@ mod tests {
             task_id: Some(task_id),
             thread_id: None,
             provider: None,
+            turn: Some(3),
         })
         .unwrap();
         assert_eq!(by_task["type"], "agentReadSession");
         assert_eq!(by_task["taskId"], task_id.to_string());
+        assert_eq!(by_task["turn"], 3);
         assert!(by_task.get("threadId").is_none());
         assert!(by_task.get("provider").is_none());
 
@@ -1313,10 +1333,12 @@ mod tests {
             task_id: None,
             thread_id: Some("thread-9".into()),
             provider: Some(ProviderKind::Claude),
+            turn: None,
         })
         .unwrap();
         assert_eq!(by_thread["threadId"], "thread-9");
         assert_eq!(by_thread["provider"], "claude");
+        assert!(by_thread.get("turn").is_none());
     }
 
     #[test]

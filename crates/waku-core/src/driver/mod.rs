@@ -275,6 +275,12 @@ pub struct DriverStartOptions {
     /// in when `agent_tools_enabled` is on; it never crosses the wire, so no
     /// client can mint itself a credential by setting it.
     pub agent: Option<crate::agent::AgentLaunchEnv>,
+    /// The session carries transcript history worth a scoped read —
+    /// suspended prior providers or a side-chat parent — so the daemon mints
+    /// the agent credential for the read surface even when the cross-task
+    /// agent tools are off. The credential still reads only this session and
+    /// its side-chat parent; the flag only says the launch has a use for it.
+    pub read_own_transcript: bool,
     /// Named subagent definitions the driver injects at launch through its
     /// harness's own mechanism. Launch-time only — no transport can
     /// re-inject mid-session, which is why this is not a `SessionOptions`

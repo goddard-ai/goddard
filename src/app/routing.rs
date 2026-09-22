@@ -59,6 +59,9 @@ pub(super) struct RouteStartPlan {
     agent_preset: Option<String>,
     deepseek_preferred_preset: Option<String>,
     provider_cursor: Option<ProviderResumeCursor>,
+    /// The session's own history should be readable by its agent (a switch
+    /// or a side chat) even with the cross-task agent tools off.
+    read_own_transcript: bool,
     mode: RuntimeMode,
     computer_use_enabled: bool,
     /// The user's remembered (effort, tier, window) triples, so the routed
@@ -167,6 +170,7 @@ impl RouteStartPlan {
                 context_window,
                 agent_preset,
                 computer_use_enabled: self.computer_use_enabled,
+                read_own_transcript: self.read_own_transcript,
                 provider_cursor: self.provider_cursor.clone(),
             },
             event_wake: self.event_wake.clone(),
@@ -369,6 +373,9 @@ impl Waku {
                 .and_then(|probe| probe.preferred_agent_preset())
                 .map(|preset| preset.id.clone()),
             provider_cursor: session.provider_cursor.clone(),
+            read_own_transcript: session.side_chat_of.is_some()
+                || !session.suspended_provider_sessions.is_empty()
+                || session.pending_provider_context.is_some(),
             mode: session.runtime_mode,
             computer_use_enabled: self.state.computer_use_enabled,
             remembered_traits: self.state.remembered_model_traits().to_vec(),

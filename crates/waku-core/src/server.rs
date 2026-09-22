@@ -1345,6 +1345,7 @@ fn handle_connection(
             protocol_version: PROTOCOL_VERSION,
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             daemon_commit: options.build_commit.clone(),
+            agent_cli_available: crate::agent::agent_cli_path().is_ok(),
         },
     )?;
     socket.set_config(|config| {
@@ -3329,6 +3330,7 @@ mod tests {
                         context_window: None,
                         agent_preset: None,
                         computer_use_enabled: false,
+                        read_own_transcript: false,
                         provider_cursor: None,
                     },
                 },
@@ -3397,6 +3399,7 @@ mod tests {
                         context_window: None,
                         agent_preset: None,
                         computer_use_enabled: false,
+                        read_own_transcript: false,
                         provider_cursor: None,
                     },
                 },
@@ -3518,6 +3521,7 @@ mod tests {
                         context_window: None,
                         agent_preset: None,
                         computer_use_enabled: false,
+                        read_own_transcript: false,
                         provider_cursor: None,
                     },
                 },
@@ -4200,6 +4204,7 @@ mod tests {
             context_window: None,
             agent_preset: None,
             computer_use_enabled: false,
+            read_own_transcript: false,
             provider_cursor: None,
         }
     }

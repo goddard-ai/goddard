@@ -127,7 +127,7 @@ taskId?: string | null,
 threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "cancelQueuedPrompt", queuedMessageId: string, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, note: string | null, } | { "type": "sendMessageToFriend", nodeId: string, text: string, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, } | { "type": "getAutomations" } | { "type": "upsertAutomation", input: AutomationInput, } | { "type": "removeAutomation", automationId: string, } | { "type": "runAutomationNow", automationId: string, } | { "type": "agentReadSession",
 /**
  * Waku task id. Exactly one of `task_id` and `thread_id` is
- * required.
+ * required for a foreign read.
  */
 taskId?: string | null,
 /**
@@ -135,4 +135,10 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, } | { "type": "setFriendSessionSharing", nodeId: string, originUrl: string, enabled: boolean, } | { "type": "getFriendSessions", nodeId: string, originUrl: string, } | { "type": "watchFriendSession", nodeId: string, originUrl: string, sessionId: string, } | { "type": "unwatchFriendSession", sessionId: string, } | { "type": "getPairing" } | { "type": "respondPairRequest", requestId: string, accept: boolean, } | { "type": "revokePairedClient", clientId: string, };
+threadId?: string | null, provider?: ProviderKind | null,
+/**
+ * Restrict the answer to one turn's entries, by its 1-based turn
+ * number — `items` each carry it, so a full read names the turn to
+ * revisit.
+ */
+turn?: number | null, } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, } | { "type": "setFriendSessionSharing", nodeId: string, originUrl: string, enabled: boolean, } | { "type": "getFriendSessions", nodeId: string, originUrl: string, } | { "type": "watchFriendSession", nodeId: string, originUrl: string, sessionId: string, } | { "type": "unwatchFriendSession", sessionId: string, } | { "type": "getPairing" } | { "type": "respondPairRequest", requestId: string, accept: boolean, } | { "type": "revokePairedClient", clientId: string, };

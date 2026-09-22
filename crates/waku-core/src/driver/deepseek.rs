@@ -112,6 +112,7 @@ impl DeepSeekDriver {
             agent_preset,
             computer_use_enabled: _,
             agent,
+            read_own_transcript: _,
             subagents: _,
             integrations,
             provider_cursor,

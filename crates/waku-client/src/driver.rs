@@ -197,6 +197,11 @@ pub struct DriverStartOptions {
     pub context_window: Option<String>,
     pub agent_preset: Option<String>,
     pub computer_use_enabled: bool,
+    /// The session carries history its agent should be able to read back —
+    /// suspended prior providers or a side-chat parent — so the daemon
+    /// mints the scoped `goddard-agent` credential even when the cross-task
+    /// agent tools are off.
+    pub read_own_transcript: bool,
     pub provider_cursor: Option<ProviderResumeCursor>,
 }
 

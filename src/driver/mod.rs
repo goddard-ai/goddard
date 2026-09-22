@@ -38,6 +38,7 @@ pub(crate) fn start_remote(
             context_window: options.context_window,
             agent_preset: options.agent_preset,
             computer_use_enabled: options.computer_use_enabled,
+            read_own_transcript: options.read_own_transcript,
             provider_cursor: options
                 .provider_cursor
                 .map(serde_json::to_value)

@@ -2146,6 +2146,7 @@ impl Backend for WakuBackend {
                     agent_preset: options.agent_preset,
                     computer_use_enabled: options.computer_use_enabled,
                     agent: None,
+                    read_own_transcript: options.read_own_transcript,
                     subagents: None,
                     // Filled in by `spawn_runtime` — the daemon owns the
                     // catalog, never the wire.
@@ -2242,7 +2243,8 @@ impl Backend for WakuBackend {
                 task_id,
                 thread_id,
                 provider,
-            } => self.agent_read_session(task_id, thread_id, provider),
+                turn,
+            } => self.agent_read_session(agent, task_id, thread_id, provider, turn),
             Command::CancelQueuedPrompt { queued_message_id } => {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
             }
@@ -2981,6 +2983,7 @@ impl WakuBackend {
                 // A fork/rollback driver is a one-shot process, not the
                 // task's live runtime; it never receives a scoped token.
                 agent: None,
+                read_own_transcript: false,
                 subagents: None,
                 integrations: Vec::new(),
                 provider_cursor: source.provider_cursor.clone(),
@@ -3222,6 +3225,7 @@ impl WakuBackend {
                 agent_preset: source.agent_preset.clone(),
                 computer_use_enabled: false,
                 agent: None,
+                read_own_transcript: false,
                 subagents: None,
                 integrations: Vec::new(),
                 provider_cursor: source.provider_cursor.clone(),
@@ -3380,7 +3384,10 @@ impl WakuBackend {
         // The credential exists before the process does so it can travel
         // with the runtime's launch environment. A missing CLI or unset
         // daemon address disables injection for this launch only. Either
-        // agent surface — task tools or settings writes — gets it injected.
+        // agent surface — task tools or settings writes — gets it injected,
+        // as does a session whose own transcript is meant to be read back
+        // (a provider-switch handoff or a side chat): its scoped read works
+        // without the cross-task surface.
         let daemon_settings = self.settings.get();
         // Computer Use is experimental: the enable flag only counts while the
         // experiment opt-in is on, whatever a client or a hand-edited settings
@@ -3389,7 +3396,10 @@ impl WakuBackend {
             options.computer_use_enabled,
             daemon_settings.computer_use_experiment_enabled,
         );
-        if daemon_settings.agent_tools_enabled || daemon_settings.agent_settings_enabled {
+        if daemon_settings.agent_tools_enabled
+            || daemon_settings.agent_settings_enabled
+            || options.read_own_transcript
+        {
             match self.agent_launch_env(session_id) {
                 Ok(launch) => options.agent = Some(launch),
                 Err(error) => eprintln!(
@@ -3637,6 +3647,11 @@ impl WakuBackend {
                 agent_preset: session.agent_preset.clone(),
                 computer_use_enabled: self.settings.get().computer_use_enabled,
                 agent: None,
+                // A switched or side-chat task cold-started this way still
+                // gets the read surface — the session is hydrated here.
+                read_own_transcript: session.side_chat_of.is_some()
+                    || !session.suspended_provider_sessions.is_empty()
+                    || session.pending_provider_context.is_some(),
                 subagents: None,
                 integrations: Vec::new(),
                 provider_cursor: session.provider_cursor.clone(),
@@ -4246,16 +4261,43 @@ impl WakuBackend {
     }
 
     /// Resolve an agent read's target and return its transcript — the
-    /// compact message view a scoped caller pulls another task's context
-    /// from. Addressed like [`Self::agent_prompt`].
+    /// compact item view a scoped caller pulls a task's context from.
+    /// Addressed like [`Self::agent_prompt`], except a scoped caller that
+    /// names nothing reads its own task.
+    ///
+    /// A session's credential may always read its own transcript — and a
+    /// side chat's parent — without the cross-task surface: the handoff and
+    /// side-chat designs rely on the pull being available even when the
+    /// user never opted into agent task tools. Anything broader still needs
+    /// `agent_tools_enabled`.
     fn agent_read_session(
         &self,
+        agent: Option<Uuid>,
         task_id: Option<Uuid>,
         thread_id: Option<String>,
         provider: Option<ProviderKind>,
+        turn: Option<usize>,
     ) -> anyhow::Result<ResponsePayload> {
-        self.require_agent_tools()?;
-        let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        let target = match (task_id, thread_id.as_ref()) {
+            (None, None) => {
+                agent.ok_or_else(|| anyhow!("exactly one of task_id and thread_id is required"))?
+            }
+            _ => self.resolve_agent_target(task_id, thread_id, provider)?,
+        };
+        let in_scope = agent.is_some_and(|caller| {
+            caller == target
+                || self
+                    .task_state
+                    .lock()
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == caller)
+                    .and_then(|session| session.side_chat_of)
+                    == Some(target)
+        });
+        if !in_scope {
+            self.require_agent_tools()?;
+        }
         let mut state = self.task_state.lock();
         let session = state
             .sessions
@@ -4263,8 +4305,13 @@ impl WakuBackend {
             .find(|session| session.id == target)
             .ok_or_else(|| anyhow!("task {target} is unknown to the daemon"))?;
         self.task_store.hydrate(session)?;
+        if let Some(turn) = turn {
+            if !session.turns.iter().any(|entry| entry.turn_count == turn) {
+                bail!("task {target} has no turn {turn}");
+            }
+        }
         Ok(ResponsePayload::AgentSessionTranscript {
-            transcript: session.agent_transcript(),
+            transcript: session.agent_transcript(turn),
         })
     }
 
@@ -6295,6 +6342,90 @@ mod tests {
             &EventSink::detached(),
         );
         assert_eq!(capture.steers.lock().len(), 1, "nothing re-injects");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A session plus its side chat in the test store; returns
+    /// (backend, session_id, side_chat_id). The default test settings keep
+    /// `agent_tools_enabled` off, so reads exercise the scoped exemption.
+    fn read_scope_test_backend(root: &Path) -> (WakuBackend, Uuid, Uuid) {
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(repo);
+        state.sessions[0].begin_turn("seed");
+        state.sessions[0].push_message(crate::model::MessageRole::Assistant, "seeded answer");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let session_id = state.sessions[0].id;
+        let mut side = crate::model::AgentSession::new(
+            state.sessions[0].project_id,
+            crate::model::ProviderKind::Codex,
+        );
+        side.side_chat_of = Some(session_id);
+        side.begin_turn("side question");
+        side.finish_active_turn(crate::model::TurnStatus::Completed);
+        let side_id = side.id;
+        state.sessions.push(side);
+        store.save(&mut state).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap();
+        (backend, session_id, side_id)
+    }
+
+    #[test]
+    fn a_scoped_read_reaches_self_and_a_side_chats_parent() {
+        let root = std::env::temp_dir().join(format!("waku-read-scope-{}", Uuid::new_v4()));
+        let (backend, session_id, side_id) = read_scope_test_backend(&root);
+
+        // Self-read works with the task-tools flag off, addressed or bare.
+        for (task_id, thread_id) in [(Some(session_id), None), (None, None)] {
+            let read = backend
+                .agent_read_session(Some(session_id), task_id, thread_id, None, None)
+                .expect("a self read is always in scope");
+            let ResponsePayload::AgentSessionTranscript { transcript } = read else {
+                panic!("expected a transcript");
+            };
+            assert_eq!(transcript.task_id, session_id);
+            assert_eq!(transcript.items.len(), 2);
+        }
+
+        // The side chat reads its parent; the reverse direction is not in
+        // scope while the flag is off.
+        assert!(
+            backend
+                .agent_read_session(Some(side_id), Some(session_id), None, None, None)
+                .is_ok()
+        );
+        assert!(
+            backend
+                .agent_read_session(Some(session_id), Some(side_id), None, None, None)
+                .is_err()
+        );
+        // A credential cannot read an unrelated task either.
+        assert!(
+            backend
+                .agent_read_session(Some(session_id), Some(Uuid::new_v4()), None, None, None)
+                .is_err()
+        );
+
+        // A turn filter returns that turn's entries; a missing turn is a
+        // clean error, not an empty transcript.
+        let read = backend
+            .agent_read_session(Some(session_id), None, None, None, Some(1))
+            .expect("turn 1 exists");
+        let ResponsePayload::AgentSessionTranscript { transcript } = read else {
+            panic!("expected a transcript");
+        };
+        assert_eq!(transcript.items.len(), 2);
+        assert!(transcript.items.iter().all(|item| item.turn == Some(1)));
+        let error = backend
+            .agent_read_session(Some(session_id), None, None, None, Some(9))
+            .unwrap_err();
+        assert!(error.to_string().contains("has no turn 9"));
 
         let _ = std::fs::remove_dir_all(&root);
     }

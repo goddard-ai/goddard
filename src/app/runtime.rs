@@ -5390,6 +5390,9 @@ impl Waku {
                 agent_preset,
                 computer_use_enabled: self.state.computer_use_enabled
                     && self.state.computer_use_experiment_enabled,
+                read_own_transcript: session.side_chat_of.is_some()
+                    || !session.suspended_provider_sessions.is_empty()
+                    || session.pending_provider_context.is_some(),
                 provider_cursor: session.provider_cursor.clone(),
             },
             event_wake: self.event_wake_tx.clone(),
@@ -6665,24 +6668,36 @@ impl Waku {
                     None => driver_prompt,
                 };
                 // A side chat's first turn tells the agent where its parent
-                // transcript lives and how to reach it. Provider-facing only
-                // — the transcript keeps the user's text, and the intro's own
-                // `turns` check keeps it a first-turn note.
-                let side_chat_intro = self.state.agent_tools_enabled.then(|| {
-                    self.state
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == session_id)
-                        .and_then(|session| {
-                            let parent_id = session.side_chat_of?;
-                            self.state
-                                .sessions
-                                .iter()
-                                .find(|parent| parent.id == parent_id)
-                                .and_then(|parent| session.side_chat_intro(parent))
-                        })
-                });
-                let driver_prompt = match side_chat_intro.flatten() {
+                // transcript lives and how to reach it. The `read` mention
+                // is unconditional — self/parent reads do not need the
+                // cross-task flag — while `prompt` stays gated on it, and
+                // the whole reach-out clause drops when the daemon cannot
+                // deliver the CLI. Provider-facing only — the transcript
+                // keeps the user's text, and the intro's own `turns` check
+                // keeps it a first-turn note.
+                let side_chat_intro = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .and_then(|session| {
+                        let parent_id = session.side_chat_of?;
+                        let cli_available = self
+                            .daemon_for_session(session_id)
+                            .is_some_and(|daemon| daemon.client().agent_cli_available());
+                        self.state
+                            .sessions
+                            .iter()
+                            .find(|parent| parent.id == parent_id)
+                            .and_then(|parent| {
+                                session.side_chat_intro(
+                                    parent,
+                                    self.state.agent_tools_enabled,
+                                    cli_available,
+                                )
+                            })
+                    });
+                let driver_prompt = match side_chat_intro {
                     Some(intro) => format!("{intro}\n\n{driver_prompt}"),
                     None => driver_prompt,
                 };

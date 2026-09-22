@@ -47,14 +47,17 @@ USAGE
 USAGE CONTRACT
     `command` manages the user's settings — today their custom commands —
     and is available whenever changing a setting would help them.
-    `create`, `prompt`, and `read` are the cross-task surface. When the
-    human asks you to create, start, or spawn another task or session —
+    `create`, `prompt`, and foreign `read` are the cross-task surface. When
+    the human asks you to create, start, or spawn another task or session —
     including running work in a separate task — use `create`; when they ask
     you to send a message to another task, use `prompt`. `read` is the read
     half of that surface — use it when another task's transcript holds
     context you need, for example when GODDARD_PARENT_TASK_ID names the
-    task this session is a side chat of. Use `create` and `prompt` only
-    when the human has explicitly asked — never for exploration,
+    task this session is a side chat of; with no address fields it reads
+    this task's own transcript, which is how context handed off across a
+    provider switch stays reachable. Use `create` and `prompt` only when
+    the human you are working for has explicitly asked — never for
+    exploration,
     convenience, or self-orchestration.
     There is no per-call approval gate for either surface; the daemon records
     this task's id on every accepted write, so agent-originated commands and
@@ -104,14 +107,15 @@ fn schema() -> serde_json::Value {
             "returns": {"ok": true}
         },
         "read": {
-            "description": "Read a task's transcript: its title, provider, status, and visible messages in order. Addressed like `prompt`. Use it to pull another task's context — a side chat's parent task id is in GODDARD_PARENT_TASK_ID.",
+            "description": "Read a task's transcript: its title, provider, status, and transcript entries — messages and tool activity — in order, each tagged with its 1-based turn number. With no address fields it reads this task's own transcript; a side chat's parent task id is in GODDARD_PARENT_TASK_ID. Entries carry a `turn` number so `turn` can re-read one turn in full.",
             "fields": {
-                "task_id": {"type": "string", "notes": "Goddard task UUID; exactly one of task_id and thread_id is required"},
-                "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required"},
-                "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"}
+                "task_id": {"type": "string", "notes": "Goddard task UUID; omit with thread_id to read this task's own transcript"},
+                "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required for a foreign read"},
+                "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"},
+                "turn": {"type": "number", "notes": "1-based turn number; restricts the answer to that turn's entries"}
             },
-            "example": "{\"task_id\":\"<uuid>\"}",
-            "returns": {"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "messages": [{"role": "user|assistant|system", "content": "string"}]}
+            "example": "{\"turn\":3}",
+            "returns": {"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "items": [{"turn": "1-based turn number when the entry belongs to one", "kind": "message|activity", "role": "user|assistant|system on message items", "content": "string"}], "truncated": "true when the size cap dropped the oldest items"}
         },
         "command": {
             "description": "Manage the user's custom commands — shell scripts they can run from the command palette in a terminal. Commands are daemon-owned and shared across the user's clients.",
@@ -179,6 +183,8 @@ struct PromptPayload {
     delivery: DeliveryArg,
 }
 
+// `read` — a transcript, not the task. With neither address field the
+// daemon reads the caller's own task.
 #[derive(Deserialize)]
 struct ReadPayload {
     #[serde(default)]
@@ -187,6 +193,10 @@ struct ReadPayload {
     thread_id: Option<String>,
     #[serde(default)]
     provider: Option<String>,
+    /// Restrict the answer to one turn's entries, by its 1-based turn
+    /// number.
+    #[serde(default)]
+    turn: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -380,6 +390,7 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 task_id: payload.task_id,
                 thread_id: payload.thread_id,
                 provider,
+                turn: payload.turn,
             })
         }
         _ => unreachable!("checked by run()"),
@@ -509,7 +520,7 @@ mod tests {
     #[test]
     fn a_read_payload_becomes_an_agent_read_command() {
         let task_id = Uuid::new_v4();
-        let payload = format!(r#"{{"task_id":"{task_id}"}}"#);
+        let payload = format!(r#"{{"task_id":"{task_id}","turn":3}}"#);
         let command = build_command("read", &payload).expect("a task-id read parses");
 
         match command {
@@ -517,10 +528,30 @@ mod tests {
                 task_id: target,
                 thread_id,
                 provider,
+                turn,
             } => {
                 assert_eq!(target, Some(task_id));
                 assert_eq!(thread_id, None);
                 assert_eq!(provider, None);
+                assert_eq!(turn, Some(3));
+            }
+            other => panic!("expected AgentReadSession, got {other:?}"),
+        }
+
+        // An empty payload reads the caller's own task — the daemon
+        // resolves the scoped credential.
+        let command = build_command("read", "{}").expect("a bare read parses");
+        match command {
+            Command::AgentReadSession {
+                task_id,
+                thread_id,
+                provider,
+                turn,
+            } => {
+                assert_eq!(
+                    (task_id, thread_id, provider, turn),
+                    (None, None, None, None)
+                );
             }
             other => panic!("expected AgentReadSession, got {other:?}"),
         }

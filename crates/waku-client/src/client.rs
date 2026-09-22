@@ -63,6 +63,9 @@ struct ClientInner {
     address: String,
     daemon_version: String,
     daemon_commit: Option<String>,
+    /// Whether the daemon can place `goddard-agent` on a session's PATH —
+    /// the scoped read surface's reachability, reported in the handshake.
+    agent_cli_available: bool,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
     /// Friend-session watchers: deliver every event for the session
@@ -134,12 +137,15 @@ impl DaemonClient {
             },
         )?;
         let hello = read_server_message(&mut socket)?;
-        let (daemon_version, daemon_commit) = match hello {
+        let (daemon_version, daemon_commit, agent_cli_available) = match hello {
             ServerMessage::Hello {
                 protocol_version,
                 daemon_version,
                 daemon_commit,
-            } if protocol_version == PROTOCOL_VERSION => (daemon_version, daemon_commit),
+                agent_cli_available,
+            } if protocol_version == PROTOCOL_VERSION => {
+                (daemon_version, daemon_commit, agent_cli_available)
+            }
             ServerMessage::Hello {
                 protocol_version, ..
             } => bail!(
@@ -156,6 +162,7 @@ impl DaemonClient {
             address: address.to_owned(),
             daemon_version,
             daemon_commit,
+            agent_cli_available,
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             session_watchers: Mutex::new(HashMap::new()),
@@ -195,6 +202,13 @@ impl DaemonClient {
     /// The commit the connected daemon was built from, when it reported one.
     pub fn daemon_commit(&self) -> Option<&str> {
         self.inner.daemon_commit.as_deref()
+    }
+
+    /// Whether the daemon can inject the `goddard-agent` CLI into sessions —
+    /// false on hosts provisioned with the daemon alone, where the scoped
+    /// read surface has nothing behind it.
+    pub fn agent_cli_available(&self) -> bool {
+        self.inner.agent_cli_available
     }
 
     pub fn subscribe(&self, session_id: Uuid, runtime_id: Uuid) -> Receiver<SequencedEvent> {

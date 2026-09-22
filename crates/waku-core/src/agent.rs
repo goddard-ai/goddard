@@ -515,7 +515,15 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              separate task (e.g. `{command} create '{{\"prompt\": \"...\"}}')\n\
              - `prompt` — when the user asks you to send a message to \
              another task\n\
-             - `read` — to read another task's transcript"
+             - `read` — to read a task's transcript"
+        ));
+    } else {
+        // Every scoped credential reads its own task's transcript — the
+        // provider-switch handoff and side chats rely on it — so the read
+        // bullet appears even when the cross-task surface is off.
+        instruction.push_str(&format!(
+            "\n- `read` — to read this task's transcript \
+             (`{command} read '{{}}'`, or `'{{\"turn\": N}}'` for one turn)"
         ));
     }
     if scope.settings_writes {
@@ -531,12 +539,12 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              asks, never for exploration, convenience, or \
              self-orchestration.",
         );
-        if let Some(parent) = scope.parent_task_id {
-            instruction.push_str(&format!(
-                " This session is a side chat of task {parent}; `read` its \
-                 transcript when you need its context."
-            ));
-        }
+    }
+    if let Some(parent) = scope.parent_task_id {
+        instruction.push_str(&format!(
+            " This session is a side chat of task {parent}; `read` its \
+             transcript when you need its context."
+        ));
     }
     instruction.push_str("\n</goddard-agent>");
     instruction
@@ -928,6 +936,21 @@ mod tests {
         let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
         assert!(instruction.contains("`command`"));
         assert!(!instruction.contains("only when the user asks"));
+        // The scoped read is still in the surface: every credential reads
+        // its own task's transcript.
+        assert!(instruction.contains("read this task's transcript"));
+        assert!(instruction.contains("\"turn\""));
+
+        // A side chat without the cross-task surface still names its parent.
+        let parent = Uuid::new_v4();
+        let env = AgentLaunchEnv {
+            task_tools: false,
+            settings_writes: false,
+            parent_task_id: Some(parent),
+            ..launch_env(&directory)
+        };
+        let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
+        assert!(instruction.contains(&format!("side chat of task {parent}")));
 
         let env = AgentLaunchEnv {
             task_tools: true,

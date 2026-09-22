@@ -1,0 +1,1 @@
+- `goddard-agent read` returns a task's transcript as turn-tagged entries — messages and condensed tool activity — and can pull a single turn with `{"turn": N}`; a session's credential can always read its own task (and a side chat's parent), even with the cross-task agent tools off

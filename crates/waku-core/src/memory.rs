@@ -1148,6 +1148,7 @@ fn headless_prompt(
         agent_preset: None,
         computer_use_enabled: false,
         agent: None,
+        read_own_transcript: false,
         subagents: None,
         integrations: Vec::new(),
         provider_cursor: None,
