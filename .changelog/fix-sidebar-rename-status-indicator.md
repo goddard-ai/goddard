@@ -1,0 +1,1 @@
+- Renaming a session in the sidebar could leave its status indicator offset from the row's right edge; the indicator now stays pinned to the timestamp edge through renames.

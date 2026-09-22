@@ -4443,81 +4443,6 @@ impl Waku {
         } else {
             "icons/folder.svg"
         };
-        let rename_input =
-            (self.session_rename == Some(session_id)).then(|| self.session_rename_input.clone());
-        let title = if let Some(rename_input) = rename_input {
-            div()
-                .id(SharedString::from(format!(
-                    "session-rename-field-{session_id}"
-                )))
-                .key_context(SESSION_RENAME_PARENT_CONTEXT)
-                .on_action(cx.listener(|this, _: &CancelSessionRename, window, cx| {
-                    this.cancel_session_rename(window, cx);
-                }))
-                .h(px(18.0))
-                .flex_1()
-                .min_w_0()
-                .px(px(4.0))
-                .rounded(px(4.0))
-                .border(hairline())
-                .border_color(theme.accent)
-                .bg(theme.inset)
-                .flex()
-                .items_center()
-                .text_size(sp(13.5))
-                .text_color(theme.text)
-                .child(rename_input)
-                .into_any_element()
-        } else {
-            div()
-                .id(SharedString::from(format!("session-title-{session_id}")))
-                .flex_1()
-                .min_w_0()
-                .whitespace_normal()
-                .line_clamp(1)
-                .text_overflow(gpui::TextOverflow::Truncate("...".into()))
-                .text_size(sp(13.5))
-                .text_color(theme.text)
-                .on_click(
-                    cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                        if event.click_count() == 2 {
-                            this.begin_session_rename(session_id, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }),
-                )
-                .child(SharedString::from(localized_session_title(session)))
-                .into_any_element()
-        };
-        // The selected task's composer already shows the text, so the row
-        // previews drafts only for sessions that aren't selected.
-        let draft_preview = (self.state.sidebar_composer_drafts
-            && !sidebar_session_selected(
-                self.state.selected_session,
-                self.pending_session_activation
-                    .map(|pending| pending.session_id),
-                session_id,
-            ))
-        .then(|| sidebar_draft_preview(&self.composer_drafts, session))
-        .flatten();
-        let pull_request_badge = self
-            .sidebar_pull_requests
-            .borrow()
-            .get(&session_id)
-            .and_then(|entries| {
-                sidebar_pull_request_badge(entries, session_pull_request_window(session))
-            });
-        // The informational-blue dot an unread notification thread earns —
-        // a status marker, not a control. The header chip owns interaction.
-        let pull_request_unread = self
-            .sidebar_pull_requests
-            .borrow()
-            .get(&session_id)
-            .is_some_and(|entries| {
-                session_pull_requests_in_window(entries, session_pull_request_window(session))
-                    .iter()
-                    .any(|entry| self.notifications.has_unread_pull_request(&entry.url))
-            });
         let status_indicator: Option<AnyElement> = if working {
             Some(motion::spin_slow(icon(
                 "icons/loader-circle.svg",
@@ -4565,6 +4490,84 @@ impl Waku {
                 _ => None,
             }
         };
+        let has_indicator = status_indicator.is_some();
+        let rename_input =
+            (self.session_rename == Some(session_id)).then(|| self.session_rename_input.clone());
+        let title = if let Some(rename_input) = rename_input {
+            div()
+                .id(SharedString::from(format!(
+                    "session-rename-field-{session_id}"
+                )))
+                .key_context(SESSION_RENAME_PARENT_CONTEXT)
+                .on_action(cx.listener(|this, _: &CancelSessionRename, window, cx| {
+                    this.cancel_session_rename(window, cx);
+                }))
+                .h(px(18.0))
+                .flex_1()
+                .min_w_0()
+                .px(px(4.0))
+                .rounded(px(4.0))
+                .border(hairline())
+                .border_color(theme.accent)
+                .bg(theme.inset)
+                .flex()
+                .items_center()
+                .text_size(sp(13.5))
+                .text_color(theme.text)
+                .when(has_indicator, |element| element.mr(px(6.0)))
+                .child(rename_input)
+                .into_any_element()
+        } else {
+            div()
+                .id(SharedString::from(format!("session-title-{session_id}")))
+                .flex_1()
+                .min_w_0()
+                .whitespace_normal()
+                .line_clamp(1)
+                .text_overflow(gpui::TextOverflow::Truncate("...".into()))
+                .text_size(sp(13.5))
+                .text_color(theme.text)
+                .on_click(
+                    cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                        if event.click_count() == 2 {
+                            this.begin_session_rename(session_id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                )
+                .when(has_indicator, |element| element.mr(px(6.0)))
+                .child(SharedString::from(localized_session_title(session)))
+                .into_any_element()
+        };
+        // The selected task's composer already shows the text, so the row
+        // previews drafts only for sessions that aren't selected.
+        let draft_preview = (self.state.sidebar_composer_drafts
+            && !sidebar_session_selected(
+                self.state.selected_session,
+                self.pending_session_activation
+                    .map(|pending| pending.session_id),
+                session_id,
+            ))
+        .then(|| sidebar_draft_preview(&self.composer_drafts, session))
+        .flatten();
+        let pull_request_badge = self
+            .sidebar_pull_requests
+            .borrow()
+            .get(&session_id)
+            .and_then(|entries| {
+                sidebar_pull_request_badge(entries, session_pull_request_window(session))
+            });
+        // The informational-blue dot an unread notification thread earns —
+        // a status marker, not a control. The header chip owns interaction.
+        let pull_request_unread = self
+            .sidebar_pull_requests
+            .borrow()
+            .get(&session_id)
+            .is_some_and(|entries| {
+                session_pull_requests_in_window(entries, session_pull_request_window(session))
+                    .iter()
+                    .any(|entry| self.notifications.has_unread_pull_request(&entry.url))
+            });
         let group_name = SharedString::from(format!("session-row-{session_id}"));
         let archive_focus = self
             .sidebar_session_archive_focuses
@@ -4704,26 +4707,30 @@ impl Waku {
                     .gap(px(6.0))
                     .overflow_hidden()
                     .line_height(sp(18.0))
+                    .relative()
                     .child(title)
+                    .child(pin_button)
+                    .child(archive_button)
                     .when_some(status_indicator, |element, indicator| {
+                        // The indicator is pinned to the row's right edge
+                        // rather than participating in the flex flow: the
+                        // zero-width pin/archive pair can expand under a
+                        // stale hover or focus state and must never push the
+                        // indicator off the timestamp edge.
                         element.child(
                             div()
-                                .flex_none()
-                                .size(px(12.0))
-                                // The zero-width pin/archive pair still
-                                // claims its two flex gaps; pulling the slot
-                                // right by that amount keeps the indicator's
-                                // right edge flush with the timestamp below.
-                                .mr(px(-12.0))
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .right_0()
+                                .w(px(12.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .group_hover(group_name.clone(), |style| style.invisible())
                                 .child(indicator),
                         )
-                    })
-                    .child(pin_button)
-                    .child(archive_button),
+                    }),
             )
             .when_some(draft_preview, |element, preview| {
                 element.child(
@@ -5819,5 +5826,282 @@ mod tests {
             - offset.offset_in_item;
         assert_eq!(visible_height, px(400.0));
         assert_eq!(sidebar_session_row_index(&rows, Uuid::from_u128(41)), None);
+    }
+
+    /// Mirrors production's topology: the root owns the row's state and
+    /// notifies itself, the sidebar pane is a `.cached` sibling entity that
+    /// fans root notifies out through `cx.observe` like `WakuPane::bind`.
+    struct RenameRootHarness {
+        sidebar: Entity<RenameSidebarHarness>,
+        composer_focus: FocusHandle,
+        renaming: bool,
+        title: SharedString,
+        input: Entity<TextInput>,
+        menu: ContextMenuHandle,
+        list: ListState,
+    }
+
+    struct RenameSidebarHarness {
+        waku: Option<WeakEntity<RenameRootHarness>>,
+    }
+
+    impl RenameSidebarHarness {
+        fn bind(waku: &Entity<RenameRootHarness>, cx: &mut Context<Self>) -> Self {
+            cx.observe(waku, |_, waku, cx| {
+                let _ = waku.read(cx);
+                cx.notify();
+            })
+            .detach();
+            Self {
+                waku: Some(waku.downgrade()),
+            }
+        }
+    }
+
+    impl Render for RenameRootHarness {
+        fn render(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                self.sidebar
+                    .clone()
+                    .cached(StyleRefinement::default().w(px(220.0)).h_full().flex_none()),
+            )
+        }
+    }
+
+    impl Render for RenameSidebarHarness {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let waku = self.waku.clone().and_then(|waku| waku.upgrade());
+            div().size_full().flex().flex_col().child(
+                list(
+                    waku.as_ref()
+                        .map(|waku| waku.read(cx).list.clone())
+                        .unwrap_or_else(|| ListState::new(0, ListAlignment::Top, px(0.0))),
+                    move |_ix, _window, cx| {
+                        waku.as_ref()
+                            .map(|waku| waku.update(cx, |this, cx| this.row(cx)))
+                            .unwrap_or_else(|| div().into_any_element())
+                    },
+                )
+                .flex_1()
+                .min_h_0(),
+            )
+        }
+    }
+
+    impl RenameRootHarness {
+        fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+            let input = cx.new(|cx| TextInput::new(window, cx));
+            cx.subscribe(&input, |this, input, event: &InputEvent, cx| {
+                if let InputEvent::Submit(_) = event {
+                    this.renaming = false;
+                    this.title = input.read(cx).content().trim().to_owned().into();
+                    cx.notify();
+                }
+            })
+            .detach();
+            let composer_focus = cx.focus_handle();
+            cx.on_focus_lost(window, |this, window, cx| {
+                let focus = this.composer_focus.clone();
+                window.focus(&focus, cx);
+            })
+            .detach();
+            let waku = cx.entity();
+            Self {
+                sidebar: cx.new(|cx| RenameSidebarHarness::bind(&waku, cx)),
+                composer_focus,
+                renaming: false,
+                title: "A quite long session title that still fits the row".into(),
+                input,
+                menu: ContextMenuHandle::new(cx),
+                list: ListState::new(1, ListAlignment::Top, px(100.0)),
+            }
+        }
+
+        fn begin_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+            self.renaming = true;
+            let title = self.title.clone();
+            self.input.update(cx, |input, cx| {
+                input.set_content(title, cx);
+                input.select_all_text(cx);
+            });
+            let focus = self.input.read(cx).focus();
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+            cx.notify();
+        }
+
+        fn row(&mut self, cx: &mut Context<Self>) -> AnyElement {
+            let title = if self.renaming {
+                div()
+                    .id("session-rename-field")
+                    .h(px(18.0))
+                    .flex_1()
+                    .min_w_0()
+                    .px(px(4.0))
+                    .flex()
+                    .items_center()
+                    .text_size(sp(13.5))
+                    .mr(px(6.0))
+                    .child(self.input.clone())
+                    .into_any_element()
+            } else {
+                div()
+                    .debug_selector(|| "session-title".into())
+                    .id("session-title")
+                    .flex_1()
+                    .min_w_0()
+                    .whitespace_normal()
+                    .line_clamp(1)
+                    .text_overflow(gpui::TextOverflow::Truncate("...".into()))
+                    .text_size(sp(13.5))
+                    .on_click(|_, _, _| {})
+                    .mr(px(6.0))
+                    .child(self.title.clone())
+                    .into_any_element()
+            };
+            let renaming = self.renaming;
+            let row = div()
+                .id("session-row")
+                .w_full()
+                .min_w_0()
+                .px(px(8.0))
+                .py(px(7.0))
+                .rounded(px(9.0))
+                .child(
+                    div()
+                        .group("session-row")
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .debug_selector(|| "title-row".into())
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .overflow_hidden()
+                                .line_height(sp(18.0))
+                                .relative()
+                                .child(title)
+                                .child(
+                                    div()
+                                        .id("session-pin")
+                                        .flex_none()
+                                        .w_0()
+                                        .h(px(18.0))
+                                        .overflow_hidden()
+                                        .opacity(0.0)
+                                        .group_hover("session-row", |style| {
+                                            style.w(px(20.0)).opacity(1.0)
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .id("session-archive")
+                                        .flex_none()
+                                        .w_0()
+                                        .h(px(18.0))
+                                        .overflow_hidden()
+                                        .opacity(0.0)
+                                        .group_hover("session-row", |style| {
+                                            style.w(px(20.0)).opacity(1.0)
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .debug_selector(|| "status-indicator".into())
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_0()
+                                        .right_0()
+                                        .w(px(12.0))
+                                        .group_hover("session-row", |style| style.invisible())
+                                        .child(div().size(px(7.0)).rounded_full()),
+                                ),
+                        ),
+                );
+            if renaming {
+                div().w_full().child(row).into_any_element()
+            } else {
+                let entity = cx.entity().downgrade();
+                context_menu(
+                    div().w_full().child(row),
+                    "session-menu",
+                    &self.menu,
+                    move |_| {
+                        let entity = entity.clone();
+                        vec![
+                            MenuItem::custom(|_, _| {
+                                div()
+                                    .debug_selector(|| "rename-item".into())
+                                    .child("Rename")
+                                    .into_any_element()
+                            })
+                            .on_click(move |window, cx| {
+                                let _ = entity.update(cx, |this, cx| this.begin_rename(window, cx));
+                            }),
+                        ]
+                    },
+                )
+                .into_any_element()
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn renamed_row_status_indicator_stays_right_aligned(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|window, cx| RenameRootHarness::new(window, cx));
+        // The field's Enter→Submit binding lives in the app-level keymap.
+        cx.update(|_window, cx| crate::input::init(cx));
+        cx.run_until_parked();
+        let before = cx
+            .debug_bounds("status-indicator")
+            .expect("status indicator should paint");
+
+        // Right-click the row, release in place, then activate Rename from
+        // the card — the same path the context menu takes in production.
+        let over_row = before.center();
+        cx.simulate_mouse_down(over_row, gpui::MouseButton::Right, Modifiers::none());
+        cx.simulate_mouse_up(over_row, gpui::MouseButton::Right, Modifiers::none());
+        cx.run_until_parked();
+        assert!(
+            cx.read(|app| view.read(app).menu.is_open()),
+            "right-click should open the context menu"
+        );
+        let item = cx
+            .debug_bounds("rename-item")
+            .expect("the rename item should paint");
+        cx.simulate_mouse_down(item.center(), gpui::MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(item.center(), gpui::MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+
+        let renaming = cx.read(|app| view.read(app).renaming);
+        assert!(renaming, "Rename menu item should open the inline field");
+        // The input's focus lands via `on_next_frame`, which tests must
+        // deliver explicitly — `run_until_parked` alone doesn't run it.
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+
+        cx.simulate_input("Short");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+
+        // Move the pointer off the row so group-hover reveals the indicator.
+        cx.simulate_mouse_move(point(px(400.0), px(300.0)), None, Modifiers::none());
+        cx.run_until_parked();
+
+        let after = cx
+            .debug_bounds("status-indicator")
+            .expect("status indicator should paint");
+        let row = cx
+            .debug_bounds("title-row")
+            .expect("title row should paint");
+        let title = cx
+            .debug_bounds("session-title")
+            .expect("title should paint");
+        assert_eq!(after.origin.x, before.origin.x);
+        assert_eq!(after.right(), row.right());
+        // The title keeps its margin against the overlayed indicator.
+        assert_eq!(after.origin.x - title.right(), px(6.0));
     }
 }
