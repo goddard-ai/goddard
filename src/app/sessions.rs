@@ -217,6 +217,33 @@ impl Waku {
 
     pub(super) fn select_project(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
         self.state.selected_project = Some(project_id);
+        if self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == project_id && project.is_projectless())
+        {
+            // "No project" names a destination, not a workspace: the pick
+            // provisions a fresh scratch directory. The row's pending draft
+            // and any text filed under it move onto the new project rather
+            // than resurrecting a finished task's directory.
+            let draft_id = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| {
+                    session.project_id == project_id
+                        && !session.has_started()
+                        && !session.is_side_chat()
+                })
+                .map(|session| session.id);
+            self.create_projectless_session_inner(
+                draft_id,
+                Some(crate::persistence::ComposerDraftKey::NewSession(project_id)),
+                cx,
+            );
+            return;
+        }
         self.create_session_for(project_id, self.state.last_provider, cx);
     }
 
@@ -855,6 +882,32 @@ impl Waku {
     }
 
     pub(super) fn create_session_for(
+        &mut self,
+        project_id: Uuid,
+        provider: ProviderKind,
+        cx: &mut Context<Self>,
+    ) {
+        // A projectless project is one task's scratch workspace, not a
+        // destination to join: a caller handed one means "no project", so
+        // provision a fresh directory rather than bind the draft to a
+        // workspace another task may have already used.
+        if self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == project_id && project.is_projectless())
+        {
+            self.create_projectless_session_inner(None, None, cx);
+            return;
+        }
+        self.create_session_under_project(project_id, provider, cx);
+    }
+
+    /// `create_session_for` once the destination is known to be a real
+    /// project. The projectless provisioning completion calls this
+    /// directly — routing back through `create_session_for` would delegate
+    /// the fresh project to another provisioning pass.
+    fn create_session_under_project(
         &mut self,
         project_id: Uuid,
         provider: ProviderKind,
@@ -4821,7 +4874,7 @@ impl Waku {
     }
 
     pub(super) fn create_projectless_session(&mut self, cx: &mut Context<Self>) {
-        self.create_projectless_session_inner(None, cx);
+        self.create_projectless_session_inner(None, None, cx);
     }
 
     /// The draft `create_projectless_session` reuses — a composer's "No
@@ -4834,6 +4887,7 @@ impl Waku {
             .find(|session| {
                 !session.has_started()
                     && !session.is_side_chat()
+                    && projectless_draft_owns_workspace(&self.state.sessions, session)
                     && self.state.projects.iter().any(|project| {
                         project.id == session.project_id
                             && project.is_projectless()
@@ -4847,13 +4901,17 @@ impl Waku {
     /// `create_projectless_session` carrying the draft a "No project" pick
     /// was made from: when provisioning lands, the draft moves onto the new
     /// project rather than leaving a stale row under the old one.
+    /// `draft_source` is the composer slot the pick's text was filed under;
+    /// it follows the draft once the destination's key is known.
     pub(super) fn create_projectless_session_inner(
         &mut self,
         retarget_draft: Option<Uuid>,
+        draft_source: Option<crate::persistence::ComposerDraftKey>,
         cx: &mut Context<Self>,
     ) {
         if let Some(draft_id) = self.reusable_projectless_draft() {
             self.select_session(draft_id, cx);
+            self.move_composer_draft_after_project_change(draft_source, cx);
             return;
         }
 
@@ -4895,7 +4953,11 @@ impl Waku {
                         waku.daemons
                             .claim_session(draft_id, waku.daemons.project_owner(project_id));
                     }
-                    waku.create_session_for(project_id, waku.state.last_provider, cx);
+                    // The provisioned project is itself projectless, so it
+                    // must take the direct creation path — `create_session_for`
+                    // would route it back through here.
+                    waku.create_session_under_project(project_id, waku.state.last_provider, cx);
+                    waku.move_composer_draft_after_project_change(draft_source, cx);
                     // A "no project" pick from the overlay's composer
                     // retargets its new-task destination to the provisioned
                     // workspace, carrying the typed draft across.
@@ -4923,9 +4985,42 @@ impl Waku {
     }
 }
 
+/// A projectless draft can stand in for the next "No project" pick only
+/// while it still owns its workspace — the draft is its project's only
+/// session. A sibling task that already ran owns the directory, and
+/// reusing the draft would put the new task in that task's place.
+fn projectless_draft_owns_workspace(sessions: &[AgentSession], draft: &AgentSession) -> bool {
+    sessions
+        .iter()
+        .all(|other| other.id == draft.id || other.project_id != draft.project_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projectless_draft_owns_workspace_only_while_alone_on_its_project() {
+        let project = Uuid::new_v4();
+        let draft = AgentSession::new(project, ProviderKind::OpenCode);
+        assert!(projectless_draft_owns_workspace(&[draft.clone()], &draft));
+
+        // A sibling task already ran in the project — the directory is
+        // that task's, and the draft can't stand in for a fresh pick.
+        let mut ran = AgentSession::new(project, ProviderKind::OpenCode);
+        ran.detail_loaded = false;
+        assert!(!projectless_draft_owns_workspace(
+            &[draft.clone(), ran],
+            &draft
+        ));
+
+        // Sessions on other projects don't count against it.
+        let elsewhere = AgentSession::new(Uuid::new_v4(), ProviderKind::OpenCode);
+        assert!(projectless_draft_owns_workspace(
+            &[draft.clone(), elsewhere],
+            &draft
+        ));
+    }
 
     #[test]
     fn new_task_carries_the_current_tasks_access_mode() {

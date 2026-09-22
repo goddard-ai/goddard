@@ -286,6 +286,18 @@ impl Waku {
             self.switch_projects_page_project(project_id, window, cx);
             return;
         }
+        if self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == project_id && project.is_projectless())
+        {
+            // The switcher's collapsed "No project" row names a destination,
+            // not the workspace its project happens to own — a pick means a
+            // fresh scratch directory, same as the composer menu's item.
+            self.create_projectless_session_from_composer(cx);
+            return;
+        }
         let source = self.composer_draft_key();
         // The composing draft follows the pick — retargeted outright, or
         // collapsed into the draft the destination already holds once the
@@ -335,6 +347,7 @@ impl Waku {
         });
         self.create_projectless_session_inner(
             draft_id.filter(|draft_id| collapse_draft != Some(*draft_id)),
+            source,
             cx,
         );
         // Reusing an existing projectless draft resolves synchronously; a
@@ -352,7 +365,6 @@ impl Waku {
             self.big_picture.new_task_project = Some(project_id);
             self.sync_big_picture_draft(cx);
         }
-        self.move_composer_draft_after_project_change(source, cx);
         if let Some(draft_id) = collapse_draft {
             self.remove_session_inner(draft_id, None, false, cx);
         }

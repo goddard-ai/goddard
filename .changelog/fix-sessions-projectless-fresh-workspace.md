@@ -1,0 +1,1 @@
+- Choosing "No project" in the project switcher or project pickers now provisions a fresh scratch workspace instead of binding the new task to an earlier projectless task's directory — the stale binding could resurrect a finished task's files or fail outright when that directory was gone

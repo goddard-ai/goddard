@@ -542,6 +542,15 @@ impl Waku {
         }
         let may_commit = pointer_selection || self.state.selected_session == original;
         let mut focus_after = previous_focus;
+        // A projectless pick always commits: the collapsed row stands for a
+        // fresh workspace, so "already on it" is never true — even a draft
+        // bound to that project row must be moved off its spent directory.
+        let projectless_target = selected.is_some_and(|project_id| {
+            self.state
+                .projects
+                .iter()
+                .any(|project| project.id == project_id && project.is_projectless())
+        });
         if may_commit
             && let Some(project_id) = selected
             && self
@@ -552,9 +561,10 @@ impl Waku {
             && self
                 .selected_session()
                 .is_some_and(|session| !session.has_started())
-            && self
-                .selected_session()
-                .is_some_and(|session| session.project_id != project_id)
+            && (projectless_target
+                || self
+                    .selected_session()
+                    .is_some_and(|session| session.project_id != project_id))
         {
             let was_in_settings = self.settings_page.is_some();
             self.settings_page = None;
