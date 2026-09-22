@@ -4742,20 +4742,24 @@ impl Waku {
                                         .items_center()
                                         .justify_center()
                                         .cursor_default()
-                                        .bg(theme.overlay_strong)
-                                        .hover(|element| element.bg(theme.danger_soft))
-                                        .active(|element| element.opacity(0.8))
+                                        .bg(gpui::black())
+                                        .hover(|element| element.opacity(0.85))
+                                        .active(|element| element.opacity(0.7))
                                         .when(escape_stop_armed, |element| {
                                             element.child(
                                                 div()
                                                     .text_size(sp(12.5))
                                                     .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(theme.text)
+                                                    .text_color(gpui::white())
                                                     .child("Esc"),
                                             )
                                         })
                                         .when(!escape_stop_armed, |element| {
-                                            element.child(icon("icons/stop.svg", 18.0, theme.text))
+                                            element.child(icon(
+                                                "icons/stop.svg",
+                                                18.0,
+                                                gpui::white(),
+                                            ))
                                         })
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             if let Some(session_id) = session_id {
