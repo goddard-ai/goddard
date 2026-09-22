@@ -2230,6 +2230,20 @@ impl Waku {
             annotations.hovered = None;
             annotations.editing = None;
         }
+        // A parked strip keeps only what cannot be re-derived: dirty buffers
+        // and annotation pins are user data, while a clean editor is a disk
+        // read away — the surface's lazy `ensure_right_panel_file_editor`
+        // recreates it on return, same as a relaunch restore. Ref editors
+        // and the parsed diff shed the same way; activating the Diff tab
+        // refetches a missing snapshot.
+        let file_editors = std::mem::take(&mut self.right_panel_file_editors)
+            .into_iter()
+            .filter(|(_, editor)| {
+                editor.dirty || !editor.annotations.borrow().items.is_empty()
+            })
+            .collect();
+        self.right_panel_ref_editors.clear();
+        self.right_panel_diff_snapshot = None;
         RightPanelSessionState {
             visible: self.right_panel_visible,
             surfaces: std::mem::take(&mut self.right_panel_surfaces),
@@ -2243,11 +2257,11 @@ impl Waku {
             expanded_paths: std::mem::take(&mut self.right_panel_expanded_paths),
             files_selected_path: self.right_panel_files_selected_path.take(),
             file_tree_width: self.right_panel_file_tree_width,
-            file_editors: std::mem::take(&mut self.right_panel_file_editors),
-            ref_editors: std::mem::take(&mut self.right_panel_ref_editors),
+            file_editors,
+            ref_editors: HashMap::new(),
             files_root: self.right_panel_files_root.take(),
             diff_source: self.right_panel_diff_source,
-            diff_snapshot: self.right_panel_diff_snapshot.take(),
+            diff_snapshot: None,
             diff_selected_file: self.right_panel_diff_selected_file.take(),
             diff_expanded_paths: std::mem::take(&mut self.right_panel_diff_expanded_paths),
         }
@@ -3928,6 +3942,15 @@ impl Waku {
                         let _ = activate_weak.update(cx, |this, cx| {
                             this.right_panel_active_surface = Some(index);
                             this.reveal_right_panel_tab(index);
+                            // A parked strip sheds its diff snapshot — the
+                            // first activation after restore refetches it.
+                            if this.right_panel_surfaces.get(index)
+                                == Some(&RightPanelSurface::Diff)
+                                && this.right_panel_diff_snapshot.is_none()
+                                && !this.right_panel_diff_loading
+                            {
+                                this.refresh_right_panel_diff(cx);
+                            }
                             this.request_active_terminal_focus();
                             cx.notify();
                         });
@@ -6961,7 +6984,14 @@ impl Waku {
             active_surface: parked_active,
             files_selected_path: self.right_panel_files_selected_path.take(),
             expanded_paths: std::mem::take(&mut self.right_panel_expanded_paths),
-            file_editors: std::mem::take(&mut self.right_panel_file_editors),
+            // Same shed as the strip park: clean editors re-read on restore;
+            // dirty buffers and annotation pins stay.
+            file_editors: std::mem::take(&mut self.right_panel_file_editors)
+                .into_iter()
+                .filter(|(_, editor)| {
+                    editor.dirty || !editor.annotations.borrow().items.is_empty()
+                })
+                .collect(),
             file_tree_width: self.right_panel_file_tree_width,
         }
     }

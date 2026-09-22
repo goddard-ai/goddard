@@ -395,6 +395,11 @@ impl Waku {
                 waku.session_hydrations.remove(&session_id);
                 match result {
                     Ok(session) => {
+                        // Trim before the hydrated row lands so this arrival
+                        // is never the release victim — the window counts
+                        // sessions that were already resident, not the one
+                        // just fetched.
+                        waku.trim_resident_transcripts();
                         let replaced = if let Some(existing) = waku
                             .state
                             .sessions
@@ -3500,6 +3505,44 @@ impl Waku {
         self.transcript_anchor.set(None);
         self.transcript_anchor_end_space.set(Pixels::ZERO);
         self.transcript_anchor_following.set(false);
+    }
+
+    /// Skeletonize hydrated transcripts nobody can see, bounded to the
+    /// recency window. The store's dirty set keeps unsaved work; the pin set
+    /// covers everything that can be observed or mutated while off screen —
+    /// a released session rehydrates through `ensure_session_loaded` like a
+    /// cold open. The released ids also drop their `message_markdown` views,
+    /// the one transcript cache that deliberately survives session switches.
+    pub(super) fn trim_resident_transcripts(&mut self) {
+        let mut pinned: HashSet<Uuid> = self.runtimes.keys().copied().collect();
+        if let Some(id) = self.state.selected_session {
+            pinned.insert(id);
+        }
+        if let Some(pending) = &self.pending_session_activation {
+            pinned.insert(pending.session_id);
+        }
+        pinned.extend(self.side_chat_views.keys().copied());
+        pinned.extend(self.big_picture.slot_session_ids());
+        pinned.extend(self.session_hydrations.iter().copied());
+        pinned.extend(self.submission_preparations.iter().copied());
+        pinned.extend(self.pending_queue_drains.iter().copied());
+        pinned.extend(self.cancel_drains.keys().copied());
+        pinned.extend(self.response_fork_preparations.keys().copied());
+        pinned.extend(self.provider_switch_in_flight.iter().copied());
+        pinned.extend(self.goal_runtime_starts.iter().copied());
+        pinned.extend(self.worktree_move_pending.iter().copied());
+        let released = self
+            .state
+            .trim_idle_transcripts(&pinned, RESIDENT_TRANSCRIPT_WINDOW);
+        if released.is_empty() {
+            return;
+        }
+        let mut message_markdown = self.message_markdown.borrow_mut();
+        for transcript in &released {
+            for id in &transcript.message_ids {
+                message_markdown.remove(id);
+            }
+        }
     }
 
     pub(super) fn reset_session_runtime(&mut self, session_id: Uuid) {

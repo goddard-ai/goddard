@@ -224,6 +224,13 @@ const MAX_CACHED_MESSAGE_SOURCE_BYTES: usize = 512 * 1024;
 /// practice. 8 is generous and caps the tree cache, the only large one, at a
 /// few hundred KB.
 const MAX_CACHED_WORKSPACES: usize = 8;
+/// How many hydrated session transcripts the app keeps resident. Hydration
+/// is a cache — a released session rehydrates through the same async fetch
+/// a cold open already uses — so a session nobody can see gets skeletonized
+/// again rather than holding its messages, blocks, and turns for the life
+/// of the window. Smaller than the daemon's own window: the daemon serves
+/// every connected client, the app needs only its recent view history.
+const RESIDENT_TRANSCRIPT_WINDOW: usize = 12;
 const STREAM_REMEASURE_TAIL_ROWS: usize = 3;
 /// Top-level markdown blocks the live reasoning peek renders, counted from
 /// the tail. The peek is a 400 px viewport pinned to the newest thought, so
@@ -2284,7 +2291,7 @@ pub struct Waku {
     /// In-memory GPUI images for daemon-owned bytes. A missing entry schedules
     /// one background fetch only when a visible row asks to render it; the
     /// desktop never creates another attachment file.
-    remote_images: RefCell<HashMap<String, RemoteImageState>>,
+    remote_images: RefCell<image_preview::RemoteImageCache>,
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
     event_wake_tx: smol::channel::Sender<()>,
@@ -5668,7 +5675,7 @@ impl Waku {
                 composer_inline_atoms: Vec::new(),
                 image_preview: None,
                 image_preview_generation: 0,
-                remote_images: RefCell::new(HashMap::new()),
+                remote_images: RefCell::new(image_preview::RemoteImageCache::new()),
                 event_wake_tx,
                 task_state_sync_tx,
                 task_state_sync_events,

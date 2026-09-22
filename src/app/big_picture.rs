@@ -214,6 +214,12 @@ impl BigPictureUi {
         self.open
     }
 
+    /// Sessions whose cards are mounted — including ones mid-leave — so the
+    /// transcript trim never releases a row a visible card still reads.
+    pub(super) fn slot_session_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+        self.slots.iter().map(|slot| slot.session_id)
+    }
+
     /// The card the docked composer follows up on; `None` starts a task.
     pub(super) fn target(&self) -> Option<Uuid> {
         self.target

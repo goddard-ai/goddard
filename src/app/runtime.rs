@@ -2214,6 +2214,9 @@ impl Waku {
                 sandbox_setup: None,
             },
         );
+        // The watch just hydrated a transcript; the runtime pin above keeps
+        // this one while older rows outside the window can go.
+        self.trim_resident_transcripts();
         signal_event_pump(&self.event_wake_tx);
         cx.notify();
     }
@@ -5284,6 +5287,7 @@ impl Waku {
             }
         }
         self.reap_idle_agy_terminals();
+        self.trim_resident_transcripts();
     }
 
     /// Applies a changed model, effort, tier, or mode to a session. Transports

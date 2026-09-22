@@ -1,0 +1,1 @@
+- Reduced memory usage in long-running windows: transcripts of tasks nobody is viewing, remote images, parked panel file buffers and diffs, and cached issue/PR details are now released when idle and reload on demand instead of accumulating for the life of the window.

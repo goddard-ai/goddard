@@ -44,6 +44,90 @@ pub(super) fn attachment_menu_items(path: PathBuf, can_reveal: bool) -> Vec<Menu
     ]
 }
 
+/// Entries retained while any rendered row could still name them.
+/// `Image::bytes` is the encoded payload — the decoded RGBA frames live in
+/// GPUI's asset cache — so the byte budget is a proxy; the entry cap bounds
+/// how many decoded frames can exist regardless of their encoding.
+const MAX_REMOTE_IMAGE_ENTRIES: usize = 64;
+const MAX_REMOTE_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+
+struct RemoteImageEntry {
+    state: RemoteImageState,
+    last_used: u64,
+    bytes: usize,
+}
+
+/// Least-recently-read cache for daemon-owned images. Evicting a `Ready`
+/// entry also drops the decoded copy GPUI keeps per image id — callers pass
+/// each returned image to `Image::remove_asset`.
+pub(super) struct RemoteImageCache {
+    entries: HashMap<String, RemoteImageEntry>,
+    clock: u64,
+    ready_bytes: usize,
+}
+
+impl RemoteImageCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            clock: 0,
+            ready_bytes: 0,
+        }
+    }
+
+    pub fn get(&mut self, reference: &str) -> Option<&RemoteImageState> {
+        self.clock += 1;
+        let entry = self.entries.get_mut(reference)?;
+        entry.last_used = self.clock;
+        Some(&entry.state)
+    }
+
+    /// Returns the evicted `Ready` images whose decoded assets must go too.
+    pub fn insert(&mut self, reference: String, state: RemoteImageState) -> Vec<Arc<gpui::Image>> {
+        self.clock += 1;
+        let bytes = match &state {
+            RemoteImageState::Ready(image) => image.bytes.len(),
+            _ => 0,
+        };
+        if let Some(previous) = self.entries.insert(
+            reference,
+            RemoteImageEntry {
+                state,
+                last_used: self.clock,
+                bytes,
+            },
+        ) {
+            self.ready_bytes = self.ready_bytes.saturating_sub(previous.bytes);
+        }
+        self.ready_bytes += bytes;
+        self.evict_over_budget()
+    }
+
+    fn evict_over_budget(&mut self) -> Vec<Arc<gpui::Image>> {
+        let mut evicted = Vec::new();
+        while self.entries.len() > MAX_REMOTE_IMAGE_ENTRIES
+            || self.ready_bytes > MAX_REMOTE_IMAGE_BYTES
+        {
+            let Some(victim) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            let Some(entry) = self.entries.remove(&victim) else {
+                break;
+            };
+            self.ready_bytes = self.ready_bytes.saturating_sub(entry.bytes);
+            if let RemoteImageState::Ready(image) = entry.state {
+                evicted.push(image);
+            }
+        }
+        evicted
+    }
+}
+
 impl Waku {
     /// Resolve one daemon-owned image for a visible row. Frames consult only
     /// in-memory state; the first miss starts a deduplicated background RPC and
@@ -60,7 +144,7 @@ impl Waku {
         if !waku_protocol::blob::is_reference(reference) && !attachment_reference {
             return None;
         }
-        if let Some(state) = self.remote_images.borrow().get(reference) {
+        if let Some(state) = self.remote_images.borrow_mut().get(reference) {
             return match state {
                 RemoteImageState::Ready(image) => Some(image.clone()),
                 RemoteImageState::Loading | RemoteImageState::Unavailable => None,
@@ -71,15 +155,21 @@ impl Waku {
             .and_then(image_format_for_name)
             .or_else(|| image_format_for_name(reference))
         else {
-            self.remote_images
-                .borrow_mut()
-                .insert(reference.to_owned(), RemoteImageState::Unavailable);
+            self.release_remote_images(
+                self.remote_images
+                    .borrow_mut()
+                    .insert(reference.to_owned(), RemoteImageState::Unavailable),
+                cx,
+            );
             return None;
         };
 
-        self.remote_images
-            .borrow_mut()
-            .insert(reference.to_owned(), RemoteImageState::Loading);
+        self.release_remote_images(
+            self.remote_images
+                .borrow_mut()
+                .insert(reference.to_owned(), RemoteImageState::Loading),
+            cx,
+        );
         let cache_key = reference.to_owned();
         let fetch_reference = cache_key.clone();
         // The blob lives on the daemon that staged it — resolve by the
@@ -88,9 +178,12 @@ impl Waku {
             Some(path) => match self.daemon_for_path(path) {
                 Some(daemon) => daemon,
                 None => {
-                    self.remote_images
-                        .borrow_mut()
-                        .insert(reference.to_owned(), RemoteImageState::Unavailable);
+                    self.release_remote_images(
+                        self.remote_images
+                            .borrow_mut()
+                            .insert(reference.to_owned(), RemoteImageState::Unavailable),
+                        cx,
+                    );
                     return None;
                 }
             },
@@ -110,15 +203,25 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                waku.remote_images.borrow_mut().insert(
+                let evicted = waku.remote_images.borrow_mut().insert(
                     cache_key,
                     image.map_or(RemoteImageState::Unavailable, RemoteImageState::Ready),
                 );
+                waku.release_remote_images(evicted, cx);
                 cx.notify();
             });
         })
         .detach();
         None
+    }
+
+    /// Drop the decoded frames GPUI holds for evicted cache entries — the
+    /// `Arc<Image>` only carries the encoded bytes; the asset cache is where
+    /// the real memory went.
+    pub(super) fn release_remote_images(&self, evicted: Vec<Arc<gpui::Image>>, cx: &mut App) {
+        for image in evicted {
+            image.remove_asset(cx);
+        }
     }
 
     pub(super) fn open_image_preview(
@@ -327,5 +430,58 @@ pub(super) fn image_format_for_name(name: &str) -> Option<gpui::ImageFormat> {
         "ico" => Some(gpui::ImageFormat::Ico),
         "pnm" | "pbm" | "pgm" | "ppm" => Some(gpui::ImageFormat::Pnm),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image(bytes: usize) -> RemoteImageState {
+        RemoteImageState::Ready(Arc::new(gpui::Image::from_bytes(
+            gpui::ImageFormat::Png,
+            vec![0u8; bytes],
+        )))
+    }
+
+    #[test]
+    fn remote_image_cache_evicts_coldest_over_budget() {
+        let mut cache = RemoteImageCache::new();
+        for index in 0..MAX_REMOTE_IMAGE_ENTRIES {
+            assert!(
+                cache
+                    .insert(format!("ref-{index}"), image(8))
+                    .is_empty()
+            );
+        }
+        // Reading an entry makes it newest — it survives the next eviction.
+        assert!(matches!(
+            cache.get("ref-0"),
+            Some(RemoteImageState::Ready(_))
+        ));
+
+        let evicted = cache.insert("fresh".to_owned(), image(8));
+        assert_eq!(evicted.len(), 1);
+        // ref-1 is now the coldest; ref-0 was just read.
+        assert!(cache.get("ref-0").is_some());
+        assert!(cache.get("ref-1").is_none());
+        assert!(matches!(
+            cache.get("fresh"),
+            Some(RemoteImageState::Ready(_))
+        ));
+    }
+
+    #[test]
+    fn remote_image_cache_honors_the_byte_budget() {
+        let mut cache = RemoteImageCache::new();
+        // The entry that just overflowed the budget is itself the coldest
+        // victim — the cache does not pin an oversized insert.
+        assert_eq!(
+            cache
+                .insert("big".to_owned(), image(MAX_REMOTE_IMAGE_BYTES + 1))
+                .len(),
+            1
+        );
+        assert!(cache.get("big").is_none());
     }
 }

@@ -95,6 +95,9 @@ pub(super) struct GitHubBrowser {
     /// The open detail, if any; fetch results live in `details`.
     pub detail: Option<GitHubDetailRef>,
     pub details: HashMap<GitHubDetailRef, GitHubFetch<Rc<GitHubItemDetail>>>,
+    /// Insertion order of `details`, oldest first — the eviction order once
+    /// the cap is reached. The open detail is never evicted.
+    detail_order: VecDeque<GitHubDetailRef>,
     /// Row focus handles keyed by item so a virtualized row can take tab
     /// focus and open on Enter.
     pub row_focuses: RefCell<HashMap<GitHubDetailRef, FocusHandle>>,
@@ -137,6 +140,10 @@ pub(super) struct GitHubBrowser {
 }
 
 const GITHUB_LIST_ROW_HEIGHT: f32 = 30.0;
+/// Fetched issue/PR details a project browser retains. Each entry is a full
+/// body plus its comment thread — cheap individually, unbounded without a
+/// cap. Re-opening an evicted item is one `gh` call.
+const GITHUB_DETAIL_CACHE_LIMIT: usize = 12;
 
 /// The view-local pieces a mounted detail needs — focus, scroll position,
 /// and the comment composer entity. The Projects page reuses the browser's
@@ -178,6 +185,7 @@ impl GitHubBrowser {
             issues: GitHubFetch::Loading,
             detail: None,
             details: HashMap::new(),
+            detail_order: VecDeque::new(),
             row_focuses: RefCell::new(HashMap::new()),
             row_menus: RefCell::new(HashMap::new()),
             detail_focus: cx.focus_handle(),
@@ -196,6 +204,28 @@ impl GitHubBrowser {
             media_loading: Rc::new(RefCell::new(HashSet::new())),
             fix_preparing: HashSet::new(),
             fix_pending: HashMap::new(),
+        }
+    }
+
+    /// Cache one fetch result and bound the map. Details are a re-fetchable
+    /// warm cache, not state — a long browse through a project's PRs and
+    /// issues would otherwise retain every body and comment thread it ever
+    /// opened. The open detail and in-flight loads are never evicted;
+    /// revisiting an evicted item refetches through `github_ensure_detail`.
+    fn cache_detail(&mut self, detail: GitHubDetailRef, fetch: GitHubFetch<Rc<GitHubItemDetail>>) {
+        self.detail_order.retain(|queued| *queued != detail);
+        self.detail_order.push_back(detail);
+        self.details.insert(detail, fetch);
+        while self.details.len() > GITHUB_DETAIL_CACHE_LIMIT {
+            let Some(position) = self.detail_order.iter().position(|queued| {
+                Some(*queued) != self.detail
+                    && matches!(self.details.get(queued), Some(GitHubFetch::Loaded(_)))
+            }) else {
+                break;
+            };
+            if let Some(evicted) = self.detail_order.remove(position) {
+                self.details.remove(&evicted);
+            }
         }
     }
 }
@@ -299,9 +329,7 @@ impl Waku {
                     if let Some((detail_ref, value)) = detail {
                         let fetched = value.map(Rc::new);
                         media_detail = fetched.clone();
-                        browser
-                            .details
-                            .insert(detail_ref, GitHubFetch::Loaded(fetched));
+                        browser.cache_detail(detail_ref, GitHubFetch::Loaded(fetched));
                         landed_detail = Some(detail_ref);
                     }
                     cx.notify();
@@ -366,7 +394,7 @@ impl Waku {
         if browser.details.contains_key(&detail) {
             return;
         }
-        browser.details.insert(detail, GitHubFetch::Loading);
+        browser.cache_detail(detail, GitHubFetch::Loading);
         cx.notify();
 
         cx.spawn(async move |waku, cx| {
@@ -383,9 +411,7 @@ impl Waku {
                     waku.github_queue_media(project_id, value, cx);
                 }
                 if let Some(browser) = waku.github_browsers.get_mut(&project_id) {
-                    browser
-                        .details
-                        .insert(detail, GitHubFetch::Loaded(value.map(Rc::new)));
+                    browser.cache_detail(detail, GitHubFetch::Loaded(value.map(Rc::new)));
                     cx.notify();
                 }
                 waku.github_maybe_run_pending_fix(project_id, detail, cx);
@@ -432,9 +458,7 @@ impl Waku {
                 let content = Rc::new(value);
                 waku.github_queue_media(project_id, &content, cx);
                 if let Some(browser) = waku.github_browsers.get_mut(&project_id) {
-                    browser
-                        .details
-                        .insert(detail, GitHubFetch::Loaded(Some(content)));
+                    browser.cache_detail(detail, GitHubFetch::Loaded(Some(content)));
                     cx.notify();
                 }
             });

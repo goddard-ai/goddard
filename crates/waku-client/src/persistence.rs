@@ -1515,6 +1515,17 @@ pub struct PersistedState {
     dirty_sessions: HashSet<Uuid>,
 }
 
+/// A transcript [`PersistedState::trim_idle_transcripts`] released: which
+/// session was skeletonized and which ids its detail keyed, so caches that
+/// outlive the session's turn on screen — parsed markdown is the big one —
+/// can drop their matching entries.
+#[derive(Debug, Default)]
+pub struct ReleasedTranscript {
+    pub session_id: Uuid,
+    pub message_ids: Vec<Uuid>,
+    pub activity_ids: Vec<Uuid>,
+}
+
 impl PersistedState {
     pub fn session_mut(&mut self, id: Uuid) -> Option<&mut AgentSession> {
         let session = self.sessions.iter_mut().find(|session| session.id == id)?;
@@ -1535,6 +1546,67 @@ impl PersistedState {
     pub fn push_session(&mut self, session: AgentSession) {
         self.dirty_sessions.insert(session.id);
         self.sessions.push(session);
+    }
+
+    /// Frees the resident transcripts of hydrated sessions that are persisted,
+    /// unmodified, and not among the newest `keep` by `updated_at`.
+    ///
+    /// Hydration is a cache: a released session reloads through
+    /// `hydrate_session` on the next selection, so the app keeps only a
+    /// recency window resident instead of every transcript it has ever
+    /// fetched. Pinned sessions and dirty sessions (unsaved work) are never
+    /// released.
+    ///
+    /// Returns what was dropped so the caller can evict the released
+    /// messages' render caches too.
+    pub fn trim_idle_transcripts(
+        &mut self,
+        pinned: &HashSet<Uuid>,
+        keep: usize,
+    ) -> Vec<ReleasedTranscript> {
+        let mut candidates = self
+            .sessions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, session)| {
+                let has_transcript = !(session.messages.is_empty()
+                    && session.transcript_blocks.is_empty()
+                    && session.turns.is_empty()
+                    && session.queued_messages.is_empty());
+                if session.detail_loaded
+                    && has_transcript
+                    && !self.dirty_sessions.contains(&session.id)
+                    && !pinned.contains(&session.id)
+                {
+                    Some((index, session.updated_at))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() <= keep {
+            return Vec::new();
+        }
+        // Newest by `updated_at` first; stable order keeps ties deterministic.
+        candidates.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        candidates
+            .into_iter()
+            .skip(keep)
+            .map(|(index, _)| {
+                let session = &mut self.sessions[index];
+                let released = ReleasedTranscript {
+                    session_id: session.id,
+                    message_ids: session.messages.iter().map(|message| message.id).collect(),
+                    activity_ids: session
+                        .transcript_blocks
+                        .iter()
+                        .flat_map(|block| block.activities.iter().map(|activity| activity.id))
+                        .collect(),
+                };
+                session.release_transcript();
+                released
+            })
+            .collect()
     }
 
     pub fn empty() -> Self {
@@ -3743,6 +3815,87 @@ mod tests {
         state.sandbox_experiment_enabled = false;
         let session = state.new_session(Uuid::new_v4(), ProviderKind::Codex);
         assert!(!session.sandboxed);
+    }
+
+    #[test]
+    fn trim_idle_transcripts_releases_only_clean_unpinned_sessions() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.sessions[0].project_id;
+        let started = 1_700_000_000_u64;
+        let ids = (0..5)
+            .map(|index| {
+                let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+                session.updated_at = started + index;
+                session.begin_turn(format!("prompt {index}"));
+                session.push_message(
+                    waku_protocol::model::MessageRole::Assistant,
+                    format!("answer {index}"),
+                );
+                session.finish_active_turn(waku_protocol::model::TurnStatus::Completed);
+                session.detail_loaded = true;
+                let id = session.id;
+                state.push_session(session);
+                id
+            })
+            .collect::<Vec<_>>();
+        let [
+            dirty_id,
+            pinned_id,
+            oldest_releasable_id,
+            middle_releasable_id,
+            newest_id,
+        ] = ids[..]
+        else {
+            panic!("expected five sessions");
+        };
+        // Saves go through the daemons the tests do not run — clearing the
+        // set marks the pushed rows persisted like a completed save.
+        state.dirty_sessions.clear();
+
+        // A pinned (live runtime) and a dirty (unsaved work) session are
+        // never released; of the remaining three clean residents only the
+        // newest survives a keep-one trim.
+        let pinned: HashSet<Uuid> = HashSet::from([pinned_id]);
+        state.mark_session_dirty(dirty_id);
+        let released = state.trim_idle_transcripts(&pinned, 1);
+        let released_ids = released
+            .iter()
+            .map(|transcript| transcript.session_id)
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            released_ids,
+            HashSet::from([oldest_releasable_id, middle_releasable_id])
+        );
+        for transcript in &released {
+            assert!(!transcript.message_ids.is_empty());
+        }
+        for session in state.sessions.iter().filter(|session| {
+            session.id == oldest_releasable_id || session.id == middle_releasable_id
+        }) {
+            assert!(!session.detail_loaded);
+            assert!(session.messages.is_empty());
+            assert!(session.turns.is_empty());
+            assert!(session.transcript_blocks.is_empty());
+        }
+        let newest = state
+            .sessions
+            .iter()
+            .find(|session| session.id == newest_id)
+            .unwrap();
+        assert!(newest.detail_loaded);
+        assert_eq!(newest.turns.len(), 1);
+        let pinned_session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == pinned_id)
+            .unwrap();
+        assert!(pinned_session.detail_loaded);
+        let dirty = state
+            .sessions
+            .iter()
+            .find(|session| session.id == dirty_id)
+            .unwrap();
+        assert!(dirty.detail_loaded);
     }
 }
 

@@ -3464,9 +3464,11 @@ impl Waku {
                 attachment.blob_reference.as_ref(),
                 attachment.client_preview_image.as_ref(),
             ) {
-                self.remote_images
+                let evicted = self
+                    .remote_images
                     .borrow_mut()
                     .insert(reference.clone(), RemoteImageState::Ready(image.clone()));
+                self.release_remote_images(evicted, cx);
             }
         }
         let attachments = self
