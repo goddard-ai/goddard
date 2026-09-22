@@ -6583,6 +6583,7 @@ mod tests {
             crate::agent::AgentPrompt {
                 prompt: "parked".into(),
                 sender: None,
+                context: None,
                 queued_id: Some(Uuid::new_v4()),
                 context: None,
             },
