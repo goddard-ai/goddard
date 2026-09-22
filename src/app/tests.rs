@@ -1,3 +1,4 @@
+use super::autocomplete::session_mention_candidate;
 use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
     ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, composer_submit_action,
@@ -522,6 +523,32 @@ fn inline_atoms_splice_back_at_their_markers() {
         "fix this\n\na\nb\n\n[session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)]"
     );
     assert_eq!(splice_inline_atoms("fix this", &[]), "fix this");
+}
+
+#[test]
+fn session_mentions_offer_only_the_composers_project() {
+    let project = Uuid::new_v4();
+    let mut same = started_session(Uuid::new_v4());
+    same.project_id = project;
+    let mut foreign = started_session(Uuid::new_v4());
+    foreign.project_id = Uuid::new_v4();
+    // In-project rows still have to earn their place: archived, side
+    // chats, and drafts that never began stay out.
+    let mut archived = started_session(Uuid::new_v4());
+    archived.project_id = project;
+    archived.archived_at = Some(1);
+    let mut side_chat = started_session(Uuid::new_v4());
+    side_chat.project_id = project;
+    side_chat.side_chat_of = Some(Uuid::new_v4());
+    let unstarted = AgentSession::new(project, ProviderKind::Codex);
+
+    assert!(session_mention_candidate(&same, Some(project)));
+    assert!(!session_mention_candidate(&foreign, Some(project)));
+    assert!(!session_mention_candidate(&archived, Some(project)));
+    assert!(!session_mention_candidate(&side_chat, Some(project)));
+    assert!(!session_mention_candidate(&unstarted, Some(project)));
+    // A composer with no draft slot has no project to scope to.
+    assert!(session_mention_candidate(&foreign, None));
 }
 
 #[test]

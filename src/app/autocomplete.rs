@@ -78,6 +78,18 @@ pub(super) struct ComposerSessionRef {
 /// reachable.
 const SESSION_MENTION_CAP: usize = 8;
 
+/// The `mentionable_sessions` pool minus the staged/target exclusions:
+/// started, unarchived, not a side chat, and in the composer's own project
+/// when one is known — a cross-project reference is a sidebar drag away,
+/// not worth the autocomplete noise. Shared with the fingerprint so both
+/// watch the same pool.
+pub(super) fn session_mention_candidate(session: &AgentSession, project: Option<Uuid>) -> bool {
+    session.has_started()
+        && session.archived_at.is_none()
+        && !session.is_side_chat()
+        && project.is_none_or(|project| session.project_id == project)
+}
+
 /// Keystroke pause before a `#` query goes to the daemon — each search is two
 /// `gh` subprocesses, so typing waits for a settle the way the transcript
 /// search does.
@@ -371,10 +383,28 @@ impl Waku {
         trigger
     }
 
+    /// The project the composer addresses: the target session's own for a
+    /// live task, or the new-task draft's destination — which is also where
+    /// Big Picture's unarmed composer lands. `None` when no draft slot is
+    /// live leaves the pool unscoped.
+    fn composer_project_id(&self) -> Option<Uuid> {
+        match self.composer_draft_key()? {
+            crate::persistence::ComposerDraftKey::NewSession(project_id) => Some(project_id),
+            crate::persistence::ComposerDraftKey::Session(session_id) => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .map(|session| session.project_id),
+        }
+    }
+
     /// Sessions the `@` popup can offer — the same set the sidebar drags:
-    /// started, unarchived, not side chats, minus the session the composer
-    /// addresses and any already staged. Recent activity first.
+    /// started, unarchived, not side chats, in the composer's own project,
+    /// minus the session the composer addresses and any already staged.
+    /// Recent activity first.
     fn mentionable_sessions(&self) -> Vec<ComposerSessionRef> {
+        let project = self.composer_project_id();
         let project_name = |session: &AgentSession| {
             self.state
                 .projects
@@ -389,9 +419,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| {
-                session.has_started()
-                    && session.archived_at.is_none()
-                    && !session.is_side_chat()
+                session_mention_candidate(session, project)
                     && self.session_atom_allowed(session.id)
             })
             .collect();
@@ -415,6 +443,8 @@ impl Waku {
     fn session_mention_fingerprint(&self) -> usize {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.composer_target_session().hash(&mut hasher);
+        let project = self.composer_project_id();
+        project.hash(&mut hasher);
         for atom in &self.composer_inline_atoms {
             atom.session_id().hash(&mut hasher);
         }
@@ -422,7 +452,7 @@ impl Waku {
             attachment.session_id.hash(&mut hasher);
         }
         for session in &self.state.sessions {
-            if session.has_started() && session.archived_at.is_none() && !session.is_side_chat() {
+            if session_mention_candidate(session, project) {
                 session.id.hash(&mut hasher);
                 session.display_title().hash(&mut hasher);
             }

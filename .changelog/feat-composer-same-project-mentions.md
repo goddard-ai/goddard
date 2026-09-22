@@ -1,0 +1,1 @@
+- `@` task mentions in the composer now suggest only sessions from the task's own project — reference a session from another project by dragging it in from the sidebar.
