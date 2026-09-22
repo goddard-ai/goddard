@@ -21,7 +21,10 @@ while IFS= read -r request; do
                     thread_id=thread-fork
                     turns='[{"id":"turn-1"}]'
                     ;;
-                *) turns='[{"id":"turn-1"},{"id":"turn-2"}]' ;;
+                *)
+                    thread_id=$(printf '%s' "$request" | sed -n 's/.*"threadId":"\([^"]*\)".*/\1/p')
+                    turns='[{"id":"turn-1"},{"id":"turn-2"}]'
+                    ;;
             esac
             printf '{"id":%s,"result":{"thread":{"id":"%s","turns":%s}}}\n' "$id" "$thread_id" "$turns"
             ;;

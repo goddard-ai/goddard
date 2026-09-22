@@ -1476,6 +1476,7 @@ impl ShuruVm {
             vm: Arc::clone(self),
             pid: pid.clone(),
             exit_rx: Some(exit_rx),
+            exit_status: None,
             stdin: Some(GuestStdin {
                 vm: Arc::clone(self),
                 pid,
@@ -1504,10 +1505,35 @@ struct GuestChild {
     stdout: Option<ChanReader>,
     stderr: Option<ChanReader>,
     exit_rx: Option<Receiver<i32>>,
+    exit_status: Option<ExitStatus>,
 }
 
 impl GuestChild {
+    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        if let Some(status) = self.exit_status {
+            return Ok(Some(status));
+        }
+        let Some(rx) = self.exit_rx.as_ref() else {
+            return Ok(None);
+        };
+        match rx.try_recv() {
+            Ok(code) => {
+                self.exit_rx.take();
+                let status = exit_status(code);
+                self.exit_status = Some(status);
+                Ok(Some(status))
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => Ok(None),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err(std::io::Error::other("guest exit stream ended"))
+            }
+        }
+    }
+
     fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        if let Some(status) = self.exit_status {
+            return Ok(status);
+        }
         let rx = self
             .exit_rx
             .take()
@@ -1515,7 +1541,9 @@ impl GuestChild {
         let code = rx.recv().map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::Other, "guest exit stream ended")
         })?;
-        Ok(exit_status(code))
+        let status = exit_status(code);
+        self.exit_status = Some(status);
+        Ok(status)
     }
 
     fn kill(&mut self) -> std::io::Result<()> {
@@ -1548,6 +1576,32 @@ enum ChildKind {
 }
 
 impl DriverChild {
+    /// Ask the host guardian to stop its child and run its cleanup trap.
+    /// `kill()` would SIGKILL the wrapper before that trap can run.
+    pub fn terminate(&mut self) -> std::io::Result<()> {
+        match &mut self.kind {
+            #[cfg(unix)]
+            ChildKind::Host(child) => {
+                let result = unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+                if result == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            }
+            #[cfg(not(unix))]
+            ChildKind::Host(child) => child.kill(),
+            ChildKind::Guest(child) => child.kill(),
+        }
+    }
+
+    pub fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        match &mut self.kind {
+            ChildKind::Host(child) => child.try_wait(),
+            ChildKind::Guest(child) => child.try_wait(),
+        }
+    }
+
     fn host(mut child: Child) -> Self {
         Self {
             stdin: child.stdin.take().map(|stdin| Box::new(stdin) as _),

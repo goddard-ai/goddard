@@ -2198,6 +2198,9 @@ impl Backend for WakuBackend {
             }
             Command::Start { options } => {
                 let previous = self.sessions.lock().remove(&session_id);
+                if let Some(previous) = &previous {
+                    previous.driver.begin_shutdown();
+                }
                 drop_detached(previous);
                 // The replaced runtime's scoped credential dies with it; the
                 // new runtime mints its own inside `spawn_runtime`.
@@ -2256,6 +2259,9 @@ impl Backend for WakuBackend {
                         .then(|| sessions.remove(&session_id))
                         .flatten()
                 };
+                if let Some(removed) = &removed {
+                    removed.driver.begin_shutdown();
+                }
                 drop_detached(removed);
                 self.agent.revoke_session(session_id);
                 Ok(ResponsePayload::Ack)

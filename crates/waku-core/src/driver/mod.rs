@@ -115,6 +115,10 @@ impl DriverHandle {
         self.inner.cancel();
     }
 
+    pub fn begin_shutdown(&self) {
+        self.inner.begin_shutdown();
+    }
+
     pub fn cancel_computer_use(&self) {
         self.inner.cancel_computer_use();
     }
@@ -223,6 +227,9 @@ pub trait DriverControl: Send + Sync {
     /// `DriverEvent::SteerRejected`.
     fn steer(&self, _prompt: String) {}
     fn cancel(&self);
+    /// Signal teardown before detached dropping, so a replacement can wait
+    /// for the old provider process instead of racing its writer.
+    fn begin_shutdown(&self) {}
     fn cancel_computer_use(&self) {}
     fn refresh_background_work(&self) {}
     fn stop_background_work(&self, _key: BackgroundWorkKey, _control_id: String) {}

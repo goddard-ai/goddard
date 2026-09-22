@@ -1,0 +1,1 @@
+- Release a Codex thread's old writer before resuming it after a task runtime restarts, including when moving the task to a worktree.

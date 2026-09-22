@@ -5,13 +5,13 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow};
 use crossbeam_channel::{Sender, bounded, unbounded};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use serde_json::{Value, json};
 #[cfg(test)]
 use uuid::Uuid;
@@ -134,6 +134,8 @@ impl BackgroundRpcState {
 
 pub struct CodexDriver {
     commands: Sender<CommandMessage>,
+    process_shutdown: Sender<()>,
+    thread_lease: Arc<CodexThreadLease>,
     binary: PathBuf,
     cwd: PathBuf,
     mode: RuntimeMode,
@@ -141,6 +143,98 @@ pub struct CodexDriver {
     computer_use_server_path: Option<PathBuf>,
     computer_use_preview_monitor: Option<computer_use_runtime::ComputerUsePreviewMonitor>,
     announced_agent_surface: bool,
+}
+
+#[derive(Default)]
+struct CodexThreadLeaseState {
+    closing: bool,
+    exited: bool,
+}
+
+/// A removed daemon runtime can still have a live app-server while its
+/// detached teardown closes stdin. Keep its native thread reserved until the
+/// process actually exits, including after the runtime leaves the map.
+struct CodexThreadLease {
+    state: Mutex<CodexThreadLeaseState>,
+    exited: Condvar,
+    claimed_ids: Mutex<Vec<String>>,
+}
+
+static CODEX_THREAD_LEASES: LazyLock<Mutex<HashMap<String, Weak<CodexThreadLease>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+impl CodexThreadLease {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(CodexThreadLeaseState::default()),
+            exited: Condvar::new(),
+            claimed_ids: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn claim(self: &Arc<Self>, thread_id: &str) -> anyhow::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let previous = {
+                let mut leases = CODEX_THREAD_LEASES.lock();
+                match leases.get(thread_id).and_then(Weak::upgrade) {
+                    None => {
+                        leases.insert(thread_id.to_owned(), Arc::downgrade(self));
+                        self.claimed_ids.lock().push(thread_id.to_owned());
+                        return Ok(());
+                    }
+                    Some(previous) if Arc::ptr_eq(&previous, self) => return Ok(()),
+                    Some(previous) => previous,
+                }
+            };
+            let mut state = previous.state.lock();
+            if !state.closing && !state.exited {
+                anyhow::bail!("Codex thread {thread_id} already has a live Goddard runtime");
+            }
+            while !state.exited {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero()
+                    || previous.exited.wait_for(&mut state, remaining).timed_out() && !state.exited
+                {
+                    anyhow::bail!(
+                        "timed out waiting for Goddard's previous Codex writer for thread {thread_id} to exit"
+                    );
+                }
+            }
+            drop(state);
+            let mut leases = CODEX_THREAD_LEASES.lock();
+            if leases
+                .get(thread_id)
+                .and_then(Weak::upgrade)
+                .is_some_and(|current| Arc::ptr_eq(&current, &previous))
+            {
+                leases.insert(thread_id.to_owned(), Arc::downgrade(self));
+                self.claimed_ids.lock().push(thread_id.to_owned());
+                return Ok(());
+            }
+        }
+    }
+
+    fn close(&self) {
+        self.state.lock().closing = true;
+    }
+
+    fn process_exited(self: &Arc<Self>) {
+        let claimed_ids = std::mem::take(&mut *self.claimed_ids.lock());
+        let mut leases = CODEX_THREAD_LEASES.lock();
+        for thread_id in claimed_ids {
+            if leases
+                .get(&thread_id)
+                .and_then(Weak::upgrade)
+                .is_some_and(|current| Arc::ptr_eq(&current, self))
+            {
+                leases.remove(&thread_id);
+            }
+        }
+        drop(leases);
+        self.state.lock().exited = true;
+        self.exited.notify_all();
+    }
 }
 
 struct CodexComputerUseConfig {
@@ -246,6 +340,10 @@ impl CodexDriver {
             }
             None => None,
         };
+        let thread_lease = CodexThreadLease::new();
+        if let Some(thread_id) = provider_session_id.as_deref() {
+            thread_lease.claim(thread_id)?;
+        }
         let computer_use = computer_use_enabled
             .then(CodexComputerUseConfig::load)
             .transpose()?;
@@ -323,6 +421,7 @@ impl CodexDriver {
             })
             .transpose()?;
         let (commands, command_rx) = unbounded();
+        let (process_shutdown, process_shutdown_rx) = bounded(1);
         let thread_id = Arc::new(Mutex::new(None::<String>));
         let turn_id = Arc::new(Mutex::new(None::<String>));
         let turn_ids = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -827,6 +926,8 @@ impl CodexDriver {
         let reader_title_generation = title_generation;
         let reader_commands = commands.clone();
         let reader_events = events.clone();
+        let reader_thread_lease = thread_lease.clone();
+        let reader_process_shutdown = process_shutdown.clone();
         let reader_thread = thread::Builder::new()
             .name("waku-codex-reader".into())
             .spawn(move || {
@@ -836,6 +937,18 @@ impl CodexDriver {
                         Ok(line) if !line.trim().is_empty() => {
                             match serde_json::from_str::<Value>(&line) {
                                 Ok(value) => {
+                                    if value.get("id").and_then(Value::as_u64) == Some(1)
+                                        && let Some(id) = value
+                                            .pointer("/result/thread/id")
+                                            .and_then(Value::as_str)
+                                        && let Err(error) = reader_thread_lease.claim(id)
+                                    {
+                                        let _ = reader_events
+                                            .send(DriverEvent::Error(error.to_string()));
+                                        let _ = reader_commands.send(CommandMessage::Shutdown);
+                                        let _ = reader_process_shutdown.try_send(());
+                                        continue;
+                                    }
                                     let main_turn_started = is_codex_turn_started(
                                         &value,
                                         reader_thread_id.lock().as_deref(),
@@ -925,12 +1038,45 @@ impl CodexDriver {
                 }
             })?;
 
+        let process_thread_lease = thread_lease.clone();
         thread::Builder::new()
             .name("waku-codex-process".into())
             .spawn(move || {
-                let status = child.wait();
+                let mut child = child;
+                let mut shutdown_at = None;
+                let mut terminate_sent = false;
+                let status = loop {
+                    match child.try_wait() {
+                        Ok(Some(status)) => break Ok(status),
+                        Err(error) => break Err(error),
+                        Ok(None) => {}
+                    }
+                    if shutdown_at.is_none() {
+                        if process_shutdown_rx
+                            .recv_timeout(Duration::from_millis(200))
+                            .is_ok()
+                        {
+                            shutdown_at = Some(Instant::now());
+                        }
+                    } else {
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    if !terminate_sent
+                        && shutdown_at
+                            .is_some_and(|at: Instant| at.elapsed() >= Duration::from_secs(1))
+                    {
+                        let _ = child.terminate();
+                        terminate_sent = true;
+                    }
+                    if shutdown_at.is_some_and(|at: Instant| at.elapsed() >= Duration::from_secs(3))
+                    {
+                        let _ = child.kill();
+                        break child.wait();
+                    }
+                };
                 let _ = reader_thread.join();
                 let _ = stderr_thread.join();
+                process_thread_lease.process_exited();
                 match status {
                     Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
                         let _ = events.send(DriverEvent::localized_error(localized!(
@@ -953,6 +1099,8 @@ impl CodexDriver {
 
         Ok(Self {
             commands,
+            process_shutdown,
+            thread_lease,
             binary,
             cwd,
             mode,
@@ -1080,6 +1228,12 @@ fn handle_goal_response(
 }
 
 impl DriverControl for CodexDriver {
+    fn begin_shutdown(&self) {
+        self.thread_lease.close();
+        let _ = self.commands.send(CommandMessage::Shutdown);
+        let _ = self.process_shutdown.try_send(());
+    }
+
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
     }
@@ -1200,12 +1354,12 @@ impl DriverControl for CodexDriver {
 
 impl Drop for CodexDriver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         self.cancel_computer_use();
         drop(self.computer_use_preview_monitor.take());
         if let Some(directory) = self.computer_use_process_directory.as_deref() {
             let _ = fs::remove_dir_all(directory);
         }
-        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 }
 
@@ -2675,6 +2829,112 @@ fn is_visible_stderr_notice(line: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn codex_thread_lease_waits_for_the_previous_process_and_rejects_live_duplicates() {
+        let thread_id = format!("test-thread-{}", Uuid::new_v4());
+        let first = CodexThreadLease::new();
+        first.claim(&thread_id).unwrap();
+
+        let next = CodexThreadLease::new();
+        assert!(
+            next.claim(&thread_id)
+                .unwrap_err()
+                .to_string()
+                .contains("live Goddard runtime")
+        );
+
+        first.close();
+        let closing = first.clone();
+        let exit = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            closing.process_exited();
+        });
+        let started = Instant::now();
+        next.claim(&thread_id).unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(90));
+        exit.join().unwrap();
+
+        let duplicate = CodexThreadLease::new();
+        assert!(duplicate.claim(&thread_id).is_err());
+        next.close();
+        next.process_exited();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacing_a_codex_runtime_waits_for_its_app_server_to_exit() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = std::env::temp_dir().join(format!("waku-codex-replace-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let binary = directory.join("codex");
+        fs::write(&binary, include_str!("fixtures/codex_fork.sh")).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        let thread_id = format!("thread-original-{}", Uuid::new_v4());
+        let start = || {
+            let (events, received) = crate::driver::test_event_channel();
+            let driver = CodexDriver::start(
+                DriverStartOptions {
+                    eval: None,
+                    sandbox: None,
+                    allow_model_fallback: false,
+                    binary: binary.clone(),
+                    cwd: directory.clone(),
+                    mode: RuntimeMode::Ask,
+                    model: None,
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                    agent_preset: None,
+                    computer_use_enabled: false,
+                    agent: None,
+                    read_own_transcript: false,
+                    subagents: None,
+                    integrations: Vec::new(),
+                    provider_cursor: Some(ProviderResumeCursor::Codex {
+                        thread_id: thread_id.clone(),
+                    }),
+                },
+                events,
+            );
+            (driver, received)
+        };
+
+        let (source, source_events) = start();
+        let source = source.unwrap();
+        assert!(matches!(
+            source_events.recv_timeout(Duration::from_secs(5)).unwrap(),
+            DriverEvent::Connected { .. }
+        ));
+        assert!(
+            start()
+                .0
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("live Goddard runtime")
+        );
+
+        source.begin_shutdown();
+        let (replacement, replacement_events) = start();
+        let replacement = replacement.unwrap();
+        assert!(matches!(
+            replacement_events
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap(),
+            DriverEvent::Connected { .. }
+        ));
+        drop(source);
+        drop(replacement);
+        for events in [source_events, replacement_events] {
+            while !matches!(
+                events.recv_timeout(Duration::from_secs(5)).unwrap(),
+                DriverEvent::ProcessExited
+            ) {}
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn fork_releases_its_writer_before_a_new_driver_sends_a_message() {
@@ -3175,8 +3435,11 @@ mod tests {
     #[test]
     fn model_changes_reach_the_running_thread_but_mode_changes_ask_for_a_restart() {
         let (commands, command_rx) = unbounded();
+        let (process_shutdown, _process_shutdown_rx) = bounded(1);
         let driver = CodexDriver {
             commands,
+            process_shutdown,
+            thread_lease: CodexThreadLease::new(),
             binary: PathBuf::from("codex"),
             cwd: std::env::temp_dir(),
             mode: RuntimeMode::FullAccess,
