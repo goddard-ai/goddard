@@ -17,6 +17,11 @@ const FILE_IMAGE_SCROLL_LINE_PX: f32 = 20.0;
 /// ⌘+scroll zoom sensitivity: a 100px wheel tick scales by ~2.7×.
 const FILE_IMAGE_ZOOM_PER_PIXEL: f32 = 0.01;
 
+/// Extra scrollable room past the end of a file, in text lines — the file
+/// editor and the markdown preview each pad their scroll extent by this so
+/// the last lines can scroll up off the pane's bottom edge.
+const FILE_SCROLL_PAD_LINES: f32 = 10.0;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct WorkingTreeEntry {
     relative_path: String,
@@ -5378,7 +5383,10 @@ impl Waku {
                                 div()
                                     .w_full()
                                     .pt(px(CONTENT_PAD_TOP))
-                                    .pb(px(CONTENT_PAD_TOP))
+                                    .pb(px(
+                                        CONTENT_PAD_TOP
+                                            + line_height * FILE_SCROLL_PAD_LINES,
+                                    ))
                                     .flex()
                                     .items_start()
                                     .child(gutter)
@@ -5692,10 +5700,11 @@ impl Waku {
         if let Some(editor) = self.right_panel_file_editors.get(relative_path) {
             preview_selection.annotations = editor.annotations.clone();
         }
+        let metrics = MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
         let ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
-            MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
+            metrics,
             preview_selection.clone(),
         )
         .with_families(crate::fonts::current(cx))
@@ -5766,7 +5775,9 @@ impl Waku {
                                     })
                                     .px(px(16.0))
                                     .pt(px(14.0))
-                                    .pb(px(24.0))
+                                    .pb(px(
+                                        24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES,
+                                    ))
                                     .text_color(theme.text)
                                     .children(document),
                             ),
