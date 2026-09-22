@@ -1713,6 +1713,9 @@ git_panel.commits: コミット
 git_panel.no_commits: コミットはまだありません
 git_panel.unpushed: 上流にプッシュされていません
 git_panel.no_commit_body: コミットの説明なし
+git_panel.copy_commit_hash: コミットハッシュをコピー
+git_panel.copy_commit_message: コミットメッセージをコピー
+git_panel.open_commit_diff: コミットの差分を開く
 git_panel.nothing_staged: ステージ済みの変更がありません
 git_panel.nothing_staged_description: 既定ではステージ済みの変更のみコミットします。代わりに未ステージの変更をすべてコミットしますか？
 git_panel.commit_all_one: すべての変更をコミット（1 ファイル）

@@ -20,7 +20,7 @@
 //! stable while a selection is dragged across it.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -98,6 +98,10 @@ pub type LinkHandler = Rc<dyn Fn(&str, &mut Window, &mut gpui::App)>;
 /// unaware of remotes and workspace surfaces, so the caller decides what a
 /// path can do.
 pub type FileRefMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
+
+/// Builds actions a right-clicked, resolved commit SHA contributes to its
+/// transcript row's context menu.
+pub type CommitRefMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
 
 // ── Layout metrics ─────────────────────────────────────────────────────────
 //
@@ -1129,6 +1133,8 @@ pub struct Ctx<'a> {
     wrap_context_menu: bool,
     /// Builds the menu rows a right-clicked `@`-mention contributes.
     file_ref_items: Option<FileRefMenuItems>,
+    /// Builds the menu rows a right-clicked commit SHA contributes.
+    commit_ref_items: Option<CommitRefMenuItems>,
     now: Instant,
 }
 
@@ -1163,6 +1169,7 @@ impl<'a> Ctx<'a> {
             context_menu: None,
             wrap_context_menu: false,
             file_ref_items: None,
+            commit_ref_items: None,
             now: Instant::now(),
         }
     }
@@ -1264,6 +1271,12 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// Enable commit-SHA context actions — see `commit_ref_items`.
+    pub fn with_commit_ref_items(mut self, items: CommitRefMenuItems) -> Self {
+        self.commit_ref_items = Some(items);
+        self
+    }
+
     fn with_cache(&self, view: &'a MarkdownView) -> Self {
         Self {
             row: self.row.clone(),
@@ -1289,6 +1302,7 @@ impl<'a> Ctx<'a> {
             context_menu: self.context_menu.clone(),
             wrap_context_menu: self.wrap_context_menu,
             file_ref_items: self.file_ref_items.clone(),
+            commit_ref_items: self.commit_ref_items.clone(),
             now: Instant::now(),
         }
     }
@@ -1399,6 +1413,7 @@ fn text_element_with_selection(
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
     file_menu: Option<(ContextMenuHandle, FileRefMenuItems)>,
+    commit_menu: Option<(ContextMenuHandle, CommitRefMenuItems)>,
     code_wash: Hsla,
     selection_wash: Hsla,
     search_match_wash: Hsla,
@@ -1411,6 +1426,7 @@ fn text_element_with_selection(
 ) -> AnyElement {
     let styled = StyledText::new(flat.text.clone()).with_runs(runs);
     let layout = styled.layout().clone();
+    let resolved_commits = selection.resolved_commits.clone();
 
     let body: AnyElement = if flat.links.is_empty() {
         styled.into_any_element()
@@ -1597,18 +1613,37 @@ fn text_element_with_selection(
         .w_full()
         .min_w_0()
         .cursor(CursorStyle::IBeam);
-    if !flat.file_refs.is_empty()
-        && let Some((menu, items)) = file_menu
+    if (!flat.file_refs.is_empty() && file_menu.is_some())
+        || (!flat.commit_refs.is_empty() && commit_menu.is_some())
     {
+        let menu = commit_menu
+            .as_ref()
+            .map(|(menu, _)| menu.clone())
+            .or_else(|| file_menu.as_ref().map(|(menu, _)| menu.clone()));
+        let Some(menu) = menu else {
+            return element.child(underlay).child(body).into_any_element();
+        };
         let geometry = TextGeometry::Text(layout.clone());
         let file_refs = flat.file_refs.clone();
         let links = flat.links.clone();
+        let commit_refs = flat.commit_refs.clone();
         element = element.on_mouse_down(MouseButton::Right, move |event, _, cx| {
-            if let Some(path) = file_ref_at(&geometry, &file_refs, &links, event.position) {
+            if let Some(sha) = commit_ref_at(
+                &geometry,
+                &commit_refs,
+                &resolved_commits.borrow(),
+                event.position,
+            ) {
+                if let Some((_, items)) = &commit_menu {
+                    menu.set_context_items(items(&sha, cx));
+                }
+            } else if let Some(path) = file_ref_at(&geometry, &file_refs, &links, event.position)
+                && let Some((_, items)) = &file_menu
+            {
                 menu.set_context_items(items(&path, cx));
             }
-            // Bubble to the row's own menu so it opens with these actions
-            // ahead of its usual ones.
+            // Bubble to the row's own menu so these actions appear ahead of
+            // its usual ones.
         });
     }
     element.child(underlay).child(body).into_any_element()
@@ -1639,6 +1674,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.search.clone(),
         ctx.link_handler.clone(),
         ctx.context_menu.clone().zip(ctx.file_ref_items.clone()),
+        ctx.context_menu.clone().zip(ctx.commit_ref_items.clone()),
         ctx.palette.code_wash,
         ctx.palette.selection,
         ctx.palette.search_match,
@@ -1670,6 +1706,7 @@ pub fn selectable_flat_text(
         flat.runs.clone(),
         key,
         selection,
+        None,
         None,
         None,
         None,
@@ -1843,6 +1880,32 @@ pub(super) fn file_ref_at(
         .iter()
         .find(|(link, _)| link == range)
         .map(|(_, path)| path.clone())
+}
+
+/// The resolved commit SHA under `position`, when the point lands inside one
+/// of its glyph boxes. Unconfirmed hex candidates remain ordinary text.
+pub(super) fn commit_ref_at(
+    geometry: &TextGeometry,
+    commit_refs: &[(Range<usize>, String)],
+    resolved_commits: &HashSet<String>,
+    position: Point<Pixels>,
+) -> Option<String> {
+    if commit_refs.is_empty() || geometry.is_missing() {
+        return None;
+    }
+    let index = geometry
+        .index_for_position(position)
+        .unwrap_or_else(|index| index);
+    commit_refs
+        .iter()
+        .find(|(range, sha)| {
+            resolved_commits.contains(sha.as_str())
+                && range.contains(&index)
+                && text_range_bounds(geometry, range)
+                    .iter()
+                    .any(|rect| rect.contains(&position))
+        })
+        .map(|(_, sha)| sha.clone())
 }
 
 /// `TextLayout::bounds` panics before prepaint has run. A row that was spliced

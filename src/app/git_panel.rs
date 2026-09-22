@@ -2520,6 +2520,52 @@ impl Waku {
         })
     }
 
+    /// The commit-specific actions a right-clicked transcript SHA contributes
+    /// before the message's usual context-menu items.
+    pub(super) fn transcript_commit_menu_items(
+        &self,
+        sha: &str,
+        cx: &mut Context<Self>,
+    ) -> Vec<MenuItem> {
+        let entry = self.transcript_commit_entry(sha);
+        let full_sha = entry
+            .as_ref()
+            .map_or_else(|| sha.to_owned(), |entry| entry.sha.clone());
+        let message = entry.as_ref().map(|entry| {
+            let body = entry.body.trim();
+            if body.is_empty() {
+                entry.subject.clone()
+            } else {
+                format!("{}\n\n{body}", entry.subject)
+            }
+        });
+        let open_sha = full_sha.clone();
+        let waku = cx.entity().downgrade();
+        let mut items = vec![MenuItem::new(
+            tr!("git_panel.copy_commit_hash"),
+            move |_, cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(full_sha.clone()));
+            },
+        )];
+        if let Some(message) = message {
+            items.push(MenuItem::new(
+                tr!("git_panel.copy_commit_message"),
+                move |_, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(message.clone()));
+                },
+            ));
+        }
+        items.push(
+            MenuItem::new(tr!("git_panel.open_commit_diff"), move |window, cx| {
+                let _ = waku.update(cx, |this, cx| {
+                    this.open_transcript_commit_diff_for_sha(&open_sha, window, cx);
+                });
+            })
+            .disabled(!self.state.git_panel_enabled),
+        );
+        items
+    }
+
     /// Fetch a transcript SHA's metadata once. The request goes through the
     /// daemon so render and hit-testing never touch Git or the filesystem.
     /// Infrastructure gaps — no workspace, no daemon connection — leave the
@@ -2670,6 +2716,16 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_transcript_commit_diff_for_sha(&hit.sha, window, cx);
+    }
+
+    /// Open the same diff as a transcript click from a context-menu action.
+    pub(super) fn open_transcript_commit_diff_for_sha(
+        &mut self,
+        sha: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.state.git_panel_enabled {
             return;
         }
@@ -2680,12 +2736,12 @@ impl Waku {
         else {
             return;
         };
-        let entry = self.transcript_commit_entry(&hit.sha).unwrap_or_else(|| {
-            self.ensure_transcript_commit_detail(&hit.sha, cx);
+        let entry = self.transcript_commit_entry(sha).unwrap_or_else(|| {
+            self.ensure_transcript_commit_detail(sha, cx);
             CommitEntry {
-                short_sha: hit.sha.chars().take(7).collect(),
-                sha: hit.sha.clone(),
-                subject: hit.sha.clone(),
+                short_sha: sha.chars().take(7).collect(),
+                sha: sha.to_owned(),
+                subject: sha.to_owned(),
                 body: String::new(),
                 author: String::new(),
                 author_email: String::new(),

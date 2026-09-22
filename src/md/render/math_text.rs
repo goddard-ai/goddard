@@ -294,6 +294,9 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
         let file_refs = flat.file_refs.clone();
         let links = flat.links.clone();
         let file_items = ctx.file_ref_items.clone();
+        let commit_refs = flat.commit_refs.clone();
+        let commit_items = ctx.commit_ref_items.clone();
+        let resolved_commits = ctx.selection.resolved_commits.clone();
         let menu = menu.clone();
         wrapper = wrapper.on_mouse_down(MouseButton::Right, move |event, _, cx| {
             if let Some(index) = hit.formula_at(event.position) {
@@ -301,6 +304,15 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
                     data.spans[index].latex.clone(),
                     tr!("common.copy_expression"),
                 )]);
+            } else if let Some(items) = &commit_items
+                && let Some(sha) = super::commit_ref_at(
+                    &file_hit,
+                    &commit_refs,
+                    &resolved_commits.borrow(),
+                    event.position,
+                )
+            {
+                menu.set_context_items(items(&sha, cx));
             } else if let Some(items) = &file_items
                 && let Some(path) = file_ref_at(&file_hit, &file_refs, &links, event.position)
             {

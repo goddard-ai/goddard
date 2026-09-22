@@ -3215,6 +3215,8 @@ pub struct Waku {
     /// Built once for the same reason as the link handler — remote-path
     /// checks need the app, and the renderer does not have it.
     markdown_file_menu_items: md::render::FileRefMenuItems,
+    /// The rows a right-clicked commit SHA contributes to its message menu.
+    markdown_commit_menu_items: md::render::CommitRefMenuItems,
     /// Transcript-wide text selection, spanning messages and tool output. Its
     /// `annotations` handle holds the commented highlights of the session on
     /// screen.
@@ -5459,6 +5461,19 @@ impl Waku {
                 })
             };
 
+            let markdown_commit_menu_items: md::render::CommitRefMenuItems = {
+                let waku = cx.entity().downgrade();
+                Rc::new(move |sha, cx| {
+                    let mut items = waku
+                        .update(cx, |this, cx| this.transcript_commit_menu_items(sha, cx))
+                        .unwrap_or_default();
+                    if !items.is_empty() {
+                        items.push(MenuItem::Separator);
+                    }
+                    items
+                })
+            };
+
             // Read before `state` moves into the struct literal below.
             let initial_session = state.selected_session;
 
@@ -6071,6 +6086,7 @@ impl Waku {
                 activity_diff_viewports: RefCell::new(HashMap::new()),
                 markdown_link_handler,
                 markdown_file_menu_items,
+                markdown_commit_menu_items,
                 transcript_selection,
                 transcript_annotations: HashMap::new(),
                 annotation_session: initial_session,

@@ -1333,6 +1333,7 @@ impl Waku {
             .with_guided_reading(self.guided_reading())
             .with_link_handler(self.markdown_link_handler.clone())
             .with_file_ref_items(self.markdown_file_menu_items.clone())
+            .with_commit_ref_items(self.markdown_commit_menu_items.clone())
             .with_streaming_animation(animate_streaming)
     }
 

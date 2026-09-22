@@ -1,0 +1,1 @@
+- Right-clicking a commit link in an agent response now lets you copy its full hash or message, or open its diff in the Git panel.

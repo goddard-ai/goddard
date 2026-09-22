@@ -3583,6 +3583,12 @@ git_panel.unpushed:
   en: Not pushed to upstream
 git_panel.no_commit_body:
   en: No commit description
+git_panel.copy_commit_hash:
+  en: Copy commit hash
+git_panel.copy_commit_message:
+  en: Copy commit message
+git_panel.open_commit_diff:
+  en: Open commit diff
 git_panel.nothing_staged:
   en: No staged changes
 git_panel.nothing_staged_description:

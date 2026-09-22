@@ -1664,6 +1664,9 @@ git_panel.commits: 提交记录
 git_panel.no_commits: 暂无提交
 git_panel.unpushed: 尚未推送到上游
 git_panel.no_commit_body: 无提交描述
+git_panel.copy_commit_hash: 复制提交哈希
+git_panel.copy_commit_message: 复制提交信息
+git_panel.open_commit_diff: 打开提交差异
 git_panel.nothing_staged: 没有已暂存的更改
 git_panel.nothing_staged_description: 默认仅提交已暂存的更改。是否改为提交所有未暂存的更改？
 git_panel.commit_all_one: 提交所有更改（1 个文件）
