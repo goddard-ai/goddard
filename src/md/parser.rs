@@ -536,9 +536,13 @@ fn parse_inline_event(cursor: &mut Cursor, pieces: &mut Vec<InlinePiece>, style:
             });
         }
         Event::DisplayMath(text) => pieces.push(InlinePiece::DisplayMath(text.into_string())),
-        // A hard or soft break inside a paragraph is a line break in the
-        // rendered run: shaped text splits on '\n' on its own.
-        Event::SoftBreak | Event::HardBreak => push_run(InlineRun {
+        // Soft breaks join source lines as prose; hard breaks remain visible
+        // line breaks in the rendered run.
+        Event::SoftBreak => push_run(InlineRun {
+            text: " ".to_owned(),
+            style: style.clone(),
+        }),
+        Event::HardBreak => push_run(InlineRun {
             text: "\n".to_owned(),
             style: style.clone(),
         }),
@@ -1267,9 +1271,9 @@ mod tests {
     }
 
     #[test]
-    fn soft_breaks_become_newlines_in_the_run() {
+    fn soft_breaks_become_spaces_in_the_run() {
         let tree = parse("first\nsecond");
-        assert_eq!(paragraph_text(&tree.blocks[0].block), "first\nsecond");
+        assert_eq!(paragraph_text(&tree.blocks[0].block), "first second");
     }
 
     /// The incremental path must agree with a full parse at every prefix —
