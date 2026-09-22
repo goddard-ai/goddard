@@ -2018,7 +2018,7 @@ friends.send_dialog_message: メッセージ
 friends.send_dialog_message_placeholder: メッセージを追加（任意）
 friends.send_dialog_send: 送信
 friends.send_dialog_title: "%{name} に送信"
-friends.send_file: ファイルを送信…
+friends.send_file: ファイルまたはフォルダを送信…
 friends.send_file_prompt: 送信するファイルまたはフォルダを選択
 friends.send_request: リクエストを送信
 friends.session_running: 実行中

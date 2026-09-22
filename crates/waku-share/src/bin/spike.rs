@@ -101,7 +101,9 @@ async fn main() -> anyhow::Result<()> {
                             };
                             eprintln!("bob: fetched {hash}");
                             let dest = bob_dir.join("files").join(&offer.file_name);
-                            bob.export(hash, &dest).await.expect("export failed");
+                            bob.export(ticket.hash_and_format(), &dest)
+                                .await
+                                .expect("export failed");
                             eprintln!("bob: exported, notifying done");
                             match waku_share::friends::notify_transfer_done(
                                 bob.endpoint(),
@@ -137,13 +139,14 @@ async fn main() -> anyhow::Result<()> {
     println!("both sides recorded the friendship — OK");
 
     // ---- offer → auto-fetch → done ------------------------------------------
-    let (ticket, _tag) = alice.provide(&file_path).await?;
+    let (ticket, _tag, size) = alice.provide(&file_path).await?;
+    assert_eq!(size, payload.len() as u64);
     waku_share::friends::send_offer(
         alice.endpoint(),
         bob.addr(),
         "alice",
         "hello.txt",
-        payload.len() as u64,
+        size,
         Some("here's the new mockups".into()),
         &ticket.to_string(),
     )
@@ -157,6 +160,34 @@ async fn main() -> anyhow::Result<()> {
     let received = std::fs::read(bob_dir.join("files/hello.txt"))?;
     assert_eq!(received, payload.as_bytes(), "bob's received bytes differ");
     println!("alice got TransferDone, bob's copy verified — OK");
+
+    // ---- folder offer ------------------------------------------------------
+    let bundle = alice_dir.join("files/bundle");
+    std::fs::create_dir_all(bundle.join("sub"))?;
+    std::fs::write(bundle.join("one.txt"), b"one\n")?;
+    std::fs::write(bundle.join("sub/two.txt"), b"two\n")?;
+    std::fs::write(bundle.join(".hidden"), b"dot\n")?;
+    let (dir_ticket, _dir_tag, dir_size) = alice.provide(&bundle).await?;
+    assert_eq!(dir_size, 12);
+    waku_share::friends::send_offer(
+        alice.endpoint(),
+        bob.addr(),
+        "alice",
+        "bundle",
+        dir_size,
+        None,
+        &dir_ticket.to_string(),
+    )
+    .await?;
+    let done = tokio::time::timeout(std::time::Duration::from_secs(30), done_rx.recv())
+        .await?
+        .expect("no TransferDone for folder");
+    assert_eq!(done, dir_ticket.to_string());
+    let received_dir = bob_dir.join("files/bundle");
+    assert_eq!(std::fs::read(received_dir.join("one.txt"))?, b"one\n");
+    assert_eq!(std::fs::read(received_dir.join("sub/two.txt"))?, b"two\n");
+    assert_eq!(std::fs::read(received_dir.join(".hidden"))?, b"dot\n");
+    println!("folder tree verified — OK");
 
     println!("spike done");
     Ok(())

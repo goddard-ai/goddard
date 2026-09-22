@@ -4425,7 +4425,7 @@ friends.unreachable:
 friends.last_seen:
   en: "last seen %{ago} ago"
 friends.send_file:
-  en: Send file…
+  en: Send file or folder…
 friends.send_file_prompt:
   en: Choose a file or folder to send
 friends.send_dialog_title:

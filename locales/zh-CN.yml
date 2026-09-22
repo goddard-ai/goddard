@@ -1968,7 +1968,7 @@ friends.send_dialog_message: 消息
 friends.send_dialog_message_placeholder: 添加消息（可选）
 friends.send_dialog_send: 发送
 friends.send_dialog_title: 发送给 %{name}
-friends.send_file: 发送文件…
+friends.send_file: 发送文件或文件夹…
 friends.send_file_prompt: 选择要发送的文件或文件夹
 friends.send_request: 发送请求
 friends.session_running: 运行中

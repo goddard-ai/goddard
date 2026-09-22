@@ -1,0 +1,1 @@
+- Send folders to friends, not just files — the share picker accepts either, and a folder crosses the wire as a blake3-verified collection that lands as a real directory tree on the other side

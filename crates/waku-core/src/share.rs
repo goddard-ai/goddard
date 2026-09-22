@@ -2195,11 +2195,15 @@ fn run_runtime(
                         };
                         let result = async {
                             let ticket: waku_share::Ticket = offer.ticket.parse()?;
-                            let hash = node.fetch(&ticket, progress).await?;
+                            node.fetch(&ticket, progress).await?;
                             let dest_dir = dir.join("transfers").join(id.to_string());
                             std::fs::create_dir_all(&dest_dir)?;
-                            let dest = dest_dir.join(&offer.file_name);
-                            node.export(hash, &dest).await?;
+                            // Wire-supplied name — scrubbed to one safe
+                            // component so an offer can't write outside
+                            // this transfer's folder.
+                            let dest =
+                                dest_dir.join(sanitize_link_component(&offer.file_name, "files"));
+                            node.export(ticket.hash_and_format(), &dest).await?;
                             // The done receipt is courtesy bookkeeping for
                             // the sender — the bytes are already verified on
                             // disk, so a missed callback must not fail the
@@ -2707,12 +2711,13 @@ fn run_runtime(
                             share_node.wait_online(),
                         )
                         .await;
-                        let (ticket, tag) = share_node.provide(&path).await?;
-                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                        let (ticket, tag, size) = share_node.provide(&path).await?;
                         let title = path
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "file".into());
+                            .unwrap_or_else(|| {
+                                if path.is_dir() { "folder" } else { "file" }.into()
+                            });
                         let ticket_str = ticket.to_string();
                         let transfer_id = Uuid::new_v4();
                         {
