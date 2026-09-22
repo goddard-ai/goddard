@@ -233,9 +233,6 @@ const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 30.0;
 /// stay identical.
 const SIDEBAR_ACTION_ROW_GAP: f32 = 2.0;
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
-/// The session column's top bar. The empty-state hero drops by this much so
-/// it sits clear of the header instead of optically centering under it.
-const HEADER_HEIGHT: f32 = 48.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 /// The spacer a project group carries between its rows and the next group.
@@ -5061,10 +5058,7 @@ impl Waku {
                     .when(self.fps_counter_visible, |element| {
                         element.child(self.render_fps_counter(cx))
                     })
-                    .when(self.state.git_panel_enabled, |element| {
-                        element.child(self.render_git_panel_toggle(cx))
-                    })
-                    .child(self.render_right_panel_toggle(cx))
+                    .child(self.render_panel_toggles(cx))
             })
             .children(right_window_controls)
     }

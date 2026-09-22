@@ -2828,6 +2828,21 @@ impl Waku {
             }))
     }
 
+    // The toggles ride whichever header owns the window's top-right corner;
+    // the fixed gap keeps the window header's spacing between them no
+    // matter the host's own rhythm.
+    pub(super) fn render_panel_toggles(&self, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .when(self.state.git_panel_enabled, |element| {
+                element.child(self.render_git_panel_toggle(cx))
+            })
+            .child(self.render_right_panel_toggle(cx))
+    }
+
     pub(super) fn render_right_panel(
         &mut self,
         width: f32,
@@ -4047,10 +4062,7 @@ impl Waku {
 
         self.window_drag_region(
             header
-                .when(self.state.git_panel_enabled, |element| {
-                    element.child(self.render_git_panel_toggle(cx))
-                })
-                .child(self.render_right_panel_toggle(cx))
+                .child(self.render_panel_toggles(cx))
                 .children(self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Right,
                     window,

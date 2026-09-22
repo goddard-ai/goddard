@@ -1,0 +1,1 @@
+- The Git and right-panel toggles no longer shift position when a panel opens — the panel headers now match the top bar's height, inset, and icon spacing.

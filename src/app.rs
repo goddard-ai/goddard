@@ -131,8 +131,10 @@ const UPDATER_BUTTON_COLLAPSED_WIDTH: f32 = 20.0;
 const UPDATER_BUTTON_EXPANDED_WIDTH: f32 = 58.0;
 const RIGHT_PANEL_MIN_WIDTH: f32 = 280.0;
 const RIGHT_PANEL_MAX_WIDTH: f32 = 1000.0;
-/// The Git panel column's fixed header.
-const GIT_PANEL_HEADER_HEIGHT: f32 = 44.0;
+/// The window's top-edge header — the session column's bar and whichever
+/// panel header hosts the top-right controls while its panel is open all
+/// share it, so the chrome keeps one baseline.
+const HEADER_HEIGHT: f32 = 48.0;
 /// Drag bounds for the Git panel's top region — the commit box or an open
 /// commit's file tree — split from the commit log.
 const GIT_PANEL_TOP_MIN_HEIGHT: f32 = 140.0;
@@ -674,7 +676,7 @@ fn widened_panel_width_for_review(panel_width: f32) -> f32 {
 /// The Git panel's top region as laid out this frame: the stored height
 /// clamped so the commit log below it keeps its minimum room.
 fn fitted_git_panel_top_height(viewport_height: f32, height: f32) -> f32 {
-    let maximum = (viewport_height - GIT_PANEL_HEADER_HEIGHT - GIT_PANEL_COMMITS_MIN_HEIGHT)
+    let maximum = (viewport_height - HEADER_HEIGHT - GIT_PANEL_COMMITS_MIN_HEIGHT)
         .clamp(GIT_PANEL_TOP_MIN_HEIGHT, GIT_PANEL_TOP_MAX_HEIGHT);
     sanitize_panel_width(
         height,

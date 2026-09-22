@@ -2939,10 +2939,10 @@ impl Waku {
         let theme = Theme::current(cx);
         let header = div()
             .id("git-panel-header")
-            .h(px(44.0))
+            .h(px(HEADER_HEIGHT))
             .flex_none()
             .pl(px(12.0))
-            .pr(px(8.0))
+            .pr(px(14.0))
             .flex()
             .items_center()
             .gap(px(6.0))
@@ -2959,10 +2959,7 @@ impl Waku {
             .child(div().flex_1());
         self.window_drag_region(
             header
-                .when(self.state.git_panel_enabled, |element| {
-                    element.child(self.render_git_panel_toggle(cx))
-                })
-                .child(self.render_right_panel_toggle(cx))
+                .child(self.render_panel_toggles(cx))
                 .children(self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Right,
                     window,
