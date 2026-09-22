@@ -3050,7 +3050,7 @@ impl Waku {
         // The row kinds are fingerprinted and spliced exactly like a card's:
         // appends keep position, a refold re-measures, and the tail re-measures
         // while the session works so fresh text is never clipped.
-        let pending_turn = self.pending_checkpoint_turn(session.id);
+        let pending_turn = self.blocked_checkpoint_turn(session.id);
         let fingerprint = transcript_rows_fingerprint(&session, &self.expanded_turns, pending_turn);
         let view = self
             .side_chat_views
@@ -3067,8 +3067,8 @@ impl Waku {
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
             let mut folded =
                 folded_transcript_row_kinds(&session, &self.expanded_turns, pending_turn);
-            // Panels have no footer or file summary, but a capture in flight
-            // still marks the settled turn — a queued prompt is waiting on it.
+            // Panels have no footer or file summary, but a capture holding
+            // a queued prompt still marks the settled turn.
             folded.retain(|kind| match kind {
                 TranscriptRowKind::ResponseFooter(..) => false,
                 TranscriptRowKind::ChangedFiles(turn_id) => pending_turn == Some(*turn_id),
@@ -3304,7 +3304,7 @@ impl Waku {
             // Only a pending capture's ChangedFiles survives the fold retain;
             // it renders the compact pending row rather than the full card.
             TranscriptRowKind::ChangedFiles(turn_id)
-                if self.pending_checkpoint_turn(session.id) == Some(turn_id) =>
+                if self.blocked_checkpoint_turn(session.id) == Some(turn_id) =>
             {
                 self.render_card_checkpoint_pending_row(&theme)
             }

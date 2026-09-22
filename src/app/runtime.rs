@@ -4187,7 +4187,7 @@ impl Waku {
     }
 
     /// The settled last turn whose checkpoint capture is still queued or in
-    /// flight — the turn a pending changed-files card stands in for.
+    /// flight.
     pub(super) fn pending_checkpoint_turn(&self, session_id: Uuid) -> Option<Uuid> {
         self.state
             .sessions
@@ -4201,6 +4201,23 @@ impl Waku {
 
     pub(super) fn ending_checkpoint_pending(&self, session_id: Uuid) -> bool {
         self.pending_checkpoint_turn(session_id).is_some()
+    }
+
+    /// The pending checkpoint turn the transcript surfaces — only once a
+    /// visible queued follow-up is actually waiting on the capture. A
+    /// capture that blocks nothing stays silent: the "Checking for
+    /// changes…" card explains why a send has not started, it is not a
+    /// progress report for background work.
+    pub(super) fn blocked_checkpoint_turn(&self, session_id: Uuid) -> Option<Uuid> {
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        if session.queued_messages.iter().all(|message| message.hidden) {
+            return None;
+        }
+        self.pending_checkpoint_turn(session_id)
     }
 
     fn defer_queue_drain(&mut self, session_id: Uuid) {
@@ -4254,7 +4271,7 @@ impl Waku {
     ///
     /// A capture lands a frame or many later, and the turn it belongs to may be
     /// gone by then, so the result is matched back by turn count rather than
-    /// position. Nothing on screen waits for it: the transcript's rewind
+    /// position. Only a queued send waits on it: the transcript's rewind
     /// affordance appears when `invalidate_checkpoint_refs` prompts the next
     /// prefetch to notice the new ref.
     pub(super) fn start_pending_checkpoint_captures(&mut self, cx: &mut Context<Self>) {

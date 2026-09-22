@@ -21,7 +21,7 @@ impl Waku {
                 transcript_rows_fingerprint(
                     session,
                     &self.expanded_turns,
-                    self.pending_checkpoint_turn(session.id),
+                    self.blocked_checkpoint_turn(session.id),
                 )
             });
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
@@ -54,7 +54,7 @@ impl Waku {
             folded_transcript_row_kinds(
                 session,
                 &self.expanded_turns,
-                self.pending_checkpoint_turn(session.id),
+                self.blocked_checkpoint_turn(session.id),
             )
         })
     }
@@ -1022,9 +1022,10 @@ pub(super) fn transcript_rows_fingerprint(
 ) -> u64 {
     let mut hash = mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, session.id);
 
-    // The pending changed-files card lives in the caller's capture queues,
-    // not the session — a capture starting or landing must move the
-    // fingerprint or the card would appear and fill in a fold late.
+    // The pending changed-files card's turn lives in the caller's capture
+    // queues and send queue, not the fold — a capture landing or a send
+    // queueing behind one must move the fingerprint or the card would
+    // appear and fill in a fold late.
     hash = mix_turn_id(hash, pending_turn);
 
     // The working indicator row exists only while the session is busy, and a
@@ -1168,9 +1169,8 @@ pub(super) fn folded_transcript_row_kinds(
     // the footer row. Only turns without a footer need a standalone row;
     // derive its insertion point from the already-folded rows so it lands
     // after the visible `Worked for …` disclosure and before the next prompt.
-    // A settled turn whose checkpoint is still capturing counts too: its
-    // card renders in a pending state so a slow snapshot does not read as
-    // the turn finishing with nothing saved.
+    // A turn the caller marks pending counts too: its card renders in a
+    // pending state to explain the queued send waiting on the capture.
     let changed_turns = session
         .turns
         .iter()

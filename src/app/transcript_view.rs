@@ -2215,9 +2215,10 @@ impl Waku {
             .filter(|checkpoint| checkpoint.status == CheckpointStatus::Ready)
             .filter(|checkpoint| !checkpoint.files.is_empty())
         else {
-            // The settled turn's capture is still running: show the card in
-            // a pending state so it fills in place rather than popping in.
-            return (self.pending_checkpoint_turn(session.id) == Some(turn_id))
+            // The settled turn's capture is still running and holding a
+            // queued send: show the card in a pending state so it explains
+            // the wait and fills in place rather than popping in.
+            return (self.blocked_checkpoint_turn(session.id) == Some(turn_id))
                 .then(|| self.render_changed_files_pending_card(turn_id, theme));
         };
 

@@ -1156,7 +1156,7 @@ impl Waku {
                 })
                 .clone()
         };
-        let pending_turn = self.pending_checkpoint_turn(session.id);
+        let pending_turn = self.blocked_checkpoint_turn(session.id);
         let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns, pending_turn);
         let (kinds, refolded) = {
             let mut cache = self.big_picture.card_kinds.borrow_mut();
@@ -1166,9 +1166,8 @@ impl Waku {
             if entry.0 != fingerprint {
                 let mut folded =
                     folded_transcript_row_kinds(session, &self.expanded_turns, pending_turn);
-                // Cards have no footer or file summary, but a capture in
-                // flight still marks the settled turn — a queued prompt is
-                // waiting on it.
+                // Cards have no footer or file summary, but a capture
+                // holding a queued prompt still marks the settled turn.
                 folded.retain(|kind| match kind {
                     TranscriptRowKind::ResponseFooter(..) => false,
                     TranscriptRowKind::ChangedFiles(turn_id) => pending_turn == Some(*turn_id),
@@ -1434,7 +1433,7 @@ impl Waku {
             // Only a pending capture's ChangedFiles survives the fold retain;
             // it renders the compact pending row rather than the full card.
             TranscriptRowKind::ChangedFiles(turn_id)
-                if self.pending_checkpoint_turn(session.id) == Some(turn_id) =>
+                if self.blocked_checkpoint_turn(session.id) == Some(turn_id) =>
             {
                 self.render_card_checkpoint_pending_row(&theme)
             }
@@ -1608,8 +1607,8 @@ impl Waku {
     }
 
     /// A card's "Checking for changes…" row while the settled turn's
-    /// checkpoint capture runs — the lane's pending card at card scale.
-    /// Side-chat panels draw the same one.
+    /// checkpoint capture holds a queued send — the lane's pending card at
+    /// card scale. Side-chat panels draw the same one.
     pub(super) fn render_card_checkpoint_pending_row(&self, theme: &Theme) -> AnyElement {
         div()
             .h(px(22.0))
