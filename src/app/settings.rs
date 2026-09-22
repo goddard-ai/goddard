@@ -9409,9 +9409,13 @@ impl Waku {
                 // visible — never tear the embed down on the finish report.
                 // An install may still have succeeded mid-script (a sign-in
                 // that bailed after the CLI landed), so re-detect on a
-                // non-clean finish too.
+                // non-clean finish too. A clean finish from a typed-input
+                // launch leaves its shell running, so the report itself is
+                // the close signal the sourced line's `exit` provided.
                 TerminalViewEvent::CommandFinished(code) => {
-                    if *code != Some(0) {
+                    if *code == Some(0) {
+                        this.provider_setup_terminal_exited(provider, cx);
+                    } else {
                         this.refresh_provider_detection(Some(provider));
                     }
                 }
@@ -9427,10 +9431,15 @@ impl Waku {
         cx.notify();
     }
 
-    /// The setup terminal's shell exited — drop the embed and re-detect so
-    /// the row reflects whatever the script changed.
+    /// The setup terminal's run ended — the shell exited, or a typed-input
+    /// launch reported success. Drop the embed and re-detect so the row
+    /// reflects whatever the script changed. A sourced-file launch reports
+    /// success and then exits its shell, so both signals arrive; only the
+    /// first acts.
     fn provider_setup_terminal_exited(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
-        self.provider_setup_terminals.remove(&provider);
+        if self.provider_setup_terminals.remove(&provider).is_none() {
+            return;
+        }
         self.provider_setup_outcomes.insert(provider);
         self.refresh_provider_detection(Some(provider));
         cx.notify();

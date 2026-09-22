@@ -5,6 +5,12 @@
 //! share one file instead of each writing their own. The terminal then
 //! sources that file inside an interactive shell, which makes the command
 //! behave exactly like text typed at the prompt.
+//!
+//! This file path is the fallback: a shell with integration hooks reports
+//! command boundaries itself, so a single-line script runs as plain typed
+//! input with no materialized file and no exit sentinel. Multi-line scripts
+//! would report each line as its own command, and shells with no hook
+//! surface report nothing — both keep the sourced file below.
 
 use std::fs;
 use std::io;
@@ -90,12 +96,14 @@ fn shell_file_name(shell: &Path) -> String {
         .to_ascii_lowercase()
 }
 
-/// The line fed to the interactive shell: source the materialized script so
-/// it runs with every capability typed input has — aliases, functions, `cd`
-/// that persists — then report the script's exit code through an invisible
-/// OSC 2 title sentinel and, when the command is configured to close on
-/// success, exit the shell so the tab can close. A failed script leaves the
-/// shell open with its output visible.
+/// The line fed to the interactive shell when the script can't run as
+/// plain typed input: print the materialized script so its text is on
+/// record in the scrollback, source it so it runs with every capability
+/// typed input has — aliases, functions, `cd` that persists — then report
+/// the script's exit code through an invisible OSC 2 title sentinel and,
+/// when the command is configured to close on success, exit the shell so
+/// the tab can close. A failed script leaves the shell open with its
+/// output visible.
 pub fn source_line(shell: &Path, script_path: &Path, close_on_success: bool) -> String {
     let quoted = shell_quote(script_path);
     let name = shell_file_name(shell);
@@ -107,11 +115,14 @@ pub fn source_line(shell: &Path, script_path: &Path, close_on_success: bool) -> 
         };
         return if close_on_success {
             format!(
-                "source {quoted}; let waku_status = $env.LAST_EXIT_CODE; {}; if $waku_status == 0 {{ exit }}",
-                report("$waku_status")
+                "open --raw {quoted}; source {quoted}; let term_status = $env.LAST_EXIT_CODE; {}; if $term_status == 0 {{ exit }}",
+                report("$term_status")
             )
         } else {
-            format!("source {quoted}; {}", report("$env.LAST_EXIT_CODE"))
+            format!(
+                "open --raw {quoted}; source {quoted}; {}",
+                report("$env.LAST_EXIT_CODE")
+            )
         };
     }
     if name.starts_with("pwsh") || name.starts_with("powershell") {
@@ -125,11 +136,14 @@ pub fn source_line(shell: &Path, script_path: &Path, close_on_success: bool) -> 
         };
         return if close_on_success {
             format!(
-                ". {quoted}; $waku_ok = $?; {}; if ($waku_ok) {{ exit }}",
-                report("[int](-not $waku_ok)")
+                "Get-Content {quoted}; . {quoted}; $term_ok = $?; {}; if ($term_ok) {{ exit }}",
+                report("[int](-not $term_ok)")
             )
         } else {
-            format!(". {quoted}; {}", report("[int](-not $?)"))
+            format!(
+                "Get-Content {quoted}; . {quoted}; {}",
+                report("[int](-not $?)")
+            )
         };
     }
     if name == "cmd" || name == "cmd.exe" {
@@ -137,9 +151,9 @@ pub fn source_line(shell: &Path, script_path: &Path, close_on_success: bool) -> 
         // behavior and never waits on a report.
         let quoted = format!("\"{}\"", script_path.to_string_lossy());
         return if close_on_success {
-            format!("call {quoted} && exit")
+            format!("type {quoted} & call {quoted} && exit")
         } else {
-            format!("call {quoted}")
+            format!("type {quoted} & call {quoted}")
         };
     }
     // `source` is fish's spelling; `.` is the POSIX one. `&&` chains in fish
@@ -150,21 +164,21 @@ pub fn source_line(shell: &Path, script_path: &Path, close_on_success: bool) -> 
     if name.starts_with("fish") {
         return if close_on_success {
             format!(
-                "source {quoted}; set waku_status $status; {}; [ $waku_status -eq 0 ] && exit",
-                report("$waku_status")
+                "cat {quoted}; source {quoted}; set term_status $status; {}; [ $term_status -eq 0 ] && exit",
+                report("$term_status")
             )
         } else {
-            format!("source {quoted}; {}", report("$status"))
+            format!("cat {quoted}; source {quoted}; {}", report("$status"))
         };
     }
-    let source = format!(". {quoted}");
+    let line = format!("cat {quoted}; . {quoted}");
     if close_on_success {
         format!(
-            "{source}; waku_status=$?; {}; [ \"$waku_status\" -eq 0 ] && exit",
-            report("\"$waku_status\"")
+            "{line}; term_status=$?; {}; [ \"$term_status\" -eq 0 ] && exit",
+            report("\"$term_status\"")
         )
     } else {
-        format!("{source}; {}", report("\"$?\""))
+        format!("{line}; {}", report("\"$?\""))
     }
 }
 
@@ -253,23 +267,25 @@ mod tests {
         let sentinel = "\\033]2;goddard-command-exit:%s\\033\\\\";
         assert_eq!(
             source_line(Path::new("/bin/zsh"), path, false),
-            format!(". '/tmp/command-abc'; printf '{sentinel}' \"$?\"")
+            format!("cat '/tmp/command-abc'; . '/tmp/command-abc'; printf '{sentinel}' \"$?\"")
         );
         assert_eq!(
             source_line(Path::new("/bin/zsh"), path, true),
             format!(
-                ". '/tmp/command-abc'; waku_status=$?; printf '{sentinel}' \"$waku_status\"; [ \"$waku_status\" -eq 0 ] && exit"
+                "cat '/tmp/command-abc'; . '/tmp/command-abc'; term_status=$?; printf '{sentinel}' \"$term_status\"; [ \"$term_status\" -eq 0 ] && exit"
             )
         );
         assert_eq!(
             source_line(Path::new("/opt/homebrew/bin/fish"), path, false),
-            format!("source '/tmp/command-abc'; printf '{sentinel}' $status")
+            format!(
+                "cat '/tmp/command-abc'; source '/tmp/command-abc'; printf '{sentinel}' $status"
+            )
         );
         assert_eq!(
             source_line(Path::new("/usr/local/bin/nu"), path, true),
-            "source '/tmp/command-abc'; let waku_status = $env.LAST_EXIT_CODE; \
-             print --no-newline $\"(char esc)]2;goddard-command-exit:($waku_status)(char esc)\\\\\"; \
-             if $waku_status == 0 { exit }"
+            "open --raw '/tmp/command-abc'; source '/tmp/command-abc'; let term_status = $env.LAST_EXIT_CODE; \
+             print --no-newline $\"(char esc)]2;goddard-command-exit:($term_status)(char esc)\\\\\"; \
+             if $term_status == 0 { exit }"
         );
         assert_eq!(
             source_line(
@@ -277,11 +293,11 @@ mod tests {
                 path,
                 true
             ),
-            ". '/tmp/command-abc'; $waku_ok = $?; [Console]::Write(\"$([char]27)]2;goddard-command-exit:$([int](-not $waku_ok))$([char]27)\\\"); if ($waku_ok) { exit }"
+            "Get-Content '/tmp/command-abc'; . '/tmp/command-abc'; $term_ok = $?; [Console]::Write(\"$([char]27)]2;goddard-command-exit:$([int](-not $term_ok))$([char]27)\\\"); if ($term_ok) { exit }"
         );
         assert_eq!(
             source_line(Path::new("C:/Windows/System32/cmd.exe"), path, true),
-            "call \"/tmp/command-abc\" && exit"
+            "type \"/tmp/command-abc\" & call \"/tmp/command-abc\" && exit"
         );
     }
 
@@ -314,7 +330,7 @@ mod tests {
         let path = Path::new("/tmp/it's/command");
         assert_eq!(
             source_line(Path::new("/bin/sh"), path, false),
-            r#". '/tmp/it'\''s/command'; printf '\033]2;goddard-command-exit:%s\033\\' "$?""#
+            r#"cat '/tmp/it'\''s/command'; . '/tmp/it'\''s/command'; printf '\033]2;goddard-command-exit:%s\033\\' "$?""#
         );
     }
 }

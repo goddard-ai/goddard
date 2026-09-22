@@ -350,6 +350,13 @@ impl Waku {
                     {
                         cx.notify();
                     }
+                    // A command launched as plain typed input leaves its
+                    // shell running after a clean exit, so the report
+                    // itself is the close signal the sourced line's
+                    // `&& exit` provides on the fallback path.
+                    if close_on_exit && *code == Some(0) {
+                        this.close_terminal_view_surface(&view, cx);
+                    }
                 }
                 TerminalViewEvent::LocalhostUrl(url) => {
                     this.on_localhost_url_detected(&view, url.clone(), cx);

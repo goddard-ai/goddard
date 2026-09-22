@@ -276,10 +276,11 @@ pub fn init_command_bar_keys(cx: &mut App) {
 }
 
 /// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
-/// `CustomCommand` sources the command's materialized script inside an
-/// interactive shell of the command's choosing. `Program` execs a binary
-/// directly — no shell beneath it — for a program that owns the whole
-/// surface, like a terminal-backed agent's TUI.
+/// `CustomCommand` feeds the command's script to an interactive shell of
+/// the command's choosing — typed verbatim when the shell's integration
+/// can report the run, sourced from a materialized file otherwise.
+/// `Program` execs a binary directly — no shell beneath it — for a program
+/// that owns the whole surface, like a terminal-backed agent's TUI.
 #[derive(Clone)]
 pub enum TerminalLaunch {
     Shell,
@@ -445,14 +446,33 @@ impl TerminalSession {
             }
             TerminalLaunch::CustomCommand(command) => {
                 let shell = crate::custom_commands::command_shell(command);
-                let script_path = crate::custom_commands::ensure_script(&command.script)
-                    .context("materialize custom command script")?;
-                let line = crate::custom_commands::source_line(
-                    &shell,
-                    &script_path,
-                    command.close_on_success,
-                );
-                (shell, Some(line), false, None)
+                // A shell the integration hooks reports command
+                // boundaries on its own: a single-line script runs as
+                // plain typed input — no materialized file, no exit
+                // sentinel. Multi-line scripts would report each line
+                // as its own command and end the run early, and shells
+                // with no hook surface (or no `begin` report, like
+                // pre-4.4 bash) can't resolve a run, so all of them
+                // keep the sourced file.
+                let script = command.script.trim();
+                let typed = (!script.is_empty()
+                    && !script.contains(['\r', '\n'])
+                    && crate::shell_integration::install(&shell)
+                    && crate::shell_integration::reports_command_begins(&shell))
+                .then(|| script.to_owned());
+                match typed {
+                    Some(line) => (shell, Some(line), true, None),
+                    None => {
+                        let script_path = crate::custom_commands::ensure_script(&command.script)
+                            .context("materialize custom command script")?;
+                        let line = crate::custom_commands::source_line(
+                            &shell,
+                            &script_path,
+                            command.close_on_success,
+                        );
+                        (shell, Some(line), false, None)
+                    }
+                }
             }
             TerminalLaunch::Program { program, args } => {
                 (program.clone(), None, false, Some(args.clone()))
@@ -1099,6 +1119,11 @@ pub struct TerminalView {
     /// An interactive command is in flight — reported by shell
     /// integration, or assumed while a custom command's launch line runs.
     command_running: bool,
+    /// A shell-integration `begin` has arrived — the marker a matching
+    /// `end` counts against. A command launch seeds `command_running`
+    /// itself, and bash emits an `end` at the first prompt before the
+    /// launch line runs, so the seed alone can't stand in for a begin.
+    command_began_seen: bool,
     /// Exit status of the most recent command — `None` until one reports.
     last_command_exit: Option<i32>,
     /// When the most recent command started (unix seconds) — the row's
@@ -1229,8 +1254,9 @@ impl TerminalView {
             working_directory,
             shell_name,
             // A custom command's launch line is the terminal's first
-            // command — running from spawn until its sentinel reports.
+            // command — running from spawn until its report lands.
             command_running: runs_a_command,
+            command_began_seen: false,
             last_command_exit: None,
             last_command_started_at: runs_a_command.then(crate::model::unix_time),
             exited: false,
@@ -1377,6 +1403,7 @@ impl TerminalView {
                 }
                 TerminalUiEvent::CommandBegan => {
                     self.command_running = true;
+                    self.command_began_seen = true;
                     self.last_command_started_at = Some(crate::model::unix_time());
                     cx.emit(TerminalViewEvent::ActivityChanged);
                 }
@@ -1384,8 +1411,9 @@ impl TerminalView {
                     // An end only counts when a begin announced a run —
                     // bash emits one at every prompt regardless, and the
                     // first prompt's status is the rc file's, not a
-                    // command's.
-                    if self.command_running {
+                    // command's. A command launch's seeded
+                    // `command_running` can't stand in for that begin.
+                    if self.command_running && self.command_began_seen {
                         self.command_running = false;
                         self.last_command_exit = Some(code);
                         cx.emit(TerminalViewEvent::ActivityChanged);

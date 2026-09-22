@@ -127,6 +127,38 @@ end
 builtin printf '\e]2;goddard-shell:cwd:%s\e\\' $PWD
 "#;
 
+/// The `major.minor` a `--version` banner reports — the first digit-led
+/// token, which on "GNU bash, version 5.2.21(1)-release …" is the
+/// version.
+fn version_tuple(banner: &str) -> Option<(u32, u32)> {
+    let version = banner
+        .split_whitespace()
+        .find(|token| token.chars().next().is_some_and(|c| c.is_ascii_digit()))?;
+    let mut parts = version.split(['.', '(', ')']);
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+/// Whether a hooked `shell` can report a command's start — the half of
+/// the integration a command launch resolves on. Every scripted shell
+/// can except bash older than 4.4, which lacks PS0 and only emits
+/// `end`/`cwd` at each prompt; a launch waiting on its command's
+/// completion treats that bash as unhooked.
+pub fn reports_command_begins(shell: &Path) -> bool {
+    let is_bash = shell
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| matches!(name.to_ascii_lowercase().as_str(), "bash" | "bash.exe"));
+    if !is_bash {
+        return true;
+    }
+    let Ok(output) = std::process::Command::new(shell).arg("--version").output() else {
+        return false;
+    };
+    version_tuple(&String::from_utf8_lossy(&output.stdout)).is_some_and(|version| version >= (4, 4))
+}
+
 /// The integration script for a shell, keyed by its binary name —
 /// `None` for shells with no hook surface (nu, pwsh, cmd).
 fn script_for(shell: &Path) -> Option<(&'static str, &'static str)> {
@@ -327,6 +359,23 @@ mod tests {
             "a\n"
         );
         assert_eq!(strip_block("a\nb\n"), "a\nb\n");
+    }
+
+    #[test]
+    fn version_banners_parse() {
+        assert_eq!(
+            version_tuple("GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)"),
+            Some((3, 2))
+        );
+        assert_eq!(
+            version_tuple("GNU bash, version 5.2.21(1)-release (aarch64-apple-darwin23.0.0)"),
+            Some((5, 2))
+        );
+        assert_eq!(
+            version_tuple("GNU bash, version 4.4.0(1)-release"),
+            Some((4, 4))
+        );
+        assert_eq!(version_tuple("no digits here"), None);
     }
 
     #[test]
