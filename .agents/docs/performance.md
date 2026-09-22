@@ -11,6 +11,13 @@
   Treat I/O reached from `render` as a defect even when it looks cheap, is
   cached after the first hit, or only triggers for some rows — one `git`
   invocation is already several frames of budget.
+- Render paths must not call `.update`, `.read`, or `.read_with` on `Waku` or
+  any entity already leased above them. Transcript rows render under
+  `entity.update` and `WakuPane` content runs inside `waku.update`, so a nested
+  lease aborts the process (`double_lease_panic`, no unwind). Helpers that need
+  `Waku` state while building elements take `&Waku` or `&mut Context<Waku>`;
+  a `&WeakEntity<Waku>` parameter signals deferred use only — callbacks and
+  continuations run outside the lease and may update freely.
 - Move the work to `cx.background_executor().spawn`, store the result on the
   entity, and `cx.notify()` when it lands. Render then reads only that store,
   and a miss means "not known yet" and must degrade gracefully.

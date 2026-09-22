@@ -36,46 +36,13 @@ Read the doc before working in its area:
 
 ## Performance
 
-- Treat performance as a product requirement, not a follow-up. Goddard is a native
-  app competing with web clients, and staying smooth under a long transcript on
-  a high-refresh display is the point of being native. Prefer the faster design
-  when it costs nothing in clarity, and measure before assuming a cost is fine.
-- Never block the UI thread with heavy work. Anything a frame can reach must
-  already be in memory: no subprocess spawns, filesystem walks, network, blocking
-  locks, or synchronous IPC. Row builders and measurement paths run for every
-  visible item on every frame, so I/O reached from `render` is a defect even when
-  cached or limited to some rows.
-- Render paths must not call `.update`, `.read`, or `.read_with` on `Waku` or any
-  entity leased above them in the same render. Transcript rows render under
-  `entity.update` and `WakuPane` content runs inside `waku.update`, so a nested
-  update on the same entity aborts the process (`double_lease_panic`, no unwind).
-  Helpers that need `Waku` state while building elements take `&Waku` or
-  `&mut Context<Waku>`; a `&WeakEntity<Waku>` parameter signals deferred use only
-  — callbacks and continuations such as `on_click`, `on_key_down`, `spawn`
-  continuations, menu-item callbacks, and canvas paint closures run outside the
-  lease and may update freely.
-- Move background work to `cx.background_executor().spawn`, store results on the
-  entity, and `cx.notify()` when they land. Render reads only that store, and a
-  miss means “not known yet” and must degrade gracefully. Resolve whole sessions
-  or collections in one background pass, with a generation counter so stale
-  results cannot overwrite newer state.
-- One-shot user actions such as a click or menu command may work synchronously
-  when freshness matters more than latency; frames may not. Keep per-frame work
-  proportional to what is on screen. Virtualize long collections with `list()`,
-  and hoist whole-session state to a cache refreshed once per frame rather than
-  rebuilding it in each row builder.
-- Streaming CPU is governed by two cadences — stream commits at ≤ ~8.3 Hz and
-  pulse-clock ticks at ≤ 60 Hz (spinners; other pulses stay at ≤ ~30 Hz) — and
-  by what one frame can see. Read [.agents/docs/performance.md](.agents/docs/performance.md)
-  before touching the event pump, pulse clock (`src/ui/motion.rs`), veils,
-  overlay scrollbars, pane caching, or anything else a streaming frame reaches;
-  it also records the counter-based measurement playbook.
-  pulse-clock ticks at ≤ 60 Hz (spinners; other pulses stay at ≤ ~30 Hz) —
-  and by what one frame can see. Read
-  [.agents/docs/performance.md](.agents/docs/performance.md) before touching the event pump,
-  the pulse clock (`src/ui/motion.rs`), veils, overlay scrollbars, pane
-  caching, or anything else a streaming frame reaches; it also records the
-  counter-based measurement playbook that actually finds regressions.
+- Performance is a product requirement: nothing a frame can reach may do I/O
+  or block — no subprocesses, filesystem walks, network, or synchronous IPC
+  from render paths — and per-frame work stays proportional to what is on
+  screen. The rules and streaming cadences live in
+  [.agents/docs/performance.md](.agents/docs/performance.md).
+- Render paths must not call `.update`, `.read`, or `.read_with` on an entity
+  already leased by their caller; transcript rows render under a `Waku` lease.
 
 ## Accessibility
 
