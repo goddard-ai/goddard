@@ -6945,7 +6945,6 @@ mod tests {
                 transport: None,
                 sender: None,
                 queued_id: Some(Uuid::new_v4()),
-                context: None,
             },
         );
 
