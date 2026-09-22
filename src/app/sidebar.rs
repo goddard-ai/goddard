@@ -4189,6 +4189,7 @@ impl Waku {
                     let unread_waku = waku.clone();
                     let copy_waku = waku.clone();
                     let move_waku = waku.clone();
+                    let reclaim_waku = waku.clone();
                     let archive_waku = waku.clone();
                     let remove_waku = waku.clone();
                     // The batch settles at open: a menu on a member of the
@@ -4197,7 +4198,14 @@ impl Waku {
                     // Item callbacks run after the root's plain-click capture
                     // has cleared the set, so they close over the resolved
                     // list instead of re-reading it.
-                    let (targets, local_workspace, any_movable, all_pinned, dormant_targets) = waku
+                    let (
+                        targets,
+                        local_workspace,
+                        any_movable,
+                        all_pinned,
+                        dormant_targets,
+                        any_reclaimable,
+                    ) = waku
                         .update(cx, |waku, cx| {
                             let targets = if waku.sidebar_multi_selection.contains(&session_id) {
                                 waku.sidebar_multi_selection_targets()
@@ -4228,15 +4236,20 @@ impl Waku {
                                         .is_some_and(|session| waku.session_dormant_now(session))
                                 })
                                 .collect::<Vec<_>>();
+                            let any_reclaimable = targets.iter().any(|target| {
+                                session(target)
+                                    .is_some_and(|session| waku.session_reclaim_eligible(session))
+                            });
                             (
                                 targets,
                                 local_workspace,
                                 any_movable,
                                 all_pinned,
                                 dormant_targets,
+                                any_reclaimable,
                             )
                         })
-                        .unwrap_or((vec![session_id], false, false, pinned, Vec::new()));
+                        .unwrap_or((vec![session_id], false, false, pinned, Vec::new(), false));
                     let all_dormant = dormant_targets.len() == targets.len();
                     // A batch labels every item with the count it acts on —
                     // the multi-selection can hold members the row menu
@@ -4372,6 +4385,18 @@ impl Waku {
                                 },
                             )
                             .icon("icons/rotate-cw.svg"),
+                        );
+                    }
+                    // The dialog lists every eligible session — the menu
+                    // entry is a discovery surface, not a per-row action.
+                    if any_reclaimable {
+                        items.push(
+                            MenuItem::new(tr!("session.reclaim_space"), move |window, cx| {
+                                let _ = reclaim_waku.update(cx, |waku, cx| {
+                                    waku.open_reclaim_dialog(window, cx);
+                                });
+                            })
+                            .icon("icons/container.svg"),
                         );
                     }
                     items.extend([

@@ -235,6 +235,7 @@ enum PaletteAction {
     ChooseIssueProject(Uuid),
     ChooseIssueTemplate(waku_protocol::workspace::IssueTemplate),
     NewBlankIssue,
+    ReclaimSpace,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1764,6 +1765,23 @@ impl Waku {
                 next(),
             ),
         ];
+
+        if self
+            .state
+            .sessions
+            .iter()
+            .any(|session| self.session_reclaim_eligible(session))
+        {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.reclaim_space"),
+                "icons/container.svg",
+                None,
+                PaletteAction::ReclaimSpace,
+                "reclaim disk space free storage clean purge delete worktree node_modules target build artifacts dependencies",
+                next(),
+            ));
+        }
 
         if self
             .state
@@ -3823,6 +3841,7 @@ impl Waku {
             PaletteAction::CheckForUpdates => {
                 window.dispatch_action(CheckForUpdates.boxed_clone(), cx)
             }
+            PaletteAction::ReclaimSpace => self.open_reclaim_dialog(window, cx),
             PaletteAction::ToggleSidebar => self.toggle_sidebar_action(&ToggleSidebar, window, cx),
             PaletteAction::ToggleRightPanel => {
                 self.toggle_right_panel_action(&ToggleRightPanel, window, cx)

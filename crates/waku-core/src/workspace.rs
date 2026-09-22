@@ -17,7 +17,8 @@ const MAX_BINARY_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 pub use waku_protocol::workspace::{
-    ReviewDiffData, ReviewDiffSource, WorkingTreeEntry, WorkspaceOperation, WorkspaceResult,
+    ReclaimFailure, ReclaimablePath, ReviewDiffData, ReviewDiffSource, WorkingTreeEntry,
+    WorkspaceOperation, WorkspaceResult,
 };
 
 pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult> {
@@ -217,6 +218,16 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::InspectArchivePreview { cwd } => WorkspaceResult::ArchivePreview {
             preview: crate::git_commit::archive_preview(&cwd)?,
         },
+        WorkspaceOperation::InspectReclaimable { cwd } => WorkspaceResult::Reclaimable {
+            entries: inspect_reclaimable(&cwd),
+        },
+        WorkspaceOperation::ReclaimPaths { cwd, paths } => {
+            let (reclaimed_bytes, failures) = reclaim_paths(&cwd, &paths);
+            WorkspaceResult::Reclaim {
+                reclaimed_bytes,
+                failures,
+            }
+        }
         WorkspaceOperation::GenerateCommitMessage {
             cwd,
             include_unstaged,
@@ -584,6 +595,135 @@ fn list_directory(directory: &Path) -> anyhow::Result<Vec<WorkingTreeEntry>> {
     entries.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
     Ok(entries)
 }
+
+/// The directories under `cwd` that are safe to delete for space:
+/// git-ignored — untracked, so never source — and named on the
+/// reproducible-output allowlist. `git ls-files` collapses each ignored
+/// directory to one `name/` entry at every level, which is how nested
+/// `node_modules` roots surface. Anything but a successful listing is an
+/// empty set — a non-checkout simply has nothing to reclaim.
+fn reclaimable_dirs(cwd: &Path) -> Vec<PathBuf> {
+    let output = crate::command_env::search_path_command("git")
+        .args([
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "-z",
+        ])
+        .current_dir(cwd)
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter_map(|entry| {
+            // Only directories carry the trailing slash; ignored files
+            // never qualify.
+            let entry = std::str::from_utf8(entry).ok()?.strip_suffix('/')?;
+            let name = Path::new(entry).file_name()?.to_str()?;
+            RECLAIMABLE_DIR_NAMES
+                .contains(&name)
+                .then(|| cwd.join(entry))
+        })
+        .collect()
+}
+
+/// One directory's on-disk size. `DirEntry::metadata` doesn't follow
+/// symlinks, so a linked subtree is charged once — the link's own bytes —
+/// rather than walked at its target.
+fn directory_size(path: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut pending = vec![path.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.is_dir() {
+                pending.push(entry.path());
+            } else {
+                total += metadata.len();
+            }
+        }
+    }
+    total
+}
+
+fn inspect_reclaimable(cwd: &Path) -> Vec<ReclaimablePath> {
+    reclaimable_dirs(cwd)
+        .into_iter()
+        .map(|path| ReclaimablePath {
+            bytes: directory_size(&path),
+            path,
+        })
+        .collect()
+}
+
+/// Delete the reported paths still qualifying under a fresh scan — the
+/// client names the set, the daemon re-derives the safe one, and only
+/// the intersection goes. Returns the freed bytes with one failure per
+/// path the delete could not remove.
+fn reclaim_paths(cwd: &Path, paths: &[PathBuf]) -> (u64, Vec<ReclaimFailure>) {
+    let allowed: HashSet<PathBuf> = reclaimable_dirs(cwd).into_iter().collect();
+    let mut reclaimed_bytes = 0u64;
+    let mut failures = Vec::new();
+    for path in paths {
+        if !allowed.contains(path) {
+            continue;
+        }
+        // A symlink reports `is_dir` false under symlink_metadata and is
+        // skipped — `remove_dir_all` never follows it off the worktree.
+        if !fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) {
+            continue;
+        }
+        let bytes = directory_size(path);
+        match fs::remove_dir_all(path) {
+            Ok(()) => reclaimed_bytes += bytes,
+            Err(error) => failures.push(ReclaimFailure {
+                path: path.clone(),
+                error: error.to_string(),
+            }),
+        }
+    }
+    (reclaimed_bytes, failures)
+}
+
+/// Directory names whose contents a toolchain reproduces — dependency
+/// installs and build output — so deleting one costs a reinstall or a
+/// rebuild, never work. The reclaim scan intersects this list with the
+/// checkout's git-ignored directories, which is the real safety hinge:
+/// a tracked directory with one of these names can never be reported.
+const RECLAIMABLE_DIR_NAMES: [&str; 19] = [
+    "node_modules",
+    "target",
+    ".expo",
+    ".next",
+    ".turbo",
+    "dist",
+    "build",
+    "out",
+    "coverage",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "Pods",
+    "DerivedData",
+    ".build",
+    ".gradle",
+    ".goddard-cache",
+    ".waku-cache",
+    "graft",
+];
 
 /// Directory names a picker walk never descends into, beyond the hidden
 /// `.`-prefixed trees: dependency and build output (the same exclusions as
@@ -1233,6 +1373,93 @@ mod tests {
         );
         assert_eq!(numstat_summary(&data.numstat), (1, 1, 0));
         assert!(data.numstat.ends_with("\tsrc/lib.rs\n"));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn reclaim_reports_and_deletes_only_ignored_allowlisted_directories() {
+        let root = repository();
+        fs::write(
+            root.join(".gitignore"),
+            "node_modules/\ntarget/\ntemp/\nscratch.txt\n",
+        )
+        .unwrap();
+        git_ok(&root, &["add", ".gitignore"]);
+        git_ok(
+            &root,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                "ignore rules",
+            ],
+        );
+        // A tracked `build/` stays off the list even though the name is
+        // allowlisted — the ignored gate is the safety hinge.
+        fs::write(root.join("build.rs"), "fn main() {}\n").unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(root.join("build/tool.rs"), "fn tool() {}\n").unwrap();
+        git_ok(&root, &["add", "build.rs", "build/tool.rs"]);
+        fs::create_dir_all(root.join("node_modules/dep")).unwrap();
+        fs::write(root.join("node_modules/dep/index.js"), "x".repeat(100)).unwrap();
+        fs::create_dir_all(root.join("target/debug")).unwrap();
+        fs::write(root.join("target/debug/app"), "y".repeat(50)).unwrap();
+        fs::create_dir_all(root.join("temp")).unwrap();
+        fs::write(root.join("temp/scratch.txt"), "z").unwrap();
+
+        let WorkspaceResult::Reclaimable { entries } =
+            execute(WorkspaceOperation::InspectReclaimable { cwd: root.clone() }).unwrap()
+        else {
+            panic!("unexpected workspace response")
+        };
+        let mut names = entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["node_modules", "target"]);
+        let node = entries
+            .iter()
+            .find(|entry| entry.path.ends_with("node_modules"))
+            .unwrap();
+        assert!(node.bytes >= 100);
+
+        // A tracked path smuggled into the request is skipped, not
+        // deleted — the daemon re-derives the safe set.
+        let mut paths = entries
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        paths.push(root.join("build"));
+        paths.push(root.join("src"));
+        let WorkspaceResult::Reclaim {
+            reclaimed_bytes,
+            failures,
+        } = execute(WorkspaceOperation::ReclaimPaths {
+            cwd: root.clone(),
+            paths,
+        })
+        .unwrap()
+        else {
+            panic!("unexpected workspace response")
+        };
+        assert!(failures.is_empty());
+        assert!(reclaimed_bytes >= 150);
+        assert!(!root.join("node_modules").exists());
+        assert!(!root.join("target").exists());
+        assert!(root.join("build/tool.rs").exists());
+        assert!(root.join("temp/scratch.txt").exists());
+        assert!(root.join("src/lib.rs").exists());
         fs::remove_dir_all(root).ok();
     }
 }

@@ -409,7 +409,7 @@ impl Waku {
     }
 }
 
-fn render_archive_action_row(
+pub(super) fn render_archive_action_row(
     id: &'static str,
     focus: &FocusHandle,
     icon_path: &'static str,

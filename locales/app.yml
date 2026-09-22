@@ -207,6 +207,8 @@ command_palette.open_on_github:
   en: Open on GitHub
 command_palette.land_changes:
   en: Land changes
+command_palette.reclaim_space:
+  en: Reclaim disk space…
 command_palette.change_base_branch:
   en: Change base branch…
 command_palette.based_on:
@@ -1521,6 +1523,8 @@ session.sweep:
   en: Move to Dormant
 session.restore:
   en: Restore
+session.reclaim_space:
+  en: Reclaim Disk Space…
 session.mark_unread:
   en: Mark as Unread
 session.pin_many:
@@ -1567,6 +1571,23 @@ dormant.confirm_description_busy:
   en: A turn is still in progress. Moving to Dormant stops it; restoring brings the task back.
 dormant.confirm_description_busy_worktree:
   en: A turn is still in progress and its checkout has work in progress. Moving to Dormant stops the turn, snapshots the checkout, and removes the worktree; restoring brings it back.
+
+reclaim.title:
+  en: Reclaim disk space
+reclaim.description:
+  en: Idle tasks keep their own copies of dependencies and build outputs. Deleting them frees disk space — they regenerate on the next install or build. Source changes and the tasks themselves stay untouched.
+reclaim.scanning:
+  en: Scanning worktrees…
+reclaim.empty:
+  en: No idle worktrees hold regenerable outputs.
+reclaim.confirm:
+  en: "Reclaim %{size}"
+reclaim.confirm_generic:
+  en: Reclaim
+reclaim.completed:
+  en: "Reclaimed %{size}"
+reclaim.completed_partial:
+  en: "Reclaimed %{size}; %{count} folders could not be deleted"
 
 sidebar.today:
   en: Today

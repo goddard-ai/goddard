@@ -2217,6 +2217,13 @@ pub struct Waku {
     /// background inspection that decides whether it opens.
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
+    /// The "Reclaim Disk Space" listing: idle worktrees and the
+    /// regenerable output each still holds. The generation invalidates
+    /// scans in flight for a replaced dialog; `reclaim_batch` collects a
+    /// confirm's background purges until the toast fires.
+    reclaim_dialog: Option<reclaim_dialog::ReclaimDialogState>,
+    reclaim_dialog_generation: u64,
+    reclaim_batch: Option<reclaim_dialog::ReclaimBatch>,
     /// The one-time confirmation gating the first switch to Full access;
     /// `state.full_access_acknowledged` records that it was accepted.
     full_access_dialog: Option<full_access_dialog::FullAccessDialogState>,
@@ -3344,6 +3351,7 @@ mod projects;
 mod provider_switch;
 mod provider_switch_dialog;
 mod push_base;
+mod reclaim_dialog;
 mod relocate;
 mod render;
 mod reset_credit_dialog;
@@ -3394,6 +3402,7 @@ pub use image_preview::init as init_image_preview_keys;
 pub use issue_dialog::init as init_issue_dialog_keys;
 pub use provider_switch_dialog::init as init_provider_switch_dialog_keys;
 pub use push_base::init as init_push_base_dialog_keys;
+pub use reclaim_dialog::init as init_reclaim_dialog_keys;
 pub use reset_credit_dialog::init as init_reset_credit_dialog_keys;
 pub use saved_drafts::init as init_drafts_keys;
 pub use send_file_dialog::init as init_send_file_dialog_keys;
@@ -3422,6 +3431,7 @@ pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
 pub use provider_switch_dialog::{ConfirmProviderSwitchDialog, DismissProviderSwitchDialog};
 pub use push_base::{ConfirmPushBaseDialog, DismissPushBaseDialog};
+pub use reclaim_dialog::{ConfirmReclaimDialog, DismissReclaimDialog};
 pub use reset_credit_dialog::{ConfirmResetCreditDialog, DismissResetCreditDialog};
 pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
@@ -5659,6 +5669,9 @@ impl Waku {
                 issue_dialog: None,
                 last_created_issue: None,
                 archive_dialog: None,
+                reclaim_dialog: None,
+                reclaim_dialog_generation: 0,
+                reclaim_batch: None,
                 terminal_close_dialog: None,
                 close_dialog: None,
                 provider_switch_dialog: None,

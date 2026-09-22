@@ -734,6 +734,24 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "dialog.reclaim.confirm",
+        action: || Box::new(crate::app::ConfirmReclaimDialog),
+        title_key: "shortcuts.confirm_dialog",
+        title_index: None,
+        category: C::Dialogs,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "dialog.reclaim.dismiss",
+        action: || Box::new(crate::app::DismissReclaimDialog),
+        title_key: "shortcuts.dismiss_dialog",
+        title_index: None,
+        category: C::Dialogs,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "dialog.terminal_close.confirm",
         action: || Box::new(crate::app::ConfirmTerminalClose),
         title_key: "shortcuts.confirm_kill_terminal",
@@ -2456,6 +2474,9 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === app::init_archive_dialog_keys ===============================================
     e("dialog.archive.confirm", All, "enter", ArchiveDialog),
     e("dialog.archive.dismiss", All, "escape", ArchiveDialog),
+    // === app::init_reclaim_dialog_keys ===============================================
+    e("dialog.reclaim.confirm", All, "enter", ReclaimDialog),
+    e("dialog.reclaim.dismiss", All, "escape", ReclaimDialog),
     // === app::init_terminal_close_dialog_keys ==========================================
     e(
         "dialog.terminal_close.confirm",
@@ -2830,6 +2851,7 @@ mod ctx {
     pub const GitPanel: &str = "GitPanel";
     pub const GitPanelModal: &str = "GitPanelModal";
     pub const ArchiveDialog: &str = "ArchiveDialog";
+    pub const ReclaimDialog: &str = "ReclaimDialog";
     pub const TerminalCloseDialog: &str = "TerminalCloseDialog";
     pub const AppCloseDialog: &str = "AppCloseDialog";
     pub const ProviderSwitchDialog: &str = "ProviderSwitchDialog";

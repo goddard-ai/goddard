@@ -13,6 +13,7 @@ use super::command_palette::{
     SelectPrevious,
 };
 use super::full_access_dialog::{ConfirmFullAccessDialog, DismissFullAccessDialog};
+use super::reclaim_dialog::{ConfirmReclaimDialog, DismissReclaimDialog};
 use super::*;
 use crate::{
     AdjustFontSize, BrowserAddressCancel, BrowserBack, BrowserDevtools, BrowserForward,
@@ -763,6 +764,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 ),
                 bound(
                     tr!("shortcuts.confirm_dialog"),
+                    ConfirmReclaimDialog,
+                    Some("ReclaimDialog"),
+                ),
+                bound(
+                    tr!("shortcuts.confirm_dialog"),
                     ConfirmFullAccessDialog,
                     Some("FullAccessDialog"),
                 ),
@@ -790,6 +796,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     tr!("shortcuts.dismiss_dialog"),
                     DismissArchiveDialog,
                     Some("ArchiveDialog"),
+                ),
+                bound(
+                    tr!("shortcuts.dismiss_dialog"),
+                    DismissReclaimDialog,
+                    Some("ReclaimDialog"),
                 ),
                 bound(
                     tr!("shortcuts.dismiss_dialog"),
@@ -1204,6 +1215,7 @@ mod tests {
             crate::app::init_commit_dialog_keys(cx);
             crate::app::init_git_panel_keys(cx);
             crate::app::init_archive_dialog_keys(cx);
+            crate::app::init_reclaim_dialog_keys(cx);
             crate::app::init_full_access_dialog_keys(cx);
             crate::app::init_provider_switch_dialog_keys(cx);
             crate::app::init_push_base_dialog_keys(cx);

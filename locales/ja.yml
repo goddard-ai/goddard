@@ -96,6 +96,7 @@ command_palette.no_issue_templates: Issue テンプレートがありません
 command_palette.no_issue_templates_hint: 代わりに空の Issue を作成してください
 command_palette.open_on_github: GitHub で開く
 command_palette.land_changes: 変更を取り込む
+command_palette.reclaim_space: ディスク容量を解放…
 command_palette.new_custom_command: 新規カスタムコマンド…
 command_palette.prompts: プロンプト
 command_palette.save_prompt: プロンプトテンプレートとして保存…
@@ -511,6 +512,7 @@ session.pin: ピン留め
 session.unpin: ピン留めを解除
 session.sweep: 休眠に移動
 session.restore: 復元
+session.reclaim_space: ディスク容量を解放…
 session.mark_unread: 未読にする
 session.pin_many: "%{count} 件のタスクをピン留め"
 session.unpin_many: "%{count} 件のタスクのピン留めを解除"
@@ -535,6 +537,15 @@ dormant.confirm_title_named: "%{name} を休眠に移動しますか？"
 dormant.confirm_description: チェックアウトに作業中の内容が残っています。休眠に移動するとスナップショットを保存してワークツリーを削除します。復元で元に戻せます。
 dormant.confirm_description_busy: 進行中のターンがあります。休眠に移動するとターンを停止します。復元でタスクを元に戻せます。
 dormant.confirm_description_busy_worktree: 進行中のターンがあり、チェックアウトにも作業中の内容が残っています。休眠に移動するとターンを停止し、チェックアウトをスナップショットに保存してワークツリーを削除します。復元で元に戻せます。
+
+reclaim.title: ディスク容量を解放
+reclaim.description: 使っていないタスクは依存関係やビルド成果物をそれぞれ保持しています。削除しても次回のインストールやビルドで再生成されます。ソースの変更やタスク自体はそのまま残ります。
+reclaim.scanning: ワークツリーをスキャン中…
+reclaim.empty: 解放できる再生成可能な出力を持つワークツリーはありません。
+reclaim.confirm: "%{size} を解放"
+reclaim.confirm_generic: 解放
+reclaim.completed: "%{size} を解放しました"
+reclaim.completed_partial: "%{size} を解放しました（%{count} 件のフォルダを削除できませんでした）"
 
 sidebar.today: 今日
 sidebar.search: 検索

@@ -500,6 +500,28 @@ pub enum NotificationPoll {
     },
 }
 
+/// A directory of reproducible output — a dependency install or a build
+/// artifact — a worktree can lose without losing work: getting it back
+/// is an install or a rebuild. `path` is absolute on the daemon host;
+/// `bytes` is its on-disk size when the scan ran.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReclaimablePath {
+    #[ts(type = "string")]
+    pub path: PathBuf,
+    pub bytes: u64,
+}
+
+/// One path `ReclaimPaths` could not delete, carrying the OS error's own
+/// wording.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReclaimFailure {
+    #[ts(type = "string")]
+    pub path: PathBuf,
+    pub error: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
@@ -731,6 +753,24 @@ pub enum WorkspaceOperation {
     InspectArchivePreview {
         #[ts(type = "string")]
         cwd: PathBuf,
+    },
+    /// Reproducible-output directories (dependency installs, build
+    /// artifacts) under `cwd` — git-ignored and on the daemon's
+    /// known-reproducible name list — each with its on-disk size.
+    /// Returns `Reclaimable`; `entries` is empty outside a Git checkout.
+    InspectReclaimable {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// Delete directories an earlier `InspectReclaimable` reported. The
+    /// daemon re-derives the safe set and removes only the `paths` still
+    /// in it, so a directory that stopped qualifying since the scan is
+    /// skipped rather than deleted. Returns `Reclaim`.
+    ReclaimPaths {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        #[ts(type = "string[]")]
+        paths: Vec<PathBuf>,
     },
     GenerateCommitMessage {
         #[ts(type = "string")]
@@ -1202,6 +1242,15 @@ pub enum WorkspaceResult {
     /// `None` when `cwd` is not inside a Git repository.
     ArchivePreview {
         preview: Option<ArchivePreview>,
+    },
+    Reclaimable {
+        entries: Vec<ReclaimablePath>,
+    },
+    /// `reclaimed_bytes` sums the removed directories' pre-delete sizes;
+    /// `failures` carries one entry per path the delete could not remove.
+    Reclaim {
+        reclaimed_bytes: u64,
+        failures: Vec<ReclaimFailure>,
     },
     CommitMessage {
         message: String,

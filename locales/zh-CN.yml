@@ -95,6 +95,7 @@ command_palette.no_issue_templates: 没有 Issue 模板
 command_palette.no_issue_templates_hint: 请改为创建空白 Issue
 command_palette.open_on_github: 在 GitHub 上打开
 command_palette.land_changes: 合入更改
+command_palette.reclaim_space: 回收磁盘空间…
 command_palette.new_custom_command: 新建自定义命令…
 command_palette.prompts: 提示词
 command_palette.save_prompt: 保存为提示词模板…
@@ -502,6 +503,7 @@ session.pin: 置顶
 session.unpin: 取消置顶
 session.sweep: 移至休眠
 session.restore: 恢复
+session.reclaim_space: 回收磁盘空间…
 session.mark_unread: 标记为未读
 session.pin_many: "置顶 %{count} 个任务"
 session.unpin_many: "取消置顶 %{count} 个任务"
@@ -525,6 +527,16 @@ dormant.confirm_title_named: "将 %{name} 移至休眠？"
 dormant.confirm_description: 该检出中仍有进行中的工作。移至休眠会将其快照并移除工作树；恢复可将其取回。
 dormant.confirm_description_busy: 该任务仍有进行中的回合。移至休眠会停止该回合；恢复可将其取回。
 dormant.confirm_description_busy_worktree: 该任务仍有进行中的回合，且检出中还有未完成的工作。移至休眠会停止回合、快照检出并移除工作树；恢复可将其取回。
+
+reclaim.title: 回收磁盘空间
+reclaim.description: 空闲任务各自保留依赖和构建产物的副本。删除它们可以释放磁盘空间——下次安装或构建时会重新生成。源代码更改和任务本身不受影响。
+reclaim.scanning: 正在扫描工作树…
+reclaim.empty: 没有持有可重新生成输出的空闲工作树。
+reclaim.confirm: "回收 %{size}"
+reclaim.confirm_generic: 回收
+reclaim.completed: "已回收 %{size}"
+reclaim.completed_partial: "已回收 %{size}；%{count} 个文件夹无法删除"
+
 sidebar.today: 今天
 sidebar.search: 搜索
 sidebar.projects: 项目

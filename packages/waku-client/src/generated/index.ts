@@ -139,6 +139,8 @@ export type { QueuedMessage } from "./QueuedMessage";
 export type { QueuedMessageSource } from "./QueuedMessageSource";
 export type { ReasoningBlock } from "./ReasoningBlock";
 export type { RebaseOutcome } from "./RebaseOutcome";
+export type { ReclaimFailure } from "./ReclaimFailure";
+export type { ReclaimablePath } from "./ReclaimablePath";
 export type { RemoteFileRef } from "./RemoteFileRef";
 export type { ReplayCursor } from "./ReplayCursor";
 export type { RepoBranch } from "./RepoBranch";

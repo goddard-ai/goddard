@@ -1,0 +1,1 @@
+- Reclaim disk space from idle worktree sessions: a new "Reclaim Disk Space…" command (command palette and task context menu) lists started, inactive worktrees alongside the dependency installs and build outputs they still hold, and deletes only git-ignored regenerable directories — source changes and task history stay untouched.
