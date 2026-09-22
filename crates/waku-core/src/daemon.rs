@@ -756,6 +756,9 @@ impl WakuBackend {
             .iter()
             .filter_map(|id| self.sessions.lock().remove(id))
             .collect::<Vec<_>>();
+        for runtime in &removed_runtimes {
+            runtime.driver.begin_shutdown();
+        }
         drop_detached(removed_runtimes);
         for id in removed_ids {
             self.agent.clear_session(id);
@@ -837,6 +840,9 @@ impl WakuBackend {
             .iter()
             .filter_map(|id| self.sessions.lock().remove(id))
             .collect::<Vec<_>>();
+        for runtime in &removed_runtimes {
+            runtime.driver.begin_shutdown();
+        }
         drop_detached(removed_runtimes);
         for id in removed_ids {
             self.agent.clear_session(id);
@@ -1104,6 +1110,7 @@ impl Backend for WakuBackend {
                     for (session_id, runtime_id, driver) in
                         reap_idle_runtimes(&sessions, &task_state, &settings, &agent)
                     {
+                        driver.begin_shutdown();
                         // The scoped credential was valid only while the
                         // provider process carrying it lived.
                         agent.revoke_session(session_id);
@@ -1748,6 +1755,9 @@ impl Backend for WakuBackend {
                     .iter()
                     .filter_map(|id| self.sessions.lock().remove(id))
                     .collect::<Vec<_>>();
+                for runtime in &removed_runtimes {
+                    runtime.driver.begin_shutdown();
+                }
                 drop_detached(removed_runtimes);
                 for id in cascaded {
                     self.agent.clear_session(id);
@@ -2812,6 +2822,9 @@ impl WakuBackend {
         // runtime id, so anything the detached teardown still emits dies
         // with it.
         let removed = self.sessions.lock().remove(&session_id);
+        if let Some(removed) = &removed {
+            removed.driver.begin_shutdown();
+        }
         drop_detached(removed);
 
         let mut rewound = source.clone();
