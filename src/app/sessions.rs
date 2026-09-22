@@ -3256,22 +3256,23 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Bare Escape never reaches here — the overlay's Dismiss binding is
-        // deeper in the context stack — but ⌥Escape does, and it must stop
-        // the armed card's turn, never the session idling underneath.
-        if self.big_picture.is_open() {
-            self.cancel_turn(cx);
-            return;
-        }
         // The switcher focus lands after its deferred overlay is painted.
         // Route the root Escape action here too so an immediate press always
-        // cancels the provisional selection instead of reaching the session.
+        // cancels the provisional selection instead of reaching the session
+        // — or, over Big Picture, the armed card's turn.
         if self.task_switcher.is_open() {
             self.cancel_task_switcher(window, cx);
             return;
         }
         if self.project_switcher.is_open() {
             self.cancel_project_switcher(window, cx);
+            return;
+        }
+        // Bare Escape never reaches here — the overlay's Dismiss binding is
+        // deeper in the context stack — but ⌥Escape does, and it must stop
+        // the armed card's turn, never the session idling underneath.
+        if self.big_picture.is_open() {
+            self.cancel_turn(cx);
             return;
         }
         if self.settings_page.take().is_some() {

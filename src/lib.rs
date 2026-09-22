@@ -550,9 +550,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-q", Quit, None),
         KeyBinding::new("secondary-w", CloseWindow, None),
         KeyBinding::new("secondary-n", NewSession, None),
-        // ⌘⇧N opens the "New task in…" directory picker in the palette when
-        // no draft can host the project switcher — the same fall-through
-        // ⌘N gives New Session.
+        // ⌘⇧N is "New task in…" — the palette's directory picker — on every
+        // surface. Only an already-open project switcher takes it first,
+        // cycling in reverse (the matching binding below).
         KeyBinding::new("secondary-shift-n", NewTaskIn, None),
         KeyBinding::new("secondary-o", NewProject, None),
         KeyBinding::new("secondary-,", OpenSettings, None),
@@ -763,10 +763,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // creating or revisiting a draft navigates there from any
         // other surface.
         KeyBinding::new("secondary-n", SwitchProjectForward, None),
-        // ⌘⇧N mirrors the forward chord at the root: the overlay's focus
-        // lands on a two-frame defer, so only a root binding keeps a fast
-        // ⌘N-then-⌘⇧N from slipping to "New task in…" — which still gets
-        // the keystroke when no draft can take the switcher.
+        // ⌘⇧N mirrors the forward chord at the root, but only ever cycles
+        // an already-open overlay in reverse — it never opens one itself.
+        // The overlay's focus lands on a two-frame defer, so only a root
+        // binding keeps a fast ⌘N-then-⌘⇧N from slipping to "New task
+        // in…", which claims the keystroke whenever no switcher is up.
         KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
         KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Workspace")),
         KeyBinding::new(

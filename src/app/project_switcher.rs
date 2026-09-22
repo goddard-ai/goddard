@@ -3,10 +3,11 @@
 //! Mirrors the task switcher: the project order is snapshotted when the
 //! overlay opens, repeated presses move only the highlight, and releasing the
 //! platform modifier commits once — so the draft under the pointer never
-//! retargets mid-gesture. Recency is borrowed from the task switcher's
-//! session history: a project ranks by when one of its tasks was last
-//! activated. The snapshot is capped at ten projects; when recency leaves
-//! slots open, the most recently added projects fill them.
+//! retargets mid-gesture. Over Big Picture the same overlay answers for the
+//! standing new-task draft instead. Recency is borrowed from the task
+//! switcher's session history: a project ranks by when one of its tasks was
+//! last activated. The snapshot is capped at ten projects; when recency
+//! leaves slots open, the most recently added projects fill them.
 
 use super::*;
 
@@ -24,12 +25,14 @@ const WINDOW_MARGIN: f32 = 44.0;
 const VERTICAL_BIAS: f32 = 0.08;
 const VERTICAL_BIAS_MAX: f32 = 96.0;
 
-/// What a commit retargets: the draft the ⌘N gesture was opened on, or the
-/// open Projects page's own project — the ⌘⇧P gesture's.
+/// What a commit retargets: the draft the ⌘N gesture was opened on, the
+/// open Projects page's own project — the ⌘⇧P gesture's — or Big
+/// Picture's standing new-task draft.
 #[derive(Clone, Copy, PartialEq)]
 enum ProjectSwitcherTarget {
     Draft,
     ProjectsPage,
+    BigPicture,
 }
 
 /// Runtime-only switcher state, like its task counterpart: recency lives in
@@ -94,7 +97,7 @@ impl ProjectSwitcherUi {
         self.scroll.scroll_to_item(index);
     }
 
-    fn dismiss(&mut self) -> Option<FocusHandle> {
+    pub(super) fn dismiss(&mut self) -> Option<FocusHandle> {
         self.open = false;
         self.ordered_project_ids.clear();
         self.highlighted_project_id = None;
@@ -225,22 +228,35 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Over Big Picture the ⌘N chord's "which project" job belongs to the
-        // overlay's own new-task draft — a second switcher stacked on top
-        // would answer it for the session underneath instead.
-        if self.big_picture.is_open() {
-            self.cycle_big_picture_new_task_project(reverse, cx);
+        if self.project_switcher.open {
+            self.advance_project_switcher(reverse, window, cx);
             return;
         }
-        if !self.project_switcher.open {
-            // The chord shares ⌘N with New Session; when no draft can take
-            // the switcher, let the keystroke fall through to it.
-            if !self.open_project_switcher(reverse, window, cx) {
+        // ⌘⇧N never opens the switcher — the chord is "New task in…" and
+        // only ever reverse-cycles the overlay ⌘N already raised.
+        if reverse {
+            cx.propagate();
+            return;
+        }
+        // Over Big Picture the ⌘N chord's "which project" job belongs to the
+        // overlay's own new-task draft: an armed card peels off first, then
+        // the switcher answers it for that draft instead of the session
+        // underneath.
+        if self.big_picture.is_open() {
+            if self.big_picture.target().is_some() {
+                self.set_big_picture_target(None, cx);
+                return;
+            }
+            if !self.open_big_picture_project_switcher(window, cx) {
                 cx.propagate();
             }
             return;
         }
-        self.advance_project_switcher(reverse, window, cx);
+        // The chord shares ⌘N with New Session; when no draft can take
+        // the switcher, let the keystroke fall through to it.
+        if !self.open_project_switcher(reverse, window, cx) {
+            cx.propagate();
+        }
     }
 
     /// The ⌘⇧P gesture's second press onward: same overlay and ordering as
@@ -315,11 +331,30 @@ impl Waku {
             return false;
         };
         self.open_switcher(
-            current_project,
+            Some(current_project),
             self.state.selected_session,
             ProjectSwitcherTarget::Draft,
             false,
             reverse,
+            window,
+            cx,
+        )
+    }
+
+    /// ⌘N over Big Picture: the same overlay, answering "which project" for
+    /// the standing new-task draft — the pick the untargeted composer
+    /// submits into — headed by the draft's current destination.
+    fn open_big_picture_project_switcher(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.open_switcher(
+            self.big_picture.new_task_project,
+            None,
+            ProjectSwitcherTarget::BigPicture,
+            false,
+            false,
             window,
             cx,
         )
@@ -337,7 +372,7 @@ impl Waku {
             return false;
         };
         self.open_switcher(
-            current_project,
+            Some(current_project),
             None,
             ProjectSwitcherTarget::ProjectsPage,
             true,
@@ -349,7 +384,7 @@ impl Waku {
 
     fn open_switcher(
         &mut self,
-        current_project: Uuid,
+        current_project: Option<Uuid>,
         original_session_id: Option<Uuid>,
         target: ProjectSwitcherTarget,
         // The page has no projectless scope; its cycling list excludes them.
@@ -366,9 +401,9 @@ impl Waku {
             .filter(|project| !exclude_projectless || !project.is_projectless())
             .cloned()
             .collect();
-        let ordered = ordered_project_ids(Some(current_project), &recent, &projects);
+        let ordered = ordered_project_ids(current_project, &recent, &projects);
         let Some(highlighted_index) =
-            task_switcher::initial_highlight_index(&ordered, Some(current_project), reverse)
+            task_switcher::initial_highlight_index(&ordered, current_project, reverse)
         else {
             return false;
         };
@@ -466,6 +501,27 @@ impl Waku {
         let original = self.project_switcher.original_session_id;
         let target = self.project_switcher.target;
         let previous_focus = self.project_switcher.dismiss();
+        // A Big Picture commit retargets the overlay's standing new-task
+        // draft — the destination its untargeted composer submits into —
+        // never the session idling underneath the scrim.
+        if target == ProjectSwitcherTarget::BigPicture {
+            if self.big_picture.is_open()
+                && let Some(project_id) = selected
+                && self
+                    .state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == project_id)
+            {
+                self.big_picture.new_task_project = Some(project_id);
+                self.sync_big_picture_draft(cx);
+            }
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
         // Page commits have no draft to guard — the highlighted project just
         // becomes the page's scope, and its tables refresh.
         if target == ProjectSwitcherTarget::ProjectsPage {
@@ -677,7 +733,10 @@ impl Waku {
                 cx.listener(|this, _, window, cx| this.cancel_project_switcher(window, cx)),
             )
             .child(motion::modal_enter("project-switcher-card-enter", card));
-        Some(gpui::deferred(layer).with_priority(6).into_any_element())
+        // Priority must clear Big Picture's 7 — ⌘N opens the overlay on top
+        // of it now — and ties the menu layer's 8, which a switcher open
+        // closes anyway.
+        Some(gpui::deferred(layer).with_priority(8).into_any_element())
     }
 }
 

@@ -685,6 +685,12 @@ impl Waku {
         if self.file_finder.is_open() {
             self.close_file_finder(window, cx);
         }
+        // Big Picture swallows the palette's own chords, so a global like
+        // "New task in…" is the only way here while it is up — the overlay
+        // yields rather than leave the palette hidden behind its scrim.
+        if self.big_picture.is_open() {
+            self.close_big_picture(window, cx);
+        }
         let open_menus = self
             .menus
             .borrow()

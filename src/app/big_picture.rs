@@ -450,6 +450,11 @@ impl Waku {
         if !self.big_picture.open {
             return;
         }
+        // The ⌘N project switcher can sit on top of this overlay; it goes
+        // with it.
+        if self.project_switcher.is_open() {
+            self.cancel_project_switcher(window, cx);
+        }
         // File the composer's content under whichever overlay slot owned it —
         // a card's session draft or the new-task draft — before the selected
         // session's draft takes the composer back.
@@ -481,6 +486,9 @@ impl Waku {
         if !self.big_picture.open {
             return;
         }
+        // No window here to hand the switcher's recorded focus back to —
+        // just drop the overlay state.
+        self.project_switcher.dismiss();
         if let Some(key) = self.big_picture.draft_key.take() {
             let draft = self.current_composer_draft(Some(key), cx);
             if self.composer_drafts.set(key, draft) {
@@ -565,36 +573,6 @@ impl Waku {
                 .new_task_project
                 .map(ComposerDraftKey::NewSession),
         }
-    }
-
-    /// ⌘N/⌘⇧N inside the overlay: step the untargeted composer's destination
-    /// through the same ordering the project switcher uses. An armed card
-    /// peels off first — the chord configures the new-task draft.
-    pub(super) fn cycle_big_picture_new_task_project(
-        &mut self,
-        reverse: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if self.big_picture.target.is_some() {
-            self.set_big_picture_target(None, cx);
-            return;
-        }
-        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
-        let ordered = project_switcher::ordered_project_ids(
-            self.big_picture.new_task_project,
-            &recent,
-            &self.state.projects,
-        );
-        let Some(index) = task_switcher::initial_highlight_index(
-            &ordered,
-            self.big_picture.new_task_project,
-            reverse,
-        ) else {
-            return;
-        };
-        self.big_picture.new_task_project = ordered.get(index).copied();
-        self.sync_big_picture_draft(cx);
-        cx.notify();
     }
 
     /// Point the docked composer at the draft its current target owns: stash
