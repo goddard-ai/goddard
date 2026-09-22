@@ -656,6 +656,94 @@ impl Waku {
         )
     }
 
+    /// The settled last turn's chips floated over the transcript's bottom
+    /// edge while its footer row sits below the fold, so a reader partway up
+    /// a long response still sees how the turn resolved. The footer keeps
+    /// the real row; activating the float scrolls the footer back into
+    /// view. Only the session's last turn qualifies — pinning an older
+    /// turn's verdict under a newer response would misattribute it.
+    pub(super) fn render_floating_status_markers(
+        &self,
+        transcript_rows: &ListState,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let turn_id = self.selected_session()?.turns.last()?.id;
+        let cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
+        if cleared.is_empty() {
+            return None;
+        }
+        let footer_row = self
+            .transcript_row_kinds
+            .borrow()
+            .iter()
+            .rposition(|kind| {
+                matches!(kind, TranscriptRowKind::ResponseFooter(id, _) if *id == turn_id)
+            })?;
+        // Unmeasured rows report `None`: no float until the footer has been
+        // laid out once and the list can say where it sits.
+        if transcript_rows.item_is_below_viewport(footer_row) != Some(true) {
+            return None;
+        }
+        let focus = self.transcript_control_focus("transcript-status-markers", cx);
+        Some(
+            div()
+                .absolute()
+                .bottom(px(8.0))
+                .left_0()
+                .right_0()
+                // Same insets and content width as transcript rows, so the
+                // float's left edge lands on the column the footer lives in.
+                .px(px(20.0))
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .mx_auto()
+                        .flex()
+                        .child(
+                            div()
+                                .id("transcript-status-markers")
+                                .flex()
+                                .items_center()
+                                .gap(px(12.0))
+                                .py(px(5.0))
+                                .px(px(9.0))
+                                .rounded(px(8.0))
+                                .border(hairline())
+                                .border_color(theme.border_subtle)
+                                .bg(theme.raised)
+                                .shadow_xs()
+                                .cursor_default()
+                                .track_focus(&focus)
+                                .tab_index(0)
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                .children(cleared.into_iter().map(|(marker, probability)| {
+                                    status_marker_chip(marker, probability, theme)
+                                }))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.active_transcript_rows()
+                                        .scroll_to_reveal_item(footer_row);
+                                    cx.notify();
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, _, cx| {
+                                        if matches!(
+                                            event.keystroke.key.as_str(),
+                                            "enter" | "space"
+                                        ) {
+                                            this.active_transcript_rows()
+                                                .scroll_to_reveal_item(footer_row);
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                )),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// Forget every marker verdict and pending request; the feature's state
     /// is runtime-only by design, so toggling off wipes it rather than
     /// leaving stale chips on screen.

@@ -401,6 +401,8 @@ impl Waku {
         });
         let transcript_focus = self.transcript_focus.clone();
         let theme = Theme::current(cx);
+        let status_marker_float =
+            self.render_floating_status_markers(&transcript_rows, &theme, cx);
         div()
             .flex_1()
             .min_h_0()
@@ -438,6 +440,7 @@ impl Waku {
             ))
             .children(navigation_rail)
             .children(scroll_to_bottom)
+            .children(status_marker_float)
             .child(scrollbar::vertical(
                 &scrollbar_handle,
                 &self.transcript_scrollbar,
