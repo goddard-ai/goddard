@@ -215,7 +215,7 @@ impl Waku {
         }
 
         let (confirm_label, confirm_icon) = match dialog.intent {
-            CloseDialogIntent::Quit => (tr!("menu.quit", app = APP_NAME), "icons/unplug.svg"),
+            CloseDialogIntent::Quit => (tr!("menu.quit", app = APP_NAME), "icons/power.svg"),
             CloseDialogIntent::HideWindow => (tr!("menu.close_window"), "icons/eye-off.svg"),
         };
         let confirm_row = render_close_dialog_row(

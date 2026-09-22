@@ -1,0 +1,1 @@
+- Fix icons that never rendered: transcript status notices, the quit confirmation's Quit action, Git panel unstage buttons, the GitHub "Fix checks" action, draft attachment badges, and Projects worktree badges.
