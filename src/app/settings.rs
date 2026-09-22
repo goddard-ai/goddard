@@ -1908,145 +1908,187 @@ impl Waku {
         .flatten()
         .collect();
 
-        let notification_cards: Vec<AnyElement> = [{
-            let enabled = self.state.completion_sound_enabled;
-            let selected_sound = self.state.completion_sound;
-            let volume = self.state.completion_sound_volume;
-            let volume_shown = self.completion_volume_slider.shown(volume);
-            let volume_slider = slider::slider(
-                "completion-volume-slider",
-                &self.completion_volume_slider,
-                crate::persistence::MAX_COMPLETION_SOUND_VOLUME,
-                volume,
-                cx,
-                |this, volume, _, cx| this.set_completion_sound_volume(volume, cx),
-            );
-            let weak = cx.entity().downgrade();
-            let sound_handle = self.menu_handle("completion-sound-selector", cx);
-            let sound_selector = dropdown_menu(
-                MenuChip::new("completion-sound-selector")
-                    .label(selected_sound.label())
-                    .outlined()
-                    .selected(sound_handle.is_open())
-                    .w(px(116.0))
-                    .justify_between(),
-                "completion-sound-selector-menu",
-                &sound_handle,
-                MenuAlign::BelowRight,
-                move |_| {
-                    CompletionSound::ALL
-                        .into_iter()
-                        .map(|sound| {
-                            let weak = weak.clone();
-                            MenuItem::new(sound.label(), move |_, cx| {
-                                let _ = weak.update(cx, |this, cx| {
-                                    this.set_completion_sound(sound, cx);
-                                });
-                            })
-                            .selected(sound == selected_sound)
-                            .on_highlight(move |_, _| {
-                                crate::platform::play_completion_sound(sound, volume);
-                            })
-                        })
-                        .collect()
-                },
-            );
-            let toggle_row = settings_row(
-                tr!("settings.completion_sound"),
-                tr!("settings.completion_sound_description"),
-                toggle_switch(
-                    "completion-sound-toggle",
-                    enabled,
-                    false,
-                    theme,
-                    cx,
-                    move |this, _, cx| this.set_completion_sound_enabled(!enabled, cx),
-                ),
-                theme,
-                search,
-            );
-            let sound_row = if !enabled {
-                None
-            } else {
-                let title = tr!("settings.completion_sound_name");
-                search.matched(&title, "").map(|matched| {
-                    div()
-                        .w_full()
-                        .min_h(px(52.0))
-                        .px(px(20.0))
-                        .py(px(10.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(24.0))
-                        .child(settings_title_jump(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(
-                                    title,
-                                    matched.title_ranges.clone(),
-                                    theme,
-                                )),
-                            &matched,
-                            theme,
-                        ))
-                        .child(sound_selector)
-                })
-            };
-            let volume_row = if !enabled {
-                None
-            } else {
-                let title = tr!("settings.completion_sound_volume");
-                search.matched(&title, "").map(|matched| {
-                    div()
-                        .w_full()
-                        .min_h(px(52.0))
-                        .px(px(20.0))
-                        .py(px(10.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(12.0))
-                        .child(settings_title_jump(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(
-                                    title,
-                                    matched.title_ranges.clone(),
-                                    theme,
-                                )),
-                            &matched,
-                            theme,
-                        ))
-                        .child(volume_slider.w(px(140.0)).flex_none())
-                        .child(
-                            div()
-                                .w(px(32.0))
-                                .flex_none()
-                                .flex()
-                                .justify_end()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(format!("{}%", (volume_shown * 100.0).round() as i32)),
-                        )
-                })
-            };
+        let notification_cards: Vec<AnyElement> = [
             settings_row_card(
                 vec![
-                    toggle_row,
-                    sound_row.map(|row| row.into_any_element()),
-                    volume_row.map(|row| row.into_any_element()),
+                    {
+                        let enabled = self.state.notify_turn_finished;
+                        settings_row(
+                            tr!("settings.finished_turn_notification"),
+                            tr!("settings.finished_turn_notification_description"),
+                            toggle_switch(
+                                "finished-turn-notification-toggle",
+                                enabled,
+                                false,
+                                theme,
+                                cx,
+                                move |this, _, cx| this.set_notify_turn_finished(!enabled, cx),
+                            ),
+                            theme,
+                            search,
+                        )
+                    },
+                    {
+                        let enabled = self.state.notify_waiting_input;
+                        settings_row(
+                            tr!("settings.waiting_input_notification"),
+                            tr!("settings.waiting_input_notification_description"),
+                            toggle_switch(
+                                "waiting-input-notification-toggle",
+                                enabled,
+                                false,
+                                theme,
+                                cx,
+                                move |this, _, cx| this.set_notify_waiting_input(!enabled, cx),
+                            ),
+                            theme,
+                            search,
+                        )
+                    },
                 ],
                 theme,
             )
-            .map(|card| card.into_any_element())
-        }]
+            .map(|card| card.into_any_element()),
+            {
+                let enabled = self.state.completion_sound_enabled;
+                let selected_sound = self.state.completion_sound;
+                let volume = self.state.completion_sound_volume;
+                let volume_shown = self.completion_volume_slider.shown(volume);
+                let volume_slider = slider::slider(
+                    "completion-volume-slider",
+                    &self.completion_volume_slider,
+                    crate::persistence::MAX_COMPLETION_SOUND_VOLUME,
+                    volume,
+                    cx,
+                    |this, volume, _, cx| this.set_completion_sound_volume(volume, cx),
+                );
+                let weak = cx.entity().downgrade();
+                let sound_handle = self.menu_handle("completion-sound-selector", cx);
+                let sound_selector = dropdown_menu(
+                    MenuChip::new("completion-sound-selector")
+                        .label(selected_sound.label())
+                        .outlined()
+                        .selected(sound_handle.is_open())
+                        .w(px(116.0))
+                        .justify_between(),
+                    "completion-sound-selector-menu",
+                    &sound_handle,
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        CompletionSound::ALL
+                            .into_iter()
+                            .map(|sound| {
+                                let weak = weak.clone();
+                                MenuItem::new(sound.label(), move |_, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_completion_sound(sound, cx);
+                                    });
+                                })
+                                .selected(sound == selected_sound)
+                                .on_highlight(move |_, _| {
+                                    crate::platform::play_completion_sound(sound, volume);
+                                })
+                            })
+                            .collect()
+                    },
+                );
+                let toggle_row = settings_row(
+                    tr!("settings.completion_sound"),
+                    tr!("settings.completion_sound_description"),
+                    toggle_switch(
+                        "completion-sound-toggle",
+                        enabled,
+                        false,
+                        theme,
+                        cx,
+                        move |this, _, cx| this.set_completion_sound_enabled(!enabled, cx),
+                    ),
+                    theme,
+                    search,
+                );
+                let sound_row = if !enabled {
+                    None
+                } else {
+                    let title = tr!("settings.completion_sound_name");
+                    search.matched(&title, "").map(|matched| {
+                        div()
+                            .w_full()
+                            .min_h(px(52.0))
+                            .px(px(20.0))
+                            .py(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(24.0))
+                            .child(settings_title_jump(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
+                            .child(sound_selector)
+                    })
+                };
+                let volume_row = if !enabled {
+                    None
+                } else {
+                    let title = tr!("settings.completion_sound_volume");
+                    search.matched(&title, "").map(|matched| {
+                        div()
+                            .w_full()
+                            .min_h(px(52.0))
+                            .px(px(20.0))
+                            .py(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(12.0))
+                            .child(settings_title_jump(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
+                            .child(volume_slider.w(px(140.0)).flex_none())
+                            .child(
+                                div()
+                                    .w(px(32.0))
+                                    .flex_none()
+                                    .flex()
+                                    .justify_end()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(format!("{}%", (volume_shown * 100.0).round() as i32)),
+                            )
+                    })
+                };
+                settings_row_card(
+                    vec![
+                        toggle_row,
+                        sound_row.map(|row| row.into_any_element()),
+                        volume_row.map(|row| row.into_any_element()),
+                    ],
+                    theme,
+                )
+                .map(|card| card.into_any_element())
+            },
+        ]
         .into_iter()
         .flatten()
         .collect();
@@ -2234,6 +2276,24 @@ impl Waku {
             self.completion_volume_slider.cancel();
         }
         self.state.completion_sound_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_notify_turn_finished(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.notify_turn_finished == enabled {
+            return;
+        }
+        self.state.notify_turn_finished = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_notify_waiting_input(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.notify_waiting_input == enabled {
+            return;
+        }
+        self.state.notify_waiting_input = enabled;
         self.save();
         cx.notify();
     }

@@ -406,6 +406,10 @@ settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド
 settings.completion_sound_volume: 音量
+settings.finished_turn_notification: ターン完了
+settings.finished_turn_notification_description: アプリがバックグラウンドにあるとき、タスクがターンを完了したらシステム通知を送信します
+settings.waiting_input_notification: 入力待ち
+settings.waiting_input_notification_description: バックグラウンドのタスクが承認や質問への回答を待って停止したときにシステム通知を送信します
 settings.theme_system: システム
 settings.theme_light: ライト
 settings.theme_dark: ダーク
@@ -1129,7 +1133,8 @@ errors.project_path_in_use: そのフォルダはすでに %{name} として追�
 
 session.stopped: 停止しました
 session.turn_completed: ターンが完了しました
-session.turn_waiting_background: バックグラウンドタスクを待っています
+session.waiting_for_approval: 承認を待っています
+session.waiting_for_answer: 回答を待っています
 transcript.waiting_background: バックグラウンドタスクを待っています
 session.stopped_before_response: エージェントは回答を返す前に停止しました
 session.prompt_not_delivered: メッセージはエージェントに届きませんでした — もう一度送信してください

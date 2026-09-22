@@ -179,6 +179,10 @@ impl CompletionSound {
     }
 }
 
+fn default_notification_enabled() -> bool {
+    true
+}
+
 fn default_sidebar_visibility() -> bool {
     true
 }
@@ -841,6 +845,12 @@ pub struct AppSettings {
     /// 1.0 is the sound as bundled, up to 2.0 plays it louder. Hand-edited
     /// values are clamped when applied.
     pub completion_sound_volume: f32,
+    /// Whether a finished turn sends an OS notification while the app is
+    /// in the background.
+    pub notify_turn_finished: bool,
+    /// Whether a session blocked on a permission or a question sends an OS
+    /// notification while the app is in the background.
+    pub notify_waiting_input: bool,
     /// User-owned terminal commands surfaced in the command palette.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
@@ -942,6 +952,8 @@ impl Default for AppSettings {
             completion_sound_enabled: false,
             completion_sound: CompletionSound::default(),
             completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
+            notify_turn_finished: default_notification_enabled(),
+            notify_waiting_input: default_notification_enabled(),
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -1327,6 +1339,10 @@ pub struct PersistedState {
     pub completion_sound: CompletionSound,
     #[serde(default = "default_completion_sound_volume")]
     pub completion_sound_volume: f32,
+    #[serde(default = "default_notification_enabled")]
+    pub notify_turn_finished: bool,
+    #[serde(default = "default_notification_enabled")]
+    pub notify_waiting_input: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental feature opt-ins from the Experiments settings page.
@@ -1575,6 +1591,8 @@ impl PersistedState {
             completion_sound_enabled: false,
             completion_sound: CompletionSound::default(),
             completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
+            notify_turn_finished: default_notification_enabled(),
+            notify_waiting_input: default_notification_enabled(),
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -1915,6 +1933,8 @@ impl PersistedState {
             completion_sound_enabled: self.completion_sound_enabled,
             completion_sound: self.completion_sound,
             completion_sound_volume: self.completion_sound_volume,
+            notify_turn_finished: self.notify_turn_finished,
+            notify_waiting_input: self.notify_waiting_input,
             custom_commands: self.custom_commands.clone(),
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
@@ -2023,6 +2043,8 @@ impl PersistedState {
         self.completion_sound = settings.completion_sound;
         self.completion_sound_volume =
             sanitized_completion_sound_volume(settings.completion_sound_volume);
+        self.notify_turn_finished = settings.notify_turn_finished;
+        self.notify_waiting_input = settings.notify_waiting_input;
         self.custom_commands = settings.custom_commands;
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;
@@ -2855,6 +2877,31 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.sidebar_transparency);
+    }
+
+    #[test]
+    fn notification_toggles_default_on_and_persist_as_app_preferences() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(defaults.notify_turn_finished);
+        assert!(defaults.notify_waiting_input);
+        let mut state = PersistedState::empty();
+        assert!(state.notify_turn_finished);
+        assert!(state.notify_waiting_input);
+        state.notify_turn_finished = false;
+        state.notify_waiting_input = false;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["notify_turn_finished"], false);
+        assert_eq!(settings["notify_waiting_input"], false);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("notify_turn_finished")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(!restored.notify_turn_finished);
+        assert!(!restored.notify_waiting_input);
     }
 
     #[test]

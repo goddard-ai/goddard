@@ -1,0 +1,1 @@
+- Choose which task events send system notifications while the app is in the background: new "Finished turn" and "Waiting for input" toggles under Settings → Notifications — and a task blocked on your approval or a question now banners instead of waiting silently

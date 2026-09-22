@@ -1293,9 +1293,6 @@ struct SessionRuntime {
     /// by a newline-only chunk; joined verbatim that renders one token per
     /// line, so the run is collapsed instead — see `push_reasoning_delta`.
     pending_reasoning_newlines: usize,
-    /// The parked-turn notification has fired for the turn in flight, so a
-    /// wake that parks again does not repeat it. Cleared when the turn ends.
-    park_announced: bool,
     stream_remeasure_pending: bool,
     pending_permission: Option<PendingPermission>,
     pending_user_input: Option<PendingUserInput>,

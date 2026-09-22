@@ -164,20 +164,39 @@ impl Waku {
             })
     }
 
-    /// Whether the running turn was prompted — a provider-started wake has no
-    /// user message of its own.
-    pub(super) fn active_turn_has_user_message(&self, session_id: Uuid) -> bool {
-        self.state
+    /// The banner title for a session's OS notification: its display title,
+    /// with the untitled placeholder swapped for the localized "New task".
+    fn task_notification_title(&self, session_id: Uuid) -> Option<String> {
+        let session = self
+            .state
             .sessions
             .iter()
-            .find(|session| session.id == session_id)
-            .and_then(|session| {
-                let turn_id = session.active_turn_id()?;
-                Some(session.messages.iter().any(|message| {
-                    message.turn_id == Some(turn_id) && message.role == MessageRole::User
-                }))
-            })
-            .unwrap_or(false)
+            .find(|session| session.id == session_id)?;
+        let title = session.display_title();
+        Some(if title == AgentSession::DEFAULT_TITLE {
+            tr!("session.new_task")
+        } else {
+            title.to_owned()
+        })
+    }
+
+    /// An OS banner for a session blocked on the user — a permission or a
+    /// question — gated by its own setting and the same "app in the
+    /// background" rule as the finished-turn banner. The per-session tag
+    /// replaces any earlier banner for the same task.
+    fn notify_waiting_input(&self, session_id: Uuid, body: String, cx: &mut Context<Self>) {
+        if !self.state.notify_waiting_input || cx.active_window().is_some() {
+            return;
+        }
+        let Some(title) = self.task_notification_title(session_id) else {
+            return;
+        };
+        crate::platform::show_task_notification(
+            &task_notification_tag(session_id),
+            &title,
+            &body,
+            cx,
+        );
     }
 
     pub(super) fn accepts_turn_output(&mut self, session_id: Uuid) -> bool {
@@ -336,8 +355,9 @@ impl Waku {
                 // The reply ended while detached work the provider will wake
                 // the session for is still running. The turn stays open for
                 // that wake; only its streaming state settles, and the session
-                // shows the wait instead of a finish. A prompted turn announces
-                // the wait once; a wake that parks again stays quiet.
+                // shows the wait instead of a finish. Parking never banners —
+                // the wake's own settle (or an input request) is the
+                // notify-worthy event.
                 if self
                     .state
                     .sessions
@@ -350,42 +370,15 @@ impl Waku {
                 }
                 self.settle_foreground_work(session_id, BackgroundWorkStatus::Completed);
                 let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
-                let announce = cx.active_window().is_none()
-                    && !runtime.park_announced
-                    && self.active_turn_has_user_message(session_id);
-                let task_notification = announce
-                    .then(|| {
-                        self.state
-                            .sessions
-                            .iter()
-                            .find(|session| session.id == session_id)
-                            .map(|session| {
-                                if session.display_title() == AgentSession::DEFAULT_TITLE {
-                                    tr!("session.new_task")
-                                } else {
-                                    session.display_title().to_owned()
-                                }
-                            })
-                    })
-                    .flatten();
                 self.finish_streaming_assistant(session_id);
                 self.complete_turn_blocks(session_id);
                 runtime.stream_phase = None;
-                runtime.park_announced = true;
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.status = SessionStatus::Background;
                     session.updated_at = unix_time();
                 }
                 if let Some(previous_kinds) = previous_kinds.as_deref() {
                     self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
-                }
-                if let Some(title) = task_notification {
-                    crate::platform::show_task_notification(
-                        &task_notification_tag(session_id),
-                        &title,
-                        &tr!("session.turn_waiting_background"),
-                        cx,
-                    );
                 }
             }
             DriverEvent::TextDelta(delta) => {
@@ -489,6 +482,7 @@ impl Waku {
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
                     }
+                    self.notify_waiting_input(session_id, tr!("session.waiting_for_approval"), cx);
                 }
             }
             DriverEvent::UserInputRequested {
@@ -504,6 +498,7 @@ impl Waku {
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
                     }
+                    self.notify_waiting_input(session_id, tr!("session.waiting_for_answer"), cx);
                 }
             }
             DriverEvent::ComputerUseUpdated(state) => {
@@ -736,29 +731,22 @@ impl Waku {
                 if finished_turn_id.is_none() {
                     return true;
                 }
-                let task_notification = cx.active_window().is_none().then(|| {
-                    self.state
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == session_id)
-                        .map(|session| {
-                            let title = if session.display_title() == AgentSession::DEFAULT_TITLE {
-                                tr!("session.new_task")
-                            } else {
-                                session.display_title().to_owned()
-                            };
-                            let body = if success {
-                                tr!("session.turn_completed")
-                            } else {
-                                tr!("session.stopped")
-                            };
-                            (title, body)
-                        })
-                });
+                let task_notification = (self.state.notify_turn_finished
+                    && cx.active_window().is_none())
+                .then(|| {
+                    self.task_notification_title(session_id).map(|title| {
+                        let body = if success {
+                            tr!("session.turn_completed")
+                        } else {
+                            tr!("session.stopped")
+                        };
+                        (title, body)
+                    })
+                })
+                .flatten();
                 self.finish_streaming_assistant(session_id);
                 self.complete_turn_blocks(session_id);
                 runtime.stream_phase = None;
-                runtime.park_announced = false;
                 let needs_fallback = !self.turn_has_assistant_message(session_id);
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.status = if success {
@@ -879,7 +867,7 @@ impl Waku {
                         self.state.completion_sound_volume,
                     );
                 }
-                if let Some(Some((title, body))) = task_notification {
+                if let Some((title, body)) = task_notification {
                     crate::platform::show_task_notification(
                         &task_notification_tag(session_id),
                         &title,

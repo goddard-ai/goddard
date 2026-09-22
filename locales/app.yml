@@ -1269,6 +1269,14 @@ settings.completion_sound_name:
   en: Sound
 settings.completion_sound_volume:
   en: Volume
+settings.finished_turn_notification:
+  en: Finished turn
+settings.finished_turn_notification_description:
+  en: Send a system notification when a task finishes its turn while the app is in the background
+settings.waiting_input_notification:
+  en: Waiting for input
+settings.waiting_input_notification_description:
+  en: Send a system notification when a task in the background is blocked on your approval or a question
 settings.theme_system:
   en: System
 settings.theme_light:
@@ -2838,8 +2846,10 @@ session.stopped:
   en: Stopped
 session.turn_completed:
   en: Turn completed
-session.turn_waiting_background:
-  en: Waiting for background tasks
+session.waiting_for_approval:
+  en: Waiting for your approval
+session.waiting_for_answer:
+  en: Waiting for your answer
 transcript.waiting_background:
   en: Waiting for background tasks
 session.stopped_before_response:

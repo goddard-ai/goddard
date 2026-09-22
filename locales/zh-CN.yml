@@ -404,6 +404,10 @@ settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
 settings.completion_sound_name: 提示音
 settings.completion_sound_volume: 音量
+settings.finished_turn_notification: 回合完成
+settings.finished_turn_notification_description: 当应用处于后台时，任务完成回合后发送系统通知
+settings.waiting_input_notification: 等待输入
+settings.waiting_input_notification_description: 当后台任务因等待你的批准或回答而暂停时发送系统通知
 settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
@@ -1099,7 +1103,8 @@ errors.project_folder_missing: 找不到 %{name} 的文件夹 — 请定位该�
 errors.project_path_in_use: 该文件夹已作为 %{name} 添加
 session.stopped: 已停止
 session.turn_completed: 本轮已完成
-session.turn_waiting_background: 正在等待后台任务
+session.waiting_for_approval: 等待你的批准
+session.waiting_for_answer: 等待你的回答
 transcript.waiting_background: 正在等待后台任务
 session.stopped_before_response: 智能体在返回回复前停止了
 session.prompt_not_delivered: 消息未送达智能体 — 请重新发送
