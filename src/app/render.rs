@@ -511,6 +511,7 @@ impl Render for Waku {
             let close_dialog = self.render_close_dialog(cx);
             let provider_switch_dialog = self.render_provider_switch_dialog(cx);
             let push_base_dialog = self.render_push_base_dialog(window, cx);
+            let reset_credit_dialog = self.render_reset_credit_dialog(cx);
             let shortcuts_dialog = self.render_shortcuts_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
             let send_file_dialog = self.render_send_file_dialog(cx);
@@ -566,6 +567,7 @@ impl Render for Waku {
                 .children(close_dialog)
                 .children(provider_switch_dialog)
                 .children(push_base_dialog)
+                .children(reset_credit_dialog)
                 .children(shortcuts_dialog)
                 .children(goal_dialog)
                 .children(send_file_dialog)
@@ -614,6 +616,7 @@ impl Render for Waku {
         let close_dialog = self.render_close_dialog(cx);
         let provider_switch_dialog = self.render_provider_switch_dialog(cx);
         let push_base_dialog = self.render_push_base_dialog(window, cx);
+        let reset_credit_dialog = self.render_reset_credit_dialog(cx);
         let shortcuts_dialog = self.render_shortcuts_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let send_file_dialog = self.render_send_file_dialog(cx);
@@ -991,6 +994,7 @@ impl Render for Waku {
             .children(close_dialog)
             .children(provider_switch_dialog)
             .children(push_base_dialog)
+            .children(reset_credit_dialog)
             .children(shortcuts_dialog)
             .children(goal_dialog)
             .children(send_file_dialog)

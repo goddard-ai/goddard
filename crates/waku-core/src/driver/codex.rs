@@ -2238,6 +2238,9 @@ fn codex_plan_usage(snapshot: Option<&Value>) -> Option<crate::usage::PlanUsage>
             snapshot.get("planType").and_then(Value::as_str),
         ),
         windows,
+        // The rolling `rateLimits/updated` snapshot never carries the
+        // reset-credit bank; the app preserves the last HTTP read's value.
+        reset_credits: None,
     })
 }
 

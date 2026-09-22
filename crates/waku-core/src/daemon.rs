@@ -184,6 +184,10 @@ pub struct WakuBackend {
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
     usage_scan_cache: Mutex<crate::usage_history::ScanCache>,
+    /// Serializes `consumeCodexResetCredit`: one host shares one ChatGPT
+    /// account, so a second call while a redemption is in flight is a
+    /// double-click, not a second spend.
+    codex_reset_credit_lock: Mutex<()>,
     checkpoint_capture_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
     /// Scoped agent credentials, per-session prompt queues, and the live
     /// turn bookkeeping the runtime event forwarder maintains. `pub(crate)`
@@ -278,6 +282,7 @@ impl WakuBackend {
             composer_drafts,
             attachments,
             usage_scan_cache: Mutex::new(HashMap::new()),
+            codex_reset_credit_lock: Mutex::new(()),
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             agent: Arc::new(crate::agent::AgentState::default()),
             runtime_start_locks: Mutex::new(HashMap::new()),
@@ -1408,6 +1413,17 @@ impl Backend for WakuBackend {
                     _ => bail!("provider has no plan usage fetcher"),
                 };
                 Ok(ResponsePayload::PlanUsage { usage })
+            }
+            Command::ConsumeCodexResetCredit { redeem_request_id } => {
+                let Some(_redeem) = self.codex_reset_credit_lock.try_lock() else {
+                    bail!("a Codex reset credit redemption is already in flight");
+                };
+                let outcome = crate::usage::consume_codex_reset_credit(&redeem_request_id)?;
+                // Whatever the verdict, the account view may have moved —
+                // a spent, missing, or stale credit all surface in the same
+                // re-read, which is also how a successful spend confirms.
+                let usage = crate::usage::fetch_codex_plan_usage().ok();
+                Ok(ResponsePayload::CodexResetCredit { outcome, usage })
             }
             Command::ProbeComputerPermissions { prompt } => {
                 // Probing installs and launches the helper app, so it obeys
@@ -4737,6 +4753,7 @@ fn handle_driver_command(
         | Command::SetDaemonExposure { .. }
         | Command::ProbeProvider { .. }
         | Command::FetchPlanUsage { .. }
+        | Command::ConsumeCodexResetCredit { .. }
         | Command::ProbeComputerPermissions { .. }
         | Command::Evaluate { .. }
         | Command::TestEvalConnection { .. }

@@ -4047,6 +4047,32 @@ usage.resets_in_hours_minutes:
   en: Resets in %{hours} hr %{minutes} min
 usage.resets_date:
   en: Resets %{date}
+usage.reset_credit_one:
+  en: "%{count} reset credit banked"
+usage.reset_credit_many:
+  en: "%{count} reset credits banked"
+usage.reset_credit_expires:
+  en: " · expires %{date}"
+usage.use_reset_credit:
+  en: Use reset
+usage.reset_credit_hint:
+  en: Spend a banked reset to clear the 5-hour and weekly limits
+usage.reset_credit_title:
+  en: Use a reset credit?
+usage.reset_credit_description:
+  en: This redeems one banked reset on your Codex account, clearing the current 5-hour and weekly limits. Your weekly reset date moves to a week from redemption. This cannot be undone.
+usage.reset_credit_applied:
+  en: Reset applied — your limits are cleared
+usage.reset_credit_unconfirmed:
+  en: Reset applied, but Codex could not confirm the new limits. Refresh the meter to check.
+usage.reset_credit_nothing:
+  en: Nothing to reset — your limits are already clear
+usage.reset_credit_none:
+  en: No reset credits remain on this account
+usage.reset_credit_redeemed:
+  en: That reset credit was already used
+usage.reset_credit_failed:
+  en: "Codex could not apply the reset: %{error}"
 
 usage_error.signin_cannot_read:
   en: "%{provider} sign-in can't read usage (HTTP %{status}). Running a %{provider} turn refreshes it"

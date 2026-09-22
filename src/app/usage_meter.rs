@@ -192,6 +192,9 @@ impl Waku {
             && PLAN_USAGE_PROVIDERS.contains(&provider);
 
         let weak = cx.entity().downgrade();
+        // The meter's popover closure owns its own clone — `weak` moves
+        // into the open/close handler above it.
+        let panel_waku = weak.clone();
         let handle = self.menu_handle_with(USAGE_METER_MENU_ID, cx, move |open, window, cx| {
             if open {
                 let mut card_focus = None;
@@ -285,6 +288,7 @@ impl Waku {
                     error.as_deref(),
                     plan_loading,
                     compact.clone(),
+                    panel_waku.clone(),
                     cx,
                 )
             },
@@ -311,6 +315,7 @@ fn usage_panel(
     error: Option<&str>,
     plan_loading: bool,
     compact: Option<(Uuid, WeakEntity<Waku>)>,
+    waku: WeakEntity<Waku>,
     cx: &App,
 ) -> AnyElement {
     let theme = Theme::current(cx);
@@ -451,6 +456,13 @@ fn usage_panel(
                     .child(meter_bar(&theme, window.percent)),
             );
         }
+        if let Some(credits) = plan
+            .reset_credits
+            .as_ref()
+            .filter(|credits| credits.available_count > 0)
+        {
+            panel = panel.child(reset_credits_section(handle, credits, waku, &theme, cx));
+        }
     } else if plan_loading {
         panel = panel.child(plan_skeleton(&theme));
     } else if let Some(error) = error {
@@ -528,6 +540,96 @@ fn compact_row(
                 cx.stop_propagation();
             }
         })
+}
+
+/// The banked-reset bank: a count line with the nearest expiry, then the
+/// "Use reset" action. Clicking opens the confirmation dialog — the credit
+/// is spent only from there. Mirrors Codex's own usage settings.
+fn reset_credits_section(
+    handle: &ContextMenuHandle,
+    credits: &crate::usage::PlanResetCredits,
+    waku: WeakEntity<Waku>,
+    theme: &Theme,
+    cx: &App,
+) -> AnyElement {
+    let count = credits.available_count as usize;
+    let mut summary = match count {
+        1 => tr!("usage.reset_credit_one"),
+        _ => tr!("usage.reset_credit_many", count = count),
+    };
+    if let Some(expires_at) = credits.next_expires_at {
+        summary.push_str(&tr!(
+            "usage.reset_credit_expires",
+            date = crate::usage::expiry_label(expires_at)
+        ));
+    }
+    let focus = cx.focus_handle();
+    let click_close = handle.clone();
+    let click_waku = waku.clone();
+    let key_close = handle.clone();
+    let action_row = div()
+        .id("usage-reset-credit")
+        .track_focus(&focus)
+        .tab_index(0)
+        .h(px(28.0))
+        .w_full()
+        .px(px(8.0))
+        .rounded(px(6.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .cursor_default()
+        .text_color(theme.text)
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
+        .hover(|style| style.bg(theme.overlay_strong))
+        .tooltip(Tooltip::text(tr!("usage.reset_credit_hint")))
+        .child(icon("icons/rotate-cw.svg", 12.0, theme.text_secondary))
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .truncate()
+                .child(tr!("usage.use_reset_credit")),
+        )
+        .on_click(move |_, window, cx| {
+            click_close.close(window, cx);
+            open_reset_credit_from_panel(&click_waku, window, cx);
+        })
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            if !event.keystroke.modifiers.modified()
+                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+            {
+                key_close.close(window, cx);
+                open_reset_credit_from_panel(&waku, window, cx);
+                cx.stop_propagation();
+            }
+        });
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(7.0))
+        .child(
+            div()
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(SharedString::from(summary)),
+        )
+        .child(action_row)
+        .into_any_element()
+}
+
+/// Open the redemption confirmation, then land focus on its confirm row —
+/// the dialog joins the dispatch tree on the deferred draw, so like the
+/// other modals focus waits two frames.
+fn open_reset_credit_from_panel(weak: &WeakEntity<Waku>, window: &mut Window, cx: &mut App) {
+    let focus = weak
+        .update(cx, |waku, cx| waku.open_reset_credit_dialog(cx))
+        .ok();
+    if let Some(focus) = focus {
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        });
+    }
 }
 
 /// Placeholder for the plan section while its first fetch is in flight:

@@ -247,6 +247,13 @@ pub enum Command {
         binary_override: Option<String>,
         cli_version: Option<String>,
     },
+    /// Spend one banked Codex rate-limit reset credit: clears the 5-hour
+    /// and weekly windows and moves the weekly anchor to the redemption
+    /// moment. `redeem_request_id` is the backend's idempotency key — a
+    /// retry of one logical redemption must reuse it.
+    ConsumeCodexResetCredit {
+        redeem_request_id: String,
+    },
     ProbeComputerPermissions {
         prompt: bool,
     },
@@ -990,6 +997,14 @@ pub enum ResponsePayload {
         version: Option<String>,
     },
     PlanUsage {
+        usage: Option<PlanUsage>,
+    },
+    /// The outcome of `consumeCodexResetCredit`, plus the re-fetched plan
+    /// snapshot when the post-redemption read succeeded. `None` on a
+    /// confirmed redemption means "applied, but the new limits could not be
+    /// confirmed" — the spend still went through.
+    CodexResetCredit {
+        outcome: crate::usage::CodexResetCreditOutcome,
         usage: Option<PlanUsage>,
     },
     ComputerPermissions {

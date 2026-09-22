@@ -38,9 +38,15 @@ const CURL_PATH: &str = "/usr/bin/curl";
 const CURL_PATH: &str = r"C:\Windows\System32\curl.exe";
 
 const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+const CODEX_RESET_CREDITS_URL: &str =
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
+const CODEX_RESET_CREDITS_CONSUME_URL: &str =
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume";
 const OPENCODE_GO_USAGE_URL: &str = "https://opencode.ai/zen/go/v1/usage";
 
-pub use waku_protocol::usage::{PlanUsage, PlanWindow, format_tokens, reset_label};
+pub use waku_protocol::usage::{
+    CodexResetCreditOutcome, PlanResetCredits, PlanUsage, PlanWindow, format_tokens, reset_label,
+};
 
 struct OauthCredentials {
     access_token: String,
@@ -119,10 +125,10 @@ fn profile_plan_label(body: &Value) -> Option<String> {
     plan_label(subscription, tier)
 }
 
-/// Fetch the ChatGPT account's Codex rate limits: `~/.codex/auth.json` holds
-/// the OAuth token and account id, and the ChatGPT backend answers with the
-/// same primary/secondary windows the CLI's own status view shows. Blocking.
-pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
+/// The ChatGPT backend credential headers shared by every wham endpoint:
+/// `~/.codex/auth.json` holds the OAuth token and account id. Blocking —
+/// reads the file.
+fn codex_auth_headers() -> anyhow::Result<Vec<String>> {
     let path = dirs::home_dir()
         .ok_or_else(|| anyhow!(keyed!("usage_error.no_home_directory")))?
         .join(".codex/auth.json");
@@ -144,22 +150,100 @@ pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
     if let Some(account_id) = auth.pointer("/tokens/account_id").and_then(Value::as_str) {
         headers.push(format!("ChatGPT-Account-Id: {account_id}"));
     }
-    let (status, body) = http_get(CODEX_USAGE_URL, &headers)?;
+    Ok(headers)
+}
+
+/// Map a ChatGPT backend response status onto the shared usage errors.
+fn codex_status_check(status: u16) -> anyhow::Result<()> {
     match status {
-        200 => {}
-        401 | 403 => {
-            return Err(anyhow!(keyed!(
-                "usage_error.signin_cannot_read",
-                provider = "Codex",
-                status = status
-            )));
-        }
-        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        200 => Ok(()),
+        401 | 403 => Err(anyhow!(keyed!(
+            "usage_error.signin_cannot_read",
+            provider = "Codex",
+            status = status
+        ))),
+        429 => Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => Err(anyhow!(keyed!("usage_error.http_status", status = other))),
     }
+}
+
+/// Fetch the ChatGPT account's Codex rate limits: `~/.codex/auth.json` holds
+/// the OAuth token and account id, and the ChatGPT backend answers with the
+/// same primary/secondary windows the CLI's own status view shows. When the
+/// account holds banked reset credits, one extra read prices their nearest
+/// expiry. Blocking.
+pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
+    let headers = codex_auth_headers()?;
+    let (status, body) = http_get(CODEX_USAGE_URL, &headers)?;
+    codex_status_check(status)?;
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
-    parse_codex_plan_usage(&body)
-        .ok_or_else(|| anyhow!(keyed!("usage_error.no_rate_limit_windows")))
+    let mut usage = parse_codex_plan_usage(&body)
+        .ok_or_else(|| anyhow!(keyed!("usage_error.no_rate_limit_windows")))?;
+    // The usage response carries only the reset count; expiry lives on the
+    // detail read, which is worth one extra request only while credits
+    // exist to spend.
+    if usage
+        .reset_credits
+        .as_ref()
+        .is_some_and(|credits| credits.available_count > 0)
+        && let Ok(Some(expires_at)) = fetch_codex_reset_credit_expiry(&headers)
+    {
+        if let Some(credits) = &mut usage.reset_credits {
+            credits.next_expires_at = Some(expires_at);
+        }
+    }
+    Ok(usage)
+}
+
+/// The earliest expiry among the account's redeemable reset credits, or
+/// `None` when the detail read reports none. Blocking.
+fn fetch_codex_reset_credit_expiry(headers: &[String]) -> anyhow::Result<Option<i64>> {
+    let (status, body) = http_get(CODEX_RESET_CREDITS_URL, headers)?;
+    codex_status_check(status)?;
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+    Ok(reset_credit_expiry(&body))
+}
+
+/// The nearest `expires_at` among credits still redeemable — `redeeming`
+/// and `redeemed` entries don't count toward a use-it-or-lose-it date.
+fn reset_credit_expiry(body: &Value) -> Option<i64> {
+    body.get("credits")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter(|credit| credit.get("status").and_then(Value::as_str) == Some("available"))
+        .filter_map(|credit| credit.get("expires_at").and_then(Value::as_str))
+        .filter_map(|expires| chrono::DateTime::parse_from_rfc3339(expires).ok())
+        .map(|expires| expires.timestamp())
+        .min()
+}
+
+/// Spend one banked reset credit. `redeem_request_id` is the backend's
+/// idempotency key: a retry of one logical redemption reuses it, a new
+/// redemption mints a new one. Blocking.
+pub fn consume_codex_reset_credit(
+    redeem_request_id: &str,
+) -> anyhow::Result<CodexResetCreditOutcome> {
+    let headers = codex_auth_headers()?;
+    let body = json!({ "redeem_request_id": redeem_request_id });
+    let (status, response) =
+        http_post_json(CODEX_RESET_CREDITS_CONSUME_URL, &headers, &body.to_string())?;
+    codex_status_check(status)?;
+    let response: Value =
+        serde_json::from_str(&response).context(keyed!("usage_error.invalid_json"))?;
+    codex_reset_outcome(&response)
+}
+
+/// Map the consume endpoint's `code` onto the wire outcome. A new backend
+/// code must not read as "nothing to reset" — that would hide a spent
+/// credit or a new refusal behind wrong copy.
+fn codex_reset_outcome(response: &Value) -> anyhow::Result<CodexResetCreditOutcome> {
+    match response.get("code").and_then(Value::as_str) {
+        Some("reset") => Ok(CodexResetCreditOutcome::Reset),
+        Some("nothing_to_reset") => Ok(CodexResetCreditOutcome::NothingToReset),
+        Some("no_credit") => Ok(CodexResetCreditOutcome::NoCredit),
+        Some("already_redeemed") => Ok(CodexResetCreditOutcome::AlreadyRedeemed),
+        _ => Err(anyhow!(keyed!("usage_error.invalid_json"))),
+    }
 }
 
 /// Fetch OpenCode Go's rolling, weekly, and monthly subscription limits.
@@ -288,6 +372,7 @@ fn parse_opencode_go_plan_usage(body: &Value) -> Option<PlanUsage> {
     Some(PlanUsage {
         plan_label: Some("Go".to_owned()),
         windows,
+        reset_credits: None,
     })
 }
 
@@ -441,6 +526,7 @@ fn parse_grok_billing(billing: &Value) -> anyhow::Result<PlanUsage> {
     Ok(PlanUsage {
         plan_label,
         windows,
+        reset_credits: None,
     })
 }
 
@@ -475,9 +561,20 @@ fn parse_codex_plan_usage(body: &Value) -> Option<PlanUsage> {
     if windows.is_empty() {
         return None;
     }
+    // The banked-reset summary rides the usage payload; per-credit detail
+    // (expiry) is a separate endpoint the caller reads only when the count
+    // is nonzero.
+    let reset_credits = body
+        .pointer("/rate_limit_reset_credits/available_count")
+        .and_then(Value::as_u64)
+        .map(|count| PlanResetCredits {
+            available_count: count.min(u32::MAX as u64) as u32,
+            next_expires_at: None,
+        });
     Some(PlanUsage {
         plan_label: openai_plan_label(body.get("plan_type").and_then(Value::as_str)),
         windows,
+        reset_credits,
     })
 }
 
@@ -645,7 +742,41 @@ pub fn http_get(url: &str, headers: &[String]) -> anyhow::Result<(u16, String)> 
     Ok((response.status, response.body))
 }
 
+/// POST `url` with a JSON body. Same transport as `http_get`: headers and
+/// body travel to curl as a stdin config, so neither the bearer token nor
+/// the payload can show up in the process table.
+fn http_post_json(url: &str, headers: &[String], body: &str) -> anyhow::Result<(u16, String)> {
+    let mut config: Vec<String> = headers
+        .iter()
+        .map(|header| format!("header = \"{header}\""))
+        .collect();
+    config.push("header = \"Content-Type: application/json\"".to_owned());
+    config.push(format!("data = \"{}\"", curl_config_escape(body)));
+    let raw = curl_run(url, &config)?;
+    let response = split_response(&raw)?;
+    Ok((response.status, response.body))
+}
+
+/// Escape a value for the quoted form of curl's `-K` config syntax, whose
+/// parser honors the C-style escapes.
+fn curl_config_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
 fn curl_get(url: &str, headers: &[String]) -> anyhow::Result<String> {
+    let config: Vec<String> = headers
+        .iter()
+        .map(|header| format!("header = \"{header}\""))
+        .collect();
+    curl_run(url, &config)
+}
+
+fn curl_run(url: &str, config: &[String]) -> anyhow::Result<String> {
     let mut child = crate::command_env::plain_command(CURL_PATH)
         .args(["-sS", "--max-time", "15", "-D", "-", "-K", "-", url])
         .stdin(Stdio::piped())
@@ -658,9 +789,8 @@ fn curl_get(url: &str, headers: &[String]) -> anyhow::Result<String> {
             .stdin
             .as_mut()
             .ok_or_else(|| anyhow!(keyed!("usage_error.curl_stdin_unavailable")))?;
-        for header in headers {
-            writeln!(stdin, "header = \"{header}\"")
-                .context(keyed!("usage_error.configure_curl"))?;
+        for line in config {
+            writeln!(stdin, "{line}").context(keyed!("usage_error.configure_curl"))?;
         }
     }
     let output = child
@@ -712,6 +842,7 @@ fn parse_plan_usage(body: &Value, credentials: &OauthCredentials) -> PlanUsage {
             credentials.rate_limit_tier.as_deref(),
         ),
         windows,
+        reset_credits: None,
     }
 }
 
@@ -994,6 +1125,86 @@ mod tests {
             ]
         );
         assert!(parse_codex_plan_usage(&serde_json::json!({"plan_type": "plus"})).is_none());
+    }
+
+    #[test]
+    fn codex_reset_credit_count_rides_the_usage_payload() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "plan_type": "plus",
+                "rate_limit": {
+                    "primary_window":
+                        {"used_percent": 37, "reset_at": 1800000000, "limit_window_seconds": 18000}
+                },
+                "rate_limit_reset_credits": {"available_count": 2, "credits": null}
+            }"#,
+        )
+        .unwrap();
+        let usage = parse_codex_plan_usage(&body).unwrap();
+        assert_eq!(
+            usage.reset_credits,
+            Some(PlanResetCredits {
+                available_count: 2,
+                next_expires_at: None,
+            })
+        );
+        // No summary on the response means no bank to show.
+        let body: Value = serde_json::from_str(
+            r#"{
+                "plan_type": "plus",
+                "rate_limit": {
+                    "primary_window":
+                        {"used_percent": 37, "reset_at": 1800000000, "limit_window_seconds": 18000}
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(parse_codex_plan_usage(&body).unwrap().reset_credits, None);
+    }
+
+    #[test]
+    fn reset_credit_expiry_picks_the_nearest_redeemable() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "credits": [
+                    {"id": "a", "status": "available",
+                     "granted_at": "2026-09-01T00:00:00Z",
+                     "expires_at": "2026-10-01T00:00:00Z"},
+                    {"id": "b", "status": "redeemed",
+                     "granted_at": "2026-09-01T00:00:00Z",
+                     "expires_at": "2026-09-10T00:00:00Z"},
+                    {"id": "c", "status": "available",
+                     "granted_at": "2026-09-05T00:00:00Z",
+                     "expires_at": "2026-09-20T00:00:00Z"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            reset_credit_expiry(&body),
+            chrono::DateTime::parse_from_rfc3339("2026-09-20T00:00:00Z")
+                .ok()
+                .map(|date| date.timestamp())
+        );
+        assert_eq!(reset_credit_expiry(&serde_json::json!({"credits": []})), None);
+        assert_eq!(reset_credit_expiry(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn codex_reset_outcome_maps_the_backend_codes() {
+        for (code, outcome) in [
+            ("reset", CodexResetCreditOutcome::Reset),
+            ("nothing_to_reset", CodexResetCreditOutcome::NothingToReset),
+            ("no_credit", CodexResetCreditOutcome::NoCredit),
+            ("already_redeemed", CodexResetCreditOutcome::AlreadyRedeemed),
+        ] {
+            assert_eq!(
+                codex_reset_outcome(&serde_json::json!({"code": code})).unwrap(),
+                outcome
+            );
+        }
+        assert!(codex_reset_outcome(&serde_json::json!({"code": "new_code"})).is_err());
+        assert!(codex_reset_outcome(&serde_json::json!({})).is_err());
     }
 
     #[test]

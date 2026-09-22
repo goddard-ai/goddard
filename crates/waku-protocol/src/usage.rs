@@ -7,6 +7,33 @@ use ts_rs::TS;
 pub struct PlanUsage {
     pub plan_label: Option<String>,
     pub windows: Vec<PlanWindow>,
+    /// Banked reset credits the account can spend on this plan's windows —
+    /// a Codex/ChatGPT promotion, absent for every other provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_credits: Option<PlanResetCredits>,
+}
+
+/// Banked promotional rate-limit resets on the ChatGPT account. Spending one
+/// clears the 5-hour and weekly windows and moves the weekly anchor to the
+/// redemption moment.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanResetCredits {
+    pub available_count: u32,
+    /// Earliest expiry among redeemable credits, unix seconds — the use-it-
+    /// or-lose-it date the row surfaces next to the count.
+    pub next_expires_at: Option<i64>,
+}
+
+/// The backend's verdict on a reset-credit redemption, mirrored from the
+/// ChatGPT consume endpoint's `code` field.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum CodexResetCreditOutcome {
+    Reset,
+    NothingToReset,
+    NoCredit,
+    AlreadyRedeemed,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -67,5 +94,18 @@ pub fn reset_label(resets_at: i64, now: i64) -> String {
             date = date.format("%a %-I:%M %p").to_string()
         ),
         _ => tr!("usage.resets_soon"),
+    }
+}
+
+/// A banked credit's expiry as a bare local date — expiries run up to ~30
+/// days out, where `reset_label`'s weekday-and-time phrasing reads wrong.
+pub fn expiry_label(expires_at: i64) -> String {
+    use chrono::TimeZone as _;
+    match chrono::Local.timestamp_opt(expires_at, 0) {
+        chrono::LocalResult::Single(date) if crate::i18n::uses_east_asian_date_format() => {
+            format!("{}月{}日", date.month(), date.day())
+        }
+        chrono::LocalResult::Single(date) => date.format("%b %-d").to_string(),
+        _ => String::new(),
     }
 }

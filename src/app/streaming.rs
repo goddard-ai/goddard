@@ -644,6 +644,18 @@ impl Waku {
                     .find(|session| session.id == session_id)
                     .map(|session| session.provider)
                 {
+                    // Codex's rolling `rateLimits/updated` snapshot never
+                    // carries the reset-credit bank; keep the last HTTP
+                    // read's count rather than blanking the row.
+                    let mut usage = usage;
+                    if usage.reset_credits.is_none()
+                        && let Some(credits) = self
+                            .plan_usage
+                            .get(&provider)
+                            .and_then(|plan| plan.reset_credits.clone())
+                    {
+                        usage.reset_credits = Some(credits);
+                    }
                     self.plan_usage.insert(provider, usage);
                 }
             }

@@ -806,6 +806,24 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "dialog.reset_credit.confirm",
+        action: || Box::new(crate::app::ConfirmResetCreditDialog),
+        title_key: "shortcuts.confirm_dialog",
+        title_index: None,
+        category: C::Dialogs,
+        editability: TEXT_ENTRY,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "dialog.reset_credit.dismiss",
+        action: || Box::new(crate::app::DismissResetCreditDialog),
+        title_key: "shortcuts.dismiss_dialog",
+        title_index: None,
+        category: C::Dialogs,
+        editability: TEXT_ENTRY,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "dialog.goal.confirm",
         action: || Box::new(crate::app::ConfirmGoalDialog),
         title_key: "shortcuts.confirm_dialog",
@@ -2470,6 +2488,9 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === app::init_push_base_dialog_keys =========================================
     e("dialog.push_base.confirm", All, "enter", PushBaseDialog),
     e("dialog.push_base.dismiss", All, "escape", PushBaseDialog),
+    // === app::init_reset_credit_dialog_keys ======================================
+    e("dialog.reset_credit.confirm", All, "enter", ResetCreditDialog),
+    e("dialog.reset_credit.dismiss", All, "escape", ResetCreditDialog),
     // === app::init_big_picture_keys ===================================================
     e("bigpicture.dismiss", All, "escape", BigPicture),
     e("bigpicture.left", All, "left", BigPicture),
@@ -2813,6 +2834,7 @@ mod ctx {
     pub const AppCloseDialog: &str = "AppCloseDialog";
     pub const ProviderSwitchDialog: &str = "ProviderSwitchDialog";
     pub const PushBaseDialog: &str = "PushBaseDialog";
+    pub const ResetCreditDialog: &str = "ResetCreditDialog";
     pub const BigPicture: &str = "BigPicture";
     pub const GoalInput: &str = "GoalDialog > TextInput";
     pub const GoalDialog: &str = "GoalDialog";

@@ -6768,6 +6768,7 @@ impl Waku {
             | self.drain_computer_permission_events()
             | self.drain_integration_events()
             | self.drain_plan_usage_events()
+            | self.drain_reset_credit_events()
             | self.drain_agy_poll_events()
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)

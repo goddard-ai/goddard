@@ -2065,6 +2065,15 @@ pub struct Waku {
     /// Providers whose turn settled since the last fetch, so the meters have
     /// moved.
     plan_usage_stale: HashSet<ProviderKind>,
+    /// The banked-reset confirmation opened from the Codex plan rows.
+    reset_credit_dialog: Option<reset_credit_dialog::ResetCreditDialogState>,
+    /// One in-flight redemption at a time — the daemon also serializes them.
+    reset_credit_tx: Sender<
+        Result<(crate::usage::CodexResetCreditOutcome, Option<crate::usage::PlanUsage>), String>,
+    >,
+    reset_credit_events: Receiver<
+        Result<(crate::usage::CodexResetCreditOutcome, Option<crate::usage::PlanUsage>), String>,
+    >,
     /// The settings Usage page's snapshot: historical token/cost usage
     /// scanned from provider transcripts off-thread. Frames read only this.
     usage_history: Option<crate::usage_history::UsageHistory>,
@@ -3323,6 +3332,7 @@ mod provider_switch_dialog;
 mod push_base;
 mod relocate;
 mod render;
+mod reset_credit_dialog;
 mod right_panel;
 mod routing;
 mod run_script;
@@ -3370,6 +3380,7 @@ pub use image_preview::init as init_image_preview_keys;
 pub use issue_dialog::init as init_issue_dialog_keys;
 pub use provider_switch_dialog::init as init_provider_switch_dialog_keys;
 pub use push_base::init as init_push_base_dialog_keys;
+pub use reset_credit_dialog::init as init_reset_credit_dialog_keys;
 pub use saved_drafts::init as init_drafts_keys;
 pub use send_file_dialog::init as init_send_file_dialog_keys;
 pub use settings::init as init_settings_keys;
@@ -3397,6 +3408,7 @@ pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
 pub use provider_switch_dialog::{ConfirmProviderSwitchDialog, DismissProviderSwitchDialog};
 pub use push_base::{ConfirmPushBaseDialog, DismissPushBaseDialog};
+pub use reset_credit_dialog::{ConfirmResetCreditDialog, DismissResetCreditDialog};
 pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
 pub use shortcuts_dialog::DismissShortcutsDialog;
@@ -4582,6 +4594,7 @@ impl Waku {
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (integration_snapshots_tx, integration_snapshots_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
+        let (reset_credit_tx, reset_credit_events) = unbounded();
         let (agy_poll_tx, agy_poll_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
@@ -5564,6 +5577,9 @@ impl Waku {
                 plan_usage_unconfigured: HashSet::new(),
                 plan_usage_checked_at: HashMap::new(),
                 plan_usage_stale: HashSet::new(),
+                reset_credit_dialog: None,
+                reset_credit_tx,
+                reset_credit_events,
                 usage_history: None,
                 usage_history_parts: HashMap::new(),
                 usage_history_pending_for: None,
