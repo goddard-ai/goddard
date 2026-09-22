@@ -3610,8 +3610,9 @@ impl Waku {
         );
     }
 
-    /// The archive toast's Undo. A lone task gets the unarchived toast's
-    /// "View now" follow-up; a group reports how many came back.
+    /// The archive toast's Undo. A lone task is restored and selected
+    /// directly; a group reports how many came back without touching the
+    /// selection.
     pub(super) fn undo_archived_sessions(&mut self, session_ids: &[Uuid], cx: &mut Context<Self>) {
         let restorable: Vec<Uuid> = session_ids
             .iter()
@@ -3625,7 +3626,9 @@ impl Waku {
             .collect();
         match restorable.as_slice() {
             [] => self.hide_toast(),
-            [session_id] => self.unarchive_session(*session_id, true, cx),
+            // Selecting unarchives on activation, so this restores and
+            // opens in one step — no follow-up toast.
+            [session_id] => self.open_toast_session(*session_id, cx),
             many => {
                 for session_id in many {
                     self.unarchive_session(*session_id, false, cx);
