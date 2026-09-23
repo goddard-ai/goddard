@@ -821,6 +821,7 @@ impl Waku {
                             .w_full()
                             .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
                             .mx_auto()
+                            .pl(px(COMPOSER_CHIP_INSET))
                             .flex()
                             .gap(px(6.0))
                             .children(actions.iter().enumerate().map(|(index, action)| {
@@ -1248,14 +1249,16 @@ impl Waku {
                 .bottom(px(8.0))
                 .left_0()
                 .right_0()
-                // Same insets and content width as transcript rows, so the
-                // float's left edge lands on the column the footer lives in.
+                // Transcript-row insets and content width; the extra left
+                // inset lands the float's edge on the project chip's icon,
+                // matching the suggestion chips beside it.
                 .px(px(20.0))
                 .child(
                     div()
                         .w_full()
                         .max_w(px(CONTENT_MAX_WIDTH))
                         .mx_auto()
+                        .pl(px(COMPOSER_CHIP_INSET - COMPOSER_OVERHANG))
                         .flex()
                         .child(
                             div()

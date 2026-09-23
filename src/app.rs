@@ -107,6 +107,11 @@ const CONTENT_MAX_WIDTH: f32 = 720.0;
 /// The composer assembly — queued messages, input card, and workspace footer —
 /// overhangs the scrollable transcript column by this much on each side.
 const COMPOSER_OVERHANG: f32 = 12.0;
+/// Inset from the composer card's left edge to the workspace footer's project
+/// chip icon — the footer row's 10px plus the chip's own 7px of padding.
+/// Floating chips above the composer indent by this much so their left edges
+/// land on the icon rather than the card edge.
+const COMPOSER_CHIP_INSET: f32 = 17.0;
 /// Menu-registry id of the composer's model picker, shared by its render site
 /// and the primary-modifier `/` toggle action.
 const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";

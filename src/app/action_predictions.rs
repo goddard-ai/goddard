@@ -805,13 +805,15 @@ impl Waku {
                     .left_0()
                     .right_0()
                     // Same insets and content width as the composer card
-                    // below, so the chip's left edge lands on the card's.
+                    // below; the extra left inset lands the chip's edge on
+                    // the project chip's icon in the workspace footer.
                     .px(px(20.0 - COMPOSER_OVERHANG))
                     .child(
                         div()
                             .w_full()
                             .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
                             .mx_auto()
+                            .pl(px(COMPOSER_CHIP_INSET))
                             .flex()
                             .child(
                                 div()
