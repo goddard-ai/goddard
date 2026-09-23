@@ -1,7 +1,7 @@
-//! QA-branch review state for the Projects page's Review tab.
+//! Dev-branch review state for the Projects page's Review tab.
 //!
 //! Proposed work lands on `origin/<qa branch>` unreviewed — the daemon's
-//! `qa_branch` setting names it, defaulting to `qa`. Human decisions are
+//! `qa_branch` setting names it, defaulting to `dev`. Human decisions are
 //! git notes under `refs/notes/qa` — one JSON record per line so
 //! concurrent reviewers union-merge cleanly. The base branch fast-forwards
 //! to the longest approved prefix. Whether a commit needs a human is
@@ -36,7 +36,7 @@ const PUSH_ATTEMPTS: usize = 3;
 /// Revert pushes retry when the QA branch moved under the attempt.
 const REVERT_ATTEMPTS: usize = 2;
 
-/// The configured QA branch name — trimmed, falling back to `qa` when
+/// The configured QA branch name — trimmed, falling back to `dev` when
 /// unset. `pub(crate)` so the daemon can name the branch in friend
 /// notices without re-resolving the setting.
 pub(crate) fn qa_branch_name(configured: &str) -> String {
@@ -157,13 +157,23 @@ fn queue_inner(cwd: &Path, branch: &str) -> anyhow::Result<ReviewQueue> {
         return Ok(queue);
     }
     let base_ref = format!("refs/remotes/origin/{base}");
+    queue.base_sha = rev_parse(cwd, &base_ref)?;
+    let can_fast_forward = queue.base_sha.as_deref().is_some_and(|sha| {
+        git_capture(cwd, &["merge-base", "--is-ancestor", sha, &remote])
+            .is_ok_and(|output| output.status.success())
+    });
     // No base ref yet → the whole branch is proposed work.
-    let range = if rev_parse(cwd, &base_ref)?.is_some() {
+    let range = if queue.base_sha.is_some() {
         format!("{base_ref}..{remote}")
     } else {
         remote.clone()
     };
-    let mut commits = crate::git_panel::log_commits(cwd, &[range.clone()], 0, QUEUE_LIMIT)?;
+    let mut commits = crate::git_panel::log_commits(cwd, &[range.clone()], 0, QUEUE_LIMIT + 1)?;
+    let truncated = commits.len() > QUEUE_LIMIT;
+    queue.truncated = truncated;
+    if truncated {
+        commits.truncate(QUEUE_LIMIT);
+    }
     let notes = notes_by_commit(cwd, &range)?;
     let paths = paths_by_commit(cwd, &range)?;
     // `git revert` records "This reverts commit <sha>." — a reverted
@@ -174,7 +184,9 @@ fn queue_inner(cwd: &Path, branch: &str) -> anyhow::Result<ReviewQueue> {
         .flat_map(|commit| revert_marks(&commit.body))
         .collect();
     commits.reverse(); // git log is newest-first; the queue is oldest-first.
-    let mut promotable = true;
+    // A newest-first page omits the oldest commits when the queue is larger
+    // than the cap, so it cannot prove an approved prefix from the base.
+    let mut promotable = can_fast_forward && !truncated;
     for commit in commits {
         let test_plans = test_plans(&commit.body);
         let reviews = latest_reviews(notes.get(&commit.sha));
@@ -567,7 +579,7 @@ mod tests {
         (remote, ours)
     }
 
-    /// Land one proposed commit on the `qa` branch and push it.
+    /// Land one proposed commit on the fixture's `qa` branch and push it.
     fn propose(ours: &Path, file: &str, contents: &str, message: &str) -> String {
         propose_on(ours, "qa", file, contents, message)
     }
@@ -590,6 +602,7 @@ mod tests {
     #[test]
     fn queue_orders_oldest_first_and_frontier_stops_at_unreviewed() {
         let (_remote, ours) = fixture();
+        let base_sha = run_git(&ours, &["rev-parse", "main"]);
         let plain = propose(&ours, "plain.txt", "plain\n", "docs tweak");
         let _reviewed = propose(
             &ours,
@@ -599,6 +612,7 @@ mod tests {
         );
 
         let queue = queue(&ours, "qa").unwrap().unwrap();
+        assert_eq!(queue.base_sha.as_deref(), Some(base_sha.as_str()));
         assert_eq!(queue.entries.len(), 2);
         assert_eq!(queue.entries[0].commit.sha, plain);
         assert!(!queue.entries[0].needs_review);
@@ -620,6 +634,19 @@ mod tests {
         let queue = queue(&ours, "qa").unwrap().unwrap();
         assert!(queue.entries[0].needs_review);
         assert!(!queue.entries[0].approved);
+        assert!(queue.frontier.is_none());
+    }
+
+    #[test]
+    fn divergent_dev_has_no_fast_forward_frontier() {
+        let (_remote, ours) = fixture_on("dev");
+        propose_on(&ours, "dev", "feature.txt", "feature\n", "feature");
+        let hotfix = commit(&ours, "hotfix.txt", "hotfix\n", "hotfix");
+        run_git(&ours, &["push", "origin", "main"]);
+
+        let queue = queue(&ours, "dev").unwrap().unwrap();
+        assert_eq!(queue.base_sha.as_deref(), Some(hotfix.as_str()));
+        assert_eq!(queue.entries.len(), 1);
         assert!(queue.frontier.is_none());
     }
 
@@ -720,8 +747,7 @@ mod tests {
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].commit.sha, sha);
 
-        // The default `qa` branch doesn't exist here — an empty queue,
-        // not an error.
+        // The other `qa` branch doesn't exist here — an empty queue.
         let result = queue(&ours, "qa").unwrap().unwrap();
         assert_eq!(result.review_branch, "qa");
         assert!(result.entries.is_empty());
@@ -729,7 +755,7 @@ mod tests {
 
     #[test]
     fn qa_branch_setting_resolves_and_validates() {
-        assert_eq!(qa_branch_name(""), "qa");
+        assert_eq!(qa_branch_name(""), "dev");
         assert_eq!(qa_branch_name("  dev  "), "dev");
         assert_eq!(qa_branch_checked("feature/x").unwrap(), "feature/x");
         assert!(qa_branch_checked("-m").is_err());

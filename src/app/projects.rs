@@ -89,7 +89,7 @@ pub(super) enum ProjectsRowKey {
     Worktree(PathBuf),
     /// `heads/<name>` for locals, `remotes/<remote>/<name>` for tracking refs.
     Branch(String),
-    /// A proposed commit on `qa` — its sha.
+    /// A proposed commit on `dev` — its sha.
     Review(String),
 }
 
@@ -1196,22 +1196,121 @@ impl Waku {
         .detach();
     }
 
-    /// Fast-forward the base branch to the approved frontier.
-    fn projects_review_promote(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
-        let Some(cwd) = self
-            .state
-            .projects
+    /// Confirm the exact approved prefix, then start a separate release task.
+    fn projects_cut_release(
+        &mut self,
+        project_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.projects_page_states.get(&project_id) else {
+            return;
+        };
+        let github::GitHubFetch::Loaded(Some(queue)) = &state.review else {
+            return;
+        };
+        if state.review_pending {
+            return;
+        }
+        let review_generation = state.review_generation;
+        let (Some(base_sha), Some(frontier)) = (&queue.base_sha, &queue.frontier) else {
+            return;
+        };
+        let Some(frontier_index) = queue
+            .entries
             .iter()
-            .find(|project| project.id == project_id)
-            .map(|project| project.path.clone())
+            .position(|entry| &entry.commit.sha == frontier)
         else {
             return;
         };
-        self.projects_review_op(
-            project_id,
-            waku_client::WorkspaceOperation::ReviewPromote { cwd },
+        let base = queue.base_branch.as_deref().unwrap_or("main");
+        let review_branch = if queue.review_branch.is_empty() {
+            waku_client::settings::DEFAULT_QA_BRANCH
+        } else {
+            queue.review_branch.as_str()
+        };
+        let range = format!("{base_sha}..{frontier}");
+        let base_sha = base_sha.clone();
+        let frontier = frontier.clone();
+        let commits = queue.entries[..=frontier_index]
+            .iter()
+            .map(|entry| {
+                let reviewers = entry
+                    .reviews
+                    .iter()
+                    .filter(|review| review.decision == waku_client::git::ReviewDecision::Approved)
+                    .map(|review| review.reviewer.as_str())
+                    .collect::<Vec<_>>();
+                let status = if entry.reverted {
+                    tr!("projects.review_reverted")
+                } else if reviewers.is_empty() {
+                    tr!("projects.review_auto")
+                } else {
+                    reviewers.join(", ")
+                };
+                format!(
+                    "{} {} — {status}",
+                    entry.commit.short_sha, entry.commit.subject
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let detail = format!(
+            "{}\n\n{commits}",
+            tr!("projects.review_release_range", range = range.clone())
+        );
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            &tr!("projects.review_release_confirm", branch = base),
+            Some(&detail),
+            &[
+                gpui::PromptButton::cancel(tr!("common.cancel")),
+                gpui::PromptButton::ok(tr!("projects.review_cut_release")),
+            ],
             cx,
         );
+        let base = base.to_owned();
+        let review_branch = review_branch.to_owned();
+        cx.spawn(async move |waku, cx| {
+            if answer.await.ok() != Some(1) {
+                return;
+            }
+            let _ = waku.update(cx, |waku, cx| {
+                // The confirmation refers to one snapshot. If a refresh changed
+                // the frontier while it was open, show the new range first.
+                let still_current = waku.projects_page_states.get(&project_id).is_some_and(
+                    |state| match &state.review {
+                        github::GitHubFetch::Loaded(Some(queue)) => {
+                            !state.review_pending
+                                && state.review_generation == review_generation
+                                && queue.base_sha.as_deref() == Some(base_sha.as_str())
+                                && queue.frontier.as_deref() == Some(frontier.as_str())
+                                && queue.review_branch == review_branch
+                        }
+                        _ => false,
+                    },
+                );
+                if !still_current {
+                    waku.show_toast(tr!("projects.review_release_changed"));
+                    return;
+                }
+                let session_id = waku.create_fresh_local_session_for(
+                    project_id,
+                    waku.state.last_provider,
+                    cx,
+                );
+                let prompt = format!(
+                    "Cut a release. Check the repository instructions first. If the release procedure is unclear, ask me.\n\n\
+                     The approved fast-forward range is {range} on {review_branch}, targeting {base}. Use exactly this range when advancing {base}; do not include later {review_branch} commits. Recheck ancestry and approvals before changing branches or pushing."
+                );
+                waku.submit_composer_submission_to(
+                    session_id,
+                    ComposerSubmission::plain(prompt),
+                    cx,
+                );
+            });
+        })
+        .detach();
     }
 
     /// `tab`'s flattened Worktrees/Branches/Review rows — the GitHub tabs
@@ -2407,7 +2506,6 @@ impl Waku {
             .iter()
             .filter(|entry| !entry.approved && !entry.rejected && !entry.reverted)
             .count();
-        let base = queue.base_branch.clone();
         let error = state.review_error.clone();
         let in_flight = state.review_pending;
 
@@ -2471,7 +2569,7 @@ impl Waku {
                 .into_any_element()
         };
 
-        let promotable = frontier_count > 0 && !in_flight;
+        let promotable = frontier_count > 0 && queue.base_sha.is_some() && !in_flight;
         let promote = div()
             .id("projects-review-promote")
             .tab_index(0)
@@ -2490,12 +2588,12 @@ impl Waku {
                     .hover(|style| style.opacity(0.9))
                     .active(|style| style.opacity(0.8))
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.projects_review_promote(project_id, cx);
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.projects_cut_release(project_id, window, cx);
                     }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.projects_review_promote(project_id, cx);
+                            this.projects_cut_release(project_id, window, cx);
                             cx.stop_propagation();
                         }
                     }))
@@ -2505,10 +2603,7 @@ impl Waku {
                 div()
                     .text_size(sp(13.0))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(tr!(
-                        "projects.review_promote",
-                        branch = base.unwrap_or_default()
-                    )),
+                    .child(tr!("projects.review_cut_release")),
             );
 
         div()
@@ -2553,6 +2648,20 @@ impl Waku {
                     .child(div().flex_1())
                     .child(promote),
             )
+            .when(queue.truncated, |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .w_full()
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .border_b(hairline())
+                        .border_color(theme.separator)
+                        .text_size(sp(12.5))
+                        .text_color(theme.warning)
+                        .child(tr!("projects.review_truncated")),
+                )
+            })
             .children(error.map(|error| {
                 div()
                     .flex_none()

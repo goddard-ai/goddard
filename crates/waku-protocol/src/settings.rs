@@ -14,7 +14,7 @@ use crate::routing::RouteClassMap;
 
 /// The default shared proposed-work branch the Projects page's Review tab
 /// reads — `origin/qa` out of the box.
-pub const DEFAULT_QA_BRANCH: &str = "qa";
+pub const DEFAULT_QA_BRANCH: &str = "dev";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(default)]

@@ -2138,7 +2138,7 @@ experiments.project_map_description: 为每个新会话提供一份工作区的�
 experiments.project_map_title: 项目地图
 experiments.projects_page_description: 按 ⌘⇧P 打开每个项目的页面，列出其工作树、分支、issue 和拉取请求，⌘⌥1–4 可直接跳转到对应标签页。
 experiments.projects_page_title: 项目页面
-experiments.review_queue_description: 在项目页面新增“审查”标签页 — QA 分支的提议提交按从旧到新列出，支持逐个批准、拒绝并回退，以及提升已批准前缀的控件。分支名在“设置 → 守护进程”中配置。
+experiments.review_queue_description: 在项目页面新增“审查”标签页，按从旧到新列出审查分支的提议提交，支持逐个批准、拒绝并回退，以及为已批准的范围启动发布任务。分支名可在“设置 → 守护进程”中配置，默认为 dev。
 experiments.review_queue_title: QA 审查
 experiments.sandbox_description: 在输入框的访问菜单中显示环境选择 — 在这台 Mac 或隔离的 Linux VM 中运行任务 — 并在会话标题上显示“沙箱中”徽标。对开启后启动的会话生效。
 experiments.sandbox_title: 沙箱 VM
@@ -2388,10 +2388,15 @@ projects.review_needs_review: 待审查
 projects.review_no_queue: "origin 上没有 %{branch} 分支"
 projects.review_pending_count: "%{count} 个待审查"
 projects.review_promote: 提升到 %{branch}
+projects.review_cut_release: 创建发布
+projects.review_release_confirm: "要启动 %{branch} 的发布任务吗？"
+projects.review_release_range: "任务将使用已批准的范围 %{range}。包含的提交："
+projects.review_release_changed: 审查范围已更改。请检查提交后重试。
+projects.review_truncated: 待审查的提交超过 200 个，无法确定发布范围。
 projects.review_reject: 拒绝并回退
 projects.review_rejected: 已拒绝
 projects.review_reverted: 已回退
-projects.review_train: "%{approved}/%{total} 个提交将被提升"
+projects.review_train: "%{approved}/%{total} 个提交可发布"
 projects.tab_review: 审查
 providers.api_key_hint: 或设置 %{var}
 providers.docs: 文档

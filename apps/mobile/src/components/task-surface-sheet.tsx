@@ -1390,8 +1390,8 @@ function QueueSurface({ root }: { root: string | null }) {
         subtitle={
           snapshot
             ? snapshot.baseBranch
-              ? `${snapshot.reviewBranch || "qa"} → ${snapshot.baseBranch}`
-              : snapshot.reviewBranch || "qa"
+              ? `${snapshot.reviewBranch || "dev"} → ${snapshot.baseBranch}`
+              : snapshot.reviewBranch || "dev"
             : undefined
         }
         surface="queue"

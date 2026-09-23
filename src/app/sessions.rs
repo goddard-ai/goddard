@@ -1043,7 +1043,17 @@ impl Waku {
             self.create_projectless_session_inner(None, None, false, cx);
             return;
         }
-        self.create_session_under_project(project_id, provider, cx);
+        self.create_session_under_project(project_id, provider, true, false, cx);
+    }
+
+    /// Start a separate local task even when this project has an unused draft.
+    pub(super) fn create_fresh_local_session_for(
+        &mut self,
+        project_id: Uuid,
+        provider: ProviderKind,
+        cx: &mut Context<Self>,
+    ) -> Uuid {
+        self.create_session_under_project(project_id, provider, false, true, cx)
     }
 
     /// `create_session_for` once the destination is known to be a real
@@ -1054,8 +1064,10 @@ impl Waku {
         &mut self,
         project_id: Uuid,
         provider: ProviderKind,
+        reuse_draft: bool,
+        local: bool,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Uuid {
         // Opening a remote project is use — start its interactive connect
         // now so the daemon is warm by the first prompt.
         if let waku_client::DaemonKey::Remote(host) = self.daemons.project_owner(project_id)
@@ -1070,14 +1082,15 @@ impl Waku {
             // A side chat is never a reusable draft — an empty one still
             // belongs to its parent's panel.
             .find(|session| {
-                session.project_id == project_id
+                reuse_draft
+                    && session.project_id == project_id
                     && !session.has_started()
                     && !session.is_side_chat()
             })
             .map(|session| session.id)
         {
             self.select_session(draft_id, cx);
-            return;
+            return draft_id;
         }
         // A task opened from the current task carries its working access mode.
         // `last_runtime_mode` covers launch and the few creation paths without
@@ -1093,7 +1106,14 @@ impl Waku {
         );
         let mut session = self.state.new_session(project_id, provider);
         session.runtime_mode = runtime_mode;
-        session.environment = environment;
+        session.environment = if local {
+            SessionEnvironment::Local
+        } else {
+            environment
+        };
+        if local {
+            session.workspace = SessionWorkspace::Local;
+        }
         let id = session.id;
         self.daemons
             .claim_session(id, self.daemons.project_owner(project_id));
@@ -1101,6 +1121,7 @@ impl Waku {
         self.record_action(Some(id), action_predictions::JournalAction::SessionNew);
         self.state.push_session(session);
         self.select_session(id, cx);
+        id
     }
 
     /// `create_session_for` for an incognito task — always a fresh draft.
@@ -5792,7 +5813,13 @@ impl Waku {
                     if incognito {
                         waku.create_incognito_session_for(project_id, waku.state.last_provider, cx);
                     } else {
-                        waku.create_session_under_project(project_id, waku.state.last_provider, cx);
+                        waku.create_session_under_project(
+                            project_id,
+                            waku.state.last_provider,
+                            true,
+                            false,
+                            cx,
+                        );
                     }
                     waku.move_composer_draft_after_project_change(draft_source, cx);
                     // A "no project" pick from the overlay's composer

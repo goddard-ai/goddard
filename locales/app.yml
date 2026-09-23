@@ -810,9 +810,9 @@ experiments.projects_page_title:
 experiments.projects_page_description:
   en: Press ⌘⇧P for a per-project page listing its worktrees, branches, issues, and pull requests, with ⌘⌥1–4 jumping straight to a tab.
 experiments.review_queue_title:
-  en: QA review
+  en: Dev review
 experiments.review_queue_description:
-  en: Add a Review tab to the Projects page — the QA branch's proposed commits listed oldest first, with per-commit approve, reject-and-revert, and a promote control for the approved frontier. The branch is named in Settings → Daemon.
+  en: Add a Review tab to the Projects page — the review branch's proposed commits listed oldest first, with per-commit approve, reject-and-revert, and a release task for the approved range. The branch is named in Settings → Daemon and defaults to dev.
 experiments.subagents_title:
   en: Subagents
 experiments.subagents_description:
@@ -2240,13 +2240,23 @@ projects.review_no_queue:
 projects.review_empty:
   en: "Nothing proposed on %{branch}"
 projects.review_train:
-  en: "%{approved} of %{total} commits promote"
+  en: "%{approved} of %{total} commits ready for release"
 projects.review_pending_count:
   en: "%{count} awaiting review"
 projects.review_promote:
   en: "Promote to %{branch}"
+projects.review_cut_release:
+  en: Cut a release
+projects.review_release_confirm:
+  en: "Start a release task for %{branch}?"
+projects.review_release_range:
+  en: "The task will use the approved range %{range}. Commits in this range:"
+projects.review_release_changed:
+  en: The review range changed. Check the commits and try again.
+projects.review_truncated:
+  en: More than 200 commits are awaiting review. The release range is unavailable.
 projects.review_frontier:
-  en: promotes
+  en: release frontier
 projects.review_approve:
   en: Approve
 projects.review_reject:

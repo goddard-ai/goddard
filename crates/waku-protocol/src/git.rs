@@ -223,6 +223,9 @@ pub struct ReviewEntry {
 pub struct ReviewQueue {
     /// The promotion target — `origin/<default branch>`, typically `main`.
     pub base_branch: Option<String>,
+    /// Current commit at the remote base branch, used to pin a release range.
+    #[serde(default)]
+    pub base_sha: Option<String>,
     /// The branch the queue was read from — the daemon's configured QA
     /// branch — so clients name it instead of assuming `qa`.
     #[serde(default)]
@@ -232,6 +235,9 @@ pub struct ReviewQueue {
     /// Commit the base branch can fast-forward to — the last entry of the
     /// approved prefix. `None` when nothing is promotable.
     pub frontier: Option<String>,
+    /// The queue exceeded its page limit, so the approved prefix is unknown.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 /// Which integration left the checkout conflicted — decides whether abort

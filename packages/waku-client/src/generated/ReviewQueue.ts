@@ -12,6 +12,10 @@ export type ReviewQueue = {
  */
 baseBranch: string | null,
 /**
+ * Current commit at the remote base branch, used to pin a release range.
+ */
+baseSha: string | null,
+/**
  * The branch the queue was read from — the daemon's configured QA
  * branch — so clients name it instead of assuming `qa`.
  */
@@ -24,4 +28,8 @@ entries: Array<ReviewEntry>,
  * Commit the base branch can fast-forward to — the last entry of the
  * approved prefix. `None` when nothing is promotable.
  */
-frontier: string | null, };
+frontier: string | null,
+/**
+ * The queue exceeded its page limit, so the approved prefix is unknown.
+ */
+truncated: boolean, };

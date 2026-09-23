@@ -2187,7 +2187,7 @@ experiments.project_map_description: 新しいセッションにワークスペ�
 experiments.project_map_title: プロジェクトマップ
 experiments.projects_page_description: ⌘⇧P でプロジェクトごとのページを開き、ワークツリー、ブランチ、Issue、プルリクエストを一覧します。⌘⌥1–4 でタブに直接移動できます。
 experiments.projects_page_title: プロジェクトページ
-experiments.review_queue_description: プロジェクトページにレビュータブを追加します — QA ブランチの提案コミットを古い順に一覧し、コミットごとの承認、却下とリバート、承認済みの先端までを昇格する操作ができます。ブランチ名は「設定 → デーモン」で変更できます。
+experiments.review_queue_description: プロジェクトページにレビュータブを追加します。レビュー用ブランチの提案コミットを古い順に表示し、コミットごとの承認、却下とリバート、承認済み範囲のリリースタスクを開始できます。ブランチ名は「設定 → デーモン」で変更でき、初期値は dev です。
 experiments.review_queue_title: QA レビュー
 experiments.sandbox_description: 入力欄のアクセスメニューに環境の選択肢（この Mac または分離された Linux VM でタスクを実行）を表示し、セッションヘッダーにサンドボックスバッジを付けます。有効化後に開始したセッションに適用されます。
 experiments.sandbox_title: サンドボックス VM
@@ -2437,10 +2437,15 @@ projects.review_needs_review: レビューが必要
 projects.review_no_queue: "origin に %{branch} ブランチがありません"
 projects.review_pending_count: "%{count} 件がレビュー待ち"
 projects.review_promote: "%{branch} に昇格"
+projects.review_cut_release: リリースを作成
+projects.review_release_confirm: "%{branch} のリリースタスクを開始しますか？"
+projects.review_release_range: "タスクは承認済みの範囲 %{range} を使用します。含まれるコミット:"
+projects.review_release_changed: レビュー対象の範囲が変わりました。コミットを確認してやり直してください。
+projects.review_truncated: レビュー待ちのコミットが 200 件を超えています。リリース範囲を確定できません。
 projects.review_reject: 却下してリバート
 projects.review_rejected: 却下
 projects.review_reverted: リバート済み
-projects.review_train: "%{total} 件中 %{approved} 件のコミットを昇格"
+projects.review_train: "%{total} 件中 %{approved} 件のコミットをリリース可能"
 projects.tab_review: レビュー
 providers.api_key_hint: "または %{var} を設定"
 providers.docs: ドキュメント
