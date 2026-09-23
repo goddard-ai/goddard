@@ -2029,19 +2029,54 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::HydrateSession { session_id } => {
+                // The skeleton leaves the global lock for the SQLite read and
+                // JSON parse — `load_session_detail` opens its own connection,
+                // so it cannot queue behind a save holding `task_state` or
+                // `storage` for its whole write. The lock is retaken only to
+                // merge the detail back and trim the resident window.
+                let mut session = {
+                    let state = self.task_state.lock();
+                    let Some(session) = state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .cloned()
+                    else {
+                        return Ok(ResponsePayload::Session { session: None });
+                    };
+                    session
+                };
+                if !session.detail_loaded {
+                    match self.task_store.load_session_detail(session_id)? {
+                        Some(detail) => {
+                            crate::persistence::apply_session_detail(&mut session, detail);
+                        }
+                        // A session with no stored row is already whole.
+                        None => session.detail_loaded = true,
+                    }
+                }
                 // Live runtimes stay resident; everything else is trimmed to
                 // the recency window once the response is built.
                 let pinned = self.sessions.lock().keys().copied().collect();
                 let mut state = self.task_state.lock();
-                let session = if let Some(session) = state
+                let session = match state
                     .sessions
                     .iter_mut()
-                    .find(|session| session.id == session_id)
+                    .find(|existing| existing.id == session_id)
                 {
-                    self.task_store.hydrate(session)?;
-                    Some(session.clone())
-                } else {
-                    None
+                    Some(existing) => {
+                        // A racing hydration may have landed meanwhile;
+                        // applying the same stored detail again is harmless,
+                        // but overwriting a session that gained newer unsaved
+                        // detail is not.
+                        if !existing.detail_loaded && session.detail_loaded {
+                            crate::persistence::apply_session_detail(existing, session);
+                        }
+                        Some(existing.clone())
+                    }
+                    // Removed while the read ran — still answer with what was
+                    // stored; the client drops sessions it no longer has.
+                    None => Some(session),
                 };
                 trim_resident_transcripts(&mut state, &pinned);
                 Ok(ResponsePayload::Session { session })

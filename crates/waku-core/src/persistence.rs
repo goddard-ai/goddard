@@ -1505,19 +1505,26 @@ impl StateStore {
         if session.detail_loaded {
             return Ok(());
         }
-        let mut guard = self.storage.lock();
-        if guard.is_none() {
-            *guard = Some(Storage {
-                connection: self.open()?,
-                persisted_sessions: HashSet::new(),
-                written_messages: HashMap::new(),
-                saved_projects: 0,
-                saved_app_settings: 0,
-                saved_app_state: 0,
-            });
+        match self.load_session_detail(session.id)? {
+            Some(stored) => apply_session_detail(session, stored),
+            // A session with no row has nothing stored to load; it is already
+            // whole.
+            None => session.detail_loaded = true,
         }
-        let connection = &guard.as_ref().expect("storage opened above").connection;
-        let id = session.id.to_string();
+        Ok(())
+    }
+
+    /// Reads one session's stored detail row and messages.
+    ///
+    /// The read runs on its own connection, so it never queues behind the
+    /// shared storage lock a save is holding for its write transaction — WAL
+    /// gives the reader a consistent snapshot either way. The returned
+    /// session is the stored blob verbatim plus its messages: its list
+    /// columns may lag the sessions table (which gets column-only writes), so
+    /// callers merge with [`apply_session_detail`] instead of adopting it.
+    pub fn load_session_detail(&self, session_id: Uuid) -> io::Result<Option<AgentSession>> {
+        let connection = self.open()?;
+        let id = session_id.to_string();
 
         let data: Option<String> = connection
             .query_row(
@@ -1527,33 +1534,13 @@ impl StateStore {
             )
             .optional()
             .map_err(to_io_error)?;
-        // A session with no row has nothing stored to load; it is already whole.
         let Some(data) = data else {
-            session.detail_loaded = true;
-            return Ok(());
+            return Ok(None);
         };
         let mut stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
         // Detail rows predate worktree names; the list row's migration is
         // overwritten when the stored workspace is copied over it.
         stored.workspace.backfill_worktree_name();
-        // Resolved before the field moves — `environment()` borrows `stored`.
-        let stored_environment = stored.environment();
-        session.transcript_blocks = stored.transcript_blocks;
-        session.turns = stored.turns;
-        session.queued_messages = stored.queued_messages;
-        session.workspace = stored.workspace;
-        session.side_chat_of = stored.side_chat_of;
-        session.provider_cursor = stored.provider_cursor;
-        session.runtime_mode = stored.runtime_mode;
-        session.reasoning_effort = stored.reasoning_effort;
-        session.service_tier = stored.service_tier;
-        session.context_window = stored.context_window;
-        session.context_usage = stored.context_usage;
-        session.runtime_event_cursor = stored.runtime_event_cursor;
-        // Quarantine is detail, not a list column — the skeleton's flag is a
-        // placeholder and the stored blob carries the real value.
-        session.quarantined = stored.quarantined;
-        session.environment = stored_environment;
 
         let mut statement = connection
             .prepare(
@@ -1562,7 +1549,7 @@ impl StateStore {
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
             .map_err(to_io_error)?;
-        session.messages = statement
+        stored.messages = statement
             .query_map(params![id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -1582,9 +1569,7 @@ impl StateStore {
             .filter_map(Result::ok)
             .filter_map(message_from_row)
             .collect();
-
-        session.detail_loaded = true;
-        Ok(())
+        Ok(Some(stored))
     }
 
     /// Persists whatever the app marked as changed, so a streaming turn writes
@@ -1911,6 +1896,35 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         // reach the store, so nothing persisted can deserialize as one.
         incognito: false,
     })
+}
+
+/// Moves a stored detail row's fields into `session`, keeping the live
+/// session's list columns.
+///
+/// The field list is everything [`StateStore::hydrate`] fills in, kept in one
+/// place so a session loaded on a background thread and one hydrated in place
+/// cannot drift apart.
+pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
+    // Resolved before the field moves — `environment()` borrows `stored`.
+    let stored_environment = stored.environment();
+    session.transcript_blocks = stored.transcript_blocks;
+    session.turns = stored.turns;
+    session.queued_messages = stored.queued_messages;
+    session.workspace = stored.workspace;
+    session.side_chat_of = stored.side_chat_of;
+    session.provider_cursor = stored.provider_cursor;
+    session.runtime_mode = stored.runtime_mode;
+    session.reasoning_effort = stored.reasoning_effort;
+    session.service_tier = stored.service_tier;
+    session.context_window = stored.context_window;
+    session.context_usage = stored.context_usage;
+    session.runtime_event_cursor = stored.runtime_event_cursor;
+    // Quarantine is detail, not a list column — the skeleton's flag is a
+    // placeholder and the stored blob carries the real value.
+    session.quarantined = stored.quarantined;
+    session.environment = stored_environment;
+    session.messages = stored.messages;
+    session.detail_loaded = true;
 }
 
 type MessageColumns = (
@@ -2740,6 +2754,42 @@ mod tests {
         );
         assert!(!session.quarantined);
 
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn hydrate_reads_on_its_own_connection_while_a_save_holds_the_storage_lock() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("Ask");
+        state.sessions[0].push_message(MessageRole::Assistant, "an answer");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        assert!(!restored.sessions[0].detail_loaded);
+
+        // The shared connection stays mid-transaction with its mutex held —
+        // exactly what a session click meets while a save is writing.
+        let mut guard = reopened.storage.lock();
+        let transaction = guard
+            .as_mut()
+            .unwrap()
+            .connection
+            .unchecked_transaction()
+            .unwrap();
+        transaction
+            .execute("UPDATE sessions SET title = title", [])
+            .unwrap();
+
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert!(restored.sessions[0].detail_loaded);
+        assert_eq!(restored.sessions[0].turns.len(), 1);
+
+        transaction.rollback().unwrap();
+        drop(guard);
         fs::remove_dir_all(directory).ok();
     }
 

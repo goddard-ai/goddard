@@ -1,0 +1,1 @@
+- Fixed long waits when opening an older task while other tasks are still streaming or the daemon has just restarted; the sidebar no longer queues the click behind in-progress saves.
