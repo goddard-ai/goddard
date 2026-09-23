@@ -224,6 +224,60 @@ impl Waku {
         }
     }
 
+    /// An image at a plain filesystem path — received transfer payloads have
+    /// no daemon blob reference to resolve. Same contract as
+    /// [`Self::image_for_reference`]: frames read only the cache, a miss
+    /// starts one background read, and the notify lands when bytes arrive.
+    pub(super) fn local_image_for_path(
+        &self,
+        path: &Path,
+        cx: &mut Context<Self>,
+    ) -> Option<Arc<gpui::Image>> {
+        let key = path.to_string_lossy().into_owned();
+        if let Some(state) = self.remote_images.borrow_mut().get(&key) {
+            return match state {
+                RemoteImageState::Ready(image) => Some(image.clone()),
+                RemoteImageState::Loading | RemoteImageState::Unavailable => None,
+            };
+        }
+        let Some(format) = image_format_for_name(&key) else {
+            self.release_remote_images(
+                self.remote_images
+                    .borrow_mut()
+                    .insert(key, RemoteImageState::Unavailable),
+                cx,
+            );
+            return None;
+        };
+        self.release_remote_images(
+            self.remote_images
+                .borrow_mut()
+                .insert(key.clone(), RemoteImageState::Loading),
+            cx,
+        );
+        let read_path = path.to_path_buf();
+        cx.spawn(async move |waku, cx| {
+            let image = cx
+                .background_executor()
+                .spawn(async move {
+                    std::fs::read(&read_path)
+                        .ok()
+                        .map(|bytes| Arc::new(gpui::Image::from_bytes(format, bytes)))
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let evicted = waku.remote_images.borrow_mut().insert(
+                    key,
+                    image.map_or(RemoteImageState::Unavailable, RemoteImageState::Ready),
+                );
+                waku.release_remote_images(evicted, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+        None
+    }
+
     pub(super) fn open_image_preview(
         &mut self,
         image: Arc<gpui::Image>,

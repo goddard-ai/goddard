@@ -6937,27 +6937,7 @@ pub(super) fn dropped_file_mention(
 }
 
 fn is_image_attachment_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "png"
-                    | "jpg"
-                    | "jpeg"
-                    | "gif"
-                    | "webp"
-                    | "bmp"
-                    | "svg"
-                    | "tif"
-                    | "tiff"
-                    | "ico"
-                    | "pnm"
-                    | "pbm"
-                    | "pgm"
-                    | "ppm"
-            )
-        })
+    waku_protocol::attachments::is_image_file_name(&path.to_string_lossy())
 }
 
 /// The snippet a "Pasted text" chip shows on hover: the paste's leading

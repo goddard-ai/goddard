@@ -2829,7 +2829,11 @@ pub struct MessageAttachment {
 /// predate a variant still show the pill; renderers that know it draw the
 /// bespoke element instead.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum TranscriptNotice {
     /// The workspace's commits were landed on `base` — rebase-or-merge
     /// integration plus a base fast-forward. `commits` is newest-first and
@@ -2853,7 +2857,48 @@ pub enum TranscriptNotice {
         #[serde(default, skip_serializing_if = "is_false")]
         restarted: bool,
     },
+    /// A friend's completed incoming transfer. `content` stays the
+    /// plain-text receipt — peer, title, destination — for the model and
+    /// clients that predate the variant; renderers that know it draw the
+    /// payload card: a folder listing, an image thumbnail, or file details.
+    TransferReceived {
+        peer_name: String,
+        /// Display title — the file or folder name the sender offered.
+        title: String,
+        /// Absolute path of the payload on the receiving host:
+        /// `dest_dir`/`title` when it landed under its own name, the
+        /// destination folder itself otherwise.
+        path: PathBuf,
+        is_dir: bool,
+        /// Single-file payloads only — a folder is never an image.
+        is_image: bool,
+        size_bytes: u64,
+        /// Immediate children of a folder payload, directories first and
+        /// capped at [`TRANSFER_MANIFEST_ENTRIES_CAP`]. Resolved once at
+        /// receipt so renderers never touch the filesystem.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        entries: Vec<TransferManifestEntry>,
+        /// The folder's true child count — larger than `entries.len()` when
+        /// the cap above dropped the tail.
+        #[serde(default)]
+        entry_count: u64,
+    },
 }
+
+/// One immediate child in a received folder's [`TranscriptNotice`]
+/// manifest: the name, kind, and size a receipt card lists without statting
+/// the file again.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferManifestEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size_bytes: u64,
+}
+
+/// How many folder children a [`TranscriptNotice::TransferReceived`]
+/// manifest retains; `entry_count` reports the uncapped total.
+pub const TRANSFER_MANIFEST_ENTRIES_CAP: usize = 64;
 
 /// Which icon a [`TranscriptNotice::Status`] row leads with.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]

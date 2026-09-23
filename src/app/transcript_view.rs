@@ -1560,6 +1560,9 @@ impl Waku {
                         push_focus: self
                             .transcript_control_focus(format!("landed-push-{}", message.id), cx),
                     });
+                    let transfer_notice = self
+                        .selected_session()
+                        .and_then(|session| self.transfer_notice_state(session, &message, cx));
                     let rendered = render_message(
                         MessageRender {
                             theme: &theme,
@@ -1589,6 +1592,7 @@ impl Waku {
                             waku,
                             composer,
                             landed_notice,
+                            transfer_notice,
                         },
                         cx,
                     );
@@ -1786,7 +1790,7 @@ impl Waku {
         if !self.expanded_landed_notices.remove(&message_id) {
             self.expanded_landed_notices.insert(message_id);
         }
-        self.remeasure_landed_notice(message_id);
+        self.remeasure_notice_message(message_id);
         cx.notify();
     }
 
@@ -1799,11 +1803,61 @@ impl Waku {
         if !self.landed_notice_show_all.remove(&message_id) {
             self.landed_notice_show_all.insert(message_id);
         }
-        self.remeasure_landed_notice(message_id);
+        self.remeasure_notice_message(message_id);
         cx.notify();
     }
 
-    fn remeasure_landed_notice(&self, message_id: Uuid) {
+    /// Live state for a `TranscriptNotice::TransferReceived` row — `None`
+    /// for every other notice. Quarantine gates Open (a skeleton session
+    /// fails closed until its detail hydrates the flag), `show_all` lifts
+    /// the folder listing's preview cap, and `image` starts the thumbnail's
+    /// background read on a cache miss.
+    pub(super) fn transfer_notice_state(
+        &self,
+        session: &AgentSession,
+        message: &Message,
+        cx: &mut Context<Self>,
+    ) -> Option<TransferNoticeState> {
+        let Some(TranscriptNotice::TransferReceived { path, is_image, .. }) = &message.notice
+        else {
+            return None;
+        };
+        Some(TransferNoticeState {
+            quarantined: session.quarantined || !session.detail_loaded,
+            session_id: session.id,
+            can_open: !self.is_remote_session(session.id),
+            show_all: self.transfer_notice_show_all.contains(&message.id),
+            image: is_image
+                .then(|| self.local_image_for_path(path, cx))
+                .flatten(),
+            open_focus: self.transcript_control_focus(format!("transfer-open-{}", message.id), cx),
+            reveal_focus: self
+                .transcript_control_focus(format!("transfer-reveal-{}", message.id), cx),
+            trust_focus: self
+                .transcript_control_focus(format!("transfer-trust-{}", message.id), cx),
+            entries_focus: self
+                .transcript_control_focus(format!("transfer-entries-{}", message.id), cx),
+            image_focus: self
+                .transcript_control_focus(format!("transfer-image-{}", message.id), cx),
+        })
+    }
+
+    /// A transfer receipt's entry list lives on its own `Message` row, same
+    /// remeasure path as the landed notice's disclosures.
+    pub(super) fn toggle_transfer_notice_entries(
+        &mut self,
+        message_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        self.pin_transcript_for_disclosure();
+        if !self.transfer_notice_show_all.remove(&message_id) {
+            self.transfer_notice_show_all.insert(message_id);
+        }
+        self.remeasure_notice_message(message_id);
+        cx.notify();
+    }
+
+    fn remeasure_notice_message(&self, message_id: Uuid) {
         let Some(message_index) = self.selected_session().and_then(|session| {
             session
                 .messages

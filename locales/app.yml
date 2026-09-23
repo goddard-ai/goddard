@@ -4934,6 +4934,28 @@ friends.quarantined_hint:
   en: "This session holds files received from a friend. Chat works while they stay quarantined — Enter on an empty composer hands the files and note to the agent."
 friends.trust:
   en: Trust files
+friends.transfer_from:
+  en: "From %{name}"
+friends.transfer_items:
+  en: "%{count} item(s)"
+friends.transfer_empty_folder:
+  en: Empty folder
+friends.transfer_file:
+  en: File
+friends.transfer_open:
+  en: Open
+friends.transfer_open_quarantined:
+  en: Trust these files to open them
+friends.transfer_preview:
+  en: Preview
+friends.transfer_show_more:
+  en: Show %{count} more
+friends.transfer_show_fewer:
+  en: Show fewer
+friends.transfer_showing_first:
+  en: Showing first %{count} of %{total}
+friends.transfer_more:
+  en: "…and %{count} more"
 friends.command_failed:
   en: "Friend command failed: %{error}"
 friends.sync_alerts:

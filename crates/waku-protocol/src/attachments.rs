@@ -1,8 +1,37 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use ts_rs::TS;
 
 pub const ATTACHMENT_SCHEME: &str = "waku-attachment:";
+
+/// Extensions the desktop client can decode for image preview. The daemon's
+/// transfer manifest and the composer's attachment chips share this list so
+/// they agree on what counts as an image.
+pub fn is_image_file_name(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png"
+                    | "jpg"
+                    | "jpeg"
+                    | "gif"
+                    | "webp"
+                    | "bmp"
+                    | "svg"
+                    | "tif"
+                    | "tiff"
+                    | "ico"
+                    | "pnm"
+                    | "pbm"
+                    | "pgm"
+                    | "ppm"
+            )
+        })
+}
+
 pub const MAX_ATTACHMENT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_ATTACHMENT_FILES: usize = 4_096;
 

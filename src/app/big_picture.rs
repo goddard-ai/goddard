@@ -1420,6 +1420,7 @@ impl Waku {
                             waku: cx.entity().downgrade(),
                             composer: self.composer.clone(),
                             landed_notice: None,
+                            transfer_notice: self.transfer_notice_state(session, &message, cx),
                         },
                         cx,
                     );

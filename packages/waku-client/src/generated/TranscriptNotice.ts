@@ -2,6 +2,7 @@
 import type { CommitEntry } from "./CommitEntry";
 import type { ProviderKind } from "./ProviderKind";
 import type { TranscriptNoticeStatus } from "./TranscriptNoticeStatus";
+import type { TransferManifestEntry } from "./TransferManifestEntry";
 
 /**
  * A structured transcript element persisted on a [`Message`]. `content`
@@ -9,4 +10,29 @@ import type { TranscriptNoticeStatus } from "./TranscriptNoticeStatus";
  * predate a variant still show the pill; renderers that know it draw the
  * bespoke element instead.
  */
-export type TranscriptNotice = { "type": "landed", base: string, commits: Array<CommitEntry>, ahead: number, } | { "type": "status", kind: TranscriptNoticeStatus, } | { "type": "providerSwitched", from: ProviderKind, to: ProviderKind, restarted?: boolean, };
+export type TranscriptNotice = { "type": "landed", base: string, commits: Array<CommitEntry>, ahead: number, } | { "type": "status", kind: TranscriptNoticeStatus, } | { "type": "providerSwitched", from: ProviderKind, to: ProviderKind, restarted?: boolean, } | { "type": "transferReceived", peerName: string,
+/**
+ * Display title — the file or folder name the sender offered.
+ */
+title: string,
+/**
+ * Absolute path of the payload on the receiving host:
+ * `dest_dir`/`title` when it landed under its own name, the
+ * destination folder itself otherwise.
+ */
+path: string, isDir: boolean,
+/**
+ * Single-file payloads only — a folder is never an image.
+ */
+isImage: boolean, sizeBytes: number,
+/**
+ * Immediate children of a folder payload, directories first and
+ * capped at [`TRANSFER_MANIFEST_ENTRIES_CAP`]. Resolved once at
+ * receipt so renderers never touch the filesystem.
+ */
+entries?: Array<TransferManifestEntry>,
+/**
+ * The folder's true child count — larger than `entries.len()` when
+ * the cap above dropped the tail.
+ */
+entryCount: number, };

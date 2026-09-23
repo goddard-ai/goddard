@@ -3683,6 +3683,7 @@ impl Waku {
         self.expanded_changed_files.clear();
         self.expanded_landed_notices.clear();
         self.landed_notice_show_all.clear();
+        self.transfer_notice_show_all.clear();
         self.changed_files_diff_hover = None;
         self.changed_files_diffs.clear();
         self.changed_files_diff_generation = self.changed_files_diff_generation.wrapping_add(1);

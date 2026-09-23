@@ -206,6 +206,7 @@ export type { TranscriptNotice } from "./TranscriptNotice";
 export type { TranscriptNoticeStatus } from "./TranscriptNoticeStatus";
 export type { TransferDirection } from "./TransferDirection";
 export type { TransferInfo } from "./TransferInfo";
+export type { TransferManifestEntry } from "./TransferManifestEntry";
 export type { TransferStatus } from "./TransferStatus";
 export type { TurnStatus } from "./TurnStatus";
 export type { UpstreamStatus } from "./UpstreamStatus";

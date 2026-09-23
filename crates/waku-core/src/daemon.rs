@@ -1069,7 +1069,8 @@ fn create_transfer_session(
     if let Some(note) = transfer.note.as_deref().filter(|note| !note.is_empty()) {
         session.push_message(crate::model::MessageRole::Assistant, note);
     }
-    session.push_message(
+    let payload = transfer_payload_path(dest_dir, &transfer.title);
+    session.push_notice_message(
         crate::model::MessageRole::Assistant,
         format!(
             "{} sent you \"{}\".\n\nFiles are in {}\n\nThe files have not been opened or executed — decide whether you trust them before asking me to work with them.",
@@ -1077,6 +1078,7 @@ fn create_transfer_session(
             transfer.title,
             dest_dir.display()
         ),
+        transfer_receipt_notice(transfer, &payload),
     );
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
@@ -1088,6 +1090,78 @@ fn create_transfer_session(
     state.push_session(session);
     task_store.save(&mut state)?;
     Ok(session_id)
+}
+
+/// Where a received transfer's payload sits: `dest_dir`/`title` when it
+/// landed under its own name, the destination folder itself otherwise —
+/// the same resolution the transfer's Finder link applies.
+fn transfer_payload_path(dest_dir: &Path, title: &str) -> PathBuf {
+    let payload = dest_dir.join(title);
+    if payload.symlink_metadata().is_ok() {
+        payload
+    } else {
+        dest_dir.to_path_buf()
+    }
+}
+
+/// The structured half of a transfer receipt — what the payload is and, for
+/// a folder, its immediate children — resolved once at delivery so
+/// transcript renderers never touch the filesystem. The message's `content`
+/// still carries the plain-text receipt for the model and clients that
+/// predate the variant.
+fn transfer_receipt_notice(
+    transfer: &waku_protocol::friends::TransferInfo,
+    payload: &Path,
+) -> crate::model::TranscriptNotice {
+    let metadata = std::fs::metadata(payload).ok();
+    let is_dir = metadata.as_ref().is_some_and(|meta| meta.is_dir());
+    let (entries, entry_count) = if is_dir {
+        transfer_manifest_entries(payload)
+    } else {
+        (Vec::new(), 0)
+    };
+    crate::model::TranscriptNotice::TransferReceived {
+        peer_name: transfer.peer_name.clone(),
+        title: transfer.title.clone(),
+        path: payload.to_path_buf(),
+        is_dir,
+        is_image: !is_dir && waku_protocol::attachments::is_image_file_name(&transfer.title),
+        size_bytes: if is_dir {
+            transfer.bytes_total
+        } else {
+            metadata.map_or(transfer.bytes_total, |meta| meta.len())
+        },
+        entries,
+        entry_count,
+    }
+}
+
+/// A folder payload's immediate children, directories first — capped at
+/// [`crate::model::TRANSFER_MANIFEST_ENTRIES_CAP`] with the true total
+/// alongside so a truncated listing still reports what it hides.
+fn transfer_manifest_entries(dir: &Path) -> (Vec<crate::model::TransferManifestEntry>, u64) {
+    let mut entries: Vec<crate::model::TransferManifestEntry> = std::fs::read_dir(dir)
+        .map(|read| {
+            read.flatten()
+                .map(|entry| {
+                    let metadata = entry.metadata().ok();
+                    crate::model::TransferManifestEntry {
+                        name: entry.file_name().to_string_lossy().into_owned(),
+                        is_dir: metadata.as_ref().is_some_and(|meta| meta.is_dir()),
+                        size_bytes: metadata.map_or(0, |meta| meta.len()),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let entry_count = entries.len() as u64;
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    entries.truncate(crate::model::TRANSFER_MANIFEST_ENTRIES_CAP);
+    (entries, entry_count)
 }
 
 /// The "Friends" project transfer and chat sessions live in — found by
@@ -6450,6 +6524,9 @@ mod tests {
             dest_dir: Some(share_dir.join("transfers/x")),
             session_id: None,
         };
+        let payload_file = share_dir.join("transfers/x/design.pdf");
+        std::fs::create_dir_all(payload_file.parent().unwrap()).unwrap();
+        std::fs::write(&payload_file, b"hello world!").unwrap();
 
         let session_id =
             create_transfer_session(&task_state, &store, &share_dir, &transfer).unwrap();
@@ -6500,24 +6577,83 @@ mod tests {
                 .position(|message| message.content.contains("transfers/x"))
                 .expect("the delivery receipt message");
             assert!(note_index < receipt_index, "the note lands above the file");
+            // The receipt carries the structured payload manifest alongside
+            // the plain text the model and older clients still read.
+            let Some(crate::model::TranscriptNotice::TransferReceived {
+                peer_name,
+                title,
+                path,
+                is_dir,
+                is_image,
+                size_bytes,
+                entries,
+                entry_count,
+            }) = &session.messages[receipt_index].notice
+            else {
+                panic!("the receipt carries a TransferReceived notice");
+            };
+            assert_eq!(peer_name, "maya");
+            assert_eq!(title, "design.pdf");
+            assert_eq!(*path, payload_file);
+            assert!(!is_dir);
+            assert!(!is_image);
+            assert_eq!(*size_bytes, 12);
+            assert!(entries.is_empty());
+            assert_eq!(*entry_count, 0);
         }
 
-        // A second transfer reuses the same Friends project.
+        // A folder payload's notice lists its children, directories first.
+        let folder_dir = share_dir.join("transfers/y/mockups");
+        std::fs::create_dir_all(folder_dir.join("sub")).unwrap();
+        std::fs::write(folder_dir.join("b.txt"), b"bb").unwrap();
+        std::fs::write(folder_dir.join("a.txt"), b"a").unwrap();
         let second = waku_protocol::friends::TransferInfo {
             id: Uuid::new_v4(),
+            title: "mockups".into(),
             dest_dir: Some(share_dir.join("transfers/y")),
             ..transfer.clone()
         };
-        create_transfer_session(&task_state, &store, &share_dir, &second).unwrap();
-        assert_eq!(
-            task_state
-                .lock()
-                .projects
+        let second_id = create_transfer_session(&task_state, &store, &share_dir, &second).unwrap();
+        {
+            let state = task_state.lock();
+            assert_eq!(
+                state
+                    .projects
+                    .iter()
+                    .filter(|project| project.path == share_dir)
+                    .count(),
+                1
+            );
+            let session = state
+                .sessions
                 .iter()
-                .filter(|project| project.path == share_dir)
-                .count(),
-            1
-        );
+                .find(|session| session.id == second_id)
+                .expect("the folder transfer's session");
+            let receipt = session
+                .messages
+                .iter()
+                .find(|message| message.notice.is_some())
+                .expect("the folder receipt");
+            let Some(crate::model::TranscriptNotice::TransferReceived {
+                path,
+                is_dir,
+                is_image,
+                entries,
+                entry_count,
+                ..
+            }) = &receipt.notice
+            else {
+                unreachable!();
+            };
+            assert_eq!(*path, folder_dir);
+            assert!(*is_dir);
+            assert!(!is_image);
+            assert_eq!(*entry_count, 3);
+            let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
+            assert_eq!(names, ["sub", "a.txt", "b.txt"]);
+            assert!(entries[0].is_dir);
+            assert_eq!(entries[1].size_bytes, 1);
+        }
 
         // The flag survives a reload — quarantine isn't a runtime accident.
         // It lives in the session detail, so the list skeleton reads false

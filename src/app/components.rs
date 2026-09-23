@@ -384,6 +384,32 @@ pub(super) struct MessageRender<'a> {
     /// card renderings (side chat, big picture), where the notice stays a
     /// collapsed summary.
     pub(super) landed_notice: Option<LandedNoticeState>,
+    /// Quarantine, disclosure, and focus state for a
+    /// `TranscriptNotice::TransferReceived` row — `None` for every other
+    /// message, which renders the card's static face only.
+    pub(super) transfer_notice: Option<TransferNoticeState>,
+}
+
+/// The live bits a received-transfer card needs that the persisted notice
+/// cannot carry: quarantine decides whether Open is armed, `show_all` lifts
+/// the folder listing's preview cap, `image` is the lazily-read thumbnail,
+/// and the focus handles keep the controls keyboard-reachable across the
+/// list's re-renders.
+pub(super) struct TransferNoticeState {
+    /// `session.quarantined` — or pessimistically true while the session's
+    /// detail is still a skeleton, so Open never arms early.
+    pub(super) quarantined: bool,
+    /// The receipt's own session — the Trust button's target.
+    pub(super) session_id: Uuid,
+    /// Remote sessions can't open or reveal their host's paths locally.
+    pub(super) can_open: bool,
+    pub(super) show_all: bool,
+    pub(super) image: Option<Arc<gpui::Image>>,
+    pub(super) open_focus: FocusHandle,
+    pub(super) reveal_focus: FocusHandle,
+    pub(super) trust_focus: FocusHandle,
+    pub(super) entries_focus: FocusHandle,
+    pub(super) image_focus: FocusHandle,
 }
 
 /// How far a landed notice is opened and the focus handles its controls
@@ -871,6 +897,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         waku,
         composer,
         landed_notice,
+        transfer_notice,
     } = params;
 
     let content = message.visible_content().to_owned();
@@ -1280,6 +1307,9 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             // keeps them from reading as agent prose.
             if let Some(TranscriptNotice::Status { kind }) = &message.notice {
                 status_notice_row(*kind, &content, theme, ctx)
+            } else if let Some(notice @ TranscriptNotice::TransferReceived { .. }) = &message.notice
+            {
+                transfer_notice_row(theme, message_id, notice, transfer_notice.as_ref(), &waku)
             } else {
                 let group_name = SharedString::from(format!("assistant-message-{message_id}"));
                 let body = render_markdown_message_body(&content, markdown, theme, ctx);
@@ -1758,6 +1788,505 @@ fn landed_notice_row(
                     }
                 }),
         );
+    }
+
+    card
+}
+
+/// How many folder entries a transfer receipt lists before the rest fold
+/// behind a "Show N more" row.
+const TRANSFER_NOTICE_SHOWN_ENTRIES: usize = 8;
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
+}
+
+/// A [`TranscriptNotice::TransferReceived`] rendered as a payload card:
+/// sender and title up top, then a folder's children or an image thumbnail —
+/// a plain file needs no body, its meta line already carries kind and size.
+/// Preview works while quarantined (decoding is read-only); Open stays
+/// disabled until Trust clears the flag, with the reason on its tooltip.
+fn transfer_notice_row(
+    theme: &Theme,
+    message_id: Uuid,
+    notice: &TranscriptNotice,
+    state: Option<&TransferNoticeState>,
+    waku: &gpui::WeakEntity<Waku>,
+) -> Div {
+    let TranscriptNotice::TransferReceived {
+        peer_name,
+        title,
+        path,
+        is_dir,
+        is_image,
+        size_bytes,
+        entries,
+        entry_count,
+    } = notice
+    else {
+        return div();
+    };
+    // `state` is missing only where the card renders without the
+    // transcript's live session — fail closed rather than arming Open on an
+    // unanswered quarantine flag.
+    let quarantined = state.is_none_or(|state| state.quarantined);
+    let can_open = state.is_some_and(|state| state.can_open);
+    let show_all = state.is_some_and(|state| state.show_all);
+
+    let from = tr!("friends.transfer_from", name = peer_name.clone()).to_string();
+    let detail = if *is_dir {
+        if *entry_count == 0 {
+            tr!("friends.transfer_empty_folder").to_string()
+        } else {
+            tr!("friends.transfer_items", count = *entry_count).to_string()
+        }
+    } else {
+        Path::new(title.as_str())
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_uppercase())
+            .unwrap_or_else(|| tr!("friends.transfer_file").to_string())
+    };
+    let meta = format!("{from} · {detail} · {}", format_bytes(*size_bytes));
+
+    let mut controls = div().flex_none().flex().items_center().gap(px(6.0));
+    if let Some(state) = state {
+        if quarantined {
+            let session_id = state.session_id;
+            let click_waku = waku.clone();
+            let key_waku = waku.clone();
+            controls = controls.child(
+                div()
+                    .id(SharedString::from(format!("transfer-trust-{message_id}")))
+                    .track_focus(&state.trust_focus)
+                    .tab_index(0)
+                    .h(px(22.0))
+                    .px(px(8.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .cursor_default()
+                    .bg(theme.inverse)
+                    .text_size(sp(11.5))
+                    .text_color(theme.on_inverse)
+                    .hover(|style| style.bg(theme.inverse.opacity(0.85)))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .child(icon("icons/lock-open.svg", 11.0, theme.on_inverse))
+                    .child(tr!("friends.trust"))
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        let _ = click_waku.update(cx, |this, cx| {
+                            this.trust_transfer_session(session_id, cx);
+                        });
+                    })
+                    .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            cx.stop_propagation();
+                            let _ = key_waku.update(cx, |this, cx| {
+                                this.trust_transfer_session(session_id, cx);
+                            });
+                        }
+                    }),
+            );
+        }
+
+        // Reveal only ever shows the payload's location — safe while
+        // quarantined, meaningless for a remote host's path.
+        let reveal_waku = waku.clone();
+        let reveal_key_waku = waku.clone();
+        let reveal_path = path.clone();
+        let reveal_key_path = path.clone();
+        let mut reveal = div()
+            .id(SharedString::from(format!("transfer-reveal-{message_id}")))
+            .track_focus(&state.reveal_focus)
+            .tab_index(0)
+            .h(px(22.0))
+            .w(px(24.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default();
+        if can_open {
+            reveal = reveal
+                .tooltip(Tooltip::text(tr!("common.reveal_in_finder")))
+                .hover(|style| style.bg(theme.overlay_strong))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .child(icon("icons/folder-open.svg", 12.0, theme.text_secondary))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    let _ = reveal_waku.update(cx, |_, cx| {
+                        crate::platform::reveal_in_file_manager(&reveal_path, cx);
+                    });
+                })
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.stop_propagation();
+                        let _ = reveal_key_waku.update(cx, |_, cx| {
+                            crate::platform::reveal_in_file_manager(&reveal_key_path, cx);
+                        });
+                    }
+                });
+        } else {
+            reveal = reveal
+                .opacity(0.45)
+                .tooltip(Tooltip::text(tr!("errors.remote_host_path")))
+                .child(icon("icons/folder-open.svg", 12.0, theme.text_ghost));
+        }
+        controls = controls.child(reveal);
+
+        let open_reason = if quarantined {
+            Some(tr!("friends.transfer_open_quarantined"))
+        } else if !can_open {
+            Some(tr!("errors.remote_host_path"))
+        } else {
+            None
+        };
+        let open_waku = waku.clone();
+        let open_key_waku = waku.clone();
+        let open_path = path.to_string_lossy().into_owned();
+        let open_key_path = open_path.clone();
+        let mut open = div()
+            .id(SharedString::from(format!("transfer-open-{message_id}")))
+            .track_focus(&state.open_focus)
+            .tab_index(0)
+            .h(px(22.0))
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .text_size(sp(11.5));
+        if let Some(reason) = open_reason {
+            // The reason rides the button's tooltip; keyboard activation
+            // toasts it so the cause isn't hover-only.
+            let toast_reason = reason.clone();
+            let key_reason = reason.clone();
+            open = open
+                .opacity(0.45)
+                .text_color(theme.text_secondary)
+                .tooltip(Tooltip::text(reason))
+                .child(icon("icons/lock.svg", 11.0, theme.text_secondary))
+                .child(tr!("friends.transfer_open"))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    let reason = toast_reason.clone();
+                    let _ = open_waku.update(cx, |this, cx| {
+                        this.show_toast(reason.clone());
+                        cx.notify();
+                    });
+                })
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.stop_propagation();
+                        let reason = key_reason.clone();
+                        let _ = open_key_waku.update(cx, |this, cx| {
+                            this.show_toast(reason.clone());
+                            cx.notify();
+                        });
+                    }
+                });
+        } else {
+            open = open
+                .text_color(theme.text_secondary)
+                .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .child(icon("icons/external-link.svg", 11.0, theme.text_secondary))
+                .child(tr!("friends.transfer_open"))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    let _ = open_waku.update(cx, |this, cx| {
+                        this.open_path_in_default_app(&open_path, cx);
+                    });
+                })
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.stop_propagation();
+                        let _ = open_key_waku.update(cx, |this, cx| {
+                            this.open_path_in_default_app(&open_key_path, cx);
+                        });
+                    }
+                });
+        }
+        controls = controls.child(open);
+    }
+
+    let header_icon = if *is_dir {
+        "icons/folder.svg"
+    } else {
+        right_panel::file_icon_for_path(title)
+    };
+    let mut card = div()
+        .w_full()
+        .min_w_0()
+        .rounded(px(15.0))
+        .border(hairline())
+        .border_color(theme.border_subtle)
+        .bg(theme.overlay)
+        .text_size(sp(12.5))
+        .line_height(sp(16.0))
+        .overflow_hidden()
+        .child(
+            div()
+                .py(px(9.0))
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(9.0))
+                .child(icon(header_icon, 16.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(1.0))
+                        .child(
+                            div()
+                                .truncate()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(title.clone()),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(sp(11.5))
+                                .text_color(theme.text_tertiary)
+                                .child(meta),
+                        ),
+                )
+                .child(controls),
+        );
+
+    if *is_dir && !entries.is_empty() {
+        let shown = if show_all {
+            entries.len()
+        } else {
+            entries.len().min(TRANSFER_NOTICE_SHOWN_ENTRIES)
+        };
+        let mut rows = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .border_t(hairline())
+            .border_color(theme.separator);
+        for entry in entries.iter().take(shown) {
+            rows = rows.child(
+                div()
+                    .h(px(26.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(icon(
+                        if entry.is_dir {
+                            "icons/folder.svg"
+                        } else {
+                            right_panel::file_icon_for_path(&entry.name)
+                        },
+                        11.0,
+                        theme.text_tertiary,
+                    ))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_color(theme.text_secondary)
+                            .child(entry.name.clone()),
+                    )
+                    .when(!entry.is_dir, |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_ghost)
+                                .child(format_bytes(entry.size_bytes)),
+                        )
+                    }),
+            );
+        }
+        card = card.child(rows);
+
+        let hidden_stored = entries.len().saturating_sub(shown);
+        let unlisted = entry_count.saturating_sub(entries.len() as u64);
+        if let Some(state) = state {
+            if hidden_stored > 0 || show_all {
+                let toggle_waku = waku.clone();
+                let toggle_key_waku = waku.clone();
+                let label = if show_all {
+                    tr!("friends.transfer_show_fewer").to_string()
+                } else {
+                    tr!("friends.transfer_show_more", count = hidden_stored).to_string()
+                };
+                card = card.child(
+                    div()
+                        .id(SharedString::from(format!("transfer-entries-{message_id}")))
+                        .track_focus(&state.entries_focus)
+                        .tab_index(0)
+                        .h(px(30.0))
+                        .px(px(12.0))
+                        .border_t(hairline())
+                        .border_color(theme.separator)
+                        .rounded_b(px(13.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .cursor_default()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .focus_visible(|style| style.bg(theme.overlay_strong))
+                        .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
+                        .active(|style| style.bg(theme.overlay))
+                        .child(SharedString::from(label))
+                        .when(show_all && unlisted > 0, |row| {
+                            row.child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .font_weight(FontWeight::NORMAL)
+                                    .text_color(theme.text_ghost)
+                                    .child(tr!(
+                                        "friends.transfer_showing_first",
+                                        count = entries.len(),
+                                        total = *entry_count
+                                    )),
+                            )
+                        })
+                        .child(div().flex_1())
+                        .child(icon(
+                            if show_all {
+                                "icons/chevron-down.svg"
+                            } else {
+                                "icons/chevron-right.svg"
+                            },
+                            11.0,
+                            theme.affordance_icon(),
+                        ))
+                        .on_click(move |_, _, cx| {
+                            let _ = toggle_waku.update(cx, |this, cx| {
+                                this.toggle_transfer_notice_entries(message_id, cx);
+                            });
+                        })
+                        .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                let _ = toggle_key_waku.update(cx, |this, cx| {
+                                    this.toggle_transfer_notice_entries(message_id, cx);
+                                });
+                                cx.stop_propagation();
+                            }
+                        }),
+                );
+            }
+        } else if *entry_count > shown as u64 {
+            // No live state (side surfaces) — the listing stays capped and
+            // a ghost line reports the remainder.
+            card = card.child(
+                div()
+                    .h(px(30.0))
+                    .px(px(12.0))
+                    .border_t(hairline())
+                    .border_color(theme.separator)
+                    .flex()
+                    .items_center()
+                    .text_color(theme.text_ghost)
+                    .child(tr!(
+                        "friends.transfer_more",
+                        count = *entry_count - shown as u64
+                    )),
+            );
+        }
+    }
+
+    if *is_image {
+        let frame = match state.and_then(|state| state.image.clone()) {
+            Some(image) => {
+                let preview_waku = waku.clone();
+                let key_waku = waku.clone();
+                let preview_image = image.clone();
+                let key_image = image.clone();
+                let preview_name = SharedString::from(title.clone());
+                let key_name = preview_name.clone();
+                let preview_path = path.clone();
+                let key_path = path.clone();
+                let mut frame = div()
+                    .id(SharedString::from(format!("transfer-image-{message_id}")))
+                    .max_w(px(ACTIVITY_IMAGE_WIDTH))
+                    .h(px(160.0))
+                    .rounded(px(10.0))
+                    .overflow_hidden()
+                    .cursor_default()
+                    .tooltip(Tooltip::text(tr!("friends.transfer_preview")))
+                    .child(img(image).size_full().object_fit(ObjectFit::Cover));
+                if let Some(state) = state {
+                    frame = frame
+                        .track_focus(&state.image_focus)
+                        .tab_index(0)
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            let _ = preview_waku.update(cx, |this, cx| {
+                                this.open_image_preview(
+                                    preview_image.clone(),
+                                    preview_name.clone(),
+                                    preview_path.clone(),
+                                    window,
+                                    cx,
+                                );
+                            });
+                        })
+                        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                            if !event.keystroke.modifiers.modified()
+                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                            {
+                                cx.stop_propagation();
+                                let _ = key_waku.update(cx, |this, cx| {
+                                    this.open_image_preview(
+                                        key_image.clone(),
+                                        key_name.clone(),
+                                        key_path.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            }
+                        });
+                }
+                frame
+            }
+            None => div()
+                .id(SharedString::from(format!(
+                    "transfer-image-empty-{message_id}"
+                )))
+                .max_w(px(ACTIVITY_IMAGE_WIDTH))
+                .h(px(160.0))
+                .rounded(px(10.0))
+                .bg(theme.inset)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon("icons/file-types/image.svg", 18.0, theme.text_ghost)),
+        };
+        card = card.child(div().px(px(12.0)).pt(px(2.0)).pb(px(10.0)).child(frame));
     }
 
     card
