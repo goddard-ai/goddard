@@ -129,6 +129,22 @@ command_palette.settings:
   en: Settings
 command_palette.new_task:
   en: New task
+command_palette.add_friend:
+  en: Add friend…
+command_palette.copy_friend_code:
+  en: Copy my friend code
+command_palette.friend_code_copied:
+  en: Friend code copied
+command_palette.share_file_or_folder:
+  en: Share file or folder…
+command_palette.share_project:
+  en: Share project…
+command_palette.manage_friends:
+  en: Manage friends
+command_palette.share_friend_placeholder:
+  en: Choose a friend…
+command_palette.share_project_placeholder:
+  en: Choose a project to share…
 command_palette.new_task_in:
   en: New task in…
 command_palette.new_task_in_placeholder:

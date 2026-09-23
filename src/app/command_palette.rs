@@ -240,6 +240,16 @@ enum PaletteAction {
     ChooseIssueTemplate(waku_protocol::workspace::IssueTemplate),
     NewBlankIssue,
     ReclaimSpace,
+    AddFriend,
+    CopyFriendCode,
+    ShareFileOrFolder,
+    ShareFileWithFriend(String),
+    ShareProject,
+    ChooseShareProject(Uuid),
+    ShareProjectWithFriend {
+        project: Uuid,
+        friend: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -252,6 +262,9 @@ enum CommandPaletteView {
     RunScripts,
     /// The "Remove project…" project picker.
     RemoveProject,
+    ShareFileFriends,
+    ShareProjects,
+    ShareProjectFriends(Uuid),
     /// The "New task in…" directory picker.
     NewTaskIn,
     IssueProjects,
@@ -888,6 +901,27 @@ impl Waku {
         self.command_palette.view = CommandPaletteView::RemoveProject;
         self.command_palette.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("command_palette.remove_project_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn open_command_palette_friends_view(
+        &mut self,
+        view: CommandPaletteView,
+        cx: &mut Context<Self>,
+    ) {
+        self.command_palette.view = view;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(
+                tr!(match view {
+                    CommandPaletteView::ShareProjects =>
+                        "command_palette.share_project_placeholder",
+                    _ => "command_palette.share_friend_placeholder",
+                }),
+                cx,
+            );
             input.clear(cx);
         });
         self.refresh_command_palette_results("", false, cx);
@@ -1554,6 +1588,12 @@ impl Waku {
                 self.open_command_palette_run_script_projects_view(cx)
             }
             CommandPaletteView::RemoveProject => self.leave_command_palette_drill_in_view(cx),
+            CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjects => {
+                self.leave_command_palette_drill_in_view(cx)
+            }
+            CommandPaletteView::ShareProjectFriends(_) => {
+                self.open_command_palette_friends_view(CommandPaletteView::ShareProjects, cx)
+            }
             CommandPaletteView::NewTaskIn => self.leave_command_palette_new_task_view(cx),
             CommandPaletteView::IssueProjects => self.leave_command_palette_drill_in_view(cx),
             // Esc on the templates step backs up to the project step —
@@ -1576,6 +1616,10 @@ impl Waku {
             }
             CommandPaletteView::RunScripts => tr!("command_palette.run_script_placeholder"),
             CommandPaletteView::RemoveProject => tr!("command_palette.remove_project_placeholder"),
+            CommandPaletteView::ShareProjects => tr!("command_palette.share_project_placeholder"),
+            CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjectFriends(_) => {
+                tr!("command_palette.share_friend_placeholder")
+            }
             CommandPaletteView::NewTaskIn => tr!("command_palette.new_task_in_placeholder"),
             CommandPaletteView::IssueProjects => {
                 tr!("command_palette.issue_project_placeholder")
@@ -1622,6 +1666,9 @@ impl Waku {
                 | CommandPaletteView::RunScriptProjects
                 | CommandPaletteView::RunScripts
                 | CommandPaletteView::RemoveProject
+                | CommandPaletteView::ShareFileFriends
+                | CommandPaletteView::ShareProjects
+                | CommandPaletteView::ShareProjectFriends(_)
                 | CommandPaletteView::NewTaskIn
                 | CommandPaletteView::IssueProjects
                 | CommandPaletteView::IssueTemplates
@@ -1817,6 +1864,59 @@ impl Waku {
                 next(),
             ),
         ];
+
+        if self.state.friends_enabled {
+            commands.extend([
+                CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    tr!("command_palette.add_friend"),
+                    "icons/plus.svg",
+                    None,
+                    PaletteAction::AddFriend,
+                    "add invite friend connection code request",
+                    next(),
+                ),
+                CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    tr!("command_palette.copy_friend_code"),
+                    "icons/copy.svg",
+                    None,
+                    PaletteAction::CopyFriendCode,
+                    "copy my friend code invite connection share",
+                    next(),
+                ),
+                CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    tr!("command_palette.share_file_or_folder"),
+                    "icons/file.svg",
+                    None,
+                    PaletteAction::ShareFileOrFolder,
+                    "share send file folder directory to friend transfer",
+                    next(),
+                ),
+                CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    tr!("command_palette.share_project"),
+                    "icons/folder.svg",
+                    None,
+                    PaletteAction::ShareProject,
+                    "share project repository repo with friend git",
+                    next(),
+                ),
+                CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    tr!("command_palette.manage_friends"),
+                    "icons/settings.svg",
+                    None,
+                    PaletteAction::OpenSettings(SettingsPage::Friends),
+                    "friends requests transfers sharing sync manage settings",
+                    next(),
+                ),
+            ]);
+            if self.friends_state.friend_code.is_empty() {
+                commands.retain(|item| item.action != PaletteAction::CopyFriendCode);
+            }
+        }
 
         if self
             .state
@@ -2757,6 +2857,104 @@ impl Waku {
             .collect()
     }
 
+    fn command_palette_share_candidates(&self) -> Vec<CommandPaletteItem> {
+        match self.command_palette.view {
+            CommandPaletteView::ShareProjects => self
+                .state
+                .projects
+                .iter()
+                .filter(|project| !project.temporary && !project.is_projectless())
+                .enumerate()
+                .map(|(order, project)| {
+                    let label = project.display_name();
+                    CommandPaletteItem {
+                        section: PaletteSection::Projects,
+                        search_text: format!(
+                            "{label} {} share project repository",
+                            project.path.display()
+                        ),
+                        label,
+                        detail: Some(settings::abbreviate_home_path(
+                            &project.path,
+                            self.home_directory.as_deref(),
+                        )),
+                        icon: PaletteIcon::Asset("icons/folder.svg"),
+                        shortcut: None,
+                        action: PaletteAction::ChooseShareProject(project.id),
+                        content_match: None,
+                        order,
+                        recency: 0,
+                    }
+                })
+                .collect(),
+            CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjectFriends(_) => {
+                self.friends_state
+                    .friends
+                    .iter()
+                    .filter(|friend| {
+                        let CommandPaletteView::ShareProjectFriends(project_id) =
+                            self.command_palette.view
+                        else {
+                            return true;
+                        };
+                        let Some(project) = self
+                            .state
+                            .projects
+                            .iter()
+                            .find(|project| project.id == project_id)
+                        else {
+                            return false;
+                        };
+                        !self.friends_state.shared_projects.iter().any(|share| {
+                            share.peer_id == friend.node_id && share.repo_path == project.path
+                        })
+                    })
+                    .enumerate()
+                    .map(|(order, friend)| {
+                        let label = friends::friend_display_name(friend).to_owned();
+                        let action = match self.command_palette.view {
+                            CommandPaletteView::ShareProjectFriends(project) => {
+                                PaletteAction::ShareProjectWithFriend {
+                                    project,
+                                    friend: friend.node_id.clone(),
+                                }
+                            }
+                            _ => PaletteAction::ShareFileWithFriend(friend.node_id.clone()),
+                        };
+                        CommandPaletteItem {
+                            section: PaletteSection::Commands,
+                            search_text: format!("{label} friend share send"),
+                            label,
+                            detail: None,
+                            icon: PaletteIcon::Asset("icons/file.svg"),
+                            shortcut: None,
+                            action,
+                            content_match: None,
+                            order,
+                            recency: 0,
+                        }
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn refresh_command_palette_share_results(&mut self, query: &str, preserve_selection: bool) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let mut candidates = self.command_palette_share_candidates();
+        if !query.trim().is_empty() {
+            candidates = self.score_run_script_items(candidates, query.trim());
+        }
+        self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
+    }
+
     fn command_palette_run_script_candidates(&self) -> Vec<CommandPaletteItem> {
         let Some(project_id) = self.command_palette.run_script_project else {
             return Vec::new();
@@ -3381,6 +3579,12 @@ impl Waku {
                 self.refresh_command_palette_remove_project_results(query, preserve_selection);
                 return;
             }
+            CommandPaletteView::ShareFileFriends
+            | CommandPaletteView::ShareProjects
+            | CommandPaletteView::ShareProjectFriends(_) => {
+                self.refresh_command_palette_share_results(query, preserve_selection);
+                return;
+            }
             CommandPaletteView::NewTaskIn => {
                 self.refresh_command_palette_new_task_results(query, preserve_selection);
                 return;
@@ -3850,6 +4054,21 @@ impl Waku {
                 self.open_command_palette_remove_project_view(cx);
                 return;
             }
+            PaletteAction::ShareFileOrFolder => {
+                self.open_command_palette_friends_view(CommandPaletteView::ShareFileFriends, cx);
+                return;
+            }
+            PaletteAction::ShareProject => {
+                self.open_command_palette_friends_view(CommandPaletteView::ShareProjects, cx);
+                return;
+            }
+            PaletteAction::ChooseShareProject(project) => {
+                self.open_command_palette_friends_view(
+                    CommandPaletteView::ShareProjectFriends(project),
+                    cx,
+                );
+                return;
+            }
             PaletteAction::NewTaskIn => {
                 self.open_command_palette_new_task_view(false, cx);
                 return;
@@ -3910,6 +4129,49 @@ impl Waku {
                 self.new_incognito_task_in_same_worktree(window, cx)
             }
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
+            PaletteAction::AddFriend => {
+                self.open_settings_action(&OpenSettings, window, cx);
+                self.open_settings_page(SettingsPage::Friends, window, cx);
+                let focus = self.friend_code_input.read(cx).focus();
+                window.focus(&focus, cx);
+            }
+            PaletteAction::CopyFriendCode => {
+                cx.write_to_clipboard(ClipboardItem::new_string(
+                    self.friends_state.friend_code.clone(),
+                ));
+                self.show_success_toast(tr!("command_palette.friend_code_copied"));
+                cx.notify();
+            }
+            PaletteAction::ShareFileWithFriend(node_id) => {
+                if self
+                    .friends_state
+                    .friends
+                    .iter()
+                    .any(|friend| friend.node_id == node_id)
+                {
+                    self.pick_and_send_file(node_id, cx);
+                }
+            }
+            PaletteAction::ShareProjectWithFriend { project, friend } => {
+                if let Some(project) =
+                    self.state.projects.iter().find(|item| {
+                        item.id == project && !item.temporary && !item.is_projectless()
+                    })
+                    && self
+                        .friends_state
+                        .friends
+                        .iter()
+                        .any(|item| item.node_id == friend)
+                {
+                    self.friends_command(
+                        waku_client::Command::ShareProjectWithFriend {
+                            node_id: friend,
+                            project_path: project.path.clone(),
+                        },
+                        cx,
+                    );
+                }
+            }
             PaletteAction::RemoveProject(project_id) => self.remove_project(project_id, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
             PaletteAction::CreateDraft => self.create_saved_draft(window, cx),
@@ -4111,6 +4373,9 @@ impl Waku {
             | PaletteAction::OpenRunScript
             | PaletteAction::ChooseRunScriptProject(_)
             | PaletteAction::OpenRemoveProject
+            | PaletteAction::ShareFileOrFolder
+            | PaletteAction::ShareProject
+            | PaletteAction::ChooseShareProject(_)
             | PaletteAction::NewTaskIn
             | PaletteAction::NewIncognitoTaskIn
             | PaletteAction::CreateGitHubIssue
@@ -4190,6 +4455,9 @@ impl Waku {
             CommandPaletteView::ResumeProviders
             | CommandPaletteView::RunScriptProjects
             | CommandPaletteView::RemoveProject
+            | CommandPaletteView::ShareFileFriends
+            | CommandPaletteView::ShareProjects
+            | CommandPaletteView::ShareProjectFriends(_)
             | CommandPaletteView::IssueProjects
             | CommandPaletteView::SavePrompt => false,
         };

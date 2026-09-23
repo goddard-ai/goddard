@@ -1886,6 +1886,7 @@ impl Waku {
         if self.settings_page == Some(SettingsPage::Friends) {
             self.probe_friends(cx);
         }
+        self.refresh_open_command_palette(cx);
         cx.notify();
         true
     }

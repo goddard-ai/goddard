@@ -1017,7 +1017,7 @@ impl Waku {
 
     /// File picker → the send dialog's optional note → `SendFileToFriend`.
     /// The daemon dials fresh regardless of the cached probe verdict.
-    fn pick_and_send_file(&self, node_id: String, cx: &mut Context<Self>) {
+    pub(super) fn pick_and_send_file(&self, node_id: String, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: true,
