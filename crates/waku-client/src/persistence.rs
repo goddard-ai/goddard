@@ -971,6 +971,11 @@ pub struct AppSettings {
     /// Show a task's unsent composer draft on its own line under the sidebar
     /// row's title.
     pub sidebar_composer_drafts: bool,
+    /// Hoist recently active Planning and Executing tasks above date groups.
+    #[serde(default)]
+    pub sidebar_phase_groups: bool,
+    #[serde(default)]
+    pub sidebar_hide_phase_labels: bool,
     /// The color the sidebar's draft preview line wears.
     pub sidebar_draft_preview_color: SidebarDraftPreviewColor,
     /// Days without a reply before a session groups as dormant; `None`
@@ -1128,6 +1133,8 @@ impl Default for AppSettings {
             archive_navigation: ArchiveNavigation::default(),
             archive_continues_unread_sweep: true,
             sidebar_composer_drafts: false,
+            sidebar_phase_groups: false,
+            sidebar_hide_phase_labels: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
@@ -1533,6 +1540,10 @@ pub struct PersistedState {
     /// the sidebar row's title.
     #[serde(default)]
     pub sidebar_composer_drafts: bool,
+    #[serde(default)]
+    pub sidebar_phase_groups: bool,
+    #[serde(default)]
+    pub sidebar_hide_phase_labels: bool,
     /// The color the sidebar's draft preview line wears.
     #[serde(default)]
     pub sidebar_draft_preview_color: SidebarDraftPreviewColor,
@@ -1926,6 +1937,8 @@ impl PersistedState {
             archive_navigation: ArchiveNavigation::default(),
             archive_continues_unread_sweep: true,
             sidebar_composer_drafts: false,
+            sidebar_phase_groups: false,
+            sidebar_hide_phase_labels: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
@@ -2313,6 +2326,8 @@ impl PersistedState {
             archive_navigation: self.archive_navigation,
             archive_continues_unread_sweep: self.archive_continues_unread_sweep,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
+            sidebar_phase_groups: self.sidebar_phase_groups,
+            sidebar_hide_phase_labels: self.sidebar_hide_phase_labels,
             sidebar_draft_preview_color: self.sidebar_draft_preview_color,
             dormant_after_days: self.dormant_after_days,
             terminal_open_links_in_mouse_mode: self.terminal_open_links_in_mouse_mode,
@@ -2436,6 +2451,8 @@ impl PersistedState {
         self.archive_navigation = settings.archive_navigation;
         self.archive_continues_unread_sweep = settings.archive_continues_unread_sweep;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
+        self.sidebar_phase_groups = settings.sidebar_phase_groups;
+        self.sidebar_hide_phase_labels = settings.sidebar_hide_phase_labels;
         self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
         self.dormant_after_days = settings.dormant_after_days;
         self.terminal_open_links_in_mouse_mode = settings.terminal_open_links_in_mouse_mode;
@@ -3980,6 +3997,23 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.sidebar_composer_drafts);
+    }
+
+    #[test]
+    fn sidebar_phase_options_default_off_and_persist_as_settings() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.sidebar_phase_groups);
+        assert!(!defaults.sidebar_hide_phase_labels);
+        let mut state = PersistedState::empty();
+        state.sidebar_phase_groups = true;
+        state.sidebar_hide_phase_labels = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["sidebar_phase_groups"], true);
+        assert_eq!(settings["sidebar_hide_phase_labels"], true);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.sidebar_phase_groups);
+        assert!(restored.sidebar_hide_phase_labels);
     }
 
     #[test]

@@ -1549,6 +1549,14 @@ settings.sidebar_composer_drafts:
   en: Sidebar draft previews
 settings.sidebar_composer_drafts_description:
   en: Show a task's unsent composer draft under its title in the sidebar
+settings.sidebar_phase_groups:
+  en: Group recent Executing and Planning tasks
+settings.sidebar_phase_groups_description:
+  en: In Date view, move tasks active in the last 30 minutes above Today, below Pinned. Requires Phase routing in Experiments
+settings.sidebar_hide_phase_labels:
+  en: Hide executing/planning labels in sidebar
+settings.sidebar_hide_phase_labels_description:
+  en: Keep phase names in the title bar and group headers without repeating them on task rows
 settings.sidebar_draft_preview_color:
   en: Draft preview color
 settings.sidebar_draft_preview_color_description:

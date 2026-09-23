@@ -1,0 +1,1 @@
+- With Phase routing enabled, turn on recent phase groups in Settings → General to move tasks active in the last 30 minutes into Executing and Planning sections above Today. You can hide repeated phase labels on sidebar rows; the selected task's phase appears in its title bar.

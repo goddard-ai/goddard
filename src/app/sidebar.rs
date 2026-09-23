@@ -77,6 +77,7 @@ pub(super) enum SidebarGroup {
     /// Swept and stale tasks, always the last section regardless of
     /// grouping. Starts collapsed like Terminals.
     Dormant,
+    Phase(waku_protocol::routing::SessionPhase),
     Date(SessionDateGroup),
     Project(Uuid),
     Projectless,
@@ -88,6 +89,10 @@ impl SidebarGroup {
             Self::Pinned => "pinned".into(),
             Self::Terminals => "terminals".into(),
             Self::Dormant => "dormant".into(),
+            Self::Phase(waku_protocol::routing::SessionPhase::Executing) => {
+                "phase-executing".into()
+            }
+            Self::Phase(waku_protocol::routing::SessionPhase::Planning) => "phase-planning".into(),
             Self::Date(group) => format!("date-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
             Self::Projectless => "projectless".into(),
@@ -99,6 +104,8 @@ impl SidebarGroup {
             Self::Pinned => mix(fingerprint, 0x300),
             Self::Terminals => mix(fingerprint, 0x400),
             Self::Dormant => mix(fingerprint, 0x500),
+            Self::Phase(waku_protocol::routing::SessionPhase::Executing) => mix(fingerprint, 0x600),
+            Self::Phase(waku_protocol::routing::SessionPhase::Planning) => mix(fingerprint, 0x601),
             Self::Date(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
             Self::Projectless => mix(fingerprint, 0x200),
@@ -409,6 +416,15 @@ fn date_sidebar_groups(sessions: &[&AgentSession], today: NaiveDate) -> [Vec<Uui
             .push(session.id);
     }
     grouped_sessions
+}
+
+fn recent_phase_group(
+    session: &AgentSession,
+    now: u64,
+) -> Option<waku_protocol::routing::SessionPhase> {
+    (now.saturating_sub(session.updated_at) < 30 * 60)
+        .then_some(session.phase)
+        .flatten()
 }
 
 fn project_sidebar_groups(
@@ -2978,6 +2994,8 @@ impl Waku {
         );
         fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
+        fingerprint = mix(fingerprint, u64::from(self.state.sidebar_phase_groups));
+        fingerprint = mix(fingerprint, u64::from(self.state.phase_routing_enabled));
         // Dormancy is part of every row's placement: mix the derived flag,
         // not the clock it is measured against, so the snapshot only rebuilds
         // on real transitions.
@@ -3000,6 +3018,16 @@ impl Waku {
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
             fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
             fingerprint = mix(fingerprint, u64::from(session.incognito));
+            if self.state.sidebar_phase_groups && self.state.phase_routing_enabled {
+                fingerprint = mix(
+                    fingerprint,
+                    match recent_phase_group(session, now) {
+                        Some(waku_protocol::routing::SessionPhase::Executing) => 1,
+                        Some(waku_protocol::routing::SessionPhase::Planning) => 2,
+                        None => 0,
+                    },
+                );
+            }
             fingerprint = mix(
                 fingerprint,
                 u64::from(session_dormant(session, now, dormant_threshold)),
@@ -3172,10 +3200,40 @@ impl Waku {
                     .map(|session| session.id)
                     .collect::<Vec<_>>();
                 sorted_sessions.retain(|session| !dormant_set.contains(&session.id));
+                if self.state.sidebar_phase_groups && self.state.phase_routing_enabled {
+                    for phase in [
+                        waku_protocol::routing::SessionPhase::Executing,
+                        waku_protocol::routing::SessionPhase::Planning,
+                    ] {
+                        let group = SidebarGroup::Phase(phase);
+                        let ids = sorted_sessions
+                            .iter()
+                            .filter(|session| recent_phase_group(session, now) == Some(phase))
+                            .map(|session| session.id)
+                            .collect::<Vec<_>>();
+                        let collapsed = self.sidebar_collapsed_groups.contains(&group);
+                        append_sidebar_group_rows(&mut rows, group, &ids, collapsed, None);
+                        if collapsed && !ids.is_empty() {
+                            collapsed_members.insert(group, ids);
+                        }
+                    }
+                    sorted_sessions.retain(|session| recent_phase_group(session, now).is_none());
+                }
                 let grouped_sessions = date_sidebar_groups(&sorted_sessions, today);
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
                     let collapsed = self.sidebar_collapsed_groups.contains(&group);
+                    if date_group == SessionDateGroup::Today
+                        && self.state.sidebar_phase_groups
+                        && rows
+                            .iter()
+                            .any(|row| matches!(row, SidebarRow::Header(SidebarGroup::Phase(_))))
+                        && grouped_sessions[date_group.index()].is_empty()
+                    {
+                        rows.push(SidebarRow::Header(group));
+                        rows.push(SidebarRow::GroupSpacer);
+                        continue;
+                    }
                     append_sidebar_group_rows(
                         &mut rows,
                         group,
@@ -3564,6 +3622,12 @@ impl Waku {
             SidebarGroup::Pinned => tr!("sidebar.pinned"),
             SidebarGroup::Terminals => tr!("sidebar.terminals"),
             SidebarGroup::Dormant => tr!("sidebar.dormant"),
+            SidebarGroup::Phase(waku_protocol::routing::SessionPhase::Executing) => {
+                tr!("phase.executing")
+            }
+            SidebarGroup::Phase(waku_protocol::routing::SessionPhase::Planning) => {
+                tr!("phase.planning")
+            }
             SidebarGroup::Date(group) => group.label(),
             SidebarGroup::Project(project_id) => self
                 .state
@@ -3598,6 +3662,7 @@ impl Waku {
         let updated_chevron = matches!(
             group,
             SidebarGroup::Date(_)
+                | SidebarGroup::Phase(_)
                 | SidebarGroup::Pinned
                 | SidebarGroup::Terminals
                 | SidebarGroup::Dormant
@@ -3894,7 +3959,10 @@ impl Waku {
                 }
                 return;
             }
-            SidebarGroup::Pinned | SidebarGroup::Date(_) | SidebarGroup::Dormant => return,
+            SidebarGroup::Pinned
+            | SidebarGroup::Phase(_)
+            | SidebarGroup::Date(_)
+            | SidebarGroup::Dormant => return,
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -4846,7 +4914,14 @@ impl Waku {
         // the selected row, which never carries a draft preview.
         let phase_marker = draft_preview
             .is_none()
-            .then(|| phases::sidebar_phase_marker(self.state.phase_routing_enabled, session))
+            .then(|| {
+                phases::sidebar_phase_marker(
+                    self.state.phase_routing_enabled
+                        && !(self.state.sidebar_phase_groups
+                            && self.state.sidebar_hide_phase_labels),
+                    session,
+                )
+            })
             .flatten();
         let pull_request_badge = self
             .sidebar_pull_requests
@@ -5254,6 +5329,13 @@ impl Waku {
             && !self.automations_page
             && self.projects_page.is_none()
             && !self.notifications.open;
+        let header_phase = session_surface
+            .then(|| {
+                session.and_then(|session| {
+                    phases::sidebar_phase_marker(self.state.phase_routing_enabled, session)
+                })
+            })
+            .flatten();
         let environment = if session_surface && self.state.sandbox_experiment_enabled {
             session.map(AgentSession::environment)
         } else {
@@ -5357,6 +5439,21 @@ impl Waku {
                                 .text_color(theme.text)
                                 .child(SharedString::from(title)),
                         )
+                        .children(header_phase.map(|(icon_path, label_key)| {
+                            div()
+                                .h(px(22.0))
+                                .px(px(6.0))
+                                .rounded(px(8.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .bg(theme.overlay)
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(icon(icon_path, 11.0, theme.text_secondary))
+                                .child(SharedString::from(tr!(label_key)))
+                        }))
                         .children(agent_preset_label.map(|label| {
                             div()
                                 .h(px(22.0))
@@ -5946,6 +6043,24 @@ mod tests {
 
         sort_sidebar_sessions(&mut sessions, SidebarOrdering::LastCreated);
         assert_eq!(sessions[0].id, newer_unanswered_session.id);
+    }
+
+    #[test]
+    fn recent_phase_group_expires_at_thirty_minutes() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.phase = Some(waku_protocol::routing::SessionPhase::Planning);
+        session.updated_at = 100;
+        assert_eq!(
+            recent_phase_group(&session, 100 + 30 * 60 - 1),
+            Some(waku_protocol::routing::SessionPhase::Planning)
+        );
+        assert_eq!(recent_phase_group(&session, 100 + 30 * 60), None);
+        session.phase = Some(waku_protocol::routing::SessionPhase::Executing);
+        session.updated_at = 200;
+        assert_eq!(
+            recent_phase_group(&session, 200),
+            Some(waku_protocol::routing::SessionPhase::Executing)
+        );
     }
 
     #[test]
