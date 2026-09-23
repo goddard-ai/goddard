@@ -1766,6 +1766,26 @@ impl Waku {
                     search,
                 )
             },
+            setting_card(
+                tr!("settings.archive_continues_unread_sweep"),
+                tr!(
+                    "settings.archive_continues_unread_sweep_description",
+                    jump = crate::platform::primary_shortcut("⌘D", "Ctrl+D")
+                ),
+                toggle_switch(
+                    "archive-continues-unread-sweep-toggle",
+                    self.state.archive_continues_unread_sweep,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.archive_continues_unread_sweep;
+                        move |this, _, cx| this.set_archive_continues_unread_sweep(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
             {
                 let dormant_after = self.state.dormant_after_days;
                 let weak = cx.entity().downgrade();
@@ -9850,6 +9870,15 @@ impl Waku {
             return;
         }
         self.state.archive_navigation = navigation;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_archive_continues_unread_sweep(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.archive_continues_unread_sweep == enabled {
+            return;
+        }
+        self.state.archive_continues_unread_sweep = enabled;
         self.save();
         cx.notify();
     }

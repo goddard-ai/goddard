@@ -445,6 +445,8 @@ settings.archive_navigation_description: 选择归档正在查看的任务后跳
 settings.archive_navigation_next_unread: 前往下一个未读完成
 settings.archive_navigation_next_session: 前往侧栏中的下一个会话
 settings.archive_navigation_new_task: 撰写新任务
+settings.archive_continues_unread_sweep: 归档后继续 %{jump} 跳转
+settings.archive_continues_unread_sweep_description: "归档通过 %{jump} 到达的任务时，前往 %{jump} 下一个会打开的任务，而不是“归档任务后”设置的目标位置"
 settings.dormant_after: 休眠时间
 settings.dormant_after_description: 没有新活动达到此时长的任务将折叠到侧边栏的“休眠”分组中。选择“从不”可停用自动休眠
 settings.dormant_after_one_day: 1 天

@@ -559,6 +559,11 @@ impl Waku {
                         {
                             waku.pending_session_activation = None;
                         }
+                        // A ⌘D landing that never lands keeps no arrival
+                        // mark.
+                        if waku.unread_sweep_arrival == Some(session_id) {
+                            waku.unread_sweep_arrival = None;
+                        }
                         waku.show_toast(tr!("errors.open_session", error = error));
                     }
                 }
@@ -580,6 +585,14 @@ impl Waku {
         // candidates again.
         if self.sweep_target.take() != Some(session_id) {
             self.sweep_visited.clear();
+        }
+        // The ⌘D arrival mark survives only while the session it landed on
+        // stays selected — it doubles as the in-flight landing's claim, so
+        // a re-activation of the same session leaves it alone.
+        if session_changed {
+            self.unread_sweep_arrival = self
+                .unread_sweep_arrival
+                .filter(|arrival| *arrival == session_id);
         }
         // Turns that settled off screen get their marker evals now that the
         // session is on it.
@@ -2005,6 +2018,24 @@ impl Waku {
             .find(|project| project.id == project_id)
             .is_some_and(Project::is_projectless);
         let was_selected = self.state.selected_session == Some(session_id);
+        // A task the ⌘D sweep landed on archives onto the sweep's next
+        // landing instead of the configured archive landing. Compute it
+        // before the departure mutates selection and rows, so the answer
+        // is exactly what a press would have found — the idle rotation
+        // still continues below the departed row's slot.
+        let continue_sweep = self.state.archive_continues_unread_sweep
+            && was_selected
+            && self.unread_sweep_arrival == Some(session_id);
+        let sweep_landing = if continue_sweep {
+            let rows = self.sidebar_rows_cached(Local::now().date_naive());
+            let pending = self
+                .pending_session_activation
+                .map(|pending| pending.session_id);
+            let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
+            Some(self.next_unread_sweep_target(&rows, Some(session_id), pending, &dormant))
+        } else {
+            None
+        };
         if self
             .pending_session_activation
             .is_some_and(|pending| pending.session_id == session_id)
@@ -2046,26 +2077,41 @@ impl Waku {
             // The departed session's strip is already stored; whatever the
             // navigation below lands on gets its own.
             self.sync_right_panel_owner(cx);
-            match self.state.archive_navigation {
-                ArchiveNavigation::NextSession => {
-                    // The row that followed the departed one now sits at its
-                    // index; without a position the scan enters at the top.
-                    let next = self.next_sidebar_session_from_row(landing_row.unwrap_or(0));
-                    if let Some(next_id) = next {
-                        self.request_session_activation(
-                            next_id,
-                            SessionActivationTransition::Visit,
-                            cx,
-                        );
-                    } else {
+            if let Some(sweep_landing) = sweep_landing {
+                match sweep_landing {
+                    Some(target) => {
+                        // The landing counts as the sweep's own arrival:
+                        // archiving it in turn continues the same sweep.
+                        self.unread_sweep_arrival = Some(target);
+                        self.go_to_unread_target(target, window, cx);
+                    }
+                    // A drained sweep lands where ⌘D does — the New task
+                    // draft, remembered one included.
+                    None => self.new_session_action(&NewSession, window, cx),
+                }
+            } else {
+                match self.state.archive_navigation {
+                    ArchiveNavigation::NextSession => {
+                        // The row that followed the departed one now sits at
+                        // its index; without a position the scan enters at the
+                        // top.
+                        let next = self.next_sidebar_session_from_row(landing_row.unwrap_or(0));
+                        if let Some(next_id) = next {
+                            self.request_session_activation(
+                                next_id,
+                                SessionActivationTransition::Visit,
+                                cx,
+                            );
+                        } else {
+                            self.compose_new_task(project_id, projectless, window, cx);
+                        }
+                    }
+                    ArchiveNavigation::NewTask => {
                         self.compose_new_task(project_id, projectless, window, cx);
                     }
-                }
-                ArchiveNavigation::NewTask => {
-                    self.compose_new_task(project_id, projectless, window, cx);
-                }
-                ArchiveNavigation::NextUnread => {
-                    self.select_session_fallback(project_id, projectless, window, cx);
+                    ArchiveNavigation::NextUnread => {
+                        self.select_session_fallback(project_id, projectless, window, cx);
+                    }
                 }
             }
         } else {
@@ -3232,48 +3278,9 @@ impl Waku {
             .pending_session_activation
             .map(|pending| pending.session_id);
         let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
-        if self
-            .unread_sweep_at
-            .is_none_or(|at| unix_time().saturating_sub(at) >= UNREAD_SWEEP_TIMEOUT.as_secs())
-        {
-            self.unread_sweep_visited.clear();
-        }
-        self.unread_sweep_at = Some(unix_time());
-        // The sessions this press departs count as shown — the on-screen
-        // task and any landing still in flight — so the rotation cannot
-        // turn straight back onto either.
-        self.unread_sweep_visited
-            .extend([selected, pending].into_iter().flatten());
-        let sweep = self.live_unread_sweep();
-        let mut target = next_attention_target(
-            &self.state.sessions,
-            &self.state.projects,
-            &self.state.unseen_completions,
-            &rows,
-            selected,
-            pending,
-            &dormant,
-            None,
-            sweep,
-        );
-        if target.is_none() && sweep.is_some() {
-            // The sweep has shown everything navigable — restart it clean.
-            self.unread_sweep_visited.clear();
-            target = next_attention_target(
-                &self.state.sessions,
-                &self.state.projects,
-                &self.state.unseen_completions,
-                &rows,
-                selected,
-                pending,
-                &dormant,
-                None,
-                None,
-            );
-        }
-        match target {
+        match self.next_unread_sweep_target(&rows, selected, pending, &dormant) {
             Some(target) => {
-                self.unread_sweep_visited.insert(target);
+                self.unread_sweep_arrival = Some(target);
                 self.sidebar_jump_flash_generation =
                     self.sidebar_jump_flash_generation.wrapping_add(1);
                 let generation = self.sidebar_jump_flash_generation;
@@ -3299,6 +3306,63 @@ impl Waku {
             }
             None => self.new_session_action(&NewSession, window, cx),
         }
+    }
+
+    /// Where ⌘D would land right now: a press more than
+    /// `UNREAD_SWEEP_TIMEOUT` after the last retires the seen set and
+    /// sweeps fresh, then the on-screen and in-flight sessions count as
+    /// shown so the rotation cannot turn straight back onto either. The
+    /// topmost unread completion leads, then the idle rotation skips what
+    /// a live sweep has shown; a sweep that has seen everything restarts
+    /// clean. The archive landing shares it so archiving a task the sweep
+    /// landed on jumps exactly where another press would have.
+    fn next_unread_sweep_target(
+        &mut self,
+        rows: &[sidebar::SidebarRow],
+        selected: Option<Uuid>,
+        pending: Option<Uuid>,
+        dormant: &HashSet<Uuid>,
+    ) -> Option<Uuid> {
+        if self
+            .unread_sweep_at
+            .is_none_or(|at| unix_time().saturating_sub(at) >= UNREAD_SWEEP_TIMEOUT.as_secs())
+        {
+            self.unread_sweep_visited.clear();
+        }
+        self.unread_sweep_at = Some(unix_time());
+        self.unread_sweep_visited
+            .extend([selected, pending].into_iter().flatten());
+        let sweep = self.live_unread_sweep();
+        let mut target = next_attention_target(
+            &self.state.sessions,
+            &self.state.projects,
+            &self.state.unseen_completions,
+            rows,
+            selected,
+            pending,
+            dormant,
+            None,
+            sweep,
+        );
+        if target.is_none() && sweep.is_some() {
+            // The sweep has shown everything navigable — restart it clean.
+            self.unread_sweep_visited.clear();
+            target = next_attention_target(
+                &self.state.sessions,
+                &self.state.projects,
+                &self.state.unseen_completions,
+                rows,
+                selected,
+                pending,
+                dormant,
+                None,
+                None,
+            );
+        }
+        if let Some(target) = target {
+            self.unread_sweep_visited.insert(target);
+        }
+        target
     }
 
     /// Shared landing for the unread-jump actions. With the overlay up the

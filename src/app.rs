@@ -2053,6 +2053,11 @@ pub struct Waku {
     /// `UNREAD_SWEEP_TIMEOUT` after it retires the seen set — the next
     /// press starts a fresh sweep.
     unread_sweep_at: Option<u64>,
+    /// The session the ⌘D sweep is flying to, kept while it stays the
+    /// selection — the mark that archiving it continues the sweep onto
+    /// the press's own landing instead of the configured archive landing.
+    /// Retired by any activation the sweep did not aim.
+    unread_sweep_arrival: Option<Uuid>,
     /// The selected session carried an unseen-completion stamp when its
     /// activation landed — one half of ⌘⇧D's "parked without reading"
     /// signal, consumed when the press decides whether to re-stamp it.
@@ -5787,6 +5792,7 @@ impl Waku {
                 sweep_target: None,
                 unread_sweep_visited: HashSet::new(),
                 unread_sweep_at: None,
+                unread_sweep_arrival: None,
                 unread_when_selected: None,
                 turn_settled_while_visible: None,
                 analytics,

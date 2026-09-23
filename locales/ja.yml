@@ -447,6 +447,8 @@ settings.archive_navigation_description: 表示中のタスクをアーカイブ
 settings.archive_navigation_next_unread: 次の未読の完了へ移動
 settings.archive_navigation_next_session: サイドバーの次のセッションへ移動
 settings.archive_navigation_new_task: 新しいタスクを作成
+settings.archive_continues_unread_sweep: アーカイブ時に %{jump} を継続
+settings.archive_continues_unread_sweep_description: "%{jump} で移動したタスクをアーカイブしたとき、「タスクをアーカイブした後」の移動先ではなく、次に %{jump} で開くはずだったタスクへ移動します"
 settings.dormant_after: 休眠までの期間
 settings.dormant_after_description: この期間新しいアクティビティがないタスクは、サイドバーの休眠グループに折りたたまれます。「なし」にすると自動休眠は無効になります
 settings.dormant_after_one_day: 1 日

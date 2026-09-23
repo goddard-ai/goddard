@@ -292,6 +292,10 @@ fn default_sidebar_shortcut_tags() -> bool {
     true
 }
 
+fn default_archive_continues_unread_sweep() -> bool {
+    true
+}
+
 fn default_local_workspace_accent() -> bool {
     true
 }
@@ -896,6 +900,9 @@ pub struct AppSettings {
     pub sidebar_shortcut_tags: bool,
     /// Where selection lands after the viewed task is archived.
     pub archive_navigation: ArchiveNavigation,
+    /// Archiving a task the ⌘D sweep landed on jumps to the sweep's next
+    /// target instead of the configured `archive_navigation` landing.
+    pub archive_continues_unread_sweep: bool,
     /// Show a task's unsent composer draft on its own line under the sidebar
     /// row's title.
     pub sidebar_composer_drafts: bool,
@@ -1038,6 +1045,7 @@ impl Default for AppSettings {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             archive_navigation: ArchiveNavigation::default(),
+            archive_continues_unread_sweep: true,
             sidebar_composer_drafts: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
@@ -1427,6 +1435,10 @@ pub struct PersistedState {
     /// Where selection lands after the viewed task is archived.
     #[serde(default)]
     pub archive_navigation: ArchiveNavigation,
+    /// Archiving a task the ⌘D sweep landed on jumps to the sweep's next
+    /// target instead of the configured `archive_navigation` landing.
+    #[serde(default = "default_archive_continues_unread_sweep")]
+    pub archive_continues_unread_sweep: bool,
     /// Whether a task's unsent composer draft shows on its own line under
     /// the sidebar row's title.
     #[serde(default)]
@@ -1802,6 +1814,7 @@ impl PersistedState {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             archive_navigation: ArchiveNavigation::default(),
+            archive_continues_unread_sweep: true,
             sidebar_composer_drafts: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
@@ -2180,6 +2193,7 @@ impl PersistedState {
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             archive_navigation: self.archive_navigation,
+            archive_continues_unread_sweep: self.archive_continues_unread_sweep,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
             sidebar_draft_preview_color: self.sidebar_draft_preview_color,
             dormant_after_days: self.dormant_after_days,
@@ -2296,6 +2310,7 @@ impl PersistedState {
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.archive_navigation = settings.archive_navigation;
+        self.archive_continues_unread_sweep = settings.archive_continues_unread_sweep;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
         self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
         self.dormant_after_days = settings.dormant_after_days;
@@ -3614,6 +3629,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.terminal_open_links_in_mouse_mode);
+    }
+
+    #[test]
+    fn archive_continues_unread_sweep_defaults_on_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(defaults.archive_continues_unread_sweep);
+        let mut state = PersistedState::empty();
+        assert!(state.archive_continues_unread_sweep);
+        state.archive_continues_unread_sweep = false;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["archive_continues_unread_sweep"], false);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("archive_continues_unread_sweep")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(!restored.archive_continues_unread_sweep);
     }
 
     #[test]
