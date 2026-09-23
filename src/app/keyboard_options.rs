@@ -442,7 +442,11 @@ impl Waku {
                             .into_any_element()
                     }
                 }
-            });
+            })
+            // A `list()` lays out as a childless node — without an explicit
+            // size it lands zero high inside the fixed-height wrapper and
+            // paints no items at all.
+            .size_full();
             div()
                 .id("keyboard-options-list")
                 .w_full()

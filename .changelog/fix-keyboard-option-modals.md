@@ -1,0 +1,1 @@
+- Fixed the option modals shown by selection shortcuts (access mode, model, workspace, branch) opening with an empty list — the choices render again.

@@ -2989,6 +2989,142 @@ mod tests {
         assert_eq!(handle.state.borrow().active_submenu, None);
     }
 
+    /// A popover hosting a virtualized `list()` — the model picker's shape.
+    struct ListPopoverHarness {
+        handle: ContextMenuHandle,
+        list_state: gpui::ListState,
+    }
+
+    impl Render for ListPopoverHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let list_state = self.list_state.clone();
+            div().size_full().pt(px(300.0)).child(popover(
+                div().w(px(120.0)).h(px(32.0)),
+                &self.handle,
+                MenuAlign::AboveLeft,
+                move |_, _, _| {
+                    let list_state = list_state.clone();
+                    div()
+                        .w(px(460.0))
+                        .h(px(390.0))
+                        .flex()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .flex()
+                                .flex_col()
+                                .child(div().h(px(52.0)).flex_none())
+                                .child(
+                                    div().flex_1().min_h_0().relative().child(
+                                        div().id("list-wrap").size_full().child(
+                                            gpui::list(list_state, move |index, _window, _cx| {
+                                                div()
+                                                    .id(SharedString::from(format!(
+                                                        "picker-row-{index}"
+                                                    )))
+                                                    .debug_selector(move || {
+                                                        format!("picker-row-{index}")
+                                                    })
+                                                    .w_full()
+                                                    .h(px(58.0))
+                                                    .into_any_element()
+                                            })
+                                            .size_full()
+                                            .p(px(9.0)),
+                                        ),
+                                    ),
+                                ),
+                        )
+                        .into_any_element()
+                },
+            ))
+        }
+    }
+
+    #[gpui::test]
+    fn popover_list_rows_paint(cx: &mut TestAppContext) {
+        let handle = cx.update(ContextMenuHandle::new);
+        let harness = ListPopoverHarness {
+            handle: handle.clone(),
+            list_state: gpui::ListState::new(5, gpui::ListAlignment::Top, px(120.0)),
+        };
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+
+        cx.simulate_mouse_down(
+            point(px(10.0), px(310.0)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        assert!(handle.is_open());
+        cx.run_until_parked();
+
+        let row = cx.debug_bounds("picker-row-0");
+        assert!(row.is_some(), "list row 0 should paint inside the popover");
+        let row = cx.debug_bounds("picker-row-4");
+        assert!(row.is_some(), "list row 4 should paint inside the popover");
+    }
+
+    /// The keyboard-options modal's shape: a `list()` inside a deferred,
+    /// centered `modal_enter` layer.
+    struct ListModalHarness {
+        list_state: gpui::ListState,
+    }
+
+    impl Render for ListModalHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let list_state = self.list_state.clone();
+            let card = div()
+                .w(px(480.0))
+                .p(px(6.0))
+                .flex()
+                .flex_col()
+                .child(div().h(px(32.0)).flex_none())
+                .child(
+                    div()
+                        .id("modal-list")
+                        .w_full()
+                        .h(px(200.0))
+                        .flex_none()
+                        .child(
+                            gpui::list(list_state, move |index, _window, _cx| {
+                                div()
+                                    .debug_selector(move || format!("modal-row-{index}"))
+                                    .w_full()
+                                    .h(px(52.0))
+                                    .into_any_element()
+                            })
+                            .size_full(),
+                        ),
+                );
+            div().size_full().child(
+                deferred(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .occlude()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(crate::ui::motion::modal_enter("test-card-enter", card)),
+                )
+                .with_priority(8),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn modal_list_rows_paint(cx: &mut TestAppContext) {
+        let harness = ListModalHarness {
+            list_state: gpui::ListState::new(5, gpui::ListAlignment::Top, px(120.0)),
+        };
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        cx.run_until_parked();
+
+        let row = cx.debug_bounds("modal-row-0");
+        assert!(row.is_some(), "list row 0 should paint inside the modal");
+    }
+
     fn items() -> Vec<MenuItem> {
         vec![
             MenuItem::new("Copy", |_, _| {}),
