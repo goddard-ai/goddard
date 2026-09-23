@@ -64,8 +64,10 @@ eval?: EvalSettings | null,
 route_classes?: { [key in TaskClass]?: RouteClassTarget },
 /**
  * User-authorized Jev rules that may send a follow-up after a task turn.
+ * An absent key seeds the shipped defaults; an explicit empty list
+ * means the user removed them, so the field always serializes.
  */
-auto_prompts?: Array<AutoPromptRule>,
+auto_prompts: Array<AutoPromptRule>,
 /**
  * Experimental opt-in for project memory: the daemon maintains a
  * `.goddard/memory/` store per project, distills finished turns into it

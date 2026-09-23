@@ -78,7 +78,7 @@ function fixture(options: { attached?: boolean } = {}) {
             subagents_enabled: false, project_map_enabled: false,
             memory_experiment_enabled: false, integrations_enabled: false,
             sandbox_experiment_enabled: false, sandbox_default_enabled: false,
-            keep_awake: false, qa_branch: 'qa',
+            keep_awake: false, qa_branch: 'qa', auto_prompts: [],
           } };
         case 'loadTaskState':
           return {
