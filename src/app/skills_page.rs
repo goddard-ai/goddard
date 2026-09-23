@@ -13,7 +13,7 @@ use std::path::Path;
 
 use gpui::KeyBinding;
 
-use super::composer::next_picker_highlight;
+use super::model_picker::next_picker_highlight;
 use crate::skills::{SkillEntry, SkillSource, SkillsCatalog};
 use crate::ui::ActivationExt;
 

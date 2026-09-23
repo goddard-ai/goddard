@@ -1,0 +1,1 @@
+- The Jev routing class pickers in Settings → Routing now use the full model picker: search, provider rail, favorites, recents, and effort variants included. "Last used" is now "No override" — the class keeps your normal provider/model while Jev still classifies the task.

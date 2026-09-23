@@ -710,7 +710,7 @@ impl Waku {
             return;
         }
         // The picker's target is only meaningful while the editor exists.
-        self.model_picker_target = composer::ModelPickerTarget::Composer;
+        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
         let focus = self.automations_search.read(cx).focus();
         window.focus(&focus, cx);
         cx.notify();
@@ -2107,9 +2107,9 @@ impl Waku {
         // provider/model pair — one row per model, no effort or tier.
         let model_handle = {
             let weak = cx.entity().downgrade();
-            let search = self.model_search.clone();
-            let search_focus = self.model_search.read(cx).focus_handle(cx);
-            let empty_focus = self.model_picker_empty_focus.clone();
+            let search = self.model_picker.search.clone();
+            let search_focus = self.model_picker.search.read(cx).focus_handle(cx);
+            let empty_focus = self.model_picker.empty_focus.clone();
             self.menu_handle_with(
                 AUTOMATION_MODEL_PICKER_MENU_ID,
                 cx,
@@ -2118,10 +2118,10 @@ impl Waku {
                     let _ = weak.update(cx, |this, cx| {
                         if open {
                             this.model_picker_target =
-                                composer::ModelPickerTarget::AutomationEditor;
+                                model_picker::ModelPickerTarget::AutomationEditor;
                             empty = this.model_picker_has_no_providers();
                             for kind in ProviderKind::ALL {
-                                if composer::picker_lists_provider(
+                                if model_picker::picker_lists_provider(
                                     &this.probes,
                                     &this.state.disabled_providers,
                                     None,
@@ -2131,11 +2131,11 @@ impl Waku {
                                     this.refresh_provider_model_discovery(kind);
                                 }
                             }
-                            this.model_picker_highlight = None;
+                            this.model_picker.highlight = None;
                             search.update(cx, |search, cx| search.clear(cx));
                             this.reveal_selected_picker_model(cx);
                         } else {
-                            this.model_picker_target = composer::ModelPickerTarget::Composer;
+                            this.model_picker_target = model_picker::ModelPickerTarget::Composer;
                             // Same rule as the composer picker: parked
                             // unstars hold their slot only while open.
                             this.pinned_unfavorites.clear();

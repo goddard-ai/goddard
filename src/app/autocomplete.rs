@@ -31,7 +31,7 @@ use crate::composer_complete::{
 };
 use crate::ui::menu::{ConfirmEntry, DismissMenu, SelectNextEntry, SelectPreviousEntry};
 
-use super::composer::next_picker_highlight;
+use super::model_picker::next_picker_highlight;
 use super::*;
 
 /// Key context the composer card declares while the popup is open.

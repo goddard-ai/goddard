@@ -4012,7 +4012,7 @@ impl Waku {
             .or(suffix_effort.as_deref())
             .map(str::to_owned)
             .or_else(|| {
-                if super::composer::supports_reasoning_default_reset(session.provider) {
+                if super::model_picker::supports_reasoning_default_reset(session.provider) {
                     None
                 } else {
                     metadata.and_then(|model| {
@@ -4053,7 +4053,7 @@ impl Waku {
         fast: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.model_picker_target == composer::ModelPickerTarget::AutomationEditor {
+        if self.model_picker_target == model_picker::ModelPickerTarget::AutomationEditor {
             // The editor stores a bare provider/model pair — effort and tier
             // rows don't exist at its granularity.
             if let Some(editor) = self.automations_editor.as_mut() {
@@ -4077,7 +4077,7 @@ impl Waku {
         // A different provider on a started session is a provider switch, not
         // a model change: the pick waits on the compaction warning dialog,
         // which applies the whole row if confirmed.
-        if self.model_picker_target == composer::ModelPickerTarget::Composer
+        if self.model_picker_target == model_picker::ModelPickerTarget::Composer
             && let Some(session) = self.composer_session()
             && session.provider != provider
             && session.provider_locked()
@@ -4169,7 +4169,7 @@ impl Waku {
     /// runs. Only drafts reach here — a started session's picker does not
     /// offer the row.
     pub(super) fn choose_auto_route(&mut self, cx: &mut Context<Self>) {
-        if self.model_picker_target != composer::ModelPickerTarget::Composer
+        if self.model_picker_target != model_picker::ModelPickerTarget::Composer
             || !self.auto_route_available()
         {
             return;
@@ -4213,48 +4213,37 @@ impl Waku {
         if !session.can_choose_model(session.provider) {
             return;
         }
-        self.model_picker_target = composer::ModelPickerTarget::Composer;
+        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
         let selection = self.model_picker_selection(cx);
         let auto_route = session.auto_route;
         let enabled = !session.is_busy();
-        let rows = composer::visible_picker_rows_with_pins(
-            &self.probes,
-            &self.state.favorite_models,
-            &self.pinned_unfavorites,
-            &self.state.recent_model_uses,
-            &self.state.disabled_providers,
-            self.model_picker_locked_provider(),
-            "",
-            self.model_picker_offers_auto_route(),
-            composer::PickerGranularity::Combos,
-        );
+        let rows = self.composer_picker_rows("");
         let items = rows
             .into_iter()
-            .map(|row| {
-                let selected = if row.auto {
-                    auto_route
-                } else {
-                    selection
-                        .as_ref()
-                        .is_some_and(|(provider, model, effort, fast)| {
-                            *provider == row.provider
-                                && model == &row.model.id
-                                && effort == &row.effort
-                                && *fast == row.fast
-                        })
-                };
-                if row.auto {
-                    return keyboard_options::KeyboardOptionItem::Choice(
+            .filter_map(|row| {
+                if let model_picker::PickerRow::Policy(model_picker::PolicyRowId::Auto) = row {
+                    return Some(keyboard_options::KeyboardOptionItem::Choice(
                         keyboard_options::KeyboardOptionChoice::new(
                             tr!("keyboard_options.automatic_routing"),
                             Some(tr!("keyboard_options.automatic_routing_description").to_string()),
                             None,
-                            selected,
+                            auto_route,
                             enabled,
                             keyboard_options::KeyboardOptionAction::AutoRoute,
                         ),
-                    );
+                    ));
                 }
+                let model_picker::PickerRow::Combo(row) = row else {
+                    return None;
+                };
+                let selected = selection
+                    .as_ref()
+                    .is_some_and(|(provider, model, effort, fast)| {
+                        *provider == row.provider
+                            && model == &row.model.id
+                            && effort == &row.effort
+                            && *fast == row.fast
+                    });
                 let mut details = vec![row.provider.display_name().to_string()];
                 if let Some(effort) = &row.effort {
                     details.push(
@@ -4269,7 +4258,7 @@ impl Waku {
                 if row.fast {
                     details.push(tr!("keyboard_options.fast").to_string());
                 }
-                keyboard_options::KeyboardOptionItem::Choice(
+                Some(keyboard_options::KeyboardOptionItem::Choice(
                     keyboard_options::KeyboardOptionChoice::new(
                         row.model.name.clone(),
                         Some(details.join(" · ")),
@@ -4283,7 +4272,7 @@ impl Waku {
                             fast: row.fast,
                         },
                     ),
-                )
+                ))
             })
             .collect::<Vec<_>>();
         let highlighted = items.iter().position(|item| {
@@ -4520,7 +4509,7 @@ impl Waku {
         &self,
         favorite: &FavoriteModel,
     ) -> (ProviderKind, String, Option<String>, bool) {
-        let (model, effort, fast) = composer::normalize_model_combo(
+        let (model, effort, fast) = model_picker::normalize_model_combo(
             &self.probes,
             favorite.provider,
             &favorite.model,
@@ -4588,7 +4577,7 @@ impl Waku {
             .iter()
             .filter(|use_| eligible(use_.provider))
             .map(|use_| {
-                let (model, effort, fast) = composer::normalize_model_combo(
+                let (model, effort, fast) = model_picker::normalize_model_combo(
                     &self.probes,
                     use_.provider,
                     &use_.model,
@@ -4684,7 +4673,7 @@ impl Waku {
                 .session_model_combo(session)
                 .and_then(|(_, effort, _)| effort);
             let mut steps: Vec<Option<String>> = Vec::new();
-            if super::composer::supports_reasoning_default_reset(session.provider) {
+            if super::model_picker::supports_reasoning_default_reset(session.provider) {
                 steps.push(None);
             }
             steps.extend(
@@ -4760,7 +4749,7 @@ impl Waku {
     ) {
         let default_effort = self.model_default_effort(provider, &model);
         let matches = |favorite: &FavoriteModel| {
-            super::composer::favorite_matches_row(
+            super::model_picker::favorite_matches_row(
                 favorite,
                 provider,
                 &model,
@@ -4787,7 +4776,7 @@ impl Waku {
                 }
             }
             self.pinned_unfavorites
-                .push(composer::PinnedUnfavorite { favorite, position });
+                .push(model_picker::PinnedUnfavorite { favorite, position });
             self.pinned_unfavorites
                 .sort_by_key(|pinned| pinned.position);
         } else if let Some(parked) = self
@@ -4933,7 +4922,7 @@ impl Waku {
     /// `default` selection.
     pub(super) fn clear_reasoning_effort(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = self.composer_session_mut()
-            && super::composer::supports_reasoning_default_reset(session.provider)
+            && super::model_picker::supports_reasoning_default_reset(session.provider)
             && session.reasoning_effort.is_some()
         {
             let session_id = session.id;

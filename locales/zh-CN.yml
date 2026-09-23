@@ -2367,7 +2367,6 @@ routing.cloudflare_token_description: 上述账户的 Workers AI 限定令牌。
 routing.cloudflare_token_placeholder: Cloudflare API 令牌
 routing.connection_failed: "连接失败：%{error}"
 routing.connection_ok: 已连接 — %{model} 在 %{latency} 毫秒内应答
-routing.effort_default: 默认
 routing.feature_auto_prompt_description: 判断已完成的轮次是否自动发送后续提示
 routing.feature_auto_prompt_preview_description: 对当前任务试运行自动提示规则
 routing.feature_auto_prompt_suggest_description: 为自动提示编辑器建议问题权重和阈值
@@ -2395,8 +2394,8 @@ routing.feature_route_phase_description: 判断分阶段会话是仍在规划还
 routing.feature_turn_status: 回合状态标记
 routing.feature_turn_status_description: 判定每个已结束轮次的收尾状态，并标记未验证或偏离等问题
 routing.in_progress: 正在路由任务…
-routing.last_used: 上次使用
-routing.last_used_description: 沿用上次使用的服务商和模型
+routing.no_override: 不覆盖
+routing.no_override_description: 沿用常用的服务商和模型 — Jev 仍会判断任务类型
 routing.optional: 可选
 routing.provider_default: 默认
 routing.providers: 服务商

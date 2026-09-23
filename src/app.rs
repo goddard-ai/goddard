@@ -2005,10 +2005,6 @@ pub struct Waku {
     project_switcher: project_switcher::ProjectSwitcherUi,
     keyboard_options: keyboard_options::KeyboardOptionsUi,
     big_picture: big_picture::BigPictureUi,
-    model_search: Entity<TextInput>,
-    /// The routing class picker's filter field — one shared set serves all
-    /// three class menus; only one can be open at a time.
-    route_class_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
     /// The Appearance page's two font pickers — one per configurable face.
     ui_font_selector: settings::FontSelector,
@@ -2196,36 +2192,28 @@ pub struct Waku {
     /// executor. Render only reads this; empty means not resolved yet (or
     /// nothing to offer) and hides the control.
     open_in_apps: Rc<Vec<crate::platform::ExternalApp>>,
-    /// Keyboard cursor over the model picker's filtered rows. `None` means the
-    /// keyboard has not moved yet, so `enter` takes the first row.
-    model_picker_highlight: Option<usize>,
+    /// The composer/editor model picker's UI state — search field, list,
+    /// and keyboard cursor in one bundle. One set serves both targets; the
+    /// panel is only ever open for one.
+    model_picker: model_picker::PickerState,
     /// Which surface a picker pick lands on — the composer session or the
     /// automation editor's provider/model fields.
-    model_picker_target: composer::ModelPickerTarget,
+    model_picker_target: model_picker::ModelPickerTarget,
     /// Selections unstarred while a model picker is open. Each leaves
     /// `favorite_models` at once — empty star, compacted ⌘⌥ chords — but
     /// parks its row in place until the picker hides, so re-starring is a
     /// one-click undo. Cleared when either model-picker menu closes.
-    pinned_unfavorites: Vec<composer::PinnedUnfavorite>,
-    model_picker_list: ListState,
-    model_picker_scrollbar: Rc<ScrollbarState>,
-    /// The class-target picker's drawn selection and list state — same shape
-    /// as the model picker's, shared by the three class menus.
-    route_class_highlight: Option<usize>,
-    route_class_list: ListState,
-    route_class_scrollbar: Rc<ScrollbarState>,
+    pinned_unfavorites: Vec<model_picker::PinnedUnfavorite>,
+    /// The class-target picker's UI state — same shape as the model
+    /// picker's, shared by the three class menus.
+    route_class_picker: model_picker::PickerState,
     /// The class whose target picker is open — routes `enter` and the
     /// empty-query reveal to the right class slot.
-    route_class_picker: Option<waku_protocol::routing::TaskClass>,
+    route_class_open: Option<waku_protocol::routing::TaskClass>,
     /// A "suggest defaults" evaluation is in flight on the Jev page.
     route_suggest_pending: bool,
     /// The last suggestion's outcome, rendered as the card's status line.
     route_suggest_result: Option<Result<(), String>>,
-    /// Focus for the picker's no-providers state. The panel takes focus on
-    /// open so `escape` has a focused descendant to dispatch up from, and
-    /// normally that is the filter field — which the empty state does not
-    /// draw, so its one button holds focus instead.
-    model_picker_empty_focus: FocusHandle,
     branch_search: Entity<TextInput>,
     branch_create_input: Entity<TextInput>,
     branch_picker_mode: BranchPickerMode,
@@ -3480,6 +3468,7 @@ mod image_preview;
 mod issue_dialog;
 mod keybindings_page;
 mod keyboard_options;
+mod model_picker;
 mod notifications;
 mod phases;
 mod project_switcher;
@@ -4392,18 +4381,8 @@ impl Waku {
                 .accessibility_label(tr!("a11y.sync_branch"))
                 .placeholder(tr!("input.search_branches"))
         });
-        let model_search = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .clear_on_escape()
-                .accessibility_label(tr!("input.search_models"))
-                .placeholder(tr!("input.search_models"))
-        });
-        let route_class_search = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .clear_on_escape()
-                .accessibility_label(tr!("input.search_models"))
-                .placeholder(tr!("input.search_models"))
-        });
+        let model_picker = model_picker::PickerState::new(window, cx);
+        let route_class_picker = model_picker::PickerState::new(window, cx);
         let branch_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -4908,7 +4887,6 @@ impl Waku {
             let onboarding_add_project_focus = cx.focus_handle();
             let onboarding_projectless_focus = cx.focus_handle();
             let updater_button_focus = cx.focus_handle();
-            let model_picker_empty_focus = cx.focus_handle();
             let task_switcher_focus = cx.focus_handle();
             cx.on_focus_out(
                 &task_switcher_focus,
@@ -5248,56 +5226,65 @@ impl Waku {
             // visible target; clearing the query returns to the opening
             // state — nothing highlighted, the current model's row in view.
             cx.subscribe(
-                &model_search,
-                |this: &mut Self, search, event: &InputEvent, cx| {
+                &model_picker.search,
+                |this: &mut Self, _search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
                         // Wash the recognized values in structured tokens —
                         // `provider:pi`'s `pi` — so a working filter reads
                         // differently from a mistyped one.
-                        let annotations = composer::picker_query_annotations(
-                            search.read(cx).content(),
-                            &this.probes,
+                        let query = this
+                            .model_picker
+                            .search
+                            .read(cx)
+                            .content()
+                            .trim()
+                            .to_lowercase();
+                        let rows = this.composer_picker_rows(&query);
+                        let selection = this.model_picker_selection(cx);
+                        let seed = model_picker::picker_selected_row_index(
+                            selection.as_ref(),
+                            this.composer_picker_auto_route(),
+                            &rows,
                         );
-                        search.update(cx, |search, cx| {
-                            search.set_annotation_ranges(annotations, cx);
-                        });
-                        if search.read(cx).content().trim().is_empty() {
-                            this.model_picker_highlight = None;
-                            this.reveal_selected_picker_model(cx);
-                        } else {
-                            this.model_picker_highlight = Some(0);
-                            this.model_picker_list.scroll_to(ListOffset {
-                                item_ix: 0,
-                                offset_in_item: Pixels::ZERO,
-                            });
-                        }
-                        cx.notify();
+                        model_picker::picker_search_edited(
+                            &mut this.model_picker,
+                            &this.probes,
+                            &rows,
+                            seed,
+                            cx,
+                        );
                     }
                 },
             )
             .detach();
             cx.subscribe(
-                &route_class_search,
-                |this: &mut Self, search, event: &InputEvent, cx| {
+                &route_class_picker.search,
+                |this: &mut Self, _search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
                         // Same contract as the model picker: a live filter
                         // pins the cursor to the first row so `enter` has a
                         // visible target; clearing returns to the opening
                         // state — nothing highlighted, the class's target
                         // row back in view.
-                        if search.read(cx).content().trim().is_empty() {
-                            this.route_class_highlight = None;
-                            if let Some(class) = this.route_class_picker {
-                                this.reveal_route_class_target(class);
-                            }
-                        } else {
-                            this.route_class_highlight = Some(0);
-                            this.route_class_list.scroll_to(ListOffset {
-                                item_ix: 0,
-                                offset_in_item: Pixels::ZERO,
-                            });
-                        }
-                        cx.notify();
+                        let query = this
+                            .route_class_picker
+                            .search
+                            .read(cx)
+                            .content()
+                            .trim()
+                            .to_lowercase();
+                        let Some(class) = this.route_class_open else {
+                            return;
+                        };
+                        let rows = this.route_class_picker_rows(&query);
+                        let seed = this.route_class_selected_index(class, &rows);
+                        model_picker::picker_search_edited(
+                            &mut this.route_class_picker,
+                            &this.probes,
+                            &rows,
+                            seed,
+                            cx,
+                        );
                     }
                 },
             )
@@ -5728,8 +5715,6 @@ impl Waku {
                 project_switcher,
                 keyboard_options,
                 big_picture,
-                model_search,
-                route_class_search,
                 branch_search,
                 branch_create_input,
                 worktree_name_input,
@@ -5840,20 +5825,13 @@ impl Waku {
                 computer_use_app_icons: RefCell::new(HashMap::new()),
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),
-                model_picker_highlight: None,
-                model_picker_target: composer::ModelPickerTarget::Composer,
+                model_picker,
+                model_picker_target: model_picker::ModelPickerTarget::Composer,
                 pinned_unfavorites: Vec::new(),
-                model_picker_list: ListState::new(0, ListAlignment::Top, px(512.0))
-                    .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
-                model_picker_scrollbar: ScrollbarState::new(),
-                route_class_highlight: None,
-                route_class_list: ListState::new(0, ListAlignment::Top, px(512.0))
-                    .with_uniform_item_height(composer::MODEL_PICKER_ROW_HEIGHT),
-                route_class_scrollbar: ScrollbarState::new(),
-                route_class_picker: None,
+                route_class_picker,
+                route_class_open: None,
                 route_suggest_pending: false,
                 route_suggest_result: None,
-                model_picker_empty_focus,
                 branch_picker_mode: BranchPickerMode::Browse,
                 branch_picker_highlight: None,
                 branch_picker_list_state,

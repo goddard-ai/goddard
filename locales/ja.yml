@@ -2416,7 +2416,6 @@ routing.cloudflare_token_description: 上のアカウントの Workers AI スコ
 routing.cloudflare_token_placeholder: Cloudflare API トークン
 routing.connection_failed: "接続に失敗しました：%{error}"
 routing.connection_ok: "接続しました — %{model} が %{latency} ms で応答"
-routing.effort_default: デフォルト
 routing.feature_auto_prompt_description: 完了したターンが自動フォローアップを送信すべきか判断します
 routing.feature_auto_prompt_preview_description: このタスクに対して自動プロンプトルールを試行します
 routing.feature_auto_prompt_suggest_description: 自動プロンプトエディタの質問の重みとしきい値を提案します
@@ -2444,8 +2443,8 @@ routing.feature_route_phase_description: フェーズ分けされたセッショ
 routing.feature_turn_status: ターン状態マーカー
 routing.feature_turn_status_description: 確定した各ターンの終了状態を採点し、未検証や逸脱などの問題にフラグを立てます
 routing.in_progress: タスクを振り分け中…
-routing.last_used: 前回使用
-routing.last_used_description: 最後に使ったプロバイダーとモデルをそのまま使います
+routing.no_override: オーバーライドなし
+routing.no_override_description: いつものプロバイダーとモデルを使います — タスクの分類は Jev が行います
 routing.optional: 任意
 routing.provider_default: デフォルト
 routing.providers: プロバイダー

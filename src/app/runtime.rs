@@ -4218,13 +4218,13 @@ impl Waku {
     /// their unavailable state.
     pub(super) fn model_picker_has_no_providers(&self) -> bool {
         let locked_provider = match self.model_picker_target {
-            composer::ModelPickerTarget::Composer => self
+            model_picker::ModelPickerTarget::Composer => self
                 .selected_session()
                 .filter(|session| session.provider_locked())
                 .map(|session| session.provider),
-            composer::ModelPickerTarget::AutomationEditor => None,
+            model_picker::ModelPickerTarget::AutomationEditor => None,
         };
-        super::composer::picker_has_no_providers(
+        super::model_picker::picker_has_no_providers(
             &self.probes,
             &self.state.disabled_providers,
             locked_provider,

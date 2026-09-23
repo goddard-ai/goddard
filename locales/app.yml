@@ -991,12 +991,10 @@ routing.providers:
   en: Providers
 routing.provider_default:
   en: default
-routing.last_used:
-  en: Last used
-routing.last_used_description:
-  en: Keep whatever provider/model was used last
-routing.effort_default:
-  en: Default
+routing.no_override:
+  en: No override
+routing.no_override_description:
+  en: Keep my usual provider/model — Jev still classifies the task
 routing.suggest_defaults:
   en: Suggest from recent usage
 routing.suggesting:
