@@ -1,0 +1,101 @@
+name: Warm Rust release cache
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-release-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    name: ${{ matrix.name }}
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-22.04
+          - name: Linux arm64
+            runner: ubuntu-22.04-arm
+          - name: Windows x86_64
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+          - name: Windows arm64
+            runner: windows-11-arm
+            rust_target: aarch64-pc-windows-msvc
+          - name: macOS
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTFLAGS: ${{ startsWith(matrix.runner, 'ubuntu-22.04') && '-C linker=clang -C link-arg=-fuse-ld=mold' || startsWith(matrix.runner, 'windows-') && '-C linker=rust-lld' || '' }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+
+      - name: Add Windows target
+        if: runner.os == 'Windows'
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            clang \
+            cmake \
+            libfontconfig-dev \
+            libvulkan1 \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libxi-dev \
+            libxtst-dev \
+            libxkbcommon-x11-dev \
+            mold \
+            pkg-config \
+            xdg-desktop-portal
+
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ matrix.runner }}-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.runner }}-rust-1.96.0-cargo-
+
+      - name: Build Linux release binaries
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --locked --release \
+            --package waku --bin goddard --bin goddard-updater --bin goddard_js_repl \
+            --package waku-daemon --bin goddard-daemon \
+            --package waku-computer-use --bin goddard_computer_use
+
+      - name: Build Windows release binaries
+        if: runner.os == 'Windows'
+        run: cargo build --locked --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-computer-use --bin goddard_computer_use
+
+      - name: Build macOS release binaries
+        if: runner.os == 'macOS'
+        run: cargo build --locked --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
