@@ -1003,12 +1003,15 @@ impl Waku {
             .pending_session_activation
             .map(|pending| pending.session_id);
         let starred = sessions::starred_project_ids(&self.state.projects);
+        let dormant =
+            sessions::dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
         let unread_target = sessions::next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
             &rows,
             selected,
             pending,
+            &dormant,
             None,
             None,
         );
@@ -1021,6 +1024,7 @@ impl Waku {
             &rows,
             selected,
             pending,
+            &dormant,
             None,
         );
         let enabled = unread_target.is_some();
@@ -3235,7 +3239,8 @@ impl Waku {
     /// The first not-busy session at or below `position` in the current
     /// sidebar order, wrapping to the top. `position` is the row index the
     /// just-archived session occupied, so the row that followed it now sits
-    /// there.
+    /// there. Dormant sessions are skipped — an archive landing never parks
+    /// selection on a shelved task.
     pub(super) fn next_sidebar_session_from_row(&self, position: usize) -> Option<Uuid> {
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         next_sidebar_session_in_rows(&rows, position, |session_id| {
@@ -3243,7 +3248,7 @@ impl Waku {
                 .sessions
                 .iter()
                 .find(|session| session.id == session_id)
-                .is_some_and(|session| !session.is_busy())
+                .is_some_and(|session| !session.is_busy() && !self.session_dormant_now(session))
         })
     }
 

@@ -116,6 +116,22 @@ pub(super) fn starred_project_ids(projects: &[Project]) -> HashSet<Uuid> {
         .collect()
 }
 
+/// The sessions keyboard navigation must never land on. A dormant row can
+/// be revealed on screen — expanded Dormant section, revealed dormant tail —
+/// and still be non-busy or unread, so visibility alone is not a filter.
+pub(super) fn dormant_session_ids(
+    sessions: &[AgentSession],
+    dormant_after_days: Option<u32>,
+) -> HashSet<Uuid> {
+    let now = unix_time();
+    let threshold = sidebar::dormant_threshold_secs(dormant_after_days);
+    sessions
+        .iter()
+        .filter(|session| sidebar::session_dormant(session, now, threshold))
+        .map(|session| session.id)
+        .collect()
+}
+
 /// The topmost unread target in the sidebar — shared by
 /// GoToNextUnreadCompletion (⌘D / ctrl-backtick), the unseen-completion
 /// bell, and the session-departure fallbacks. "Unread" is the
@@ -125,7 +141,8 @@ pub(super) fn starred_project_ids(projects: &[Project]) -> HashSet<Uuid> {
 /// skipped, and the on-screen or pending-activation session is never a
 /// candidate. `excluded` lets the ⌘⇧D chain and the departure fallback pass
 /// the sessions the chain has already shown, so neither can land back on
-/// one of them; ⌘D itself keeps them as candidates.
+/// one of them; ⌘D itself keeps them as candidates. `dormant` sessions are
+/// never candidates — parked tasks only open on an explicit pick.
 ///
 /// `starred_tier` scopes the scan: `Some((set, true))` considers only
 /// sessions in starred projects, `Some((set, false))` only sessions in
@@ -141,6 +158,7 @@ pub(super) fn next_unread_completion(
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
+    dormant: &HashSet<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
     starred_tier: Option<(&HashSet<Uuid>, bool)>,
 ) -> Option<Uuid> {
@@ -151,6 +169,7 @@ pub(super) fn next_unread_completion(
     sidebar::next_sidebar_session_in_rows(rows, 0, |session_id| {
         Some(session_id) != selected_session
             && Some(session_id) != pending_activation
+            && !dormant.contains(&session_id)
             && excluded.map_or(true, |excluded| !excluded.contains(&session_id))
             && by_id.get(&session_id).is_some_and(|session| {
                 session.has_started()
@@ -175,6 +194,7 @@ pub(super) fn next_attention_target(
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
+    dormant: &HashSet<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
 ) -> Option<Uuid> {
     let starred = starred_project_ids(projects);
@@ -186,6 +206,7 @@ pub(super) fn next_attention_target(
             rows,
             selected_session,
             pending_activation,
+            dormant,
             excluded,
             tier,
         )
@@ -195,6 +216,7 @@ pub(super) fn next_attention_target(
                 rows,
                 selected_session,
                 pending_activation,
+                dormant,
                 excluded,
                 tier,
             )
@@ -208,14 +230,16 @@ pub(super) fn next_attention_target(
 /// The next non-busy session at-or-below `start_row` in the sidebar's
 /// displayed order, wrapping to the top — the shared walk behind the idle
 /// rotation and ⌘⇧D's park-and-jump chain. The selected or
-/// pending-activation session is never a candidate, and `excluded` lets the
-/// chain skip the sessions it has already shown.
+/// pending-activation session is never a candidate, `dormant` sessions are
+/// never candidates either, and `excluded` lets the chain skip the sessions
+/// it has already shown.
 pub(super) fn next_non_busy_session(
     sessions: &[AgentSession],
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
     start_row: usize,
+    dormant: &HashSet<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
     starred_tier: Option<(&HashSet<Uuid>, bool)>,
 ) -> Option<Uuid> {
@@ -226,6 +250,7 @@ pub(super) fn next_non_busy_session(
     sidebar::next_sidebar_session_in_rows(rows, start_row, |session_id| {
         Some(session_id) != selected_session
             && Some(session_id) != pending_activation
+            && !dormant.contains(&session_id)
             && excluded.map_or(true, |excluded| !excluded.contains(&session_id))
             && by_id.get(&session_id).is_some_and(|session| {
                 !session.is_busy()
@@ -246,6 +271,7 @@ pub(super) fn next_idle_session(
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
+    dormant: &HashSet<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
     starred_tier: Option<(&HashSet<Uuid>, bool)>,
 ) -> Option<Uuid> {
@@ -263,6 +289,7 @@ pub(super) fn next_idle_session(
         selected_session,
         pending_activation,
         start,
+        dormant,
         excluded,
         starred_tier,
     )
@@ -1748,6 +1775,7 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
+        let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
         if let Some(session_id) = next_attention_target(
             &self.state.sessions,
             &self.state.projects,
@@ -1755,6 +1783,7 @@ impl Waku {
             &rows,
             self.state.selected_session,
             pending,
+            &dormant,
             Some(&self.sweep_visited),
         ) {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
@@ -3156,6 +3185,7 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
+        let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
         let target = next_attention_target(
             &self.state.sessions,
             &self.state.projects,
@@ -3163,6 +3193,7 @@ impl Waku {
             &rows,
             selected,
             pending,
+            &dormant,
             None,
         );
         match target {
@@ -3288,6 +3319,7 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
+        let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
         let target = next_attention_target(
             &self.state.sessions,
             &self.state.projects,
@@ -3295,6 +3327,7 @@ impl Waku {
             &rows,
             selected,
             pending,
+            &dormant,
             Some(&self.sweep_visited),
         );
         match target {

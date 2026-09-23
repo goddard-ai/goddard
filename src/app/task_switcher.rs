@@ -117,11 +117,17 @@ fn ordered_task_ids(
     current: Option<Uuid>,
     recent: &[Uuid],
     sessions: &[AgentSession],
+    dormant: &HashSet<Uuid>,
 ) -> Vec<Uuid> {
+    // Dormant tasks never join the list — even the current one — so the
+    // switcher can neither highlight nor commit a shelved task.
     let eligible = sessions
         .iter()
         .filter(|session| {
-            session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+            session.has_started()
+                && session.archived_at.is_none()
+                && !session.is_side_chat()
+                && !dormant.contains(&session.id)
         })
         .collect::<Vec<_>>();
     let valid = eligible
@@ -287,6 +293,7 @@ impl Waku {
             self.state.selected_session,
             &self.task_switcher.recent_session_ids,
             &self.state.sessions,
+            &sessions::dormant_session_ids(&self.state.sessions, self.state.dormant_after_days),
         );
         let Some(highlighted_index) =
             initial_highlight_index(&ordered, self.state.selected_session, reverse)
@@ -648,7 +655,12 @@ mod tests {
         expected.extend(recent.iter().take(MAX_TASKS - 1).map(|session| session.id));
 
         assert_eq!(
-            ordered_task_ids(Some(current.id), &recorded_recency, &sessions),
+            ordered_task_ids(
+                Some(current.id),
+                &recorded_recency,
+                &sessions,
+                &HashSet::new()
+            ),
             expected
         );
     }
@@ -671,7 +683,12 @@ mod tests {
         let recorded_recency = recent.iter().map(|session| session.id).collect::<Vec<_>>();
 
         assert_eq!(
-            ordered_task_ids(Some(current.id), &recorded_recency, &sessions),
+            ordered_task_ids(
+                Some(current.id),
+                &recorded_recency,
+                &sessions,
+                &HashSet::new()
+            ),
             vec![
                 current.id,
                 recent[0].id,
@@ -709,11 +726,33 @@ mod tests {
     }
 
     #[test]
+    fn switcher_omits_dormant_tasks_even_the_current_one() {
+        let shelved = started_session(20);
+        let live = started_session(10);
+        let sessions = vec![shelved.clone(), live.clone()];
+        let dormant = HashSet::from([shelved.id]);
+        // A dormant current task does not lead the list, and a dormant
+        // recent visit is not offered either.
+        let ordered = ordered_task_ids(
+            Some(shelved.id),
+            &[shelved.id, live.id],
+            &sessions,
+            &dormant,
+        );
+        assert_eq!(ordered, vec![live.id]);
+    }
+
+    #[test]
     fn draft_can_switch_to_the_only_visited_started_task() {
         let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         let started = started_session(10);
         let sessions = vec![draft.clone(), started.clone()];
-        let ordered = ordered_task_ids(Some(draft.id), &[draft.id, started.id], &sessions);
+        let ordered = ordered_task_ids(
+            Some(draft.id),
+            &[draft.id, started.id],
+            &sessions,
+            &HashSet::new(),
+        );
         assert_eq!(ordered, vec![started.id]);
         assert_eq!(
             initial_highlight_index(&ordered, Some(draft.id), false),

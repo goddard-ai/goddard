@@ -2283,6 +2283,8 @@ impl Waku {
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
+        let dormant =
+            sessions::dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
         if sessions::next_attention_target(
             &self.state.sessions,
             &self.state.projects,
@@ -2290,6 +2292,7 @@ impl Waku {
             &rows,
             selected,
             pending,
+            &dormant,
             None,
         )
         .is_some()
