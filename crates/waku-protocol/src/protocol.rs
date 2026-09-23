@@ -1449,6 +1449,7 @@ mod tests {
                     text: "unfinished".into(),
                     attachments: Vec::new(),
                     annotations: Vec::new(),
+                    inline_atoms: Vec::new(),
                 }),
             }],
         };

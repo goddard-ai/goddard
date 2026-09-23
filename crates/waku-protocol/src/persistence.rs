@@ -77,6 +77,25 @@ pub struct ComposerDraftAnnotation {
     pub file: Option<ComposerDraftFileAnnotation>,
 }
 
+/// Client-local metadata for an inline atom while a composer draft is being
+/// moved between targets. The range points into the expanded draft text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComposerDraftInlineAtom {
+    pub offset: usize,
+    pub length: usize,
+    pub revision: Uuid,
+    pub kind: ComposerDraftInlineAtomKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ComposerDraftInlineAtomKind {
+    PastedText {
+        text: String,
+        paste_category: Option<String>,
+    },
+    SessionRef { session_id: Uuid, title: String },
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct ComposerDraft {
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -85,11 +104,19 @@ pub struct ComposerDraft {
     pub attachments: Vec<ComposerDraftAttachment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotations: Vec<ComposerDraftAnnotation>,
+    /// Editor-only chip identity. Kept while drafts move in memory, but never
+    /// serialized: persisted and cross-device drafts remain plain prompt text.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub inline_atoms: Vec<ComposerDraftInlineAtom>,
 }
 
 impl ComposerDraft {
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.attachments.is_empty() && self.annotations.is_empty()
+        self.text.is_empty()
+            && self.attachments.is_empty()
+            && self.annotations.is_empty()
+            && self.inline_atoms.is_empty()
     }
 }
 

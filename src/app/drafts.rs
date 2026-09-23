@@ -199,21 +199,19 @@ impl Waku {
                 .map(|draft| draft.annotations.clone())
                 .unwrap_or_default()
         };
+        let (text, inline_atoms) = super::composer::composer_draft_content(
+            self.composer.read(cx).content(cx),
+            &self.composer_inline_atoms,
+        );
         crate::persistence::ComposerDraft {
-            // Inline atoms have no draft slot of their own — the shared
-            // schema is just text — so each splices to its payload: pasted
-            // text verbatim, session atoms as their token; both come back
-            // as ordinary inline text on restore.
-            text: super::composer::splice_inline_atoms(
-                self.composer.read(cx).content(cx),
-                &self.composer_inline_atoms,
-            ),
+            text,
             attachments: self
                 .composer_attachments
                 .iter()
                 .map(crate::persistence::ComposerDraftAttachment::from)
                 .collect(),
             annotations,
+            inline_atoms,
         }
     }
 
@@ -446,14 +444,14 @@ impl Waku {
         draft: crate::persistence::ComposerDraft,
         cx: &mut Context<Self>,
     ) {
+        let (text, atoms) =
+            super::composer::restore_inline_atoms(&draft.text, &draft.inline_atoms);
         self.composer_attachments = draft
             .attachments
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
-        // The previous target's atoms already folded into its draft text;
-        // a restored draft carries them inline, not as atoms.
-        self.composer_inline_atoms.clear();
+        self.composer_inline_atoms = atoms;
         // An open paste editor's marker offsets belong to the outgoing
         // content — the atoms it edited are gone.
         self.pasted_text_editor = None;
@@ -462,7 +460,7 @@ impl Waku {
             self.restore_draft_annotations(draft.annotations);
         }
         self.composer
-            .update(cx, |input, cx| input.set_content(draft.text, cx));
+            .update(cx, |input, cx| input.set_content(text, cx));
         cx.notify();
     }
 

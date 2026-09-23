@@ -5719,6 +5719,7 @@ mod tests {
                 text: text.to_owned(),
                 attachments: Vec::new(),
                 annotations: Vec::new(),
+                inline_atoms: Vec::new(),
             }
         }
 

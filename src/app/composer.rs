@@ -64,7 +64,7 @@ pub(super) struct ComposerInlineAtom {
     pub kind: ComposerAtomKind,
     /// Renewed when the payload changes; offsets alone cannot identify a paste.
     pub revision: Uuid,
-    pub paste_category: Option<&'static str>,
+    pub paste_category: Option<String>,
 }
 
 /// What an atom's marker stands for — and what it splices to on submit.
@@ -85,7 +85,7 @@ impl ComposerInlineAtom {
         match &self.kind {
             ComposerAtomKind::PastedText(text) => {
                 let lines = text.lines().count();
-                let category = self.paste_category.unwrap_or("Pasted text");
+                let category = self.paste_category.as_deref().unwrap_or("Pasted text");
                 if lines > 1 {
                     format!("{category} ({lines} lines)")
                 } else {
@@ -7023,6 +7023,149 @@ pub(super) fn splice_inline_atoms(content: &str, atoms: &[ComposerInlineAtom]) -
         body.push_str(&text);
     }
     body
+}
+
+/// Expand the composer's marker text for a draft while remembering where each
+/// atom landed in the resulting plain text. Those ranges let a live draft
+/// regain its chips after a project or workspace handoff.
+pub(super) fn composer_draft_content(
+    content: &str,
+    atoms: &[ComposerInlineAtom],
+) -> (String, Vec<crate::persistence::ComposerDraftInlineAtom>) {
+    let mut body = String::with_capacity(content.len());
+    let mut inline_atoms = Vec::new();
+    let mut rest = content;
+    let mut atoms = atoms.iter();
+    let marker_len = INLINE_ATOM_MARKER.len_utf8();
+    while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
+        body.push_str(&rest[..index]);
+        if let Some(atom) = atoms.next() {
+            let payload = atom.payload();
+            if !payload.is_empty() {
+                let offset = body.len();
+                body.push_str(&payload);
+                inline_atoms.push(draft_inline_atom(atom, offset, payload.len()));
+            }
+        }
+        rest = &rest[index + marker_len..];
+    }
+    body.push_str(rest);
+
+    let leading_trim = body.len() - body.trim_start().len();
+    body = body.trim().to_owned();
+    for atom in &mut inline_atoms {
+        atom.offset = atom.offset.saturating_sub(leading_trim);
+    }
+
+    for atom in atoms {
+        let payload = atom.payload();
+        if payload.is_empty() {
+            continue;
+        }
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        let offset = body.len();
+        body.push_str(&payload);
+        inline_atoms.push(draft_inline_atom(atom, offset, payload.len()));
+    }
+
+    (body, inline_atoms)
+}
+
+fn draft_inline_atom(
+    atom: &ComposerInlineAtom,
+    offset: usize,
+    length: usize,
+) -> crate::persistence::ComposerDraftInlineAtom {
+    use crate::persistence::{ComposerDraftInlineAtom, ComposerDraftInlineAtomKind};
+
+    let kind = match &atom.kind {
+        ComposerAtomKind::PastedText(text) => ComposerDraftInlineAtomKind::PastedText {
+            text: text.clone(),
+            paste_category: atom.paste_category.clone(),
+        },
+        ComposerAtomKind::SessionRef { session_id, title } => {
+            ComposerDraftInlineAtomKind::SessionRef {
+                session_id: *session_id,
+                title: title.to_string(),
+            }
+        }
+    };
+    ComposerDraftInlineAtom {
+        offset,
+        length,
+        revision: atom.revision,
+        kind,
+    }
+}
+
+/// Reinsert markers for ranges that still match the draft's text. A stale
+/// range falls back to plain text, keeping edits safe if another path changed
+/// the draft after the chip snapshot was taken.
+pub(super) fn restore_inline_atoms(
+    text: &str,
+    atoms: &[crate::persistence::ComposerDraftInlineAtom],
+) -> (String, Vec<ComposerInlineAtom>) {
+    use crate::persistence::ComposerDraftInlineAtomKind;
+
+    let mut ordered = atoms.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|atom| atom.offset);
+
+    let mut content = String::with_capacity(text.len());
+    let mut restored = Vec::new();
+    let mut cursor = 0;
+    for atom in ordered {
+        let Some(end) = atom.offset.checked_add(atom.length) else {
+            continue;
+        };
+        if atom.offset < cursor || atom.length == 0 {
+            continue;
+        }
+        let Some(payload) = text.get(atom.offset..end) else {
+            continue;
+        };
+        let (kind, paste_category) = match &atom.kind {
+            ComposerDraftInlineAtomKind::PastedText {
+                text: pasted_text,
+                paste_category,
+            } => {
+                if payload != pasted_text.trim() {
+                    continue;
+                }
+                (
+                    ComposerAtomKind::PastedText(pasted_text.clone()),
+                    paste_category.clone(),
+                )
+            }
+            ComposerDraftInlineAtomKind::SessionRef { session_id, title } => {
+                let expected = session_token(*session_id, title);
+                if payload != expected {
+                    continue;
+                }
+                (
+                    ComposerAtomKind::SessionRef {
+                        session_id: *session_id,
+                        title: SharedString::from(title.clone()),
+                    },
+                    None,
+                )
+            }
+        };
+
+        content.push_str(&text[cursor..atom.offset]);
+        let marker = content.len();
+        content.push(INLINE_ATOM_MARKER);
+        restored.push(ComposerInlineAtom {
+            marker,
+            kind,
+            revision: atom.revision,
+            paste_category,
+        });
+        cursor = end;
+    }
+    content.push_str(&text[cursor..]);
+    (content, restored)
 }
 
 /// `content` minus its atom markers — the user's own typed words, for a

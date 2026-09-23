@@ -29,8 +29,9 @@ use waku_protocol::theme::ThemeSettings;
 pub use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAnnotation, ComposerDraftAnnotationSpan, ComposerDraftAttachment,
-    ComposerDraftChange, ComposerDraftFileAnnotation, ComposerDraftKey, ComposerDraftTarget,
-    ComposerDrafts, SessionMessageMatch, SessionMessageSearchQuery, SessionMessageSearchScope,
+    ComposerDraftChange, ComposerDraftFileAnnotation, ComposerDraftInlineAtom,
+    ComposerDraftInlineAtomKind, ComposerDraftKey, ComposerDraftTarget, ComposerDrafts,
+    SessionMessageMatch, SessionMessageSearchQuery, SessionMessageSearchScope,
     parse_session_message_search, resolve_named_search_project,
 };
 

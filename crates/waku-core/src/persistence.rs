@@ -2286,6 +2286,7 @@ mod tests {
             text: text.to_owned(),
             attachments: Vec::new(),
             annotations: Vec::new(),
+            inline_atoms: Vec::new(),
         }
     }
 
@@ -2509,6 +2510,7 @@ mod tests {
                 session_id: None,
             }],
             annotations: Vec::new(),
+            inline_atoms: Vec::new(),
         };
         let mut drafts = ComposerDrafts::default();
         drafts.set(ComposerDraftKey::NewSession(project_id), draft.clone());
@@ -3081,6 +3083,7 @@ mod tests {
                     session_id: None,
                 }],
                 annotations: Vec::new(),
+                inline_atoms: Vec::new(),
             },
         );
         ComposerDraftStore::for_state_path(&directory.join("app.db"))

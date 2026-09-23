@@ -92,7 +92,7 @@ fn apply_category(
     }) else {
         return false;
     };
-    atom.paste_category = Some(category);
+    atom.paste_category = Some(category.to_owned());
     true
 }
 

@@ -3034,14 +3034,14 @@ impl Waku {
             if submission.hidden {
                 continue;
             }
+            let source = submission
+                .human_content
+                .or(submission.display_content)
+                .unwrap_or(submission.prompt);
+            let (text, inline_atoms) =
+                super::composer::composer_draft_content(&source, &submission.atoms);
             let draft = crate::persistence::ComposerDraft {
-                text: super::composer::splice_inline_atoms(
-                    &submission
-                        .human_content
-                        .or(submission.display_content)
-                        .unwrap_or(submission.prompt),
-                    &submission.atoms,
-                ),
+                text,
                 attachments: submission
                     .attachments
                     .into_iter()
@@ -3055,6 +3055,7 @@ impl Waku {
                     .iter()
                     .map(crate::persistence::ComposerDraftAnnotation::from)
                     .collect(),
+                inline_atoms,
             };
             if !draft.is_empty() {
                 self.composer_drafts.set(
