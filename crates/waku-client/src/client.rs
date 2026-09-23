@@ -378,11 +378,24 @@ impl DaemonClient {
         runtime_id: Uuid,
         command: Command,
     ) -> anyhow::Result<ResponsePayload> {
+        let timeout = request_timeout(&command);
+        self.request_with_timeout(session_id, runtime_id, command, Some(timeout))
+    }
+
+    /// Like [`Self::request`] with a caller-chosen wait bound. `None` parks
+    /// until the daemon answers or the connection drops — for calls that
+    /// wait on a human, like `agentAsk`, where a clock can't bound the wait.
+    pub fn request_with_timeout(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        command: Command,
+        timeout: Option<Duration>,
+    ) -> anyhow::Result<ResponsePayload> {
         if self.inner.disconnected.load(Ordering::Acquire) {
             bail!("Goddard daemon is disconnected");
         }
         let request_id = Uuid::new_v4();
-        let timeout = request_timeout(&command);
         let (response, response_rx) = bounded(1);
         self.inner.pending.lock().insert(request_id, response);
         let message = ClientMessage::Request(Request {
@@ -400,14 +413,21 @@ impl DaemonClient {
             self.inner.pending.lock().remove(&request_id);
             bail!("Goddard daemon connection is closed");
         }
-        match response_rx.recv_timeout(timeout) {
-            Ok(Ok(payload)) => Ok(payload),
-            Ok(Err(error)) => Err(anyhow!(error.localized_message())),
-            Err(error) => {
-                self.inner.pending.lock().remove(&request_id);
-                Err(anyhow!("timed out waiting for Goddard daemon: {error}"))
-            }
-        }
+        let outcome = match timeout {
+            Some(timeout) => match response_rx.recv_timeout(timeout) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    self.inner.pending.lock().remove(&request_id);
+                    return Err(anyhow!("timed out waiting for Goddard daemon: {error}"));
+                }
+            },
+            // A dropped sender means the connection died — the disconnect
+            // path resolves every pending waiter with an error first.
+            None => response_rx
+                .recv()
+                .map_err(|error| anyhow!("Goddard daemon connection closed: {error}"))?,
+        };
+        outcome.map_err(|error| anyhow!(error.localized_message()))
     }
 
     pub fn notify(

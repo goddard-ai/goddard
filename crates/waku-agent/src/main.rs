@@ -11,6 +11,9 @@
 //! custom commands — and is available whenever changing one would help them.
 //! Invoke `create` or `prompt` only when the human you are working for has
 //! explicitly asked you to create another task or to send a message to one.
+//! `ask` blocks on the human's answer to a structured question shown in
+//! their client — reach for it when their decision must come back before
+//! you can proceed, not for questions a reply can carry.
 //! There is no per-call approval gate; the daemon stamps every accepted
 //! write with this task's id so agent-originated changes stay visible to the
 //! user.
@@ -25,7 +28,7 @@ use uuid::Uuid;
 
 use waku_client::DaemonClient;
 use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
-use waku_protocol::model::ProviderKind;
+use waku_protocol::model::{ProviderKind, UserInputOption, UserInputQuestion};
 use waku_protocol::{
     AGENT_TASK_ENV, AGENT_TOKEN_ENV, AgentPromptDelivery, AgentWorkspace, Command,
     DAEMON_ADDRESS_ENV, ResponsePayload,
@@ -40,6 +43,7 @@ USAGE
     goddard-agent rename '<json>'            Rename this task when its transcript grants permission
     goddard-agent read '<json>'              Read a task's transcript
     goddard-agent search '<json>'            Search this project's task transcripts
+    goddard-agent ask '<json>'               Ask the user a structured question
     goddard-agent command list               List the user's custom commands
     goddard-agent command upsert '<json>'    Add or update a custom command
     goddard-agent command remove '<json>'    Remove a custom command
@@ -64,6 +68,11 @@ USAGE CONTRACT
     convenience, or self-orchestration.
     `rename` changes only this task's title and requires a grant from this
     task's transcript header.
+    `ask` renders a question card in the user's Goddard client and blocks
+    until they answer, clarify, or dismiss it. Use it when the human's
+    decision — a choice between options or a confirmation — must come back
+    before you can proceed; it is not a substitute for ordinary questions
+    you can just ask in your reply.
     There is no per-call approval gate for either surface; the daemon records
     this task's id on every accepted write, so agent-originated commands and
     turns are visibly attributed to it.
@@ -82,7 +91,7 @@ fn schema() -> serde_json::Value {
         .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
         .collect();
     json!({
-        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. There is no per-call approval gate; the daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
+        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate; the daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
         "create": {
             "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation.",
             "fields": {
@@ -136,6 +145,20 @@ fn schema() -> serde_json::Value {
             },
             "example": "{\"query\":\"status:idle retry logic\"}",
             "returns": {"results": [{"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
+        },
+        "ask": {
+            "description": "Ask this task's user a structured question and block until they resolve it. Renders the session's question card in their Goddard client while your turn keeps running — use it when a human decision (a choice between options, or a confirmation) must come back before you can proceed. Do not use it for questions an ordinary reply can carry.",
+            "fields": {
+                "questions": {"type": "array", "required": true, "notes": "one or more questions, presented one card at a time in order", "items": {
+                    "question": {"type": "string", "required": true},
+                    "header": {"type": "string", "notes": "short card label; defaults to \"Question\""},
+                    "id": {"type": "string", "notes": "answer key; defaults to question-<index>"},
+                    "options": {"type": "array", "items": {"label": {"type": "string", "required": true}, "description": {"type": "string"}}, "notes": "omit for a free-form answer"},
+                    "multiSelect": {"type": "boolean", "default": false}
+                }}
+            },
+            "example": "{\"questions\":[{\"header\":\"Deploy\",\"question\":\"Which environment should I deploy to?\",\"options\":[{\"label\":\"Staging\"},{\"label\":\"Production\",\"description\":\"Requires sign-off\"}]}]}",
+            "returns": {"outcome": "{\"type\":\"answers\",\"answers\":[{\"questionId\":\"<id>\",\"answers\":[\"<chosen label or typed text>\"]}]} when the user submits; {\"type\":\"clarified\",\"content\":\"<text>\"} when they explain instead; {\"type\":\"cancelled\"} when they dismiss or the turn ends"}
         },
         "command": {
             "description": "Manage the user's custom commands — shell scripts they can run from the command palette in a terminal. Commands are daemon-owned and shared across the user's clients.",
@@ -293,7 +316,7 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         "command" => command(arguments.next().as_deref(), arguments.next()),
-        "create" | "prompt" | "read" | "search" | "rename" => {
+        "create" | "prompt" | "read" | "search" | "rename" | "ask" => {
             let payload = arguments
                 .next()
                 .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
@@ -301,7 +324,14 @@ fn run() -> anyhow::Result<()> {
                 bail!("`{subcommand}` accepts exactly one JSON object argument");
             }
             let command = build_command(&subcommand, &payload)?;
-            let response = connect()?.request(request_session_id(), Uuid::nil(), command)?;
+            let client = connect()?;
+            // `ask` waits on a human — a clock can't bound that, so it
+            // parks until the daemon resolves it or the connection drops.
+            let response = if subcommand == "ask" {
+                client.request_with_timeout(request_session_id(), Uuid::nil(), command, None)?
+            } else {
+                client.request(request_session_id(), Uuid::nil(), command)?
+            };
             match response {
                 ResponsePayload::AgentSessionCreated { session_id } => {
                     println!("{}", serde_json::json!({ "task_id": session_id }));
@@ -317,6 +347,9 @@ fn run() -> anyhow::Result<()> {
                             "session_link_hint": session_link_hint(),
                         }))?
                     );
+                }
+                ResponsePayload::AgentAskResult { outcome } => {
+                    println!("{}", serde_json::to_string_pretty(&outcome)?);
                 }
                 ResponsePayload::Ack => {
                     println!("{}", serde_json::json!({ "ok": true }));
@@ -451,6 +484,9 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 last_turns: payload.last_turns,
             })
         }
+        "ask" => Ok(Command::AgentAsk {
+            questions: ask_questions(payload)?,
+        }),
         _ => unreachable!("checked by run()"),
     }
 }
@@ -463,6 +499,76 @@ fn session_link_hint() -> String {
         "Reference a task in your reply as [title]({}<task_id>) and Goddard renders it as a link that opens the task.",
         waku_protocol::TASK_LINK_PREFIX
     )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AskOption {
+    label: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AskQuestion {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    header: Option<String>,
+    question: String,
+    #[serde(default)]
+    options: Vec<AskOption>,
+    #[serde(default)]
+    multi_select: bool,
+}
+
+#[derive(Deserialize)]
+struct AskPayload {
+    questions: Vec<AskQuestion>,
+}
+
+/// Parse the `ask` payload into the wire question shape — ids and headers
+/// default like the provider drivers' own translation layers.
+fn ask_questions(payload: &str) -> anyhow::Result<Vec<UserInputQuestion>> {
+    let payload: AskPayload = serde_json::from_str(payload)
+        .context("`ask` takes a JSON object; run `goddard-agent schema` for its shape")?;
+    if payload.questions.is_empty() {
+        bail!("`ask` requires at least one question");
+    }
+    payload
+        .questions
+        .into_iter()
+        .enumerate()
+        .map(|(index, question)| {
+            if question.question.trim().is_empty() {
+                bail!("question {index} has no text");
+            }
+            Ok(UserInputQuestion {
+                id: question
+                    .id
+                    .filter(|id| !id.trim().is_empty())
+                    .unwrap_or_else(|| format!("question-{index}")),
+                header: question
+                    .header
+                    .filter(|header| !header.trim().is_empty())
+                    .unwrap_or_else(|| "Question".to_owned()),
+                question: question.question,
+                options: question
+                    .options
+                    .into_iter()
+                    .filter(|option| !option.label.trim().is_empty())
+                    .map(|option| UserInputOption {
+                        label: option.label,
+                        description: option
+                            .description
+                            .filter(|description| !description.trim().is_empty()),
+                    })
+                    .collect(),
+                multi_select: question.multi_select,
+            })
+        })
+        .collect()
 }
 
 fn provider_kind(id: &str) -> anyhow::Result<ProviderKind> {
@@ -690,6 +796,39 @@ mod tests {
             }
             other => panic!("expected AgentPrompt, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn an_ask_payload_becomes_an_agent_ask_command_with_defaults() {
+        let command = build_command(
+            "ask",
+            r#"{"questions":[{"question":"Which environment?","options":[{"label":"Staging"},{"label":"Production","description":"Requires sign-off"}],"multiSelect":false},{"id":"confirm","header":"Deploy","question":"Ship it?"}]}"#,
+        )
+        .expect("a valid ask payload parses");
+
+        match command {
+            Command::AgentAsk { questions } => {
+                assert_eq!(questions.len(), 2);
+                assert_eq!(questions[0].id, "question-0");
+                assert_eq!(questions[0].header, "Question");
+                assert_eq!(questions[0].options.len(), 2);
+                assert_eq!(
+                    questions[0].options[1].description.as_deref(),
+                    Some("Requires sign-off")
+                );
+                assert!(!questions[0].multi_select);
+                assert_eq!(questions[1].id, "confirm");
+                assert_eq!(questions[1].header, "Deploy");
+                assert!(questions[1].options.is_empty());
+            }
+            other => panic!("expected AgentAsk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_ask_payload_rejects_empty_and_blank_questions() {
+        assert!(build_command("ask", r#"{"questions":[]}"#).is_err());
+        assert!(build_command("ask", r#"{"questions":[{"question":"  "}]}"#).is_err());
     }
 
     #[test]

@@ -67,13 +67,13 @@ mod protocol;
 pub use driver_wire::{decode_enum, encode_enum, event_from_wire, event_to_wire};
 pub use exposure::{DaemonExposure, parse_allowed_origins};
 pub use protocol::{
-    AGENT_PARENT_TASK_ENV, AGENT_TASK_ENV, AGENT_TOKEN_ENV, APP_EXECUTABLE_ENV,
-    AgentPromptDelivery, AgentWorkspace, ClientMessage, Command, DAEMON_ADDRESS_ENV,
-    DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady, DaemonSessionSample,
-    DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ReplayCursor, Request,
-    ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage, SessionDetailTail,
-    TASK_LINK_PREFIX, WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions,
-    WireSessionOptions,
+    AGENT_ASK_REQUEST_PREFIX, AGENT_PARENT_TASK_ENV, AGENT_TASK_ENV, AGENT_TOKEN_ENV,
+    APP_EXECUTABLE_ENV, AgentPromptDelivery, AgentWorkspace, ClientMessage, Command,
+    DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady,
+    DaemonSessionSample, DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ReplayCursor,
+    Request, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage,
+    SessionDetailTail, TASK_LINK_PREFIX, WireComputerToolRequest, WireDriverEvent,
+    WireDriverStartOptions, WireSessionOptions,
 };
 pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;

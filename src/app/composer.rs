@@ -602,9 +602,13 @@ impl Waku {
             format!("user-input-{request_id}-{question_index}-continue"),
             cx,
         );
-        let supports_actions = self
-            .selected_runtime()
-            .is_some_and(|runtime| runtime.driver.supports_user_input_actions());
+        // Daemon-owned `agent ask` requests always take the actions — the
+        // daemon resolves them itself, so the provider's capability is
+        // irrelevant. Provider-owned requests need the transport's support.
+        let supports_actions = request_id.starts_with(waku_protocol::AGENT_ASK_REQUEST_PREFIX)
+            || self
+                .selected_runtime()
+                .is_some_and(|runtime| runtime.driver.supports_user_input_actions());
         let dismiss = supports_actions.then(|| {
             let focus = self.transcript_control_focus(
                 format!("user-input-{request_id}-{question_index}-dismiss"),

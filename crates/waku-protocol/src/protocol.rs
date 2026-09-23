@@ -12,9 +12,10 @@ use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
 use crate::eval::{EvalQuestion, EvalSettings, EvalUsageStats, Evaluation};
 use crate::model::{
-    AgentSession, AgentSessionSearchHit, AgentSessionTranscript, GoalOperation, MessageAttachment,
-    Project, ProviderKind, ProviderProbe, ProviderResumeCursor, ProviderSessionCatalogStatus,
-    ProviderSessionHistory, ProviderSessionSummary, SessionStatus, UserInputAnswer,
+    AgentAskOutcome, AgentSession, AgentSessionSearchHit, AgentSessionTranscript, GoalOperation,
+    MessageAttachment, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
+    ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, SessionStatus,
+    UserInputAnswer, UserInputQuestion,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -50,6 +51,11 @@ pub const AGENT_PARENT_TASK_ENV: &str = "GODDARD_PARENT_TASK_ID";
 /// task. Surfaced to agents through `goddard-agent` so a reply can point at
 /// another task the way it would point at a file.
 pub const TASK_LINK_PREFIX: &str = "goddard://task/";
+/// The request-id prefix the daemon mints for `agentAsk` user-input
+/// requests. Clients use it to offer clarify/dismiss actions on those cards
+/// even when the session's provider has no user-input actions of its own —
+/// the daemon owns these requests, so the actions always resolve.
+pub const AGENT_ASK_REQUEST_PREFIX: &str = "agent-ask-";
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -694,6 +700,16 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_turns: Option<usize>,
     },
+    /// Scoped agent credential only: ask the session's user a structured
+    /// question mid-turn. The daemon emits the session's ordinary
+    /// `userInputRequested` event and parks this call until the user
+    /// answers, clarifies, or dismisses — or the turn underneath it ends.
+    /// The provider is never involved: to it, the `goddard-agent ask`
+    /// invocation is just a long-running tool call. This is the universal
+    /// fallback for providers with no native question mechanism.
+    AgentAsk {
+        questions: Vec<UserInputQuestion>,
+    },
     /// Share one of my projects with a friend. The daemon resolves the
     /// project's name and `origin` URL from `project_path` and re-sends
     /// the friend our full shared set.
@@ -1288,6 +1304,11 @@ pub enum ResponsePayload {
     /// command palette ranks session matches.
     AgentSessionSearch {
         hits: Vec<AgentSessionSearchHit>,
+    },
+    /// The resolution of a parked `agentAsk` — the user's answers, their
+    /// free-form clarification, or a cancellation.
+    AgentAskResult {
+        outcome: AgentAskOutcome,
     },
 }
 

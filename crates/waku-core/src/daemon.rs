@@ -18,10 +18,10 @@ use crate::auto_prompts::AutoPromptService;
 use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
-    AgentSession, AgentSessionSearchHit, Checkpoint, CheckpointStatus, DriverEvent, Project,
-    ProjectMapStatus, ProviderKind, ProviderModelOption, ProviderResumeCursor,
-    ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace, TurnStatus,
-    detail_prefix_signature,
+    AgentAskOutcome, AgentSession, AgentSessionSearchHit, Checkpoint, CheckpointStatus,
+    DriverEvent, Project, ProjectMapStatus, ProviderKind, ProviderModelOption,
+    ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace,
+    TurnStatus, UserInputQuestion, detail_prefix_signature,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -2663,10 +2663,19 @@ impl Backend for WakuBackend {
             Command::AgentSearchSessions { query, last_turns } => {
                 self.agent_search_sessions(agent, session_id, &query, last_turns)
             }
+            Command::AgentAsk { questions } => {
+                self.agent_ask(session_id, agent, questions, &events)
+            }
             Command::CancelQueuedPrompt { queued_message_id } => {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
             }
             command => {
+                // Daemon-owned `agentAsk` requests resolve here — their
+                // request ids never reached the provider, so the driver has
+                // nothing parked under them.
+                if self.agent.resolve_user_input(session_id, &command) {
+                    return Ok(ResponsePayload::Ack);
+                }
                 // Quarantined transfer sessions still take interactive
                 // prompts — the sandbox is the boundary, and the quarantine
                 // flag only keeps unattended senders (agent prompts,
@@ -5103,6 +5112,71 @@ impl WakuBackend {
         Ok(matches)
     }
 
+    /// `agent ask`: surface the session's ordinary question card and park
+    /// this request until the user answers, clarifies, or dismisses — or the
+    /// turn underneath it ends. The provider never sees the exchange; to it
+    /// the `goddard-agent ask` call is just a long-running tool call, which
+    /// is what makes the path work on providers with no native question
+    /// mechanism.
+    fn agent_ask(
+        &self,
+        session_id: Uuid,
+        agent: Option<Uuid>,
+        questions: Vec<UserInputQuestion>,
+        events: &EventSink,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.require_agent_tools()?;
+        if questions.is_empty() {
+            bail!("`ask` takes at least one question");
+        }
+        // A scoped credential asks through its own session; a master-token
+        // request names the target by session id.
+        let target = agent
+            .or_else(|| {
+                (!session_id.is_nil() && self.known_session(session_id)).then_some(session_id)
+            })
+            .ok_or_else(|| anyhow!("`ask` needs a task — the request names no known session"))?;
+        let runtime_id = self
+            .sessions
+            .lock()
+            .get(&target)
+            .map(|entry| entry.runtime_id)
+            .ok_or_else(|| anyhow!("task {target} has no running runtime to show the question"))?;
+        // Only a turn the provider is actively working can be running the
+        // tool call that asked. Without one the card could never render, so
+        // fail fast instead of parking a question nobody can answer.
+        if !self.agent.is_working(target) {
+            bail!("task {target} has no working turn to ask from");
+        }
+        let request_id = format!(
+            "{}{}",
+            waku_protocol::AGENT_ASK_REQUEST_PREFIX,
+            Uuid::new_v4()
+        );
+        let wire = event_to_wire(DriverEvent::UserInputRequested {
+            request_id: request_id.clone(),
+            questions,
+        })?;
+        let (settled, settle_rx) = crossbeam_channel::bounded(1);
+        // The card holds one request — a parallel ask would hide the first
+        // behind it and park forever, so the second is refused instead.
+        if !self.agent.try_park_ask(target, request_id.clone(), settled) {
+            bail!("task {target} already has an `ask` waiting on the user");
+        }
+        // A turn that finished between the check and the park left every
+        // parked ask unanswerable — resolve them all cancelled.
+        if !self.agent.is_working(target) {
+            self.agent.drain_asks(target);
+        }
+        events.for_session(target, runtime_id).send(wire)?;
+        // Parked like a provider question: the user's response resolves it,
+        // and a finished turn, exited process, or torn-down session resolves
+        // it cancelled.
+        let outcome = settle_rx.recv().unwrap_or(AgentAskOutcome::Cancelled);
+        self.agent.remove_ask(target, &request_id);
+        Ok(ResponsePayload::AgentAskResult { outcome })
+    }
+
     /// Resolve an agent prompt's target: an explicit Waku task id, or a
     /// provider-native Agent CLI thread id matched against every
     /// daemon-known task's stored resume cursor.
@@ -5487,6 +5561,7 @@ fn handle_driver_command(
         | Command::AgentRenameSelf { .. }
         | Command::AgentReadSession { .. }
         | Command::AgentSearchSessions { .. }
+        | Command::AgentAsk { .. }
         | Command::CancelQueuedPrompt { .. }
         | Command::UpsertCustomCommand { .. }
         | Command::RemoveCustomCommand { .. }

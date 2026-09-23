@@ -1618,6 +1618,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentRenameSelf { .. }
             | Command::AgentReadSession { .. }
             | Command::AgentSearchSessions { .. }
+            | Command::AgentAsk { .. }
             | Command::UpsertCustomCommand { .. }
             | Command::RemoveCustomCommand { .. }
             | Command::ListCustomCommands

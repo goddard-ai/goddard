@@ -1,0 +1,1 @@
+- `goddard-agent ask` lets an agent render a structured question card mid-turn and block until the user answers, clarifies, or dismisses — bringing agent-to-user elicitation to providers with no native question mechanism

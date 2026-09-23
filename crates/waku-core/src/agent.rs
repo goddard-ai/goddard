@@ -16,11 +16,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, anyhow};
+use crossbeam_channel::Sender;
 use parking_lot::Mutex;
 use subtle::ConstantTimeEq as _;
 use uuid::Uuid;
 
-use crate::model::DriverEvent;
+use waku_protocol::Command;
+
+use crate::model::{AgentAskOutcome, DriverEvent};
 
 /// A prompt an agent submitted, with the sending task it must be attributed
 /// to. The same record tracks steer injections awaiting the provider's
@@ -103,6 +106,10 @@ pub struct AgentState {
     /// runtime's credentials are revoked.
     parent_indexes: Mutex<HashSet<Uuid>>,
     turns: Mutex<HashMap<Uuid, AgentTurn>>,
+    /// Daemon-owned `agentAsk` requests parked on a session, by request id.
+    /// The provider never sees these — the response commands the client
+    /// sends resolve here instead of reaching the driver.
+    pending_asks: Mutex<HashMap<Uuid, HashMap<String, Sender<AgentAskOutcome>>>>,
 }
 
 impl AgentState {
@@ -136,6 +143,7 @@ impl AgentState {
         // restarted process gets the parent index again.
         self.index_steers.lock().remove(&session_id);
         self.parent_indexes.lock().remove(&session_id);
+        self.drain_asks(session_id);
     }
 
     /// Whether the session's side-chat parent index is still undelivered.
@@ -219,6 +227,11 @@ impl AgentState {
         self.index_steers.lock().clear();
         self.parent_indexes.lock().clear();
         self.turns.lock().clear();
+        for (_, asks) in std::mem::take(&mut *self.pending_asks.lock()) {
+            for (_, sender) in asks {
+                let _ = sender.send(AgentAskOutcome::Cancelled);
+            }
+        }
     }
 
     /// Update the session's turn bookkeeping from a runtime event. Returns
@@ -242,6 +255,10 @@ impl AgentState {
                     turn.open = false;
                     turn.working = false;
                 }
+                // A finished turn leaves any parked ask unanswerable — the
+                // client has already dropped the card and the tool call that
+                // was waiting on it is gone too.
+                self.drain_asks(session_id);
             }
             DriverEvent::ProcessExited => {
                 self.turns.lock().remove(&session_id);
@@ -249,6 +266,7 @@ impl AgentState {
                 // restarted runtime does not attribute an unrelated echo.
                 self.pending_steers.lock().remove(&session_id);
                 self.index_steers.lock().remove(&session_id);
+                self.drain_asks(session_id);
             }
             DriverEvent::SteerRejected { message, .. } => {
                 // A refused steer settles without delivering: the parent
@@ -412,6 +430,88 @@ impl AgentState {
             steers.remove(&session_id);
         }
         prompt
+    }
+
+    /// Park a daemon-owned `agentAsk` on the session. The caller blocks on
+    /// the receiver until a user-input response resolves it or a drain
+    /// resolves it cancelled. Returns `false` without parking when another
+    /// ask is already waiting — the card renders one request at a time, so
+    /// a second would swallow the first.
+    pub fn try_park_ask(
+        &self,
+        session_id: Uuid,
+        request_id: String,
+        settled: Sender<AgentAskOutcome>,
+    ) -> bool {
+        let mut asks = self.pending_asks.lock();
+        let pending = asks.entry(session_id).or_default();
+        if !pending.is_empty() {
+            return false;
+        }
+        pending.insert(request_id, settled);
+        true
+    }
+
+    /// Drop a parked ask without resolving it — the request that parked it
+    /// is gone, so there is no one left to answer.
+    pub fn remove_ask(&self, session_id: Uuid, request_id: &str) {
+        let mut asks = self.pending_asks.lock();
+        if let Some(pending) = asks.get_mut(&session_id) {
+            pending.remove(request_id);
+            if pending.is_empty() {
+                asks.remove(&session_id);
+            }
+        }
+    }
+
+    /// Settle every parked ask on the session as cancelled — the turn or
+    /// runtime underneath them went away, so no answer can still reach the
+    /// callers.
+    pub fn drain_asks(&self, session_id: Uuid) {
+        if let Some(asks) = self.pending_asks.lock().remove(&session_id) {
+            for (_, sender) in asks {
+                let _ = sender.send(AgentAskOutcome::Cancelled);
+            }
+        }
+    }
+
+    /// Resolve a parked `agentAsk` from a client user-input response
+    /// command. Returns `true` when the request id names a daemon-owned ask —
+    /// the command is consumed and must not reach the provider driver, which
+    /// has nothing parked under that id.
+    pub fn resolve_user_input(&self, session_id: Uuid, command: &Command) -> bool {
+        let (request_id, outcome) = match command {
+            Command::RespondUserInput {
+                request_id,
+                answers,
+            } => (
+                request_id,
+                AgentAskOutcome::Answers {
+                    answers: answers.clone(),
+                },
+            ),
+            Command::ClarifyUserInput {
+                request_id,
+                content,
+            } => (
+                request_id,
+                AgentAskOutcome::Clarified {
+                    content: content.clone(),
+                },
+            ),
+            Command::CancelUserInput { request_id } => (request_id, AgentAskOutcome::Cancelled),
+            _ => return false,
+        };
+        let sender = self
+            .pending_asks
+            .lock()
+            .get_mut(&session_id)
+            .and_then(|asks| asks.remove(request_id));
+        let Some(sender) = sender else {
+            return false;
+        };
+        let _ = sender.send(outcome);
+        true
     }
 }
 
@@ -590,6 +690,12 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              self-orchestration. `search` is read-only and confined to \
              this task's project — use it to find which sibling tasks are \
              worth `read`ing.",
+        );
+        instruction.push_str(
+            " `ask` renders a structured question in the user's client and \
+             blocks until they answer, clarify, or dismiss it — use it when \
+             a human decision must come back before you can proceed, not \
+             for questions a reply can carry.",
         );
     }
     if let Some(parent) = scope.parent_task_id {
@@ -859,6 +965,126 @@ mod tests {
         );
         assert!(!state.has_open_turn(session));
         assert!(!state.is_working(session));
+    }
+
+    #[test]
+    fn a_parked_ask_resolves_from_the_user_input_commands() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+
+        let (answered, answered_rx) = crossbeam_channel::bounded(1);
+        assert!(state.try_park_ask(session, "agent-ask-one".into(), answered));
+        assert!(state.resolve_user_input(
+            session,
+            &Command::RespondUserInput {
+                request_id: "agent-ask-one".into(),
+                answers: vec![crate::model::UserInputAnswer {
+                    question_id: "question-0".into(),
+                    answers: vec!["Staging".into()],
+                }],
+            },
+        ));
+        assert_eq!(
+            answered_rx.recv().unwrap(),
+            AgentAskOutcome::Answers {
+                answers: vec![crate::model::UserInputAnswer {
+                    question_id: "question-0".into(),
+                    answers: vec!["Staging".into()],
+                }],
+            },
+        );
+
+        let (clarified, clarified_rx) = crossbeam_channel::bounded(1);
+        assert!(state.try_park_ask(session, "agent-ask-two".into(), clarified));
+        assert!(state.resolve_user_input(
+            session,
+            &Command::ClarifyUserInput {
+                request_id: "agent-ask-two".into(),
+                content: "neither, use the preview env".into(),
+            },
+        ));
+        assert_eq!(
+            clarified_rx.recv().unwrap(),
+            AgentAskOutcome::Clarified {
+                content: "neither, use the preview env".into(),
+            },
+        );
+
+        let (dismissed, dismissed_rx) = crossbeam_channel::bounded(1);
+        assert!(state.try_park_ask(session, "agent-ask-three".into(), dismissed));
+        assert!(state.resolve_user_input(
+            session,
+            &Command::CancelUserInput {
+                request_id: "agent-ask-three".into(),
+            },
+        ));
+        assert_eq!(dismissed_rx.recv().unwrap(), AgentAskOutcome::Cancelled,);
+    }
+
+    #[test]
+    fn a_second_parked_ask_is_refused_until_the_first_resolves() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        let (first, _first_rx) = crossbeam_channel::bounded(1);
+        let (second, _second_rx) = crossbeam_channel::bounded(1);
+        assert!(state.try_park_ask(session, "agent-ask-one".into(), first));
+        assert!(!state.try_park_ask(session, "agent-ask-two".into(), second));
+
+        state.remove_ask(session, "agent-ask-one");
+        let (third, _third_rx) = crossbeam_channel::bounded(1);
+        assert!(state.try_park_ask(session, "agent-ask-three".into(), third));
+    }
+
+    #[test]
+    fn provider_owned_request_ids_fall_through_to_the_driver() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        let (settled, _rx) = crossbeam_channel::bounded(1);
+        assert!(state.try_park_ask(session, "agent-ask-mine".into(), settled));
+
+        // A request id the daemon never parked — including one from another
+        // session — is not consumed here.
+        assert!(!state.resolve_user_input(
+            session,
+            &Command::CancelUserInput {
+                request_id: "provider-request".into(),
+            },
+        ));
+        assert!(!state.resolve_user_input(
+            Uuid::new_v4(),
+            &Command::CancelUserInput {
+                request_id: "agent-ask-mine".into(),
+            },
+        ));
+    }
+
+    #[test]
+    fn a_finished_turn_cancels_parked_asks() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        let (settled, settle_rx) = crossbeam_channel::bounded(1);
+        assert!(state.try_park_ask(session, "agent-ask-one".into(), settled));
+
+        state.note_driver_event(
+            session,
+            &DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            },
+        );
+        assert_eq!(settle_rx.recv().unwrap(), AgentAskOutcome::Cancelled);
+    }
+
+    #[test]
+    fn revoking_the_session_cancels_parked_asks() {
+        let state = AgentState::default();
+        let session = Uuid::new_v4();
+        let (settled, settle_rx) = crossbeam_channel::bounded(1);
+        assert!(state.try_park_ask(session, "agent-ask-one".into(), settled));
+
+        state.revoke_session(session);
+        assert_eq!(settle_rx.recv().unwrap(), AgentAskOutcome::Cancelled);
     }
 
     #[test]

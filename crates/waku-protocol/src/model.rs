@@ -3936,6 +3936,22 @@ pub struct UserInputAnswer {
     pub answers: Vec<String>,
 }
 
+/// How a daemon-owned `agentAsk` request settled. Unlike provider-initiated
+/// questions, these park inside the daemon and the provider never sees them —
+/// the CLI call that asked is just a long-running tool call to it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum AgentAskOutcome {
+    /// The user submitted the question card's answers.
+    Answers { answers: Vec<UserInputAnswer> },
+    /// The user typed a clarification instead of answering — the "let me
+    /// explain" path, after which the agent re-decides the question.
+    Clarified { content: String },
+    /// The user dismissed the card, or the turn underneath the ask went away
+    /// before anyone could answer.
+    Cancelled,
+}
+
 /// What a provider says happened to a file, when it says anything at all.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
