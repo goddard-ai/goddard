@@ -68,6 +68,12 @@ const TRIGGER_GAP: f32 = 4.0;
 /// cursor crossing the strip never flashes it, short enough to feel instant.
 const HOVER_OPEN_DELAY: Duration = Duration::from_millis(150);
 
+/// How long a sibling row's hover takes to retire an open flyout. The flyout
+/// draws top-aligned beside the card, so the straight path from its parent
+/// row to its first entry crosses the siblings in between — tearing the
+/// flyout down instantly on each crossing would make it unreachable.
+const FLYOUT_CLOSE_DELAY: Duration = Duration::from_millis(300);
+
 /// How far a release can land from the press that opened the menu and still
 /// read as a click. Past it the press was a drag, and releasing over nothing
 /// dismisses.
@@ -375,6 +381,10 @@ struct MenuState {
     /// the handle, not the element: the element is rebuilt every frame, so a
     /// captured `Cell` would forget the hover a pending timer needs to see.
     trigger_hovered: bool,
+    /// Invalidates a delayed flyout teardown — bumped when the pointer
+    /// reaches the flyout or the menu state resets, so a timer armed by a
+    /// sibling hover it crossed en route fires into a stale serial.
+    flyout_close_serial: u64,
 }
 
 /// Cross-frame state for one context menu. The owner keeps one per menu site.
@@ -464,6 +474,7 @@ impl ContextMenuHandle {
             state.submenu_highlighted = None;
             state.submenu_focused = false;
             state.trigger_click_toggles = false;
+            state.flyout_close_serial += 1;
             was_open
         };
         if was_open {
@@ -528,6 +539,7 @@ impl ContextMenuHandle {
             state.submenu_highlighted = None;
             state.submenu_focused = false;
             state.trigger_click_toggles = trigger_click_toggles;
+            state.flyout_close_serial += 1;
             was_open
         };
         if !was_open {
@@ -1361,6 +1373,16 @@ impl RenderOnce for MenuCard {
         if let Some((parent_index, submenu_items)) = submenu {
             let mut submenu_card = div()
                 .id(SharedString::from(format!("submenu-{parent_index}")))
+                // Resting on the card — padding included — cancels a delayed
+                // teardown a crossed sibling armed on the way in.
+                .on_hover({
+                    let handle = self.handle.clone();
+                    move |hovered, _, _| {
+                        if *hovered {
+                            handle.state.borrow_mut().flyout_close_serial += 1;
+                        }
+                    }
+                })
                 .ml(px(-4.0))
                 .min_w(px(176.0))
                 .max_w(px(320.0))
@@ -1549,6 +1571,7 @@ fn render_menu_item(
 
 fn open_submenu(handle: &ContextMenuHandle, index: usize, keyboard: bool) {
     let mut state = handle.state.borrow_mut();
+    state.flyout_close_serial += 1;
     if state.active_submenu != Some(index) {
         state.submenu_highlighted = None;
     }
@@ -1571,16 +1594,43 @@ fn track_pointer_highlight(
             if !*hovered {
                 return;
             }
+            let mut retire_flyout = None;
             {
                 let mut state = handle.state.borrow_mut();
                 if in_submenu {
                     state.submenu_highlighted = Some(index);
+                    state.flyout_close_serial += 1;
                 } else {
                     state.highlighted = Some(index);
-                    state.active_submenu = None;
-                    state.submenu_highlighted = None;
-                    state.submenu_focused = false;
+                    if state.active_submenu.is_some() {
+                        state.flyout_close_serial += 1;
+                        retire_flyout = Some(state.flyout_close_serial);
+                    } else {
+                        state.submenu_highlighted = None;
+                        state.submenu_focused = false;
+                    }
                 }
+            }
+            if let Some(serial) = retire_flyout {
+                // The hover may be a crossing en route to the flyout, not a
+                // switch — retire it on a delay that reaching the flyout
+                // cancels via the serial.
+                let handle = handle.clone();
+                let window_handle = window.window_handle();
+                cx.spawn(async move |cx| {
+                    cx.background_executor().timer(FLYOUT_CLOSE_DELAY).await;
+                    let _ = window_handle.update(cx, |_, window, _| {
+                        let mut state = handle.state.borrow_mut();
+                        if state.flyout_close_serial == serial {
+                            state.active_submenu = None;
+                            state.submenu_highlighted = None;
+                            state.submenu_focused = false;
+                            drop(state);
+                            window.refresh();
+                        }
+                    });
+                })
+                .detach();
             }
             // The handler can reach back into menu state, so it runs only
             // after the highlight borrow is released.
@@ -2562,6 +2612,134 @@ mod tests {
         assert_eq!(highlighted.get(), 1);
         cx.simulate_keystrokes("down");
         assert_eq!(highlighted.get(), 2);
+    }
+
+    /// A menu with a clickable row above a submenu — the shape that makes a
+    /// top-aligned flyout unreachable by a diagonal pointer path.
+    struct CrossingHarness {
+        handle: ContextMenuHandle,
+        activated: Rc<Cell<bool>>,
+    }
+
+    impl Render for CrossingHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let activated = self.activated.clone();
+            dropdown_menu(
+                div().w(px(120.0)).h(px(32.0)),
+                "crossing-dropdown",
+                &self.handle,
+                MenuAlign::BelowLeft,
+                move |_| {
+                    let activated = activated.clone();
+                    vec![
+                        MenuItem::custom(|_, _| {
+                            div()
+                                .debug_selector(|| "above-row".into())
+                                .size_full()
+                                .into_any_element()
+                        })
+                        .on_click(|_, _| {}),
+                        MenuItem::Submenu {
+                            label: "Send to friend".into(),
+                            value: None,
+                            items: Rc::new(move |_| {
+                                let activated = activated.clone();
+                                vec![
+                                    MenuItem::custom(|_, _| {
+                                        div()
+                                            .debug_selector(|| "friend-row".into())
+                                            .size_full()
+                                            .into_any_element()
+                                    })
+                                    .on_click(move |_, _| activated.set(true)),
+                                ]
+                            }),
+                        },
+                    ]
+                },
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn pointer_crossing_a_sibling_row_keeps_the_submenu_reachable(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let handle = cx.update(ContextMenuHandle::new);
+        let activated = Rc::new(Cell::new(false));
+        let harness = CrossingHarness {
+            handle: handle.clone(),
+            activated: activated.clone(),
+        };
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+        assert!(handle.is_open());
+
+        let above = cx
+            .debug_bounds("above-row")
+            .expect("the sibling row should paint");
+        // The submenu row sits directly beneath the first entry.
+        let submenu_row = point(above.center().x, above.bottom() + px(2.0));
+        cx.simulate_mouse_move(submenu_row, None, Modifiers::none());
+        assert_eq!(
+            handle.state.borrow().active_submenu,
+            Some(1),
+            "hovering the submenu row should open its flyout"
+        );
+        cx.run_until_parked();
+        let friend = cx
+            .debug_bounds("friend-row")
+            .expect("the flyout row should paint");
+
+        // The flyout is top-aligned to the card, so the direct path to its
+        // first row crosses the sibling entry above the submenu row.
+        cx.simulate_mouse_move(above.center(), None, Modifiers::none());
+        cx.simulate_mouse_move(friend.center(), None, Modifiers::none());
+        cx.simulate_click(friend.center(), Modifiers::none());
+
+        assert!(
+            activated.get(),
+            "a pointer crossing a sibling row en route to the flyout must still reach it"
+        );
+    }
+
+    #[gpui::test]
+    fn lingering_on_a_sibling_row_retires_the_submenu(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let handle = cx.update(ContextMenuHandle::new);
+        let harness = CrossingHarness {
+            handle: handle.clone(),
+            activated: Rc::new(Cell::new(false)),
+        };
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+
+        let above = cx
+            .debug_bounds("above-row")
+            .expect("the sibling row should paint");
+        let submenu_row = point(above.center().x, above.bottom() + px(2.0));
+        cx.simulate_mouse_move(submenu_row, None, Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(handle.state.borrow().active_submenu, Some(1));
+
+        // The pointer lands on a sibling and stays — the flyout retires once
+        // the crossing grace elapses.
+        cx.simulate_mouse_move(above.center(), None, Modifiers::none());
+        assert_eq!(
+            handle.state.borrow().active_submenu,
+            Some(1),
+            "the grace window keeps the flyout open at first"
+        );
+        cx.executor().advance_clock(FLYOUT_CLOSE_DELAY);
+        cx.run_until_parked();
+        assert_eq!(handle.state.borrow().active_submenu, None);
     }
 
     fn items() -> Vec<MenuItem> {

@@ -1,0 +1,1 @@
+- Fixed the **Send to friend** flyout on a reply's context menu closing before the pointer could reach a friend, so clicking a name now opens the send confirmation.
