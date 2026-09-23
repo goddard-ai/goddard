@@ -10,6 +10,7 @@
 //! unexpected exit.
 
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,7 +19,10 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use waku_protocol::DaemonStatsSample;
+use waku_protocol::model::ProviderKind;
+use waku_protocol::{
+    DaemonChildKind, DaemonChildSample, DaemonSessionSample, DaemonStatsSample,
+};
 
 /// One sample per minute keeps the process-table walk cheap while catching
 /// growth between turns; eviction leaks move on hour timescales anyway.
@@ -29,14 +33,43 @@ const STATS_FILE_CAP: u64 = 512 * 1024;
 const STATS_FILE_NAME: &str = "daemon-stats.jsonl";
 const PANIC_FILE_NAME: &str = "daemon-panics.jsonl";
 
+/// A live runtime's identity for subtree attribution: guardian shells run
+/// the provider in its session cwd — some set it on the shell, some `env -C`
+/// inside — so a subtree claims the session when *any* member runs there.
+pub(crate) struct RuntimeDir {
+    pub session_id: Uuid,
+    pub provider: ProviderKind,
+    /// Canonicalized when the probe is built — `process_cwd` reports real
+    /// paths, so a symlinked stored path would never match.
+    pub cwd: PathBuf,
+}
+
+/// What the daemon reports about its live state each sample — counts,
+/// subtree attribution hints, and per-session resident detail. Built in
+/// `daemon.rs`, which owns the locks this data sits behind.
+#[derive(Default)]
+pub(crate) struct StatsProbe {
+    /// Live provider runtimes at sample time.
+    pub runtimes: u32,
+    /// Live remote terminals at sample time.
+    pub terminals: u32,
+    pub runtime_dirs: Vec<RuntimeDir>,
+    /// Terminal PTY child pid → the task surface that opened it.
+    pub terminal_roots: Vec<(u32, Option<Uuid>)>,
+    /// Every known session, skeletons included.
+    pub sessions_total: u32,
+    /// Resident or running sessions.
+    pub sessions: Vec<DaemonSessionSample>,
+}
+
 /// The sampler's shared state: what it last wrote, and the previous boot's
 /// final line captured before this process appended anything.
 pub struct DaemonStats {
     boot: String,
     path: PathBuf,
-    /// Session/terminal counters for samples and the shutdown marker —
-    /// set when the sampler starts.
-    counts: Mutex<Option<Box<dyn Fn() -> (u32, u32) + Send + Sync>>>,
+    /// The live-state readout for samples and the shutdown marker — set
+    /// when the sampler starts.
+    probe: Mutex<Option<Box<dyn Fn() -> StatsProbe + Send + Sync>>>,
     state: Mutex<DaemonStatsState>,
 }
 
@@ -77,7 +110,7 @@ impl DaemonStats {
         Arc::new(Self {
             boot: Uuid::new_v4().simple().to_string(),
             path,
-            counts: Mutex::new(None),
+            probe: Mutex::new(None),
             state: Mutex::new(DaemonStatsState {
                 previous_boot: last_line.as_ref().map(|line| line.sample.clone()),
                 previous_boot_clean: last_line.is_some_and(|line| line.shutdown),
@@ -96,19 +129,13 @@ impl DaemonStats {
         )
     }
 
-    /// Spawn the sampling thread. Only the maps' lengths are read — the
-    /// generics keep this module free of daemon internals.
-    pub(crate) fn spawn_sampler<V, T>(
+    /// Spawn the sampling thread. The probe callback keeps this module free
+    /// of daemon internals — `daemon.rs` owns the maps it reads.
+    pub(crate) fn spawn_sampler(
         self: &Arc<Self>,
-        sessions: Arc<Mutex<HashMap<Uuid, V>>>,
-        terminals: Arc<Mutex<HashMap<Uuid, T>>>,
-    ) where
-        V: Send + 'static,
-        T: Send + 'static,
-    {
-        *self.counts.lock() = Some(Box::new(move || {
-            (sessions.lock().len() as u32, terminals.lock().len() as u32)
-        }));
+        probe: impl Fn() -> StatsProbe + Send + Sync + 'static,
+    ) {
+        *self.probe.lock() = Some(Box::new(probe));
         let stats = self.clone();
         let path = self.path.clone();
         let boot = self.boot.clone();
@@ -146,19 +173,22 @@ impl DaemonStats {
     }
 
     fn current_sample(&self) -> DaemonStatsSample {
-        let (runtimes, terminals) = self
-            .counts
+        let probe = self
+            .probe
             .lock()
             .as_ref()
-            .map(|counts| counts())
+            .map(|probe| probe())
             .unwrap_or_default();
-        let (daemon_rss_mb, children_rss_mb) = memory_footprint_mb();
+        let (daemon_rss_mb, children_rss_mb, children) = memory_rows(&probe);
         DaemonStatsSample {
             at: crate::model::unix_time(),
             daemon_rss_mb,
             children_rss_mb,
-            runtimes,
-            terminals,
+            runtimes: probe.runtimes,
+            terminals: probe.terminals,
+            children,
+            sessions_total: probe.sessions_total,
+            sessions: probe.sessions,
         }
     }
 }
@@ -227,38 +257,104 @@ fn append_json_line(path: &Path, line: &impl Serialize) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Own RSS and the summed RSS of every descendant process. `None` where the
-/// platform has no table walk.
-fn memory_footprint_mb() -> (Option<u64>, Option<u64>) {
+/// One process-table row: parent, resident size, and the process name
+/// (`comm` — truncated to 15–16 chars by the kernel, enough for `devin`,
+/// `codex`, `goddard-daemon`).
+struct ProcEntry {
+    ppid: i32,
+    rss: u64,
+    name: String,
+}
+
+/// Own RSS, the summed RSS of every descendant, and one row per direct
+/// child's subtree. `None` where the platform has no table walk.
+fn memory_rows(probe: &StatsProbe) -> (Option<u64>, Option<u64>, Vec<DaemonChildSample>) {
     let Some(table) = process_table() else {
-        return (None, None);
+        return (None, None, Vec::new());
     };
     let own_pid = std::process::id() as i32;
-    let own = table.get(&own_pid).map(|(_, rss)| *rss);
+    let own = table.get(&own_pid).map(|entry| entry.rss);
     let mut children_of: HashMap<i32, Vec<i32>> = HashMap::new();
-    for (pid, (ppid, _)) in &table {
-        children_of.entry(*ppid).or_default().push(*pid);
+    for (pid, entry) in &table {
+        children_of.entry(entry.ppid).or_default().push(*pid);
     }
     // Descendants, not just direct children: provider runtimes sit under a
     // guardian shell that owns their termination, so the process tree is
-    // deeper than one level.
+    // deeper than one level. Each direct child roots one subtree row.
     let mut total = 0_u64;
-    let mut stack = children_of.get(&own_pid).cloned().unwrap_or_default();
-    while let Some(pid) = stack.pop() {
-        let Some((_, rss)) = table.get(&pid) else {
+    let mut rows = Vec::new();
+    let mut unclaimed = probe.runtime_dirs.iter().collect::<Vec<_>>();
+    for (root, entry) in &table {
+        if entry.ppid != own_pid {
             continue;
-        };
-        total += rss;
-        if let Some(children) = children_of.get(&pid) {
-            stack.extend_from_slice(children);
         }
+        let mut members = vec![*root];
+        let mut subtree_rss = 0_u64;
+        let mut cursor = 0;
+        while let Some(pid) = members.get(cursor).copied() {
+            cursor += 1;
+            let Some(member) = table.get(&pid) else {
+                continue;
+            };
+            subtree_rss += member.rss;
+            if let Some(children) = children_of.get(&pid) {
+                members.extend_from_slice(children);
+            }
+        }
+        total += subtree_rss;
+        // The subtree's identity is its heaviest member: the guardian is a
+        // bare `sh`, the provider CLI carries the megabytes.
+        let name = members
+            .iter()
+            .filter_map(|pid| table.get(pid))
+            .max_by_key(|member| member.rss)
+            .map(|member| member.name.clone())
+            .unwrap_or_default();
+        let (kind, session_id, provider) =
+            attribute(&members, &probe.terminal_roots, &mut unclaimed);
+        rows.push(DaemonChildSample {
+            pid: *root as u32,
+            name,
+            rss_mb: subtree_rss / (1 << 20),
+            processes: members.len() as u32,
+            kind,
+            session_id,
+            provider,
+        });
     }
-    (own.map(|bytes| bytes / (1 << 20)), Some(total / (1 << 20)))
+    rows.sort_by(|a, b| b.rss_mb.cmp(&a.rss_mb));
+    (own.map(|bytes| bytes / (1 << 20)), Some(total / (1 << 20)), rows)
 }
 
-/// pid → (parent pid, resident bytes) for every readable process.
+/// Who owns one subtree: a terminal when its PTY pid sits among the
+/// members, else the runtime whose session cwd a member runs in — claimed
+/// once so two sessions sharing a directory still split their subtrees.
+fn attribute(
+    members: &[i32],
+    terminal_roots: &[(u32, Option<Uuid>)],
+    runtime_dirs: &mut Vec<&RuntimeDir>,
+) -> (DaemonChildKind, Option<Uuid>, Option<ProviderKind>) {
+    if let Some((_, owner)) = terminal_roots
+        .iter()
+        .find(|(pid, _)| members.contains(&(*pid as i32)))
+    {
+        return (DaemonChildKind::Terminal, *owner, None);
+    }
+    for member in members {
+        let Some(cwd) = process_cwd(*member) else {
+            continue;
+        };
+        if let Some(index) = runtime_dirs.iter().position(|dir| dir.cwd == cwd) {
+            let dir = runtime_dirs.remove(index);
+            return (DaemonChildKind::Runtime, Some(dir.session_id), Some(dir.provider));
+        }
+    }
+    (DaemonChildKind::Other, None, None)
+}
+
+/// pid → parent/name/RSS for every readable process.
 #[cfg(target_os = "macos")]
-fn process_table() -> Option<HashMap<i32, (i32, u64)>> {
+fn process_table() -> Option<HashMap<i32, ProcEntry>> {
     let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     if count <= 0 {
         return None;
@@ -289,7 +385,11 @@ fn process_table() -> Option<HashMap<i32, (i32, u64)>> {
         if read <= 0 {
             continue;
         }
-        let ppid = unsafe { bsd.assume_init() }.pbi_ppid as i32;
+        let bsd = unsafe { bsd.assume_init() };
+        let ppid = bsd.pbi_ppid as i32;
+        let name = unsafe { CStr::from_ptr(bsd.pbi_comm.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
         // phys_footprint is what Activity Monitor and jetsam measure;
         // pti_resident_size understates compressed memory.
         let mut usage = std::mem::MaybeUninit::<libc::rusage_info_v4>::zeroed();
@@ -304,15 +404,15 @@ fn process_table() -> Option<HashMap<i32, (i32, u64)>> {
             continue;
         }
         let rss = unsafe { usage.assume_init() }.ri_phys_footprint;
-        table.insert(pid, (ppid, rss));
+        table.insert(pid, ProcEntry { ppid, rss, name });
     }
     Some(table)
 }
 
-/// pid → (parent pid, resident bytes) via `/proc/*/status` — one file gives
-/// both `PPid` and `VmRSS`.
+/// pid → parent/name/RSS via `/proc/*/status` — one file gives `Name`,
+/// `PPid`, and `VmRSS`.
 #[cfg(target_os = "linux")]
-fn process_table() -> Option<HashMap<i32, (i32, u64)>> {
+fn process_table() -> Option<HashMap<i32, ProcEntry>> {
     let mut table = HashMap::new();
     for entry in std::fs::read_dir("/proc").ok()? {
         let Ok(entry) = entry else { continue };
@@ -323,9 +423,11 @@ fn process_table() -> Option<HashMap<i32, (i32, u64)>> {
         let Ok(status) = std::fs::read_to_string(entry.path().join("status")) else {
             continue;
         };
-        let (mut ppid, mut rss_kb) = (None, None);
+        let (mut comm, mut ppid, mut rss_kb) = (None, None, None);
         for line in status.lines() {
-            if let Some(value) = line.strip_prefix("PPid:") {
+            if let Some(value) = line.strip_prefix("Name:") {
+                comm = Some(value.trim().to_owned());
+            } else if let Some(value) = line.strip_prefix("PPid:") {
                 ppid = value.trim().parse::<i32>().ok();
             } else if let Some(value) = line.strip_prefix("VmRSS:") {
                 rss_kb = value
@@ -337,14 +439,56 @@ fn process_table() -> Option<HashMap<i32, (i32, u64)>> {
             }
         }
         if let (Some(ppid), Some(rss_kb)) = (ppid, rss_kb) {
-            table.insert(pid, (ppid, rss_kb * 1024));
+            table.insert(
+                pid,
+                ProcEntry {
+                    ppid,
+                    rss: rss_kb * 1024,
+                    name: comm.unwrap_or_default(),
+                },
+            );
         }
     }
     Some(table)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn process_table() -> Option<HashMap<i32, (i32, u64)>> {
+fn process_table() -> Option<HashMap<i32, ProcEntry>> {
+    None
+}
+
+/// A process's working directory — the join between a runtime subtree and
+/// the session it serves. ACP guardians `env -C` into the session dir, so
+/// the *descendant* carries it even when the direct child does not.
+#[cfg(target_os = "macos")]
+fn process_cwd(pid: i32) -> Option<PathBuf> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            info.as_mut_ptr() as *mut std::ffi::c_void,
+            std::mem::size_of::<libc::proc_vnodepathinfo>() as i32,
+        )
+    };
+    if read <= 0 {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    // libc spells vip_path as `[[c_char; 32]; 32]` for old-rustc layout
+    // reasons; it is a flat 1024-byte MAXPATHLEN buffer.
+    let path = unsafe { CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr() as *const _) };
+    Some(PathBuf::from(path.to_string_lossy().into_owned()))
+}
+
+#[cfg(target_os = "linux")]
+fn process_cwd(pid: i32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_cwd(_pid: i32) -> Option<PathBuf> {
     None
 }
 
@@ -356,10 +500,49 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn the_process_table_reports_this_processs_footprint() {
         let table = process_table().expect("a readable process table");
-        let (_, rss) = table
+        let entry = table
             .get(&(std::process::id() as i32))
             .expect("the test process's own row");
-        assert!(*rss > 0);
+        assert!(entry.rss > 0);
+        assert!(!entry.name.is_empty());
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn subtrees_report_each_direct_child_and_claim_by_cwd() {
+        let dir = std::env::temp_dir().join(format!("waku-stats-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cwd = std::fs::canonicalize(&dir).unwrap();
+        let session_id = Uuid::new_v4();
+        // One child runs in a session's worktree, one runs nowhere known.
+        let mut claimed = std::process::Command::new("sleep")
+            .arg("30")
+            .current_dir(&cwd)
+            .spawn()
+            .unwrap();
+        let mut unclaimed = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+
+        let mut probe = StatsProbe::default();
+        probe.runtime_dirs.push(RuntimeDir {
+            session_id,
+            provider: ProviderKind::Codex,
+            cwd: cwd.clone(),
+        });
+        let (_, _, rows) = memory_rows(&probe);
+        let _ = claimed.kill();
+        let _ = unclaimed.kill();
+
+        let runtime = rows
+            .iter()
+            .find(|row| row.session_id == Some(session_id))
+            .expect("the session's subtree row");
+        assert_eq!(runtime.kind, DaemonChildKind::Runtime);
+        assert_eq!(runtime.provider, Some(ProviderKind::Codex));
+        assert_eq!(runtime.name, "sleep");
+        assert!(rows.iter().any(|row| {
+            row.pid == unclaimed.id() && row.kind == DaemonChildKind::Other
+        }));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn append(path: &Path, boot: &str, sample: &DaemonStatsSample, shutdown: bool) {
@@ -385,6 +568,9 @@ mod tests {
             children_rss_mb: Some(1500),
             runtimes: 3,
             terminals: 1,
+            children: Vec::new(),
+            sessions_total: 0,
+            sessions: Vec::new(),
         };
         append(&path, "boot-a", &first, false);
         let mut second = first.clone();
@@ -412,6 +598,9 @@ mod tests {
             children_rss_mb: Some(700),
             runtimes: 2,
             terminals: 0,
+            children: Vec::new(),
+            sessions_total: 0,
+            sessions: Vec::new(),
         };
         append(&path, "boot-a", &sample, false);
         append(&path, "boot-a", &sample, true);
@@ -434,6 +623,9 @@ mod tests {
             children_rss_mb: Some(2),
             runtimes: 0,
             terminals: 0,
+            children: Vec::new(),
+            sessions_total: 0,
+            sessions: Vec::new(),
         };
         let line_len = serde_json::to_string(&StatsLine {
             boot: "boot".into(),

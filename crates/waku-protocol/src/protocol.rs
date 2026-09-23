@@ -14,7 +14,7 @@ use crate::eval::{EvalQuestion, EvalSettings, EvalUsageStats, Evaluation};
 use crate::model::{
     AgentSession, AgentSessionSearchHit, AgentSessionTranscript, GoalOperation, MessageAttachment,
     Project, ProviderKind, ProviderProbe, ProviderResumeCursor, ProviderSessionCatalogStatus,
-    ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
+    ProviderSessionHistory, ProviderSessionSummary, SessionStatus, UserInputAnswer,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -949,6 +949,70 @@ pub enum ResponseOutcome {
     Error { error: RpcError },
 }
 
+/// What owns one direct child of the daemon process.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum DaemonChildKind {
+    /// A provider runtime subtree — a guardian shell over the agent CLI.
+    Runtime,
+    /// A remote terminal's PTY subtree.
+    Terminal,
+    /// Anything else the daemon spawned (helper processes, mid-teardown
+    /// subtrees, children no live entry claimed).
+    Other,
+}
+
+/// One direct child of the daemon, summarized over its whole subtree —
+/// provider CLIs sit under a guardian shell, so the interesting process is
+/// usually a grandchild.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonChildSample {
+    /// The direct child's pid — the subtree root this row summarizes.
+    pub pid: u32,
+    /// The heaviest member's process name — `devin`, `codex`, the login
+    /// shell a terminal runs. Identifies what the subtree actually is.
+    pub name: String,
+    /// Resident size summed over the whole subtree, in MiB.
+    pub rss_mb: u64,
+    /// Processes in the subtree, the direct child included.
+    pub processes: u32,
+    pub kind: DaemonChildKind,
+    /// The session this subtree serves — `None` when no live entry claimed
+    /// it (mid-teardown, or a helper the daemon never tracked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
+    /// The provider behind a runtime subtree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<ProviderKind>,
+}
+
+/// How much of one session's transcript the daemon holds in memory. Only
+/// resident or running sessions get a row — skeletons carry ~1 KB of list
+/// columns each and are not worth per-session detail.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonSessionSample {
+    pub id: Uuid,
+    /// Empty for incognito sessions — this struct lands in
+    /// `daemon-stats.jsonl`, and incognito exists to keep data off disk.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    pub provider: ProviderKind,
+    pub status: SessionStatus,
+    /// Whether the full transcript is resident; `false` means only the list
+    /// columns are loaded (a skeleton).
+    pub detail_loaded: bool,
+    /// Whether a live provider runtime is attached.
+    pub running: bool,
+    pub resident_messages: u32,
+    pub resident_activities: u32,
+    /// Rough heap estimate of the resident detail — struct sizes plus the
+    /// big string payloads (message content, activity output/detail). An
+    /// underestimate: deeply nested fields are counted shallowly.
+    pub resident_bytes: u64,
+}
+
 /// One process-memory sample written by the daemon's stats sampler — see
 /// [`Command::GetDaemonStats`]. Also the per-line shape of
 /// `daemon-stats.jsonl` in the daemon's data directory.
@@ -968,6 +1032,17 @@ pub struct DaemonStatsSample {
     pub runtimes: u32,
     /// Live remote terminals at sample time.
     pub terminals: u32,
+    /// Per-subtree rows: one per direct child of the daemon, each carrying
+    /// its whole descendant tree's resident size. `None`-empty on platforms
+    /// without a sampler implementation.
+    #[serde(default)]
+    pub children: Vec<DaemonChildSample>,
+    /// Every session the daemon knows, skeletons included.
+    #[serde(default)]
+    pub sessions_total: u32,
+    /// Resident or running sessions and what they hold in memory.
+    #[serde(default)]
+    pub sessions: Vec<DaemonSessionSample>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

@@ -77,6 +77,94 @@ fn trim_resident_transcripts(state: &mut PersistedState, pinned: &HashSet<Uuid>)
     state.trim_idle_transcripts(pinned, RESIDENT_TRANSCRIPT_WINDOW);
 }
 
+/// One `DaemonSessionSample` per session worth a row: resident (hydrated)
+/// or running. Skeletons carry ~1 KB of list columns each and only count
+/// toward `sessions_total` — a daemon with hundreds of stored tasks must
+/// not turn the stats line into a session dump.
+fn session_stats_sample(
+    session: &AgentSession,
+    running: bool,
+) -> Option<waku_protocol::DaemonSessionSample> {
+    (session.detail_loaded || running).then(|| waku_protocol::DaemonSessionSample {
+        id: session.id,
+        // Incognito sessions persist nowhere — their titles must not reach
+        // `daemon-stats.jsonl` either.
+        title: if session.incognito {
+            String::new()
+        } else {
+            session.title.clone()
+        },
+        provider: session.provider,
+        status: session.status,
+        detail_loaded: session.detail_loaded,
+        running,
+        resident_messages: session.messages.len() as u32,
+        resident_activities: session
+            .transcript_blocks
+            .iter()
+            .map(|block| block.activities.len() as u32)
+            .sum(),
+        resident_bytes: resident_bytes(session),
+    })
+}
+
+/// Rough heap estimate of a session's resident detail: struct sizes plus
+/// the big string payloads. Underestimates nested collections — enough to
+/// rank which sessions hold the daemon's memory, not to bill exact bytes.
+fn resident_bytes(session: &AgentSession) -> u64 {
+    fn strings<'a>(values: impl Iterator<Item = &'a String>) -> u64 {
+        values.map(|value| value.capacity() as u64).sum()
+    }
+    fn opt_string(value: &Option<String>) -> u64 {
+        value.as_ref().map_or(0, |value| value.capacity() as u64)
+    }
+    let mut bytes = (std::mem::size_of::<AgentSession>() + session.title.capacity()) as u64;
+    for message in &session.messages {
+        bytes += std::mem::size_of::<waku_protocol::model::Message>() as u64
+            + message.content.capacity() as u64
+            + opt_string(&message.display_content)
+            + strings(message.attachments.iter().map(|a| &a.name).chain(
+                message.attachments.iter().map(|a| &a.mention),
+            ));
+    }
+    for block in &session.transcript_blocks {
+        bytes += std::mem::size_of::<waku_protocol::model::TranscriptBlock>() as u64;
+        for activity in &block.activities {
+            bytes += std::mem::size_of_val(activity) as u64
+                + activity.title.capacity() as u64
+                + opt_string(&activity.source_id)
+                + opt_string(&activity.tool_name)
+                + opt_string(&activity.mcp_server)
+                + opt_string(&activity.detail)
+                + opt_string(&activity.arguments)
+                + opt_string(&activity.output)
+                + opt_string(&activity.display_target)
+                + opt_string(&activity.display_description)
+                + strings(activity.image_urls.iter())
+                + activity
+                    .reasoning
+                    .as_ref()
+                    .map_or(0, |block| block.content.capacity() as u64)
+                + strings(activity.file_changes.iter().map(|change| &change.path))
+                + strings(activity.file_changes.iter().filter_map(|c| c.diff.as_ref()));
+        }
+    }
+    for turn in &session.turns {
+        bytes += std::mem::size_of::<waku_protocol::model::AgentTurn>() as u64
+            + opt_string(&turn.provider_resume_at)
+            + turn.checkpoint.as_ref().map_or(0, |checkpoint| {
+                checkpoint.git_ref.capacity() as u64
+                    + strings(checkpoint.files.iter().map(|file| &file.path))
+            });
+    }
+    for queued in &session.queued_messages {
+        bytes += std::mem::size_of::<waku_protocol::model::QueuedMessage>() as u64
+            + queued.content.capacity() as u64
+            + opt_string(&queued.display_content);
+    }
+    bytes
+}
+
 /// Registry removal is the atomic handoff for a runtime or terminal, so the
 /// request handler can answer immediately: the teardown itself — PTY grace
 /// periods, process waits, provider unregistration — runs on this worker
@@ -126,12 +214,15 @@ struct TerminalEntry {
 /// or served a request. `resumable` records whether the runtime can be
 /// rebuilt from a provider cursor — seeded from the spawn options and set
 /// once the driver's `Connected` handshake reports one. The idle reaper
-/// reads both stamps.
+/// reads both stamps. `provider`/`cwd` exist for the stats sampler, which
+/// claims a descendant subtree by the directory its members run in.
 struct RuntimeEntry {
     runtime_id: Uuid,
     driver: DriverHandle,
     last_active: std::time::Instant,
     resumable: bool,
+    provider: ProviderKind,
+    cwd: PathBuf,
 }
 
 /// The provider/model selection an `agent create` request carried. Every
@@ -1105,8 +1196,48 @@ impl Backend for WakuBackend {
         }
         // The stats sampler shares the guard: it owns a file and a thread,
         // so a second event-source install must not duplicate it either.
-        self.stats
-            .spawn_sampler(self.sessions.clone(), self.terminals.clone());
+        // The probe locks each map in turn rather than nesting — per-minute
+        // cadence means a consistent-as-of snapshot per map is enough.
+        let probe_sessions = self.sessions.clone();
+        let probe_terminals = self.terminals.clone();
+        let probe_state = self.task_state.clone();
+        self.stats.spawn_sampler(move || {
+            let (runtimes, runtime_dirs, running) = {
+                let sessions = probe_sessions.lock();
+                let running: HashSet<Uuid> = sessions.keys().copied().collect();
+                let dirs = sessions
+                    .iter()
+                    .map(|(session_id, entry)| crate::stats::RuntimeDir {
+                        session_id: *session_id,
+                        provider: entry.provider,
+                        cwd: std::fs::canonicalize(&entry.cwd)
+                            .unwrap_or_else(|_| entry.cwd.clone()),
+                    })
+                    .collect();
+                (sessions.len() as u32, dirs, running)
+            };
+            let (terminals, terminal_roots) = {
+                let terminals = probe_terminals.lock();
+                let roots = terminals
+                    .iter()
+                    .map(|(_, entry)| (entry.terminal.child_pid(), entry.owner))
+                    .collect();
+                (terminals.len() as u32, roots)
+            };
+            let state = probe_state.lock();
+            crate::stats::StatsProbe {
+                runtimes,
+                terminals,
+                runtime_dirs,
+                terminal_roots,
+                sessions_total: state.sessions.len() as u32,
+                sessions: state
+                    .sessions
+                    .iter()
+                    .filter_map(|session| session_stats_sample(session, running.contains(&session.id)))
+                    .collect(),
+            }
+        });
         let sessions = self.sessions.clone();
         let task_state = self.task_state.clone();
         let settings = self.settings.clone();
@@ -2253,6 +2384,7 @@ impl Backend for WakuBackend {
                     allow_model_fallback: false,
                 };
                 let resumable = options.provider_cursor.is_some();
+                let cwd = options.cwd.clone();
                 let handle =
                     self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
                 let supports_steer = handle.supports_steer();
@@ -2264,6 +2396,8 @@ impl Backend for WakuBackend {
                         driver: handle,
                         last_active: std::time::Instant::now(),
                         resumable,
+                        provider,
+                        cwd,
                     },
                 );
                 Ok(ResponsePayload::Started {
@@ -3821,6 +3955,7 @@ impl WakuBackend {
         let runtime_id = Uuid::new_v4();
         let sink = events.begin_session_runtime(session_id, runtime_id);
         let resumable = options.provider_cursor.is_some();
+        let cwd = options.cwd.clone();
         let handle =
             match self.spawn_runtime(session_id, runtime_id, provider, options, sink.clone()) {
                 Ok(handle) => handle,
@@ -3837,6 +3972,8 @@ impl WakuBackend {
                 driver: handle,
                 last_active: std::time::Instant::now(),
                 resumable,
+                provider,
+                cwd,
             },
         );
         Ok((runtime_id, driver))
@@ -7271,6 +7408,8 @@ mod tests {
                 driver: driver.clone(),
                 last_active: std::time::Instant::now(),
                 resumable: true,
+                provider: ProviderKind::Claude,
+                cwd: PathBuf::new(),
             },
         )])));
         driver_events
@@ -7457,6 +7596,8 @@ mod tests {
                             last_active: std::time::Instant::now()
                                 - std::time::Duration::from_secs(120),
                             resumable: id != unresumable_id,
+                            provider: ProviderKind::Claude,
+                            cwd: PathBuf::new(),
                         },
                     )
                 }),
@@ -7485,6 +7626,8 @@ mod tests {
                 driver,
                 last_active: std::time::Instant::now(),
                 resumable: true,
+                provider: ProviderKind::Claude,
+                cwd: PathBuf::new(),
             },
         );
         assert!(

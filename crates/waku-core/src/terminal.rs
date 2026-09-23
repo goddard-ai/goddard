@@ -175,6 +175,12 @@ mod platform {
         pub fn resize(&self, cols: u16, rows: u16) {
             self.pty.lock().on_resize(window_size(cols, rows));
         }
+
+        /// The PTY child's pid — the stats sampler attributes a process
+        /// subtree to this terminal through it.
+        pub fn child_pid(&self) -> u32 {
+            self.pty.lock().child().id()
+        }
     }
 
     impl Drop for DaemonTerminal {
@@ -260,4 +266,8 @@ impl DaemonTerminal {
     }
 
     pub fn resize(&self, _cols: u16, _rows: u16) {}
+
+    pub fn child_pid(&self) -> u32 {
+        0
+    }
 }

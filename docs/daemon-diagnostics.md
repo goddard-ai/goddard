@@ -9,8 +9,8 @@ and how to read them together.
 | --- | --- | --- |
 | `daemon.recovery` | Umami event | One recovery episode: `cause` (`unexpected_exit`, `disconnect`, `rebuild`), `outcome` (`recovered`, `unreachable`), `sessionsResumed`, `daemonRssMb`/`childrenRssMb` (pre-restart readings), `exitCode`/`exitSignal`/`exitSignalCode` when a real exit happened, `previousBootClean` |
 | `daemon.crash` | Umami event | One OS crash report per unseen `goddard-daemon-*.ips`, scanned at launch: `termination` namespace (`exc_resource` = jetsam/resource limits, `signal` = crash/kill), `signal`, `uptimeSecs` |
-| `daemon-stats.jsonl` | `~/.goddard/` | One JSONL sample per minute per boot: `boot`, `at`, `daemonRssMb`, `childrenRssMb` (whole descendant tree — provider runtimes carry memory under their own pids), `runtimes`, `terminals`. A `"shutdown": true` line is the clean-exit marker |
-| `daemon-panics.jsonl` | `~/.goddard/` | One line per panic: `at`, `thread`, `location` (file:line:col), `message` (first line, 400 chars). Request-thread panics unwind without killing the daemon — a wedged handler leaves its trace here |
+| `daemon-stats.jsonl` | `~/Library/Application Support/<App>/` | One JSONL sample per minute per boot: `boot`, `at`, `daemonRssMb`, `childrenRssMb` (whole descendant tree — provider runtimes carry memory under their own pids), `runtimes`, `terminals`, plus per-subtree `children` rows (`pid`, `name`, subtree `rssMb`, `processes`, `kind`, `sessionId`/`provider` when claimed) and per-session `sessions` rows (`detailLoaded`, `running`, `residentMessages`/`residentActivities`/`residentBytes`). A `"shutdown": true` line is the clean-exit marker |
+| `daemon-panics.jsonl` | `~/Library/Application Support/<App>/` | One line per panic: `at`, `thread`, `location` (file:line:col), `message` (first line, 400 chars). Request-thread panics unwind without killing the daemon — a wedged handler leaves its trace here |
 | `daemon-crashes.json` | `~/.goddard/` | Internal watermark for the `.ips` scan (`lastSeenAt` mtime); not diagnostic data itself |
 
 Analytics are release-only; the files exist in every build and are the
@@ -53,6 +53,23 @@ drives everything:
 boot's **final** sample — memory pressure shows up before the kill.
 `previousBootClean=false` on `unexpected_exit` confirms the death was
 abnormal; `true` means the daemon ran its shutdown path.
+
+## Reading memory
+
+`children` itemizes where descendant memory sits: one row per direct child
+of the daemon, `rssMb` summed over its whole subtree, `name` taken from the
+heaviest member (a provider CLI such as `devin`, or the shell a terminal
+runs). A row is `kind: "runtime"` when a member's working directory matches
+a live session's workspace — `sessionId`/`provider` are set then — and
+`kind: "terminal"` when a member is a remote terminal's PTY. Rows that
+claim nothing are `kind: "other"`: mid-teardown subtrees or helpers.
+
+`sessions` lists sessions holding resident transcripts — `detailLoaded`
+means the full message/activity history is in memory and `residentBytes` is
+a rough heap estimate, good for ranking, not exact billing. Skeletons
+(never hydrated or already trimmed) are omitted; `sessionsTotal` counts
+them anyway. Incognito sessions appear with an empty `title` — the file
+must not persist what incognito keeps off disk.
 
 ## Caveats
 

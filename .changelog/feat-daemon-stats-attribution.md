@@ -1,0 +1,1 @@
+- The daemon's per-minute stats log (`daemon-stats.jsonl` in the app data directory) now itemizes each child process — pid, process name, subtree memory, and the owning task and provider when known — and reports per-session resident transcript sizes, so memory questions name the task that holds the RAM.
