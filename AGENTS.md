@@ -74,12 +74,16 @@ Read the doc before working in its area:
 
 ## QA branch workflow
 
-- Proposed work lands on the `qa` branch unreviewed and is promoted to
-  `main` in order once approved. History is immutable up to and
-  including the newest `qa` commit carrying an approval — approvals bind
-  to commit SHAs, so rewriting them orphans the approvals. The
+- `dev` is the QA branch — there is no `qa` branch. Proposed work lands
+  on `dev` unreviewed and is promoted to `main` in order once approved.
+  History is immutable up to and including the newest `dev` commit
+  carrying an approval — approvals are git notes under `refs/notes/qa`
+  and bind to commit SHAs, so rewriting them orphans the approvals. The
   unreviewed tail past that commit may be rebased or amended.
-- Squash-merge feature work so each `qa` commit is one reviewable unit.
+- `dev` stays checked out in its own worktree — land by rebasing onto
+  `origin/dev` and fast-forwarding `dev` there rather than checking it
+  out here.
+- Squash-merge feature work so each `dev` commit is one reviewable unit.
 - Add one or more `Test-Plan:` trailers to the commit message when a
   human should verify the change. Each trailer is one executable check a
   reviewer can run — e.g. `Test-Plan: send a file to an offline friend;
