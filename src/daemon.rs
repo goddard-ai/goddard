@@ -77,6 +77,51 @@ pub fn local_ipv4() -> Option<String> {
     }
 }
 
+/// One JSON line per supervisor recovery episode, appended to
+/// `~/.goddard/daemon-recovery.jsonl` — the on-machine counterpart of the
+/// `daemon.recovery` analytics event, so a restart's cause and exit detail
+/// are diagnosable without leaving the box. Append-only and self-capping
+/// like the daemon's own `daemon-stats.jsonl`.
+pub(crate) fn log_daemon_recovery(record: &serde_json::Value) {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let path = home.join(".goddard").join("daemon-recovery.jsonl");
+    if append_json_line(&path, record).is_err() {
+        return;
+    }
+    if std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0) <= RECOVERY_LOG_CAP {
+        return;
+    }
+    // Keep the newest half, cut at a line boundary — same scheme the
+    // daemon's stats sampler uses.
+    if let Ok(bytes) = std::fs::read(&path) {
+        let halfway = bytes.len() / 2;
+        let start = bytes[halfway..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| halfway + offset + 1)
+            .unwrap_or(bytes.len());
+        let _ = std::fs::write(&path, &bytes[start..]);
+    }
+}
+
+/// ~256 KB at a few hundred bytes a line is years of recovery episodes.
+const RECOVERY_LOG_CAP: u64 = 256 * 1024;
+
+fn append_json_line(path: &std::path::Path, record: &serde_json::Value) -> std::io::Result<()> {
+    use std::io::Write as _;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "{record}")?;
+    Ok(())
+}
+
 /// One launch-time pass over `~/Library/Logs/DiagnosticReports` for crash
 /// reports the OS wrote for a daemon process — one `daemon.crash` event
 /// per report not yet seen, deduplicated by a file-mtime watermark in

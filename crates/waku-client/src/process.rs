@@ -794,13 +794,16 @@ fn monitor_daemon(
                 let (cause, exit) = outage.unwrap_or((cause, exit));
                 // A daemon whose process is still alive only lost its
                 // connection — reconnect in place; killing it would take
-                // every provider runtime down for nothing.
+                // every provider runtime down for nothing. The failure count
+                // survives a successful reconnect: it only clears after a
+                // stable stretch, so a daemon that accepts connections but
+                // keeps failing probes is replaced instead of flapping
+                // forever.
                 if matches!(still_down, Some(LocalDown::Disconnected))
                     && consecutive_failures < LOCAL_RECONNECT_ATTEMPTS
                 {
                     match reconnect_local_daemon(&inner) {
                         Ok(()) => {
-                            consecutive_failures = 0;
                             healthy_since = Instant::now();
                             mark_connected(&inner, cause, exit);
                         }

@@ -53,6 +53,11 @@ fn request_timeout(command: &Command) -> Duration {
 
 enum Outgoing {
     Message(ClientMessage),
+    /// Close only this connection — sent when the daemon stops answering,
+    /// so a slow daemon survives for the supervisor's in-place reconnect.
+    Close,
+    /// Ask the daemon itself to exit — only for the process owner tearing
+    /// down a managed daemon it is already replacing.
     Shutdown,
 }
 
@@ -290,10 +295,12 @@ impl DaemonClient {
     /// Mark this connection dead without waiting for the socket to notice:
     /// pending requests and event subscribers are released exactly as if the
     /// socket had closed, and the socket thread is asked to shut down. Used
-    /// when the daemon stops answering while keeping the socket open.
+    /// when the daemon stops answering while keeping the socket open. Only
+    /// the connection ends — a daemon that is merely slow must not receive a
+    /// shutdown it would honor, killing every provider runtime it owns.
     pub fn force_disconnect(&self) {
         fail_connection(&self.inner);
-        let _ = self.inner.outgoing.send(Outgoing::Shutdown);
+        let _ = self.inner.outgoing.send(Outgoing::Close);
     }
 
     pub fn unsubscribe(&self, session_id: Uuid, runtime_id: Uuid) {
@@ -533,6 +540,10 @@ fn run_client(
                     if write_json(&mut socket, &message).is_err() {
                         break 'connection;
                     }
+                }
+                Outgoing::Close => {
+                    let _ = socket.close(None);
+                    break 'connection;
                 }
                 Outgoing::Shutdown => {
                     let _ = write_json(&mut socket, &ClientMessage::Shutdown);
@@ -827,6 +838,85 @@ mod tests {
                 attachments: Vec::new(),
             }),
             REQUEST_TIMEOUT
+        );
+    }
+
+    /// A stand-in daemon: accepts one WebSocket connection, answers the
+    /// `Hello` handshake, and reports every later message the client sent
+    /// once the socket closes.
+    fn fake_daemon() -> (String, Receiver<Vec<ClientMessage>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (frames, frames_rx) = unbounded();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let mut seen = Vec::new();
+            loop {
+                match socket.read() {
+                    Ok(Message::Text(text)) => {
+                        let Ok(message) = serde_json::from_str::<ClientMessage>(text.as_ref())
+                        else {
+                            break;
+                        };
+                        if matches!(message, ClientMessage::Hello { .. }) {
+                            write_json(
+                                &mut socket,
+                                &ServerMessage::Hello {
+                                    protocol_version: PROTOCOL_VERSION,
+                                    daemon_version: "test".into(),
+                                    daemon_commit: None,
+                                    agent_cli_available: false,
+                                },
+                            )
+                            .unwrap();
+                        } else {
+                            seen.push(message);
+                        }
+                    }
+                    Ok(Message::Close(_)) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+            let _ = frames.send(seen);
+        });
+        (address, frames_rx)
+    }
+
+    /// The regression this guards: `force_disconnect` used to write a
+    /// daemon-wide shutdown on the wire, so a slow-but-alive daemon honored
+    /// it and killed every runtime it owned. It must close only the socket.
+    #[test]
+    fn force_disconnect_closes_the_connection_without_stopping_the_daemon() {
+        let (address, frames) = fake_daemon();
+        let client = DaemonClient::connect(&address, "token".into()).unwrap();
+        client.force_disconnect();
+        assert!(client.is_disconnected());
+        let seen = frames
+            .recv_timeout(Duration::from_secs(5))
+            .expect("connection stayed open after force_disconnect");
+        assert!(
+            !seen
+                .iter()
+                .any(|message| matches!(message, ClientMessage::Shutdown)),
+            "force_disconnect asked the daemon to exit: {seen:?}"
+        );
+    }
+
+    /// The deliberate kill path is untouched: `shutdown` still sends the
+    /// daemon-wide message `DaemonProcess::stop` relies on.
+    #[test]
+    fn shutdown_sends_the_daemon_shutdown_message() {
+        let (address, frames) = fake_daemon();
+        let client = DaemonClient::connect(&address, "token".into()).unwrap();
+        client.shutdown();
+        let seen = frames
+            .recv_timeout(Duration::from_secs(5))
+            .expect("connection stayed open after shutdown");
+        assert!(
+            seen.iter()
+                .any(|message| matches!(message, ClientMessage::Shutdown)),
+            "shutdown did not reach the daemon: {seen:?}"
         );
     }
 

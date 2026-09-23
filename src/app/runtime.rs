@@ -1730,21 +1730,47 @@ impl Waku {
                         .unwrap_or_default(),
                     _ => (None, None),
                 };
+                let cause = match episode.cause {
+                    waku_client::DaemonRecoveryCause::UnexpectedExit => "unexpected_exit",
+                    waku_client::DaemonRecoveryCause::Disconnect => "disconnect",
+                    waku_client::DaemonRecoveryCause::Rebuild => "rebuild",
+                };
+                let outcome = match episode.outcome {
+                    waku_client::DaemonRecoveryOutcome::Recovered => "recovered",
+                    waku_client::DaemonRecoveryOutcome::Unreachable => "unreachable",
+                };
+                let daemon_rss_mb = sample.as_ref().and_then(|sample| sample.daemon_rss_mb);
+                let children_rss_mb = sample.and_then(|sample| sample.children_rss_mb);
+                let exit_code = episode.exit.and_then(|exit| exit.code);
+                let exit_signal = episode.exit.and_then(|exit| exit.signal);
+                // The same record lands on disk — Umami is remote-only, so
+                // without the local copy a restart's cause leaves no trace.
+                crate::daemon::log_daemon_recovery(&serde_json::json!({
+                    "at": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_secs())
+                        .unwrap_or_default(),
+                    "daemon": match episode.key {
+                        waku_client::DaemonKey::Local => "local".to_owned(),
+                        waku_client::DaemonKey::Remote(id) => id.to_string(),
+                    },
+                    "cause": cause,
+                    "outcome": outcome,
+                    "sessionsResumed": episode.sessions_resumed,
+                    "daemonRssMb": daemon_rss_mb,
+                    "childrenRssMb": children_rss_mb,
+                    "exitCode": exit_code,
+                    "exitSignal": exit_signal,
+                    "previousBootClean": previous_boot_clean,
+                }));
                 analytics.track(crate::analytics::Event::DaemonRecovery {
-                    cause: match episode.cause {
-                        waku_client::DaemonRecoveryCause::UnexpectedExit => "unexpected_exit",
-                        waku_client::DaemonRecoveryCause::Disconnect => "disconnect",
-                        waku_client::DaemonRecoveryCause::Rebuild => "rebuild",
-                    },
-                    outcome: match episode.outcome {
-                        waku_client::DaemonRecoveryOutcome::Recovered => "recovered",
-                        waku_client::DaemonRecoveryOutcome::Unreachable => "unreachable",
-                    },
+                    cause,
+                    outcome,
                     sessions_resumed: episode.sessions_resumed,
-                    daemon_rss_mb: sample.as_ref().and_then(|sample| sample.daemon_rss_mb),
-                    children_rss_mb: sample.and_then(|sample| sample.children_rss_mb),
-                    exit_code: episode.exit.and_then(|exit| exit.code),
-                    exit_signal: episode.exit.and_then(|exit| exit.signal),
+                    daemon_rss_mb,
+                    children_rss_mb,
+                    exit_code,
+                    exit_signal,
                     previous_boot_clean,
                 });
             })
