@@ -2344,6 +2344,10 @@ providers.set_up: 设置
 providers.setup: 设置
 providers.setup_terminal_title: 设置 %{provider}
 providers.sign_in_label: 登录
+providers.update: 更新
+providers.update_label: 更新
+providers.update_terminal_title: 更新 %{provider}
+providers.updating: 更新中…
 right_panel.side_chat: 侧聊
 right_panel.side_chat_unavailable: 侧聊不可用
 right_panel.side_chat_unavailable_description: 该聊天已随其父任务删除，或已在此标签页中关闭

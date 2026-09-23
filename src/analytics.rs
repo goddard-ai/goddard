@@ -103,6 +103,11 @@ pub enum Event {
         /// `installed` | `not_detected`
         outcome: &'static str,
     },
+    ProviderUpdateFinished {
+        provider: &'static str,
+        /// `installed` | `not_detected`
+        outcome: &'static str,
+    },
     UpdateResolved {
         /// `accepted` | `installing` | `up_to_date` | `failed`
         outcome: &'static str,
@@ -282,6 +287,13 @@ impl Event {
             ),
             Self::ProviderSetupFinished { provider, outcome } => (
                 "provider.setup.finished",
+                json!({
+                    "provider": provider,
+                    "outcome": outcome,
+                }),
+            ),
+            Self::ProviderUpdateFinished { provider, outcome } => (
+                "provider.update.finished",
                 json!({
                     "provider": provider,
                     "outcome": outcome,
@@ -652,6 +664,10 @@ mod tests {
                 origin: "external",
             },
             Event::ProviderSetupFinished {
+                provider: "codex",
+                outcome: "installed",
+            },
+            Event::ProviderUpdateFinished {
                 provider: "codex",
                 outcome: "installed",
             },

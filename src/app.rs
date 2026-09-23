@@ -2907,6 +2907,13 @@ pub struct Waku {
     /// probe answers "did setup produce a working install" — consumed by
     /// `drain_provider_detection_events` for `provider.setup.finished`.
     provider_setup_outcomes: HashSet<ProviderKind>,
+    /// Live embeds running a provider update rather than install/sign-in —
+    /// exit reporting routes their outcome to `provider.update.finished`.
+    provider_update_runs: HashSet<ProviderKind>,
+    /// Providers whose update terminal just exited and whose next detection
+    /// probe answers "did the CLI still detect" — consumed by
+    /// `drain_provider_detection_events` for `provider.update.finished`.
+    provider_update_outcomes: HashSet<ProviderKind>,
     /// The PTY running an Antigravity session's TUI, keyed by session id.
     /// It is the session's main surface — not a right-panel tab — and it
     /// exists only while the process does.
@@ -6059,6 +6066,8 @@ impl Waku {
                 custom_command_runs: HashMap::new(),
                 provider_setup_terminals: HashMap::new(),
                 provider_setup_outcomes: HashSet::new(),
+                provider_update_runs: HashSet::new(),
+                provider_update_outcomes: HashSet::new(),
                 agy_terminals: HashMap::new(),
                 agy_last_visible: HashMap::new(),
                 agy_spawned_at: HashMap::new(),

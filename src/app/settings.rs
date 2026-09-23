@@ -10278,6 +10278,42 @@ impl Waku {
                     })
             });
 
+            // Updates run where the CLI lives, so like Run in terminal the
+            // button stays hidden against a remote daemon — the expanded
+            // row's copyable command is the remote path.
+            let updating = self.provider_update_runs.contains(&kind)
+                && self.provider_setup_terminals.contains_key(&kind);
+            let update_button =
+                (installed && !detection_pending && !self.daemon.is_remote()).then(|| {
+                    div()
+                        .id(SharedString::from(format!("provider-update-{}", kind.id())))
+                        .tab_index(0)
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .h(px(28.0))
+                        .px(px(11.0))
+                        .rounded(px(9.0))
+                        .border(hairline())
+                        .border_color(theme.border_strong)
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .gap(px(6.0))
+                        .cursor_default()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .hover(|element| element.bg(theme.overlay))
+                        .child(icon("icons/download.svg", 11.0, theme.text_tertiary))
+                        .child(if updating {
+                            tr!("providers.updating")
+                        } else {
+                            tr!("providers.update")
+                        })
+                        .tooltip(Tooltip::text(kind.setup().update_command()))
+                        .on_activation(cx, move |this, window, cx| {
+                            this.provider_update_clicked(kind, window, cx);
+                        })
+                });
+
             let header = div()
                 .flex()
                 .items_center()
@@ -10359,6 +10395,7 @@ impl Waku {
                         ),
                 )
                 .when_some(setup_button, |element, button| element.child(button))
+                .when_some(update_button, |element, button| element.child(button))
                 .child(expand_button)
                 .when(installed && !detection_pending, |element| {
                     element.child(toggle)
@@ -10561,7 +10598,16 @@ impl Waku {
         let terminal = self.provider_setup_terminals.get(&kind).cloned();
 
         let mut steps = div().mt(px(2.0)).flex().flex_col().gap(px(6.0));
-        if !installed {
+        if installed {
+            steps = steps.child(self.provider_setup_step_row(
+                kind,
+                "update",
+                tr!("providers.update_label"),
+                setup.update_command(),
+                theme,
+                cx,
+            ));
+        } else {
             steps = steps.child(self.provider_setup_step_row(
                 kind,
                 "install",
@@ -10788,12 +10834,91 @@ impl Waku {
         }
     }
 
+    /// The row's Update button: expand the provider's settings so the update
+    /// command and its terminal are visible, then run it. A click on an
+    /// already-expanded row is still just the run — collapsing would hide a
+    /// live update terminal.
+    fn provider_update_clicked(
+        &mut self,
+        provider: ProviderKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.expanded_provider_settings != Some(provider) {
+            self.toggle_provider_expanded(provider, cx);
+        }
+        self.run_provider_update(provider, window, cx);
+    }
+
+    /// The command a provider's Update button runs: the CLI's own updater
+    /// when it has one, else its install one-liner — every documented
+    /// installer fetches the latest release. `None` for a CLI that isn't
+    /// installed.
+    fn provider_update_script(&self, provider: ProviderKind) -> Option<String> {
+        self.provider_probe(provider)
+            .is_some_and(|probe| probe.installed)
+            .then(|| provider.setup().update_command().to_owned())
+    }
+
     /// Run the setup script in a terminal embedded in the expanded row. The
     /// command closes its own shell on success; the exit event drops the
     /// embed and re-detects the provider.
     fn run_provider_setup(
         &mut self,
         provider: ProviderKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(script) = self.provider_setup_script(provider) else {
+            return;
+        };
+        self.run_provider_script(
+            provider,
+            script,
+            tr!(
+                "providers.setup_terminal_title",
+                provider = provider.display_name()
+            ),
+            false,
+            window,
+            cx,
+        );
+    }
+
+    /// Run the provider's update command in the same embedded terminal the
+    /// setup flow uses, flagged so exit reporting routes to
+    /// `provider.update.finished` rather than `provider.setup.finished`.
+    fn run_provider_update(
+        &mut self,
+        provider: ProviderKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(script) = self.provider_update_script(provider) else {
+            return;
+        };
+        self.run_provider_script(
+            provider,
+            script,
+            tr!(
+                "providers.update_terminal_title",
+                provider = provider.display_name()
+            ),
+            true,
+            window,
+            cx,
+        );
+    }
+
+    /// Run a provider maintenance script — setup or update — in a terminal
+    /// embedded in the expanded row. The command closes its own shell on
+    /// success; the exit event drops the embed and re-detects the provider.
+    fn run_provider_script(
+        &mut self,
+        provider: ProviderKind,
+        script: String,
+        title: String,
+        update: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -10807,14 +10932,11 @@ impl Waku {
             window.focus(&focus, cx);
             return;
         }
-        let Some(script) = self.provider_setup_script(provider) else {
-            return;
-        };
+        if update {
+            self.provider_update_runs.insert(provider);
+        }
         let mut command = CustomCommand::new(script);
-        command.name = Some(tr!(
-            "providers.setup_terminal_title",
-            provider = provider.display_name()
-        ));
+        command.name = Some(title);
         command.icon = CustomCommandIcon::Download;
         command.close_on_success = true;
         let cwd = self
@@ -10865,13 +10987,18 @@ impl Waku {
         if self.provider_setup_terminals.remove(&provider).is_none() {
             return;
         }
-        self.provider_setup_outcomes.insert(provider);
+        if self.provider_update_runs.remove(&provider) {
+            self.provider_update_outcomes.insert(provider);
+        } else {
+            self.provider_setup_outcomes.insert(provider);
+        }
         self.refresh_provider_detection(Some(provider));
         cx.notify();
     }
 
     fn dismiss_provider_setup_terminal(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
         self.provider_setup_terminals.remove(&provider);
+        self.provider_update_runs.remove(&provider);
         cx.notify();
     }
 

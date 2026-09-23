@@ -206,18 +206,21 @@ impl ProviderKind {
             // simply launches `agy`.
             Self::Antigravity => ProviderSetup {
                 install: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+                update: Some("agy update"),
                 sign_in: Some("agy"),
                 api_key_env: Some("GEMINI_API_KEY"),
                 docs_url: "https://antigravity.google/docs/cli/overview",
             },
             Self::Amp => ProviderSetup {
                 install: "curl -fsSL https://ampcode.com/install.sh | bash",
+                update: Some("amp update"),
                 sign_in: Some("amp login"),
                 api_key_env: Some("AMP_API_KEY"),
                 docs_url: "https://ampcode.com/manual",
             },
             Self::Claude => ProviderSetup {
                 install: "curl -fsSL https://claude.ai/install.sh | bash",
+                update: Some("claude update"),
                 sign_in: Some("claude auth login"),
                 api_key_env: Some("ANTHROPIC_API_KEY"),
                 docs_url: "https://code.claude.com/docs/en/install",
@@ -226,6 +229,7 @@ impl ProviderKind {
             // silently from the environment.
             Self::Codex => ProviderSetup {
                 install: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+                update: Some("codex update"),
                 sign_in: Some("codex login"),
                 api_key_env: None,
                 docs_url: "https://developers.openai.com/codex/cli",
@@ -235,12 +239,14 @@ impl ProviderKind {
             // COPILOT_GITHUB_TOKEN, GH_TOKEN, and GITHUB_TOKEN.
             Self::Copilot => ProviderSetup {
                 install: "npm install -g @github/copilot",
+                update: Some("copilot update"),
                 sign_in: Some("copilot"),
                 api_key_env: Some("COPILOT_GITHUB_TOKEN"),
                 docs_url: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
             },
             Self::Cursor => ProviderSetup {
                 install: "curl -fsSL https://cursor.com/install | bash",
+                update: Some("cursor-agent update"),
                 sign_in: Some("cursor-agent login"),
                 api_key_env: Some("CURSOR_API_KEY"),
                 docs_url: "https://cursor.com/docs/cli/installation",
@@ -249,12 +255,14 @@ impl ProviderKind {
             // no login subcommand.
             Self::DeepSeek => ProviderSetup {
                 install: "npm install -g @deepseek-ai/dsh",
+                update: None,
                 sign_in: None,
                 api_key_env: Some("DEEPSEEK_API_KEY"),
                 docs_url: "https://github.com/deepseek-ai/deepseek-harness",
             },
             Self::Devin => ProviderSetup {
                 install: "curl -fsSL https://cli.devin.ai/install.sh | bash",
+                update: Some("devin update"),
                 sign_in: Some("devin auth login"),
                 api_key_env: None,
                 docs_url: "https://docs.devin.ai/cli",
@@ -263,24 +271,28 @@ impl ProviderKind {
             // API key is for headless `droid exec` runs.
             Self::Droid => ProviderSetup {
                 install: "curl -fsSL https://app.factory.ai/cli | sh",
+                update: None,
                 sign_in: Some("droid"),
                 api_key_env: Some("FACTORY_API_KEY"),
                 docs_url: "https://docs.factory.ai/droid-cli/quickstart",
             },
             Self::Fx => ProviderSetup {
                 install: "curl -fsSL https://fx.sh/setup.sh | bash",
+                update: Some("fx upgrade"),
                 sign_in: Some("fx login"),
                 api_key_env: Some("AI_GATEWAY_API_KEY"),
                 docs_url: "https://fx.sh/docs/getting-started/installation",
             },
             Self::OpenCode => ProviderSetup {
                 install: "curl -fsSL https://opencode.ai/install | bash",
+                update: Some("opencode upgrade"),
                 sign_in: Some("opencode auth login"),
                 api_key_env: None,
                 docs_url: "https://opencode.ai/docs",
             },
             Self::OpenCode2 => ProviderSetup {
                 install: "curl -fsSL https://opencode.ai/v2/install | bash",
+                update: Some("opencode2 upgrade"),
                 sign_in: Some("opencode2 auth login"),
                 api_key_env: None,
                 docs_url: "https://opencode.ai/v2/docs",
@@ -289,18 +301,21 @@ impl ProviderKind {
             // the provider and model and stores credentials in its own config.
             Self::Goose => ProviderSetup {
                 install: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash",
+                update: Some("goose update"),
                 sign_in: Some("goose configure"),
                 api_key_env: None,
                 docs_url: "https://aaif-goose.github.io/goose/",
             },
             Self::Grok => ProviderSetup {
                 install: "curl -fsSL https://x.ai/cli/install.sh | bash",
+                update: None,
                 sign_in: Some("grok login"),
                 api_key_env: Some("XAI_API_KEY"),
                 docs_url: "https://docs.x.ai/build/overview",
             },
             Self::Kimi => ProviderSetup {
                 install: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+                update: None,
                 sign_in: Some("kimi login"),
                 api_key_env: None,
                 docs_url: "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html",
@@ -309,12 +324,14 @@ impl ProviderKind {
             // login surface, so sign-in is always the CLI's own flow.
             Self::Muse => ProviderSetup {
                 install: "curl -fsSL https://dev.meta.ai/install.sh | sh",
+                update: None,
                 sign_in: Some("muse login"),
                 api_key_env: None,
                 docs_url: "https://meta-models.github.io/muse-code-sdk",
             },
             Self::OhMyPi => ProviderSetup {
                 install: "curl -fsSL https://omp.sh/install | sh",
+                update: None,
                 sign_in: Some("omp auth-broker login"),
                 api_key_env: None,
                 docs_url: "https://github.com/can1357/oh-my-pi",
@@ -323,6 +340,7 @@ impl ProviderKind {
             // TUI, so the sign-in step simply launches `pi`.
             Self::Pi => ProviderSetup {
                 install: "curl -fsSL https://pi.dev/install.sh | sh",
+                update: Some("pi update"),
                 sign_in: Some("pi"),
                 api_key_env: None,
                 docs_url: "https://pi.dev/docs/latest",
@@ -415,6 +433,10 @@ impl ProviderKind {
 pub struct ProviderSetup {
     /// The provider's canonical one-line install command.
     pub install: &'static str,
+    /// The CLI's own update command when it has one. `None` means re-running
+    /// `install` is the update path — every documented installer fetches the
+    /// latest release.
+    pub update: Option<&'static str>,
     /// Interactive sign-in command, `None` when the provider authenticates
     /// with an API key rather than a login flow.
     pub sign_in: Option<&'static str>,
@@ -423,6 +445,13 @@ pub struct ProviderSetup {
     pub api_key_env: Option<&'static str>,
     /// Install/authentication documentation.
     pub docs_url: &'static str,
+}
+
+impl ProviderSetup {
+    /// The command that brings an installed CLI to the latest release.
+    pub fn update_command(&self) -> &'static str {
+        self.update.unwrap_or(self.install)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]

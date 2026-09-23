@@ -1638,6 +1638,14 @@ providers.api_key_hint:
   en: or set %{var}
 providers.setup_terminal_title:
   en: Set up %{provider}
+providers.update:
+  en: Update
+providers.updating:
+  en: Updating…
+providers.update_label:
+  en: Update
+providers.update_terminal_title:
+  en: Update %{provider}
 
 computer_use.allow_apps:
   en: Let Goddard use apps

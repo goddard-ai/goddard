@@ -2393,6 +2393,10 @@ providers.set_up: セットアップ
 providers.setup: セットアップ
 providers.setup_terminal_title: "%{provider} のセットアップ"
 providers.sign_in_label: サインイン
+providers.update: 更新
+providers.update_label: 更新
+providers.update_terminal_title: "%{provider} を更新"
+providers.updating: 更新中…
 right_panel.side_chat: サイドチャット
 right_panel.side_chat_unavailable: サイドチャットを利用できません
 right_panel.side_chat_unavailable_description: チャットは親タスクとともに削除されたか、このタブから閉じられました

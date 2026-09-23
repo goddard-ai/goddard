@@ -4124,6 +4124,17 @@ impl Waku {
                         },
                     });
             }
+            if self.provider_update_outcomes.remove(&provider) {
+                self.analytics
+                    .track(crate::analytics::Event::ProviderUpdateFinished {
+                        provider: provider.id(),
+                        outcome: if installed {
+                            "installed"
+                        } else {
+                            "not_detected"
+                        },
+                    });
+            }
             self.provider_detection_remaining = self.provider_detection_remaining.saturating_sub(1);
             if self.provider_detection_remaining == 0 {
                 self.provider_detection_checked_at = Some(Instant::now());
