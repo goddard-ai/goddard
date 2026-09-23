@@ -536,6 +536,8 @@ fn pasted_text_preview_caps_at_two_hundred_characters() {
 fn pasted_atom(marker: usize, text: &str) -> ComposerInlineAtom {
     ComposerInlineAtom {
         marker,
+        revision: Uuid::new_v4(),
+        paste_category: None,
         kind: ComposerAtomKind::PastedText(text.to_owned()),
     }
 }
@@ -543,6 +545,8 @@ fn pasted_atom(marker: usize, text: &str) -> ComposerInlineAtom {
 fn session_atom(marker: usize) -> ComposerInlineAtom {
     ComposerInlineAtom {
         marker,
+        revision: Uuid::new_v4(),
+        paste_category: None,
         kind: ComposerAtomKind::SessionRef {
             session_id: Uuid::nil(),
             title: "Big refactor".into(),

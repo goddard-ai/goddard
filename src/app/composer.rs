@@ -11,6 +11,8 @@ use gpui::{AnyView, KeyBinding};
 
 use crate::input::Clear;
 
+mod paste_classification;
+
 /// Group on the session column's hitbox: the composer card reads it through
 /// `group_drag_over` so it lights up wherever over the column an OS file drag
 /// is held, and the column itself accepts the drop for the same staging.
@@ -60,6 +62,9 @@ const PASTED_TEXT_PREVIEW_CHARS: usize = 200;
 pub(super) struct ComposerInlineAtom {
     pub marker: usize,
     pub kind: ComposerAtomKind,
+    /// Renewed when the payload changes; offsets alone cannot identify a paste.
+    pub revision: Uuid,
+    pub paste_category: Option<&'static str>,
 }
 
 /// What an atom's marker stands for — and what it splices to on submit.
@@ -80,10 +85,11 @@ impl ComposerInlineAtom {
         match &self.kind {
             ComposerAtomKind::PastedText(text) => {
                 let lines = text.lines().count();
+                let category = self.paste_category.unwrap_or("Pasted text");
                 if lines > 1 {
-                    format!("pasted text ({lines} lines)")
+                    format!("{category} ({lines} lines)")
                 } else {
-                    "pasted text".to_owned()
+                    category.to_owned()
                 }
             }
             ComposerAtomKind::SessionRef { title, .. } => session_atom_label(title),
@@ -2937,6 +2943,8 @@ impl Waku {
     ) {
         self.composer_inline_atoms.push(ComposerInlineAtom {
             marker,
+            revision: Uuid::new_v4(),
+            paste_category: None,
             kind: ComposerAtomKind::SessionRef {
                 session_id,
                 title: SharedString::from(title.to_owned()),
@@ -3176,15 +3184,19 @@ impl Waku {
     /// atom at the caret, and still joins the submission verbatim.
     pub(super) fn stage_pasted_text(&mut self, text: String, cx: &mut Context<Self>) {
         if text.len() <= PASTED_TEXT_FILE_BYTES {
+            let revision = Uuid::new_v4();
             let marker = self
                 .composer
                 .update(cx, |composer, cx| composer.insert_inline_marker(cx));
             self.composer_inline_atoms.push(ComposerInlineAtom {
                 marker,
+                revision,
+                paste_category: None,
                 kind: ComposerAtomKind::PastedText(text),
             });
             self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
             self.sync_inline_atom_labels(cx);
+            self.classify_pasted_atom(revision, cx);
             self.schedule_composer_draft_save(cx);
             cx.notify();
             return;
@@ -3331,18 +3343,22 @@ impl Waku {
         if text.trim().is_empty() {
             self.remove_atom_marker(editor.marker, cx);
         } else {
-            let mut updated = false;
+            let mut revision = None;
             if let Some(atom) = self
                 .composer_inline_atoms
                 .iter_mut()
                 .find(|atom| atom.marker == editor.marker)
                 && let ComposerAtomKind::PastedText(slot) = &mut atom.kind
+                && *slot != text
             {
                 *slot = text;
-                updated = true;
+                atom.revision = Uuid::new_v4();
+                atom.paste_category = None;
+                revision = Some(atom.revision);
             }
-            if updated {
+            if let Some(revision) = revision {
                 self.sync_inline_atom_labels(cx);
+                self.classify_pasted_atom(revision, cx);
             }
         }
         self.schedule_composer_draft_save(cx);
