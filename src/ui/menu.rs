@@ -69,9 +69,9 @@ const TRIGGER_GAP: f32 = 4.0;
 const HOVER_OPEN_DELAY: Duration = Duration::from_millis(150);
 
 /// How long a sibling row's hover takes to retire an open flyout. The flyout
-/// draws top-aligned beside the card, so the straight path from its parent
-/// row to its first entry crosses the siblings in between — tearing the
-/// flyout down instantly on each crossing would make it unreachable.
+/// draws centered on its parent row, so the straight path to an entry above
+/// or below the pointer's level crosses the siblings in between — tearing
+/// the flyout down instantly on each crossing would make it unreachable.
 const FLYOUT_CLOSE_DELAY: Duration = Duration::from_millis(300);
 
 /// How far a release can land from the press that opened the menu and still
@@ -148,9 +148,10 @@ pub enum MenuItem {
         #[allow(clippy::type_complexity)]
         on_highlight: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     },
-    /// Opens a one-level flyout beside the parent card. `value` keeps the
-    /// current choice visible in the parent row, matching native inspector
-    /// menus whose submenu is a preference rather than an action.
+    /// Opens a one-level flyout beside the row, vertically centered on it.
+    /// `value` keeps the current choice visible in the parent row, matching
+    /// native inspector menus whose submenu is a preference rather than an
+    /// action.
     Submenu {
         label: SharedString,
         value: Option<SharedString>,
@@ -373,6 +374,10 @@ struct MenuState {
     submenu_highlighted: Option<usize>,
     /// Whether arrow-key navigation currently belongs to the flyout.
     submenu_focused: bool,
+    /// The flyout card's last-painted bounds. The flyout hangs beside its
+    /// parent row, outside the surface hitbox the out-listeners test, so
+    /// they check this rect before treating a point as outside.
+    flyout_bounds: Option<Bounds<Pixels>>,
     /// A dropdown/popover trigger toggles its own surface on left click. The
     /// outside-click capture must leave that click alone so the later trigger
     /// handler can close it; a context-menu row has no such handler.
@@ -487,6 +492,9 @@ impl ContextMenuHandle {
     /// and it runs after this capture-phase listener. Closing here first would
     /// make that handler see a closed menu and reopen it.
     fn dismiss_on_down_out(&self, event: &MouseDownEvent, window: &mut Window, cx: &mut App) {
+        if self.over_flyout(event.position) {
+            return;
+        }
         let on_toggling_trigger = self.state.borrow().trigger_click_toggles
             && event.button == MouseButton::Left
             && self
@@ -498,6 +506,15 @@ impl ContextMenuHandle {
         }
         self.close(window, cx);
         window.refresh();
+    }
+
+    /// Whether the point rests inside the open flyout's painted bounds.
+    fn over_flyout(&self, position: Point<Pixels>) -> bool {
+        let state = self.state.borrow();
+        state.active_submenu.is_some()
+            && state
+                .flyout_bounds
+                .is_some_and(|bounds| bounds.contains(&position))
     }
 
     /// Consume the press that drag-opened the menu when `event` is its
@@ -596,6 +613,21 @@ fn trigger_bounds_probe(handle: &ContextMenuHandle) -> impl IntoElement {
     let bounds = handle.trigger_bounds.clone();
     canvas(
         move |probe: Bounds<Pixels>, _, _| bounds.set(Some(probe)),
+        |_, _, _, _| (),
+    )
+    .absolute()
+    .inset_0()
+}
+
+/// A zero-cost canvas recording the flyout card's painted bounds into menu
+/// state, so the surface's out-listeners can tell a flyout interaction from
+/// an outside one.
+fn flyout_bounds_probe(handle: &ContextMenuHandle) -> impl IntoElement {
+    let state = handle.state.clone();
+    canvas(
+        move |probe: Bounds<Pixels>, _, _| {
+            state.borrow_mut().flyout_bounds = Some(probe);
+        },
         |_, _, _, _| (),
     )
     .absolute()
@@ -761,6 +793,66 @@ fn resolve_floating_placement(
     }
 }
 
+/// How a [`FloatingSurface`] attaches to its trigger.
+#[derive(Clone, Copy)]
+enum FloatingAnchor {
+    /// Above or below the trigger, aligned to a horizontal edge — dropdowns
+    /// and popovers.
+    Edge(MenuAlign),
+    /// Beside the trigger, vertically centered on it — a menu flyout hanging
+    /// off its parent row.
+    Side,
+}
+
+/// Resolve a flyout's placement: beside the row it stems from, vertically
+/// centered on it. Prefers the row's right edge, flips left when that side
+/// fits better, then shifts inside the viewport.
+fn resolve_flyout_placement(
+    trigger: Bounds<Pixels>,
+    surface_size: Size<Pixels>,
+    viewport: Bounds<Pixels>,
+    gap: Pixels,
+    margin: Pixels,
+) -> Bounds<Pixels> {
+    let viewport_left = f32::from(viewport.left() + margin);
+    let viewport_right = f32::from(viewport.right() - margin);
+    let viewport_top = f32::from(viewport.top() + margin);
+    let viewport_bottom = f32::from(viewport.bottom() - margin);
+    let trigger_left = f32::from(trigger.left());
+    let trigger_right = f32::from(trigger.right());
+    let trigger_center_y = f32::from(trigger.top()) + f32::from(trigger.size.height) / 2.0;
+    let width = f32::from(surface_size.width);
+    let height = f32::from(surface_size.height);
+    let gap = f32::from(gap);
+
+    let right_space = (viewport_right - trigger_right - gap).max(0.0);
+    let left_space = (trigger_left - gap - viewport_left).max(0.0);
+    let right = width <= right_space || right_space >= left_space;
+    let mut x = if right {
+        trigger_right + gap
+    } else {
+        trigger_left - gap - width
+    };
+    let mut y = trigger_center_y - height / 2.0;
+
+    // Same `shift` as `resolve_floating_placement`: keep the chosen side,
+    // moving only enough to stay inside the viewport.
+    let usable_width = (viewport_right - viewport_left).max(0.0);
+    if width <= usable_width {
+        x = x.clamp(viewport_left, viewport_right - width);
+    } else {
+        x = viewport_left;
+    }
+    let usable_height = (viewport_bottom - viewport_top).max(0.0);
+    if height <= usable_height {
+        y = y.clamp(viewport_top, viewport_bottom - height);
+    } else {
+        y = viewport_top;
+    }
+
+    Bounds::new(Point::new(px(x), px(y)), surface_size)
+}
+
 /// A measured, trigger-aware deferred surface. This mirrors GPUI's
 /// `Anchored` element lifecycle, but resolves placement from the trigger's
 /// rectangle instead of a single point so vertical flips remain attached to
@@ -775,7 +867,7 @@ pub(crate) struct FloatingSurface {
     /// rect during prepaint, so the trigger is never a frame behind an anchor
     /// that moved since the last render.
     trigger: Option<Bounds<Pixels>>,
-    preferred: MenuAlign,
+    anchor: FloatingAnchor,
     gap: Pixels,
     margin: Pixels,
 }
@@ -795,7 +887,7 @@ impl FloatingSurface {
         Self {
             child,
             trigger: Some(trigger),
-            preferred,
+            anchor: FloatingAnchor::Edge(preferred),
             gap,
             margin,
         }
@@ -814,7 +906,20 @@ impl FloatingSurface {
         Self {
             child,
             trigger: None,
-            preferred,
+            anchor: FloatingAnchor::Edge(preferred),
+            gap,
+            margin,
+        }
+    }
+
+    /// A flyout anchored beside its containing block — vertically centered on
+    /// the parent row it stems from, flipping to the other side when it fits
+    /// better there.
+    pub(crate) fn anchored_beside_parent(child: AnyElement, gap: Pixels, margin: Pixels) -> Self {
+        Self {
+            child,
+            trigger: None,
+            anchor: FloatingAnchor::Side,
             gap,
             margin,
         }
@@ -878,15 +983,24 @@ impl Element for FloatingSurface {
         let surface_size = window.layout_bounds(request_layout.child_layout_id).size;
         let viewport = Bounds::new(Point::default(), window.viewport_size());
         let margin = self.margin + window.client_inset().unwrap_or(px(0.0));
-        let placement = resolve_floating_placement(
-            self.trigger.unwrap_or(bounds),
-            surface_size,
-            viewport,
-            self.preferred,
-            self.gap,
-            margin,
-        );
-        let offset = placement.bounds.origin - bounds.origin;
+        let trigger = self.trigger.unwrap_or(bounds);
+        let placed = match self.anchor {
+            FloatingAnchor::Edge(preferred) => {
+                resolve_floating_placement(
+                    trigger,
+                    surface_size,
+                    viewport,
+                    preferred,
+                    self.gap,
+                    margin,
+                )
+                .bounds
+            }
+            FloatingAnchor::Side => {
+                resolve_flyout_placement(trigger, surface_size, viewport, self.gap, margin)
+            }
+        };
+        let offset = placed.origin - bounds.origin;
         let offset = Point::new(offset.x.round(), offset.y.round());
         window.with_element_offset(offset, |window| self.child.prepaint(window, cx));
     }
@@ -1296,6 +1410,64 @@ impl RenderOnce for MenuCard {
             };
             Some((index, items(cx)))
         });
+        // The flyout centers on the row it stems from, so it is built ahead
+        // of the rows and the active one mounts it as a floating child — a
+        // sibling of the card could only align to the card itself.
+        let mut flyout = submenu.map(|(parent_index, submenu_items)| {
+            let mut card = div()
+                .id(SharedString::from(format!("submenu-{parent_index}")))
+                .occlude()
+                // Resting on the card — padding included — cancels a delayed
+                // teardown a crossed sibling armed on the way in.
+                .on_hover({
+                    let handle = self.handle.clone();
+                    move |hovered, _, _| {
+                        if *hovered {
+                            handle.state.borrow_mut().flyout_close_serial += 1;
+                        }
+                    }
+                })
+                // A drag released on the flyout but not on a row ends the
+                // gesture here — the surface's release listeners exempt the
+                // flyout's rect so a row release can still pick.
+                .on_mouse_up(MouseButton::Left, {
+                    let handle = self.handle.clone();
+                    move |event, window, cx| dismiss_on_held_release(&handle, event, window, cx)
+                })
+                .on_mouse_up(MouseButton::Right, {
+                    let handle = self.handle.clone();
+                    move |event, window, cx| dismiss_on_held_release(&handle, event, window, cx)
+                })
+                .min_w(px(176.0))
+                .max_w(px(320.0))
+                .py(px(4.0))
+                .rounded(px(11.0))
+                .border(hairline())
+                .border_color(theme.border_subtle)
+                .bg(card_bg(&theme))
+                .shadow_lg()
+                .flex()
+                .flex_col()
+                .child(flyout_bounds_probe(&self.handle));
+            for (index, item) in submenu_items.into_iter().enumerate() {
+                card = card.child(render_menu_item(
+                    item,
+                    index,
+                    submenu_highlighted == Some(index),
+                    true,
+                    None,
+                    &theme,
+                    self.handle.clone(),
+                    window,
+                    cx,
+                ));
+            }
+            motion::surface_enter(
+                SharedString::from(format!("submenu-{parent_index}-enter")),
+                card,
+            )
+            .into_any_element()
+        });
         let enter_id = ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "enter".into());
 
         let mut root_card = div()
@@ -1317,6 +1489,11 @@ impl RenderOnce for MenuCard {
                 index,
                 highlighted == Some(index) || active_submenu == Some(index),
                 false,
+                if active_submenu == Some(index) {
+                    flyout.take()
+                } else {
+                    None
+                },
                 &theme,
                 self.handle.clone(),
                 window,
@@ -1324,7 +1501,7 @@ impl RenderOnce for MenuCard {
             ));
         }
 
-        let mut surface = div()
+        let surface = div()
             .occlude()
             .track_focus(&self.handle.focus)
             .key_context(MENU_CONTEXT)
@@ -1370,56 +1547,17 @@ impl RenderOnce for MenuCard {
             })
             .child(root_card);
 
-        if let Some((parent_index, submenu_items)) = submenu {
-            let mut submenu_card = div()
-                .id(SharedString::from(format!("submenu-{parent_index}")))
-                // Resting on the card — padding included — cancels a delayed
-                // teardown a crossed sibling armed on the way in.
-                .on_hover({
-                    let handle = self.handle.clone();
-                    move |hovered, _, _| {
-                        if *hovered {
-                            handle.state.borrow_mut().flyout_close_serial += 1;
-                        }
-                    }
-                })
-                .ml(px(-4.0))
-                .min_w(px(176.0))
-                .max_w(px(320.0))
-                .py(px(4.0))
-                .rounded(px(11.0))
-                .border(hairline())
-                .border_color(theme.border_subtle)
-                .bg(card_bg(&theme))
-                .shadow_lg()
-                .flex()
-                .flex_col();
-            for (index, item) in submenu_items.into_iter().enumerate() {
-                submenu_card = submenu_card.child(render_menu_item(
-                    item,
-                    index,
-                    submenu_highlighted == Some(index),
-                    true,
-                    &theme,
-                    self.handle.clone(),
-                    window,
-                    cx,
-                ));
-            }
-            surface = surface.child(motion::surface_enter(
-                SharedString::from(format!("submenu-{parent_index}-enter")),
-                submenu_card,
-            ));
-        }
         motion::surface_enter(enter_id, surface)
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_menu_item(
     item: MenuItem,
     index: usize,
     highlighted: bool,
     in_submenu: bool,
+    flyout: Option<AnyElement>,
     theme: &Theme,
     handle: ContextMenuHandle,
     window: &mut Window,
@@ -1513,6 +1651,9 @@ fn render_menu_item(
             let up_handle = handle.clone();
             row(index, highlighted, theme, handle, None)
                 .cursor_default()
+                // The flyout's floating surface stretches over this row to
+                // read its rect — it needs the row as its containing block.
+                .relative()
                 .hover(move |element| element.bg(hover))
                 .text_color(theme.text_secondary)
                 .on_hover(move |hovered, window, _| {
@@ -1535,6 +1676,16 @@ fn render_menu_item(
                 })
                 .on_mouse_up(MouseButton::Right, move |event, _, cx| {
                     swallow_held_release(&up_handle, event, cx)
+                })
+                .when_some(flyout, |element, flyout| {
+                    element.child(
+                        deferred(FloatingSurface::anchored_beside_parent(
+                            flyout,
+                            px(0.0),
+                            px(8.0),
+                        ))
+                        .with_priority(MENU_PAINT_PRIORITY),
+                    )
                 })
                 .child(div().flex_1().min_w_0().truncate().child(label))
                 .when_some(value, |element, value| {
@@ -1669,6 +1820,21 @@ fn release_on_entry(
 /// disabled row, or anywhere outside the card — dismisses. A release in place
 /// reads as a click and leaves the menu up.
 fn release_over_nothing(
+    handle: &ContextMenuHandle,
+    event: &MouseUpEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    // A release on the flyout is the flyout's own to finish: its rows pick,
+    // and its card runs this same check for the padding between them.
+    if handle.over_flyout(event.position) {
+        return;
+    }
+    dismiss_on_held_release(handle, event, window, cx);
+}
+
+/// The release of a drag-opening press landed on no entry — dismiss.
+fn dismiss_on_held_release(
     handle: &ContextMenuHandle,
     event: &MouseUpEvent,
     window: &mut Window,
@@ -2075,6 +2241,48 @@ mod tests {
         );
 
         assert_eq!(placement.bounds.origin.x, px(8.0));
+    }
+
+    #[test]
+    fn flyout_centers_on_its_row_and_prefers_the_right_edge() {
+        let row = Bounds::new(point(px(100.0), px(200.0)), size(px(200.0), px(26.0)));
+        let placed = resolve_flyout_placement(
+            row,
+            size(px(180.0), px(120.0)),
+            Bounds::new(Point::default(), size(px(800.0), px(600.0))),
+            px(0.0),
+            px(8.0),
+        );
+
+        assert_eq!(placed.origin, point(px(300.0), px(153.0)));
+    }
+
+    #[test]
+    fn flyout_flips_left_when_the_right_side_does_not_fit() {
+        let row = Bounds::new(point(px(700.0), px(200.0)), size(px(90.0), px(26.0)));
+        let placed = resolve_flyout_placement(
+            row,
+            size(px(180.0), px(120.0)),
+            Bounds::new(Point::default(), size(px(800.0), px(600.0))),
+            px(0.0),
+            px(8.0),
+        );
+
+        assert_eq!(placed.origin, point(px(520.0), px(153.0)));
+        assert_eq!(placed.right(), row.left());
+    }
+
+    #[test]
+    fn flyout_shifts_vertically_to_stay_in_the_viewport() {
+        let placed = resolve_flyout_placement(
+            Bounds::new(point(px(100.0), px(560.0)), size(px(200.0), px(26.0))),
+            size(px(180.0), px(120.0)),
+            Bounds::new(Point::default(), size(px(800.0), px(600.0))),
+            px(0.0),
+            px(8.0),
+        );
+
+        assert_eq!(placed.origin, point(px(300.0), px(472.0)));
     }
 
     /// Mirrors the changed-files row the diff preview anchors to: a thin
@@ -2615,7 +2823,8 @@ mod tests {
     }
 
     /// A menu with a clickable row above a submenu — the shape that makes a
-    /// top-aligned flyout unreachable by a diagonal pointer path.
+    /// centered flyout unreachable by a diagonal pointer path without a
+    /// crossing grace.
     struct CrossingHarness {
         handle: ContextMenuHandle,
         activated: Rc<Cell<bool>>,
@@ -2694,8 +2903,8 @@ mod tests {
             .debug_bounds("friend-row")
             .expect("the flyout row should paint");
 
-        // The flyout is top-aligned to the card, so the direct path to its
-        // first row crosses the sibling entry above the submenu row.
+        // The flyout hangs centered on the submenu row; the direct path to
+        // it crosses the sibling entry above.
         cx.simulate_mouse_move(above.center(), None, Modifiers::none());
         cx.simulate_mouse_move(friend.center(), None, Modifiers::none());
         cx.simulate_click(friend.center(), Modifiers::none());
@@ -2704,6 +2913,44 @@ mod tests {
             activated.get(),
             "a pointer crossing a sibling row en route to the flyout must still reach it"
         );
+    }
+
+    #[gpui::test]
+    fn flyout_centers_on_the_row_it_stems_from(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let handle = cx.update(ContextMenuHandle::new);
+        let harness = CrossingHarness {
+            handle: handle.clone(),
+            activated: Rc::new(Cell::new(false)),
+        };
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_mouse_down(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(on_trigger, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+
+        let above = cx
+            .debug_bounds("above-row")
+            .expect("the sibling row should paint");
+        let submenu_row = point(above.center().x, above.bottom() + px(2.0));
+        cx.simulate_mouse_move(submenu_row, None, Modifiers::none());
+        cx.run_until_parked();
+
+        let friend = cx
+            .debug_bounds("friend-row")
+            .expect("the flyout row should paint");
+        // One flyout entry, so the entry's center lands on the parent row's
+        // — 26px rows, the submenu row directly beneath the first entry.
+        let row_center = f32::from(above.bottom()) + 13.0;
+        assert!(
+            (f32::from(friend.center().y) - row_center).abs() < 2.0,
+            "flyout should be vertically centered on its parent row: {:?} vs {:?}",
+            friend.center().y,
+            row_center
+        );
+        // And it still hangs off the card's right edge rather than a corner.
+        assert!(friend.left() > above.right());
     }
 
     #[gpui::test]

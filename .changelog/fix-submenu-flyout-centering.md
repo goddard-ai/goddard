@@ -1,0 +1,1 @@
+- Context-menu flyouts like **Send to friend** now open centered on the row you hovered, so the submenu sits next to your pointer instead of aligned to the top of the menu.
