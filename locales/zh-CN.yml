@@ -2635,6 +2635,35 @@ terminal.localhost_open: 打开
 terminal.localhost_open_in_tab: 按 %{keys} 在浏览器标签页中打开
 terminal.pinned: 终端已置顶
 terminal.unpinned: 终端已取消置顶
+speed_reader.go_fast: 快速阅读
+speed_reader.agent_response: 智能体回复
+speed_reader.preview_title: Markdown 预览 · %{path}
+speed_reader.return_to_text: 返回原文
+speed_reader.previous: 上一个
+speed_reader.play: 播放
+speed_reader.pause: 暂停
+speed_reader.continue: 继续
+speed_reader.read_again: 重新阅读
+speed_reader.next: 下一个
+speed_reader.slower: 慢一点
+speed_reader.faster: 快一点
+speed_reader.end_title: 回复结束
+speed_reader.end_detail: 返回原文或重新阅读。
+speed_reader.wpm: "%{wpm} 字/分钟"
+speed_reader.keyboard_hint: 空格 播放 · ← → 步进 · ↑ ↓ 调速 · Esc 返回
+speed_reader.code: 代码块
+speed_reader.code_language: 代码 · %{language}
+speed_reader.equation: 公式
+speed_reader.inline_equation: 行内公式
+speed_reader.inline_code: 行内代码
+speed_reader.image: 图片
+speed_reader.no_image_description: 未提供描述。
+speed_reader.quote: 引用。
+speed_reader.checked: 已勾选。
+speed_reader.unchecked: 未勾选。
+speed_reader.table: 表格 · 准备好后继续
+speed_reader.section_break: 分节符
+speed_reader.continue_when_ready: 准备好后继续。
 keyboard_options.choose_model: 选择模型
 keyboard_options.favorite_models: 收藏和最近使用的模型
 keyboard_options.choose_reasoning_effort: 选择推理强度

@@ -5378,6 +5378,64 @@ automations.error_project_required:
   en: Pick a project.
 automations.error_session_required:
   en: Pick the task to run in.
+speed_reader.go_fast:
+  en: Go fast
+speed_reader.agent_response:
+  en: Agent response
+speed_reader.preview_title:
+  en: Markdown preview · %{path}
+speed_reader.return_to_text:
+  en: Return to text
+speed_reader.previous:
+  en: Previous
+speed_reader.play:
+  en: Play
+speed_reader.pause:
+  en: Pause
+speed_reader.continue:
+  en: Continue
+speed_reader.read_again:
+  en: Read again
+speed_reader.next:
+  en: Next
+speed_reader.slower:
+  en: Slower
+speed_reader.faster:
+  en: Faster
+speed_reader.end_title:
+  en: End of response
+speed_reader.end_detail:
+  en: Return to the source or read again.
+speed_reader.wpm:
+  en: "%{wpm} WPM"
+speed_reader.keyboard_hint:
+  en: Space play · ← → step · ↑ ↓ speed · Esc return
+speed_reader.code:
+  en: Code block
+speed_reader.code_language:
+  en: Code · %{language}
+speed_reader.equation:
+  en: Equation
+speed_reader.inline_equation:
+  en: Inline equation
+speed_reader.inline_code:
+  en: Inline code
+speed_reader.image:
+  en: Image
+speed_reader.no_image_description:
+  en: No description was provided.
+speed_reader.quote:
+  en: Quote.
+speed_reader.checked:
+  en: Checked.
+speed_reader.unchecked:
+  en: Unchecked.
+speed_reader.table:
+  en: Table · advance when ready
+speed_reader.section_break:
+  en: Section break
+speed_reader.continue_when_ready:
+  en: Continue when ready.
 sidebar.automations:
   en: Automations
 experiments.automations_title:

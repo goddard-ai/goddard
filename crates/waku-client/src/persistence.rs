@@ -254,6 +254,10 @@ fn default_guided_reading_opacity() -> u8 {
     100
 }
 
+fn default_speed_reader_wpm() -> u32 {
+    300
+}
+
 fn default_ui_font_size() -> f32 {
     DEFAULT_UI_FONT_SIZE
 }
@@ -826,6 +830,9 @@ pub struct AppSettings {
     pub render_math: bool,
     /// Append an estimated "N tok/s" readout to settled response footers.
     pub show_response_token_speed: bool,
+    /// Last reading speed selected in the transient speed reader.
+    #[serde(default = "default_speed_reader_wpm")]
+    pub speed_reader_wpm: u32,
     /// Integrate upstream changes with `git pull --no-rebase` (a merge)
     /// instead of `git pull --rebase` when a checkout is synced from the new
     /// task area.
@@ -1012,6 +1019,7 @@ impl Default for AppSettings {
             code_font_family: None,
             render_math: true,
             show_response_token_speed: false,
+            speed_reader_wpm: default_speed_reader_wpm(),
             sync_with_merge: false,
             auto_fetch_remotes: true,
             auto_resolve_in_chat: false,
@@ -1339,6 +1347,8 @@ pub struct PersistedState {
     /// Append an estimated "N tok/s" readout to settled response footers.
     #[serde(default)]
     pub show_response_token_speed: bool,
+    #[serde(default = "default_speed_reader_wpm")]
+    pub speed_reader_wpm: u32,
     /// Integrate upstream changes with `git pull --no-rebase` (a merge)
     /// instead of `git pull --rebase` when a checkout is synced from the new
     /// task area.
@@ -1773,6 +1783,7 @@ impl PersistedState {
             code_font_family: None,
             render_math: true,
             show_response_token_speed: false,
+            speed_reader_wpm: default_speed_reader_wpm(),
             sync_with_merge: false,
             auto_fetch_remotes: true,
             auto_resolve_in_chat: false,
@@ -2150,6 +2161,7 @@ impl PersistedState {
             code_font_family: self.code_font_family.clone(),
             render_math: self.render_math,
             show_response_token_speed: self.show_response_token_speed,
+            speed_reader_wpm: self.speed_reader_wpm,
             sync_with_merge: self.sync_with_merge,
             auto_fetch_remotes: self.auto_fetch_remotes,
             auto_resolve_in_chat: self.auto_resolve_in_chat,
@@ -2264,6 +2276,7 @@ impl PersistedState {
         self.code_font_family = sanitized_font_family(settings.code_font_family);
         self.render_math = settings.render_math;
         self.show_response_token_speed = settings.show_response_token_speed;
+        self.speed_reader_wpm = settings.speed_reader_wpm.clamp(100, 1200);
         self.sync_with_merge = settings.sync_with_merge;
         self.auto_fetch_remotes = settings.auto_fetch_remotes;
         self.auto_resolve_in_chat = settings.auto_resolve_in_chat;

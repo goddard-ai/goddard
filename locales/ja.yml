@@ -2684,6 +2684,35 @@ terminal.localhost_open: 開く
 terminal.localhost_open_in_tab: "%{keys} でブラウザタブに開きます"
 terminal.pinned: ターミナルをピン留めしました
 terminal.unpinned: ターミナルのピン留めを解除しました
+speed_reader.go_fast: 高速で読む
+speed_reader.agent_response: エージェントの応答
+speed_reader.preview_title: Markdown プレビュー · %{path}
+speed_reader.return_to_text: 元のテキストに戻る
+speed_reader.previous: 前へ
+speed_reader.play: 再生
+speed_reader.pause: 一時停止
+speed_reader.continue: 続ける
+speed_reader.read_again: もう一度読む
+speed_reader.next: 次へ
+speed_reader.slower: ゆっくり
+speed_reader.faster: 速く
+speed_reader.end_title: 応答の最後
+speed_reader.end_detail: 元のテキストに戻るか、もう一度読みます。
+speed_reader.wpm: "%{wpm} 語/分"
+speed_reader.keyboard_hint: Space 再生 · ← → 移動 · ↑ ↓ 速度 · Esc 戻る
+speed_reader.code: コードブロック
+speed_reader.code_language: コード · %{language}
+speed_reader.equation: 数式
+speed_reader.inline_equation: インライン数式
+speed_reader.inline_code: インラインコード
+speed_reader.image: 画像
+speed_reader.no_image_description: 説明はありません。
+speed_reader.quote: 引用。
+speed_reader.checked: チェック済み。
+speed_reader.unchecked: 未チェック。
+speed_reader.table: 表 · 準備ができたら続ける
+speed_reader.section_break: セクション区切り
+speed_reader.continue_when_ready: 準備ができたら続けます。
 keyboard_options.choose_model: モデルを選択
 keyboard_options.favorite_models: お気に入りと最近使用したモデル
 keyboard_options.choose_reasoning_effort: 推論レベルを選択

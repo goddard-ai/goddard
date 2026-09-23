@@ -2822,6 +2822,8 @@ pub struct Waku {
     file_preview_selection: TranscriptSelection,
     file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
+    /// Transient, snapshot-based speed reader opened from Markdown surfaces.
+    speed_reader: Option<speed_reader::SpeedReader>,
     right_panel_pending_tab_reveal: Option<usize>,
     /// A file the `Cmd+P` finder just opened — or a `file:line` link or
     /// go-to-line jump aimed at — whose editor should take keyboard focus on
@@ -3501,6 +3503,7 @@ mod settings;
 mod shortcuts_dialog;
 mod sidebar;
 mod skills_page;
+mod speed_reader;
 mod status_markers;
 mod streaming;
 mod sync_branch;
@@ -6095,6 +6098,7 @@ impl Waku {
                 file_preview_selection: TranscriptSelection::default(),
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
+                speed_reader: None,
                 right_panel_pending_tab_reveal: None,
                 right_panel_pending_file_focus: None,
                 right_panel_pending_terminal_focus: None,

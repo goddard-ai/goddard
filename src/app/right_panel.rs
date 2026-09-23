@@ -5777,6 +5777,10 @@ impl Waku {
             preview_selection.annotations = editor.annotations.clone();
         }
         let metrics = MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
+        let reader_selection = preview_selection.clone();
+        let reader_editor_state = editor_state.clone();
+        let reader_title = tr!("speed_reader.preview_title", path = relative_path);
+        let reader_waku = cx.entity().downgrade();
         let ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
@@ -5787,6 +5791,20 @@ impl Waku {
         .with_math_enabled(self.state.render_math)
         .with_guided_reading(self.guided_reading())
         .with_standalone_context_menu(self.menu_handle("file-preview-math", cx))
+        .with_context_menu_items(Rc::new(move |cx| {
+            let source = reader_selection
+                .selection
+                .borrow()
+                .selected_text()
+                .unwrap_or_else(|| reader_editor_state.read(cx).content().to_owned());
+            let waku = reader_waku.clone();
+            let title = reader_title.clone();
+            vec![MenuItem::new(tr!("speed_reader.go_fast"), move |window, cx| {
+                let _ = waku.update(cx, |this, cx| {
+                    this.open_speed_reader(title.clone(), source.clone(), window, cx);
+                });
+            })]
+        }))
         .with_link_handler(self.markdown_link_handler.clone());
         let document = md::render::markdown(view, &ctx);
 

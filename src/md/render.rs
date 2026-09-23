@@ -103,6 +103,9 @@ pub type FileRefMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
 /// transcript row's context menu.
 pub type CommitRefMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
 
+/// Additional actions for a standalone Markdown surface's context menu.
+pub type ContextMenuItems = Rc<dyn Fn(&mut gpui::App) -> Vec<MenuItem>>;
+
 // ── Layout metrics ─────────────────────────────────────────────────────────
 //
 // Everything in this block participates in measurement, so these are the only
@@ -1152,6 +1155,8 @@ pub struct Ctx<'a> {
     file_ref_items: Option<FileRefMenuItems>,
     /// Builds the menu rows a right-clicked commit SHA contributes.
     commit_ref_items: Option<CommitRefMenuItems>,
+    /// Extra actions for a standalone Markdown surface's context menu.
+    context_menu_items: Option<ContextMenuItems>,
     now: Instant,
 }
 
@@ -1187,6 +1192,7 @@ impl<'a> Ctx<'a> {
             wrap_context_menu: false,
             file_ref_items: None,
             commit_ref_items: None,
+            context_menu_items: None,
             now: Instant::now(),
         }
     }
@@ -1294,6 +1300,12 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// Add actions to a standalone Markdown surface's context menu.
+    pub fn with_context_menu_items(mut self, items: ContextMenuItems) -> Self {
+        self.context_menu_items = Some(items);
+        self
+    }
+
     fn with_cache(&self, view: &'a MarkdownView) -> Self {
         Self {
             row: self.row.clone(),
@@ -1320,6 +1332,7 @@ impl<'a> Ctx<'a> {
             wrap_context_menu: self.wrap_context_menu,
             file_ref_items: self.file_ref_items.clone(),
             commit_ref_items: self.commit_ref_items.clone(),
+            context_menu_items: self.context_menu_items.clone(),
             now: Instant::now(),
         }
     }
@@ -2322,14 +2335,21 @@ fn markdown_capped<'a>(
         .children(children);
     Some(
         if ctx.wrap_context_menu
-            && (ctx.math_enabled || ctx.file_link_root.is_some())
+            && (ctx.math_enabled
+                || ctx.file_link_root.is_some()
+                || ctx.context_menu_items.is_some())
             && let Some(menu) = &ctx.context_menu
         {
+            let extra_items = ctx.context_menu_items.clone();
             context_menu(
                 element,
                 SharedString::from(format!("context-menu-{}", ctx.row)),
                 menu,
-                |_| Vec::new(),
+                move |cx| {
+                    extra_items
+                        .as_ref()
+                        .map_or_else(Vec::new, |items| items(cx))
+                },
             )
         } else {
             element.into_any_element()

@@ -910,6 +910,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         .unwrap_or_else(|| SharedString::from(content.clone()));
     let message_id = message.id;
     let role = message.role;
+    let offer_speed_reader =
+        role == MessageRole::Assistant && message.notice.is_none() && !content.trim().is_empty();
     let element = match role {
         MessageRole::User => {
             let group_name = SharedString::from(format!("user-message-{message_id}"));
@@ -1406,6 +1408,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 &selection,
                 &composer,
                 &waku,
+                offer_speed_reader,
                 cx,
             )
         },
@@ -2303,11 +2306,13 @@ fn message_menu_items(
     selection: &TranscriptSelection,
     composer: &Entity<ComposerInput>,
     waku: &gpui::WeakEntity<Waku>,
+    offer_speed_reader: bool,
     _cx: &mut App,
 ) -> Vec<MenuItem> {
     let mut items = Vec::new();
 
-    if let Some(selected) = selection.selection.borrow().selected_text() {
+    let selected_text = selection.selection.borrow().selected_text();
+    if let Some(selected) = selected_text.as_ref() {
         let copy = selected.clone();
         items.push(
             MenuItem::new(tr!("common.copy_selection"), move |_, cx| {
@@ -2315,6 +2320,7 @@ fn message_menu_items(
             })
             .shortcut_action(&CopySelection),
         );
+        let selected = selected.clone();
         items.push(MenuItem::new(
             tr!("common.search_with_google"),
             move |_, cx| {
@@ -2323,11 +2329,12 @@ fn message_menu_items(
         ));
     }
 
-    let copy_content = content.to_owned();
+    let copy_content: Rc<str> = Rc::from(content);
+    let copied_content = copy_content.clone();
     items.push(MenuItem::new(
         tr!("common.copy_message_title"),
         move |_, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(copy_content.clone()));
+            cx.write_to_clipboard(ClipboardItem::new_string(copied_content.to_string()));
         },
     ));
 
@@ -2349,6 +2356,25 @@ fn message_menu_items(
     if let Some(code) = fenced_code(content) {
         items.push(MenuItem::new(tr!("common.copy_code"), move |_, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+        }));
+    }
+
+    if offer_speed_reader {
+        let reader_content = copy_content;
+        let waku = waku.clone();
+        items.push(MenuItem::Separator);
+        items.push(MenuItem::new(tr!("speed_reader.go_fast"), move |window, cx| {
+            let source = selected_text
+                .clone()
+                .unwrap_or_else(|| reader_content.to_string());
+            let _ = waku.update(cx, |this, cx| {
+                this.open_speed_reader(
+                    tr!("speed_reader.agent_response"),
+                    source.clone(),
+                    window,
+                    cx,
+                );
+            });
         }));
     }
 

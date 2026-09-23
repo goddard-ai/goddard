@@ -502,6 +502,7 @@ impl Render for Waku {
         let keyboard_options = self.render_keyboard_options(window, cx);
         let big_picture = self.render_big_picture(window, cx);
         if self.settings_page.is_some() {
+            let speed_reader = self.render_speed_reader_overlay(cx);
             let command_palette = self.render_command_palette(window, cx);
             let file_finder = self.render_file_finder(window, cx);
             let commit_dialog = self.render_commit_dialog(cx);
@@ -580,6 +581,7 @@ impl Render for Waku {
                 .children(project_switcher)
                 .children(big_picture)
                 .children(keyboard_options)
+                .children(speed_reader)
                 .into_any_element();
             return self.render_window_frame(content, window, cx);
         }
@@ -610,6 +612,7 @@ impl Render for Waku {
             && !agy_surface
             && !friend_watch;
         let computer_use = self.render_computer_use_overlay(window, cx);
+        let speed_reader = self.render_speed_reader_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
         let file_finder = self.render_file_finder(window, cx);
         let commit_dialog = self.render_commit_dialog(cx);
@@ -1021,6 +1024,7 @@ impl Render for Waku {
             .children(project_switcher)
             .children(big_picture)
             .children(keyboard_options)
+            .children(speed_reader)
             .into_any_element();
 
         self.render_window_frame(content, window, cx)
