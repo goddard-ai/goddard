@@ -8,13 +8,12 @@ use crate::theme::{Theme, hairline, sp};
 
 use super::icon;
 
-/// The one-line text box shell: a fixed-height bordered field around a
-/// [`TextInput`], with an optional leading icon and an accent border
-/// on keyboard-driven focus.
+/// A bordered field around a [`TextInput`], with an optional leading icon
+/// and an accent border on keyboard-driven focus.
 ///
-/// The embedded input must stay single-line (the default mode) — that is
-/// what keeps the text from wrapping and slides overlong content under the
-/// clipped viewport instead of growing out of the fixed-height shell.
+/// The default shell is fixed-height for a single-line input. Use
+/// [`TextField::multiline`] with an auto-height input so wrapped content can
+/// grow the shell instead of clipping inside it.
 /// Construction stays at the call site because the entity needs the window;
 /// this component owns everything visual.
 #[derive(IntoElement)]
@@ -22,6 +21,7 @@ pub struct TextField {
     base: Stateful<Div>,
     input: gpui::Entity<TextInput>,
     icon: Option<(&'static str, f32)>,
+    multiline: bool,
 }
 
 impl TextField {
@@ -31,7 +31,14 @@ impl TextField {
             base: div().id(id),
             input,
             icon: None,
+            multiline: false,
         }
+    }
+
+    /// Size the shell to an auto-height multi-line input.
+    pub fn multiline(mut self) -> Self {
+        self.multiline = true;
+        self
     }
 
     /// Leading icon, tinted tertiary like the address bar's lock.
@@ -64,8 +71,9 @@ impl RenderOnce for TextField {
         let theme = Theme::current(cx);
         let ring = self.input.read(cx).show_focus_ring(window);
         self.base
-            .h(px(28.0))
+            .when(!self.multiline, |field| field.h(px(28.0)))
             .px(px(8.0))
+            .when(self.multiline, |field| field.py(px(6.0)))
             .rounded(px(8.0))
             .border(hairline())
             .border_color(theme.border_subtle)

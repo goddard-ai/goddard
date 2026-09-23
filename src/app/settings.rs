@@ -5677,7 +5677,9 @@ impl Waku {
                 "icons/compose.svg",
                 tr!("auto_prompts.prompt"),
                 tr!("auto_prompts.prompt_description"),
-                TextField::new("auto-prompt-prompt", editor.prompt.clone()).w(px(320.0)),
+                TextField::new("auto-prompt-prompt", editor.prompt.clone())
+                    .multiline()
+                    .w(px(320.0)),
                 theme,
                 &SettingSearch::new(""),
             ),
@@ -5697,6 +5699,7 @@ impl Waku {
                             format!("auto-prompt-question-{id}"),
                             question.instructions.clone(),
                         )
+                        .multiline()
                         .w(px(260.0)),
                     )
                     .when(editor.advanced, |row| {
@@ -5918,7 +5921,6 @@ impl Waku {
             TextInput::new(window, cx)
                 .multi_line()
                 .auto_height()
-                .max_lines(8)
                 .tab_index(0)
                 .accessibility_label(tr!("auto_prompts.prompt"))
                 .placeholder(tr!("auto_prompts.prompt_placeholder"))
@@ -13445,7 +13447,6 @@ fn auto_prompt_question_editor(
         TextInput::new(window, cx)
             .multi_line()
             .auto_height()
-            .max_lines(4)
             .tab_index(0)
             .accessibility_label(tr!("auto_prompts.question_label"))
             .placeholder(tr!("auto_prompts.question_placeholder"))
