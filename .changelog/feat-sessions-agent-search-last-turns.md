@@ -1,0 +1,1 @@
+- `goddard-agent search` accepts an optional `last_turns` count that confines each task's transcript search to its most recent turns, so agents can skip stale early-turn matches when looking for recent sibling work.

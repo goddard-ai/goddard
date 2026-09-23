@@ -129,9 +129,10 @@ fn schema() -> serde_json::Value {
             "returns": {"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "items": [{"turn": "1-based turn number when the entry belongs to one", "kind": "message|activity", "role": "user|assistant|system on message items", "content": "string"}], "truncated": "true when the size cap dropped the oldest items"}
         },
         "search": {
-            "description": "Search the transcripts of every task in this task's project. `query` is free text — a single case-insensitive substring over user and assistant messages — plus `field:value` filters: `project:<name>` (may only name this project), `status:<idle|connecting|working|waiting|background|failed|busy>` (`busy` unions the working set), `archived:<true|false|any>` (default: active tasks only), `limit:<n>` (default 20). Repeated project:/status: tokens union; different filters intersect; unrecognized tokens stay literal text. A filters-only query lists matching tasks.",
+            "description": "Search the transcripts of every task in this task's project. `query` is free text — a single case-insensitive substring over user and assistant messages — plus `field:value` filters: `project:<name>` (may only name this project), `status:<idle|connecting|working|waiting|background|failed|busy>` (`busy` unions the working set), `archived:<true|false|any>` (default: active tasks only), `limit:<n>` (default 20). Repeated project:/status: tokens union; different filters intersect; unrecognized tokens stay literal text. A filters-only query lists matching tasks. `last_turns` narrows each task's corpus to its N most recent turns — the units `read` numbers — so a stale hit in an early turn cannot outrank recent work.",
             "fields": {
-                "query": {"type": "string", "required": true}
+                "query": {"type": "string", "required": true},
+                "last_turns": {"type": "number", "notes": "search only each task's last N turns; omit to scan whole transcripts"}
             },
             "example": "{\"query\":\"status:idle retry logic\"}",
             "returns": {"results": [{"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
@@ -221,6 +222,9 @@ struct ReadPayload {
 #[derive(Deserialize)]
 struct SearchPayload {
     query: String,
+    /// Restrict matches to each task's last N turns.
+    #[serde(default)]
+    last_turns: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -444,6 +448,7 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
             )?;
             Ok(Command::AgentSearchSessions {
                 query: payload.query,
+                last_turns: payload.last_turns,
             })
         }
         _ => unreachable!("checked by run()"),
@@ -626,12 +631,27 @@ mod tests {
             .expect("a query payload parses");
 
         match command {
-            Command::AgentSearchSessions { query } => {
+            Command::AgentSearchSessions { query, last_turns } => {
                 assert_eq!(query, "status:idle retry logic");
+                assert_eq!(last_turns, None);
             }
             other => panic!("expected AgentSearchSessions, got {other:?}"),
         }
         assert!(build_command("search", "{}").is_err());
+    }
+
+    #[test]
+    fn a_search_payload_may_confine_the_scan_to_the_last_turns() {
+        let command = build_command("search", r#"{"query":"retry logic","last_turns":2}"#)
+            .expect("a last_turns payload parses");
+
+        match command {
+            Command::AgentSearchSessions { query, last_turns } => {
+                assert_eq!(query, "retry logic");
+                assert_eq!(last_turns, Some(2));
+            }
+            other => panic!("expected AgentSearchSessions, got {other:?}"),
+        }
     }
 
     #[test]

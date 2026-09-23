@@ -653,10 +653,15 @@ pub enum Command {
     /// the caller's own project — the same corpus the command palette's
     /// session search scans. `query` is free text plus `field:value`
     /// filters (`project:`, `status:`, `archived:`, `limit:`); see
-    /// [`crate::persistence::parse_session_message_search`]. Hits identify
-    /// tasks for [`Self::AgentReadSession`] to open.
+    /// [`crate::persistence::parse_session_message_search`]. `last_turns`
+    /// narrows each task's corpus to its most recent turns — the units
+    /// [`Self::AgentReadSession`] numbers — dropping messages outside a
+    /// turn entirely. Hits identify tasks for [`Self::AgentReadSession`]
+    /// to open.
     AgentSearchSessions {
         query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_turns: Option<usize>,
     },
     /// Share one of my projects with a friend. The daemon resolves the
     /// project's name and `origin` URL from `project_path` and re-sends

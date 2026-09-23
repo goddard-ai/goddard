@@ -1809,7 +1809,7 @@ impl Backend for WakuBackend {
                 limit,
                 scope,
             } => {
-                let matches = self.search_session_messages(&query, limit, scope, None)?;
+                let matches = self.search_session_messages(&query, limit, scope, None, None)?;
                 Ok(ResponsePayload::SessionMessageMatches { matches })
             }
             Command::ListProviderSessions { provider, limit } => {
@@ -2330,8 +2330,8 @@ impl Backend for WakuBackend {
                 provider,
                 turn,
             } => self.agent_read_session(agent, task_id, thread_id, provider, turn),
-            Command::AgentSearchSessions { query } => {
-                self.agent_search_sessions(agent, session_id, &query)
+            Command::AgentSearchSessions { query, last_turns } => {
+                self.agent_search_sessions(agent, session_id, &query, last_turns)
             }
             Command::CancelQueuedPrompt { queued_message_id } => {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
@@ -4544,6 +4544,7 @@ impl WakuBackend {
         agent: Option<Uuid>,
         session_id: Uuid,
         query: &str,
+        last_turns: Option<usize>,
     ) -> anyhow::Result<ResponsePayload> {
         self.require_agent_tools()?;
         // A scoped token names its owning session; a master-token request may
@@ -4567,6 +4568,7 @@ impl WakuBackend {
             AGENT_SEARCH_DEFAULT_LIMIT,
             SessionMessageSearchScope::Active,
             Some(project_id),
+            last_turns,
         )?;
         let state = self.task_state.lock();
         let hits = matches
@@ -4595,12 +4597,15 @@ impl WakuBackend {
     /// `SearchSessionMessages` and the agent-scoped `AgentSearchSessions`.
     /// `project_scope` confines the search to one project (the agent
     /// credential's own); `None` lets `project:` tokens select any project.
+    /// `last_turns` — agent search only — scans just each task's N most
+    /// recent turns.
     fn search_session_messages(
         &self,
         query: &str,
         limit: usize,
         scope: SessionMessageSearchScope,
         project_scope: Option<Uuid>,
+        last_turns: Option<usize>,
     ) -> anyhow::Result<Vec<SessionMessageMatch>> {
         let parsed = parse_session_message_search(query);
         if parsed.is_blank() {
@@ -4651,6 +4656,7 @@ impl WakuBackend {
             parsed.limit.unwrap_or(limit),
             parsed.scope.unwrap_or(scope),
             allowed,
+            last_turns,
         )()?;
         Ok(matches)
     }
@@ -7481,7 +7487,7 @@ mod tests {
         let backend = WakuBackend::new(settings, store).unwrap();
 
         let hits = |query: &str, agent: Uuid| match backend
-            .agent_search_sessions(Some(agent), Uuid::nil(), query)
+            .agent_search_sessions(Some(agent), Uuid::nil(), query, None)
             .unwrap()
         {
             ResponsePayload::AgentSessionSearch { hits } => hits,
@@ -7516,7 +7522,12 @@ mod tests {
         );
         assert!(
             backend
-                .agent_search_sessions(Some(caller_id), Uuid::nil(), "project:other rare needle")
+                .agent_search_sessions(
+                    Some(caller_id),
+                    Uuid::nil(),
+                    "project:other rare needle",
+                    None
+                )
                 .is_err()
         );
         // `status:` intersects the project allowlist: every task here is
@@ -7533,7 +7544,7 @@ mod tests {
         // An anonymous request has nothing to scope to.
         assert!(
             backend
-                .agent_search_sessions(None, Uuid::nil(), "rare needle")
+                .agent_search_sessions(None, Uuid::nil(), "rare needle", None)
                 .is_err()
         );
 

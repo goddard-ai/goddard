@@ -928,6 +928,7 @@ fn search_session_messages(
     limit: usize,
     scope: SessionMessageSearchScope,
     session_ids: Option<Vec<Uuid>>,
+    last_turns: Option<usize>,
 ) -> io::Result<Vec<SessionMessageMatch>> {
     let query = query.trim();
     // An empty needle still scans when a session-id allowlist narrows the
@@ -955,18 +956,52 @@ fn search_session_messages(
     };
     // Allowlist values are validated Uuids — their Display form is hex and
     // dashes only, so inlining them cannot inject SQL.
-    let session_clause = session_ids
-        .map(|ids| {
-            ids.iter()
-                .map(|id| format!("'{id}'"))
-                .collect::<Vec<_>>()
-                .join(",")
-        })
+    let session_id_list = session_ids.map(|ids| {
+        ids.iter()
+            .map(|id| format!("'{id}'"))
+            .collect::<Vec<_>>()
+            .join(",")
+    });
+    let session_clause = session_id_list
+        .as_deref()
         .map(|ids| format!("sessions.id IN ({ids})"))
         .unwrap_or_else(|| "1".to_owned());
+    // `last_turns` confines the scan to each session's N most recent turns:
+    // rank the session's stored turn ids by their latest message position
+    // and join the survivors, so messages belonging to no turn never match.
+    let (turn_cte, turn_join) = match last_turns {
+        Some(_) => (
+            format!(
+                "recent_turns AS (
+                     SELECT session_id, turn_id
+                       FROM (
+                           SELECT session_id,
+                                  turn_id,
+                                  ROW_NUMBER() OVER (
+                                      PARTITION BY session_id
+                                      ORDER BY MAX(position) DESC
+                                  ) AS turn_rank
+                             FROM messages
+                            WHERE turn_id IS NOT NULL{turn_filter}
+                            GROUP BY session_id, turn_id
+                       )
+                      WHERE turn_rank <= ?3
+                 ), ",
+                turn_filter = session_id_list
+                    .as_deref()
+                    .map(|ids| format!(" AND session_id IN ({ids})"))
+                    .unwrap_or_default(),
+            ),
+            "INNER JOIN recent_turns
+                    ON recent_turns.session_id = messages.session_id
+                   AND recent_turns.turn_id = messages.turn_id"
+                .to_owned(),
+        ),
+        None => (String::new(), String::new()),
+    };
     let mut statement = connection
         .prepare(&format!(
-            "WITH ranked AS (
+            "WITH {turn_cte}ranked AS (
                  SELECT messages.session_id,
                         messages.role,
                         messages.content,
@@ -981,6 +1016,7 @@ fn search_session_messages(
                         ) AS session_match_rank
                    FROM messages
                    INNER JOIN sessions ON sessions.id = messages.session_id
+                   {turn_join}
                   WHERE messages.streaming = 0
                     AND {archive_clause}
                     AND {session_clause}
@@ -997,15 +1033,21 @@ fn search_session_messages(
         ))
         .map_err(to_io_error)?;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-    let rows = statement
-        .query_map(params![query, limit], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(to_io_error)?;
+    let read_row = |row: &rusqlite::Row<'_>| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    };
+    let rows = match last_turns {
+        Some(turns) => {
+            let turns = i64::try_from(turns).unwrap_or(i64::MAX);
+            statement.query_map(params![query, limit, turns], read_row)
+        }
+        None => statement.query_map(params![query, limit], read_row),
+    }
+    .map_err(to_io_error)?;
 
     let mut matches = Vec::new();
     for row in rows {
@@ -1182,15 +1224,17 @@ impl StateStore {
     /// scanning message text happen when the returned closure runs off-thread.
     /// `session_ids` is the caller-resolved allowlist behind `project:` and
     /// `status:` filters — `None` scans every session in `scope`.
+    /// `last_turns` confines the scan to each session's N most recent turns.
     pub fn session_message_search(
         &self,
         query: String,
         limit: usize,
         scope: SessionMessageSearchScope,
         session_ids: Option<Vec<Uuid>>,
+        last_turns: Option<usize>,
     ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
         let path = self.path.clone();
-        move || search_session_messages(&path, &query, limit, scope, session_ids)
+        move || search_session_messages(&path, &query, limit, scope, session_ids, last_turns)
     }
 
     pub fn blobs(&self) -> Arc<BlobStore> {
@@ -3754,6 +3798,7 @@ mod tests {
             50,
             SessionMessageSearchScope::Active,
             None,
+            None,
         )()
         .unwrap();
         assert_eq!(
@@ -3776,6 +3821,7 @@ mod tests {
                 50,
                 SessionMessageSearchScope::Active,
                 None,
+                None,
             )()
             .unwrap()
             .iter()
@@ -3790,6 +3836,7 @@ mod tests {
                 50,
                 SessionMessageSearchScope::Active,
                 None,
+                None,
             )()
             .unwrap()
             .is_empty(),
@@ -3801,11 +3848,69 @@ mod tests {
                 50,
                 SessionMessageSearchScope::Active,
                 None,
+                None,
             )()
             .unwrap()
             .is_empty(),
             "a synthesized notice never surfaces in search"
         );
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn message_search_can_be_confined_to_the_last_turns() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let session_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("the needle opens the first turn");
+        state.sessions[0].push_message(MessageRole::Assistant, "early answer");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions[0].begin_turn("a quiet middle turn");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions[0].begin_turn("the needle returns in the last turn");
+        state.sessions[0].push_message(MessageRole::Assistant, "latest needle answer");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        // Pushed without a running turn, this row belongs to no turn at all.
+        state.sessions[0].push_message(MessageRole::Assistant, "unturned needle");
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let hits = |needle: &str, last_turns: Option<usize>| {
+            reopened.session_message_search(
+                needle.into(),
+                50,
+                SessionMessageSearchScope::Active,
+                None,
+                last_turns,
+            )()
+            .unwrap()
+        };
+
+        // The whole transcript matches either turn; the ranked excerpt is
+        // the newest user hit — turn three's prompt.
+        let matched = hits("needle", None);
+        assert_eq!(matched.len(), 1);
+        assert!(matched[0].snippet.contains("last turn"));
+        // Only the last turn is scanned, and it still carries a needle.
+        let matched = hits("needle", Some(1));
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].session_id, session_id);
+        assert!(matched[0].snippet.contains("last turn"));
+
+        // A phrase unique to the first turn falls out of the last-one and
+        // last-two windows and comes back once every turn is in scope.
+        assert_eq!(hits("opens the first turn", None).len(), 1);
+        assert!(hits("opens the first turn", Some(1)).is_empty());
+        assert!(hits("opens the first turn", Some(2)).is_empty());
+        assert_eq!(hits("opens the first turn", Some(3)).len(), 1);
+
+        // An unturned message is never inside a last-N window, and a
+        // zero-turn window matches nothing.
+        assert_eq!(hits("unturned needle", None).len(), 1);
+        assert!(hits("unturned needle", Some(3)).is_empty());
+        assert!(hits("needle", Some(0)).is_empty());
 
         fs::remove_dir_all(directory).ok();
     }
@@ -4049,6 +4154,7 @@ mod tests {
                 "needle".into(),
                 50,
                 SessionMessageSearchScope::Active,
+                None,
                 None
             )()
             .unwrap()
@@ -4068,6 +4174,7 @@ mod tests {
                 "needle".into(),
                 50,
                 SessionMessageSearchScope::Active,
+                None,
                 None
             )()
             .unwrap()
@@ -4079,6 +4186,7 @@ mod tests {
                 "needle".into(),
                 50,
                 SessionMessageSearchScope::Archived,
+                None,
                 None,
             )()
             .unwrap()
@@ -4097,6 +4205,7 @@ mod tests {
                 "needle".into(),
                 50,
                 SessionMessageSearchScope::Active,
+                None,
                 None
             )()
             .unwrap()
@@ -4108,6 +4217,7 @@ mod tests {
                 "needle".into(),
                 50,
                 SessionMessageSearchScope::Archived,
+                None,
                 None,
             )()
             .unwrap()
