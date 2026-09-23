@@ -3160,8 +3160,7 @@ mod tests {
         let binary = directory.join("codex");
         fs::write(&binary, include_str!("fixtures/codex_fork.sh")).unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
-        let thread_id = format!("thread-original-{}", Uuid::new_v4());
-        let start = || {
+        let start = |provider_cursor| {
             let (events, received) = crate::driver::test_event_channel();
             let driver = CodexDriver::start(
                 DriverStartOptions {
@@ -3181,23 +3180,28 @@ mod tests {
                     read_own_transcript: false,
                     subagents: None,
                     integrations: Vec::new(),
-                    provider_cursor: Some(ProviderResumeCursor::Codex {
-                        thread_id: thread_id.clone(),
-                    }),
+                    provider_cursor,
                 },
                 events,
             );
             (driver, received)
         };
 
-        let (source, source_events) = start();
+        // A chat created in this app session must reserve the ID returned
+        // by thread/start, just like one opened with a saved resume cursor.
+        let (source, source_events) = start(None);
         let source = source.unwrap();
+        let DriverEvent::Connected { provider_cursor } =
+            source_events.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("expected a newly created thread");
+        };
         assert!(matches!(
-            source_events.recv_timeout(Duration::from_secs(5)).unwrap(),
-            DriverEvent::Connected { .. }
+            provider_cursor,
+            Some(ProviderResumeCursor::Codex { .. })
         ));
         assert!(
-            start()
+            start(provider_cursor.clone())
                 .0
                 .err()
                 .unwrap()
@@ -3206,7 +3210,7 @@ mod tests {
         );
 
         source.begin_shutdown();
-        let (replacement, replacement_events) = start();
+        let (replacement, replacement_events) = start(provider_cursor);
         let replacement = replacement.unwrap();
         assert!(matches!(
             replacement_events

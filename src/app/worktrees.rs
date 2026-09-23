@@ -533,6 +533,7 @@ impl Waku {
         let mut deferred = HashSet::new();
         let mut ready = Vec::new();
         let mut projectless_ready = Vec::new();
+        let mut archived_codex_runtimes = Vec::new();
         for session_id in std::mem::take(&mut self.pending_workspace_cleanups) {
             let Some(session) = self
                 .state
@@ -556,12 +557,25 @@ impl Waku {
                 continue;
             }
             let quiet = !session.is_busy()
+                && session.queued_messages.is_empty()
                 && !self.submission_preparations.contains(&session_id)
                 && !self.session_has_live_detached_work(session_id)
                 && !self.ending_checkpoint_pending(session_id);
             if !quiet {
                 deferred.insert(session_id);
                 continue;
+            }
+            // An archived chat must not keep its old Codex writer (or its
+            // soon-to-be-deleted cwd) alive until the idle reaper runs.
+            // Keep the cursor so unarchiving resumes the same conversation.
+            if session.archived_at.is_some()
+                && matches!(
+                    session.provider_cursor,
+                    Some(ProviderResumeCursor::Codex { .. })
+                )
+                && session.provider == ProviderKind::Codex
+            {
+                archived_codex_runtimes.push(session_id);
             }
             if let SessionWorkspace::Worktree { path, .. } = &session.workspace {
                 // "New task in same worktree" clones the workspace into a
@@ -588,6 +602,9 @@ impl Waku {
             }
         }
         self.pending_workspace_cleanups = deferred;
+        for session_id in archived_codex_runtimes {
+            self.reset_session_runtime(session_id);
+        }
         for (session_id, path) in projectless_ready {
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
                 continue;

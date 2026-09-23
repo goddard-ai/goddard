@@ -11,6 +11,10 @@ while IFS= read -r request; do
             printf '{"id":%s,"result":{}}\n' "$id"
             ;;
         *'"method":"initialized"'*) ;;
+        *'"method":"thread/start"'*)
+            thread_id="thread-$(basename "$fixture_dir")"
+            printf '{"id":%s,"result":{"thread":{"id":"%s","turns":[]}}}\n' "$id" "$thread_id"
+            ;;
         *'"method":"thread/resume"'*)
             case "$request" in
                 *'"threadId":"thread-fork"'*)
