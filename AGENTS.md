@@ -33,6 +33,8 @@ Read the doc before working in its area:
   or GPUI decisions: when and how to consult T3 Code and Zed source
 - [.agents/docs/changelog.md](.agents/docs/changelog.md) — fragment naming,
   groups, the mobile split
+- [.agents/docs/jev.md](.agents/docs/jev.md) — the eval model's plumbing,
+  call sites, thresholds, and the spend-gating rules
 
 ## Performance
 
@@ -58,6 +60,17 @@ Read the doc before working in its area:
   and preview the fold with `bun ./scripts/changelog.ts check`. Naming rules
   and group vocabulary:
   [.agents/docs/changelog.md](.agents/docs/changelog.md).
+
+## Jev (eval model)
+
+- Jev is TypeSafe's structured decision model: one call posts a shared
+  `state` plus typed questions (`Noul`/`Choice`/`Score`) and returns
+  calibrated probabilities — never generated text. Jev decides, code
+  applies; full rules and call sites in
+  [.agents/docs/jev.md](.agents/docs/jev.md).
+- Every call goes through the session's daemon (`Command::Evaluate`), runs
+  off the UI thread, degrades to the deterministic default on any failure,
+  and is logged to `eval-decisions.jsonl` under a `feature` tag.
 
 ## QA branch workflow
 
