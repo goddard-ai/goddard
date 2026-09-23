@@ -271,12 +271,13 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .filter(|model| !model.is_empty());
+            let description = entry.get("description").and_then(Value::as_str);
             let name = entry
                 .get("displayName")
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
-                .map(str::to_owned)
+                .map(|label| claude_release_label(label, description))
                 .or_else(|| resolved.map(display_name_from_slug))
                 .unwrap_or_else(|| display_name_from_slug(id));
 
@@ -328,6 +329,32 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
             Some(model)
         })
         .collect()
+}
+
+/// Claude Code labels the rows that follow a family's newest release with the
+/// bare family — `Opus (1M context)`, `Sonnet` — and names the release only in
+/// the description `/model` prints beside it: `Opus 5.5 with 1M context · …`.
+/// Its pinned rows already carry the release in the label (`Opus 4.6 (1M
+/// context)`), so the described release is folded in the same way. The default
+/// row, custom role mappings, and already-versioned labels keep Claude's text.
+fn claude_release_label(label: &str, description: Option<&str>) -> String {
+    let (family, qualifier) = label.split_once(' ').unwrap_or((label, ""));
+    let release = description
+        .filter(|_| qualifier.is_empty() || qualifier.starts_with('('))
+        .and_then(|description| {
+            let mut words = description.split_whitespace();
+            let described_family = words.next()?;
+            let release = words.next()?;
+            let is_release = release
+                .split('.')
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+            (described_family.eq_ignore_ascii_case(family) && is_release).then_some(release)
+        });
+    match release {
+        Some(release) if qualifier.is_empty() => format!("{family} {release}"),
+        Some(release) => format!("{family} {release} {qualifier}"),
+        None => label.to_owned(),
+    }
 }
 
 /// Copilot's `models.list` is an RPC, so discovery runs the SDK handshake on a
@@ -2774,6 +2801,73 @@ mod tests {
         assert_eq!(models[0].default_reasoning_effort.as_deref(), Some("high"));
         assert_eq!(models[1].name, "Sonnet");
         assert!(models[1].reasoning_efforts.is_empty());
+    }
+
+    /// Descriptions as Claude Code 2.1.280 reports them, first-party and with
+    /// CC Switch-style role mappings.
+    #[test]
+    fn names_claude_family_aliases_by_their_described_release() {
+        let models = parse_claude_models(&json!({"models": [
+            {
+                "value": "default",
+                "resolvedModel": "claude-opus-5-5[1m]",
+                "displayName": "Default (recommended)",
+                "description": "Use the default model (currently Opus 5.5 (1M context)) · $4/$20 per Mtok"
+            },
+            {
+                "value": "opus[1m]",
+                "resolvedModel": "claude-opus-5-5[1m]",
+                "displayName": "Opus (1M context)",
+                "description": "Opus 5.5 with 1M context · Best for everyday, complex tasks · $4/$20 per Mtok"
+            },
+            {
+                "value": "claude-fable-5-1[1m]",
+                "resolvedModel": "claude-fable-5-1",
+                "displayName": "Fable",
+                "description": "Fable 5.1 · Most capable for your hardest and longest-running tasks"
+            },
+            {
+                "value": "sonnet",
+                "resolvedModel": "claude-sonnet-5",
+                "displayName": "Sonnet",
+                "description": "Sonnet 5 · Efficient for routine tasks · $2/$10 per Mtok"
+            },
+            {
+                "value": "haiku",
+                "resolvedModel": "claude-haiku-4-5-20251001",
+                "displayName": "Haiku",
+                "description": "Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok"
+            },
+            {
+                "value": "claude-opus-4-6[1m]",
+                "displayName": "Opus 4.6 (1M context)",
+                "description": "Opus 4.6 for long sessions"
+            },
+            {
+                "value": "opus",
+                "resolvedModel": "kimi-k2-0905",
+                "displayName": "kimi-k2-0905",
+                "description": "Custom Opus model"
+            },
+            {"value": "sonnet[1m]", "displayName": "Sonnet"}
+        ]}));
+
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Default (recommended)",
+                "Opus 5.5 (1M context)",
+                "Fable 5.1",
+                "Sonnet 5",
+                "Haiku 4.5",
+                "Opus 4.6 (1M context)",
+                "kimi-k2-0905",
+                "Sonnet",
+            ]
+        );
     }
 
     #[cfg(unix)]

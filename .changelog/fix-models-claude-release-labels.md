@@ -1,0 +1,1 @@
+- The Claude model picker now shows the release version Claude Code names in each family row's description — "Opus 5.5 (1M context)", "Sonnet 5", "Haiku 4.5" — instead of the bare family name.
