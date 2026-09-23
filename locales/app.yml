@@ -883,6 +883,12 @@ experiments.gate_confirm:
   en: I understand the risks — show experiments
 status_markers.complete:
   en: Complete
+status_markers.answered:
+  en: Answered
+status_markers.nothing_to_do:
+  en: Nothing to do
+status_markers.pushed_back:
+  en: Pushed back
 status_markers.awaiting_input:
   en: Awaiting input
 status_markers.go_ahead:

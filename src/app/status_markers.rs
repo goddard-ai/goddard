@@ -64,7 +64,7 @@ impl MarkerTone {
 /// that contradict each other never share the footer. `other` is the escape
 /// bucket: when it wins, no ending chip renders. Bad endings carry lower
 /// thresholds — a false chip is cheap next to a missed failure — while
-/// `complete` only renders when the model is sure.
+/// `complete` and `nothing-to-do` only render when the model is sure.
 const ENDING_QUESTION: &str = "ending";
 const ENDING_OTHER_OPTION: &str = "other";
 const INPUT_QUESTION: &str = "awaiting-input-kind";
@@ -79,9 +79,43 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/check.svg",
         tone: MarkerTone::Success,
         threshold: 0.65,
-        instructions: "The requested work was carried out end to end and the final \
-            response reports it done — judge the ask as the `prompt` plus any \
-            `priorPrompts` still in play.",
+        instructions: "The prompt asked for a change or action, the work was carried \
+            out end to end, and the final response reports it done — judge the ask \
+            as the `prompt` plus any `priorPrompts` still in play. An ask satisfied \
+            entirely by information is `answered`; a reported 'no work needed' is \
+            `nothing-to-do`; a declined or redirected ask is `pushed-back`.",
+    },
+    StatusMarker {
+        id: "answered",
+        label_key: "status_markers.answered",
+        icon: "icons/message-square.svg",
+        tone: MarkerTone::Info,
+        threshold: 0.60,
+        instructions: "The prompt asked for information — a question, an explanation, \
+            or an investigation — and the response delivers that answer, findings, \
+            or analysis without making changes. If the prompt also requested work \
+            that was carried out, choose `complete` instead.",
+    },
+    StatusMarker {
+        id: "nothing-to-do",
+        label_key: "status_markers.nothing_to_do",
+        icon: "icons/minus.svg",
+        tone: MarkerTone::Info,
+        threshold: 0.65,
+        instructions: "The prompt asked for work, but the assistant investigated and \
+            reported that none was needed — the request was already satisfied, the \
+            problem does not reproduce, or there is nothing to change.",
+    },
+    StatusMarker {
+        id: "pushed-back",
+        label_key: "status_markers.pushed_back",
+        icon: "icons/hand.svg",
+        tone: MarkerTone::Warning,
+        threshold: 0.55,
+        instructions: "The assistant declined the request as asked or redirected it — \
+            refused, disputed the premise, or recommended a different approach — \
+            without asking the user anything. If it asked for approval, a decision, \
+            or details first, choose `awaiting-input`.",
     },
     StatusMarker {
         id: "awaiting-input",
@@ -409,7 +443,9 @@ fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
             instructions: "Which best describes how this turn ended? Judge the closing \
                 `response` against the `prompt` and any `priorPrompts` still in play; \
                 `toolSequence`, `toolErrors`, and `filesChanged` carry what the turn \
-                actually did."
+                actually did. `answered` is only for asks satisfied entirely by \
+                information — a prompt that requested work ends `complete`, \
+                `partial`, or `failed` even when the response also explains."
                 .to_owned(),
             criteria: ENDING_MARKERS
                 .iter()
@@ -710,6 +746,7 @@ fn cleared_subtype(
 
 fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)> {
     let mut cleared: Vec<(&'static StatusMarker, f64)> = Vec::new();
+    let mut work_free_ending = false;
     if let Some(EvalAnswer::Choice {
         choice,
         probabilities,
@@ -719,6 +756,7 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
     {
         let winner = probabilities.get(choice).copied().unwrap_or(0.0);
         if winner >= marker.threshold {
+            work_free_ending = matches!(marker.id, "answered" | "nothing-to-do");
             let subtype = match marker.id {
                 "awaiting-input" => cleared_subtype(evaluation, INPUT_QUESTION, INPUT_MARKERS),
                 "partial" => cleared_subtype(evaluation, PARTIAL_QUESTION, PARTIAL_MARKERS),
@@ -733,6 +771,11 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
         }
     }
     for marker in FLAG_MARKERS {
+        // `unverified` presupposes the turn made changes — an ending that
+        // asserts no work happened makes the flag meaningless.
+        if marker.id == "unverified" && work_free_ending {
+            continue;
+        }
         if let Some(EvalAnswer::Noul { noul }) = evaluation.answers.get(marker.id)
             && *noul >= marker.threshold
         {
@@ -747,7 +790,9 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
         }
     }
     if cleared.len() > 1 {
-        cleared.retain(|(marker, _)| marker.id != "complete");
+        cleared.retain(|(marker, _)| {
+            !matches!(marker.id, "complete" | "answered" | "nothing-to-do")
+        });
     }
     cleared
 }
@@ -1613,6 +1658,90 @@ mod tests {
             .map(|(marker, _)| marker.id)
             .collect();
         assert_eq!(ids, ["complete"]);
+    }
+
+    #[test]
+    fn work_free_endings_skip_unverified_and_yield_to_flags() {
+        for ending in ["answered", "nothing-to-do"] {
+            let clean = evaluation(
+                [(
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice(ending, &[(ending, 0.90), ("other", 0.10)]),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            let ids: Vec<&str> = cleared_markers(&clean)
+                .iter()
+                .map(|(marker, _)| marker.id)
+                .collect();
+            assert_eq!(ids, [ending]);
+
+            // `unverified` presupposes changes — it cannot ride a work-free
+            // ending even at high confidence.
+            let unchecked = evaluation(
+                [
+                    (
+                        ENDING_QUESTION.to_owned(),
+                        ending_choice(ending, &[(ending, 0.90), ("other", 0.10)]),
+                    ),
+                    ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+                    (
+                        VERIFICATION_QUESTION.to_owned(),
+                        ending_choice("not-tested", &[("not-tested", 0.90)]),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            );
+            let ids: Vec<&str> = cleared_markers(&unchecked)
+                .iter()
+                .map(|(marker, _)| marker.id)
+                .collect();
+            assert_eq!(ids, [ending]);
+
+            // Other flags still clear, and the resolved ending yields the
+            // footer to them.
+            let assumed = evaluation(
+                [
+                    (
+                        ENDING_QUESTION.to_owned(),
+                        ending_choice(ending, &[(ending, 0.90), ("other", 0.10)]),
+                    ),
+                    ("assumed".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+                ]
+                .into_iter()
+                .collect(),
+            );
+            let ids: Vec<&str> = cleared_markers(&assumed)
+                .iter()
+                .map(|(marker, _)| marker.id)
+                .collect();
+            assert_eq!(ids, ["assumed"]);
+        }
+    }
+
+    #[test]
+    fn pushed_back_renders_and_keeps_verification_flags() {
+        let verdict = evaluation(
+            [
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice(
+                        "pushed-back",
+                        &[("pushed-back", 0.80), ("complete", 0.20)],
+                    ),
+                ),
+                ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let ids: Vec<&str> = cleared_markers(&verdict)
+            .iter()
+            .map(|(marker, _)| marker.id)
+            .collect();
+        assert_eq!(ids, ["pushed-back", "unverified"]);
     }
 
     #[test]

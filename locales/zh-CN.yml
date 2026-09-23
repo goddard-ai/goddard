@@ -2607,6 +2607,9 @@ status_markers.decision: 等待决定
 status_markers.details: 等待补充信息
 status_markers.blocked: 受阻
 status_markers.complete: 已完成
+status_markers.answered: 已回答
+status_markers.nothing_to_do: 无需处理
+status_markers.pushed_back: 提出异议
 status_markers.drifted: 已偏离
 status_markers.failed: 失败
 status_markers.errors_remain: 仍有错误

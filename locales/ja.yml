@@ -2656,6 +2656,9 @@ status_markers.decision: 選択待ち
 status_markers.details: 詳細待ち
 status_markers.blocked: ブロック中
 status_markers.complete: 完了
+status_markers.answered: 回答済み
+status_markers.nothing_to_do: 対応不要
+status_markers.pushed_back: 異議あり
 status_markers.drifted: 脱線
 status_markers.failed: 失敗
 status_markers.errors_remain: エラーが残っています
