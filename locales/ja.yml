@@ -1222,7 +1222,7 @@ session.waiting_for_approval: 承認を待っています
 session.waiting_for_answer: 回答を待っています
 transcript.waiting_background: バックグラウンドタスクを待っています
 session.stopped_before_response: エージェントは回答を返す前に停止しました
-session.prompt_not_delivered: メッセージはエージェントに届きませんでした — もう一度送信してください
+session.prompt_not_delivered: メッセージがエージェントに届いたことを確認できませんでした
 session.codex_exited_before_response: Codex app-server は回答を返す前に終了しました
 session.steer_rejected: エージェントに追加の指示を送れませんでした（%{error}）。メッセージはフォローアップとしてキューに追加されました
 session.steer_rejected_plain: エージェントに追加の指示を送れませんでした。メッセージはフォローアップとしてキューに追加されました

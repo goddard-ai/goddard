@@ -3054,7 +3054,7 @@ transcript.waiting_background:
 session.stopped_before_response:
   en: The agent stopped before returning a response
 session.prompt_not_delivered:
-  en: The message never reached the agent — send it again
+  en: We couldn't confirm the message reached the agent
 session.codex_exited_before_response:
   en: Codex app-server exited before returning a response
 session.steer_rejected:

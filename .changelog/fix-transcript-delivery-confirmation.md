@@ -1,0 +1,1 @@
+- When Goddard can't confirm a prompt reached its agent, the transcript now reports unconfirmed delivery instead of claiming the message never arrived.
