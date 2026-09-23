@@ -1,0 +1,1 @@
+- Run project script… (⌘R) now asks where to run when the repo has more than the local checkout: the current task's worktree leads the list, followed by the local checkout and any worktrees not created by Goddard. Scripts run outside the task's own workspace open in a standalone terminal.

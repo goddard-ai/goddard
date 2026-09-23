@@ -9,7 +9,7 @@
 use gpui::{Action, KeyBinding, StyledText, TextRun, actions};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
-use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef};
+use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef, RepoWorktree};
 
 use super::*;
 use crate::ui::shortcut::ShortcutHint;
@@ -91,6 +91,8 @@ enum PaletteSection {
     // Drill-in sections; they never appear in Commands view.
     Projects,
     Scripts,
+    // The run-script where-to-run step's listing; never in Commands view.
+    Worktrees,
     // The "New task in…" picker's directory listing; never in Commands view.
     Directories,
     Templates,
@@ -112,6 +114,7 @@ impl PaletteSection {
             Self::Settings => "command_palette.settings",
             Self::Projects => "command_palette.projects",
             Self::Scripts => "command_palette.scripts",
+            Self::Worktrees => "command_palette.worktrees",
             Self::Directories => "command_palette.directories",
             Self::Templates => "command_palette.templates",
             Self::Branches => "command_palette.branches",
@@ -126,6 +129,7 @@ impl PaletteSection {
             Self::Settings => 3,
             Self::Projects
             | Self::Scripts
+            | Self::Worktrees
             | Self::Directories
             | Self::Templates
             | Self::Branches => 4,
@@ -239,9 +243,16 @@ enum PaletteAction {
     ToggleAutoRestart,
     OpenRunScript,
     ChooseRunScriptProject(Uuid),
+    /// Script picked — advance to the where-to-run step, or run straight
+    /// through when it would offer a single location.
+    ChooseRunScriptLocation {
+        project: Uuid,
+        script: run_script::ProjectScript,
+    },
     RunScript {
         project: Uuid,
         script: run_script::ProjectScript,
+        location: run_script::ScriptRunTarget,
     },
     CreateGitHubIssue,
     ChooseIssueProject(Uuid),
@@ -268,6 +279,9 @@ enum CommandPaletteView {
     ResumeProviders,
     RunScriptProjects,
     RunScripts,
+    /// The run-script flow's where-to-run step: the task's workspace, the
+    /// local checkout, and the repo's foreign worktrees.
+    RunScriptWorktrees,
     /// The "Remove project…" project picker.
     RemoveProject,
     ShareFileFriends,
@@ -570,6 +584,12 @@ pub(super) struct CommandPaletteUi {
     run_script_project: Option<Uuid>,
     run_scripts: Vec<run_script::ProjectScript>,
     run_scripts_pending: bool,
+    /// The script awaiting a location pick, and the project's worktree
+    /// scan — fetched alongside the script scan so the where-to-run step is
+    /// usually warm by the time a script is picked.
+    run_script_script: Option<run_script::ProjectScript>,
+    run_script_worktrees: Vec<RepoWorktree>,
+    run_script_worktrees_pending: bool,
     run_script_generation: u64,
     /// The daemon's directory scan behind the "New task in…" picker, fetched
     /// once per view entry and filtered per keystroke.
@@ -628,6 +648,9 @@ impl CommandPaletteUi {
             run_script_project: None,
             run_scripts: Vec::new(),
             run_scripts_pending: false,
+            run_script_script: None,
+            run_script_worktrees: Vec::new(),
+            run_script_worktrees_pending: false,
             run_script_generation: 0,
             new_task_directories: Vec::new(),
             new_task_directories_pending: false,
@@ -783,6 +806,9 @@ impl Waku {
         self.command_palette.run_script_project = None;
         self.command_palette.run_scripts.clear();
         self.command_palette.run_scripts_pending = false;
+        self.command_palette.run_script_script = None;
+        self.command_palette.run_script_worktrees.clear();
+        self.command_palette.run_script_worktrees_pending = false;
         self.command_palette.run_script_generation =
             self.command_palette.run_script_generation.wrapping_add(1);
         self.command_palette.new_task_directories.clear();
@@ -855,6 +881,7 @@ impl Waku {
             .provider_session_generation
             .wrapping_add(1);
         self.command_palette.run_scripts_pending = false;
+        self.command_palette.run_script_worktrees_pending = false;
         self.command_palette.run_script_generation =
             self.command_palette.run_script_generation.wrapping_add(1);
         self.command_palette.new_task_directories_pending = false;
@@ -905,6 +932,9 @@ impl Waku {
         self.command_palette.run_script_project = None;
         self.command_palette.run_scripts.clear();
         self.command_palette.run_scripts_pending = false;
+        self.command_palette.run_script_script = None;
+        self.command_palette.run_script_worktrees.clear();
+        self.command_palette.run_script_worktrees_pending = false;
         self.command_palette.run_script_generation =
             self.command_palette.run_script_generation.wrapping_add(1);
         self.command_palette.search.update(cx, |input, cx| {
@@ -948,7 +978,14 @@ impl Waku {
 
     /// The project is picked: swap the picker to its scripts and scan its
     /// root off the UI thread, generation-guarded like the resume fetch.
-    fn open_command_palette_run_scripts_view(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+    /// The next step's worktree scan rides along so it is usually resolved
+    /// before a script is picked.
+    fn open_command_palette_run_scripts_view(
+        &mut self,
+        project_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(project) = self
             .state
             .projects
@@ -960,8 +997,11 @@ impl Waku {
         let root = project.path.clone();
         self.command_palette.view = CommandPaletteView::RunScripts;
         self.command_palette.run_script_project = Some(project_id);
+        self.command_palette.run_script_script = None;
         self.command_palette.run_scripts.clear();
         self.command_palette.run_scripts_pending = true;
+        self.command_palette.run_script_worktrees.clear();
+        self.command_palette.run_script_worktrees_pending = true;
         self.command_palette.run_script_generation =
             self.command_palette.run_script_generation.wrapping_add(1);
         let generation = self.command_palette.run_script_generation;
@@ -972,10 +1012,11 @@ impl Waku {
         self.refresh_command_palette_results("", false, cx);
         cx.notify();
 
+        let script_root = root.clone();
         cx.spawn(async move |waku, cx| {
             let scripts = cx
                 .background_executor()
-                .spawn(async move { run_script::discover_project_scripts(&root) })
+                .spawn(async move { run_script::discover_project_scripts(&script_root) })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
                 if !waku.command_palette.open
@@ -994,6 +1035,144 @@ impl Waku {
             });
         })
         .detach();
+
+        let workspace = self.workspace_client_for_project(project_id);
+        let window_handle = window.window_handle();
+        cx.spawn(async move |waku, cx| {
+            let worktrees = cx
+                .background_executor()
+                .spawn(async move {
+                    let entries = workspace
+                        .and_then(|workspace| {
+                            workspace
+                                .request(waku_client::WorkspaceOperation::ListWorktrees {
+                                    cwd: root.clone(),
+                                })
+                                .ok()
+                        })
+                        .and_then(|result| match result {
+                            waku_client::WorkspaceResult::RepoWorktrees { entries } => entries,
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    // A linked worktree whose project directory is missing
+                    // could only host a failing run — drop it here rather
+                    // than stat it on the picker's keystroke path.
+                    let main = entries
+                        .iter()
+                        .find(|worktree| worktree.is_main)
+                        .map(|worktree| worktree.path.clone());
+                    let relative = main
+                        .as_deref()
+                        .and_then(|main| root.strip_prefix(main).ok())
+                        .map(Path::to_path_buf);
+                    entries
+                        .into_iter()
+                        .filter(|worktree| {
+                            worktree.is_main
+                                || match &relative {
+                                    Some(relative) => worktree.path.join(relative).is_dir(),
+                                    None => worktree.path.is_dir(),
+                                }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            let outcome = waku.update(cx, |waku, cx| {
+                if !waku.command_palette.open
+                    || waku.command_palette.run_script_generation != generation
+                    || waku.command_palette.run_script_project != Some(project_id)
+                {
+                    return None;
+                }
+                waku.command_palette.run_script_worktrees_pending = false;
+                waku.command_palette.run_script_worktrees = worktrees;
+                if waku.command_palette.view != CommandPaletteView::RunScriptWorktrees {
+                    return None;
+                }
+                let locations = waku.run_script_locations(project_id);
+                if locations.len() <= 1 {
+                    return waku
+                        .command_palette
+                        .run_script_script
+                        .clone()
+                        .map(|script| (script, locations.into_iter().next()));
+                }
+                let query = waku.command_palette.search.read(cx).content().to_owned();
+                waku.refresh_command_palette_results(&query, false, cx);
+                cx.notify();
+                None
+            });
+            let Ok(Some((script, location))) = outcome else {
+                return;
+            };
+            // The picker was waiting on this scan and it still offers a
+            // single location — run it rather than park on a one-row step.
+            let _ = window_handle.update(cx, |_, window, cx| {
+                let _ = waku.update(cx, |waku, cx| {
+                    waku.close_command_palette(window, cx);
+                    let Some(location) = location else {
+                        return;
+                    };
+                    waku.run_project_script(project_id, script, location.target, window, cx);
+                });
+            });
+        })
+        .detach();
+    }
+
+    /// The script is picked: when the repo offers more than one place to
+    /// run it the where-to-run step asks which — the task's own workspace
+    /// leads, then the local checkout, then the repo's foreign worktrees.
+    /// A single-location step skips itself and runs like the pick always
+    /// did; a still-pending scan shows the step's loading row and its
+    /// resolution makes the same call.
+    fn open_command_palette_run_script_worktrees_view(
+        &mut self,
+        project_id: Uuid,
+        script: run_script::ProjectScript,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.command_palette.run_script_script = Some(script.clone());
+        if !self.command_palette.run_script_worktrees_pending {
+            let locations = self.run_script_locations(project_id);
+            if locations.len() <= 1 {
+                self.close_command_palette(window, cx);
+                if let Some(location) = locations.into_iter().next() {
+                    self.run_project_script(project_id, script, location.target, window, cx);
+                }
+                return;
+            }
+        }
+        self.command_palette.view = CommandPaletteView::RunScriptWorktrees;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.run_script_worktree_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    /// The where-to-run rows for the picked project — see
+    /// `run_script::script_run_locations` for the ordering and filtering.
+    fn run_script_locations(&self, project_id: Uuid) -> Vec<run_script::ScriptRunLocation> {
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+        else {
+            return Vec::new();
+        };
+        run_script::script_run_locations(
+            project.id,
+            &project.path,
+            self.selected_session(),
+            &self.state.sessions,
+            &self.command_palette.run_script_worktrees,
+            self.home_directory.as_deref(),
+        )
     }
 
     /// The "Change base branch" drill-in: snapshot the composer session's
@@ -1605,6 +1784,15 @@ impl Waku {
             CommandPaletteView::RunScripts => {
                 self.open_command_palette_run_script_projects_view(cx)
             }
+            // Esc on the where-to-run step backs up to the script step.
+            CommandPaletteView::RunScriptWorktrees => {
+                match self.command_palette.run_script_project {
+                    Some(project_id) => {
+                        self.open_command_palette_run_scripts_view(project_id, window, cx)
+                    }
+                    None => self.leave_command_palette_drill_in_view(cx),
+                }
+            }
             CommandPaletteView::RemoveProject => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjects => {
                 self.leave_command_palette_drill_in_view(cx)
@@ -1633,6 +1821,9 @@ impl Waku {
                 tr!("command_palette.run_script_project_placeholder")
             }
             CommandPaletteView::RunScripts => tr!("command_palette.run_script_placeholder"),
+            CommandPaletteView::RunScriptWorktrees => {
+                tr!("command_palette.run_script_worktree_placeholder")
+            }
             CommandPaletteView::RemoveProject => tr!("command_palette.remove_project_placeholder"),
             CommandPaletteView::ShareProjects => tr!("command_palette.share_project_placeholder"),
             CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjectFriends(_) => {
@@ -1683,6 +1874,7 @@ impl Waku {
                 | CommandPaletteView::ResumeProviders
                 | CommandPaletteView::RunScriptProjects
                 | CommandPaletteView::RunScripts
+                | CommandPaletteView::RunScriptWorktrees
                 | CommandPaletteView::RemoveProject
                 | CommandPaletteView::ShareFileFriends
                 | CommandPaletteView::ShareProjects
@@ -3069,7 +3261,7 @@ impl Waku {
                 )),
                 icon: PaletteIcon::Asset(script.source.icon()),
                 shortcut: None,
-                action: PaletteAction::RunScript {
+                action: PaletteAction::ChooseRunScriptLocation {
                     project: project_id,
                     script: script.clone(),
                 },
@@ -3081,6 +3273,35 @@ impl Waku {
                     script.detail,
                     script.source.label()
                 ),
+                order,
+                recency: 0,
+            })
+            .collect()
+    }
+
+    fn command_palette_run_script_worktree_candidates(&self) -> Vec<CommandPaletteItem> {
+        let Some(project_id) = self.command_palette.run_script_project else {
+            return Vec::new();
+        };
+        let Some(script) = self.command_palette.run_script_script.clone() else {
+            return Vec::new();
+        };
+        self.run_script_locations(project_id)
+            .into_iter()
+            .enumerate()
+            .map(|(order, location)| CommandPaletteItem {
+                section: PaletteSection::Worktrees,
+                search_text: location.search_text,
+                label: location.label,
+                detail: Some(location.detail),
+                icon: PaletteIcon::Asset(location.icon),
+                shortcut: None,
+                action: PaletteAction::RunScript {
+                    project: project_id,
+                    script: script.clone(),
+                    location: location.target,
+                },
+                content_match: None,
                 order,
                 recency: 0,
             })
@@ -3204,6 +3425,28 @@ impl Waku {
             candidates = self.score_run_script_items(candidates, query);
         }
         self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
+    }
+
+    fn refresh_command_palette_run_script_worktree_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_run_script_worktree_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        // The first row is the task's own workspace — or the checkout when
+        // there is none — so a bare Enter takes the default.
         self.finish_drill_in_refresh(selected_action.flatten(), None);
     }
 
@@ -3669,6 +3912,10 @@ impl Waku {
             }
             CommandPaletteView::RunScripts => {
                 self.refresh_command_palette_run_script_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::RunScriptWorktrees => {
+                self.refresh_command_palette_run_script_worktree_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::RemoveProject => {
@@ -4174,7 +4421,13 @@ impl Waku {
                 return;
             }
             PaletteAction::ChooseRunScriptProject(project_id) => {
-                self.open_command_palette_run_scripts_view(project_id, cx);
+                self.open_command_palette_run_scripts_view(project_id, window, cx);
+                return;
+            }
+            PaletteAction::ChooseRunScriptLocation { project, script } => {
+                self.open_command_palette_run_script_worktrees_view(
+                    project, script, window, cx,
+                );
                 return;
             }
             PaletteAction::CreateGitHubIssue => {
@@ -4451,9 +4704,13 @@ impl Waku {
                 element_inspector::start(element_inspector::InspectorMode::Colors, window, cx);
             }
             PaletteAction::ToggleAutoRestart => self.toggle_auto_restart(cx),
-            PaletteAction::RunScript { project, script } => {
+            PaletteAction::RunScript {
+                project,
+                script,
+                location,
+            } => {
                 self.settings_page = None;
-                self.run_project_script(project, script, window, cx);
+                self.run_project_script(project, script, location, window, cx);
             }
             PaletteAction::ChooseIssueTemplate(template) => match template.kind {
                 waku_protocol::workspace::IssueTemplateKind::Markdown => {
@@ -4479,6 +4736,7 @@ impl Waku {
             | PaletteAction::ResumeProviderSession(..)
             | PaletteAction::OpenRunScript
             | PaletteAction::ChooseRunScriptProject(_)
+            | PaletteAction::ChooseRunScriptLocation { .. }
             | PaletteAction::OpenRemoveProject
             | PaletteAction::ShareFileOrFolder
             | PaletteAction::ShareProject
@@ -4552,6 +4810,9 @@ impl Waku {
             CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
             CommandPaletteView::RunScripts => self.command_palette.run_scripts_pending,
+            CommandPaletteView::RunScriptWorktrees => {
+                self.command_palette.run_script_worktrees_pending
+            }
             CommandPaletteView::NewTaskIn => self.command_palette.new_task_directories_pending,
             CommandPaletteView::IssueTemplates => self.command_palette.issue_templates_pending,
             CommandPaletteView::RebaseBase => self
@@ -4582,6 +4843,9 @@ impl Waku {
             || (run_scripts_view
                 && self.command_palette.results.is_empty()
                 && self.command_palette.run_scripts_pending)
+            || (view == CommandPaletteView::RunScriptWorktrees
+                && self.command_palette.results.is_empty()
+                && self.command_palette.run_script_worktrees_pending)
             || (view == CommandPaletteView::NewTaskIn
                 && self.command_palette.results.is_empty()
                 && self.command_palette.new_task_directories_pending)
@@ -4619,6 +4883,8 @@ impl Waku {
                     "icons/loader-circle.svg",
                     if run_scripts_view {
                         tr!("command_palette.loading_scripts")
+                    } else if view == CommandPaletteView::RunScriptWorktrees {
+                        tr!("command_palette.loading_worktrees")
                     } else if view == CommandPaletteView::NewTaskIn {
                         tr!("command_palette.loading_directories")
                     } else if issue_templates_view {

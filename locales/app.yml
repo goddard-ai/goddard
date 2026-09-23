@@ -199,12 +199,22 @@ command_palette.projects:
   en: Projects
 command_palette.scripts:
   en: Scripts
+command_palette.worktrees:
+  en: Worktrees
 command_palette.run_script_project_placeholder:
   en: Select a project…
 command_palette.run_script_placeholder:
   en: Select a script to run…
+command_palette.run_script_worktree_placeholder:
+  en: Select a worktree…
 command_palette.loading_scripts:
   en: Looking for scripts…
+command_palette.loading_worktrees:
+  en: Looking for worktrees…
+command_palette.run_script_task_worktree:
+  en: This task's worktree
+command_palette.run_script_local_checkout:
+  en: Local checkout
 command_palette.no_projects:
   en: No projects
 command_palette.no_projects_hint:

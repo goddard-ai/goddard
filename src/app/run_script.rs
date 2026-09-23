@@ -1,12 +1,16 @@
-//! The "Run project script" flow behind ⌘R. The palette drills in two
-//! steps — a project, then one of the scripts declared at its root
-//! (package.json, makefile, justfile) — and the pick lands here: a terminal
-//! running the script. A session whose project matches hosts the run in its
-//! right panel; anything else gets a full-width standalone terminal.
+//! The "Run project script" flow behind ⌘R. The palette drills in three
+//! steps — a project, one of the scripts declared at its root (package.json,
+//! makefile, justfile), then where to run it — and the pick lands here: a
+//! terminal running the script. The location step leads with the selected
+//! task's own workspace — its worktree, or the checkout it is bound to —
+//! hosted in its right panel; the local checkout and worktrees Goddard
+//! doesn't own get full-width standalone terminals. A step that would offer
+//! a single location skips itself.
 
 use std::collections::HashSet;
 
 use super::*;
+use waku_client::RepoWorktree;
 
 /// A file kind the picker reads scripts from, in listing order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -259,16 +263,141 @@ pub(super) fn run_script_project_order(
     ordered
 }
 
+/// Where a picked script runs. `SessionWorkspace` keeps the right-panel
+/// treatment the flow has always had for the selected task's own workspace;
+/// `Standalone` opens a full-width terminal rooted at the path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum ScriptRunTarget {
+    SessionWorkspace,
+    Standalone(PathBuf),
+}
+
+/// One row in the where-to-run step.
+pub(super) struct ScriptRunLocation {
+    pub label: String,
+    pub detail: String,
+    pub search_text: String,
+    pub icon: &'static str,
+    pub target: ScriptRunTarget,
+}
+
+fn local_checkout_location(
+    project_path: &Path,
+    target: ScriptRunTarget,
+    home: Option<&Path>,
+) -> ScriptRunLocation {
+    ScriptRunLocation {
+        label: tr!("command_palette.run_script_local_checkout"),
+        detail: settings::abbreviate_home_path(project_path, home),
+        search_text: format!("local checkout {}", project_path.display()),
+        icon: "icons/folder.svg",
+        target,
+    }
+}
+
+/// The where-to-run step's rows: the selected task's own workspace first
+/// when it sits in this project — its worktree, or the checkout it is bound
+/// to — then the local checkout, then every worktree `git worktree list`
+/// reports that Goddard doesn't own. A worktree is Goddard's when a task's
+/// workspace lives inside it or it sits under the managed
+/// `../worktrees/<repository>` namespace, orphaned tasks included. The
+/// `worktrees` entries arrive filtered to checkouts whose project directory
+/// exists.
+pub(super) fn script_run_locations(
+    project_id: Uuid,
+    project_path: &Path,
+    selected: Option<&AgentSession>,
+    sessions: &[AgentSession],
+    worktrees: &[RepoWorktree],
+    home: Option<&Path>,
+) -> Vec<ScriptRunLocation> {
+    let mut locations = Vec::new();
+    let session = selected.filter(|session| session.project_id == project_id);
+    match session.map(|session| &session.workspace) {
+        Some(SessionWorkspace::Worktree { path, name, .. }) => {
+            locations.push(ScriptRunLocation {
+                label: tr!("command_palette.run_script_task_worktree"),
+                detail: if name.is_empty() {
+                    settings::abbreviate_home_path(path, home)
+                } else {
+                    format!("{name} · {}", settings::abbreviate_home_path(path, home))
+                },
+                search_text: format!("task worktree {name} {}", path.display()),
+                icon: "icons/git-branch.svg",
+                target: ScriptRunTarget::SessionWorkspace,
+            });
+            locations.push(local_checkout_location(
+                project_path,
+                ScriptRunTarget::Standalone(project_path.to_path_buf()),
+                home,
+            ));
+        }
+        _ => locations.push(local_checkout_location(
+            project_path,
+            if session.is_some() {
+                ScriptRunTarget::SessionWorkspace
+            } else {
+                ScriptRunTarget::Standalone(project_path.to_path_buf())
+            },
+            home,
+        )),
+    }
+    let main = worktrees.iter().find(|worktree| worktree.is_main);
+    let project_relative = main.and_then(|main| project_path.strip_prefix(&main.path).ok());
+    let managed_root = main.and_then(|main| {
+        let name = main.path.file_name()?;
+        Some(main.path.parent()?.join("worktrees").join(name))
+    });
+    for worktree in worktrees.iter().filter(|worktree| !worktree.is_main) {
+        if sessions
+            .iter()
+            .filter_map(|session| session.workspace.path())
+            .any(|bound| bound.starts_with(&worktree.path))
+        {
+            continue;
+        }
+        if managed_root
+            .as_ref()
+            .is_some_and(|root| worktree.path.starts_with(root))
+        {
+            continue;
+        }
+        let root = match project_relative.filter(|relative| !relative.as_os_str().is_empty()) {
+            Some(relative) => worktree.path.join(relative),
+            None => worktree.path.clone(),
+        };
+        let label = worktree
+            .branch
+            .clone()
+            .or_else(|| {
+                worktree
+                    .path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| worktree.path.display().to_string());
+        locations.push(ScriptRunLocation {
+            search_text: format!("{label} worktree {}", worktree.path.display()),
+            label,
+            detail: settings::abbreviate_home_path(&root, home),
+            icon: "icons/git-branch.svg",
+            target: ScriptRunTarget::Standalone(root),
+        });
+    }
+    locations
+}
+
 impl Waku {
-    /// Run the picked script. When the selected task belongs to the same
-    /// project the run lands in its right panel, rooted at that task's
+    /// Run the picked script at the location the step chose. The session's
+    /// own workspace hosts the run in its right panel, rooted at that task's
     /// workspace like every other panel terminal; anything else gets a
-    /// full-width standalone terminal at the project root. The command's
+    /// full-width standalone terminal at the picked root. The command's
     /// `close_on_success` stays off, so the shell — and its output — remain.
     pub(super) fn run_project_script(
         &mut self,
         project_id: Uuid,
         script: ProjectScript,
+        target: ScriptRunTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -290,9 +419,10 @@ impl Waku {
         command.name = Some(script.name.clone());
         command.icon = script.source.command_icon();
 
-        if self
-            .selected_session()
-            .is_some_and(|session| session.project_id == project_id)
+        if target == ScriptRunTarget::SessionWorkspace
+            && self
+                .selected_session()
+                .is_some_and(|session| session.project_id == project_id)
             && self.selected_workspace_path().is_some()
         {
             let surface = RightPanelSurface::new_terminal();
@@ -326,7 +456,11 @@ impl Waku {
             self.open_right_panel_surface(surface, cx);
             return;
         }
-        if let Some(terminal_id) = self.create_terminal(project_path, None, Some(command), cx) {
+        let working_directory = match target {
+            ScriptRunTarget::SessionWorkspace => project_path,
+            ScriptRunTarget::Standalone(path) => path,
+        };
+        if let Some(terminal_id) = self.create_terminal(working_directory, None, Some(command), cx) {
             self.select_terminal(terminal_id, window, cx);
         }
     }
@@ -429,6 +563,150 @@ mod tests {
         assert_eq!(
             run_script_project_order(Some(current.id), &[recent_b.id, recent_a.id], &projects),
             [current.id, recent_b.id, recent_a.id, added.id, stale.id]
+        );
+    }
+
+    fn session(project_id: Uuid, workspace: SessionWorkspace) -> AgentSession {
+        let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+        session.workspace = workspace;
+        session
+    }
+
+    fn worktree(path: &Path, is_main: bool, branch: Option<&str>) -> RepoWorktree {
+        RepoWorktree {
+            path: path.to_path_buf(),
+            head: String::new(),
+            branch: branch.map(str::to_owned),
+            is_main,
+            dirty_files: None,
+            ahead: None,
+            behind: None,
+            last_commit_at: None,
+        }
+    }
+
+    fn targets(locations: &[ScriptRunLocation]) -> Vec<ScriptRunTarget> {
+        locations
+            .iter()
+            .map(|location| location.target.clone())
+            .collect()
+    }
+
+    #[test]
+    fn run_locations_lead_with_the_tasks_worktree_then_local_then_foreign() {
+        let project_id = Uuid::new_v4();
+        let repo = Path::new("/code/repo");
+        let managed = PathBuf::from("/code/worktrees/repo/task/repo");
+        let selected = session(
+            project_id,
+            SessionWorkspace::Worktree {
+                path: managed.clone(),
+                name: "task".into(),
+                branch: None,
+                base_branch: None,
+            },
+        );
+        let bound = session(
+            Uuid::new_v4(),
+            SessionWorkspace::Worktree {
+                path: PathBuf::from("/checkouts/bound"),
+                name: "bound".into(),
+                branch: None,
+                base_branch: None,
+            },
+        );
+        let sessions = [selected, bound];
+        let worktrees = [
+            worktree(repo, true, Some("main")),
+            worktree(&managed, false, None),
+            worktree(Path::new("/checkouts/bound"), false, Some("bound")),
+            worktree(Path::new("/checkouts/feature"), false, Some("feature")),
+        ];
+        let locations = script_run_locations(
+            project_id,
+            repo,
+            sessions.first(),
+            &sessions,
+            &worktrees,
+            None,
+        );
+        assert_eq!(
+            targets(&locations),
+            [
+                ScriptRunTarget::SessionWorkspace,
+                ScriptRunTarget::Standalone(repo.to_path_buf()),
+                ScriptRunTarget::Standalone(PathBuf::from("/checkouts/feature")),
+            ]
+        );
+        assert_eq!(locations[2].label, "feature");
+    }
+
+    #[test]
+    fn run_locations_hide_orphaned_managed_worktrees() {
+        let project_id = Uuid::new_v4();
+        let repo = Path::new("/code/repo");
+        // No task is bound here anymore — the managed namespace still marks
+        // it as Goddard's, so it is not a foreign checkout.
+        let orphaned = PathBuf::from("/code/worktrees/repo/gone/repo");
+        let worktrees = [
+            worktree(repo, true, Some("main")),
+            worktree(&orphaned, false, None),
+            worktree(Path::new("/checkouts/feature"), false, Some("feature")),
+        ];
+        let locations =
+            script_run_locations(project_id, repo, None, &[], &worktrees, None);
+        assert_eq!(
+            targets(&locations),
+            [
+                ScriptRunTarget::Standalone(repo.to_path_buf()),
+                ScriptRunTarget::Standalone(PathBuf::from("/checkouts/feature")),
+            ]
+        );
+    }
+
+    #[test]
+    fn run_locations_give_local_sessions_the_checkout_in_panel() {
+        let project_id = Uuid::new_v4();
+        let repo = Path::new("/repo");
+        let local = session(project_id, SessionWorkspace::Local);
+        let worktrees = [
+            worktree(repo, true, Some("main")),
+            worktree(Path::new("/checkouts/feature"), false, Some("feature")),
+        ];
+        let locations = script_run_locations(
+            project_id,
+            repo,
+            Some(&local),
+            &[local.clone()],
+            &worktrees,
+            None,
+        );
+        assert_eq!(
+            targets(&locations),
+            [
+                ScriptRunTarget::SessionWorkspace,
+                ScriptRunTarget::Standalone(PathBuf::from("/checkouts/feature")),
+            ]
+        );
+    }
+
+    #[test]
+    fn run_locations_map_subdirectory_projects_into_foreign_worktrees() {
+        let project_id = Uuid::new_v4();
+        let repo = Path::new("/repo");
+        let project = repo.join("packages/app");
+        let worktrees = [
+            worktree(repo, true, Some("main")),
+            worktree(Path::new("/checkouts/feature"), false, Some("feature")),
+        ];
+        let locations =
+            script_run_locations(project_id, &project, None, &[], &worktrees, None);
+        assert_eq!(
+            targets(&locations),
+            [
+                ScriptRunTarget::Standalone(project.clone()),
+                ScriptRunTarget::Standalone(PathBuf::from("/checkouts/feature/packages/app")),
+            ]
         );
     }
 }
