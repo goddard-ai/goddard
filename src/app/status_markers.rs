@@ -20,6 +20,8 @@ use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{ActivityKind, AgentSession, MessageRole, TurnStatus};
 
+use crate::ui::shortcut::ShortcutHint;
+
 use super::*;
 
 /// One status the evaluation model scores each settled turn against. `id` is
@@ -777,7 +779,11 @@ fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) ->
 impl Waku {
     /// Status-driven actions take the composer suggestion slot when the
     /// latest settled turn clearly asks for a response from the user.
-    pub(super) fn render_status_suggestion(&self, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn render_status_suggestion(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         if !self.state.status_markers_enabled {
             return None;
         }
@@ -791,6 +797,16 @@ impl Waku {
         if actions.is_empty() {
             return None;
         }
+        // ⌘⏎ fires the leftmost chip while the composer is empty — the
+        // chord is advertised there exactly when it is bound, resolved as
+        // if the field were focused (the binding lives on the TextInput
+        // context).
+        let shortcut_label = if self.composer_is_empty(cx) {
+            ShortcutHint::action_in(&crate::input::SubmitSteer, &self.composer_focus(cx))
+                .resolve(window, cx)
+        } else {
+            None
+        };
         let theme = Theme::current(cx);
         Some(
             div().w_full().h(px(0.0)).relative().child(
@@ -903,6 +919,21 @@ impl Waku {
                                     .hover(|element| element.bg(theme.overlay_strong))
                                     .child(icon(icon_path, 11.0, theme.text_secondary))
                                     .child(display_label)
+                                    .when_some(
+                                        if index == 0 {
+                                            shortcut_label.clone()
+                                        } else {
+                                            None
+                                        },
+                                        |chip, label| {
+                                            chip.child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_color(theme.text_tertiary)
+                                                    .child(label),
+                                            )
+                                        },
+                                    )
                                     .tooltip(Tooltip::text(tooltip))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.accept_status_suggestion(turn_id, &action, window, cx);
@@ -929,7 +960,7 @@ impl Waku {
         )
     }
 
-    fn accept_status_suggestion(
+    pub(super) fn accept_status_suggestion(
         &mut self,
         turn_id: Uuid,
         action: &StatusSuggestedAction,

@@ -25,6 +25,9 @@ use waku_client::git::PullStrategy;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{AgentSession, SessionWorkspace};
 
+use crate::ui::shortcut::ShortcutHint;
+
+use super::status_markers::StatusSuggestedAction;
 use super::*;
 
 /// One consequential user action, recorded at its dispatch site. The
@@ -760,19 +763,32 @@ impl Waku {
     /// space, so a chip appearing or clearing never moves the composer or
     /// the transcript. The chip hangs off its bottom edge, painted over the
     /// transcript's bottom padding.
-    pub(super) fn render_action_suggestion(&self, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn render_action_suggestion(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         if self
             .composer_session()
             .and_then(|session| session.turns.last())
             .is_some_and(|turn| self.turn_status_suggestions.contains_key(&turn.id))
         {
-            return self.render_status_suggestion(cx);
+            return self.render_status_suggestion(window, cx);
         }
         let suggestion = self.action_suggestion.as_ref()?;
         if self.composer_session().map(|session| session.id) != Some(suggestion.session_id) {
             return None;
         }
         let (icon_path, label) = self.suggestion_parts(suggestion.action)?;
+        // ⌘⏎ fires the chip while the composer is empty — advertise the
+        // chord exactly when it is bound, resolved as if the field were
+        // focused (the binding lives on the TextInput context).
+        let shortcut_label = if self.composer_is_empty(cx) {
+            ShortcutHint::action_in(&crate::input::SubmitSteer, &self.composer_focus(cx))
+                .resolve(window, cx)
+        } else {
+            None
+        };
         let tooltip = label.clone();
         let display_label: String = label.replace('\n', " ").chars().take(96).collect();
         let display_label = if label.chars().count() > 96 || label.contains('\n') {
@@ -816,6 +832,14 @@ impl Waku {
                                     .hover(|element| element.bg(theme.overlay_strong))
                                     .child(icon(icon_path, 11.0, theme.text_secondary))
                                     .child(display_label)
+                                    .when_some(shortcut_label, |chip, label| {
+                                        chip.child(
+                                            div()
+                                                .flex_none()
+                                                .text_color(theme.text_tertiary)
+                                                .child(label),
+                                        )
+                                    })
                                     .tooltip(Tooltip::text(tooltip))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.accept_action_suggestion(window, cx);
@@ -882,6 +906,72 @@ impl Waku {
             }
             None => {}
         }
+    }
+
+    /// ⌘⏎ on an empty composer fires whatever the suggestion lane is
+    /// showing, with the same layering `render_action_suggestion` draws:
+    /// a settled turn's status row claims the slot first and its leftmost
+    /// chip is the one the chord hits, the predicted action chips in only
+    /// when no status row does. Returns whether a suggestion fired —
+    /// `false` means the keystroke falls through to its usual empty-draft
+    /// meaning.
+    ///
+    /// Dispatch defers a tick: the caller is a `ComposerEvent` subscription
+    /// that already holds this entity mutably, and the accept paths need a
+    /// `&mut Window` besides — both resolve once the notification returns.
+    pub(super) fn accept_displayed_suggestion(&mut self, cx: &mut Context<Self>) -> bool {
+        enum Displayed {
+            Status(Uuid, StatusSuggestedAction),
+            Action,
+        }
+        let displayed = self
+            .composer_session()
+            .and_then(|session| session.turns.last())
+            .filter(|turn| {
+                self.state.status_markers_enabled && turn.status == TurnStatus::Completed
+            })
+            .and_then(|turn| {
+                self.turn_status_suggestions
+                    .get(&turn.id)
+                    .and_then(|actions| actions.first())
+                    .map(|action| Displayed::Status(turn.id, action.clone()))
+            });
+        let displayed = match displayed {
+            Some(displayed) => Some(displayed),
+            // The status slot only yields to the prediction when no entry
+            // claims it — same gate as the render path.
+            None if self
+                .composer_session()
+                .and_then(|session| session.turns.last())
+                .is_some_and(|turn| self.turn_status_suggestions.contains_key(&turn.id)) =>
+            {
+                None
+            }
+            None => self
+                .action_suggestion
+                .as_ref()
+                .filter(|suggestion| {
+                    self.composer_session().map(|session| session.id) == Some(suggestion.session_id)
+                        && self.suggestion_parts(&suggestion.action).is_some()
+                })
+                .map(|_| Displayed::Action),
+        };
+        let Some(displayed) = displayed else {
+            return false;
+        };
+        let waku = cx.entity();
+        let window_handle = self.window_handle;
+        cx.defer(move |cx| {
+            let _ = window_handle.update(cx, move |_, window, cx| {
+                let _ = waku.update(cx, |this, cx| match &displayed {
+                    Displayed::Status(turn_id, action) => {
+                        this.accept_status_suggestion(*turn_id, action, window, cx);
+                    }
+                    Displayed::Action => this.accept_action_suggestion(window, cx),
+                });
+            });
+        });
+        true
     }
 }
 

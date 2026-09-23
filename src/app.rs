@@ -4997,7 +4997,13 @@ impl Waku {
                                 this.steer_big_picture_submission(submission, cx);
                             }
                         } else if empty_draft {
-                            if this
+                            if !this.big_picture.is_open()
+                                && this.accept_displayed_suggestion(cx)
+                            {
+                                // A suggestion chip owns ⌘⏎ while the
+                                // composer is empty — its hint advertises
+                                // the chord.
+                            } else if this
                                 .composer_session()
                                 .is_some_and(composer::session_awaits_continue)
                             {

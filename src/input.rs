@@ -3977,7 +3977,8 @@ pub enum ComposerEvent {
     /// instead of queueing it behind the turn. An empty value means only
     /// the field held no text — staged attachments or annotations may
     /// still make a real draft, and with nothing staged at all the owner
-    /// steers the oldest queued follow-up instead.
+    /// fires the displayed suggestion chip when one is up, otherwise
+    /// steering the oldest queued follow-up instead.
     SubmitSteer(String),
     Focus,
     Edited,

@@ -4733,6 +4733,17 @@ impl Waku {
         self.composer_session().map(|session| session.id)
     }
 
+    /// Whether the composer holds no draft at all — no text, attachments,
+    /// pasted atoms, or staged annotations. ⌘⏎ belongs to the suggestion
+    /// chip only while this holds; the `SubmitSteer` handler runs the same
+    /// predicate against the submitted text.
+    pub(super) fn composer_is_empty(&self, cx: &App) -> bool {
+        self.composer.read(cx).content(cx).trim().is_empty()
+            && self.composer_attachments.is_empty()
+            && self.composer_inline_atoms.is_empty()
+            && !self.has_annotations()
+    }
+
     /// The mutable counterpart of [`Self::composer_session`]: writes land on
     /// the armed card's session while the overlay is open — and on no session
     /// at all when nothing is armed — the selected session otherwise.
