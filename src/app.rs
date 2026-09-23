@@ -2516,6 +2516,9 @@ pub struct Waku {
     /// Pivot a ⌘⇧-click range grows from: the last row a modified click
     /// touched, kept even when a toggle removed it from the set.
     sidebar_multi_selection_anchor: Option<Uuid>,
+    /// Short accent wash on a ⌘D jump past the adjacent sidebar sessions.
+    sidebar_jump_flash: Option<(Uuid, u64)>,
+    sidebar_jump_flash_generation: u64,
     /// One stable field reused across sidebar rows so virtualization never
     /// replaces the focused editor while a rename is in progress.
     session_rename_input: Entity<TextInput>,
@@ -5793,6 +5796,8 @@ impl Waku {
                 terminal_rename: None,
                 sidebar_multi_selection: HashSet::new(),
                 sidebar_multi_selection_anchor: None,
+                sidebar_jump_flash: None,
+                sidebar_jump_flash_generation: 0,
                 session_rename_input,
                 // The Terminals group starts folded every launch — its rows
                 // are opt-in, unlike the session history below them.

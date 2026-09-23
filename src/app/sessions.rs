@@ -3159,7 +3159,30 @@ impl Waku {
             None,
         );
         match target {
-            Some(target) => self.go_to_unread_target(target, window, cx),
+            Some(target) => {
+                self.sidebar_jump_flash_generation =
+                    self.sidebar_jump_flash_generation.wrapping_add(1);
+                let generation = self.sidebar_jump_flash_generation;
+                self.sidebar_jump_flash = (self.sidebar_visible
+                    && !self.big_picture.is_open()
+                    && sidebar::sidebar_jump_skips_session(&rows, pending.or(selected), target))
+                    .then_some((target, generation));
+                if self.sidebar_jump_flash.is_some() {
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(450))
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            if this.sidebar_jump_flash == Some((target, generation)) {
+                                this.sidebar_jump_flash = None;
+                                cx.notify();
+                            }
+                        });
+                    })
+                    .detach();
+                }
+                self.go_to_unread_target(target, window, cx);
+            }
             None => self.new_session_action(&NewSession, window, cx),
         }
     }

@@ -766,6 +766,30 @@ pub(super) fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -
         .position(|row| *row == SidebarRow::Session(session_id))
 }
 
+/// Headers, spacers, and folded-group controls are not sessions in the list.
+pub(super) fn sidebar_jump_skips_session(
+    rows: &[SidebarRow],
+    from: Option<Uuid>,
+    target: Uuid,
+) -> bool {
+    let sessions: Vec<_> = rows
+        .iter()
+        .filter_map(|row| match row {
+            SidebarRow::Session(id) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    let Some(from_index) =
+        from.and_then(|id| sessions.iter().position(|candidate| *candidate == id))
+    else {
+        return false;
+    };
+    sessions
+        .iter()
+        .position(|id| *id == target)
+        .is_some_and(|to_index| from_index.abs_diff(to_index) > 1)
+}
+
 /// The first session row at-or-below `position` that `is_available` accepts,
 /// scanning downward and wrapping to the top. Non-session rows are skipped.
 pub(super) fn next_sidebar_session_in_rows(
@@ -4444,6 +4468,30 @@ impl Waku {
             .w_full()
             .pb(px(SIDEBAR_SESSION_ROW_GAP))
             .child(row)
+            .when(
+                selected && self.sidebar_jump_flash.is_some_and(|(id, _)| id == session_id),
+                |element| {
+                    let generation = self.sidebar_jump_flash.unwrap().1;
+                    let wash = div()
+                        .absolute()
+                        .top_0()
+                        .bottom(px(SIDEBAR_SESSION_ROW_GAP))
+                        .left_0()
+                        .right_0()
+                        .rounded(px(9.0))
+                        .bg(theme.accent.opacity(0.24));
+                    element.child(if cx.reduce_motion() {
+                        wash.into_any_element()
+                    } else {
+                        wash.with_animation(
+                            SharedString::from(format!("sidebar-jump-flash-{generation}")),
+                            Animation::new(Duration::from_millis(450)),
+                            |wash, delta| wash.opacity(1.0 - delta),
+                        )
+                        .into_any_element()
+                    })
+                },
+            )
             .when(grouped_by_project, |element| {
                 element.child(
                     div()
@@ -5546,6 +5594,25 @@ pub(super) fn sidebar_session_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jump_flash_uses_session_neighbors_across_group_headers() {
+        let first = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+        let third = Uuid::from_u128(3);
+        let rows = [
+            SidebarRow::Session(first),
+            SidebarRow::GroupSpacer,
+            SidebarRow::Header(SidebarGroup::Date(SessionDateGroup::Yesterday)),
+            SidebarRow::Session(second),
+            SidebarRow::Session(third),
+        ];
+        assert!(!sidebar_jump_skips_session(&rows, Some(first), second));
+        assert!(!sidebar_jump_skips_session(&rows, Some(third), second));
+        assert!(sidebar_jump_skips_session(&rows, Some(first), third));
+        assert!(sidebar_jump_skips_session(&rows, Some(third), first));
+        assert!(!sidebar_jump_skips_session(&rows, None, third));
+    }
 
     #[test]
     fn groups_sessions_by_calendar_period() {
