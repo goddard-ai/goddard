@@ -1854,7 +1854,9 @@ impl AgentSession {
             available_commands: Vec::new(),
             thread_goal: None,
             context_usage: None,
-            runtime_event_cursor: None,
+            // A list column: attach resumes replay dedup from it without
+            // hydrating the session.
+            runtime_event_cursor: self.runtime_event_cursor,
             provider_session_id: None,
             messages: Vec::new(),
             transcript_blocks: Vec::new(),

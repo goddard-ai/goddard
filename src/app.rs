@@ -40,7 +40,8 @@ use crate::model::{
     ContextUsage, DriverEvent, FavoriteModel, Message, MessageAttachment, MessageRole,
     PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe, ProviderResumeCursor,
     ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
-    ReasoningBlock, RuntimeMode, SessionEnvironment, SessionStatus, SessionWorkspace,
+    ReasoningBlock, RuntimeEventCursor, RuntimeMode, SessionEnvironment, SessionStatus,
+    SessionWorkspace,
     TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputAnswer,
     UserInputQuestion, compact_path, unix_time, unix_time_millis,
 };

@@ -71,6 +71,12 @@ export const sessions = sqliteTable(
     sideChatOf: text("side_chat_of"),
     /** Per-task grant for the owning agent to change this task's title. */
     agentRenameAllowed: integer("agent_rename_allowed", { mode: "boolean" }).notNull().default(false),
+    /**
+     * JSON-serialized RuntimeEventCursor, duplicated from `session_details.data`
+     * so a runtime attach can resume its replay dedup without hydrating the
+     * session. NULL before the session first streams events.
+     */
+    runtimeEventCursor: text("runtime_event_cursor"),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),

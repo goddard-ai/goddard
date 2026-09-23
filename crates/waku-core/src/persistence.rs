@@ -31,7 +31,7 @@ use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
     AgentSession, FavoriteModel, Message, MessageAttachment, MessageRole, Project, ProviderKind,
-    RuntimeMode, SessionWorkspace, TranscriptNotice,
+    RuntimeEventCursor, RuntimeMode, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
 use waku_protocol::custom_commands::CustomCommand;
@@ -1428,7 +1428,7 @@ impl StateStore {
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
-                        agent_rename_allowed
+                        agent_rename_allowed, runtime_event_cursor
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1454,6 +1454,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(15)?,
                     row.get::<_, Option<String>>(16)?,
                     row.get::<_, bool>(17)?,
+                    row.get::<_, Option<String>>(18)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1861,6 +1862,7 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     bool,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -1888,6 +1890,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         workspace,
         side_chat_of,
         agent_rename_allowed,
+        runtime_event_cursor,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -1896,6 +1899,10 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         .and_then(|workspace| serde_json::from_str::<SessionWorkspace>(&workspace).ok())
         .unwrap_or_default();
     workspace.backfill_worktree_name();
+    // Same duplication story as `workspace`: runtime attach resumes replay
+    // dedup from the column without hydrating the session.
+    let runtime_event_cursor = runtime_event_cursor
+        .and_then(|cursor| serde_json::from_str::<RuntimeEventCursor>(&cursor).ok());
     Some(AgentSession {
         id: Uuid::parse_str(&id).ok()?,
         title,
@@ -1940,7 +1947,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         available_commands: Vec::new(),
         thread_goal: None,
         context_usage: None,
-        runtime_event_cursor: None,
+        runtime_event_cursor,
         provider_session_id: None,
         messages: Vec::new(),
         transcript_blocks: Vec::new(),
@@ -2249,8 +2256,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
-         agent_rename_allowed
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+         agent_rename_allowed, runtime_event_cursor
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -2268,7 +2275,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          landed_at     = excluded.landed_at,
          workspace     = excluded.workspace,
          side_chat_of  = excluded.side_chat_of,
-         agent_rename_allowed = excluded.agent_rename_allowed";
+         agent_rename_allowed = excluded.agent_rename_allowed,
+         runtime_event_cursor = excluded.runtime_event_cursor";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred)
@@ -2337,6 +2345,13 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .side_chat_of
             .map_or(Value::Null, |id| Value::Text(id.to_string())),
         Value::Integer(i64::from(session.agent_rename_allowed)),
+        // NULL until the session first streams events, like the workspace
+        // column: duplicated detail so attach need not hydrate.
+        session
+            .runtime_event_cursor
+            .as_ref()
+            .and_then(|cursor| serde_json::to_string(cursor).ok())
+            .map_or(Value::Null, Value::Text),
     ]
 }
 
@@ -2754,6 +2769,33 @@ mod tests {
                 .any(|session| session.id == incognito_id),
             "an incognito session must not survive a store round-trip"
         );
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn runtime_event_cursor_round_trips_on_the_skeleton() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("Ask");
+        let cursor = RuntimeEventCursor {
+            runtime_id: Uuid::new_v4(),
+            epoch: Uuid::new_v4(),
+            sequence: 7,
+        };
+        state.sessions[0].runtime_event_cursor = Some(cursor);
+        store.save(&mut state).unwrap();
+
+        let mut restored = store_in(&directory).load().unwrap();
+        // Attach reads the cursor straight off the list row — no hydrate.
+        assert!(!restored.sessions[0].detail_loaded);
+        assert_eq!(restored.sessions[0].runtime_event_cursor, Some(cursor));
+
+        // Hydrating over it keeps the same detail value.
+        let reopened = store_in(&directory);
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert_eq!(restored.sessions[0].runtime_event_cursor, Some(cursor));
+
         fs::remove_dir_all(directory).ok();
     }
 

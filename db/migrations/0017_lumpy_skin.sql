@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `runtime_event_cursor` text;

@@ -171,14 +171,15 @@ pub(super) struct SshPrompt {
     pub input: Option<Entity<crate::input::TextInput>>,
 }
 
+/// Attaches without hydrating the session: the replay cursor arrives with
+/// the session list, and the full transcript loads only when a client opens
+/// it — one runtime reconnect must not pay a hydration per session.
 fn attach_driver(
     daemon: waku_client::DaemonSupervisor,
     session_id: Uuid,
+    replay_cursor: Option<RuntimeEventCursor>,
     event_wake: smol::channel::Sender<()>,
-) -> anyhow::Result<Option<(AgentSession, PreparedDriver)>> {
-    let Some(session) = waku_client::persistence::hydrate_session(&daemon, session_id)? else {
-        return Ok(None);
-    };
+) -> anyhow::Result<Option<PreparedDriver>> {
     let client = daemon.client();
     let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
     let waku_client::ResponsePayload::SessionRuntime {
@@ -200,10 +201,10 @@ fn attach_driver(
         runtime_id,
         supports_steer,
         supports_user_input_actions,
-        session.runtime_event_cursor,
+        replay_cursor,
         event_tx,
     )?;
-    Ok(Some((session, PreparedDriver { handle, events })))
+    Ok(Some(PreparedDriver { handle, events }))
 }
 
 fn load_remote_task_state(
@@ -2580,10 +2581,16 @@ impl Waku {
             return;
         };
         let event_wake = self.event_wake_tx.clone();
+        let replay_cursor = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.runtime_event_cursor);
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { attach_driver(daemon, session_id, event_wake) })
+                .spawn(async move { attach_driver(daemon, session_id, replay_cursor, event_wake) })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
                 waku.finish_runtime_attachment(session_id, result, cx);
@@ -3498,14 +3505,14 @@ impl Waku {
     fn finish_runtime_attachment(
         &mut self,
         session_id: Uuid,
-        result: anyhow::Result<Option<(AgentSession, PreparedDriver)>>,
+        result: anyhow::Result<Option<PreparedDriver>>,
         cx: &mut Context<Self>,
     ) {
         if !self.runtime_attach_pending.remove(&session_id) {
             return;
         }
         match result {
-            Ok(Some((session, prepared))) => {
+            Ok(Some(prepared)) => {
                 self.runtime_attach_misses.remove(&session_id);
                 let Some(index) = self
                     .state
@@ -3519,15 +3526,15 @@ impl Waku {
                     // A turn the daemon still reports running but never
                     // confirmed is the dropped-dispatch case outliving its
                     // own watchdog — an app restart abandons the timer, not
-                    // the wedge. Re-arm it on the attached projection.
-                    let unstarted_turn = session
+                    // the wedge. Re-arm it on the local projection; a session
+                    // still on its skeleton has no turn history to arm from.
+                    let unstarted_turn = self.state.sessions[index]
                         .turns
                         .last()
                         .filter(|turn| {
                             turn.status == TurnStatus::Running && !turn.provider_turn_started
                         })
                         .map(|turn| turn.id);
-                    self.state.sessions[index] = session;
                     self.install_prepared_driver(session_id, prepared);
                     self.watch_unstarted_turn(session_id, unstarted_turn, cx);
                     if self.state.selected_session == Some(session_id) {
