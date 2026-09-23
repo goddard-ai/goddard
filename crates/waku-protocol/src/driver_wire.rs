@@ -397,6 +397,9 @@ mod tests {
         let wire = event_to_wire(DriverEvent::GoalUpdated(Some(ThreadGoal {
             objective: "Ship the feature".into(),
             status: ThreadGoalStatus::UsageLimited,
+            managed_since_message: None,
+            managed_id: None,
+            managed_last_turn: None,
             token_budget: Some(50_000),
             tokens_used: 12_500,
             time_used_seconds: 90,

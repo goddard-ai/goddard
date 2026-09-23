@@ -1,4 +1,4 @@
-//! Modal editor for Codex thread goals — the `/goal` command's surface.
+//! Modal editor and provider-independent pursuit for `/goal`.
 //!
 //! The dialog reads goal state live from the selected session, so provider
 //! notifications (progress accounting, status flips) keep an open dialog
@@ -7,6 +7,9 @@
 //! draft.
 
 use gpui::{KeyBinding, actions};
+use serde_json::json;
+use std::collections::BTreeMap;
+use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 
 use crate::model::{
     GoalOperation, MessageRole, ThreadGoal, ThreadGoalStatus, TranscriptNotice,
@@ -20,6 +23,18 @@ actions!(waku_goal_dialog, [ConfirmGoalDialog, DismissGoalDialog]);
 
 const DIALOG_CONTEXT: &str = "GoalDialog";
 const DIALOG_INPUT_CONTEXT: &str = "GoalDialog > TextInput";
+const MANAGED_GOAL_PROMPT_PREFIX: &str = "Goddard goal: ";
+
+fn managed_goal_prompt(objective: &str, continuing: bool) -> String {
+    let instruction = if continuing {
+        "Build on the work already done in this task."
+    } else {
+        "Start working toward this goal."
+    };
+    format!(
+        "{MANAGED_GOAL_PROMPT_PREFIX}{objective}\n{instruction} If you need a decision or information from the user, ask and stop."
+    )
+}
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -136,6 +151,26 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.record_goal_submission(session_id, &operation, cx);
+        let native_goal = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| {
+                session.provider == ProviderKind::Codex
+                    && session
+                        .thread_goal
+                        .as_ref()
+                        .is_none_or(|goal| goal.managed_id.is_none())
+                    && self.slash_command_index.iter().any(|command| {
+                        command.name == "goal"
+                            && command.scope == crate::composer_complete::CommandScope::Builtin
+                    })
+            });
+        if !native_goal {
+            self.dispatch_managed_goal_operation(session_id, operation, cx);
+            return;
+        }
         self.begin_goal_pursuit_turn(session_id, &operation, cx);
         if let Some(runtime) = self.runtimes.get(&session_id) {
             runtime.driver.goal(operation);
@@ -146,6 +181,275 @@ impl Waku {
             .or_default()
             .push(operation);
         self.start_goal_runtime(session_id, cx);
+    }
+
+    fn dispatch_managed_goal_operation(
+        &mut self,
+        session_id: Uuid,
+        operation: GoalOperation,
+        cx: &mut Context<Self>,
+    ) {
+        let mut initial_prompt = None;
+        let Some(session) = self.state.session_mut(session_id) else {
+            return;
+        };
+        if !matches!(&operation, GoalOperation::Refresh) {
+            if let Some(goal) = session
+                .thread_goal
+                .as_ref()
+                .filter(|goal| goal.managed_id.is_some())
+            {
+                let initial = managed_goal_prompt(&goal.objective, false);
+                let continuation = managed_goal_prompt(&goal.objective, true);
+                session.queued_messages.retain(|message| {
+                    message.content != initial && message.content != continuation
+                });
+            }
+        }
+        match operation {
+            GoalOperation::Refresh => return,
+            GoalOperation::Clear => session.thread_goal = None,
+            GoalOperation::Set {
+                objective,
+                status,
+                replace,
+            } => {
+                let new_goal = objective.is_some()
+                    && (replace
+                        || session
+                            .thread_goal
+                            .as_ref()
+                            .is_none_or(|goal| goal.managed_id.is_none()));
+                if new_goal {
+                    let objective = objective.unwrap();
+                    let active = status.unwrap_or(ThreadGoalStatus::Active);
+                    session.thread_goal = Some(ThreadGoal {
+                        objective: objective.clone(),
+                        status: active,
+                        managed_since_message: Some(session.messages.len()),
+                        managed_id: Some(Uuid::new_v4()),
+                        managed_last_turn: None,
+                        token_budget: None,
+                        tokens_used: 0,
+                        time_used_seconds: 0,
+                    });
+                    if active == ThreadGoalStatus::Active {
+                        initial_prompt = Some(managed_goal_prompt(&objective, false));
+                    }
+                } else if let Some(goal) = session.thread_goal.as_mut() {
+                    if let Some(objective) = objective {
+                        goal.objective = objective;
+                        goal.managed_id = Some(Uuid::new_v4());
+                        goal.managed_since_message = Some(session.messages.len());
+                        goal.managed_last_turn = None;
+                        if goal.status == ThreadGoalStatus::Active {
+                            initial_prompt = Some(managed_goal_prompt(&goal.objective, true));
+                        }
+                    }
+                    if let Some(status) = status {
+                        if goal.status != status {
+                            goal.managed_id = Some(Uuid::new_v4());
+                        }
+                        goal.status = status;
+                        if status == ThreadGoalStatus::Active {
+                            initial_prompt = Some(managed_goal_prompt(&goal.objective, true));
+                        }
+                    }
+                }
+            }
+        }
+        session.updated_at = crate::model::unix_time();
+        self.state.mark_session_dirty(session_id);
+        self.save();
+        cx.notify();
+        if let Some(prompt) = initial_prompt {
+            self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
+        }
+    }
+
+    /// Score a settled managed goal against only the transcript created after
+    /// it was set. The request is independent of the provider's own runtime.
+    pub(super) fn note_managed_goal_settle(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        success: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.state.session_mut(session_id) else {
+            return;
+        };
+        let Some(goal) = session.thread_goal.as_mut().filter(|goal| {
+            goal.status == ThreadGoalStatus::Active
+                && goal.managed_id.is_some()
+                && goal.managed_last_turn != Some(turn_id)
+        }) else {
+            return;
+        };
+        let Some(since) = goal.managed_since_message else {
+            return;
+        };
+        if !session
+            .messages
+            .iter()
+            .skip(since)
+            .any(|message| message.turn_id == Some(turn_id))
+        {
+            return;
+        }
+        let goal_id = goal.managed_id.unwrap();
+        let first_goal_turn = session
+            .messages
+            .iter()
+            .skip(since)
+            .find_map(|message| message.turn_id);
+        let first_goal_turn_index =
+            first_goal_turn.and_then(|id| session.turns.iter().position(|turn| turn.id == id));
+        if !success || first_goal_turn_index.is_none_or(|index| session.turns.len() - index > 20) {
+            goal.status = ThreadGoalStatus::Paused;
+            goal.managed_last_turn = Some(turn_id);
+            self.state.mark_session_dirty(session_id);
+            self.save();
+            cx.notify();
+            return;
+        }
+        let objective = goal.objective.clone();
+        let context = session
+            .messages
+            .iter()
+            .skip(since)
+            .filter(|message| matches!(message.role, MessageRole::User | MessageRole::Assistant))
+            .rev()
+            .take(40)
+            .map(|message| {
+                json!({
+                    "role": if message.role == MessageRole::User { "user" } else { "assistant" },
+                    "text": message.content.chars().take(4_000).collect::<String>(),
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
+        let goal_turn_ids = session
+            .messages
+            .iter()
+            .skip(since)
+            .filter_map(|message| message.turn_id)
+            .collect::<std::collections::HashSet<_>>();
+        let activities = session.transcript_blocks.iter()
+            .filter(|block| block.turn_id.is_some_and(|id| goal_turn_ids.contains(&id)))
+            .flat_map(|block| block.activities.iter())
+            .rev().take(60).map(|activity| json!({
+                "title": activity.title,
+                "tool": activity.tool_name,
+                "failed": activity.failed,
+                "detail": activity.detail.as_deref().unwrap_or("").chars().take(250).collect::<String>(),
+                "output": activity.output.as_deref().unwrap_or("").chars().rev().take(500).collect::<String>().chars().rev().collect::<String>(),
+            })).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>();
+        let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
+            goal.status = ThreadGoalStatus::Paused;
+            goal.managed_last_turn = Some(turn_id);
+            self.state.mark_session_dirty(session_id);
+            self.save();
+            cx.notify();
+            return;
+        };
+        if daemon
+            .settings()
+            .eval
+            .as_ref()
+            .is_none_or(|eval| eval.credential_missing())
+        {
+            goal.status = ThreadGoalStatus::Paused;
+            goal.managed_last_turn = Some(turn_id);
+            self.state.mark_session_dirty(session_id);
+            self.save();
+            cx.notify();
+            return;
+        }
+        let questions = BTreeMap::from([("next".to_owned(), EvalQuestion::Choice {
+            instructions: "Given the goal and the conversation since it was set, what should happen next? Judge actual progress, not just the assistant's claim. If the user must answer a question or choose an option, select needs_input. If an external obstacle prevents progress, select blocked. Select continue only when the agent can make a useful next attempt on its own.".to_owned(),
+            criteria: BTreeMap::from([
+                ("complete".to_owned(), Some("The goal has been achieved and the result is adequately verified.".to_owned())),
+                ("continue".to_owned(), Some("Useful work remains and the agent can proceed without user input.".to_owned())),
+                ("needs_input".to_owned(), Some("A user decision or missing information is required.".to_owned())),
+                ("blocked".to_owned(), Some("An external obstacle prevents further useful work.".to_owned())),
+            ]),
+        })]);
+        cx.spawn(async move |waku, cx| {
+            let result = cx.background_executor().spawn(async move {
+                let claim = daemon.client().request(
+                    Uuid::nil(), session_id,
+                    waku_client::Command::ClaimManagedGoalTurn { goal_id, turn_id },
+                )?;
+                match claim {
+                    waku_client::ResponsePayload::ManagedGoalTurnClaimed { claimed: true } => {}
+                    waku_client::ResponsePayload::ManagedGoalTurnClaimed { claimed: false } => return Ok(None),
+                    _ => anyhow::bail!("the daemon returned an invalid managed-goal claim"),
+                }
+                daemon.client().request(Uuid::nil(), session_id, waku_client::Command::Evaluate {
+                    state: json!({"goal": objective, "conversation": context, "activities": activities}),
+                    questions,
+                    feature: Some("managed-goal".to_owned()),
+                    timeout_secs: None,
+                }).map(Some)
+            }).await;
+            let _ = waku.update(cx, |waku, cx| {
+                if matches!(&result, Ok(None)) {
+                    return;
+                }
+                waku.apply_managed_goal_decision(session_id, goal_id, turn_id, result.and_then(|value| value.ok_or_else(|| anyhow::anyhow!("goal turn was not claimed"))), cx);
+            });
+        }).detach();
+    }
+
+    fn apply_managed_goal_decision(
+        &mut self,
+        session_id: Uuid,
+        goal_id: Uuid,
+        turn_id: Uuid,
+        result: anyhow::Result<waku_client::ResponsePayload>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.state.session_mut(session_id) else {
+            return;
+        };
+        let Some(goal) = session.thread_goal.as_mut().filter(|goal| {
+            goal.managed_id == Some(goal_id) && goal.status == ThreadGoalStatus::Active
+        }) else {
+            return;
+        };
+        // A human message or a newer turn supersedes this answer. Its own
+        // settle will be judged with the additional context.
+        if session.turns.last().is_none_or(|turn| turn.id != turn_id)
+            || !session.queued_messages.is_empty()
+        {
+            return;
+        }
+        goal.managed_last_turn = Some(turn_id);
+        let answer = match result {
+            Ok(waku_client::ResponsePayload::Evaluation { evaluation }) => {
+                evaluation.answers.get("next").cloned()
+            }
+            _ => None,
+        };
+        let mut continue_prompt = None;
+        match managed_goal_decision(answer.as_ref()) {
+            ManagedGoalDecision::Complete => goal.status = ThreadGoalStatus::Complete,
+            ManagedGoalDecision::Continue => {
+                continue_prompt = Some(managed_goal_prompt(&goal.objective, true));
+            }
+            ManagedGoalDecision::Blocked => goal.status = ThreadGoalStatus::Blocked,
+            ManagedGoalDecision::Paused => goal.status = ThreadGoalStatus::Paused,
+        }
+        session.updated_at = crate::model::unix_time();
+        self.state.mark_session_dirty(session_id);
+        self.save();
+        cx.notify();
+        if let Some(prompt) = continue_prompt {
+            self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
+        }
     }
 
     /// A submitted objective leaves a persistent transcript record — the
@@ -746,9 +1050,55 @@ fn edited_goal_status(status: ThreadGoalStatus) -> ThreadGoalStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ManagedGoalDecision {
+    Complete,
+    Continue,
+    Paused,
+    Blocked,
+}
+
+fn managed_goal_decision(answer: Option<&EvalAnswer>) -> ManagedGoalDecision {
+    let Some(EvalAnswer::Choice {
+        choice, confidence, ..
+    }) = answer
+    else {
+        return ManagedGoalDecision::Paused;
+    };
+    let confidence = confidence.unwrap_or(0.0);
+    match choice.as_str() {
+        "complete" if confidence >= 0.7 => ManagedGoalDecision::Complete,
+        "continue" if confidence >= 0.65 => ManagedGoalDecision::Continue,
+        "blocked" if confidence >= 0.5 => ManagedGoalDecision::Blocked,
+        _ => ManagedGoalDecision::Paused,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_goal_pauses_for_input_or_uncertain_answers() {
+        let answer = |choice: &str, confidence| EvalAnswer::Choice {
+            choice: choice.to_owned(),
+            confidence: Some(confidence),
+            probabilities: BTreeMap::new(),
+        };
+        assert_eq!(managed_goal_decision(None), ManagedGoalDecision::Paused);
+        assert_eq!(
+            managed_goal_decision(Some(&answer("needs_input", 0.99))),
+            ManagedGoalDecision::Paused
+        );
+        assert_eq!(
+            managed_goal_decision(Some(&answer("continue", 0.4))),
+            ManagedGoalDecision::Paused
+        );
+        assert_eq!(
+            managed_goal_decision(Some(&answer("continue", 0.9))),
+            ManagedGoalDecision::Continue
+        );
+    }
 
     #[test]
     fn elapsed_time_is_compact() {
@@ -785,6 +1135,9 @@ mod tests {
         let goal = ThreadGoal {
             objective: "Ship it".into(),
             status: ThreadGoalStatus::Active,
+            managed_since_message: None,
+            managed_id: None,
+            managed_last_turn: None,
             token_budget: Some(50_000),
             tokens_used: 12_500,
             time_used_seconds: 90,
@@ -797,6 +1150,9 @@ mod tests {
         let mut goal = ThreadGoal {
             objective: "Ship it".into(),
             status: ThreadGoalStatus::Active,
+            managed_since_message: None,
+            managed_id: None,
+            managed_last_turn: None,
             token_budget: None,
             tokens_used: 12_500,
             time_used_seconds: 16_500,

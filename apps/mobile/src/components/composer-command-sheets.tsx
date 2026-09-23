@@ -61,7 +61,7 @@ export function useComposerLocalCommands({
   goal?: ThreadGoal | null;
   contextKey: string;
   onServiceTier: (tier: string) => void | Promise<void>;
-  onGoal: (operation: GoalOperation) => Promise<void>;
+  onGoal: (operation: GoalOperation, managed?: boolean) => Promise<void>;
   onLand?: () => Promise<void>;
   onRename?: (title: string | null) => void | Promise<void>;
   onClear: () => void;
@@ -70,6 +70,7 @@ export function useComposerLocalCommands({
   const settings = useDaemonSettings();
   const [resumeOpen, setResumeOpen] = useState(false);
   const [goalDialog, setGoalDialog] = useState<{ prefill: string | null; replace: boolean } | null>(null);
+  const [goalManaged, setGoalManaged] = useState(false);
   useEffect(() => {
     setResumeOpen(false);
     setGoalDialog(null);
@@ -105,6 +106,9 @@ export function useComposerLocalCommands({
     } else {
       const command = parseGoalSubmission(provider, prompt, commands);
       if (!command) return false;
+      const managed = provider !== 'codex' || Boolean(goal?.managedId)
+        || !commands.some((item) => item.name === 'goal' && item.scope === 'Builtin');
+      setGoalManaged(managed);
       switch (command.kind) {
         case 'show':
         case 'edit':
@@ -112,16 +116,16 @@ export function useComposerLocalCommands({
           break;
         case 'pause':
         case 'resume':
-          await onGoal({ kind: 'set', objective: null, status: command.kind === 'pause' ? 'paused' : 'active', replace: false });
+          await onGoal({ kind: 'set', objective: null, status: command.kind === 'pause' ? 'paused' : 'active', replace: false }, managed);
           break;
         case 'clear':
-          await onGoal({ kind: 'clear' });
+          await onGoal({ kind: 'clear' }, managed);
           break;
         case 'set':
           if (goal && goal.status !== 'complete' && goal.status !== 'budgetLimited') {
             setGoalDialog({ prefill: command.objective, replace: true });
           } else {
-            await onGoal({ kind: 'set', objective: command.objective, status: 'active', replace: Boolean(goal) });
+            await onGoal({ kind: 'set', objective: command.objective, status: 'active', replace: Boolean(goal) }, managed);
           }
           break;
       }
@@ -142,7 +146,7 @@ export function useComposerLocalCommands({
             goal={goal ?? null}
             prefill={goalDialog.prefill}
             replace={goalDialog.replace}
-            onRun={onGoal}
+            onRun={(operation) => onGoal(operation, goalManaged)}
             onDismiss={() => setGoalDialog(null)}
           />
         )}

@@ -10,7 +10,14 @@ import type {
   SequencedEvent,
   UserInputAnswer,
 } from '@waku/client'
-import { attachmentPromptToken } from '@waku/client'
+import {
+  attachmentPromptToken,
+  continuationPrompt,
+  managedGoalDecision,
+  managedGoalEvaluation,
+  managedGoalOperation,
+  MANAGED_GOAL_QUESTION,
+} from '@waku/client'
 import {
   createContext,
   useCallback,
@@ -126,7 +133,7 @@ interface RuntimeContextValue {
     attachments?: MessageAttachment[],
     providerPromptOverride?: string,
   ) => Promise<void>
-  sendGoalOperation: (session: AgentSession, operation: GoalOperation) => Promise<void>
+  sendGoalOperation: (session: AgentSession, operation: GoalOperation, managed?: boolean) => Promise<void>
   cancel: (sessionId: string) => Promise<void>
   closeSession: (sessionId: string) => Promise<void>
   removeQueuedMessage: (sessionId: string, messageId: string) => Promise<void>
@@ -166,6 +173,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const projectionPersistTimers = useRef(new Map<string, number>())
   const saveGenerations = useRef(new Map<string, number>())
   const sendPromptRef = useRef<RuntimeContextValue['sendPrompt'] | null>(null)
+  const managedGoalSettleRef = useRef<((session: AgentSession) => Promise<void>) | null>(null)
   const pendingSteers = useRef(
     new Map<
       string,
@@ -406,7 +414,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           // Release the checkpoint gate before starting the queued turn. The
           // next send must become a real turn instead of queueing itself again.
           checkpointCaptures.current.delete(saved.id)
-          if (!config || saved.status !== 'idle') return
+          if (!config) return
+          if (saved.status === 'failed') {
+            await managedGoalSettleRef.current?.(saved)
+            return
+          }
+          if (saved.status !== 'idle') return
           const latest = queryClient.getQueryData<AgentSession>(
             daemonKeys.session(config.address, saved.id),
           ) ?? saved
@@ -415,7 +428,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           const nextQueued = latest.queued_messages?.find(
             (message) => !isAgentQueuedMessage(message),
           )
-          if (!nextQueued) return
+          if (!nextQueued) {
+            await managedGoalSettleRef.current?.(latest)
+            return
+          }
           const dequeued = {
             ...latest,
             queued_messages: latest.queued_messages?.filter(
@@ -815,13 +831,37 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
    * socket serializes the start request ahead of the goal command.
    */
   const sendGoalOperation = useCallback(
-    async (inputSession: AgentSession, operation: GoalOperation) => {
+    async (inputSession: AgentSession, operation: GoalOperation, managed = false) => {
       if (!client || !config || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
       }
       const currentSession = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, inputSession.id),
       ) ?? inputSession
+      if (managed || currentSession.provider !== 'codex' || currentSession.thread_goal?.managedId) {
+        let base = currentSession
+        if (operation.kind === 'set' && operation.objective) {
+          const now = Math.floor(Date.now() / 1_000)
+          base = {
+            ...base,
+            messages: [...base.messages, {
+              id: crypto.randomUUID(),
+              turn_id: null,
+              role: 'system',
+              content: translate(localeRef.current, 'goal.set_notice', {
+                objective: noticeObjective(operation.objective),
+              }),
+              created_at: now,
+              streaming: false,
+            }],
+          }
+        }
+        const updated = managedGoalOperation(base, operation)
+        cacheSession(updated.session)
+        const saved = await persistOrdered(updated.session)
+        if (updated.prompt) await sendPromptRef.current?.(saved, updated.prompt)
+        return
+      }
       // Activating a goal on an idle thread makes Codex pursue it right away,
       // so begin its turn optimistically — the way a submission's turn begins
       // at accept — instead of showing the empty-task page until the
@@ -1011,6 +1051,65 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   )
 
   sendPromptRef.current = sendPrompt
+
+  managedGoalSettleRef.current = async (settled) => {
+    if (!client || !config) return
+    const plan = managedGoalEvaluation(settled)
+    if (!plan) return
+    let shouldEvaluate = !plan.stop
+    if (shouldEvaluate) {
+      try {
+        const claim = await client.request({
+          type: 'claimManagedGoalTurn', goalId: plan.goalId, turnId: plan.turnId,
+        }, settled.id)
+        if (claim.type !== 'managedGoalTurnClaimed') shouldEvaluate = false
+        else if (!claim.claimed) return
+      } catch {
+        shouldEvaluate = false
+      }
+    }
+    const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, settled.id))
+    if (!current || current.thread_goal?.managedId !== plan.goalId
+      || current.thread_goal.status !== 'active'
+      || current.turns.at(-1)?.id !== plan.turnId
+      || current.messages.length !== settled.messages.length
+      || current.queued_messages?.length) return
+    const marked: AgentSession = {
+      ...current,
+      thread_goal: { ...current.thread_goal, managedLastTurn: plan.turnId },
+    }
+    cacheSession(marked)
+    await persistOrdered(marked)
+    let decision: ReturnType<typeof managedGoalDecision> = 'paused'
+    if (shouldEvaluate) {
+      try {
+        const response = await client.request({
+          type: 'evaluate',
+          state: plan.state,
+          questions: MANAGED_GOAL_QUESTION,
+          feature: 'managed-goal',
+        }, settled.id)
+        if (response.type === 'evaluation') {
+          decision = managedGoalDecision(response.evaluation.answers.next)
+        }
+      } catch {
+        // A missing or failed evaluator pauses the loop.
+      }
+    }
+    const latest = queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, settled.id))
+    if (!latest || latest.thread_goal?.managedId !== plan.goalId
+      || latest.thread_goal.managedLastTurn !== plan.turnId
+      || latest.thread_goal.status !== 'active'
+      || latest.turns.at(-1)?.id !== plan.turnId
+      || latest.queued_messages?.length) return
+    if (decision === 'continue') {
+      await sendPromptRef.current?.(latest, continuationPrompt(latest.thread_goal.objective))
+    } else {
+      const updated = { ...latest, thread_goal: { ...latest.thread_goal, status: decision } }
+      cacheSession(updated)
+      await persistOrdered(updated)
+    }
+  }
 
   const steerPrompt = useCallback<RuntimeContextValue['steerPrompt']>(
     async (session, rawPrompt, attachments = [], providerPromptOverride) => {

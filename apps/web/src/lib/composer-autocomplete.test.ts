@@ -172,8 +172,9 @@ describe('parseGoalSubmission', () => {
     expect(parse('ship /goal')).toBeNull()
   })
 
-  test('is codex-only and respects command overrides', () => {
-    expect(parseGoalSubmission('claude', '/goal', [builtin])).toBeNull()
+  test('uses the managed fallback and respects command overrides', () => {
+    expect(parseGoalSubmission('claude', '/goal', [builtin])).toEqual({ kind: 'show' })
+    expect(parseGoalSubmission('codex', '/goal', [])).toEqual({ kind: 'show' })
     const projectOwned: SlashCommand = {
       ...builtin,
       scope: 'Project',

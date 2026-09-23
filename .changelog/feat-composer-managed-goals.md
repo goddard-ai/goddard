@@ -1,0 +1,1 @@
+- `/goal <description>` now keeps pursuing a goal with Jev on providers without native goals, pausing when the agent needs your input or the evaluator cannot safely continue.

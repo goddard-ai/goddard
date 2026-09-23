@@ -325,6 +325,7 @@ export function reduceRuntimeEvent(
       break
     }
     case 'goalUpdated': {
+      if (session.thread_goal?.managedId) break
       // Conversation meta like usage: it applies regardless of turn state,
       // and `null` means the provider cleared the goal.
       const goal = asThreadGoal(payload)

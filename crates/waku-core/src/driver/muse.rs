@@ -1544,6 +1544,9 @@ fn muse_goal(goal: &Value) -> Option<ThreadGoal> {
     Some(ThreadGoal {
         objective: objective.to_owned(),
         status,
+        managed_since_message: None,
+        managed_id: None,
+        managed_last_turn: None,
         token_budget: None,
         tokens_used: 0,
         time_used_seconds: 0,

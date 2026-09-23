@@ -9,6 +9,13 @@ import type {
   SequencedEvent,
   UserInputAnswer,
 } from '@waku/client';
+import {
+  continuationPrompt,
+  managedGoalDecision,
+  managedGoalEvaluation,
+  managedGoalOperation,
+  MANAGED_GOAL_QUESTION,
+} from '@waku/client';
 import { isAgentQueuedMessage, reduceRuntimeEvent } from '@waku/client/event-reducer';
 import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
 import * as Crypto from 'expo-crypto';
@@ -139,7 +146,7 @@ interface RuntimeContextValue {
   clarifyUserInput: (sessionId: string, requestId: string, content: string) => Promise<void>;
   cancelUserInput: (sessionId: string, requestId: string) => Promise<void>;
   updateSessionOptions: (sessionId: string, changes: SessionOptionChanges) => Promise<void>;
-  sendGoalOperation: (session: AgentSession, operation: GoalOperation) => Promise<void>;
+  sendGoalOperation: (session: AgentSession, operation: GoalOperation, managed?: boolean) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   setAgentRenameAllowed: (sessionId: string, allowed: boolean) => Promise<void>;
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
@@ -185,6 +192,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       providerPromptOverride?: string,
     ) => Promise<AgentSession>) | null
   >(null);
+  const managedGoalSettleRef = useRef<((session: AgentSession) => Promise<void>) | null>(null);
 
   /** Writes a session into the query cache without advancing its
    * generation: the daemon's echo of a snapshot this client already holds. */
@@ -303,11 +311,19 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const latest = queryClient.getQueryData<AgentSession>(
       daemonKeys.session(profileId, sessionId),
     );
-    if (!latest || latest.status !== 'idle') return;
+    if (!latest) return;
+    if (latest.status === 'failed') {
+      await managedGoalSettleRef.current?.(latest);
+      return;
+    }
+    if (latest.status !== 'idle') return;
     // Daemon-owned entries drain on the daemon's schedule — submitting one
     // here would double-deliver it once the daemon's drain fires.
     const next = latest.queued_messages?.find((message) => !isAgentQueuedMessage(message));
-    if (!next) return;
+    if (!next) {
+      await managedGoalSettleRef.current?.(latest);
+      return;
+    }
     drainingQueues.current.add(sessionId);
     try {
       const dequeued = {
@@ -669,6 +685,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       }, clock).session;
       cacheSession(failed);
       await persistOrdered(failed).catch(() => failed);
+      try { await managedGoalSettleRef.current?.(failed); } catch { /* retain the provider error */ }
       throw cause;
     }
   }, [attachSession, cacheSession, daemon.activeProfile?.id, daemon.client, daemon.phase, loadFullSession, persistOrdered, queryClient, removeRuntime, subscribe]);
@@ -676,6 +693,70 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     sendPromptRef.current = sendPrompt;
   }, [sendPrompt]);
+
+  managedGoalSettleRef.current = async (settled) => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId) return;
+    const plan = managedGoalEvaluation(settled);
+    if (!plan) return;
+    let shouldEvaluate = !plan.stop;
+    if (shouldEvaluate) {
+      try {
+        const claim = await client.request({
+          type: 'claimManagedGoalTurn', goalId: plan.goalId, turnId: plan.turnId,
+        }, settled.id);
+        if (claim.type !== 'managedGoalTurnClaimed') shouldEvaluate = false;
+        else if (!claim.claimed) return;
+      } catch {
+        shouldEvaluate = false;
+      }
+    }
+    const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, settled.id));
+    if (!current || current.thread_goal?.managedId !== plan.goalId
+      || current.thread_goal.status !== 'active'
+      || current.turns.at(-1)?.id !== plan.turnId
+      || current.messages.length !== settled.messages.length
+      || current.queued_messages?.length) return;
+    const marked: AgentSession = {
+      ...current,
+      thread_goal: { ...current.thread_goal, managedLastTurn: plan.turnId },
+    };
+    cacheSession(marked);
+    await persistOrdered(marked);
+    let decision: ReturnType<typeof managedGoalDecision> = 'paused';
+    if (shouldEvaluate) {
+      try {
+        const response = await client.request({
+          type: 'evaluate',
+          state: plan.state,
+          questions: MANAGED_GOAL_QUESTION,
+          feature: 'managed-goal',
+        }, settled.id);
+        if (response.type === 'evaluation') {
+          decision = managedGoalDecision(response.evaluation.answers.next);
+        }
+      } catch {
+        // A missing or failed evaluator pauses the loop.
+      }
+    }
+    const latest = queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, settled.id));
+    if (!latest || latest.thread_goal?.managedId !== plan.goalId
+      || latest.thread_goal.managedLastTurn !== plan.turnId
+      || latest.thread_goal.status !== 'active'
+      || latest.turns.at(-1)?.id !== plan.turnId
+      || latest.queued_messages?.length) return;
+    if (decision === 'continue') {
+      await sendPromptRef.current?.(latest, continuationPrompt(latest.thread_goal.objective));
+    } else {
+      const updated: AgentSession = {
+        ...latest,
+        thread_goal: { ...latest.thread_goal, status: decision },
+      };
+      cacheSession(updated);
+      await persistOrdered(updated);
+    }
+  };
 
   /** Inject a prompt into a parked turn when the provider supports it —
    * the idle provider wakes inside the open turn. Every other status falls
@@ -736,11 +817,31 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   /** Local /goal commands use the native provider operation without adding
    * a user prompt. A fresh task still needs a subscribed provider runtime;
    * its goalUpdated/turnStarted events supply the authoritative state. */
-  const sendGoalOperation = useCallback(async (inputSession: AgentSession, operation: GoalOperation) => {
+  const sendGoalOperation = useCallback(async (inputSession: AgentSession, operation: GoalOperation, managed = false) => {
     const client = daemon.client;
     if (!client || daemon.phase !== 'connected') throw new Error('Goddard daemon is disconnected');
     let current = await loadFullSession(inputSession.id);
-    if (current.provider !== 'codex') throw new Error('Goals require Codex');
+    if (managed || current.provider !== 'codex' || current.thread_goal?.managedId) {
+      let base = current;
+      if (operation.kind === 'set' && operation.objective) {
+        base = {
+          ...base,
+          messages: [...base.messages, {
+            id: Crypto.randomUUID(),
+            turn_id: null,
+            role: 'system',
+            content: `Goal set: ${operation.objective}`,
+            created_at: Math.floor(Date.now() / 1000),
+            streaming: false,
+          }],
+        };
+      }
+      const updated = managedGoalOperation(base, operation, Crypto.randomUUID);
+      cacheSession(updated.session);
+      const saved = await persistOrdered(updated.session);
+      if (updated.prompt) await sendPromptRef.current?.(saved, updated.prompt);
+      return;
+    }
     if (!entries.current.has(current.id)) await attachSession(current);
     let runtime = entries.current.get(current.id);
     if (!runtime) {

@@ -59,6 +59,7 @@ import {
   isResumeSubmission,
   isLandSubmission,
   mergeComposerCommands,
+  withManagedGoalCommand,
   parseGoalSubmission,
   parseRenameSubmission,
   replaceComposerTrigger,
@@ -241,10 +242,10 @@ export function Composer({
     : workspace.kind === 'worktree'
       ? workspace.name || workspace.branch || t('workspace.worktree')
       : t('workspace.local')
-  const availableCommands = mergeComposerCommands(
+  const availableCommands = withManagedGoalCommand(session.provider, mergeComposerCommands(
     composerCommands.data ?? [],
     session.available_commands ?? [],
-  )
+  ), t('goal.title'))
   const autocompleteTrigger = inputFocused ? detectComposerTrigger(prompt, cursor) : null
   const autocompleteKey = autocompleteTrigger
     ? `${autocompleteTrigger.kind}:${autocompleteTrigger.start}:${autocompleteTrigger.end}:${autocompleteTrigger.query}`
@@ -451,7 +452,9 @@ export function Composer({
   }
 
   function dispatchGoal(operation: GoalOperation) {
-    void sendGoalOperation(session, operation).catch((error) => toast.error(errorMessage(error)))
+    const nativeGoal = session.provider === 'codex'
+      && availableCommands.some((command) => command.name === 'goal' && command.scope === 'Builtin')
+    void sendGoalOperation(session, operation, !nativeGoal).catch((error) => toast.error(errorMessage(error)))
   }
 
   /** Codex's native `/goal` command, bridged to app-server without starting a

@@ -261,7 +261,7 @@ export function MobileComposer({
     goal: session.thread_goal,
     contextKey: session.id,
     onServiceTier: (serviceTier) => runtime.updateSessionOptions(session.id, { serviceTier }),
-    onGoal: (operation) => runtime.sendGoalOperation(session, operation),
+    onGoal: (operation, managed) => runtime.sendGoalOperation(session, operation, managed),
     onRename: async (title) => {
       if (title === null) {
         draftSync.markEdited();

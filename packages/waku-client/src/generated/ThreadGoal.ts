@@ -2,8 +2,20 @@
 import type { ThreadGoalStatus } from "./ThreadGoalStatus";
 
 /**
- * A provider-persisted objective the agent keeps pursuing across turns.
- * Field names follow the Codex app-server payload so its `goal` objects
- * deserialize directly.
+ * An objective the agent keeps pursuing across turns. Native Codex fields
+ * retain their app-server spelling; `managed_*` fields mark a Goddard goal.
  */
-export type ThreadGoal = { objective: string, status: ThreadGoalStatus, tokenBudget?: number | null, tokensUsed: number, timeUsedSeconds: number, };
+export type ThreadGoal = { objective: string, status: ThreadGoalStatus,
+/**
+ * Present only for a Goddard-managed goal. Earlier transcript messages
+ * are excluded from its Jev decisions.
+ */
+managedSinceMessage?: number | null,
+/**
+ * Distinguishes replacements even when the objective stays the same.
+ */
+managedId?: string | null,
+/**
+ * A settled turn already handed to the managed-goal evaluator.
+ */
+managedLastTurn?: string | null, tokenBudget?: number | null, tokensUsed: number, timeUsedSeconds: number, };

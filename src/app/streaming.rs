@@ -662,6 +662,16 @@ impl Waku {
                 }
             }
             DriverEvent::GoalUpdated(goal) => {
+                if self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .and_then(|session| session.thread_goal.as_ref())
+                    .is_some_and(|goal| goal.managed_id.is_some())
+                {
+                    return true;
+                }
                 // Conversation meta like usage: it applies regardless of turn
                 // state, and `None` means the provider cleared the goal.
                 if goal.is_some() {
@@ -861,6 +871,9 @@ impl Waku {
                         summary.clone(),
                         cx,
                     );
+                }
+                if let Some(turn_id) = finished_turn_id {
+                    self.note_managed_goal_settle(session_id, turn_id, success, cx);
                 }
                 if allow_queue_drain && success {
                     // Start the next queued follow-up once the runtime has

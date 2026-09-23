@@ -207,6 +207,18 @@ describe('thread goals', () => {
     expect(session.thread_goal).toBeNull()
   })
 
+  test('provider goal notifications cannot replace a managed goal', () => {
+    const session: AgentSession = {
+      ...runningSession(),
+      thread_goal: {
+        objective: 'Ship the feature', status: 'active', managedId: 'managed-1',
+        managedSinceMessage: 0, managedLastTurn: null,
+        tokensUsed: 0, timeUsedSeconds: 0,
+      },
+    }
+    expect(apply(session, 'goalUpdated', null).thread_goal?.managedId).toBe('managed-1')
+  })
+
   test('an unsolicited codex turn gets a transcript home and streams output', () => {
     let session: AgentSession = { ...runningSession(), status: 'idle', messages: [], turns: [] }
     session = apply(session, 'turnStarted', null)

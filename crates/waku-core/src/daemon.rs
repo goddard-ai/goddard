@@ -266,6 +266,7 @@ fn resolve_agent_trait(
 
 pub struct WakuBackend {
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
+    managed_goal_claims: Mutex<HashMap<(Uuid, Uuid), HashSet<Uuid>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
     terminals: Arc<Mutex<HashMap<Uuid, TerminalEntry>>>,
     #[cfg(all(test, unix))]
@@ -334,6 +335,18 @@ pub struct WakuBackend {
     auto_prompts: Arc<AutoPromptService>,
 }
 
+fn claim_managed_goal_turn(
+    claims: &mut HashMap<(Uuid, Uuid), HashSet<Uuid>>,
+    session_id: Uuid,
+    goal_id: Uuid,
+    turn_id: Uuid,
+) -> bool {
+    claims
+        .entry((session_id, goal_id))
+        .or_default()
+        .insert(turn_id)
+}
+
 impl WakuBackend {
     pub fn new(settings: DaemonSettingsStore, task_store: StateStore) -> anyhow::Result<Self> {
         let mut task_state = task_store
@@ -378,6 +391,7 @@ impl WakuBackend {
         let task_store = Arc::new(task_store);
         let backend = Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            managed_goal_claims: Mutex::new(HashMap::new()),
             repo_maps: Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
             terminals: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(all(test, unix))]
@@ -1370,6 +1384,11 @@ impl Backend for WakuBackend {
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
         match request.command {
+            Command::ClaimManagedGoalTurn { goal_id, turn_id } => {
+                let mut claims = self.managed_goal_claims.lock();
+                let claimed = claim_managed_goal_turn(&mut claims, session_id, goal_id, turn_id);
+                Ok(ResponsePayload::ManagedGoalTurnClaimed { claimed })
+            }
             Command::AttachSession => {
                 let sessions = self.sessions.lock();
                 let Some(entry) = sessions.get(&session_id) else {
@@ -5265,6 +5284,7 @@ fn handle_driver_command(
             return Ok(ResponsePayload::Cursor { cursor });
         }
         Command::AttachSession
+        | Command::ClaimManagedGoalTurn { .. }
         | Command::Start { .. }
         | Command::GetSettings
         | Command::UpdateSettings { .. }
@@ -6098,6 +6118,26 @@ fn record_provider_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_goal_turn_has_one_claimant_across_clients() {
+        let mut claims = HashMap::new();
+        let session = Uuid::new_v4();
+        let goal = Uuid::new_v4();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        assert!(claim_managed_goal_turn(&mut claims, session, goal, first));
+        assert!(!claim_managed_goal_turn(&mut claims, session, goal, first));
+        assert!(claim_managed_goal_turn(&mut claims, session, goal, second));
+        assert!(!claim_managed_goal_turn(&mut claims, session, goal, first));
+        assert!(claim_managed_goal_turn(
+            &mut claims,
+            session,
+            Uuid::new_v4(),
+            first
+        ));
+        assert!(!claim_managed_goal_turn(&mut claims, session, goal, first));
+    }
 
     /// The auth-status command reads the per-provider shared home — a
     /// credential file under `sandbox-homes/<id>` flips the answer.

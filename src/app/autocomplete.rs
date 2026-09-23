@@ -206,9 +206,17 @@ impl Waku {
         let command_key = (provider, project_path.clone(), binary_override.clone());
         match self.slash_commands.read(&command_key) {
             Query::Ready(commands) => {
-                self.slash_command_index = Rc::new(composer_complete::merge_reported_commands(
-                    &commands, &reported,
-                ));
+                let mut merged = composer_complete::merge_reported_commands(&commands, &reported);
+                if !merged.iter().any(|command| command.name == "goal") {
+                    merged.push(SlashCommand {
+                        name: "goal".to_owned(),
+                        description: tr!("goal.title"),
+                        scope: composer_complete::CommandScope::Waku,
+                        argument_hint: Some("<description>".to_owned()),
+                        template: None,
+                    });
+                }
+                self.slash_command_index = Rc::new(merged);
                 self.slash_command_index_key = Some(command_key);
                 self.slash_command_index_loading = false;
             }

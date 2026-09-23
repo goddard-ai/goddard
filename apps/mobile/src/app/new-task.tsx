@@ -350,14 +350,14 @@ export default function NewTaskScreen() {
     runtimeMode,
     contextKey: selectedProject?.id ?? 'new-task',
     onServiceTier: setServiceTier,
-    onGoal: async (operation) => {
+    onGoal: async (operation, managed) => {
       if (!selectedProject || !provider) throw new Error('Choose a project and model first');
       const session = await runtime.createTask(selectedProject.id, provider, isolated && !projectless, '', {
         model, reasoningEffort, serviceTier, contextWindow, runtimeMode, baseBranch,
       }, undefined, (created) => {
         router.push({ pathname: '/session/[id]', params: { id: created.id } });
       });
-      await runtime.sendGoalOperation(session, operation);
+      await runtime.sendGoalOperation(session, operation, managed);
     },
     onClear: () => {
       draftSync.markEdited();

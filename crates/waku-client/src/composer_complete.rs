@@ -214,18 +214,13 @@ pub enum GoalCommand {
     Set(String),
 }
 
-/// Parse the submitted text as Codex's native `/goal` command, which Goddard
-/// bridges to `thread/goal/*`. `None` when it is not one — wrong provider,
-/// other text, or a project/user command that deliberately owns `/goal`
-/// (resolution precedence stands).
+/// Parse Goddard's goal command. Dispatch chooses a native provider goal when
+/// available and falls back to Jev otherwise.
 pub fn parse_goal_submission(
-    provider: ProviderKind,
+    _provider: ProviderKind,
     prompt: &str,
     commands: &[SlashCommand],
 ) -> Option<GoalCommand> {
-    if provider != ProviderKind::Codex {
-        return None;
-    }
     let invocation = prompt.trim().strip_prefix('/')?;
     let (name, arguments) = invocation
         .split_once(char::is_whitespace)
@@ -235,12 +230,11 @@ pub fn parse_goal_submission(
     if name != "goal" {
         return None;
     }
-    let goal_is_codex_builtin = commands.iter().any(|command| {
+    let overridden = commands.iter().any(|command| {
         command.name == "goal"
-            && command.scope == CommandScope::Builtin
-            && command.template.is_none()
+            && matches!(command.scope, CommandScope::Project | CommandScope::User)
     });
-    if !goal_is_codex_builtin {
+    if overridden {
         return None;
     }
     Some(match arguments {
@@ -998,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn goal_command_is_codex_only_and_respects_overrides() {
+    fn goal_command_falls_back_and_respects_overrides() {
         let builtin = command("goal", CommandScope::Builtin);
         assert_eq!(
             parse_goal_submission(
@@ -1006,7 +1000,11 @@ mod tests {
                 "/goal",
                 std::slice::from_ref(&builtin)
             ),
-            None
+            Some(GoalCommand::Show)
+        );
+        assert_eq!(
+            parse_goal_submission(ProviderKind::Codex, "/goal", &[]),
+            Some(GoalCommand::Show)
         );
         // A project command deliberately owning /goal wins the collision.
         let mut project = command("goal", CommandScope::Project);

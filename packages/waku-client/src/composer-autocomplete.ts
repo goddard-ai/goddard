@@ -64,6 +64,17 @@ export function mergeComposerCommands(
   })
 }
 
+export function withManagedGoalCommand(
+  _provider: ProviderKind,
+  commands: SlashCommand[],
+  description: string,
+): SlashCommand[] {
+  if (commands.some((command) => command.name === 'goal')) return commands
+  return [...commands, {
+    name: 'goal', description, scope: 'Waku', argument_hint: '<description>', template: null,
+  }]
+}
+
 export function isFastModeToggleSubmission(
   provider: ProviderKind,
   prompt: string,
@@ -104,26 +115,21 @@ export type GoalCommand =
   | { kind: 'set'; objective: string }
 
 /**
- * Parse the submitted text as Codex's native `/goal` command, which Goddard
- * bridges to `thread/goal/*`. `null` when it is not one — wrong provider,
- * other text, or a project/user command that deliberately owns `/goal`
- * (resolution precedence stands).
+ * Parse `/goal` for native or Goddard-managed goals. Project and user
+ * commands keep precedence.
  */
 export function parseGoalSubmission(
-  provider: ProviderKind,
+  _provider: ProviderKind,
   prompt: string,
   commands: SlashCommand[],
 ): GoalCommand | null {
-  if (provider !== 'codex') return null
   const invocation = prompt.trim()
   if (!invocation.startsWith('/')) return null
   const body = invocation.slice(1)
   const split = body.match(/^(\S+)(?:\s+([\s\S]*))?$/u)
   if (!split || split[1] !== 'goal') return null
-  const goalIsCodexBuiltin = commands.some((command) => command.name === 'goal'
-    && command.scope === 'Builtin'
-    && command.template === null)
-  if (!goalIsCodexBuiltin) return null
+  if (commands.some((command) => command.name === 'goal'
+    && (command.scope === 'Project' || command.scope === 'User'))) return null
   const argument = (split[2] ?? '').trim()
   switch (argument) {
     case '': return { kind: 'show' }

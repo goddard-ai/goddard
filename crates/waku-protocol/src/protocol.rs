@@ -186,6 +186,12 @@ pub enum Command {
     Goal {
         operation: GoalOperation,
     },
+    /// Atomically assign one client to evaluate and advance a managed goal
+    /// after this turn. Other attached clients observe the resulting state.
+    ClaimManagedGoalTurn {
+        goal_id: Uuid,
+        turn_id: Uuid,
+    },
     RunComputerTool {
         request: WireComputerToolRequest,
     },
@@ -1053,6 +1059,9 @@ pub struct DaemonStatsSample {
 )]
 pub enum ResponsePayload {
     Ack,
+    ManagedGoalTurnClaimed {
+        claimed: bool,
+    },
     SessionRuntime {
         runtime_id: Option<Uuid>,
         supports_steer: bool,

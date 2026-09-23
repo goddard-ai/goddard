@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { FileEntry, ProviderKind, ReportedCommand, SlashCommand } from '@waku/client';
-import { mergeComposerCommands, type ComposerAutocompleteRow, type ComposerTriggerKind } from '@waku/client/composer-autocomplete';
+import { mergeComposerCommands, withManagedGoalCommand, type ComposerAutocompleteRow, type ComposerTriggerKind } from '@waku/client/composer-autocomplete';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard, type TextInputProps } from 'react-native';
 
@@ -46,7 +46,7 @@ export function useComposerPicker({ text, onChangeText, provider, root, reported
   };
   const catalog = useQuery({ ...commandOptions, enabled: enabled && visible && Boolean(settings.data) && kind === 'command' });
   const discovered = catalog.data ?? NO_COMMANDS;
-  const commands = useMemo(() => mergeComposerCommands(discovered, reported), [discovered, reported]);
+  const commands = useMemo(() => withManagedGoalCommand(provider!, mergeComposerCommands(discovered, reported), 'Goal'), [discovered, reported, provider]);
   const files = useQuery({
     queryKey: daemonKeys.composerFiles(profileId, root),
     queryFn: () => listComposerFiles(daemon.client!, root!),
@@ -102,7 +102,7 @@ export function useComposerPicker({ text, onChangeText, provider, root, reported
         queryKey: daemonKeys.composerCommands(profileId, provider, root, override),
         queryFn: () => discoverComposerCommands(daemon.client!, provider!, root!, override),
       });
-      return mergeComposerCommands(discoveredCommands, reported);
+      return withManagedGoalCommand(provider!, mergeComposerCommands(discoveredCommands, reported), 'Goal');
     },
     inputProps: {
       inputRef: setInputRef,

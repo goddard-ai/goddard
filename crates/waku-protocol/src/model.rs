@@ -1459,14 +1459,23 @@ pub struct ProviderSessionHistory {
     pub turns: Vec<AgentTurn>,
 }
 
-/// A provider-persisted objective the agent keeps pursuing across turns.
-/// Field names follow the Codex app-server payload so its `goal` objects
-/// deserialize directly.
+/// An objective the agent keeps pursuing across turns. Native Codex fields
+/// retain their app-server spelling; `managed_*` fields mark a Goddard goal.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadGoal {
     pub objective: String,
     pub status: ThreadGoalStatus,
+    /// Present only for a Goddard-managed goal. Earlier transcript messages
+    /// are excluded from its Jev decisions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_since_message: Option<usize>,
+    /// Distinguishes replacements even when the objective stays the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_id: Option<Uuid>,
+    /// A settled turn already handed to the managed-goal evaluator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_last_turn: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_budget: Option<i64>,
     #[serde(default)]
@@ -2678,6 +2687,15 @@ impl AgentSession {
         let message_count = self.messages.len();
         for block in &mut self.transcript_blocks {
             block.after_message = block.after_message.min(message_count);
+        }
+        // The managed goal's evaluation window is anchored to the original
+        // transcript. Rewinding changes that window, so require a new goal.
+        if self
+            .thread_goal
+            .as_ref()
+            .is_some_and(|goal| goal.managed_id.is_some())
+        {
+            self.thread_goal = None;
         }
         self.rederive_phase();
         self.updated_at = unix_time();
@@ -6240,6 +6258,26 @@ mod tests {
         assert_eq!(session.transcript_blocks.len(), 1);
         assert_eq!(session.transcript_blocks[0].turn_id, Some(first_turn));
         assert_eq!(session.transcript_blocks[0].after_message, 2);
+    }
+
+    #[test]
+    fn rewind_clears_managed_goal_with_stale_context_boundary() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        session.begin_turn("work");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.thread_goal = Some(ThreadGoal {
+            objective: "Ship".into(),
+            status: ThreadGoalStatus::Active,
+            managed_since_message: Some(1),
+            managed_id: Some(Uuid::new_v4()),
+            managed_last_turn: None,
+            token_budget: None,
+            tokens_used: 0,
+            time_used_seconds: 0,
+        });
+        session.truncate_after_turn(0);
+        assert!(session.thread_goal.is_none());
     }
 
     #[test]
