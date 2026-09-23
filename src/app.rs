@@ -326,7 +326,6 @@ impl SettingsPage {
             Self::Friends => friends_enabled,
             Self::Jev => jev_in_use,
             Self::Integrations => integrations_enabled,
-            Self::Keybindings => crate::keybindings::manager_enabled(),
             _ => true,
         }
     }

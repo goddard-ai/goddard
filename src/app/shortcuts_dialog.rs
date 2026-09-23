@@ -1012,6 +1012,9 @@ pub(super) struct ShortcutsDialogState {
 }
 
 impl Waku {
+    // Dormant since the footer keyboard button routes to the keybindings
+    // manager; the dialog surface stays for reuse.
+    #[allow(dead_code)]
     pub(super) fn open_shortcuts_dialog(&mut self, cx: &mut Context<Self>) -> FocusHandle {
         let focus = cx.focus_handle();
         self.shortcuts_dialog = Some(ShortcutsDialogState {

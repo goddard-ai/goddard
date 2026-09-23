@@ -27,11 +27,6 @@ pub use layout::{
     KeyboardLayout, LayoutId, LayoutSource, bundled_layouts, detect_layout, layout_by_id,
 };
 
-/// Development flag gating the manager surface while editing and conflict
-/// resolution are still landing — matches the staged rollout plan.
-pub fn manager_enabled() -> bool {
-    cfg!(debug_assertions)
-}
 #[allow(unused_imports)]
 pub use service::{
     BindingOperation, CommitError, EffectiveBinding, KeybindingEvent, KeybindingService,

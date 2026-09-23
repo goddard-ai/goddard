@@ -2112,18 +2112,9 @@ impl Waku {
         }
     }
 
-    /// The footer keyboard button's target: the keybindings manager when it
-    /// is enabled, otherwise the legacy shortcuts dialog, whose focus lands
-    /// two frames after the modal joins the dispatch tree.
+    /// The footer keyboard button opens the keybindings manager.
     fn open_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if crate::keybindings::manager_enabled() {
-            self.open_keybindings_page(window, cx);
-            return;
-        }
-        let focus = self.open_shortcuts_dialog(cx);
-        window.on_next_frame(move |window, _| {
-            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-        });
+        self.open_keybindings_page(window, cx);
     }
 
     /// Aggregate in-flight friend transfers into one footer ring beside the

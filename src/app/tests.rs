@@ -4283,10 +4283,11 @@ fn settings_search_filters_pages_for_arrow_cycling() {
 
     // An empty query keeps every page in sidebar order, so the arrows cycle
     // the full navigation even before anything is typed.
-    let mut all_pages = vec![SettingsPage::General, SettingsPage::Appearance];
-    if crate::keybindings::manager_enabled() {
-        all_pages.push(SettingsPage::Keybindings);
-    }
+    let mut all_pages = vec![
+        SettingsPage::General,
+        SettingsPage::Appearance,
+        SettingsPage::Keybindings,
+    ];
     all_pages.extend([
         SettingsPage::Providers,
         SettingsPage::Skills,
