@@ -1,0 +1,1 @@
+- Sending a message to a task left idle past the daemon's runtime timeout no longer fails with "the message never reached the agent" — the app now hears that the runtime was retired and resumes the task on a fresh one.

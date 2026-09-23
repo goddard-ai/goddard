@@ -18,7 +18,9 @@ use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket, accept_hdr_with_config};
 use uuid::Uuid;
 
-use crate::model::{AgentSession, Project, ProviderKind, SessionStatus};
+use waku_protocol::event_to_wire;
+
+use crate::model::{AgentSession, DriverEvent, Project, ProviderKind, SessionStatus};
 use crate::protocol::MAX_WIRE_MESSAGE_BYTES;
 use crate::protocol::{
     ClientMessage, Command, DaemonExposure, PROTOCOL_VERSION, ReplayCursor, Request,
@@ -255,6 +257,18 @@ impl EventSink {
     /// it just started fails before its first event.
     pub fn end_session_runtime(&self) {
         self.hub.end_runtime(self.session_id, Some(self.runtime_id));
+    }
+
+    /// Emit the runtime-ended signal clients already understand. Used
+    /// before `end_session_runtime` on teardown paths with no provider
+    /// process left to report its own exit — idle eviction, forced
+    /// shutdown. Without it an attached client keeps a stale driver
+    /// handle, and because runtime commands are fire-and-forget the next
+    /// prompt vanishes into a runtime the daemon no longer has.
+    pub fn notify_runtime_ended(&self) {
+        if let Ok(wire) = event_to_wire(DriverEvent::ProcessExited) {
+            let _ = self.send(wire);
+        }
     }
 
     /// Replay depth retained for `session_id` — tests assert a dead
@@ -3910,6 +3924,32 @@ mod tests {
         sink.send(WireDriverEvent::new("three", serde_json::Value::Null))
             .unwrap();
         assert!(events.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_retired_runtime_tells_attached_clients_it_ended() {
+        let hub = Arc::new(Hub::default());
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let (outgoing, events) = bounded(4);
+        hub.subscribe(&[], Subscriber::new(outgoing).0);
+        hub.begin_runtime(session_id, runtime_id);
+        let sink = hub.event_sink(session_id, runtime_id);
+
+        // Idle eviction's order: the ended signal must go out before the
+        // hub retires routing — afterwards emit drops it as stale.
+        sink.notify_runtime_ended();
+        sink.end_session_runtime();
+
+        let ServerMessage::Event(event) = events.recv().unwrap() else {
+            panic!("expected the runtime-ended event to reach the client");
+        };
+        assert_eq!(event.session_id, session_id);
+        assert_eq!(event.runtime_id, runtime_id);
+        assert_eq!(event.event.kind, "processExited");
+        // Nothing lingers to replay: a reconnecting client learns the
+        // runtime is gone from its attach response, not a stale entry.
+        assert_eq!(sink.journaled_event_count(session_id), 0);
     }
 
     #[test]

@@ -1111,6 +1111,7 @@ impl Backend for WakuBackend {
         let task_state = self.task_state.clone();
         let settings = self.settings.clone();
         let agent = self.agent.clone();
+        let repo_maps = self.repo_maps.clone();
         let _ = std::thread::Builder::new()
             .name("waku-idle-reaper".into())
             .spawn(move || {
@@ -1119,14 +1120,14 @@ impl Backend for WakuBackend {
                     for (session_id, runtime_id, driver) in
                         reap_idle_runtimes(&sessions, &task_state, &settings, &agent)
                     {
-                        driver.begin_shutdown();
-                        // The scoped credential was valid only while the
-                        // provider process carrying it lived.
-                        agent.revoke_session(session_id);
-                        events
-                            .for_session(session_id, runtime_id)
-                            .end_session_runtime();
-                        drop_detached(driver);
+                        evict_idle_runtime(
+                            session_id,
+                            runtime_id,
+                            driver,
+                            &agent,
+                            &repo_maps,
+                            &events,
+                        );
                     }
                 }
             });
@@ -5477,6 +5478,37 @@ fn reap_idle_runtimes(
                 .map(|entry| (session_id, entry.runtime_id, entry.driver))
         })
         .collect()
+}
+
+/// Retire one runtime the reaper claimed: shut the provider down, release
+/// its agent bookkeeping and project-map state, then tell attached
+/// clients the runtime ended. The notification must run before
+/// `end_session_runtime` clears the hub's routing — afterwards the event
+/// would be dropped as stale — and without it a client keeps its driver
+/// handle, so the next prompt vanishes into a runtime the daemon no
+/// longer has: runtime commands are fire-and-forget and carry no response.
+fn evict_idle_runtime(
+    session_id: Uuid,
+    runtime_id: Uuid,
+    driver: DriverHandle,
+    agent: &crate::agent::AgentState,
+    repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>,
+    events: &EventSink,
+) {
+    driver.begin_shutdown();
+    // The scoped credential was valid only while the provider process
+    // carrying it lived; the turn bookkeeping and pending steers die with
+    // it too.
+    agent.clear_session(session_id);
+    {
+        let mut maps = repo_maps.0.lock();
+        maps.sessions.remove(&session_id);
+        maps.pending.remove(&session_id);
+    }
+    let sink = events.for_session(session_id, runtime_id);
+    sink.notify_runtime_ended();
+    sink.end_session_runtime();
+    drop_detached(driver);
 }
 
 /// Whether killing this task's provider process loses nothing the next
