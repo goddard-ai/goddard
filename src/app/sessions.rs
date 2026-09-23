@@ -4630,7 +4630,7 @@ impl Waku {
             })
     }
 
-    /// ⌥Tab and ⌥⇧Tab open eligible starred combos and the most recent
+    /// ⌥Tab and ⌥⇧Tab open Auto, eligible starred combos, and the most recent
     /// selection together, so the user can choose directly.
     pub(super) fn cycle_favorite_model_action(
         &mut self,
@@ -4684,13 +4684,27 @@ impl Waku {
         if let Some(recent) = recent {
             combos.push(recent);
         }
-        if combos.is_empty() {
+        let auto_available = self.auto_route_available();
+        if combos.is_empty() && !auto_available {
             return;
         }
         let current = self
             .session_model_combo(session)
             .map(|(model, effort, fast)| (session.provider, model, effort, fast));
-        let items = combos
+        let mut items = Vec::with_capacity(combos.len() + if auto_available { 1 } else { 0 });
+        if auto_available {
+            items.push(keyboard_options::KeyboardOptionItem::Choice(
+                keyboard_options::KeyboardOptionChoice::new(
+                    tr!("keyboard_options.automatic_routing"),
+                    Some(tr!("keyboard_options.automatic_routing_description").to_string()),
+                    None,
+                    session.auto_route,
+                    true,
+                    keyboard_options::KeyboardOptionAction::AutoRoute,
+                ),
+            ));
+        }
+        items.extend(combos
             .iter()
             .map(|(provider, model, effort, fast)| {
                 let label = self
@@ -4705,7 +4719,7 @@ impl Waku {
                 if *fast {
                     details.push(tr!("keyboard_options.fast").to_string());
                 }
-                let selected = current.as_ref().is_some_and(
+                let selected = !session.auto_route && current.as_ref().is_some_and(
                     |(current_provider, current_model, current_effort, current_fast)| {
                         current_provider == provider
                             && current_model == model
@@ -4728,8 +4742,8 @@ impl Waku {
                         },
                     ),
                 )
-            })
-            .collect::<Vec<_>>();
+            }));
+        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
         let highlighted = items.iter().position(|item| {
             matches!(
                 item,
