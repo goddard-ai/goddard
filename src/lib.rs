@@ -786,9 +786,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("end", SelectLastTask, Some("TaskSwitcher")),
         KeyBinding::new("enter", ConfirmTaskSwitch, Some("TaskSwitcher")),
         KeyBinding::new("escape", CancelTaskSwitch, Some("TaskSwitcher")),
-        // The project switcher opens from the New Task page's draft and
-        // commits when the platform modifier is released, the same
-        // gesture as ctrl-tab above. Registered after New Session at
+        // The project switcher opens a focused search on the New Task page.
+        // Another press starts cycling and commits on modifier release,
+        // like ctrl-tab above. Registered after New Session at
         // the same depth, the chord wins the tie and only falls
         // through to it when the New Task page is not on screen —
         // creating or revisiting a draft navigates there from any
@@ -818,6 +818,21 @@ pub(crate) fn bind_keys(cx: &mut App) {
             "secondary-shift-escape",
             CancelProjectSwitch,
             Some("ProjectSwitcher"),
+        ),
+        KeyBinding::new(
+            "down",
+            SwitchProjectForward,
+            Some("ProjectSwitcher > TextInput"),
+        ),
+        KeyBinding::new(
+            "up",
+            SwitchProjectBackward,
+            Some("ProjectSwitcher > TextInput"),
+        ),
+        KeyBinding::new(
+            "enter",
+            ConfirmProjectSwitch,
+            Some("ProjectSwitcher > TextInput"),
         ),
         KeyBinding::new("down", SwitchProjectForward, Some("ProjectSwitcher")),
         KeyBinding::new("right", SwitchProjectForward, Some("ProjectSwitcher")),

@@ -1,0 +1,1 @@
+- Press ⌘N on the New Task page to search projects by name or path; press ⌘N or ⌘⇧N again to cycle through recently used projects.

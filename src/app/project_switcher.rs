@@ -1,8 +1,9 @@
 //! Cmd-N switching across recently used projects in a New Task draft.
 //!
 //! Mirrors the task switcher: the project order is snapshotted when the
-//! overlay opens, repeated presses move only the highlight, and releasing the
-//! platform modifier commits once — so the draft under the pointer never
+//! overlay opens. On the New Task page it starts with a focused search;
+//! another Cmd-N/Shift-Cmd-N enters cycling. Repeated presses move only the
+//! highlight, and releasing the platform modifier commits once — so the draft under the pointer never
 //! retargets mid-gesture. Over Big Picture the same overlay answers for the
 //! standing new-task draft instead. Recency is borrowed from the task
 //! switcher's session history: a project ranks by when one of its tasks was
@@ -10,6 +11,8 @@
 //! leaves slots open, the most recently added projects fill them.
 
 use super::*;
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Matcher, Utf32Str};
 
 const MODAL_WIDTH: f32 = 400.0;
 const MODAL_RADIUS: f32 = 17.0;
@@ -21,6 +24,7 @@ const ROW_INSET_X: f32 = 10.0;
 const ROW_RADIUS: f32 = 10.0;
 const PATH_MAX_WIDTH: f32 = 180.0;
 const MAX_PROJECTS: usize = 10;
+const MAX_SEARCH_RESULTS: usize = 50;
 const WINDOW_MARGIN: f32 = 44.0;
 const VERTICAL_BIAS: f32 = 0.08;
 const VERTICAL_BIAS_MAX: f32 = 96.0;
@@ -40,6 +44,9 @@ enum ProjectSwitcherTarget {
 pub(super) struct ProjectSwitcherUi {
     open: bool,
     ordered_project_ids: Vec<Uuid>,
+    recent_project_ids: Vec<Uuid>,
+    search: Option<Entity<TextInput>>,
+    searching: bool,
     highlighted_project_id: Option<Uuid>,
     original_session_id: Option<Uuid>,
     target: ProjectSwitcherTarget,
@@ -54,6 +61,9 @@ impl ProjectSwitcherUi {
         Self {
             open: false,
             ordered_project_ids: Vec::new(),
+            recent_project_ids: Vec::new(),
+            search: None,
+            searching: false,
             highlighted_project_id: None,
             original_session_id: None,
             target: ProjectSwitcherTarget::Draft,
@@ -100,6 +110,8 @@ impl ProjectSwitcherUi {
     pub(super) fn dismiss(&mut self) -> Option<FocusHandle> {
         self.open = false;
         self.ordered_project_ids.clear();
+        self.recent_project_ids.clear();
+        self.searching = false;
         self.highlighted_project_id = None;
         self.original_session_id = None;
         self.target = ProjectSwitcherTarget::Draft;
@@ -149,6 +161,47 @@ pub(super) fn ordered_project_ids(
         push(project.id);
     }
     ordered
+}
+
+// Empty search keeps the cycling snapshot; a query searches every known project
+// with the same fuzzy name/path matching as “New task in…”.
+fn filtered_project_ids(
+    recent: &[Uuid],
+    projects: &[Project],
+    home: Option<&Path>,
+    query: &str,
+) -> Vec<Uuid> {
+    let query = query.trim();
+    if query.is_empty() {
+        return recent.to_vec();
+    }
+    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+    let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
+    let mut utf32 = Vec::new();
+    let mut projectless_seen = false;
+    let mut scored = projects
+        .iter()
+        .filter_map(|project| {
+            if project.is_projectless() && std::mem::replace(&mut projectless_seen, true) {
+                return None;
+            }
+            let path = if project.is_projectless() {
+                String::new()
+            } else {
+                settings::abbreviate_home_path(&project.path, home)
+            };
+            let text = format!("{} {path} directory folder project", project.display_name());
+            pattern
+                .score(Utf32Str::new(&text, &mut utf32), &mut matcher)
+                .map(|score| (score, project.id))
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    scored
+        .into_iter()
+        .take(MAX_SEARCH_RESULTS)
+        .map(|(_, id)| id)
+        .collect()
 }
 
 impl Waku {
@@ -217,7 +270,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.project_switcher.open && !event.secondary() {
+        if self.project_switcher.open && !self.project_switcher.searching && !event.secondary() {
             self.finish_project_switcher(false, window, cx);
         }
     }
@@ -229,6 +282,14 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if self.project_switcher.open {
+            if self.project_switcher.searching && window.modifiers().secondary() {
+                self.project_switcher.searching = false;
+                self.project_switcher.ordered_project_ids =
+                    self.project_switcher.recent_project_ids.clone();
+                self.project_switcher.highlighted_project_id =
+                    self.project_switcher.ordered_project_ids.first().copied();
+                window.focus(&self.project_switcher.focus, cx);
+            }
             self.advance_project_switcher(reverse, window, cx);
             return;
         }
@@ -292,7 +353,9 @@ impl Waku {
                         .position(|candidate| *candidate == current)
                 })
         else {
-            self.cancel_project_switcher(window, cx);
+            if !self.project_switcher.searching {
+                self.cancel_project_switcher(window, cx);
+            }
             return;
         };
         let len = self.project_switcher.ordered_project_ids.len();
@@ -313,7 +376,7 @@ impl Waku {
     /// other surface (a page, a full-width terminal, Settings) the open
     /// fails and the chord falls through to New Session, which navigates
     /// to the New Task page. The draft's own project pins the head of the
-    /// list so the first press lands on the next most recent one.
+    /// list; the first press opens search, and another press starts cycling.
     fn open_project_switcher(
         &mut self,
         reverse: bool,
@@ -330,7 +393,7 @@ impl Waku {
         else {
             return false;
         };
-        self.open_switcher(
+        let opened = self.open_switcher(
             Some(current_project),
             self.state.selected_session,
             ProjectSwitcherTarget::Draft,
@@ -338,7 +401,35 @@ impl Waku {
             reverse,
             window,
             cx,
-        )
+        );
+        if opened {
+            self.project_switcher.searching = true;
+            self.project_switcher.recent_project_ids =
+                self.project_switcher.ordered_project_ids.clone();
+            let search = self
+                .project_switcher
+                .search
+                .get_or_insert_with(|| {
+                    let search = cx.new(|cx| {
+                        TextInput::new(window, cx)
+                            .clear_on_escape()
+                            .placeholder(tr!("command_palette.new_task_in_placeholder"))
+                            .accessibility_label(tr!("command_palette.new_task_in_placeholder"))
+                    });
+                    cx.subscribe(&search, |this, search, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Edited) && this.project_switcher.searching {
+                            let query = search.read(cx).content().to_owned();
+                            this.filter_project_switcher(&query, cx);
+                        }
+                    })
+                    .detach();
+                    search
+                })
+                .clone();
+            search.update(cx, |input, cx| input.clear(cx));
+            self.filter_project_switcher("", cx);
+        }
+        opened
     }
 
     /// ⌘N over Big Picture: the same overlay, answering "which project" for
@@ -457,18 +548,45 @@ impl Waku {
         // modifier listener still catches a very quick modifier release.
         window.on_next_frame(move |window, _| {
             window.on_next_frame(move |window, cx| {
-                let should_focus = weak
-                    .update(cx, |this, _| {
-                        this.project_switcher.open && this.project_switcher.generation == generation
+                let focus = weak
+                    .update(cx, |this, cx| {
+                        (this.project_switcher.open
+                            && this.project_switcher.generation == generation)
+                            .then(|| {
+                                if this.project_switcher.searching {
+                                    this.project_switcher
+                                        .search
+                                        .as_ref()
+                                        .unwrap()
+                                        .read(cx)
+                                        .focus()
+                                } else {
+                                    focus
+                                }
+                            })
                     })
-                    .unwrap_or(false);
-                if should_focus {
+                    .ok()
+                    .flatten();
+                if let Some(focus) = focus {
                     window.focus(&focus, cx);
                 }
             });
         });
         cx.notify();
         true
+    }
+
+    fn filter_project_switcher(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.project_switcher.ordered_project_ids = filtered_project_ids(
+            &self.project_switcher.recent_project_ids,
+            &self.state.projects,
+            self.home_directory.as_deref(),
+            query,
+        );
+        self.project_switcher.highlighted_project_id =
+            self.project_switcher.ordered_project_ids.first().copied();
+        self.project_switcher.reveal_highlight();
+        cx.notify();
     }
 
     fn set_project_switcher_highlight(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -498,6 +616,9 @@ impl Waku {
             return;
         }
         let selected = self.project_switcher.highlighted_project_id;
+        if self.project_switcher.searching && selected.is_none() {
+            return;
+        }
         let original = self.project_switcher.original_session_id;
         let target = self.project_switcher.target;
         let previous_focus = self.project_switcher.dismiss();
@@ -662,7 +783,7 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.project_switcher.open || self.project_switcher.ordered_project_ids.is_empty() {
+        if !self.project_switcher.open {
             return None;
         }
         let theme = Theme::current(cx);
@@ -684,10 +805,27 @@ impl Waku {
         // Padding below the card pushes the centered layout up by half the
         // padding, so the switcher sits slightly above center like Spotlight.
         let vertical_bias = (viewport_height * VERTICAL_BIAS).min(VERTICAL_BIAS_MAX);
+        let search_height = if self.project_switcher.searching {
+            44.0
+        } else {
+            0.0
+        };
+        let title = if self.project_switcher.searching
+            && self
+                .project_switcher
+                .search
+                .as_ref()
+                .is_some_and(|search| !search.read(cx).content().trim().is_empty())
+        {
+            tr!("command_palette.project")
+        } else {
+            tr!("project_switcher.recently_used")
+        };
         let list_max_height = (viewport_height
             - WINDOW_MARGIN * 2.0
             - vertical_bias * 2.0
             - TITLE_HEIGHT
+            - search_height
             - MODAL_INSET * 2.0)
             .max(ROW_HEIGHT);
 
@@ -706,6 +844,17 @@ impl Waku {
             .bg(theme.raised)
             .shadow_xl()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .when(self.project_switcher.searching, |card| {
+                card.child(
+                    div()
+                        .px(px(TITLE_INSET_X))
+                        .h(px(search_height))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .child(self.project_switcher.search.as_ref().unwrap().clone()),
+                )
+            })
             .child(
                 div()
                     .h(px(TITLE_HEIGHT))
@@ -716,7 +865,7 @@ impl Waku {
                     .text_size(sp(12.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text_tertiary)
-                    .child(tr!("project_switcher.recently_used")),
+                    .child(title),
             )
             .child(
                 div()
@@ -727,7 +876,18 @@ impl Waku {
                     .track_scroll(&scroll)
                     .flex()
                     .flex_col()
-                    .children(entries),
+                    .children(entries)
+                    .when(
+                        self.project_switcher.ordered_project_ids.is_empty(),
+                        |list| {
+                            list.child(
+                                div()
+                                    .p(px(ROW_INSET_X))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("command_palette.no_results")),
+                            )
+                        },
+                    ),
             );
         let layer = div()
             .id("project-switcher-layer")
@@ -753,6 +913,41 @@ impl Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_finds_projects_outside_recents_by_fuzzy_name_or_path() {
+        let mut projects = (0..12)
+            .map(|index| Project {
+                id: Uuid::new_v4(),
+                name: format!("Project {index}"),
+                path: PathBuf::from(format!("/home/dev/repository-{index}")),
+                bookmark: None,
+                created_at: index,
+                temporary: false,
+                starred: false,
+            })
+            .collect::<Vec<_>>();
+        projects[0].name = "Forgotten Orchard".into();
+        projects[0].path = PathBuf::from("/home/dev/archived-orchard");
+        let recent = ordered_project_ids(None, &[], &projects);
+        assert!(!recent.contains(&projects[0].id));
+        assert_eq!(filtered_project_ids(&recent, &projects, None, "  "), recent);
+        assert_eq!(
+            filtered_project_ids(&recent, &projects, None, "FGORCH"),
+            vec![projects[0].id]
+        );
+        assert_eq!(
+            filtered_project_ids(
+                &recent,
+                &projects,
+                Some(Path::new("/home")),
+                "~/dev/archived-orchard"
+            ),
+            vec![projects[0].id]
+        );
+        assert!(filtered_project_ids(&recent, &projects, None, "no-such-project").is_empty());
+        assert_eq!(filtered_project_ids(&recent, &projects, None, ""), recent);
+    }
 
     #[test]
     fn switcher_order_contains_only_the_ten_most_recently_used_projects() {
