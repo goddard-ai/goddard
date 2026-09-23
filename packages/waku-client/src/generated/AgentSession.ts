@@ -135,7 +135,11 @@ landed_at?: number | null,
  * daemon restart, so the session can still resume through
  * `provider_cursor`.
  */
-incognito?: boolean, provider_cursor: ProviderResumeCursor | null,
+incognito?: boolean,
+/**
+ * The user has allowed this task's agent to set its own title.
+ */
+agent_rename_allowed?: boolean, provider_cursor: ProviderResumeCursor | null,
 /**
  * Provider conversations this session ran on before switching away.
  * Each holds a resumable cursor and the transcript boundary the return

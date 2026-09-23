@@ -138,6 +138,11 @@ pub fn parse_side_submission(prompt: &str) -> Option<Option<String>> {
     parse_waku_invocation(prompt, "side")
 }
 
+/// A reserved local title change. A bare command opens the title editor.
+pub fn parse_rename_submission(prompt: &str) -> Option<Option<String>> {
+    parse_waku_invocation(prompt, "rename")
+}
+
 /// Parse the submitted text as a `/incognito` invocation: `None` when it is
 /// not the command, `Some(None)` for a bare `/incognito` — flag the current
 /// draft only — and `Some(Some(prompt))` when a prompt follows, which flags
@@ -671,6 +676,16 @@ mod tests {
         assert_eq!(parse_incognito_submission("incognito"), None);
         assert_eq!(parse_incognito_submission("/incognito-mode"), None);
         assert_eq!(parse_incognito_submission("/other /incognito"), None);
+    }
+
+    #[test]
+    fn rename_submission_requires_exact_command_name() {
+        assert_eq!(
+            parse_rename_submission("/rename New name"),
+            Some(Some("New name".into()))
+        );
+        assert_eq!(parse_rename_submission("/rename"), Some(None));
+        assert_eq!(parse_rename_submission("/renamed New name"), None);
     }
 
     #[test]

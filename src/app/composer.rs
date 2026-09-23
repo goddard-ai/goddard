@@ -3564,12 +3564,38 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         self.execute_resume_composer_command(prompt, cx)
+            || self.execute_rename_composer_command(prompt, cx)
             || self.execute_land_composer_command(prompt, cx)
             || self.execute_compact_composer_command(prompt, cx)
             || self.execute_side_composer_command(prompt, cx)
             || self.execute_incognito_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
+    }
+
+    fn execute_rename_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        let Some(title) = crate::composer_complete::parse_rename_submission(prompt) else {
+            return false;
+        };
+        let Some(session_id) = self.composer_session().map(|session| session.id) else {
+            self.show_toast(tr!("commands.rename_no_session"));
+            return true;
+        };
+        if let Some(title) = title {
+            self.composer.update(cx, |input, cx| input.clear(cx));
+            if self
+                .state
+                .session_mut(session_id)
+                .is_some_and(|session| session.set_title(title))
+            {
+                self.save();
+                cx.notify();
+            }
+        } else {
+            self.composer
+                .update(cx, |input, cx| input.set_content("/rename ", cx));
+        }
+        true
     }
 
     fn execute_resume_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {

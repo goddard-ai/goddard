@@ -2323,6 +2323,7 @@ impl Backend for WakuBackend {
                     sender, task_id, thread_id, provider, prompt, delivery, events,
                 )
             }
+            Command::AgentRenameSelf { title } => self.agent_rename_self(agent, &title),
             Command::AgentReadSession {
                 task_id,
                 thread_id,
@@ -2479,6 +2480,7 @@ fn merge_session_list_columns(
     }
     existing.title = incoming.title;
     existing.auto_title = incoming.auto_title;
+    existing.agent_rename_allowed = incoming.agent_rename_allowed;
     existing.project_id = incoming.project_id;
     existing.provider = incoming.provider;
     existing.model = incoming.model;
@@ -2502,6 +2504,7 @@ fn merge_session_list_columns(
 fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSession) {
     if incoming.updated_at >= existing.updated_at {
         existing.title = incoming.title;
+        existing.agent_rename_allowed = incoming.agent_rename_allowed;
         existing.project_id = incoming.project_id;
         existing.provider = incoming.provider;
         existing.model = incoming.model;
@@ -3366,6 +3369,29 @@ impl WakuBackend {
         Ok(())
     }
 
+    fn agent_rename_self(
+        &self,
+        agent: Option<Uuid>,
+        title: &str,
+    ) -> anyhow::Result<ResponsePayload> {
+        let caller =
+            agent.ok_or_else(|| anyhow!("agent rename requires a scoped task credential"))?;
+        let mut state = self.task_state.lock();
+        let session = state
+            .session_mut(caller)
+            .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
+        if !session.agent_rename_allowed {
+            bail!("this task has not granted its agent permission to rename it");
+        }
+        if title.trim().is_empty() {
+            bail!("a task title cannot be empty");
+        }
+        if session.set_title(title) {
+            self.task_store.save(&mut state)?;
+        }
+        Ok(ResponsePayload::Ack)
+    }
+
     /// The settings surface is gated separately from task creation and only
     /// for scoped credentials — a client holding the master token already has
     /// full `updateSettings` access, so the flag must not gate it.
@@ -3493,13 +3519,13 @@ impl WakuBackend {
             options.computer_use_enabled,
             daemon_settings.computer_use_experiment_enabled,
         );
-        let environment = self
+        let (environment, rename_allowed) = self
             .task_state
             .lock()
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .map(AgentSession::environment)
+            .map(|session| (session.environment(), session.agent_rename_allowed))
             .unwrap_or_default();
         // A cloud task runs on the provider's hosted environment — nothing
         // local executes, so the launch injections below (agent surface,
@@ -3509,6 +3535,7 @@ impl WakuBackend {
         if !cloud_launch
             && (daemon_settings.agent_tools_enabled
                 || daemon_settings.agent_settings_enabled
+                || rename_allowed
                 || options.read_own_transcript)
         {
             match self.agent_launch_env(session_id) {
@@ -5008,6 +5035,7 @@ fn handle_driver_command(
         | Command::CloseSession
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
+        | Command::AgentRenameSelf { .. }
         | Command::AgentReadSession { .. }
         | Command::AgentSearchSessions { .. }
         | Command::CancelQueuedPrompt { .. }
@@ -6781,6 +6809,56 @@ mod tests {
         )
         .unwrap();
         (backend, session_id, side_id)
+    }
+
+    #[test]
+    fn agent_rename_requires_own_task_grant_and_persists_title() {
+        let root = std::env::temp_dir().join(format!("waku-agent-rename-{}", Uuid::new_v4()));
+        let (backend, session_id, side_id) = read_scope_test_backend(&root);
+        assert!(backend.agent_rename_self(None, "No caller").is_err());
+        assert!(
+            backend
+                .agent_rename_self(Some(session_id), "Denied")
+                .is_err()
+        );
+        {
+            let mut state = backend.task_state.lock();
+            state.session_mut(session_id).unwrap().agent_rename_allowed = true;
+            backend.task_store.save(&mut state).unwrap();
+        }
+        assert!(backend.agent_rename_self(Some(session_id), " ").is_err());
+        backend
+            .agent_rename_self(Some(session_id), "  My title  ")
+            .unwrap();
+        let state = backend.task_state.lock();
+        assert_eq!(
+            state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .unwrap()
+                .title,
+            "My title"
+        );
+        assert_eq!(
+            state
+                .sessions
+                .iter()
+                .find(|session| session.id == side_id)
+                .unwrap()
+                .title,
+            AgentSession::DEFAULT_TITLE
+        );
+        drop(state);
+        let restored = StateStore::daemon(root.join("app.db")).load().unwrap();
+        let own = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert_eq!(own.title, "My title");
+        assert!(own.agent_rename_allowed);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

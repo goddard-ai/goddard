@@ -478,7 +478,7 @@ pub enum Command {
     /// immediately start its first prompt.
     ///
     /// Agents running inside a Waku session receive a daemon-minted token
-    /// restricted to `agentCreateSession` and `agentPrompt`, so a harness can
+    /// restricted to the agent command surface, so a harness can
     /// reach other tasks only when the human asked it to. There is no
     /// per-call approval gate; instead the daemon marks every accepted prompt
     /// with the sending task's id, which keeps agent-originated turns
@@ -536,6 +536,10 @@ pub enum Command {
         prompt: String,
         #[serde(default)]
         delivery: AgentPromptDelivery,
+    },
+    /// Set the title of the calling agent's own task. Requires a per-task grant.
+    AgentRenameSelf {
+        title: String,
     },
     /// Cancel a daemon-owned queued agent prompt before it delivers. The
     /// session id rides the request envelope; `queued_message_id` names the

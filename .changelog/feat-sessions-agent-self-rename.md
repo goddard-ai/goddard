@@ -1,0 +1,1 @@
+- Let agents rename their own tasks after a per-task grant in the transcript, and let you rename a task with `/rename <title>` in the composer.

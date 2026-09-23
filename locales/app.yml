@@ -2685,6 +2685,16 @@ commands.land_description:
   en: Rebase onto the base branch and land this task's commits on it
 commands.side_description:
   en: Open a side chat in this task's panel
+commands.rename_description:
+  en: Rename this task with /rename followed by a title
+commands.rename_no_session:
+  en: Select a task to rename
+session.allow_agent_rename:
+  en: Allow agent rename
+session.agent_rename_allowed:
+  en: Agent rename allowed
+session.agent_rename_hint:
+  en: Toggle permission for this task's agent to rename itself
 commands.compact_description:
   en: Compact the conversation context
 commands.incognito_description:

@@ -1365,7 +1365,8 @@ impl StateStore {
             .prepare(
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
-                        dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of
+                        dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
+                        agent_rename_allowed
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1390,6 +1391,7 @@ impl StateStore {
                     row.get::<_, Option<i64>>(14)?,
                     row.get::<_, Option<String>>(15)?,
                     row.get::<_, Option<String>>(16)?,
+                    row.get::<_, bool>(17)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1763,6 +1765,7 @@ type SessionColumns = (
     Option<i64>,
     Option<String>,
     Option<String>,
+    bool,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -1789,6 +1792,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         landed_at,
         workspace,
         side_chat_of,
+        agent_rename_allowed,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -1807,6 +1811,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         // Same duplication story as `workspace`: the daemon's side-chat
         // cascade and launch environment need it without a hydrate.
         side_chat_of: side_chat_of.and_then(|id| Uuid::parse_str(&id).ok()),
+        agent_rename_allowed,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
         model,
         // Hydration replaces these; the list never reads them.
@@ -2100,8 +2105,9 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
 const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
-         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
+         agent_rename_allowed
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -2118,7 +2124,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          dormant_exempt_until = excluded.dormant_exempt_until,
          landed_at     = excluded.landed_at,
          workspace     = excluded.workspace,
-         side_chat_of  = excluded.side_chat_of";
+         side_chat_of  = excluded.side_chat_of,
+         agent_rename_allowed = excluded.agent_rename_allowed";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred)
@@ -2186,6 +2193,7 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
         session
             .side_chat_of
             .map_or(Value::Null, |id| Value::Text(id.to_string())),
+        Value::Integer(i64::from(session.agent_rename_allowed)),
     ]
 }
 

@@ -37,6 +37,7 @@ goddard-agent — Goddard's scoped agent surface inside a session
 USAGE
     goddard-agent create '<json>'            Create a task and start its first prompt
     goddard-agent prompt '<json>'            Send a prompt to an existing task
+    goddard-agent rename '<json>'            Rename this task when its transcript grants permission
     goddard-agent read '<json>'              Read a task's transcript
     goddard-agent search '<json>'            Search this project's task transcripts
     goddard-agent command list               List the user's custom commands
@@ -61,6 +62,8 @@ USAGE CONTRACT
     `read`ing. Use `create` and `prompt` only when the human you are
     working for has explicitly asked — never for exploration,
     convenience, or self-orchestration.
+    `rename` changes only this task's title and requires a grant from this
+    task's transcript header.
     There is no per-call approval gate for either surface; the daemon records
     this task's id on every accepted write, so agent-originated commands and
     turns are visibly attributed to it.
@@ -106,6 +109,12 @@ fn schema() -> serde_json::Value {
                 "delivery": {"type": "string", "enum": ["queue", "steer"], "default": "queue", "notes": "queue waits for the target to go idle and preserves submission order; steer injects into the running turn and fails when no turn is running"}
             },
             "example": "{\"task_id\":\"<uuid>\",\"prompt\":\"How is the migration going?\",\"delivery\":\"queue\"}",
+            "returns": {"ok": true}
+        },
+        "rename": {
+            "description": "Set this task's title after the user grants rename permission in its transcript. Cannot rename another task.",
+            "fields": { "title": {"type": "string", "required": true} },
+            "example": "{\"title\":\"Investigate session startup\"}",
             "returns": {"ok": true}
         },
         "read": {
@@ -215,6 +224,11 @@ struct SearchPayload {
 }
 
 #[derive(Deserialize)]
+struct RenamePayload {
+    title: String,
+}
+
+#[derive(Deserialize)]
 struct CommandUpsertPayload {
     #[serde(default)]
     id: Option<Uuid>,
@@ -275,7 +289,7 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         "command" => command(arguments.next().as_deref(), arguments.next()),
-        "create" | "prompt" | "read" | "search" => {
+        "create" | "prompt" | "read" | "search" | "rename" => {
             let payload = arguments
                 .next()
                 .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
@@ -404,6 +418,13 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                     DeliveryArg::Queue => AgentPromptDelivery::Queue,
                     DeliveryArg::Steer => AgentPromptDelivery::Steer,
                 },
+            })
+        }
+        "rename" => {
+            let payload: RenamePayload = serde_json::from_str(payload)
+                .context("`rename` takes a JSON object with a title")?;
+            Ok(Command::AgentRenameSelf {
+                title: payload.title,
             })
         }
         "read" => {
@@ -611,6 +632,13 @@ mod tests {
             other => panic!("expected AgentSearchSessions, got {other:?}"),
         }
         assert!(build_command("search", "{}").is_err());
+    }
+
+    #[test]
+    fn rename_payload_only_carries_a_title() {
+        let command = build_command("rename", r#"{"title":"My task"}"#).unwrap();
+        assert!(matches!(command, Command::AgentRenameSelf { title } if title == "My task"));
+        assert!(build_command("rename", "{}").is_err());
     }
 
     #[test]

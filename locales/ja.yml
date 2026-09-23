@@ -1049,6 +1049,11 @@ commands.goal_description: このタスクが継続して追求するゴール�
 commands.resume_description: ターミナルのエージェントセッションを再開
 commands.land_description: ベースブランチにリベースしてこのタスクのコミットを取り込む
 commands.side_description: このタスクのパネルでサイドチャットを開く
+commands.rename_description: /rename の後に名前を入力してこのタスクの名前を変更
+commands.rename_no_session: 名前を変更するタスクを選択してください
+session.allow_agent_rename: エージェントの名前変更を許可
+session.agent_rename_allowed: エージェントの名前変更を許可中
+session.agent_rename_hint: このタスクのエージェントが自分の名前を変更する権限を切り替えます
 commands.compact_description: 会話のコンテキストを圧縮
 commands.incognito_description: シークレットタスクを開始 — メモリ上のみで、プロジェクトメモリの対象外
 commands.incognito_no_draft: シークレットは新しいタスクに適用します — 下書きが選択されていません

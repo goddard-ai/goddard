@@ -69,6 +69,8 @@ export const sessions = sqliteTable(
      * tasks. Side chats stay out of task lists and die with their parent.
      */
     sideChatOf: text("side_chat_of"),
+    /** Per-task grant for the owning agent to change this task's title. */
+    agentRenameAllowed: integer("agent_rename_allowed", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),

@@ -388,7 +388,10 @@ fn assemble_slash_commands(
     // composer exposes the same picker and submitting them can never leak
     // into an agent turn.
     commands.retain(|command| {
-        command.name != "resume" && command.name != "land" && command.name != "side"
+        command.name != "resume"
+            && command.name != "land"
+            && command.name != "side"
+            && command.name != "rename"
     });
     commands.push(SlashCommand {
         name: "resume".to_owned(),
@@ -409,6 +412,13 @@ fn assemble_slash_commands(
         description: crate::i18n::translate("commands.side_description"),
         scope: CommandScope::Waku,
         argument_hint: Some("[prompt]".to_owned()),
+        template: None,
+    });
+    commands.push(SlashCommand {
+        name: "rename".to_owned(),
+        description: crate::i18n::translate("commands.rename_description"),
+        scope: CommandScope::Waku,
+        argument_hint: Some("[title]".to_owned()),
         template: None,
     });
     // `/incognito` is draft-scoped — the picker hides it once the session

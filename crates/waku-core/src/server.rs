@@ -1590,14 +1590,15 @@ fn token_matches(expected: &str, candidate: &str) -> bool {
 /// The whole command surface a scoped agent credential can reach. These are
 /// deliberately absent from `command_targets_runtime` so they dispatch on
 /// their own workers — the backend serializes target-session delivery itself.
-/// The task commands sit behind the `agent_tools_enabled` opt-in; the custom
-/// command commands are the default-on agent settings surface, gated inside
-/// the backend by `agent_settings_enabled`.
+/// Cross-task commands sit behind `agent_tools_enabled`; self-rename has a
+/// per-task grant. Custom commands use the default-on agent settings surface,
+/// gated inside the backend by `agent_settings_enabled`.
 fn is_agent_command(command: &Command) -> bool {
     matches!(
         command,
         Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
+            | Command::AgentRenameSelf { .. }
             | Command::AgentReadSession { .. }
             | Command::AgentSearchSessions { .. }
             | Command::UpsertCustomCommand { .. }
@@ -1868,6 +1869,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         // clients learn about the new task or prompt from the revision bump.
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
+        | Command::AgentRenameSelf { .. }
         | Command::CancelQueuedPrompt { .. } => TaskCatalogAction::Changed,
         _ => TaskCatalogAction::None,
     }

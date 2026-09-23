@@ -581,6 +581,7 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              proactively whenever adding one would help",
         );
     }
+    instruction.push_str("\n- `rename` — set this task's title after the user grants rename permission in its transcript");
     if scope.task_tools {
         instruction.push_str(
             "\n\n`create`, `prompt`, and `read` act on the user's other \

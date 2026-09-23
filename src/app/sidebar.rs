@@ -4042,6 +4042,15 @@ impl Waku {
         cx.notify();
     }
 
+    fn toggle_agent_rename_grant(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.agent_rename_allowed = !session.agent_rename_allowed;
+            session.updated_at = unix_time();
+            self.save();
+            cx.notify();
+        }
+    }
+
     pub(super) fn commit_session_rename(&mut self, cx: &mut Context<Self>) {
         let Some(session_id) = self.session_rename.take() else {
             return;
@@ -5343,6 +5352,45 @@ impl Waku {
                     div().id("header-center-drag-region").h_full().flex_1(),
                     cx,
                 ),
+            )
+            .children(
+                session
+                    .filter(|session| session_surface && session.has_started())
+                    .map(|session| {
+                        let session_id = session.id;
+                        let allowed = session.agent_rename_allowed;
+                        let focus = cx.focus_handle();
+                        div()
+                            .id("agent-rename-grant")
+                            .track_focus(&focus)
+                            .tab_index(0)
+                            .tab_group()
+                            .tab_stop(true)
+                            .px(px(8.0))
+                            .py(px(5.0))
+                            .rounded(px(8.0))
+                            .bg(theme.overlay)
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_secondary)
+                            .cursor_default()
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .hover(|style| style.bg(theme.raised))
+                            .child(if allowed {
+                                tr!("session.agent_rename_allowed")
+                            } else {
+                                tr!("session.allow_agent_rename")
+                            })
+                            .tooltip(Tooltip::text(tr!("session.agent_rename_hint")))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.toggle_agent_rename_grant(session_id, cx);
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.toggle_agent_rename_grant(session_id, cx);
+                                    cx.stop_propagation();
+                                }
+                            }))
+                    }),
             )
             .child(self.render_background_work_summary(cx))
             .when(!self.right_panel_slot_visible(), |element| {

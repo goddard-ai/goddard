@@ -1593,6 +1593,9 @@ pub struct AgentSession {
     /// `provider_cursor`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub incognito: bool,
+    /// The user has allowed this task's agent to set its own title.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub agent_rename_allowed: bool,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// Provider conversations this session ran on before switching away.
@@ -1732,6 +1735,7 @@ impl AgentSession {
             quarantined: false,
             landed_at: None,
             incognito: false,
+            agent_rename_allowed: false,
             detail_loaded: true,
             provider_cursor: None,
             suspended_provider_sessions: Vec::new(),
@@ -1789,6 +1793,7 @@ impl AgentSession {
             landed_at: self.landed_at,
             // A list column: the sidebar and drafts list badge incognito rows.
             incognito: self.incognito,
+            agent_rename_allowed: self.agent_rename_allowed,
             // Incognito sessions persist nowhere, so the client's skeleton
             // may be the only surviving copy after a daemon restart — it
             // must carry the resume cursor, or survival depends on whether
@@ -2671,6 +2676,7 @@ impl AgentSession {
         let now = unix_time();
         fork.id = fork_id;
         fork.title = Self::DEFAULT_TITLE.to_owned();
+        fork.agent_rename_allowed = false;
         fork.auto_title = Some(fork_title.to_owned());
         fork.status = SessionStatus::Idle;
         fork.created_at = now;

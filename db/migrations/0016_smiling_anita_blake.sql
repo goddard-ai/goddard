@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `agent_rename_allowed` integer DEFAULT false NOT NULL;
