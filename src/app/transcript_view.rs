@@ -1559,6 +1559,12 @@ impl Waku {
                         push: landed_push,
                         push_focus: self
                             .transcript_control_focus(format!("landed-push-{}", message.id), cx),
+                        archive_session_id: self.selected_session().and_then(|session| {
+                            (session.archived_at.is_none() && !session.is_side_chat())
+                                .then_some(session.id)
+                        }),
+                        archive_focus: self
+                            .transcript_control_focus(format!("landed-archive-{}", message.id), cx),
                     });
                     let transfer_notice = self
                         .selected_session()

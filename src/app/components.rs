@@ -416,7 +416,8 @@ pub(super) struct TransferNoticeState {
 /// track. `expanded` reveals the commit list; `show_all` lifts the
 /// [`LANDED_NOTICE_SHOWN_COMMITS`] preview cap within it. `push` is the
 /// base branch's live push state — the card's push affordance — and
-/// `push_focus` its button's focus target.
+/// `push_focus` its button's focus target. Once pushed, the card offers to
+/// archive the session.
 pub(super) struct LandedNoticeState {
     pub(super) expanded: bool,
     pub(super) show_all: bool,
@@ -424,6 +425,8 @@ pub(super) struct LandedNoticeState {
     pub(super) commits_focus: FocusHandle,
     pub(super) push: push_base::LandedPush,
     pub(super) push_focus: FocusHandle,
+    pub(super) archive_session_id: Option<Uuid>,
+    pub(super) archive_focus: FocusHandle,
 }
 
 /// Filename text that opens the file in its OS default app — the user's
@@ -1568,6 +1571,61 @@ fn landed_push_control(
     }
 }
 
+fn landed_archive_control(
+    message_id: Uuid,
+    state: &LandedNoticeState,
+    theme: &Theme,
+    waku: &gpui::WeakEntity<Waku>,
+) -> Option<AnyElement> {
+    let session_id = state.archive_session_id?;
+    if !matches!(state.push, push_base::LandedPush::Pushed) {
+        return None;
+    }
+    let click_waku = waku.clone();
+    let key_waku = waku.clone();
+    Some(
+        div()
+            .id(SharedString::from(format!("landed-archive-{message_id}")))
+            .track_focus(&state.archive_focus)
+            .tab_index(0)
+            .h(px(22.0))
+            .px(px(7.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .text_size(sp(11.5))
+            .text_color(theme.text_secondary)
+            .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .child(icon("icons/archive.svg", 11.0, theme.text_secondary))
+            .child(tr!("session.archive"))
+            .tooltip(Tooltip::text_with_action(
+                tr!("session.archive"),
+                &ArchiveSession,
+            ))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                let _ = click_waku.update(cx, |waku, cx| {
+                    waku.archive_session(session_id, window, cx);
+                });
+            })
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    cx.stop_propagation();
+                    let _ = key_waku.update(cx, |waku, cx| {
+                        waku.archive_session(session_id, window, cx);
+                    });
+                }
+            })
+            .into_any_element(),
+    )
+}
+
 /// The "Landed on `base`" card a [`TranscriptNotice::Landed`] renders as: a
 /// collapsed disclosure header over the commit list, wearing the changed-files
 /// card's chrome. The SHAs ride the ctx's commit-ref detection — enabled for
@@ -1629,6 +1687,10 @@ fn landed_notice_row(
             .focus_visible(|style| style.bg(theme.overlay_strong))
             .when_some(
                 landed_push_control(message_id, state, theme, waku),
+                |header, control| header.child(control),
+            )
+            .when_some(
+                landed_archive_control(message_id, state, theme, waku),
                 |header, control| header.child(control),
             )
             .child(icon(
