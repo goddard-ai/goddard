@@ -129,6 +129,62 @@ impl RemoteImageCache {
 }
 
 impl Waku {
+    pub(super) fn toggle_pasted_text_attachment(
+        &mut self,
+        message_id: Uuid,
+        index: usize,
+        attachment: &waku_protocol::model::MessageAttachment,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (message_id, index);
+        if self
+            .expanded_pasted_text
+            .borrow_mut()
+            .remove(&key)
+            .is_some()
+        {
+            cx.notify();
+            return;
+        }
+        self.expanded_pasted_text.borrow_mut().insert(key, None);
+        let reference = attachment.blob_reference.clone();
+        let daemon_path = attachment.path.clone();
+        let daemon = self.daemon_for_path(&daemon_path);
+        let Some(daemon) = daemon else {
+            self.expanded_pasted_text.borrow_mut().insert(
+                key,
+                Some("Pasted text is unavailable from this host.".to_owned()),
+            );
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let content = cx
+                .background_executor()
+                .spawn(async move {
+                    let reference = reference?;
+                    let bytes = waku_client::persistence::read_remote_reference(
+                        &reference,
+                        Some(&daemon_path),
+                        &daemon,
+                    )?;
+                    Some(String::from_utf8_lossy(&bytes).into_owned())
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                if waku.expanded_pasted_text.borrow().contains_key(&key) {
+                    waku.expanded_pasted_text.borrow_mut().insert(
+                        key,
+                        Some(content.unwrap_or_else(|| "Could not load pasted text.".to_owned())),
+                    );
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
     /// Resolve one daemon-owned image for a visible row. Frames consult only
     /// in-memory state; the first miss starts a deduplicated background RPC and
     /// a later notification lets GPUI render the returned bytes from memory.

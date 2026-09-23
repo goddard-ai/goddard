@@ -169,6 +169,21 @@ impl Waku {
         cx.notify();
     }
 
+    pub(super) fn pasted_text_attachment_view(
+        &self,
+        message_id: Uuid,
+        index: usize,
+    ) -> PastedTextAttachmentView {
+        self.expanded_pasted_text
+            .borrow()
+            .get(&(message_id, index))
+            .map(|content| PastedTextAttachmentView {
+                expanded: true,
+                content: content.clone(),
+            })
+            .unwrap_or_default()
+    }
+
     fn show_message_copied(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
         self.copied_message_generation = self.copied_message_generation.wrapping_add(1);
         let generation = self.copied_message_generation;
@@ -360,6 +375,7 @@ pub(super) struct MessageRender<'a> {
     pub(super) message_edit_input: Option<Entity<ComposerInput>>,
     pub(super) attachment_menus: Vec<ContextMenuHandle>,
     pub(super) attachment_images: Vec<Option<Arc<gpui::Image>>>,
+    pub(super) pasted_text_attachments: Vec<PastedTextAttachmentView>,
     /// Captured from the selected daemon before the virtualized row is built.
     /// A row is laid out while the root `Waku` entity is already updating, so
     /// it must not read that entity again just to decide whether Finder reveal
@@ -388,6 +404,12 @@ pub(super) struct MessageRender<'a> {
     /// `TranscriptNotice::TransferReceived` row — `None` for every other
     /// message, which renders the card's static face only.
     pub(super) transfer_notice: Option<TransferNoticeState>,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct PastedTextAttachmentView {
+    pub(super) expanded: bool,
+    pub(super) content: Option<String>,
 }
 
 /// The live bits a received-transfer card needs that the persisted notice
@@ -516,6 +538,7 @@ fn render_sent_message_attachments(
     attachments: &[MessageAttachment],
     attachment_menus: &[ContextMenuHandle],
     attachment_images: &[Option<Arc<gpui::Image>>],
+    pasted_text_attachments: &[PastedTextAttachmentView],
     can_reveal: bool,
     waku: &gpui::WeakEntity<Waku>,
     theme: &Theme,
@@ -584,6 +607,14 @@ fn render_sent_message_attachments(
         };
         if let Some(preview) = attachment.pasted_text_preview.as_ref() {
             let key_menu = menu.clone();
+            let click_waku = waku.clone();
+            let key_waku = waku.clone();
+            let click_attachment = attachment.clone();
+            let key_attachment = attachment.clone();
+            let pasted_text = pasted_text_attachments
+                .get(index)
+                .cloned()
+                .unwrap_or_default();
             let mut chip = div()
                 .id(SharedString::from(format!(
                     "message-{message_id}-attachment-{index}"
@@ -600,6 +631,7 @@ fn render_sent_message_attachments(
                 .gap(px(5.0))
                 .track_focus(menu.trigger_focus_handle())
                 .tab_index(0)
+                .cursor_pointer()
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .child(icon("icons/file.svg", 11.0, theme.text_tertiary))
                 .child(
@@ -615,19 +647,67 @@ fn render_sent_message_attachments(
                     preview.clone(),
                 )));
             }
-            chip = chip.on_key_down(move |event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
-                    key_menu.open_context_menu(window, cx);
+            chip = chip
+                .on_click(move |_, _, cx| {
+                    let _ = click_waku.update(cx, |this, cx| {
+                        this.toggle_pasted_text_attachment(
+                            message_id,
+                            index,
+                            &click_attachment,
+                            cx,
+                        );
+                    });
                     cx.stop_propagation();
-                }
-            });
+                })
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        let _ = key_waku.update(cx, |this, cx| {
+                            this.toggle_pasted_text_attachment(
+                                message_id,
+                                index,
+                                &key_attachment,
+                                cx,
+                            );
+                        });
+                        cx.stop_propagation();
+                    } else if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
+                        key_menu.open_context_menu(window, cx);
+                        cx.stop_propagation();
+                    }
+                });
             let reveal_path = attachment.path.clone();
-            row = row.child(context_menu(
+            let mut attachment_column = div().flex().flex_col().items_end().gap(px(6.0));
+            attachment_column = attachment_column.child(context_menu(
                 chip,
                 SharedString::from(format!("message-{message_id}-attachment-{index}-menu")),
                 menu,
                 move |_| image_preview::attachment_menu_items(reveal_path.clone(), can_reveal),
             ));
+            if pasted_text.expanded {
+                let text = pasted_text
+                    .content
+                    .unwrap_or_else(|| "Loading pasted text…".to_owned());
+                attachment_column = attachment_column.child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "message-{message_id}-attachment-{index}-text"
+                        )))
+                        .w(px(360.0))
+                        .max_w(px(540.0))
+                        .max_h(px(240.0))
+                        .overflow_y_scroll()
+                        .px(px(10.0))
+                        .py(px(8.0))
+                        .rounded(px(9.0))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.inset)
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(text),
+                );
+            }
+            row = row.child(attachment_column);
             continue;
         }
         let icon_path = if attachment.is_dir {
@@ -890,6 +970,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         message_edit_input,
         attachment_menus,
         attachment_images,
+        pasted_text_attachments,
         attachments_can_reveal,
         markdown,
         work_item_refs,
@@ -1018,6 +1099,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 &message.attachments,
                 &attachment_menus,
                 &attachment_images,
+                &pasted_text_attachments,
                 attachments_can_reveal,
                 &waku,
                 theme,

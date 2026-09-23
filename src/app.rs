@@ -3447,6 +3447,9 @@ pub struct Waku {
     user_message_viewports: RefCell<HashMap<Uuid, UserMessageScrollViewport>>,
     /// User prompts whose height cap the reader lifted via "Show more".
     expanded_user_messages: HashSet<Uuid>,
+    /// Full text for oversized pasted-text attachments, loaded only when a
+    /// reader opens their transcript chip.
+    expanded_pasted_text: RefCell<HashMap<(Uuid, usize), Option<String>>>,
     /// Focus handles for each bubble's "Show more" button, kept so focus
     /// survives the virtualized row rebuilds.
     user_message_expand_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
@@ -6489,6 +6492,7 @@ impl Waku {
                 message_markdown: RefCell::new(HashMap::new()),
                 user_message_viewports: RefCell::new(HashMap::new()),
                 expanded_user_messages: HashSet::new(),
+                expanded_pasted_text: RefCell::new(HashMap::new()),
                 user_message_expand_focuses: RefCell::new(HashMap::new()),
                 activity_markdown: RefCell::new(HashMap::new()),
                 reasoning_window_starts: RefCell::new(HashMap::new()),

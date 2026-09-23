@@ -1523,6 +1523,9 @@ impl Waku {
                             message_edit_input: None,
                             attachment_menus,
                             attachment_images,
+                            pasted_text_attachments: (0..message.attachments.len())
+                                .map(|index| self.pasted_text_attachment_view(message.id, index))
+                                .collect(),
                             attachments_can_reveal: !self.is_remote_session(session_id),
                             markdown: view,
                             work_item_refs,
