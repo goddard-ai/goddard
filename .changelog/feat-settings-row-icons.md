@@ -1,0 +1,1 @@
+- Settings rows now lead with an icon matching the option they control, making it easier to scan a page and spot the setting you want.

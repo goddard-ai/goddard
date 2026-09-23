@@ -344,6 +344,7 @@ impl ExperimentGroup {
 struct ExperimentDef {
     group: ExperimentGroup,
     id: &'static str,
+    icon: &'static str,
     title_key: &'static str,
     description_key: &'static str,
     enabled: bool,
@@ -621,6 +622,33 @@ pub(super) fn settings_row_text(
         )
 }
 
+/// The lucide glyph leading every settings row, centered in a fixed-width
+/// slot so the title columns line up across toggles, pickers, and fields.
+#[track_caller]
+pub(super) fn settings_row_icon(path: &'static str, theme: Theme) -> Div {
+    div()
+        .w(px(20.0))
+        .flex_none()
+        .flex()
+        .justify_center()
+        .child(icon(path, 16.0, theme.text_tertiary))
+}
+
+/// A settings row's leading content: the row's icon beside the text column
+/// [`settings_row_text`] builds. Rows that extend the column (inline fields,
+/// extra lines) pass the extended div through unchanged.
+#[track_caller]
+pub(super) fn settings_row_label(icon_path: &'static str, text: Div, theme: Theme) -> Div {
+    div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .child(settings_row_icon(icon_path, theme))
+        .child(text)
+}
+
 /// The dormancy-threshold picker's row label — "1 day", "N days", or
 /// "Never" for the auto-dormancy kill switch.
 fn dormant_after_label(days: Option<u32>) -> String {
@@ -644,6 +672,7 @@ fn link_modifier_label(modifier: TerminalLinkModifier) -> &'static str {
 /// text-only cards. Vertical spacing belongs to the caller's column.
 #[track_caller]
 fn setting_card(
+    icon_path: &'static str,
     title: impl Into<SharedString>,
     description: impl Into<SharedString>,
     control: impl IntoElement,
@@ -664,7 +693,11 @@ fn setting_card(
             .flex()
             .items_center()
             .gap(px(24.0))
-            .child(settings_row_text(title, description, matched, theme))
+            .child(settings_row_label(
+                icon_path,
+                settings_row_text(title, description, matched, theme),
+                theme,
+            ))
             .child(control)
             .into_any_element(),
     )
@@ -1596,6 +1629,7 @@ impl Waku {
         // belong to no feature area.
         let mut head_cards: Vec<AnyElement> = [
             setting_card(
+                "icons/local.svg",
                 tr!("settings.local_by_default"),
                 tr!("settings.local_by_default_description"),
                 div(),
@@ -1603,6 +1637,7 @@ impl Waku {
                 search,
             ),
             setting_card(
+                "icons/chart-column.svg",
                 tr!("settings.share_anonymous_usage_data"),
                 tr!("settings.share_anonymous_usage_data_description"),
                 analytics_toggle,
@@ -1616,6 +1651,7 @@ impl Waku {
         if updater_available {
             let enabled = self.automatic_updates_enabled;
             head_cards.extend(setting_card(
+                "icons/rotate-cw.svg",
                 tr!("settings.automatic_updates"),
                 tr!("settings.automatic_updates_description"),
                 toggle_switch(
@@ -1634,6 +1670,7 @@ impl Waku {
                 None => env!("CARGO_PKG_VERSION").to_owned(),
             };
             head_cards.extend(setting_card(
+                "icons/download.svg",
                 tr!("settings.check_for_updates"),
                 tr!(
                     "settings.check_for_updates_description",
@@ -1699,6 +1736,7 @@ impl Waku {
                     },
                 );
                 setting_card(
+                    "icons/folder.svg",
                     tr!("settings.default_workspace"),
                     tr!("settings.default_workspace_description"),
                     workspace_selector,
@@ -1707,6 +1745,7 @@ impl Waku {
                 )
             },
             setting_card(
+                "icons/appearance.svg",
                 tr!("settings.local_workspace_accent"),
                 tr!("settings.local_workspace_accent_description"),
                 toggle_switch(
@@ -1753,6 +1792,7 @@ impl Waku {
                     },
                 );
                 setting_card(
+                    "icons/archive.svg",
                     tr!("settings.archive_navigation"),
                     tr!("settings.archive_navigation_description"),
                     navigation_selector,
@@ -1761,6 +1801,7 @@ impl Waku {
                 )
             },
             setting_card(
+                "icons/archive.svg",
                 tr!("settings.archive_continues_unread_sweep"),
                 tr!(
                     "settings.archive_continues_unread_sweep_description",
@@ -1810,6 +1851,7 @@ impl Waku {
                     },
                 );
                 setting_card(
+                    "icons/hourglass.svg",
                     tr!("settings.dormant_after"),
                     tr!("settings.dormant_after_description"),
                     dormant_selector,
@@ -1818,6 +1860,7 @@ impl Waku {
                 )
             },
             setting_card(
+                "icons/keyboard.svg",
                 tr!("settings.sidebar_shortcut_tags"),
                 tr!(
                     "settings.sidebar_shortcut_tags_description",
@@ -1839,6 +1882,7 @@ impl Waku {
                 search,
             ),
             setting_card(
+                "icons/compose.svg",
                 tr!("settings.sidebar_composer_drafts"),
                 tr!("settings.sidebar_composer_drafts_description"),
                 toggle_switch(
@@ -1861,6 +1905,7 @@ impl Waku {
                 .sidebar_composer_drafts
                 .then(|| {
                     setting_card(
+                        "icons/appearance.svg",
                         tr!("settings.sidebar_draft_preview_color"),
                         tr!("settings.sidebar_draft_preview_color_description"),
                         self.setting_selector(
@@ -1889,6 +1934,7 @@ impl Waku {
             // three-finger horizontal swipes.
             let enabled = self.state.three_finger_swipe_navigation;
             session_cards.extend(setting_card(
+                "icons/hand.svg",
                 tr!("settings.three_finger_swipe_navigation"),
                 tr!("settings.three_finger_swipe_navigation_description"),
                 toggle_switch(
@@ -1908,6 +1954,7 @@ impl Waku {
 
         let git_cards: Vec<AnyElement> = [
             setting_card(
+                "icons/git-branch.svg",
                 tr!("settings.new_worktree_base"),
                 tr!("settings.new_worktree_base_description"),
                 self.setting_selector(
@@ -1938,7 +1985,8 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(24.0))
-                        .child(
+                        .child(settings_row_label(
+                            "icons/rotate-cw.svg",
                             settings_row_text(title, description, matched, theme).child(
                                 div().mt(px(9.0)).max_w(px(360.0)).child(
                                     TextField::new(
@@ -1948,7 +1996,8 @@ impl Waku {
                                     .w_full(),
                                 ),
                             ),
-                        )
+                            theme,
+                        ))
                         .child(toggle_switch(
                             "new-worktree-sync-default-branch-toggle",
                             self.state.new_worktree_sync_default_branch,
@@ -1966,6 +2015,7 @@ impl Waku {
                 })
             },
             setting_card(
+                "icons/git-merge.svg",
                 tr!("settings.sync_strategy"),
                 tr!("settings.sync_strategy_description"),
                 self.setting_selector(
@@ -1983,6 +2033,7 @@ impl Waku {
                 search,
             ),
             setting_card(
+                "icons/download.svg",
                 tr!("settings.auto_fetch_remotes"),
                 tr!("settings.auto_fetch_remotes_description"),
                 toggle_switch(
@@ -2000,6 +2051,7 @@ impl Waku {
                 search,
             ),
             setting_card(
+                "icons/alert.svg",
                 tr!("settings.sync_conflict_handling"),
                 tr!("settings.sync_conflict_handling_description"),
                 self.setting_selector(
@@ -2017,6 +2069,7 @@ impl Waku {
                 search,
             ),
             setting_card(
+                "icons/octagon-alert.svg",
                 tr!("settings.land_conflict_handling"),
                 tr!("settings.land_conflict_handling_description"),
                 self.setting_selector(
@@ -2034,6 +2087,7 @@ impl Waku {
                 search,
             ),
             setting_card(
+                "icons/git-commit-horizontal.svg",
                 tr!("settings.land_commit_reminder"),
                 tr!("settings.land_commit_reminder_description"),
                 toggle_switch(
@@ -2061,6 +2115,7 @@ impl Waku {
                     {
                         let enabled = self.state.notify_turn_finished;
                         settings_row(
+                            "icons/bell.svg",
                             tr!("settings.finished_turn_notification"),
                             tr!("settings.finished_turn_notification_description"),
                             toggle_switch(
@@ -2078,6 +2133,7 @@ impl Waku {
                     {
                         let enabled = self.state.notify_waiting_input;
                         settings_row(
+                            "icons/inbox.svg",
                             tr!("settings.waiting_input_notification"),
                             tr!("settings.waiting_input_notification_description"),
                             toggle_switch(
@@ -2140,6 +2196,7 @@ impl Waku {
                     },
                 );
                 let toggle_row = settings_row(
+                    "icons/bell.svg",
                     tr!("settings.completion_sound"),
                     tr!("settings.completion_sound_description"),
                     toggle_switch(
@@ -2165,7 +2222,8 @@ impl Waku {
                             .py(px(10.0))
                             .flex()
                             .items_center()
-                            .gap(px(24.0))
+                            .gap(px(12.0))
+                            .child(settings_row_icon("icons/volume-2.svg", theme))
                             .child(settings_title_jump(
                                 div()
                                     .flex_1()
@@ -2197,6 +2255,7 @@ impl Waku {
                             .flex()
                             .items_center()
                             .gap(px(12.0))
+                            .child(settings_row_icon("icons/gauge.svg", theme))
                             .child(settings_title_jump(
                                 div()
                                     .flex_1()
@@ -2230,6 +2289,7 @@ impl Waku {
                 } else {
                     let starred_sound = self.state.starred_completion_sound;
                     settings_row(
+                        "icons/star.svg",
                         tr!("settings.completion_sound_starred"),
                         tr!("settings.completion_sound_starred_description"),
                         toggle_switch(
@@ -2368,6 +2428,7 @@ impl Waku {
             .children(
                 [
                     setting_card(
+                        "icons/terminal.svg",
                         tr!("settings.terminal_font_size"),
                         tr!("settings.terminal_font_size_description"),
                         font_size_selector,
@@ -2375,6 +2436,7 @@ impl Waku {
                         search,
                     ),
                     setting_card(
+                        "icons/external-link.svg",
                         tr!(
                             "settings.terminal_mouse_mode_click",
                             modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
@@ -2400,6 +2462,7 @@ impl Waku {
                         search,
                     ),
                     setting_card(
+                        "icons/command.svg",
                         tr!("settings.terminal_link_modifier"),
                         tr!("settings.terminal_link_modifier_description"),
                         modifier_selector,
@@ -2407,6 +2470,7 @@ impl Waku {
                         search,
                     ),
                     setting_card(
+                        "icons/copy.svg",
                         tr!("settings.terminal_copy_on_select"),
                         tr!("settings.terminal_copy_on_select_description"),
                         toggle_switch(
@@ -2921,7 +2985,13 @@ impl Waku {
                     .py(px(14.0))
                     .rounded(px(16.0))
                     .bg(theme.raised)
-                    .child(settings_row_text(title, description, matched, theme))
+                    .flex()
+                    .items_center()
+                    .child(settings_row_label(
+                        "icons/slash.svg",
+                        settings_row_text(title, description, matched, theme),
+                        theme,
+                    ))
                     .into_any_element()
             })
         };
@@ -3319,7 +3389,13 @@ impl Waku {
                         .py(px(16.0))
                         .rounded(px(16.0))
                         .bg(theme.raised)
-                        .child(settings_row_text(title, description, matched, theme))
+                        .flex()
+                        .items_center()
+                        .child(settings_row_label(
+                            "icons/unplug.svg",
+                            settings_row_text(title, description, matched, theme),
+                            theme,
+                        ))
                         .into_any_element()
                 })
             };
@@ -3587,7 +3663,8 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(24.0))
-                    .child(
+                    .child(settings_row_label(
+                        "icons/wifi.svg",
                         div()
                             .flex_1()
                             .min_w_0()
@@ -3644,7 +3721,8 @@ impl Waku {
                                         theme,
                                     )),
                             ),
-                    )
+                        theme,
+                    ))
                     .child(exposure_toggle)
                     .into_any_element()
             })
@@ -3658,43 +3736,52 @@ impl Waku {
                 let title = tr!("daemon.connection_title");
                 let description = tr!("daemon.connection_description");
                 search.matched(&title, &description).map(|matched| {
-                    div()
-                        .child(settings_title_jump(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(
-                                    title,
-                                    matched.title_ranges.clone(),
-                                    theme,
-                                )),
-                            &matched,
-                            theme,
-                        ))
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .min_w_0()
-                                .whitespace_normal()
-                                .text_size(sp(12.5))
-                                .line_height(sp(16.0))
-                                .text_color(theme.text_secondary)
-                                .child(settings_search_text(
-                                    description,
-                                    matched.description_ranges.clone(),
-                                    theme,
-                                )),
-                        )
+                    settings_row_label(
+                        "icons/link.svg",
+                        div()
+                            .child(settings_title_jump(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(16.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(settings_search_text(
+                                        description,
+                                        matched.description_ranges.clone(),
+                                        theme,
+                                    )),
+                            ),
+                        theme,
+                    )
                 })
             };
-            let field_row = |title: String, description: String, field: TextField| -> Option<Div> {
+            let field_row = |icon_path: &'static str,
+                             title: String,
+                             description: String,
+                             field: TextField|
+             -> Option<Div> {
                 search.matched(&title, &description).map(|matched| {
                     div()
                         .mt(px(14.0))
                         .flex()
-                        .items_start()
+                        .items_center()
                         .gap(px(24.0))
+                        .child(settings_row_icon(icon_path, theme))
                         .child(
                             div()
                                 .flex_1()
@@ -3730,11 +3817,13 @@ impl Waku {
                 })
             };
             let port_row = field_row(
+                "icons/server.svg",
                 tr!("daemon.port"),
                 tr!("daemon.port_description"),
                 TextField::new("daemon-port-field", self.daemon_port_input.clone()).w(px(150.0)),
             );
             let origins_row = field_row(
+                "icons/globe.svg",
                 tr!("daemon.allowed_origins"),
                 tr!("daemon.allowed_origins_description"),
                 TextField::new("daemon-origins-field", self.daemon_origins_input.clone())
@@ -3769,34 +3858,38 @@ impl Waku {
                 let title = tr!("daemon.credentials_title");
                 let description = tr!("daemon.credentials_description");
                 search.matched(&title, &description).map(|matched| {
-                    div()
-                        .child(settings_title_jump(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(
-                                    title,
-                                    matched.title_ranges.clone(),
-                                    theme,
-                                )),
-                            &matched,
-                            theme,
-                        ))
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .min_w_0()
-                                .whitespace_normal()
-                                .text_size(sp(12.5))
-                                .line_height(sp(16.0))
-                                .text_color(theme.text_secondary)
-                                .child(settings_search_text(
-                                    description,
-                                    matched.description_ranges.clone(),
-                                    theme,
-                                )),
-                        )
+                    settings_row_label(
+                        "icons/key-round.svg",
+                        div()
+                            .child(settings_title_jump(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(16.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(settings_search_text(
+                                        description,
+                                        matched.description_ranges.clone(),
+                                        theme,
+                                    )),
+                            ),
+                        theme,
+                    )
                 })
             };
             let url_row = {
@@ -3808,6 +3901,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(10.0))
+                        .child(settings_row_icon("icons/link.svg", theme))
                         .child(settings_title_jump(
                             div()
                                 .w(px(80.0))
@@ -3848,6 +3942,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(10.0))
+                        .child(settings_row_icon("icons/key-round.svg", theme))
                         .child(settings_title_jump(
                             div()
                                 .w(px(80.0))
@@ -3892,6 +3987,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(10.0))
+                        .child(settings_row_icon("icons/qr-code.svg", theme))
                         .child(settings_title_jump(
                             div()
                                 .w(px(80.0))
@@ -4006,34 +4102,38 @@ impl Waku {
             let title = tr!("daemon.build_title");
             let description = tr!("daemon.build_description");
             search.matched(&title, &description).map(|matched| {
-                div()
-                    .child(settings_title_jump(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(settings_search_text(
-                                title,
-                                matched.title_ranges.clone(),
-                                theme,
-                            )),
-                        &matched,
-                        theme,
-                    ))
-                    .child(
-                        div()
-                            .mt(px(4.0))
-                            .min_w_0()
-                            .whitespace_normal()
-                            .text_size(sp(12.5))
-                            .line_height(sp(16.0))
-                            .text_color(theme.text_secondary)
-                            .child(settings_search_text(
-                                description,
-                                matched.description_ranges,
-                                theme,
-                            )),
-                    )
+                settings_row_label(
+                    "icons/hammer.svg",
+                    div()
+                        .child(settings_title_jump(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .child(
+                            div()
+                                .mt(px(4.0))
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_size(sp(12.5))
+                                .line_height(sp(16.0))
+                                .text_color(theme.text_secondary)
+                                .child(settings_search_text(
+                                    description,
+                                    matched.description_ranges,
+                                    theme,
+                                )),
+                        ),
+                    theme,
+                )
             })
         };
         let copy_button = |id: &'static str, value: String, cx: &mut Context<Self>| {
@@ -4085,7 +4185,8 @@ impl Waku {
                     }
                 }))
         };
-        let build_row = |title: String,
+        let build_row = |icon_path: &'static str,
+                         title: String,
                          value: String,
                          copy_id: &'static str,
                          top_border: bool,
@@ -4101,6 +4202,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
+                    .child(settings_row_icon(icon_path, theme))
                     .child(settings_title_jump(
                         div()
                             .w(px(80.0))
@@ -4138,6 +4240,7 @@ impl Waku {
             None => client.daemon_version().to_owned(),
         };
         let app_row = build_row(
+            "icons/laptop.svg",
             tr!("daemon.build_app"),
             app_build,
             "copy-app-build",
@@ -4145,6 +4248,7 @@ impl Waku {
             cx,
         );
         let daemon_row = build_row(
+            "icons/server.svg",
             tr!("daemon.build_daemon"),
             daemon_build,
             "copy-daemon-build",
@@ -4382,33 +4486,38 @@ impl Waku {
             .py(px(15.0))
             .rounded(px(16.0))
             .bg(theme.raised)
-            .child(settings_title_jump(
+            .child(settings_row_label(
+                "icons/server.svg",
                 div()
-                    .text_size(sp(13.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text)
-                    .child(settings_search_text(
-                        title,
-                        matched.title_ranges.clone(),
+                    .child(settings_title_jump(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(settings_search_text(
+                                title,
+                                matched.title_ranges.clone(),
+                                theme,
+                            )),
+                        &matched,
                         theme,
-                    )),
-                &matched,
+                    ))
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(sp(12.5))
+                            .line_height(sp(16.0))
+                            .text_color(theme.text_secondary)
+                            .child(settings_search_text(
+                                description,
+                                matched.description_ranges.clone(),
+                                theme,
+                            )),
+                    ),
                 theme,
-            ))
-            .child(
-                div()
-                    .mt(px(4.0))
-                    .min_w_0()
-                    .whitespace_normal()
-                    .text_size(sp(12.5))
-                    .line_height(sp(16.0))
-                    .text_color(theme.text_secondary)
-                    .child(settings_search_text(
-                        description,
-                        matched.description_ranges.clone(),
-                        theme,
-                    )),
-            );
+            ));
         // The editor form and the add button are chrome, not matches — a
         // search renders the card's saved rows only.
         if !search.active() {
@@ -4854,7 +4963,11 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(24.0))
-                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(settings_row_label(
+                    "icons/bot.svg",
+                    settings_row_text(title, description, matched, theme).whitespace_normal(),
+                    theme,
+                ))
                 .child(toggle)
                 .into_any_element(),
         )
@@ -4896,7 +5009,11 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(24.0))
-                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(settings_row_label(
+                    "icons/coffee.svg",
+                    settings_row_text(title, description, matched, theme).whitespace_normal(),
+                    theme,
+                ))
                 .child(toggle)
                 .into_any_element(),
         )
@@ -4925,10 +5042,15 @@ impl Waku {
                 .bg(theme.raised)
                 .flex()
                 .items_center()
-                .child(settings_row_text(title, description, matched, theme).child(
-                    div().mt(px(9.0)).max_w(px(360.0)).child(
-                        TextField::new("qa-branch-field", self.qa_branch_input.clone()).w_full(),
+                .child(settings_row_label(
+                    "icons/git-branch.svg",
+                    settings_row_text(title, description, matched, theme).child(
+                        div().mt(px(9.0)).max_w(px(360.0)).child(
+                            TextField::new("qa-branch-field", self.qa_branch_input.clone())
+                                .w_full(),
+                        ),
                     ),
+                    theme,
                 ))
                 .into_any_element(),
         )
@@ -4966,7 +5088,11 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(24.0))
-                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(settings_row_label(
+                    "icons/settings.svg",
+                    settings_row_text(title, description, matched, theme).whitespace_normal(),
+                    theme,
+                ))
                 .child(toggle)
                 .into_any_element(),
         )
@@ -5016,7 +5142,11 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(24.0))
-                .child(settings_row_text(title, description, matched, theme).whitespace_normal())
+                .child(settings_row_label(
+                    "icons/container.svg",
+                    settings_row_text(title, description, matched, theme).whitespace_normal(),
+                    theme,
+                ))
                 .child(selector)
                 .into_any_element(),
         )
@@ -5052,6 +5182,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "subagents-experiment-toggle",
+                icon: "icons/bot.svg",
                 title_key: "experiments.subagents_title",
                 description_key: "experiments.subagents_description",
                 enabled: self.state.subagents_enabled,
@@ -5062,6 +5193,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "automations-experiment-toggle",
+                icon: "icons/zap.svg",
                 title_key: "experiments.automations_title",
                 description_key: "experiments.automations_description",
                 enabled: self.state.automations_enabled,
@@ -5072,6 +5204,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "memory-experiment-toggle",
+                icon: "icons/brain.svg",
                 title_key: "experiments.memory_title",
                 description_key: "experiments.memory_description",
                 enabled: self.state.memory_experiment_enabled,
@@ -5082,6 +5215,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "project-map-experiment-toggle",
+                icon: "icons/map.svg",
                 title_key: "experiments.project_map_title",
                 description_key: "experiments.project_map_description",
                 enabled: self.state.project_map_enabled,
@@ -5092,6 +5226,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "model-router-experiment-toggle",
+                icon: "icons/fork.svg",
                 title_key: "experiments.model_router_title",
                 description_key: "experiments.model_router_description",
                 enabled: self.state.model_router_enabled,
@@ -5102,6 +5237,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "status-markers-experiment-toggle",
+                icon: "icons/circle-dot.svg",
                 title_key: "experiments.status_markers_title",
                 description_key: "experiments.status_markers_description",
                 enabled: self.state.status_markers_enabled,
@@ -5112,6 +5248,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "action-predictions-experiment-toggle",
+                icon: "icons/sparkle.svg",
                 title_key: "experiments.action_predictions_title",
                 description_key: "experiments.action_predictions_description",
                 enabled: self.state.action_predictions_enabled,
@@ -5122,6 +5259,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "phase-routing-experiment-toggle",
+                icon: "icons/map.svg",
                 title_key: "experiments.phase_routing_title",
                 description_key: "experiments.phase_routing_description",
                 enabled: self.state.phase_routing_enabled,
@@ -5132,6 +5270,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "computer-use-experiment-toggle",
+                icon: "icons/monitor.svg",
                 title_key: "experiments.computer_use_title",
                 description_key: "experiments.computer_use_description",
                 enabled: self.state.computer_use_experiment_enabled,
@@ -5142,6 +5281,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "integrations-experiment-toggle",
+                icon: "icons/package.svg",
                 title_key: "experiments.integrations_title",
                 description_key: "experiments.integrations_description",
                 enabled: self.state.integrations_enabled,
@@ -5152,6 +5292,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "sandbox-experiment-toggle",
+                icon: "icons/container.svg",
                 title_key: "experiments.sandbox_title",
                 description_key: "experiments.sandbox_description",
                 enabled: self.state.sandbox_experiment_enabled,
@@ -5172,6 +5313,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Git,
                 id: "git-panel-experiment-toggle",
+                icon: "icons/panel-right.svg",
                 title_key: "experiments.git_panel_title",
                 description_key: "experiments.git_panel_description",
                 enabled: self.state.git_panel_enabled,
@@ -5182,6 +5324,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Git,
                 id: "github-experiment-toggle",
+                icon: "icons/github.svg",
                 title_key: "experiments.github_title",
                 description_key: "experiments.github_description",
                 enabled: self.state.github_enabled,
@@ -5192,6 +5335,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Git,
                 id: "projects-page-experiment-toggle",
+                icon: "icons/projects.svg",
                 title_key: "experiments.projects_page_title",
                 description_key: "experiments.projects_page_description",
                 enabled: self.state.projects_page_enabled,
@@ -5202,6 +5346,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Git,
                 id: "review-queue-experiment-toggle",
+                icon: "icons/queue.svg",
                 title_key: "experiments.review_queue_title",
                 description_key: "experiments.review_queue_description",
                 enabled: self.state.review_queue_enabled,
@@ -5212,6 +5357,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Surfaces,
                 id: "big-picture-experiment-toggle",
+                icon: "icons/map.svg",
                 title_key: "experiments.big_picture_title",
                 description_key: "experiments.big_picture_description",
                 enabled: self.state.big_picture_enabled,
@@ -5222,6 +5368,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Surfaces,
                 id: "friends-experiment-toggle",
+                icon: "icons/friends.svg",
                 title_key: "experiments.friends_title",
                 description_key: "experiments.friends_description",
                 enabled: self.state.friends_enabled,
@@ -5232,6 +5379,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Surfaces,
                 id: "sidebar-dock-experiment-toggle",
+                icon: "icons/panel-left.svg",
                 title_key: "experiments.sidebar_dock_title",
                 description_key: "experiments.sidebar_dock_description",
                 enabled: self.state.sidebar_dock_enabled,
@@ -5242,6 +5390,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Surfaces,
                 id: "guided-reading-experiment-toggle",
+                icon: "icons/book-open.svg",
                 title_key: "experiments.guided_reading_title",
                 description_key: "experiments.guided_reading_description",
                 enabled: self.state.guided_reading_enabled,
@@ -5418,6 +5567,7 @@ impl Waku {
                     move |this, _, cx| this.remove_auto_prompt(id, cx),
                 ));
             rows.push(settings_row(
+                "icons/zap.svg",
                 rule.name.clone(),
                 rule.prompt.clone(),
                 controls,
@@ -5427,6 +5577,7 @@ impl Waku {
         }
         if rows.is_empty() {
             rows.push(settings_row(
+                "icons/zap.svg",
                 tr!("auto_prompts.title"),
                 tr!("auto_prompts.description"),
                 div(),
@@ -5465,6 +5616,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let mut rows = vec![
             settings_row(
+                "icons/pencil.svg",
                 tr!("auto_prompts.name"),
                 tr!("auto_prompts.name_description"),
                 TextField::new("auto-prompt-name", editor.name.clone()).w(px(320.0)),
@@ -5472,6 +5624,7 @@ impl Waku {
                 &SettingSearch::new(""),
             ),
             settings_row(
+                "icons/compose.svg",
                 tr!("auto_prompts.prompt"),
                 tr!("auto_prompts.prompt_description"),
                 TextField::new("auto-prompt-prompt", editor.prompt.clone()).w(px(320.0)),
@@ -5482,6 +5635,7 @@ impl Waku {
         for (index, question) in editor.questions.iter().enumerate() {
             let id = question.id;
             rows.push(settings_row(
+                "icons/circle-help.svg",
                 tr!("auto_prompts.question", number = index + 1),
                 tr!("auto_prompts.question_description"),
                 div()
@@ -5526,6 +5680,7 @@ impl Waku {
         }
         if editor.advanced {
             rows.push(settings_row(
+                "icons/gauge.svg",
                 tr!("auto_prompts.threshold"),
                 tr!("auto_prompts.threshold_description"),
                 TextField::new("auto-prompt-threshold", editor.threshold.clone()).w(px(100.0)),
@@ -6283,7 +6438,14 @@ impl Waku {
                         cx,
                         move |this, _, cx| this.reset_suggested_prompt(id, cx),
                     ));
-                settings_row(title, description, controls, theme, search)
+                settings_row(
+                    "icons/sparkle.svg",
+                    title,
+                    description,
+                    controls,
+                    theme,
+                    search,
+                )
             })
             .collect::<Vec<_>>();
         let mut cards = Vec::new();
@@ -6421,10 +6583,12 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(24.0))
-                        .child(
+                        .child(settings_row_label(
+                            experiment.icon,
                             settings_row_text(title, description, matched, theme)
                                 .whitespace_normal(),
-                        )
+                            theme,
+                        ))
                         .child(toggle),
                 )
                 .when(eval_hint, |card| {
@@ -7305,6 +7469,7 @@ impl Waku {
 
         let mut credential_rows: Vec<Option<AnyElement>> = match backend {
             waku_protocol::eval::EvalBackend::TypeSafe => vec![settings_row(
+                "icons/key-round.svg",
                 tr!("routing.typesafe_key"),
                 tr!("routing.typesafe_key_description"),
                 TextField::new("eval-typesafe-key", self.eval_typesafe_key_input.clone())
@@ -7314,6 +7479,7 @@ impl Waku {
             )],
             waku_protocol::eval::EvalBackend::VercelGateway => vec![
                 settings_row(
+                    "icons/key-round.svg",
                     tr!("routing.vercel_key"),
                     tr!("routing.vercel_key_description"),
                     TextField::new("eval-vercel-key", self.eval_vercel_key_input.clone())
@@ -7322,6 +7488,7 @@ impl Waku {
                     search,
                 ),
                 settings_row(
+                    "icons/friends.svg",
                     tr!("routing.vercel_team"),
                     tr!("routing.vercel_team_description"),
                     TextField::new("eval-vercel-team", self.eval_vercel_team_input.clone())
@@ -7332,6 +7499,7 @@ impl Waku {
             ],
             waku_protocol::eval::EvalBackend::Cloudflare => vec![
                 settings_row(
+                    "icons/globe.svg",
                     tr!("routing.cloudflare_account"),
                     tr!("routing.cloudflare_account_description"),
                     TextField::new(
@@ -7343,6 +7511,7 @@ impl Waku {
                     search,
                 ),
                 settings_row(
+                    "icons/key-round.svg",
                     tr!("routing.cloudflare_token"),
                     tr!("routing.cloudflare_token_description"),
                     TextField::new(
@@ -7357,6 +7526,7 @@ impl Waku {
         };
 
         let mut credential_rows_with_backend = vec![settings_row(
+            "icons/server.svg",
             tr!("routing.backend"),
             tr!("routing.backend_description"),
             backend_selector,
@@ -7415,6 +7585,7 @@ impl Waku {
             .into_iter()
             .map(|(class, title, description)| {
                 settings_row(
+                    "icons/gauge.svg",
                     title,
                     description,
                     self.route_class_controls(class, cx),
@@ -7492,6 +7663,7 @@ impl Waku {
                         )
                     };
                     let mut rows: Vec<Option<AnyElement>> = vec![settings_row(
+                        "icons/chart-column.svg",
                         tr!("routing.usage_total"),
                         total_description,
                         eval_usage_label(&stats.totals, theme),
@@ -9081,6 +9253,7 @@ impl Waku {
                 |this, amount, window, cx| this.set_sidebar_transparency_amount(amount, window, cx),
             );
             let transparency_row = settings_row(
+                "icons/panel-left.svg",
                 tr!("settings.sidebar_transparency"),
                 tr!("settings.sidebar_transparency_description"),
                 self.setting_selector(
@@ -9114,6 +9287,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(12.0))
+                        .child(settings_row_icon("icons/gauge.svg", theme))
                         .child(settings_title_jump(
                             div()
                                 .flex_1()
@@ -9150,6 +9324,7 @@ impl Waku {
 
         let mut rows: Vec<Option<AnyElement>> = vec![
             settings_row(
+                "icons/appearance.svg",
                 tr!("settings.appearance"),
                 tr!("settings.appearance_mode_description"),
                 mode_selector,
@@ -9157,6 +9332,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/sun.svg",
                 tr!("settings.light_theme"),
                 tr!("settings.light_theme_description"),
                 light_theme_selector,
@@ -9164,6 +9340,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/moon.svg",
                 tr!("settings.dark_theme"),
                 tr!("settings.dark_theme_description"),
                 dark_theme_selector,
@@ -9175,6 +9352,7 @@ impl Waku {
         rows.extend(transparency_rows);
         rows.extend([
             settings_row(
+                "icons/languages.svg",
                 tr!("language.title"),
                 tr!("language.description"),
                 language_selector,
@@ -9182,6 +9360,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/type.svg",
                 tr!("settings.ui_font"),
                 tr!("settings.ui_font_description"),
                 ui_font_selector,
@@ -9189,6 +9368,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/type.svg",
                 tr!("settings.code_font"),
                 tr!("settings.code_font_description"),
                 code_font_selector,
@@ -9196,6 +9376,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/case-sensitive.svg",
                 tr!("settings.ui_font_size"),
                 tr!("settings.ui_font_size_description"),
                 ui_font_size_selector,
@@ -9203,6 +9384,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/case-sensitive.svg",
                 tr!("settings.code_font_size"),
                 tr!("settings.code_font_size_description"),
                 code_font_size_selector,
@@ -9210,6 +9392,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/terminal.svg",
                 tr!("settings.terminal_font_size"),
                 tr!("settings.terminal_font_size_description"),
                 terminal_font_size_selector,
@@ -9217,6 +9400,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/square.svg",
                 tr!("settings.border_weight"),
                 tr!("settings.border_weight_description"),
                 self.setting_selector(
@@ -9234,6 +9418,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/gauge.svg",
                 tr!("settings.border_intensity"),
                 tr!("settings.border_intensity_description"),
                 {
@@ -9272,6 +9457,7 @@ impl Waku {
                 search,
             ),
             settings_row(
+                "icons/contrast.svg",
                 tr!("settings.high_contrast"),
                 tr!("settings.high_contrast_description"),
                 toggle_switch(
@@ -9295,6 +9481,7 @@ impl Waku {
         let transcript_card = settings_row_card(
             vec![
                 settings_row(
+                    "icons/sigma.svg",
                     tr!("settings.math_rendering"),
                     tr!("settings.math_rendering_description"),
                     self.setting_selector(
@@ -9312,6 +9499,7 @@ impl Waku {
                     search,
                 ),
                 settings_row(
+                    "icons/gauge.svg",
                     tr!("settings.show_response_token_speed"),
                     tr!("settings.show_response_token_speed_description"),
                     toggle_switch(
@@ -9329,6 +9517,7 @@ impl Waku {
                     search,
                 ),
                 settings_row(
+                    "icons/file.svg",
                     tr!("settings.markdown_files"),
                     tr!("settings.markdown_files_description"),
                     self.setting_selector(
@@ -9393,10 +9582,14 @@ impl Waku {
             .gap(px(24.0))
             .cursor_default()
             .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .child(settings_row_text(
-                tr!("settings.preview"),
-                tr!("settings.preview_description"),
-                matched,
+            .child(settings_row_label(
+                "icons/eye.svg",
+                settings_row_text(
+                    tr!("settings.preview"),
+                    tr!("settings.preview_description"),
+                    matched,
+                    theme,
+                ),
                 theme,
             ))
             .child(icon(
@@ -10572,12 +10765,11 @@ impl Waku {
             let title = tr!("providers.coding_agents");
             let description = tr!("providers.description");
             search.matched(&title, &description).map(|matched| {
-                div().flex_1().min_w_0().child(settings_row_text(
-                    title,
-                    description,
-                    matched,
+                settings_row_label(
+                    "icons/bot.svg",
+                    settings_row_text(title, description, matched, theme),
                     theme,
-                ))
+                )
             })
         };
         // The card drops out of the results entirely when neither its header
@@ -11360,7 +11552,11 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(20.0))
-                    .child(settings_row_text(title, description, matched, theme))
+                    .child(settings_row_label(
+                        "icons/laptop.svg",
+                        settings_row_text(title, description, matched, theme),
+                        theme,
+                    ))
                     .child(toggle_switch(
                         "computer-use-enabled",
                         enabled,
@@ -11381,34 +11577,39 @@ impl Waku {
                 let title = tr!("computer_use.macos_access");
                 let description = tr!("computer_use.helper_access", helper = helper_name);
                 search.matched(&title, &description).map(|matched| {
-                    div()
-                        .child(settings_title_jump(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(settings_search_text(
-                                    title,
-                                    matched.title_ranges.clone(),
-                                    theme,
-                                )),
-                            &matched,
-                            theme,
-                        ))
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(settings_search_text(
-                                    description,
-                                    matched.description_ranges.clone(),
-                                    theme,
-                                )),
-                        )
+                    settings_row_label(
+                        "icons/lock-open.svg",
+                        div()
+                            .child(settings_title_jump(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
+                                theme,
+                            ))
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(settings_search_text(
+                                        description,
+                                        matched.description_ranges.clone(),
+                                        theme,
+                                    )),
+                            ),
+                        theme,
+                    )
                 })
             };
             let screen_row = permission_status_row(
+                "icons/monitor.svg",
                 tr!("computer_use.screen_recording"),
                 tr!("computer_use.screen_recording_description"),
                 permissions.screen_recording,
@@ -11418,6 +11619,7 @@ impl Waku {
                 cx,
             );
             let accessibility_row = permission_status_row(
+                "icons/hand.svg",
                 tr!("computer_use.accessibility"),
                 tr!("computer_use.accessibility_description"),
                 permissions.accessibility,
@@ -11487,7 +11689,13 @@ impl Waku {
                     .py(px(14.0))
                     .rounded(px(16.0))
                     .bg(theme.raised)
-                    .child(settings_row_text(title, description, matched, theme))
+                    .flex()
+                    .items_center()
+                    .child(settings_row_label(
+                        "icons/laptop.svg",
+                        settings_row_text(title, description, matched, theme),
+                        theme,
+                    ))
                     .into_any_element()
             })
         };
@@ -11501,30 +11709,35 @@ impl Waku {
                     .py(px(14.0))
                     .rounded(px(16.0))
                     .bg(theme.raised)
-                    .child(settings_title_jump(
+                    .child(settings_row_label(
+                        "icons/package.svg",
                         div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(settings_search_text(
-                                title,
-                                matched.title_ranges.clone(),
+                            .child(settings_title_jump(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(
+                                        title,
+                                        matched.title_ranges.clone(),
+                                        theme,
+                                    )),
+                                &matched,
                                 theme,
-                            )),
-                        &matched,
+                            ))
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(settings_search_text(
+                                        description,
+                                        matched.description_ranges.clone(),
+                                        theme,
+                                    )),
+                            ),
                         theme,
                     ))
-                    .child(
-                        div()
-                            .mt(px(4.0))
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(settings_search_text(
-                                description,
-                                matched.description_ranges.clone(),
-                                theme,
-                            )),
-                    )
                     .when(!search.active(), |card| card.child(allowed_apps))
                     .into_any_element()
             })
@@ -12719,10 +12932,11 @@ fn font_row_label(family: &SharedString) -> SharedString {
     }
 }
 
-/// A settings card row: title and description on the left, control on the
-/// right — the card's divider lines are drawn by the caller.
+/// A settings card row: icon, title, and description on the left, control
+/// on the right — the card's divider lines are drawn by the caller.
 #[track_caller]
 fn settings_row(
+    icon_path: &'static str,
     title: impl Into<SharedString>,
     description: impl Into<SharedString>,
     control: impl IntoElement,
@@ -12741,7 +12955,11 @@ fn settings_row(
             .flex()
             .items_center()
             .gap(px(24.0))
-            .child(settings_row_text(title, description, matched, theme))
+            .child(settings_row_label(
+                icon_path,
+                settings_row_text(title, description, matched, theme),
+                theme,
+            ))
             .child(control)
             .into_any_element(),
     )
@@ -12808,7 +13026,14 @@ fn eval_feature_row(
     let title = eval_feature_label(feature);
     let calls = tr!("routing.usage_feature_calls", calls = totals.calls);
     let Some(detail) = eval_feature_description(feature) else {
-        return settings_row(title, calls, eval_usage_label(totals, theme), theme, search);
+        return settings_row(
+            "icons/chart-column.svg",
+            title,
+            calls,
+            eval_usage_label(totals, theme),
+            theme,
+            search,
+        );
     };
     let matched = search.matched(&title, &detail)?;
     Some(
@@ -12820,7 +13045,8 @@ fn eval_feature_row(
             .flex()
             .items_center()
             .gap(px(24.0))
-            .child(
+            .child(settings_row_label(
+                "icons/chart-column.svg",
                 settings_row_text(title, detail, matched, theme).child(
                     div()
                         .mt(px(2.0))
@@ -12828,7 +13054,8 @@ fn eval_feature_row(
                         .text_color(theme.text_tertiary)
                         .child(calls),
                 ),
-            )
+                theme,
+            ))
             .child(eval_usage_label(totals, theme))
             .into_any_element(),
     )
@@ -13234,6 +13461,7 @@ fn integration_logo(id: &str, theme: Theme) -> Svg {
 
 #[track_caller]
 fn permission_status_row(
+    icon_path: &'static str,
     name: String,
     description: String,
     granted: bool,
@@ -13288,6 +13516,7 @@ fn permission_status_row(
             .flex()
             .items_center()
             .gap(px(10.0))
+            .child(settings_row_icon(icon_path, theme))
             .child(
                 div()
                     .flex_1()

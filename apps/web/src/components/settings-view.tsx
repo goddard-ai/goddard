@@ -171,12 +171,14 @@ function GeneralSettings() {
     <div>
       <SettingsCard>
         <SettingText
+          icon="local"
           title={t('settings.local_by_default')}
           description={t('settings.local_by_default_web_description')}
         />
       </SettingsCard>
       <SettingsCard row>
         <SettingText
+          icon="chartColumn"
           title={t('settings.share_anonymous_usage_data')}
           description={t('settings.share_anonymous_usage_data_description')}
         />
@@ -203,7 +205,7 @@ function AppearanceSettings() {
   return (
     <div className="mt-[15px] w-full overflow-hidden rounded-[13px] bg-[var(--raised)]">
       <div className="flex min-h-[60px] items-center gap-6 px-5 py-3">
-        <SettingText title={t('settings.theme')} description={t('settings.theme_description')} />
+        <SettingText icon="appearance" title={t('settings.theme')} description={t('settings.theme_description')} />
         <ControlMenu
           align="right"
           items={(['system', 'light', 'dark'] as ThemeChoice[]).map((choice) => ({
@@ -220,7 +222,7 @@ function AppearanceSettings() {
       </div>
       <div className="mx-5 border-t" />
       <div className="flex min-h-[60px] items-center gap-6 px-5 py-3">
-        <SettingText title={t('language.title')} description={t('language.description')} />
+        <SettingText icon="languages" title={t('language.title')} description={t('language.description')} />
         <ControlMenu
           align="right"
           items={APP_LANGUAGES.map((choice) => ({
@@ -292,7 +294,10 @@ function ProvidersSettings() {
 
   return (
     <div className="mt-[15px] overflow-hidden rounded-[13px] bg-[var(--raised)] px-5 py-[14px]">
-      <div className="flex items-start gap-5">
+      <div className="flex items-center gap-3">
+        <span className="grid w-5 shrink-0 place-items-center">
+          <WakuIcon className="size-4 text-[var(--text-tertiary)]" name="bot" />
+        </span>
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium">{t('providers.coding_agents')}</div>
           <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
@@ -484,12 +489,14 @@ function DaemonSettings() {
     <div>
       <SettingsCard>
         <SettingText
+          icon="unplug"
           title={t('daemon.external_title')}
           description={t('daemon.web_external_description')}
         />
       </SettingsCard>
       <SettingsCard row>
         <SettingText
+          icon="bot"
           title={t('daemon.agent_tools_title')}
           description={t('daemon.agent_tools_description')}
         />
@@ -500,16 +507,17 @@ function DaemonSettings() {
         />
       </SettingsCard>
       <SettingsCard>
-        <SettingText title={t('daemon.credentials_title')} description={t('daemon.web_connection_description')} />
+        <SettingText icon="keyRound" title={t('daemon.credentials_title')} description={t('daemon.web_connection_description')} />
         <div className="mt-4 divide-y rounded-xl border bg-background px-3">
-          <DetailRow label={t('daemon.websocket_url')} value={config?.address ?? t('daemon.not_configured')} copy />
+          <DetailRow icon="link" label={t('daemon.websocket_url')} value={config?.address ?? t('daemon.not_configured')} copy />
           <DetailRow
             copy={Boolean(config?.token)}
+            icon="keyRound"
             label={t('daemon.token')}
             secret={Boolean(config?.token)}
             value={config?.token ?? t('daemon.not_configured')}
           />
-          <DetailRow label={t('daemon.status')} value={t(`daemon.phase_${phase}`)} />
+          <DetailRow icon="wifi" label={t('daemon.status')} value={t(`daemon.phase_${phase}`)} />
         </div>
         {error && <p className="mt-3 text-[11.5px] text-destructive">{error}</p>}
         <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -538,11 +546,24 @@ function SettingsCard({ children, row = false }: { children: ReactNode; row?: bo
   )
 }
 
-function SettingText({ title, description }: { title: string; description: string }) {
+function SettingText({
+  icon,
+  title,
+  description,
+}: {
+  icon: WakuIconName
+  title: string
+  description: string
+}) {
   return (
-    <div className="min-w-0 flex-1">
-      <div className="text-[13.5px] font-medium">{title}</div>
-      <p className="mt-[5px] text-[12.5px] leading-[18px] text-[var(--text-secondary)]">{description}</p>
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <span className="grid w-5 shrink-0 place-items-center">
+        <WakuIcon className="size-4 text-[var(--text-tertiary)]" name={icon} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13.5px] font-medium">{title}</div>
+        <p className="mt-[5px] text-[12.5px] leading-[18px] text-[var(--text-secondary)]">{description}</p>
+      </div>
     </div>
   )
 }
@@ -566,11 +587,13 @@ function Toggle({ checked, label, onChange }: { checked: boolean; label: string;
 }
 
 function DetailRow({
+  icon,
   label,
   value,
   copy = false,
   secret = false,
 }: {
+  icon: WakuIconName
   label: string
   value: string
   copy?: boolean
@@ -581,6 +604,9 @@ function DetailRow({
   const [revealed, setRevealed] = useState(false)
   return (
     <div className="flex min-h-12 items-center gap-4 text-[11.5px]">
+      <span className="grid w-5 shrink-0 place-items-center">
+        <WakuIcon className="size-4 text-[var(--text-tertiary)]" name={icon} />
+      </span>
       <span className="w-28 shrink-0 text-[var(--text-tertiary)]">{label}</span>
       <span className="min-w-0 flex-1 truncate font-mono">
         {secret && !revealed ? '••••••••••••••••••••••••' : value}

@@ -3,7 +3,9 @@
 //! from the daemon's `friendsChanged` document; this file only renders it
 //! and sends commands.
 
-use super::settings::{SettingSearch, settings_search_text, settings_title_jump};
+use super::settings::{
+    SettingSearch, settings_row_icon, settings_search_text, settings_title_jump,
+};
 use super::*;
 use waku_client::friends::{
     FriendInfo, FriendSyncAlertAction, IncomingShareInfo, SharedSessionSummary, SyncAlertInfo,
@@ -141,7 +143,12 @@ impl Waku {
         let name_card = self.friends_card(
             &theme,
             [
-                self.friends_section_title(&theme, tr!("friends.display_name"))
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(9.0))
+                    .child(settings_row_icon("icons/pencil.svg", theme))
+                    .child(self.friends_section_title(&theme, tr!("friends.display_name")))
                     .into_any_element(),
                 div()
                     .mt(px(5.0))
@@ -179,19 +186,25 @@ impl Waku {
             let hint = tr!("friends.code_hint");
             search.matched(&title, &hint).map(|matched| {
                 let mut children: Vec<AnyElement> = vec![
-                    settings_title_jump(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(settings_search_text(
-                                title,
-                                matched.title_ranges.clone(),
-                                theme,
-                            )),
-                        &matched,
-                        theme,
-                    ),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(9.0))
+                        .child(settings_row_icon("icons/key-round.svg", theme))
+                        .child(settings_title_jump(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .into_any_element(),
                     div()
                         .mt(px(5.0))
                         .text_size(sp(12.5))
@@ -250,19 +263,25 @@ impl Waku {
             let hint = tr!("friends.add_hint");
             search.matched(&title, &hint).map(|matched| {
                 let mut children: Vec<AnyElement> = vec![
-                    settings_title_jump(
-                        div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(settings_search_text(
-                                title,
-                                matched.title_ranges.clone(),
-                                theme,
-                            )),
-                        &matched,
-                        theme,
-                    ),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(9.0))
+                        .child(settings_row_icon("icons/send.svg", theme))
+                        .child(settings_title_jump(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(settings_search_text(
+                                    title,
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                )),
+                            &matched,
+                            theme,
+                        ))
+                        .into_any_element(),
                     div()
                         .mt(px(5.0))
                         .text_size(sp(12.5))
