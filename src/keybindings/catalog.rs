@@ -2698,7 +2698,6 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("projects.tab.1", All, "secondary-alt-1", ProjectsPage),
     e("projects.tab.2", All, "secondary-alt-2", ProjectsPage),
     e("projects.tab.3", All, "secondary-alt-3", ProjectsPage),
-    e("projects.tab.4", All, "secondary-alt-4", ProjectsPage),
     e("automations.tab.1", All, "secondary-alt-1", AutomationsPage),
     e("automations.tab.2", All, "secondary-alt-2", AutomationsPage),
     e("model.favorite.1", All, "secondary-alt-1", ComposerScope),
@@ -2801,6 +2800,24 @@ pub static ENTRIES: &[CatalogEntry] = &[
         All,
         "secondary-shift-escape",
         ProjectSwitcher,
+    ),
+    e(
+        "switcher.project_forward",
+        All,
+        "down",
+        ProjectSwitcherInput,
+    ),
+    e(
+        "switcher.project_backward",
+        All,
+        "up",
+        ProjectSwitcherInput,
+    ),
+    e(
+        "switcher.project_confirm",
+        All,
+        "enter",
+        ProjectSwitcherInput,
     ),
     e("switcher.project_forward", All, "down", ProjectSwitcher),
     e("switcher.project_forward", All, "right", ProjectSwitcher),
@@ -2985,6 +3002,7 @@ mod ctx {
     pub const ComposerScope: &str = "ComposerExists && !Terminal";
     pub const TaskSwitcher: &str = "TaskSwitcher";
     pub const ProjectSwitcher: &str = "ProjectSwitcher";
+    pub const ProjectSwitcherInput: &str = "ProjectSwitcher > TextInput";
     pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";
     pub const Terminal: &str = "Terminal";
     pub const ReviewDiffOrEditor: &str = "ReviewDiff || FileEditorPane";
