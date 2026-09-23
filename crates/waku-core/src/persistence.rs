@@ -646,6 +646,9 @@ impl PersistedState {
             sandbox_default_enabled: false,
             // Idle eviction postdates it too; absent means the default.
             runtime_idle_timeout_secs: None,
+            // So does the review-train branch name — `qa` is the
+            // migration.
+            qa_branch: waku_protocol::settings::DEFAULT_QA_BRANCH.to_owned(),
             extra: self.daemon_settings_extra.clone(),
         }
     }

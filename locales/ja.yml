@@ -247,7 +247,7 @@ settings.providers_keywords: プロバイダー エージェント モデル CLI
 settings.skills: スキル
 settings.skills_keywords: スキル ライブラリ エージェント 無効 有効 削除 claude codex cursor opencode pi amp 共有 fx devin
 settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシュ 日別 グラフ モデル 内訳 履歴 claude codex
-settings.daemon_keywords: デーモン サーバー リモート ウェブ ネットワーク 公開 オリジン トークン ポート websocket
+settings.daemon_keywords: デーモン サーバー リモート ウェブ ネットワーク 公開 オリジン トークン ポート websocket qa ブランチ レビュー
 settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセシビリティ アプリ 制御 codex
 settings.jev: Jev
 settings.jev_keywords: jev typesafe 評価 モデル 自動 ルーティング ルーター バックエンド APIキー 認証情報 vercel cloudflare ポリシー eval routing
@@ -325,6 +325,9 @@ daemon.hide_qr: 隠す
 daemon.security_warning: このトークンは、このマシン上のタスク、ファイル、Git、添付ファイル、コーディングエージェントへの完全なアクセス権を持ちます。プライベートネットワーク外では信頼できる TLS プロキシ経由で WSS を使用してください。
 daemon.keep_awake_title: スリープさせない
 daemon.keep_awake_description: モバイルアプリや Web アプリから接続できるよう、このマシンをスリープさせません。AC 電源接続時は蓋を閉じてもスリープしません。
+daemon.qa_branch_title: QA ブランチ
+daemon.qa_branch_description: プロジェクトページの「レビュー」タブが提案コミットを読み取るブランチ — 却下するとこのブランチにリバートがプッシュされます。空の場合は qa が使われます。
+daemon.qa_branch_placeholder: qa
 daemon.external_title: 外部デーモン
 daemon.external_description: このデスクトップは Goddard の外部で管理されているデーモンに接続しています。リスナー、ブラウザオリジン、トークンは接続先ホストで設定してください。
 daemon.web_external_description: Goddard Web はブラウザの外部で管理されているデーモンに接続します。リスナー、ブラウザオリジン、トークンは接続先ホストで設定してください。
@@ -2139,7 +2142,7 @@ experiments.project_map_description: 新しいセッションにワークスペ�
 experiments.project_map_title: プロジェクトマップ
 experiments.projects_page_description: ⌘⇧P でプロジェクトごとのページを開き、ワークツリー、ブランチ、Issue、プルリクエストを一覧します。⌘⌥1–4 でタブに直接移動できます。
 experiments.projects_page_title: プロジェクトページ
-experiments.review_queue_description: プロジェクトページにレビュータブを追加します — qa ブランチの提案コミットを古い順に一覧し、コミットごとの承認、却下とリバート、承認済みの先端までを昇格する操作ができます。
+experiments.review_queue_description: プロジェクトページにレビュータブを追加します — QA ブランチの提案コミットを古い順に一覧し、コミットごとの承認、却下とリバート、承認済みの先端までを昇格する操作ができます。ブランチ名は「設定 → デーモン」で変更できます。
 experiments.review_queue_title: QA レビュー
 experiments.sandbox_description: 入力欄のアクセスメニューに環境の選択肢（この Mac または分離された Linux VM でタスクを実行）を表示し、セッションヘッダーにサンドボックスバッジを付けます。有効化後に開始したセッションに適用されます。
 experiments.sandbox_title: サンドボックス VM
@@ -2366,15 +2369,15 @@ projects.col_pull_request: PR
 projects.col_tasks: タスク
 projects.col_updated: 更新日時
 projects.confirm_reject: "%{commit} を却下してリバートしますか？"
-projects.confirm_reject_detail: 共有の qa ブランチにリバートコミットがプッシュされます — 同期している全員がそのリバートを受け取ります。
+projects.confirm_reject_detail: "共有の %{branch} ブランチにリバートコミットがプッシュされます — 同期している全員がそのリバートを受け取ります。"
 projects.filter_review: コミットを絞り込み
 projects.review_approve: 承認
 projects.review_approved: 承認済み
 projects.review_auto: 自動承認
-projects.review_empty: qa に提案されたコミットはありません
+projects.review_empty: "%{branch} に提案されたコミットはありません"
 projects.review_frontier: 昇格対象
 projects.review_needs_review: レビューが必要
-projects.review_no_queue: origin に qa ブランチがありません
+projects.review_no_queue: "origin に %{branch} ブランチがありません"
 projects.review_pending_count: "%{count} 件がレビュー待ち"
 projects.review_promote: "%{branch} に昇格"
 projects.review_reject: 却下してリバート

@@ -191,8 +191,8 @@ pub struct ReviewRecord {
     pub at: u64,
 }
 
-/// One proposed commit on `qa` and its review state, for the Projects
-/// page's Review tab.
+/// One proposed commit on the QA branch and its review state, for the
+/// Projects page's Review tab.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewEntry {
@@ -207,25 +207,30 @@ pub struct ReviewEntry {
     pub reviews: Vec<ReviewRecord>,
     /// Some reviewer's latest decision is `Rejected`.
     pub rejected: bool,
-    /// A `git revert` of this commit sits later on `qa` — its changes are
-    /// undone, so it can't block the frontier.
+    /// A `git revert` of this commit sits later on the QA branch — its
+    /// changes are undone, so it can't block the frontier.
     pub reverted: bool,
     /// Promotable: no pending rejection, and either policy auto-approves it
     /// or a reviewer approved it.
     pub approved: bool,
 }
 
-/// The `qa` branch's proposed commits (oldest first) and how far `main`
-/// may fast-forward — the longest prefix where every entry is approved.
+/// The QA branch's proposed commits (oldest first) and how far the base
+/// branch may fast-forward — the longest prefix where every entry is
+/// approved.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewQueue {
     /// The promotion target — `origin/<default branch>`, typically `main`.
     pub base_branch: Option<String>,
-    /// Oldest first. Empty when the repo has no `origin/qa`.
+    /// The branch the queue was read from — the daemon's configured QA
+    /// branch — so clients name it instead of assuming `qa`.
+    #[serde(default)]
+    pub review_branch: String,
+    /// Oldest first. Empty when the repo has no `origin/<review_branch>`.
     pub entries: Vec<ReviewEntry>,
-    /// Commit `main` can fast-forward to — the last entry of the approved
-    /// prefix. `None` when nothing is promotable.
+    /// Commit the base branch can fast-forward to — the last entry of the
+    /// approved prefix. `None` when nothing is promotable.
     pub frontier: Option<String>,
 }
 

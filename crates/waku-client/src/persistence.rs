@@ -309,6 +309,10 @@ fn default_agent_settings_enabled() -> bool {
     true
 }
 
+fn default_qa_branch() -> String {
+    waku_protocol::settings::DEFAULT_QA_BRANCH.to_owned()
+}
+
 fn default_provider() -> ProviderKind {
     ProviderKind::Codex
 }
@@ -1571,6 +1575,11 @@ pub struct PersistedState {
     /// toggle.
     #[serde(default)]
     pub keep_awake: bool,
+    /// The branch the daemon's review queue treats as the proposed-work
+    /// train. Daemon-owned; mirrored here so the settings field can edit
+    /// it. Empty resolves to `qa` daemon-side.
+    #[serde(default = "default_qa_branch")]
+    pub qa_branch: String,
     /// Experimental: whether sessions get named subagents injected. Daemon-
     /// owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
@@ -1836,6 +1845,7 @@ impl PersistedState {
             agent_tools_enabled: false,
             agent_settings_enabled: true,
             keep_awake: false,
+            qa_branch: default_qa_branch(),
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
             project_map_enabled: default_experiment_enabled(),
@@ -2068,6 +2078,7 @@ impl PersistedState {
             agent_tools_enabled: self.agent_tools_enabled,
             agent_settings_enabled: self.agent_settings_enabled,
             keep_awake: self.keep_awake,
+            qa_branch: self.qa_branch.clone(),
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
             project_map_enabled: self.project_map_enabled,
@@ -2098,6 +2109,7 @@ impl PersistedState {
         self.agent_tools_enabled = settings.agent_tools_enabled;
         self.agent_settings_enabled = settings.agent_settings_enabled;
         self.keep_awake = settings.keep_awake;
+        self.qa_branch = settings.qa_branch;
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
         self.project_map_enabled = settings.project_map_enabled;

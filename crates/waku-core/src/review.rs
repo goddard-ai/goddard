@@ -1,12 +1,13 @@
 //! QA-branch review state for the Projects page's Review tab.
 //!
-//! Proposed work lands on `origin/qa` unreviewed; human decisions are git
-//! notes under `refs/notes/qa` — one JSON record per line so concurrent
-//! reviewers union-merge cleanly. The base branch fast-forwards to the
-//! longest approved prefix. Whether a commit needs a human is policy
-//! computed locally from `Test-Plan:` trailers and sensitive paths; only
-//! decisions are synced state. Rejection reverts the commit on `qa`
-//! rather than blocking the train.
+//! Proposed work lands on `origin/<qa branch>` unreviewed — the daemon's
+//! `qa_branch` setting names it, defaulting to `qa`. Human decisions are
+//! git notes under `refs/notes/qa` — one JSON record per line so
+//! concurrent reviewers union-merge cleanly. The base branch fast-forwards
+//! to the longest approved prefix. Whether a commit needs a human is
+//! policy computed locally from `Test-Plan:` trailers and sensitive paths;
+//! only decisions are synced state. Rejection reverts the commit on the QA
+//! branch rather than blocking the train.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -15,24 +16,59 @@ use anyhow::{Context as _, bail};
 use serde::{Deserialize, Serialize};
 
 use waku_protocol::git::{ReviewDecision, ReviewEntry, ReviewQueue, ReviewRecord};
+use waku_protocol::settings::DEFAULT_QA_BRANCH;
 
 use crate::git_commit::{
     command_error, ensure_repository, git_capture, git_optional_stdout, git_stdout, git_success,
 };
 
-/// The shared proposed-work branch, read through its remote-tracking ref.
-const QA_REMOTE: &str = "refs/remotes/origin/qa";
 /// The notes ref review records live under — pushed to `origin` on every
-/// decision. `pub(crate)` so the daemon can name it in friend notices.
+/// decision. Deliberately not derived from the configured branch: the
+/// `qa` namespace names the review function, so renaming the branch keeps
+/// the records. `pub(crate)` so the daemon can name it in friend notices.
 pub(crate) const NOTES_REF: &str = "refs/notes/qa";
 /// Scratch ref a losing notes push fetches into before union-merging.
 const NOTES_REMOTE_TMP: &str = "refs/notes/qa-remote";
-/// How far back the queue reads `origin/qa`.
+/// How far back the queue reads `origin/<qa branch>`.
 const QUEUE_LIMIT: usize = 200;
 /// Notes pushes retry this many fetch+merge cycles before giving up.
 const PUSH_ATTEMPTS: usize = 3;
-/// Revert pushes retry when `qa` moved under the attempt.
+/// Revert pushes retry when the QA branch moved under the attempt.
 const REVERT_ATTEMPTS: usize = 2;
+
+/// The configured QA branch name — trimmed, falling back to `qa` when
+/// unset. `pub(crate)` so the daemon can name the branch in friend
+/// notices without re-resolving the setting.
+pub(crate) fn qa_branch_name(configured: &str) -> String {
+    let branch = configured.trim();
+    if branch.is_empty() {
+        DEFAULT_QA_BRANCH.to_owned()
+    } else {
+        branch.to_owned()
+    }
+}
+
+/// Resolve the configured branch for a review operation, rejecting names
+/// git can't treat as a branch — the value lands inside refspecs and a
+/// bare `git fetch origin <name>` argument, where a leading `-` would be
+/// a flag.
+fn qa_branch_checked(configured: &str) -> anyhow::Result<String> {
+    let branch = qa_branch_name(configured);
+    let valid = !branch.starts_with('-')
+        && !branch.contains("..")
+        && !branch
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, ':' | '~' | '^' | '?' | '*' | '[' | '\\'));
+    if !valid {
+        bail!("{branch:?} is not a usable branch name — fix the QA branch setting");
+    }
+    Ok(branch)
+}
+
+/// The QA branch's remote-tracking ref.
+fn qa_remote(branch: &str) -> String {
+    format!("refs/remotes/origin/{branch}")
+}
 
 /// One stored record — a line in a commit's note. Unknown lines are
 /// ignored, so the format can grow fields without breaking old readers.
@@ -45,41 +81,47 @@ struct NoteLine {
     at: u64,
 }
 
-/// The review queue for `origin/qa`, plus the promotable frontier.
-/// Fetches `origin` and the notes ref first so the view is fresh; fetch
-/// failures degrade to last-known state rather than an empty queue.
-/// `None` outside a repository.
-pub fn queue(cwd: &Path) -> anyhow::Result<Option<ReviewQueue>> {
+/// The review queue for `origin/<qa branch>`, plus the promotable
+/// frontier. `qa_branch` is the daemon's configured branch name. Fetches
+/// `origin` and the notes ref first so the view is fresh; fetch failures
+/// degrade to last-known state rather than an empty queue. `None`
+/// outside a repository.
+pub fn queue(cwd: &Path, qa_branch: &str) -> anyhow::Result<Option<ReviewQueue>> {
+    let branch = qa_branch_checked(qa_branch)?;
     if git_optional_stdout(cwd, &["rev-parse", "--git-dir"])?.is_none() {
         return Ok(None);
     }
     let _ = git_capture(cwd, &["fetch", "origin"]);
     fetch_notes(cwd);
-    queue_inner(cwd).map(Some)
+    queue_inner(cwd, &branch).map(Some)
 }
 
 /// Approve `sha`: note it and return the refreshed queue.
-pub fn approve(cwd: &Path, sha: &str) -> anyhow::Result<Option<ReviewQueue>> {
-    record(cwd, sha, ReviewDecision::Approved)?;
-    queue_inner(cwd).map(Some)
+pub fn approve(cwd: &Path, sha: &str, qa_branch: &str) -> anyhow::Result<Option<ReviewQueue>> {
+    let branch = qa_branch_checked(qa_branch)?;
+    record(cwd, sha, ReviewDecision::Approved, &branch)?;
+    queue_inner(cwd, &branch).map(Some)
 }
 
-/// Reject `sha`: note it, revert it on `qa`, push both, and return the
-/// refreshed queue. The revert runs in a temp worktree at `origin/qa`'s
-/// tip — the reviewer's own checkouts are never touched.
-pub fn reject(cwd: &Path, sha: &str) -> anyhow::Result<Option<ReviewQueue>> {
-    record(cwd, sha, ReviewDecision::Rejected)?;
-    revert_on_qa(cwd, sha)?;
-    queue_inner(cwd).map(Some)
+/// Reject `sha`: note it, revert it on the QA branch, push both, and
+/// return the refreshed queue. The revert runs in a temp worktree at
+/// `origin/<qa branch>`'s tip — the reviewer's own checkouts are never
+/// touched.
+pub fn reject(cwd: &Path, sha: &str, qa_branch: &str) -> anyhow::Result<Option<ReviewQueue>> {
+    let branch = qa_branch_checked(qa_branch)?;
+    record(cwd, sha, ReviewDecision::Rejected, &branch)?;
+    revert_on_qa(cwd, sha, &branch)?;
+    queue_inner(cwd, &branch).map(Some)
 }
 
 /// Fast-forward the base branch to the approved frontier and return the
 /// refreshed queue. A non-fast-forward push means the base moved without
-/// `qa` (a hotfix) — git's error says as much.
-pub fn promote(cwd: &Path) -> anyhow::Result<Option<ReviewQueue>> {
-    let queue = queue(cwd)?.context("not inside a repository")?;
+/// the QA branch (a hotfix) — git's error says as much.
+pub fn promote(cwd: &Path, qa_branch: &str) -> anyhow::Result<Option<ReviewQueue>> {
+    let branch = qa_branch_checked(qa_branch)?;
+    let queue = queue(cwd, &branch)?.context("not inside a repository")?;
     let Some(frontier) = &queue.frontier else {
-        bail!("nothing on qa is approved for promotion");
+        bail!("nothing on {branch} is approved for promotion");
     };
     let base = queue
         .base_branch
@@ -89,7 +131,7 @@ pub fn promote(cwd: &Path) -> anyhow::Result<Option<ReviewQueue>> {
         cwd,
         &["push", "origin", &format!("{frontier}:refs/heads/{base}")],
     )?;
-    queue_inner(cwd).map(Some)
+    queue_inner(cwd, &branch).map(Some)
 }
 
 /// Fetch moved refs into `cwd` after a friend's ref notice. Best-effort —
@@ -103,21 +145,23 @@ pub fn fetch_refs(cwd: &Path, refs: &[String]) {
     let _ = git_capture(cwd, &args.iter().map(String::as_str).collect::<Vec<_>>());
 }
 
-fn queue_inner(cwd: &Path) -> anyhow::Result<ReviewQueue> {
+fn queue_inner(cwd: &Path, branch: &str) -> anyhow::Result<ReviewQueue> {
     let base = crate::sync::default_branch(cwd)?.unwrap_or_else(|| "main".to_owned());
+    let remote = qa_remote(branch);
     let mut queue = ReviewQueue {
         base_branch: Some(base.clone()),
+        review_branch: branch.to_owned(),
         ..Default::default()
     };
-    if rev_parse(cwd, QA_REMOTE)?.is_none() {
+    if rev_parse(cwd, &remote)?.is_none() {
         return Ok(queue);
     }
     let base_ref = format!("refs/remotes/origin/{base}");
     // No base ref yet → the whole branch is proposed work.
     let range = if rev_parse(cwd, &base_ref)?.is_some() {
-        format!("{base_ref}..{QA_REMOTE}")
+        format!("{base_ref}..{remote}")
     } else {
-        QA_REMOTE.to_owned()
+        remote.clone()
     };
     let mut commits = crate::git_panel::log_commits(cwd, &[range.clone()], 0, QUEUE_LIMIT)?;
     let notes = notes_by_commit(cwd, &range)?;
@@ -297,16 +341,21 @@ fn reviewer_identity(cwd: &Path) -> anyhow::Result<String> {
     }
 }
 
-/// Record `decision` for `sha` — it must still be on `origin/qa` — then
-/// push the notes ref.
-fn record(cwd: &Path, sha: &str, decision: ReviewDecision) -> anyhow::Result<()> {
+/// Record `decision` for `sha` — it must still be on `origin/<branch>` —
+/// then push the notes ref.
+fn record(
+    cwd: &Path,
+    sha: &str,
+    decision: ReviewDecision,
+    branch: &str,
+) -> anyhow::Result<()> {
     ensure_repository(cwd)?;
     fetch_notes(cwd);
-    let on_qa = git_capture(cwd, &["merge-base", "--is-ancestor", sha, QA_REMOTE])?
+    let on_qa = git_capture(cwd, &["merge-base", "--is-ancestor", sha, &qa_remote(branch)])?
         .status
         .success();
     if !on_qa {
-        bail!("{sha} is not on origin/qa — it may have been promoted or reverted already");
+        bail!("{sha} is not on origin/{branch} — it may have been promoted or reverted already");
     }
     let line = serde_json::to_string(&NoteLine {
         v: 1,
@@ -343,13 +392,13 @@ fn record(cwd: &Path, sha: &str, decision: ReviewDecision) -> anyhow::Result<()>
     push_notes(cwd)
 }
 
-/// Revert `sha` on top of `origin/qa` in a temp worktree and push
-/// `HEAD:qa`. Retries when `qa` moved under the attempt.
-fn revert_on_qa(cwd: &Path, sha: &str) -> anyhow::Result<()> {
+/// Revert `sha` on top of `origin/<branch>` in a temp worktree and push
+/// `HEAD:<branch>`. Retries when the branch moved under the attempt.
+fn revert_on_qa(cwd: &Path, sha: &str, branch: &str) -> anyhow::Result<()> {
     let dir = std::env::temp_dir().join(format!("goddard-qa-{}", uuid::Uuid::new_v4()));
     let mut last_error = None;
     for _ in 0..REVERT_ATTEMPTS {
-        let _ = git_capture(cwd, &["fetch", "origin", "qa"]);
+        let _ = git_capture(cwd, &["fetch", "origin", branch]);
         if dir.exists() {
             let _ = crate::sync::remove_worktree(cwd, &dir);
             let _ = std::fs::remove_dir_all(&dir);
@@ -361,10 +410,10 @@ fn revert_on_qa(cwd: &Path, sha: &str) -> anyhow::Result<()> {
                 "add",
                 "--detach",
                 &dir.to_string_lossy(),
-                QA_REMOTE,
+                &qa_remote(branch),
             ],
         )?;
-        let attempt = revert_and_push(&dir, sha);
+        let attempt = revert_and_push(&dir, sha, branch);
         let _ = crate::sync::remove_worktree(cwd, &dir);
         let _ = std::fs::remove_dir_all(&dir);
         match attempt {
@@ -375,14 +424,14 @@ fn revert_on_qa(cwd: &Path, sha: &str) -> anyhow::Result<()> {
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("revert did not run")))
 }
 
-fn revert_and_push(worktree: &Path, sha: &str) -> anyhow::Result<()> {
+fn revert_and_push(worktree: &Path, sha: &str, branch: &str) -> anyhow::Result<()> {
     let output = git_capture(worktree, &["revert", "--no-edit", sha])?;
     if !output.status.success() {
         let files = crate::git_panel::conflicted_paths(worktree).unwrap_or_default();
         let _ = git_capture(worktree, &["revert", "--abort"]);
         let short = &sha[..sha.len().min(12)];
         bail!(
-            "reverting {short} on qa conflicts{}",
+            "reverting {short} on {branch} conflicts{}",
             if files.is_empty() {
                 format!(": {}", command_error(&output))
             } else {
@@ -390,7 +439,10 @@ fn revert_and_push(worktree: &Path, sha: &str) -> anyhow::Result<()> {
             }
         );
     }
-    git_success(worktree, &["push", "origin", "HEAD:refs/heads/qa"])?;
+    git_success(
+        worktree,
+        &["push", "origin", &format!("HEAD:refs/heads/{branch}")],
+    )?;
     Ok(())
 }
 
@@ -492,6 +544,12 @@ mod tests {
     /// A bare `origin` plus one clone with `main` and `qa` pushed — `qa`
     /// starts at `main`, commits go on `qa` via `propose`.
     fn fixture() -> (PathBuf, PathBuf) {
+        fixture_on("qa")
+    }
+
+    /// `fixture` on a named QA branch — `dev` here stands in for any
+    /// configured name.
+    fn fixture_on(qa_branch: &str) -> (PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!("waku-review-test-{}", Uuid::new_v4()));
         let seed = root.join("seed");
         let remote = root.join("remote.git");
@@ -506,16 +564,27 @@ mod tests {
         );
         run_git(&ours, &["config", "user.name", "Tester"]);
         run_git(&ours, &["config", "user.email", "tester@example.com"]);
-        run_git(&ours, &["branch", "qa"]);
-        run_git(&ours, &["push", "origin", "qa"]);
+        run_git(&ours, &["branch", qa_branch]);
+        run_git(&ours, &["push", "origin", qa_branch]);
         (remote, ours)
     }
 
     /// Land one proposed commit on the `qa` branch and push it.
     fn propose(ours: &Path, file: &str, contents: &str, message: &str) -> String {
-        run_git(ours, &["checkout", "qa"]);
+        propose_on(ours, "qa", file, contents, message)
+    }
+
+    /// `propose` on a named QA branch.
+    fn propose_on(
+        ours: &Path,
+        qa_branch: &str,
+        file: &str,
+        contents: &str,
+        message: &str,
+    ) -> String {
+        run_git(ours, &["checkout", qa_branch]);
         let sha = commit(ours, file, contents, message);
-        run_git(ours, &["push", "origin", "qa"]);
+        run_git(ours, &["push", "origin", qa_branch]);
         run_git(ours, &["checkout", "main"]);
         sha
     }
@@ -531,7 +600,7 @@ mod tests {
             "add feature\n\nTest-Plan: run the thing; it prints ok",
         );
 
-        let queue = queue(&ours).unwrap().unwrap();
+        let queue = queue(&ours, "qa").unwrap().unwrap();
         assert_eq!(queue.entries.len(), 2);
         assert_eq!(queue.entries[0].commit.sha, plain);
         assert!(!queue.entries[0].needs_review);
@@ -550,7 +619,7 @@ mod tests {
     fn sensitive_paths_need_review_without_a_trailer() {
         let (_remote, ours) = fixture();
         propose(&ours, "package.json", "{}\n", "bump dep");
-        let queue = queue(&ours).unwrap().unwrap();
+        let queue = queue(&ours, "qa").unwrap().unwrap();
         assert!(queue.entries[0].needs_review);
         assert!(!queue.entries[0].approved);
         assert!(queue.frontier.is_none());
@@ -567,7 +636,7 @@ mod tests {
             "add feature\n\nTest-Plan: run the thing",
         );
 
-        let queue = approve(&ours, &reviewed).unwrap().unwrap();
+        let queue = approve(&ours, &reviewed, "qa").unwrap().unwrap();
         assert_eq!(queue.frontier.as_deref(), Some(reviewed.as_str()));
         let entry = &queue.entries[1];
         assert!(entry.approved);
@@ -575,7 +644,7 @@ mod tests {
         assert_eq!(entry.reviews[0].reviewer, "Tester <tester@example.com>");
         assert_eq!(entry.reviews[0].decision, ReviewDecision::Approved);
 
-        let queue = promote(&ours).unwrap().unwrap();
+        let queue = promote(&ours, "qa").unwrap().unwrap();
         assert!(queue.entries.is_empty());
         assert_eq!(
             run_git(&Path::new(&remote), &["rev-parse", "refs/heads/main"]),
@@ -589,7 +658,7 @@ mod tests {
         let bad = propose(&ours, "bad.txt", "bad\n", "break things");
         propose(&ours, "good.txt", "good\n", "docs tweak");
 
-        let queue = reject(&ours, &bad).unwrap().unwrap();
+        let queue = reject(&ours, &bad, "qa").unwrap().unwrap();
         // The bad commit gained a revert on qa; its tree change is gone.
         run_git(&ours, &["fetch", "origin", "qa"]);
         run_git(&ours, &["checkout", "qa"]);
@@ -641,5 +710,33 @@ mod tests {
     fn test_plan_trailer_parsing_is_case_insensitive() {
         let body = "context\n\nTest-Plan: do this\ntest-plan : and that\nOther: no\n";
         assert_eq!(test_plans(body), vec!["do this", "and that"]);
+    }
+
+    #[test]
+    fn configured_branch_names_the_train() {
+        let (_remote, ours) = fixture_on("dev");
+        let sha = propose_on(&ours, "dev", "x.txt", "x\n", "dev proposal");
+
+        let result = queue(&ours, "dev").unwrap().unwrap();
+        assert_eq!(result.review_branch, "dev");
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].commit.sha, sha);
+
+        // The default `qa` branch doesn't exist here — an empty queue,
+        // not an error.
+        let result = queue(&ours, "qa").unwrap().unwrap();
+        assert_eq!(result.review_branch, "qa");
+        assert!(result.entries.is_empty());
+    }
+
+    #[test]
+    fn qa_branch_setting_resolves_and_validates() {
+        assert_eq!(qa_branch_name(""), "qa");
+        assert_eq!(qa_branch_name("  dev  "), "dev");
+        assert_eq!(qa_branch_checked("feature/x").unwrap(), "feature/x");
+        assert!(qa_branch_checked("-m").is_err());
+        assert!(qa_branch_checked("two words").is_err());
+        assert!(qa_branch_checked("a..b").is_err());
+        assert!(qa_branch_checked("a:b").is_err());
     }
 }

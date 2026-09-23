@@ -512,7 +512,7 @@ settings.skills_keywords:
 settings.usage_keywords:
   en: usage tokens cost spend cache daily chart model breakdown history claude codex
 settings.daemon_keywords:
-  en: daemon server remote web network expose origin token port websocket
+  en: daemon server remote web network expose origin token port websocket qa branch review train
 settings.computer_use_keywords:
   en: computer use screen recording accessibility apps control codex
 settings.commands_keywords:
@@ -719,6 +719,12 @@ daemon.keep_awake_title:
   en: Keep awake
 daemon.keep_awake_description:
   en: Stop this machine from sleeping so the mobile and web apps can reach it. On AC power it stays awake even with the lid closed.
+daemon.qa_branch_title:
+  en: QA branch
+daemon.qa_branch_description:
+  en: The branch the Projects page's Review tab reads proposed commits from — rejections push reverts onto it. Defaults to qa when empty.
+daemon.qa_branch_placeholder:
+  en: qa
 daemon.external_title:
   en: External daemon
 daemon.external_description:
@@ -766,7 +772,7 @@ experiments.projects_page_description:
 experiments.review_queue_title:
   en: QA review
 experiments.review_queue_description:
-  en: Add a Review tab to the Projects page — the qa branch's proposed commits listed oldest first, with per-commit approve, reject-and-revert, and a promote control for the approved frontier.
+  en: Add a Review tab to the Projects page — the QA branch's proposed commits listed oldest first, with per-commit approve, reject-and-revert, and a promote control for the approved frontier. The branch is named in Settings → Daemon.
 experiments.subagents_title:
   en: Subagents
 experiments.subagents_description:
@@ -2114,9 +2120,9 @@ projects.tab_review:
 projects.filter_review:
   en: Filter commits
 projects.review_no_queue:
-  en: No qa branch on origin
+  en: "No %{branch} branch on origin"
 projects.review_empty:
-  en: Nothing proposed on qa
+  en: "Nothing proposed on %{branch}"
 projects.review_train:
   en: "%{approved} of %{total} commits promote"
 projects.review_pending_count:
@@ -2200,7 +2206,7 @@ projects.confirm_delete_detail:
 projects.confirm_reject:
   en: "Reject and revert %{commit}?"
 projects.confirm_reject_detail:
-  en: A revert commit is pushed onto the shared qa branch — anyone synced to it picks the revert up.
+  en: "A revert commit is pushed onto the shared %{branch} branch — anyone synced to it picks the revert up."
 projects.open_pull_request:
   en: Open pull request
 projects.view_pull_request:

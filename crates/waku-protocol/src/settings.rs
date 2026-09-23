@@ -12,6 +12,10 @@ use crate::eval::EvalSettings;
 use crate::model::ProviderKind;
 use crate::routing::RouteClassMap;
 
+/// The default shared proposed-work branch the Projects page's Review tab
+/// reads — `origin/qa` out of the box.
+pub const DEFAULT_QA_BRANCH: &str = "qa";
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(default)]
 pub struct DaemonSettings {
@@ -98,6 +102,12 @@ pub struct DaemonSettings {
     /// whose session is busy or cannot resume are never evicted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_idle_timeout_secs: Option<u64>,
+    /// The branch the review queue treats as the shared proposed-work
+    /// train: `origin/<name>` is what the Review tab lists, and rejections
+    /// push reverts onto it. Daemon-owned so every attached client sees one
+    /// train; empty resolves to [`DEFAULT_QA_BRANCH`].
+    #[serde(default)]
+    pub qa_branch: String,
     /// Keep the daemon's host awake so remote clients — the mobile and web
     /// apps — can still reach it. While on, the daemon holds the platform
     /// sleep assertions `caffeinate -is` would: idle sleep is prevented on
@@ -138,6 +148,7 @@ impl Default for DaemonSettings {
             sandbox_experiment_enabled: default_experiment_enabled(),
             sandbox_default_enabled: false,
             runtime_idle_timeout_secs: None,
+            qa_branch: DEFAULT_QA_BRANCH.to_owned(),
             keep_awake: false,
             extra: BTreeMap::new(),
         }

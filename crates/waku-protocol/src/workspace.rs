@@ -1029,10 +1029,11 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         sha: String,
     },
-    /// The QA review queue: `origin/qa` commits not yet on the base
-    /// branch, oldest first, each with its approval state from
-    /// `refs/notes/qa`. Fetches `origin` first so the view is fresh;
-    /// `None` outside a repository.
+    /// The QA review queue: `origin/<qa branch>` commits not yet on the
+    /// base branch, oldest first, each with its approval state from
+    /// `refs/notes/qa`. The daemon's `qa_branch` setting names the branch.
+    /// Fetches `origin` first so the view is fresh; `None` outside a
+    /// repository.
     ReviewQueue {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -1044,16 +1045,16 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         sha: String,
     },
-    /// Record a rejection note for `sha`, revert it on `qa`, and push
-    /// both. Returns the refreshed queue.
+    /// Record a rejection note for `sha`, revert it on the QA branch, and
+    /// push both. Returns the refreshed queue.
     ReviewReject {
         #[ts(type = "string")]
         cwd: PathBuf,
         sha: String,
     },
     /// Fast-forward the base branch to the approved frontier. Returns
-    /// the refreshed queue; errors when the push is rejected (`main`
-    /// moved without `qa` — a hotfix that `qa` must integrate first).
+    /// the refreshed queue; errors when the push is rejected (the base
+    /// moved without the QA branch — a hotfix it must integrate first).
     ReviewPromote {
         #[ts(type = "string")]
         cwd: PathBuf,

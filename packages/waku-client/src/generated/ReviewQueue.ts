@@ -2,8 +2,9 @@
 import type { ReviewEntry } from "./ReviewEntry";
 
 /**
- * The `qa` branch's proposed commits (oldest first) and how far `main`
- * may fast-forward — the longest prefix where every entry is approved.
+ * The QA branch's proposed commits (oldest first) and how far the base
+ * branch may fast-forward — the longest prefix where every entry is
+ * approved.
  */
 export type ReviewQueue = {
 /**
@@ -11,11 +12,16 @@ export type ReviewQueue = {
  */
 baseBranch: string | null,
 /**
- * Oldest first. Empty when the repo has no `origin/qa`.
+ * The branch the queue was read from — the daemon's configured QA
+ * branch — so clients name it instead of assuming `qa`.
+ */
+reviewBranch: string,
+/**
+ * Oldest first. Empty when the repo has no `origin/<review_branch>`.
  */
 entries: Array<ReviewEntry>,
 /**
- * Commit `main` can fast-forward to — the last entry of the approved
- * prefix. `None` when nothing is promotable.
+ * Commit the base branch can fast-forward to — the last entry of the
+ * approved prefix. `None` when nothing is promotable.
  */
 frontier: string | null, };

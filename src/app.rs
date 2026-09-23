@@ -1996,6 +1996,9 @@ pub struct Waku {
     code_font_selector: settings::FontSelector,
     daemon_port_input: Entity<TextInput>,
     daemon_origins_input: Entity<TextInput>,
+    /// The review-train branch name, edited live on the Daemon settings
+    /// page.
+    qa_branch_input: Entity<TextInput>,
     /// The worktree fast-forward branch whitelist, edited live on the
     /// General settings page.
     worktree_sync_branches_input: Entity<TextInput>,
@@ -4396,6 +4399,15 @@ impl Waku {
             input.set_content(daemon_origins, cx);
             input
         });
+        let qa_branch_input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("daemon.qa_branch_title"))
+                .placeholder(tr!("daemon.qa_branch_placeholder"));
+            input.set_content(state.qa_branch.clone(), cx);
+            input
+        });
         let worktree_sync_branches_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .tab_index(0)
@@ -5345,6 +5357,15 @@ impl Waku {
                 .detach();
             }
             cx.subscribe(
+                &qa_branch_input,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited | InputEvent::Submit(_)) {
+                        this.apply_qa_branch(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &worktree_sync_branches_input,
                 |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
@@ -5646,6 +5667,7 @@ impl Waku {
                 code_font_selector,
                 daemon_port_input,
                 daemon_origins_input,
+                qa_branch_input,
                 worktree_sync_branches_input,
                 daemon_reconfigure_pending: false,
                 daemon_token_revealed: false,

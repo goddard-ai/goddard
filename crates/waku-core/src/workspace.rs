@@ -21,7 +21,9 @@ pub use waku_protocol::workspace::{
     WorkspaceOperation, WorkspaceResult,
 };
 
-pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult> {
+/// `qa_branch` is the daemon's configured review-train branch — only the
+/// `Review*` operations read it.
+pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result<WorkspaceResult> {
     Ok(match operation {
         WorkspaceOperation::ListTree {
             root,
@@ -346,16 +348,16 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             entry: crate::git_panel::commit(&cwd, &sha)?,
         },
         WorkspaceOperation::ReviewQueue { cwd } => WorkspaceResult::ReviewQueue {
-            queue: crate::review::queue(&cwd)?,
+            queue: crate::review::queue(&cwd, qa_branch)?,
         },
         WorkspaceOperation::ReviewApprove { cwd, sha } => WorkspaceResult::ReviewQueue {
-            queue: crate::review::approve(&cwd, &sha)?,
+            queue: crate::review::approve(&cwd, &sha, qa_branch)?,
         },
         WorkspaceOperation::ReviewReject { cwd, sha } => WorkspaceResult::ReviewQueue {
-            queue: crate::review::reject(&cwd, &sha)?,
+            queue: crate::review::reject(&cwd, &sha, qa_branch)?,
         },
         WorkspaceOperation::ReviewPromote { cwd } => WorkspaceResult::ReviewQueue {
-            queue: crate::review::promote(&cwd)?,
+            queue: crate::review::promote(&cwd, qa_branch)?,
         },
         WorkspaceOperation::CaptureTurnStart {
             cwd,
@@ -1159,10 +1161,13 @@ mod tests {
     }
 
     fn collect(root: &Path, source: ReviewDiffSource) -> ReviewDiffData {
-        let WorkspaceResult::ReviewDiff { data } = execute(WorkspaceOperation::CollectReviewDiff {
-            cwd: root.to_path_buf(),
-            source,
-        })
+        let WorkspaceResult::ReviewDiff { data } = execute(
+            WorkspaceOperation::CollectReviewDiff {
+                cwd: root.to_path_buf(),
+                source,
+            },
+            "qa",
+        )
         .unwrap() else {
             panic!("unexpected workspace response")
         };
@@ -1202,9 +1207,12 @@ mod tests {
             parent,
             entries,
             ..
-        } = execute(WorkspaceOperation::BrowseDirectory {
-            path: Some(directory.clone()),
-        })
+        } = execute(
+            WorkspaceOperation::BrowseDirectory {
+                path: Some(directory.clone()),
+            },
+            "qa",
+        )
         .unwrap()
         else {
             panic!("unexpected workspace response")
@@ -1230,21 +1238,26 @@ mod tests {
         let content = "line\n".repeat(10_000);
         fs::write(root.join("large.txt"), &content).unwrap();
 
-        let WorkspaceResult::TextFile { content: restored } =
-            execute(WorkspaceOperation::ReadTextFile {
+        let WorkspaceResult::TextFile { content: restored } = execute(
+            WorkspaceOperation::ReadTextFile {
                 root: root.clone(),
                 relative_path: PathBuf::from("large.txt"),
-            })
-            .unwrap()
+            },
+            "qa",
+        )
+        .unwrap()
         else {
             panic!("unexpected workspace response")
         };
         assert_eq!(restored, content);
         assert!(
-            execute(WorkspaceOperation::ReadTextFile {
-                root: root.clone(),
-                relative_path: PathBuf::from("missing.txt"),
-            })
+            execute(
+                WorkspaceOperation::ReadTextFile {
+                    root: root.clone(),
+                    relative_path: PathBuf::from("missing.txt"),
+                },
+                "qa",
+            )
             .is_err()
         );
 
@@ -1422,8 +1435,11 @@ mod tests {
         fs::create_dir_all(root.join("temp")).unwrap();
         fs::write(root.join("temp/scratch.txt"), "z").unwrap();
 
-        let WorkspaceResult::Reclaimable { entries } =
-            execute(WorkspaceOperation::InspectReclaimable { cwd: root.clone() }).unwrap()
+        let WorkspaceResult::Reclaimable { entries } = execute(
+            WorkspaceOperation::InspectReclaimable { cwd: root.clone() },
+            "qa",
+        )
+        .unwrap()
         else {
             panic!("unexpected workspace response")
         };
@@ -1457,10 +1473,13 @@ mod tests {
         let WorkspaceResult::Reclaim {
             reclaimed_bytes,
             failures,
-        } = execute(WorkspaceOperation::ReclaimPaths {
-            cwd: root.clone(),
-            paths,
-        })
+        } = execute(
+            WorkspaceOperation::ReclaimPaths {
+                cwd: root.clone(),
+                paths,
+            },
+            "qa",
+        )
         .unwrap()
         else {
             panic!("unexpected workspace response")

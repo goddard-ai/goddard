@@ -3223,6 +3223,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let agent_tools_card = self.agent_tools_card(theme, search, cx);
         let keep_awake_card = self.keep_awake_card(theme, search, cx);
+        let qa_branch_card = self.qa_branch_card(theme, search);
         let agent_settings_card = self.agent_settings_card(theme, search, cx);
         let sandbox_default_card = self.sandbox_default_card(theme, search, cx);
         let remote_hosts_card = self.render_remote_hosts_card(theme, search, cx);
@@ -3250,6 +3251,7 @@ impl Waku {
                 .children(remote_hosts_card)
                 .children(external_card)
                 .children(keep_awake_card)
+                .children(qa_branch_card)
                 .children(agent_tools_card)
                 .children(agent_settings_card)
                 .children(sandbox_default_card)
@@ -3898,6 +3900,7 @@ impl Waku {
             .children(credentials_card)
             .children(remote_hosts_card)
             .children(keep_awake_card)
+            .children(qa_branch_card)
             .children(agent_tools_card)
             .children(agent_settings_card)
             .children(sandbox_default_card)
@@ -4822,6 +4825,35 @@ impl Waku {
         self.state.keep_awake = enabled;
         self.save();
         cx.notify();
+    }
+
+    /// The daemon-scoped name of the review train's branch — the Review
+    /// tab lists `origin/<name>` and rejections push reverts onto it.
+    /// Edited live; an empty field resolves to `qa` daemon-side.
+    fn qa_branch_card(&self, theme: Theme, search: &SettingSearch) -> Option<AnyElement> {
+        let title = tr!("daemon.qa_branch_title");
+        let description = tr!("daemon.qa_branch_description");
+        let matched = search.matched(&title, &description)?;
+        Some(
+            div()
+                .w_full()
+                .min_h(px(66.0))
+                .px(px(20.0))
+                .py(px(13.0))
+                .rounded(px(16.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .child(
+                    settings_row_text(title, description, matched, theme).child(
+                        div().mt(px(9.0)).max_w(px(360.0)).child(
+                            TextField::new("qa-branch-field", self.qa_branch_input.clone())
+                                .w_full(),
+                        ),
+                    ),
+                )
+                .into_any_element(),
+        )
     }
 
     /// The daemon-scoped settings surface agents may write — custom commands
@@ -9837,6 +9869,18 @@ impl Waku {
         }
         self.state.new_worktree_sync_default_branch = enabled;
         self.save();
+        cx.notify();
+    }
+
+    /// Persist the QA branch field's current name as the user types; the
+    /// next review-queue read uses it. An empty field resolves to `qa`
+    /// daemon-side.
+    pub(super) fn apply_qa_branch(&mut self, cx: &mut Context<Self>) {
+        let branch = self.qa_branch_input.read(cx).content().trim().to_owned();
+        if branch != self.state.qa_branch {
+            self.state.qa_branch = branch;
+            self.save();
+        }
         cx.notify();
     }
 

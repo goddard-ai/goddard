@@ -245,7 +245,7 @@ settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 
 settings.skills: 技能
 settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude codex cursor opencode pi amp 共享 fx devin
 settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型 明细 历史 claude codex
-settings.daemon_keywords: 守护进程 服务 远程 网页 网络 暴露 来源 令牌 端口 websocket
+settings.daemon_keywords: 守护进程 服务 远程 网页 网络 暴露 来源 令牌 端口 websocket qa 分支 审查
 settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 控制 codex
 settings.jev: Jev
 settings.jev_keywords: jev typesafe 评估 模型 自动 路由 后端 API密钥 凭据 vercel cloudflare 策略 eval routing
@@ -323,6 +323,9 @@ daemon.hide_qr: 隐藏
 daemon.security_warning: 此令牌可完全访问本机上的任务、文件、Git、附件和编程智能体。在私有网络之外请通过受信任的 TLS 代理使用 WSS。
 daemon.keep_awake_title: 保持唤醒
 daemon.keep_awake_description: 防止本机睡眠，让移动应用和 Web 应用保持可连接。接通电源时即使合上盖子也不会睡眠。
+daemon.qa_branch_title: QA 分支
+daemon.qa_branch_description: 项目页面“审查”标签读取提议提交的分支 — 拒绝操作会向它推送回退提交。留空时默认为 qa。
+daemon.qa_branch_placeholder: qa
 daemon.external_title: 外部守护进程
 daemon.external_description: 此桌面应用连接到由 Goddard 之外管理的守护进程。请在对应主机上配置监听地址、浏览器来源和令牌。
 daemon.web_external_description: Goddard Web 连接到由浏览器之外管理的守护进程。请在对应主机上配置监听地址、浏览器来源和令牌。
@@ -2090,7 +2093,7 @@ experiments.project_map_description: 为每个新会话提供一份工作区的�
 experiments.project_map_title: 项目地图
 experiments.projects_page_description: 按 ⌘⇧P 打开每个项目的页面，列出其工作树、分支、issue 和拉取请求，⌘⌥1–4 可直接跳转到对应标签页。
 experiments.projects_page_title: 项目页面
-experiments.review_queue_description: 在项目页面新增“审查”标签页 — qa 分支的提议提交按从旧到新列出，支持逐个批准、拒绝并回退，以及提升已批准前缀的控件。
+experiments.review_queue_description: 在项目页面新增“审查”标签页 — QA 分支的提议提交按从旧到新列出，支持逐个批准、拒绝并回退，以及提升已批准前缀的控件。分支名在“设置 → 守护进程”中配置。
 experiments.review_queue_title: QA 审查
 experiments.sandbox_description: 在输入框的访问菜单中显示环境选择 — 在这台 Mac 或隔离的 Linux VM 中运行任务 — 并在会话标题上显示“沙箱中”徽标。对开启后启动的会话生效。
 experiments.sandbox_title: 沙箱 VM
@@ -2317,15 +2320,15 @@ projects.col_pull_request: PR
 projects.col_tasks: 任务
 projects.col_updated: 更新
 projects.confirm_reject: "拒绝并回退 %{commit}？"
-projects.confirm_reject_detail: 将向共享的 qa 分支推送一个回退提交 — 所有已同步的人都会收到它。
+projects.confirm_reject_detail: 将向共享的 %{branch} 分支推送一个回退提交 — 所有已同步的人都会收到它。
 projects.filter_review: 筛选提交
 projects.review_approve: 批准
 projects.review_approved: 已批准
 projects.review_auto: 自动批准
-projects.review_empty: qa 分支上没有提议的提交
+projects.review_empty: "%{branch} 分支上没有提议的提交"
 projects.review_frontier: 将提升
 projects.review_needs_review: 待审查
-projects.review_no_queue: origin 上没有 qa 分支
+projects.review_no_queue: "origin 上没有 %{branch} 分支"
 projects.review_pending_count: "%{count} 个待审查"
 projects.review_promote: 提升到 %{branch}
 projects.review_reject: 拒绝并回退

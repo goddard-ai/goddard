@@ -3,8 +3,8 @@ import type { CommitEntry } from "./CommitEntry";
 import type { ReviewRecord } from "./ReviewRecord";
 
 /**
- * One proposed commit on `qa` and its review state, for the Projects
- * page's Review tab.
+ * One proposed commit on the QA branch and its review state, for the
+ * Projects page's Review tab.
  */
 export type ReviewEntry = { commit: CommitEntry,
 /**
@@ -26,8 +26,8 @@ reviews: Array<ReviewRecord>,
  */
 rejected: boolean,
 /**
- * A `git revert` of this commit sits later on `qa` — its changes are
- * undone, so it can't block the frontier.
+ * A `git revert` of this commit sits later on the QA branch — its
+ * changes are undone, so it can't block the frontier.
  */
 reverted: boolean,
 /**

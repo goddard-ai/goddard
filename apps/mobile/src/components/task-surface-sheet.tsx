@@ -1390,8 +1390,8 @@ function QueueSurface({ root }: { root: string | null }) {
         subtitle={
           snapshot
             ? snapshot.baseBranch
-              ? `qa → ${snapshot.baseBranch}`
-              : "qa"
+              ? `${snapshot.reviewBranch || "qa"} → ${snapshot.baseBranch}`
+              : snapshot.reviewBranch || "qa"
             : undefined
         }
         surface="queue"
@@ -1405,7 +1405,7 @@ function QueueSurface({ root }: { root: string | null }) {
         />
       ) : !snapshot ? (
         <PanelMessage
-          detail="This repository has no origin/qa branch."
+          detail="This repository has no review branch on origin."
           title="No review queue"
         />
       ) : (

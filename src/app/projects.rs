@@ -311,7 +311,7 @@ pub(super) struct ProjectsPageState {
     pub activity: activity::ActivityState,
     pub worktrees: github::GitHubFetch<Rc<Vec<RepoWorktree>>>,
     pub branches: github::GitHubFetch<Rc<Vec<RepoBranch>>>,
-    /// The `qa` review queue — `Loaded(None)` outside a git repo or
+    /// The QA-branch review queue — `Loaded(None)` outside a git repo or
     /// without an `origin` remote to read proposed work from.
     pub review: github::GitHubFetch<Rc<waku_client::git::ReviewQueue>>,
     /// An approve/reject/promote op is in flight; its controls disable.
@@ -1013,8 +1013,19 @@ impl Waku {
         }
     }
 
-    /// Fetch the `qa` review queue — the daemon walks `origin/qa` and
-    /// `refs/notes/qa` on its side.
+    /// The configured QA branch name for display — the daemon resolves an
+    /// empty setting to `qa`, so the label does the same.
+    fn qa_branch_display(&self) -> String {
+        let branch = self.state.qa_branch.trim();
+        if branch.is_empty() {
+            waku_client::settings::DEFAULT_QA_BRANCH.to_owned()
+        } else {
+            branch.to_owned()
+        }
+    }
+
+    /// Fetch the QA review queue — the daemon walks `origin/<qa branch>`
+    /// and `refs/notes/qa` on its side.
     pub(super) fn projects_refresh_review(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
         let Some(cwd) = self
             .state
@@ -1114,7 +1125,7 @@ impl Waku {
     }
 
     /// Record `approve`/`reject` on the proposed commit `sha`. Reject pushes
-    /// a revert onto the shared `qa` branch, so it confirms first — the
+    /// a revert onto the shared QA branch, so it confirms first — the
     /// prompt names the commit it's about to revert.
     fn projects_review_decide(
         &mut self,
@@ -1141,22 +1152,29 @@ impl Waku {
             );
             return;
         }
-        let commit = self
-            .projects_page_states
-            .get(&project_id)
-            .and_then(|state| match &state.review {
-                github::GitHubFetch::Loaded(Some(queue)) => queue
+        let Some(state) = self.projects_page_states.get(&project_id) else {
+            return;
+        };
+        let (commit, review_branch) = match &state.review {
+            github::GitHubFetch::Loaded(Some(queue)) => (
+                queue
                     .entries
                     .iter()
                     .find(|entry| entry.commit.sha == sha)
-                    .map(|entry| format!("{} {}", entry.commit.short_sha, entry.commit.subject)),
-                _ => None,
-            })
-            .unwrap_or_else(|| sha.clone());
+                    .map(|entry| format!("{} {}", entry.commit.short_sha, entry.commit.subject))
+                    .unwrap_or_else(|| sha.clone()),
+                if queue.review_branch.is_empty() {
+                    self.qa_branch_display()
+                } else {
+                    queue.review_branch.clone()
+                },
+            ),
+            _ => (sha.clone(), self.qa_branch_display()),
+        };
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
             &tr!("projects.confirm_reject", commit = commit),
-            Some(&tr!("projects.confirm_reject_detail")),
+            Some(&tr!("projects.confirm_reject_detail", branch = review_branch)),
             &[
                 gpui::PromptButton::cancel(tr!("common.cancel")),
                 gpui::PromptButton::ok(tr!("projects.review_reject")),
@@ -2339,7 +2357,7 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The Review tab: the `qa` train's promotion bar over the queue —
+    /// The Review tab: the QA train's promotion bar over the queue —
     /// oldest proposed commit first, each trailed by its `Test-Plan:`
     /// lines, with per-commit approve/reject controls.
     fn render_projects_review(&mut self, project_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
@@ -2357,9 +2375,14 @@ impl Waku {
         let Some(queue) = queue else {
             return github::github_centered(
                 icon("icons/git-branch.svg", 16.0, theme.text_tertiary).into_any_element(),
-                tr!("projects.review_no_queue"),
+                tr!("projects.review_no_queue", branch = self.qa_branch_display()),
                 &theme,
             );
+        };
+        let review_branch = if queue.review_branch.is_empty() {
+            self.qa_branch_display()
+        } else {
+            queue.review_branch.clone()
         };
         let total = queue.entries.len();
         let frontier_count = queue
@@ -2387,7 +2410,7 @@ impl Waku {
             github::github_centered(
                 icon("icons/git-commit-horizontal.svg", 16.0, theme.text_tertiary)
                     .into_any_element(),
-                tr!("projects.review_empty"),
+                tr!("projects.review_empty", branch = review_branch),
                 &theme,
             )
         } else if rows.is_empty() {

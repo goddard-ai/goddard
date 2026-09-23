@@ -2276,7 +2276,8 @@ impl Backend for WakuBackend {
                     }
                     _ => None,
                 };
-                let result = crate::workspace::execute(operation)?;
+                let qa_branch = self.settings.get().qa_branch;
+                let result = crate::workspace::execute(operation, &qa_branch)?;
                 if kick {
                     self.share.note_repo_activity();
                 }
@@ -2734,9 +2735,10 @@ enum ReviewMove {
 }
 
 impl WakuBackend {
-    /// A review op moved `refs/notes/qa`, `qa`, or the base branch on a
-    /// shared origin — tell friends sharing it and bump review surfaces
-    /// locally. Best-effort: no notices go out without an `origin`.
+    /// A review op moved `refs/notes/qa`, the QA branch, or the base
+    /// branch on a shared origin — tell friends sharing it and bump review
+    /// surfaces locally. Best-effort: no notices go out without an
+    /// `origin`.
     fn notify_review_moved(&self, cwd: &Path, review_move: ReviewMove, result: &WorkspaceResult) {
         let Ok(Some(origin_url)) = crate::git_branch::remote_url(cwd, "origin") else {
             return;
@@ -2753,8 +2755,10 @@ impl WakuBackend {
                     origin_url.clone(),
                     vec![crate::review::NOTES_REF.to_owned()],
                 );
-                self.share
-                    .notify_push(origin_url.clone(), vec!["qa".to_owned()]);
+                self.share.notify_push(
+                    origin_url.clone(),
+                    vec![crate::review::qa_branch_name(&self.settings.get().qa_branch)],
+                );
             }
             ReviewMove::Promoted => {
                 let base = match result {

@@ -113,6 +113,13 @@ sandbox_default_enabled: boolean,
  */
 runtime_idle_timeout_secs?: number | null,
 /**
+ * The branch the review queue treats as the shared proposed-work
+ * train: `origin/<name>` is what the Review tab lists, and rejections
+ * push reverts onto it. Daemon-owned so every attached client sees one
+ * train; empty resolves to [`DEFAULT_QA_BRANCH`].
+ */
+qa_branch: string,
+/**
  * Keep the daemon's host awake so remote clients — the mobile and web
  * apps — can still reach it. While on, the daemon holds the platform
  * sleep assertions `caffeinate -is` would: idle sleep is prevented on

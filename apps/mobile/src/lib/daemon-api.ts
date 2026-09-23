@@ -607,8 +607,9 @@ export async function generateWorkspaceCommitMessage(
   return result.message;
 }
 
-/** The `qa` branch's proposed commits — `null` when the repo has no
- * `origin/qa`. Approve/reject/promote all return the refreshed queue. */
+/** The QA branch's proposed commits — `null` when the repo has no
+ * `origin/<qa branch>`. The daemon's `qa_branch` setting names the
+ * branch. Approve/reject/promote all return the refreshed queue. */
 export async function listReviewQueue(
   client: WakuClient,
   cwd: string,
@@ -644,7 +645,8 @@ export async function rejectReviewCommit(
   return result.queue;
 }
 
-/** Fast-forwards `main` through the approved prefix of `qa`. */
+/** Fast-forwards the base branch through the QA branch's approved
+ * prefix. */
 export async function promoteReviewQueue(
   client: WakuClient,
   cwd: string,
