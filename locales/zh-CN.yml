@@ -2685,7 +2685,6 @@ status_markers.needs_continuation: 需要继续
 status_markers.thrash: 反复试错
 status_markers.unverified: 未验证
 phase.planning: 规划中
-phase.executing: 执行中
 sync_branch.busy: 另一个 Git 操作仍在运行
 sync_branch.current: 当前分支
 sync_branch.loading: 正在加载分支…

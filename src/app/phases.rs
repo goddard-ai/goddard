@@ -1,6 +1,6 @@
 //! Phase-aware model routing: a session's lifecycle is tracked as
-//! `Planning` → `Executing` and reported on the sidebar's quiet status
-//! line. Auto-routed sessions whose intake judged the task plan-worthy
+//! `Planning` → `Executing`; only Planning is shown in session chrome.
+//! Auto-routed sessions whose intake judged the task plan-worthy
 //! also retune the live model at the boundary — planning on the user's
 //! hardest-class target, implementation one class tier below.
 //!
@@ -16,7 +16,7 @@
 //! intake route marked `phased` — unlike status markers, they are not
 //! selection-gated, because the retune pays for itself on background
 //! sessions too. Manual model picks clear `route_decision` and end
-//! routing ownership; the marker keeps tracking the work either way.
+//! routing ownership; the internal phase keeps tracking the work either way.
 
 use std::collections::BTreeMap;
 
@@ -51,9 +51,8 @@ const MIN_IMPL_CONFIDENCE: f64 = 0.6;
 /// errors are ordinary friction, not a stall worth an evaluation.
 const STUCK_FAILURE_COUNT: usize = 2;
 
-/// The icon and label a sidebar row shows for a known phase — `None` when
-/// classification is off or the session's tool stream has not classified
-/// yet. Icon and text both carry the meaning; color is only decoration.
+/// The Planning chip shown in session chrome while a task is planning.
+/// Other internal phases do not get a visible marker.
 pub(super) fn sidebar_phase_marker(
     enabled: bool,
     session: &AgentSession,
@@ -61,10 +60,8 @@ pub(super) fn sidebar_phase_marker(
     if !enabled {
         return None;
     }
-    Some(match session.phase? {
-        SessionPhase::Planning => ("icons/target.svg", "phase.planning"),
-        SessionPhase::Executing => ("icons/hammer.svg", "phase.executing"),
-    })
+    (session.phase == Some(SessionPhase::Planning))
+        .then_some(("icons/target.svg", "phase.planning"))
 }
 
 /// What a settled turn's tool stream says about the phase boundary —
@@ -875,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn marker_only_renders_for_known_phases() {
+    fn marker_only_renders_while_planning() {
         let mut session =
             AgentSession::new(Uuid::new_v4(), waku_protocol::model::ProviderKind::Claude);
         assert_eq!(sidebar_phase_marker(true, &session), None);
@@ -885,10 +882,7 @@ mod tests {
             Some(("icons/target.svg", "phase.planning"))
         );
         session.phase = Some(SessionPhase::Executing);
-        assert_eq!(
-            sidebar_phase_marker(true, &session),
-            Some(("icons/hammer.svg", "phase.executing"))
-        );
+        assert_eq!(sidebar_phase_marker(true, &session), None);
         assert_eq!(sidebar_phase_marker(false, &session), None);
     }
 

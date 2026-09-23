@@ -874,7 +874,7 @@ experiments.action_predictions_description:
 experiments.phase_routing_title:
   en: Phase-aware routing
 experiments.phase_routing_description:
-  en: Auto-routed tasks the evaluator judges plan-worthy start on your hardest-class model, then downshift one class tier once the tool stream or the evaluator says planning ended — and climb back if implementation stalls. Also classifies tasks as Planning or Executing.
+  en: Auto-routed tasks the evaluator judges plan-worthy start on your hardest-class model, then downshift one class tier once the tool stream or the evaluator says planning ended — and climb back if implementation stalls. A Planning marker appears in session chrome until planning ends.
 experiments.sidebar_dock_title:
   en: Sidebar dock
 experiments.sidebar_dock_description:
@@ -987,8 +987,6 @@ status_markers.assumed:
   en: Assumed
 phase.planning:
   en: Planning
-phase.executing:
-  en: Executing
 routing.backend:
   en: Evaluation backend
 routing.backend_description:
@@ -1550,13 +1548,13 @@ settings.sidebar_composer_drafts:
 settings.sidebar_composer_drafts_description:
   en: Show a task's unsent composer draft under its title in the sidebar
 settings.sidebar_phase_groups:
-  en: Group recent Executing and Planning tasks
+  en: Group recent Planning tasks
 settings.sidebar_phase_groups_description:
-  en: Classify tasks by Planning or Executing and move those active in the last 30 minutes above Today in Date view
+  en: Move tasks still planning and active in the last 30 minutes above Today in Date view
 settings.sidebar_hide_phase_labels:
-  en: Hide executing/planning labels in sidebar
+  en: Hide Planning chips on task rows
 settings.sidebar_hide_phase_labels_description:
-  en: Keep phase names in the title bar and group headers without repeating them on task rows
+  en: Keep Planning in the title bar and group header without repeating it on task rows
 settings.sidebar_draft_preview_color:
   en: Draft preview color
 settings.sidebar_draft_preview_color_description:

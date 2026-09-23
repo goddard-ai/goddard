@@ -2734,7 +2734,6 @@ status_markers.needs_continuation: 続行が必要
 status_markers.thrash: 空回り
 status_markers.unverified: 未検証
 phase.planning: 計画中
-phase.executing: 実行中
 sync_branch.busy: 別の Git 操作がまだ実行中です
 sync_branch.current: 現在のブランチ
 sync_branch.loading: ブランチを読み込み中…

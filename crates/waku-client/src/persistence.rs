@@ -971,7 +971,7 @@ pub struct AppSettings {
     /// Show a task's unsent composer draft on its own line under the sidebar
     /// row's title.
     pub sidebar_composer_drafts: bool,
-    /// Hoist recently active Planning and Executing tasks above date groups.
+    /// Hoist recently active Planning tasks above date groups.
     #[serde(default)]
     pub sidebar_phase_groups: bool,
     #[serde(default)]
