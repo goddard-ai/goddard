@@ -47,6 +47,7 @@ pub mod acp_session;
 pub mod agent;
 pub mod amp_session;
 pub mod attachments;
+pub mod auto_prompts;
 pub mod automations;
 pub mod blob_store;
 pub mod checkpoint;

@@ -1,5 +1,49 @@
 _version: 1
 
+auto_prompts.title: 自動プロンプト
+auto_prompts.description: 完了したタスクの内容が条件に合うと、Jev がフォローアップを送信します。
+auto_prompts.add: 自動プロンプトを追加
+auto_prompts.edit: 編集
+auto_prompts.enable: 有効にする
+auto_prompts.disable: 無効にする
+auto_prompts.sent_by: "自動プロンプトから送信: %{name}"
+auto_prompts.remove: 削除
+auto_prompts.name: 名前
+auto_prompts.name_description: 自動送信されたプロンプトの先頭に表示されます。
+auto_prompts.name_placeholder: 完了した作業をレビュー
+auto_prompts.prompt: プロンプト
+auto_prompts.prompt_description: このタスクに送るフォローアップです。
+auto_prompts.prompt_placeholder: 変更をレビューし、問題があれば修正してください。
+auto_prompts.question: 質問 %{number}
+auto_prompts.question_label: トリガーの質問
+auto_prompts.question_description: 完了したターンについて、はい・いいえで答えられる質問を入力します。
+auto_prompts.question_placeholder: 応答は作業の完了を示していますか？
+auto_prompts.weight: 質問の重み
+auto_prompts.threshold: トリガーのしきい値
+auto_prompts.threshold_description: 加重平均が 0〜1 のこの値に達すると送信します。
+auto_prompts.add_question: 質問を追加
+auto_prompts.advanced: 詳細
+auto_prompts.suggest: 値を提案
+auto_prompts.try_task: このタスクで試す
+auto_prompts.save: 下書きを保存
+auto_prompts.working: 処理中…
+auto_prompts.would_send: 送信されます
+auto_prompts.would_skip: 送信されません
+auto_prompts.saved_disabled: 無効の状態で保存しました。準備ができたら有効にしてください。
+auto_prompts.no_editor: 編集するルールを開いてください。
+auto_prompts.need_prompt: 名前とプロンプトを入力してください。
+auto_prompts.need_questions: すべての質問を入力するか、空の行を削除してください。
+auto_prompts.invalid_weight: 重みには正の数を入力してください。
+auto_prompts.invalid_threshold: しきい値には 0〜1 の数を入力してください。
+auto_prompts.values_complete: すべての値が設定されています。
+auto_prompts.changed_during_suggestion: ルールが変更されました。もう一度値を提案してください。
+auto_prompts.suggest_incomplete: Jev の提案に十分な確信がない値があります。
+auto_prompts.suggested: 提案された初期値を確認できます。
+auto_prompts.need_values: 先にすべての重みとしきい値を設定するか、提案を取得してください。
+auto_prompts.need_task: 試すタスクを選択してください。
+auto_prompts.need_completed_turn: このタスクには試せる完了済みターンがありません。
+auto_prompts.preview_incomplete: Jev がすべての質問に回答しませんでした。
+
 menu.about: "%{app} について"
 menu.check_for_updates: アップデートを確認…
 menu.settings: 設定…

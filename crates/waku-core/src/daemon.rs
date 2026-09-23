@@ -14,6 +14,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::attachments::AttachmentStore;
+use crate::auto_prompts::AutoPromptService;
 use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
@@ -239,6 +240,7 @@ pub struct WakuBackend {
     /// Scheduled automations — definitions, run history, and the tick that
     /// dispatches them whether or not a client is attached.
     automations: Arc<AutomationService>,
+    auto_prompts: Arc<AutoPromptService>,
 }
 
 impl WakuBackend {
@@ -273,6 +275,10 @@ impl WakuBackend {
         let automations = Arc::new(
             AutomationService::open(data_dir.join("automations.json"))
                 .context("could not load Goddard automations")?,
+        );
+        let auto_prompts = Arc::new(
+            AutoPromptService::open(data_dir.join("auto-prompts.json"))
+                .context("could not load Goddard auto prompt history")?,
         );
         let task_state = Arc::new(Mutex::new(task_state));
         let task_store = Arc::new(task_store);
@@ -318,6 +324,7 @@ impl WakuBackend {
             data_dir,
             our_name,
             automations,
+            auto_prompts,
         };
         backend.purge_expired_archived_sessions();
         backend.install_link_handlers();
@@ -480,6 +487,7 @@ impl WakuBackend {
     /// starts serving — the service needs the backend's `Arc` for dispatch.
     pub fn start_automations(self: &Arc<Self>) {
         self.automations.start(self);
+        self.auto_prompts.start(self);
     }
 
     /// Point the `waku-link` ALPN at the daemon's metadata and pairing
@@ -1086,6 +1094,7 @@ impl Backend for WakuBackend {
 
     fn set_event_source(&self, events: EventSink) {
         self.automations.set_event_source(events.clone());
+        self.auto_prompts.set_event_source(events.clone());
         // The reaper starts with the event hub: retiring a runtime needs a
         // sink, and before serve() installs one there is nothing to retire.
         if self
@@ -1771,7 +1780,8 @@ impl Backend for WakuBackend {
                             .find(|session| session.id == session_id)
                             .cloned()
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
+                self.auto_prompts.consider(&sessions);
                 // The save above can adopt full transcripts for every session
                 // the client touched. Keep only the recent window resident;
                 // the echoed clones above still carry the saved detail.
@@ -3667,6 +3677,7 @@ impl WakuBackend {
         let task_store = self.task_store.clone();
         let sessions = self.sessions.clone();
         let automations = self.automations.clone();
+        let auto_prompts = self.auto_prompts.clone();
         let memory = self.memory.clone();
         let repo_maps = self.repo_maps.clone();
         std::thread::Builder::new()
@@ -3683,6 +3694,7 @@ impl WakuBackend {
                     task_store,
                     sessions,
                     automations,
+                    auto_prompts,
                     memory,
                     repo_maps,
                 );
@@ -4399,6 +4411,41 @@ impl WakuBackend {
         self.drain_agent_queue(target, &driver, &sink)
     }
 
+    pub(crate) fn auto_prompt_settings(&self) -> crate::DaemonSettings {
+        self.settings.get()
+    }
+
+    pub(crate) fn auto_prompt_turn_is_latest(&self, session_id: Uuid, turn_id: Uuid) -> bool {
+        if self.agent.is_working(session_id) {
+            return false;
+        }
+        self.task_state.lock().sessions.iter().any(|session| {
+            session.id == session_id
+                && session.archived_at.is_none()
+                && session.turns.last().is_some_and(|turn| turn.id == turn_id)
+                && session.queued_messages.is_empty()
+        })
+    }
+
+    pub(crate) fn queue_auto_prompt(
+        &self,
+        session_id: Uuid,
+        source_turn: Uuid,
+        prompt: String,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        if !self.auto_prompt_turn_is_latest(session_id, source_turn) {
+            bail!("task moved on before auto prompt dispatch");
+        }
+        if self.session_quarantined(session_id) {
+            bail!("task is quarantined");
+        }
+        if !self.sessions.lock().contains_key(&session_id) {
+            bail!("task runtime is unavailable");
+        }
+        self.queue_agent_prompt(session_id, prompt, None, events)
+    }
+
     /// Pop every queued agent prompt for the session, in submission order.
     /// A turn that started working mid-drain holds the remainder for the
     /// provider's finish event.
@@ -4420,6 +4467,7 @@ impl WakuBackend {
                 entry,
                 sink,
                 &self.agent,
+                &self.auto_prompts,
                 &self.task_state,
                 &self.task_store,
             )?;
@@ -5181,6 +5229,7 @@ fn forward_driver_events(
     task_store: Arc<StateStore>,
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     automations: Arc<AutomationService>,
+    auto_prompts: Arc<AutoPromptService>,
     memory: Arc<crate::memory::MemoryService>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
 ) {
@@ -5193,6 +5242,9 @@ fn forward_driver_events(
         }
         let rejected_steer = agent.note_driver_event(session_id, &event);
         automations.note_driver_event(session_id, &event);
+        if let DriverEvent::TurnFinished { success, .. } = &event {
+            auto_prompts.note_turn_finished(session_id, *success);
+        }
         let event = match event {
             DriverEvent::Connected { provider_cursor } => {
                 // The daemon keeps its own copy of the resume cursor so
@@ -5351,6 +5403,7 @@ fn forward_driver_events(
                     entry,
                     &events,
                     &agent,
+                    &auto_prompts,
                     &task_state,
                     &task_store,
                 ) {
@@ -5506,6 +5559,7 @@ fn deliver_agent_prompt(
     entry: crate::agent::AgentPrompt,
     sink: &EventSink,
     agent: &crate::agent::AgentState,
+    auto_prompts: &AutoPromptService,
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
 ) -> anyhow::Result<()> {
@@ -5522,6 +5576,7 @@ fn deliver_agent_prompt(
         return Ok(());
     }
     let turn_id = Uuid::new_v4();
+    auto_prompts.note_nonhuman_turn(session_id, turn_id);
     // A parked prompt reuses its mirrored chip's id as the delivered
     // message's id: clients folding `promptSubmitted` drop the chip and
     // adopt the transcript row in one move.
@@ -7204,6 +7259,7 @@ mod tests {
             task_store.clone(),
             sessions.clone(),
             Arc::new(AutomationService::open(root.join("automations.json")).unwrap()),
+            Arc::new(AutoPromptService::open(root.join("auto-prompts.json")).unwrap()),
             crate::memory::MemoryService::new(
                 Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap()),
                 task_state,

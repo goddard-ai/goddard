@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
+use crate::auto_prompts::AutoPromptRule;
 use crate::computer_use::ComputerAppGrant;
 use crate::custom_commands::CustomCommand;
 use crate::eval::EvalSettings;
@@ -58,6 +59,9 @@ pub struct DaemonSettings {
     /// `last_used` default.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub route_classes: RouteClassMap,
+    /// User-authorized Jev rules that may send a follow-up after a task turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub auto_prompts: Vec<AutoPromptRule>,
     /// Experimental opt-in for project memory: the daemon maintains a
     /// `.goddard/memory/` store per project, distills finished turns into it
     /// in the background, and injects it into each session's first prompt.
@@ -126,6 +130,7 @@ impl Default for DaemonSettings {
             provider_binary_overrides: HashMap::new(),
             eval: None,
             route_classes: RouteClassMap::new(),
+            auto_prompts: Vec::new(),
             memory_experiment_enabled: default_experiment_enabled(),
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),

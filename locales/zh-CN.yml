@@ -1,5 +1,49 @@
 _version: 1
 
+auto_prompts.title: 自动提示词
+auto_prompts.description: 当 Jev 判断已完成的任务回合符合条件时，自动发送后续提示词。
+auto_prompts.add: 添加自动提示词
+auto_prompts.edit: 编辑
+auto_prompts.enable: 启用
+auto_prompts.disable: 停用
+auto_prompts.sent_by: "由自动提示词发送：%{name}"
+auto_prompts.remove: 删除
+auto_prompts.name: 名称
+auto_prompts.name_description: 显示在自动发送的提示词开头。
+auto_prompts.name_placeholder: 检查已完成的工作
+auto_prompts.prompt: 提示词
+auto_prompts.prompt_description: 发送到此任务的后续提示词。
+auto_prompts.prompt_placeholder: 检查更改，并修复发现的问题。
+auto_prompts.question: 问题 %{number}
+auto_prompts.question_label: 触发问题
+auto_prompts.question_description: 针对已完成的回合提出一个是或否的问题。
+auto_prompts.question_placeholder: 回复是否声称工作已完成？
+auto_prompts.weight: 问题权重
+auto_prompts.threshold: 触发阈值
+auto_prompts.threshold_description: 加权平均值达到此 0 到 1 之间的数值时发送。
+auto_prompts.add_question: 添加问题
+auto_prompts.advanced: 高级
+auto_prompts.suggest: 建议数值
+auto_prompts.try_task: 在此任务中试用
+auto_prompts.save: 保存草稿
+auto_prompts.working: 处理中…
+auto_prompts.would_send: 会发送
+auto_prompts.would_skip: 不会发送
+auto_prompts.saved_disabled: 已保存为停用状态。准备好后再启用。
+auto_prompts.no_editor: 请打开要编辑的规则。
+auto_prompts.need_prompt: 请输入名称和提示词。
+auto_prompts.need_questions: 请填写每个问题，或删除空白行。
+auto_prompts.invalid_weight: 权重必须是正数。
+auto_prompts.invalid_threshold: 阈值必须介于 0 和 1 之间。
+auto_prompts.values_complete: 所有数值均已设置。
+auto_prompts.changed_during_suggestion: 规则已更改。请重新获取建议数值。
+auto_prompts.suggest_incomplete: Jev 对部分建议的把握不足。
+auto_prompts.suggested: 建议的初始数值已就绪，请检查。
+auto_prompts.need_values: 请先设置或获取所有权重和阈值。
+auto_prompts.need_task: 请选择一个任务以试用此规则。
+auto_prompts.need_completed_turn: 此任务没有可供试用的已完成回合。
+auto_prompts.preview_incomplete: Jev 未回答所有问题。
+
 menu.about: 关于 %{app}
 menu.check_for_updates: 检查更新…
 menu.settings: 设置…

@@ -1415,6 +1415,8 @@ impl Waku {
                             sent_by_task_link: message
                                 .sent_by_task
                                 .filter(|id| self.sent_by_task_openable(*id)),
+                            auto_prompt_rule: self
+                                .enabled_auto_prompt_for_content(message.visible_content()),
                             waku: cx.entity().downgrade(),
                             composer: self.composer.clone(),
                             landed_notice: None,

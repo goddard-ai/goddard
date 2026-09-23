@@ -520,7 +520,7 @@ settings.commands_keywords:
 settings.jev:
   en: Jev
 settings.jev_keywords:
-  en: jev typesafe eval evaluation model auto routing router backend api key credential vercel gateway cloudflare policy
+  en: jev typesafe eval evaluation model auto routing router backend api key credential vercel gateway cloudflare policy prompts questions triggers
 settings.experiments:
   en: Experiments
 settings.experiments_keywords:
@@ -983,6 +983,92 @@ routing.feature_memory_triage:
   en: Memory triage
 routing.feature_permission_review:
   en: Permission review
+auto_prompts.title:
+  en: Auto prompts
+auto_prompts.description:
+  en: Send a follow-up when Jev finds enough evidence in a completed task turn.
+auto_prompts.add:
+  en: Add auto prompt
+auto_prompts.edit:
+  en: Edit
+auto_prompts.enable:
+  en: Enable
+auto_prompts.disable:
+  en: Disable
+auto_prompts.sent_by:
+  en: "Sent by auto prompt: %{name}"
+auto_prompts.remove:
+  en: Remove
+auto_prompts.name:
+  en: Name
+auto_prompts.name_description:
+  en: Shown at the start of the automatically sent prompt.
+auto_prompts.name_placeholder:
+  en: Review finished work
+auto_prompts.prompt:
+  en: Prompt
+auto_prompts.prompt_description:
+  en: The follow-up to send to this task.
+auto_prompts.prompt_placeholder:
+  en: Review the changes and fix any issues you find.
+auto_prompts.question:
+  en: Question %{number}
+auto_prompts.question_label:
+  en: Trigger question
+auto_prompts.question_description:
+  en: Ask one yes or no question about the completed turn.
+auto_prompts.question_placeholder:
+  en: Does the response claim the work is complete?
+auto_prompts.weight:
+  en: Question weight
+auto_prompts.threshold:
+  en: Trigger threshold
+auto_prompts.threshold_description:
+  en: Send when the weighted average reaches this value from 0 to 1.
+auto_prompts.add_question:
+  en: Add question
+auto_prompts.advanced:
+  en: Advanced
+auto_prompts.suggest:
+  en: Suggest values
+auto_prompts.try_task:
+  en: Try on this task
+auto_prompts.save:
+  en: Save draft
+auto_prompts.working:
+  en: Working…
+auto_prompts.would_send:
+  en: Would send
+auto_prompts.would_skip:
+  en: Would skip
+auto_prompts.saved_disabled:
+  en: Saved off. Enable the rule when ready.
+auto_prompts.no_editor:
+  en: Open a rule to edit it.
+auto_prompts.need_prompt:
+  en: Enter a name and prompt.
+auto_prompts.need_questions:
+  en: Enter every question or remove empty rows.
+auto_prompts.invalid_weight:
+  en: Weights must be positive numbers.
+auto_prompts.invalid_threshold:
+  en: The threshold must be between 0 and 1.
+auto_prompts.values_complete:
+  en: Every value is already set.
+auto_prompts.changed_during_suggestion:
+  en: The rule changed. Suggest values again.
+auto_prompts.suggest_incomplete:
+  en: Jev did not return a confident suggestion for every value.
+auto_prompts.suggested:
+  en: Suggested starting values are ready to review.
+auto_prompts.need_values:
+  en: Set or suggest every weight and the threshold first.
+auto_prompts.need_task:
+  en: Select a task to try this rule.
+auto_prompts.need_completed_turn:
+  en: This task has no completed turn to try.
+auto_prompts.preview_incomplete:
+  en: Jev did not answer every question.
 daemon.not_configured:
   en: Not configured
 daemon.status:

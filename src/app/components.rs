@@ -376,6 +376,8 @@ pub(super) struct MessageRender<'a> {
     /// against session state before layout — `None` when the source task is
     /// archived or deleted, leaving the chip inert.
     pub(super) sent_by_task_link: Option<Uuid>,
+    /// An enabled auto prompt identified from its labeled transcript row.
+    pub(super) auto_prompt_rule: Option<(Uuid, String)>,
     pub(super) waku: gpui::WeakEntity<Waku>,
     pub(super) composer: Entity<ComposerInput>,
     /// Disclosure state for a `TranscriptNotice::Landed` row — `None` in the
@@ -865,6 +867,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         ctx,
         menu,
         sent_by_task_link,
+        auto_prompt_rule,
         waku,
         composer,
         landed_notice,
@@ -931,6 +934,52 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                             })
                     });
                 column = column.child(chip);
+            }
+            if let Some((rule_id, name)) = auto_prompt_rule {
+                let click_waku = waku.clone();
+                let key_waku = waku.clone();
+                column = column.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("auto_prompts.sent_by", name = name)),
+                        )
+                        .child(
+                            div()
+                                .id(SharedString::from(format!(
+                                    "disable-auto-prompt-{message_id}"
+                                )))
+                                .tab_index(0)
+                                .px(px(6.0))
+                                .py(px(3.0))
+                                .rounded(px(5.0))
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                .hover(|style| style.bg(theme.overlay))
+                                .cursor_pointer()
+                                .text_size(sp(12.5))
+                                .text_color(theme.accent)
+                                .child(tr!("auto_prompts.disable"))
+                                .on_click(move |_, _, cx| {
+                                    let _ = click_waku.update(cx, |this, cx| {
+                                        this.set_auto_prompt_enabled(rule_id, false, cx);
+                                    });
+                                    cx.stop_propagation();
+                                })
+                                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                        let _ = key_waku.update(cx, |this, cx| {
+                                            this.set_auto_prompt_enabled(rule_id, false, cx);
+                                        });
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                        ),
+                );
             }
             if let Some(attachments) = render_sent_message_attachments(
                 message_id,

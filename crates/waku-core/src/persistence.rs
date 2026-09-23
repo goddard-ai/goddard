@@ -635,6 +635,7 @@ impl PersistedState {
             project_map_enabled: self.project_map_enabled,
             eval: self.eval.clone(),
             route_classes: self.route_classes.clone(),
+            auto_prompts: Vec::new(),
             // Integrations postdate the legacy combined document; defaults
             // are the correct migration (on in dev builds, opt-in in release).
             integrations_enabled: cfg!(debug_assertions),

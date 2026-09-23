@@ -2016,6 +2016,7 @@ pub struct Waku {
     /// Token totals summed from the daemon's eval decision log, loaded when
     /// the Jev page opens. `None` until the scan answers.
     eval_usage_stats: Option<waku_protocol::eval::EvalUsageStats>,
+    auto_prompt_editor: Option<settings::AutoPromptEditor>,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -5636,6 +5637,7 @@ impl Waku {
                 eval_probe_pending: false,
                 eval_probe_result: None,
                 eval_usage_stats: None,
+                auto_prompt_editor: None,
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,

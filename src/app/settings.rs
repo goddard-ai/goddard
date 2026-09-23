@@ -10,8 +10,27 @@ use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
 use gpui::{ElementId, HighlightStyle, KeyBinding, StyledText, Svg, actions};
+use waku_protocol::auto_prompts::{AutoPromptQuestion, AutoPromptRule};
 use waku_protocol::integrations::{IntegrationAuthKind, IntegrationAuthState};
 use waku_protocol::routing::{ALL_TASK_CLASSES, RouteClassTarget, TaskClass};
+
+pub(super) struct AutoPromptQuestionEditor {
+    id: Uuid,
+    instructions: Entity<TextInput>,
+    weight: Entity<TextInput>,
+}
+
+pub(super) struct AutoPromptEditor {
+    id: Uuid,
+    name: Entity<TextInput>,
+    prompt: Entity<TextInput>,
+    questions: Vec<AutoPromptQuestionEditor>,
+    threshold: Entity<TextInput>,
+    advanced: bool,
+    pending: bool,
+    status: Option<Result<String, String>>,
+    preview: Option<(Vec<(String, f64)>, f64, bool)>,
+}
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 
@@ -5224,7 +5243,783 @@ impl Waku {
     /// class-level targets. The page only exists in navigation while at
     /// least one eval-backed experiment is on.
     fn render_jev_settings(&self, search: &SettingSearch, cx: &mut Context<Self>) -> AnyElement {
-        self.render_model_routing_settings(Theme::current(cx), search, cx)
+        div()
+            .child(self.render_model_routing_settings(Theme::current(cx), search, cx))
+            .child(self.render_auto_prompt_settings(search, cx))
+            .into_any_element()
+    }
+
+    fn render_auto_prompt_settings(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let mut rows = Vec::new();
+        for rule in &self.state.auto_prompts {
+            let id = rule.id;
+            let enabled = rule.enabled;
+            let controls = div()
+                .flex()
+                .items_center()
+                .gap(px(7.0))
+                .child(settings_button(
+                    format!("auto-prompt-edit-{id}"),
+                    tr!("auto_prompts.edit"),
+                    true,
+                    false,
+                    true,
+                    theme,
+                    cx,
+                    move |this, window, cx| this.open_auto_prompt_editor(Some(id), window, cx),
+                ))
+                .child(settings_button(
+                    format!("auto-prompt-toggle-{id}"),
+                    if enabled {
+                        tr!("auto_prompts.disable")
+                    } else {
+                        tr!("auto_prompts.enable")
+                    },
+                    enabled || rule.valid_for_dispatch_without_enabled(),
+                    false,
+                    true,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_auto_prompt_enabled(id, !enabled, cx),
+                ))
+                .child(settings_button(
+                    format!("auto-prompt-remove-{id}"),
+                    tr!("auto_prompts.remove"),
+                    true,
+                    true,
+                    true,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.remove_auto_prompt(id, cx),
+                ));
+            rows.push(settings_row(
+                rule.name.clone(),
+                rule.prompt.clone(),
+                controls,
+                theme,
+                search,
+            ));
+        }
+        if rows.is_empty() {
+            rows.push(settings_row(
+                tr!("auto_prompts.title"),
+                tr!("auto_prompts.description"),
+                div(),
+                theme,
+                search,
+            ));
+        }
+        let list = settings_row_card(rows, theme).map(|card| {
+            card.mt(px(15.0)).child(
+                div()
+                    .p(px(12.0))
+                    .flex()
+                    .justify_end()
+                    .child(settings_button(
+                        "auto-prompt-add",
+                        tr!("auto_prompts.add"),
+                        true,
+                        false,
+                        false,
+                        theme,
+                        cx,
+                        |this, window, cx| this.open_auto_prompt_editor(None, window, cx),
+                    )),
+            )
+        });
+        div()
+            .children(list)
+            .when(!search.active(), |element| {
+                element.children(self.render_auto_prompt_editor(cx))
+            })
+            .into_any_element()
+    }
+
+    fn render_auto_prompt_editor(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let editor = self.auto_prompt_editor.as_ref()?;
+        let theme = Theme::current(cx);
+        let mut rows = vec![
+            settings_row(
+                tr!("auto_prompts.name"),
+                tr!("auto_prompts.name_description"),
+                TextField::new("auto-prompt-name", editor.name.clone()).w(px(320.0)),
+                theme,
+                &SettingSearch::new(""),
+            ),
+            settings_row(
+                tr!("auto_prompts.prompt"),
+                tr!("auto_prompts.prompt_description"),
+                TextField::new("auto-prompt-prompt", editor.prompt.clone()).w(px(320.0)),
+                theme,
+                &SettingSearch::new(""),
+            ),
+        ];
+        for (index, question) in editor.questions.iter().enumerate() {
+            let id = question.id;
+            rows.push(settings_row(
+                tr!("auto_prompts.question", number = index + 1),
+                tr!("auto_prompts.question_description"),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(7.0))
+                    .child(
+                        TextField::new(
+                            format!("auto-prompt-question-{id}"),
+                            question.instructions.clone(),
+                        )
+                        .w(px(260.0)),
+                    )
+                    .when(editor.advanced, |row| {
+                        row.child(
+                            div()
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("auto_prompts.weight")),
+                        )
+                        .child(
+                            TextField::new(
+                                format!("auto-prompt-weight-{id}"),
+                                question.weight.clone(),
+                            )
+                            .w(px(60.0)),
+                        )
+                    })
+                    .child(settings_button(
+                        format!("auto-prompt-question-remove-{id}"),
+                        tr!("auto_prompts.remove"),
+                        editor.questions.len() > 1,
+                        true,
+                        true,
+                        theme,
+                        cx,
+                        move |this, _, cx| this.remove_auto_prompt_question(id, cx),
+                    )),
+                theme,
+                &SettingSearch::new(""),
+            ));
+        }
+        if editor.advanced {
+            rows.push(settings_row(
+                tr!("auto_prompts.threshold"),
+                tr!("auto_prompts.threshold_description"),
+                TextField::new("auto-prompt-threshold", editor.threshold.clone()).w(px(100.0)),
+                theme,
+                &SettingSearch::new(""),
+            ));
+        }
+        let status = editor.status.as_ref().map(|result| match result {
+            Ok(message) => (message.clone(), theme.success),
+            Err(message) => (message.clone(), theme.warning),
+        });
+        let preview = editor.preview.as_ref().map(|(answers, score, fires)| {
+            let parts = answers
+                .iter()
+                .map(|(question, probability)| format!("{question}: {:.0}%", probability * 100.0))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            format!(
+                "{} · {:.0}% · {}",
+                parts,
+                score * 100.0,
+                if *fires {
+                    tr!("auto_prompts.would_send")
+                } else {
+                    tr!("auto_prompts.would_skip")
+                }
+            )
+        });
+        settings_row_card(rows, theme).map(|card| {
+            card.mt(px(15.0))
+                .child(
+                    div()
+                        .p(px(12.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .when_some(status, |column, (message, color)| {
+                            column.child(div().text_size(sp(12.0)).text_color(color).child(message))
+                        })
+                        .when_some(preview, |column, message| {
+                            column.child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(message),
+                            )
+                        })
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .justify_end()
+                                .gap(px(7.0))
+                                .child(settings_button(
+                                    "auto-prompt-add-question",
+                                    tr!("auto_prompts.add_question"),
+                                    true,
+                                    false,
+                                    true,
+                                    theme,
+                                    cx,
+                                    |this, window, cx| this.add_auto_prompt_question(window, cx),
+                                ))
+                                .child(settings_button(
+                                    "auto-prompt-advanced",
+                                    tr!("auto_prompts.advanced"),
+                                    true,
+                                    false,
+                                    true,
+                                    theme,
+                                    cx,
+                                    |this, _, cx| this.toggle_auto_prompt_advanced(cx),
+                                ))
+                                .child(settings_button(
+                                    "auto-prompt-suggest",
+                                    tr!("auto_prompts.suggest"),
+                                    !editor.pending,
+                                    false,
+                                    true,
+                                    theme,
+                                    cx,
+                                    |this, _, cx| this.suggest_auto_prompt_values(false, cx),
+                                ))
+                                .child(settings_button(
+                                    "auto-prompt-try",
+                                    tr!("auto_prompts.try_task"),
+                                    !editor.pending,
+                                    false,
+                                    true,
+                                    theme,
+                                    cx,
+                                    |this, _, cx| this.preview_auto_prompt(cx),
+                                ))
+                                .child(settings_button(
+                                    "auto-prompt-save",
+                                    if editor.pending {
+                                        tr!("auto_prompts.working")
+                                    } else {
+                                        tr!("auto_prompts.save")
+                                    },
+                                    !editor.pending,
+                                    false,
+                                    false,
+                                    theme,
+                                    cx,
+                                    |this, _, cx| this.save_auto_prompt_editor(cx),
+                                )),
+                        ),
+                )
+                .into_any_element()
+        })
+    }
+
+    fn open_auto_prompt_editor(
+        &mut self,
+        id: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let existing = id.and_then(|id| {
+            self.state
+                .auto_prompts
+                .iter()
+                .find(|rule| rule.id == id)
+                .cloned()
+        });
+        let name = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .accessibility_label(tr!("auto_prompts.name"))
+                .placeholder(tr!("auto_prompts.name_placeholder"))
+        });
+        let prompt = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .auto_height()
+                .max_lines(8)
+                .tab_index(0)
+                .accessibility_label(tr!("auto_prompts.prompt"))
+                .placeholder(tr!("auto_prompts.prompt_placeholder"))
+        });
+        let threshold = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .accessibility_label(tr!("auto_prompts.threshold"))
+                .placeholder("0.80")
+        });
+        if let Some(rule) = &existing {
+            name.update(cx, |input, cx| input.set_content(rule.name.clone(), cx));
+            prompt.update(cx, |input, cx| input.set_content(rule.prompt.clone(), cx));
+            if let Some(value) = rule.threshold {
+                threshold.update(cx, |input, cx| input.set_content(format!("{value:.2}"), cx));
+            }
+        }
+        let questions = existing
+            .as_ref()
+            .map(|rule| {
+                rule.questions
+                    .iter()
+                    .map(|question| auto_prompt_question_editor(window, cx, Some(question)))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![auto_prompt_question_editor(window, cx, None)]);
+        self.auto_prompt_editor = Some(AutoPromptEditor {
+            id: existing
+                .as_ref()
+                .map(|rule| rule.id)
+                .unwrap_or_else(Uuid::new_v4),
+            name,
+            prompt,
+            questions,
+            threshold,
+            advanced: false,
+            pending: false,
+            status: None,
+            preview: None,
+        });
+        cx.notify();
+    }
+
+    fn add_auto_prompt_question(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.auto_prompt_editor.as_mut() {
+            editor
+                .questions
+                .push(auto_prompt_question_editor(window, cx, None));
+            editor.preview = None;
+            cx.notify();
+        }
+    }
+
+    fn remove_auto_prompt_question(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        if let Some(editor) = self.auto_prompt_editor.as_mut() {
+            if editor.questions.len() > 1 {
+                editor.questions.retain(|question| question.id != id);
+                editor.preview = None;
+                cx.notify();
+            }
+        }
+    }
+
+    fn toggle_auto_prompt_advanced(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.auto_prompt_editor.as_mut() {
+            editor.advanced = !editor.advanced;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn set_auto_prompt_enabled(
+        &mut self,
+        id: Uuid,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(rule) = self
+            .state
+            .auto_prompts
+            .iter_mut()
+            .find(|rule| rule.id == id)
+        {
+            if !enabled || rule.valid_for_dispatch_without_enabled() {
+                rule.enabled = enabled;
+                self.save();
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn enabled_auto_prompt_for_content(&self, content: &str) -> Option<(Uuid, String)> {
+        let (name, prompt) = content
+            .strip_prefix("[Auto prompt: ")?
+            .split_once("]\n\n")?;
+        let mut matches = self.state.auto_prompts.iter().filter(|rule| {
+            rule.enabled && rule.name.replace(['\n', '\r'], " ") == name && rule.prompt == prompt
+        });
+        let rule = matches.next()?;
+        matches
+            .next()
+            .is_none()
+            .then(|| (rule.id, rule.name.clone()))
+    }
+
+    fn remove_auto_prompt(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        self.state.auto_prompts.retain(|rule| rule.id != id);
+        if self
+            .auto_prompt_editor
+            .as_ref()
+            .is_some_and(|editor| editor.id == id)
+        {
+            self.auto_prompt_editor = None;
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn collect_auto_prompt_rule(&self, cx: &App) -> Result<AutoPromptRule, String> {
+        let editor = self
+            .auto_prompt_editor
+            .as_ref()
+            .ok_or_else(|| tr!("auto_prompts.no_editor"))?;
+        let content = |field: &Entity<TextInput>| field.read(cx).content().trim().to_owned();
+        let name = content(&editor.name).replace(['\n', '\r'], " ");
+        let prompt = content(&editor.prompt);
+        if name.is_empty() || prompt.is_empty() {
+            return Err(tr!("auto_prompts.need_prompt"));
+        }
+        let questions = editor
+            .questions
+            .iter()
+            .map(|question| {
+                let instructions = content(&question.instructions);
+                if instructions.is_empty() {
+                    return Err(tr!("auto_prompts.need_questions"));
+                }
+                let raw_weight = content(&question.weight);
+                let weight = if raw_weight.is_empty() {
+                    None
+                } else {
+                    let value = raw_weight
+                        .parse::<f64>()
+                        .map_err(|_| tr!("auto_prompts.invalid_weight"))?;
+                    if !value.is_finite() || value <= 0.0 {
+                        return Err(tr!("auto_prompts.invalid_weight"));
+                    }
+                    Some(value)
+                };
+                Ok(AutoPromptQuestion {
+                    id: question.id,
+                    instructions,
+                    weight,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let raw_threshold = content(&editor.threshold);
+        let threshold = if raw_threshold.is_empty() {
+            None
+        } else {
+            let value = raw_threshold
+                .parse::<f64>()
+                .map_err(|_| tr!("auto_prompts.invalid_threshold"))?;
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(tr!("auto_prompts.invalid_threshold"));
+            }
+            Some(value)
+        };
+        Ok(AutoPromptRule {
+            id: editor.id,
+            name,
+            prompt,
+            questions,
+            threshold,
+            enabled: false,
+        })
+    }
+
+    fn persist_auto_prompt_rule(&mut self, rule: AutoPromptRule, cx: &mut Context<Self>) {
+        if let Some(existing) = self
+            .state
+            .auto_prompts
+            .iter_mut()
+            .find(|existing| existing.id == rule.id)
+        {
+            *existing = rule;
+        } else {
+            self.state.auto_prompts.push(rule);
+        }
+        self.save();
+        if let Some(editor) = self.auto_prompt_editor.as_mut() {
+            editor.status = Some(Ok(tr!("auto_prompts.saved_disabled")));
+        }
+        cx.notify();
+    }
+
+    fn save_auto_prompt_editor(&mut self, cx: &mut Context<Self>) {
+        let rule = match self.collect_auto_prompt_rule(cx) {
+            Ok(rule) => rule,
+            Err(error) => {
+                if let Some(editor) = self.auto_prompt_editor.as_mut() {
+                    editor.status = Some(Err(error));
+                }
+                cx.notify();
+                return;
+            }
+        };
+        if rule.threshold.is_none()
+            || rule
+                .questions
+                .iter()
+                .any(|question| question.weight.is_none())
+        {
+            self.persist_auto_prompt_rule(rule, cx);
+            self.suggest_auto_prompt_values(true, cx);
+        } else {
+            self.persist_auto_prompt_rule(rule, cx);
+        }
+    }
+
+    fn suggest_auto_prompt_values(&mut self, save_after: bool, cx: &mut Context<Self>) {
+        let rule = match self.collect_auto_prompt_rule(cx) {
+            Ok(rule) => rule,
+            Err(error) => {
+                if let Some(editor) = self.auto_prompt_editor.as_mut() {
+                    editor.status = Some(Err(error));
+                }
+                cx.notify();
+                return;
+            }
+        };
+        let Some(editor) = self.auto_prompt_editor.as_mut() else {
+            return;
+        };
+        if editor.pending {
+            return;
+        }
+        let mut questions = BTreeMap::new();
+        for question in rule
+            .questions
+            .iter()
+            .filter(|question| question.weight.is_none())
+        {
+            questions.insert(format!("weight:{}", question.id), waku_protocol::eval::EvalQuestion::Choice {
+                instructions: format!("For the auto prompt in `prompt`, how important is this question relative to the other questions in `questions` for deciding whether to send it: {}", question.instructions),
+                criteria: BTreeMap::from([
+                    ("1".to_owned(), Some("Supporting evidence".to_owned())),
+                    ("2".to_owned(), Some("Important evidence".to_owned())),
+                    ("3".to_owned(), Some("Essential evidence".to_owned())),
+                ]),
+            });
+        }
+        if rule.threshold.is_none() {
+            questions.insert("threshold".to_owned(), waku_protocol::eval::EvalQuestion::Choice {
+                instructions: "Given `prompt` and every question in `questions`, how strong should the combined evidence be before this prompt is sent automatically?".to_owned(),
+                criteria: BTreeMap::from([
+                    ("0.65".to_owned(), Some("A missed opportunity costs more than an unnecessary follow-up".to_owned())),
+                    ("0.80".to_owned(), Some("A balanced default for an automatic follow-up".to_owned())),
+                    ("0.90".to_owned(), Some("An unnecessary follow-up is especially costly".to_owned())),
+                ]),
+            });
+        }
+        if questions.is_empty() {
+            editor.status = Some(Ok(tr!("auto_prompts.values_complete")));
+            cx.notify();
+            return;
+        }
+        editor.pending = true;
+        editor.status = None;
+        let daemon = self.daemon.client();
+        let state = serde_json::json!({ "prompt": rule.prompt, "questions": rule.questions.iter().map(|question| &question.instructions).collect::<Vec<_>>() });
+        let suggest = cx.background_executor().spawn(async move {
+            daemon
+                .request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::Evaluate {
+                        state,
+                        questions,
+                        feature: Some("auto-prompt-suggest".to_owned()),
+                        timeout_secs: None,
+                    },
+                )
+                .map_err(|error| format!("{error:#}"))
+        });
+        cx.spawn(async move |this, cx| {
+            let result = suggest.await;
+            let _ = this.update(cx, |this, cx| {
+                let unchanged = this.collect_auto_prompt_rule(cx).ok().as_ref() == Some(&rule);
+                let Some(editor) = this
+                    .auto_prompt_editor
+                    .as_mut()
+                    .filter(|editor| editor.id == rule.id)
+                else {
+                    return;
+                };
+                editor.pending = false;
+                if !unchanged {
+                    editor.status = Some(Err(tr!("auto_prompts.changed_during_suggestion")));
+                    cx.notify();
+                    return;
+                }
+                let outcome = result.and_then(|payload| match payload {
+                    waku_client::ResponsePayload::Evaluation { evaluation } => Ok(evaluation),
+                    _ => Err("the daemon returned an invalid evaluation response".to_owned()),
+                });
+                match outcome {
+                    Ok(evaluation) => {
+                        let mut completed = rule.clone();
+                        for question in &mut completed.questions {
+                            if question.weight.is_none() {
+                                let key = format!("weight:{}", question.id);
+                                question.weight = confident_auto_prompt_suggestion(
+                                    evaluation.answers.get(&key),
+                                );
+                            }
+                        }
+                        if completed.threshold.is_none() {
+                            completed.threshold = confident_auto_prompt_suggestion(
+                                evaluation.answers.get("threshold"),
+                            );
+                        }
+                        if !completed.valid_for_dispatch_without_enabled() {
+                            editor.status = Some(Err(tr!("auto_prompts.suggest_incomplete")));
+                        } else {
+                            editor.advanced = true;
+                            for question in &editor.questions {
+                                if let Some(value) = completed
+                                    .questions
+                                    .iter()
+                                    .find(|candidate| candidate.id == question.id)
+                                    .and_then(|candidate| candidate.weight)
+                                {
+                                    question.weight.update(cx, |input, cx| {
+                                        input.set_content(format!("{value:.0}"), cx)
+                                    });
+                                }
+                            }
+                            if let Some(value) = completed.threshold {
+                                editor.threshold.update(cx, |input, cx| {
+                                    input.set_content(format!("{value:.2}"), cx)
+                                });
+                            }
+                            editor.status = Some(Ok(tr!("auto_prompts.suggested")));
+                            if save_after {
+                                this.persist_auto_prompt_rule(completed, cx);
+                            }
+                        }
+                    }
+                    Err(error) => editor.status = Some(Err(error)),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn preview_auto_prompt(&mut self, cx: &mut Context<Self>) {
+        let rule = match self.collect_auto_prompt_rule(cx) {
+            Ok(rule) if rule.valid_for_dispatch_without_enabled() => rule,
+            Ok(_) => {
+                if let Some(editor) = self.auto_prompt_editor.as_mut() {
+                    editor.status = Some(Err(tr!("auto_prompts.need_values")));
+                }
+                cx.notify();
+                return;
+            }
+            Err(error) => {
+                if let Some(editor) = self.auto_prompt_editor.as_mut() {
+                    editor.status = Some(Err(error));
+                }
+                cx.notify();
+                return;
+            }
+        };
+        let Some(session) = self
+            .state
+            .selected_session
+            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
+        else {
+            if let Some(editor) = self.auto_prompt_editor.as_mut() {
+                editor.status = Some(Err(tr!("auto_prompts.need_task")));
+            }
+            cx.notify();
+            return;
+        };
+        let Some(turn) = session
+            .turns
+            .last()
+            .filter(|turn| turn.status == TurnStatus::Completed)
+        else {
+            if let Some(editor) = self.auto_prompt_editor.as_mut() {
+                editor.status = Some(Err(tr!("auto_prompts.need_completed_turn")));
+            }
+            cx.notify();
+            return;
+        };
+        let state = waku_protocol::auto_prompts::turn_state(session, turn.id);
+        let questions = rule
+            .questions
+            .iter()
+            .map(|question| {
+                (
+                    question.id.to_string(),
+                    waku_protocol::eval::EvalQuestion::Noul {
+                        instructions: question.instructions.clone(),
+                        criteria: None,
+                    },
+                )
+            })
+            .collect();
+        let client = self.daemon.client();
+        let session_id = session.id;
+        if let Some(editor) = self.auto_prompt_editor.as_mut() {
+            editor.pending = true;
+            editor.status = None;
+            editor.preview = None;
+        }
+        let preview = cx.background_executor().spawn(async move {
+            client
+                .request(
+                    Uuid::nil(),
+                    session_id,
+                    waku_client::Command::Evaluate {
+                        state,
+                        questions,
+                        feature: Some("auto-prompt-preview".to_owned()),
+                        timeout_secs: None,
+                    },
+                )
+                .map_err(|error| format!("{error:#}"))
+        });
+        cx.spawn(async move |this, cx| {
+            let result = preview.await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(editor) = this
+                    .auto_prompt_editor
+                    .as_mut()
+                    .filter(|editor| editor.id == rule.id)
+                else {
+                    return;
+                };
+                editor.pending = false;
+                match result {
+                    Ok(waku_client::ResponsePayload::Evaluation { evaluation }) => {
+                        let mut answers = Vec::new();
+                        let mut weighted = 0.0;
+                        let mut total = 0.0;
+                        for question in &rule.questions {
+                            let Some(waku_protocol::eval::EvalAnswer::Noul { noul }) =
+                                evaluation.answers.get(&question.id.to_string())
+                            else {
+                                editor.status = Some(Err(tr!("auto_prompts.preview_incomplete")));
+                                cx.notify();
+                                return;
+                            };
+                            answers.push((question.instructions.clone(), *noul));
+                            let weight = question.weight.unwrap_or(1.0);
+                            weighted += weight * *noul;
+                            total += weight;
+                        }
+                        let score = weighted / total;
+                        editor.preview =
+                            Some((answers, score, score >= rule.threshold.unwrap_or(1.0)));
+                    }
+                    Ok(_) => {
+                        editor.status = Some(Err(
+                            "the daemon returned an invalid evaluation response".to_owned(),
+                        ))
+                    }
+                    Err(error) => editor.status = Some(Err(error)),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn open_suggested_prompt_editor(
@@ -11526,6 +12321,9 @@ fn eval_feature_label(feature: &str) -> String {
         "memory-rank" => tr!("routing.feature_memory_rank"),
         "memory-triage" => tr!("routing.feature_memory_triage"),
         "permission-review" => tr!("routing.feature_permission_review"),
+        "auto-prompt" => tr!("auto_prompts.title"),
+        "auto-prompt-suggest" => tr!("auto_prompts.suggest"),
+        "auto-prompt-preview" => tr!("auto_prompts.try_task"),
         _ => return feature.to_owned(),
     }
 }
@@ -11550,6 +12348,76 @@ fn eval_backend_label(backend: waku_protocol::eval::EvalBackend) -> &'static str
         waku_protocol::eval::EvalBackend::VercelGateway => "Vercel AI Gateway",
         waku_protocol::eval::EvalBackend::Cloudflare => "Cloudflare Workers AI",
     }
+}
+
+fn auto_prompt_question_editor(
+    window: &mut Window,
+    cx: &mut Context<Waku>,
+    existing: Option<&AutoPromptQuestion>,
+) -> AutoPromptQuestionEditor {
+    let instructions = cx.new(|cx| {
+        TextInput::new(window, cx)
+            .multi_line()
+            .auto_height()
+            .max_lines(4)
+            .tab_index(0)
+            .accessibility_label(tr!("auto_prompts.question_label"))
+            .placeholder(tr!("auto_prompts.question_placeholder"))
+    });
+    let weight = cx.new(|cx| {
+        TextInput::new(window, cx)
+            .tab_index(0)
+            .accessibility_label(tr!("auto_prompts.weight"))
+            .placeholder("1")
+    });
+    if let Some(question) = existing {
+        instructions.update(cx, |input, cx| {
+            input.set_content(question.instructions.clone(), cx)
+        });
+        if let Some(value) = question.weight {
+            weight.update(cx, |input, cx| input.set_content(format!("{value}"), cx));
+        }
+    }
+    AutoPromptQuestionEditor {
+        id: existing
+            .map(|question| question.id)
+            .unwrap_or_else(Uuid::new_v4),
+        instructions,
+        weight,
+    }
+}
+
+fn confident_auto_prompt_suggestion(
+    answer: Option<&waku_protocol::eval::EvalAnswer>,
+) -> Option<f64> {
+    let waku_protocol::eval::EvalAnswer::Choice {
+        choice,
+        confidence: Some(confidence),
+        probabilities,
+    } = answer?
+    else {
+        return None;
+    };
+    if !confidence.is_finite() || *confidence < 0.5 {
+        return None;
+    }
+    let selected = *probabilities.get(choice)?;
+    if !selected.is_finite() {
+        return None;
+    }
+    let highest = probabilities
+        .values()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let runner_up = probabilities
+        .iter()
+        .filter(|(candidate, _)| candidate.as_str() != choice)
+        .map(|(_, probability)| *probability)
+        .fold(0.0, f64::max);
+    if selected < highest || selected - runner_up < 0.15 {
+        return None;
+    }
+    choice.parse::<f64>().ok()
 }
 
 /// How many recent combos Jev sees when suggesting class defaults.

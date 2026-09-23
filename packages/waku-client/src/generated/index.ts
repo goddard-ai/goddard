@@ -16,6 +16,8 @@ export type { AgentWorkspace } from "./AgentWorkspace";
 export type { ArchivePreview } from "./ArchivePreview";
 export type { AttachmentUpload } from "./AttachmentUpload";
 export type { AttachmentUploadEntry } from "./AttachmentUploadEntry";
+export type { AutoPromptQuestion } from "./AutoPromptQuestion";
+export type { AutoPromptRule } from "./AutoPromptRule";
 export type { Automation } from "./Automation";
 export type { AutomationInput } from "./AutomationInput";
 export type { AutomationPrecheck } from "./AutomationPrecheck";
