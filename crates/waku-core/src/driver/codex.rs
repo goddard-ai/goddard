@@ -60,6 +60,19 @@ enum CommandMessage {
         turns: usize,
         response: Sender<Result<(), String>>,
     },
+    RollbackPage {
+        thread_id: String,
+        cursor: Option<String>,
+        remaining: usize,
+        total_turns: usize,
+        response: Sender<Result<(), String>>,
+    },
+    RollbackRevert {
+        thread_id: String,
+        before_turn_id: String,
+        turns: usize,
+        response: Sender<Result<(), String>>,
+    },
     PrepareFork {
         turns_to_remove: usize,
         response: Sender<Result<(String, String), String>>,
@@ -73,6 +86,33 @@ enum CommandMessage {
     },
     GeneratedTitle(String),
     Shutdown,
+}
+
+enum PendingRollback {
+    Legacy {
+        turns: usize,
+        response: Sender<Result<(), String>>,
+    },
+    Page {
+        thread_id: String,
+        remaining: usize,
+        total_turns: usize,
+        response: Sender<Result<(), String>>,
+    },
+    Revert {
+        turns: usize,
+        response: Sender<Result<(), String>>,
+    },
+}
+
+impl PendingRollback {
+    fn rollback_response(self) -> Sender<Result<(), String>> {
+        match self {
+            Self::Legacy { response, .. }
+            | Self::Page { response, .. }
+            | Self::Revert { response, .. } => response,
+        }
+    }
 }
 
 struct CodexTitleRequest {
@@ -423,12 +463,10 @@ impl CodexDriver {
         let (commands, command_rx) = unbounded();
         let (process_shutdown, process_shutdown_rx) = bounded(1);
         let thread_id = Arc::new(Mutex::new(None::<String>));
+        let paginated_history = Arc::new(Mutex::new(false));
         let turn_id = Arc::new(Mutex::new(None::<String>));
         let turn_ids = Arc::new(Mutex::new(Vec::<String>::new()));
-        let pending_rollbacks = Arc::new(Mutex::new(HashMap::<
-            u64,
-            (usize, Sender<Result<(), String>>),
-        >::new()));
+        let pending_rollbacks = Arc::new(Mutex::new(HashMap::<u64, PendingRollback>::new()));
         let pending_steers = Arc::new(Mutex::new(HashMap::<u64, String>::new()));
         let background_rpcs = Arc::new(Mutex::new(BackgroundRpcState::default()));
         let goal_rpcs = Arc::new(Mutex::new(GoalRpcState::default()));
@@ -439,6 +477,7 @@ impl CodexDriver {
         }));
 
         let writer_thread_id = thread_id.clone();
+        let writer_paginated_history = paginated_history.clone();
         let writer_turn_id = turn_id.clone();
         let writer_turn_ids = turn_ids.clone();
         let writer_pending_rollbacks = pending_rollbacks.clone();
@@ -728,22 +767,111 @@ impl CodexDriver {
                             };
                             next_request_id += 1;
                             let request_id = next_request_id;
-                            writer_pending_rollbacks
-                                .lock()
-                                .insert(request_id, (turns, response));
+                            let paginated = *writer_paginated_history.lock();
+                            let (pending, message) = if paginated {
+                                (
+                                    PendingRollback::Page {
+                                        thread_id: thread_id.clone(),
+                                        remaining: turns,
+                                        total_turns: turns,
+                                        response,
+                                    },
+                                    json!({
+                                        "method": "thread/turns/list",
+                                        "id": request_id,
+                                        "params": {
+                                            "threadId": thread_id,
+                                            "sortDirection": "desc",
+                                            "itemsView": "notLoaded",
+                                            "limit": turns.min(100)
+                                        }
+                                    }),
+                                )
+                            } else {
+                                (
+                                    PendingRollback::Legacy { turns, response },
+                                    json!({
+                                        "method": "thread/rollback",
+                                        "id": request_id,
+                                        "params": {"threadId": thread_id, "numTurns": turns}
+                                    }),
+                                )
+                            };
+                            writer_pending_rollbacks.lock().insert(request_id, pending);
+                            if let Err(error) = write_json_line(&mut stdin, &message)
+                                && let Some(pending) =
+                                    writer_pending_rollbacks.lock().remove(&request_id)
+                            {
+                                let _ = pending
+                                    .rollback_response()
+                                    .send(Err(format!("Codex transport write failed: {error}")));
+                            }
+                            continue;
+                        }
+                        CommandMessage::RollbackPage {
+                            thread_id,
+                            cursor,
+                            remaining,
+                            total_turns,
+                            response,
+                        } => {
+                            next_request_id += 1;
+                            let request_id = next_request_id;
+                            writer_pending_rollbacks.lock().insert(
+                                request_id,
+                                PendingRollback::Page {
+                                    thread_id: thread_id.clone(),
+                                    remaining,
+                                    total_turns,
+                                    response,
+                                },
+                            );
                             let message = json!({
-                                "method": "thread/rollback",
+                                "method": "thread/turns/list",
                                 "id": request_id,
                                 "params": {
                                     "threadId": thread_id,
-                                    "numTurns": turns
+                                    "cursor": cursor,
+                                    "sortDirection": "desc",
+                                    "itemsView": "notLoaded",
+                                    "limit": remaining.min(100)
                                 }
                             });
                             if let Err(error) = write_json_line(&mut stdin, &message)
-                                && let Some((_, response)) =
+                                && let Some(pending) =
                                     writer_pending_rollbacks.lock().remove(&request_id)
                             {
-                                let _ = response
+                                let _ = pending
+                                    .rollback_response()
+                                    .send(Err(format!("Codex transport write failed: {error}")));
+                            }
+                            continue;
+                        }
+                        CommandMessage::RollbackRevert {
+                            thread_id,
+                            before_turn_id,
+                            turns,
+                            response,
+                        } => {
+                            next_request_id += 1;
+                            let request_id = next_request_id;
+                            writer_pending_rollbacks
+                                .lock()
+                                .insert(request_id, PendingRollback::Revert { turns, response });
+                            let message = json!({
+                                "method": "thread/revert",
+                                "id": request_id,
+                                "params": {
+                                    "threadId": thread_id,
+                                    "beforeTurnId": before_turn_id
+                                }
+                            });
+                            if let Err(error) = write_json_line(&mut stdin, &message)
+                                && let Some(pending) =
+                                    writer_pending_rollbacks.lock().remove(&request_id)
+                            {
+                                let _ = pending
+                                    .rollback_response()
                                     .send(Err(format!("Codex transport write failed: {error}")));
                             }
                             continue;
@@ -917,6 +1045,7 @@ impl CodexDriver {
             })?;
 
         let reader_thread_id = thread_id.clone();
+        let reader_paginated_history = paginated_history;
         let reader_turn_id = turn_id.clone();
         let reader_turn_ids = turn_ids.clone();
         let reader_pending_rollbacks = pending_rollbacks.clone();
@@ -937,6 +1066,13 @@ impl CodexDriver {
                         Ok(line) if !line.trim().is_empty() => {
                             match serde_json::from_str::<Value>(&line) {
                                 Ok(value) => {
+                                    if value.get("id").and_then(Value::as_u64) == Some(1)
+                                        && let Some(mode) = value
+                                            .pointer("/result/thread/historyMode")
+                                            .and_then(Value::as_str)
+                                    {
+                                        *reader_paginated_history.lock() = mode == "paginated";
+                                    }
                                     if value.get("id").and_then(Value::as_u64) == Some(1)
                                         && let Some(id) = value
                                             .pointer("/result/thread/id")
@@ -1323,7 +1459,7 @@ impl DriverControl for CodexDriver {
             })
             .context("Codex driver stopped before rollback")?;
         response_rx
-            .recv_timeout(Duration::from_secs(15))
+            .recv_timeout(Duration::from_secs(60))
             .context("timed out waiting for Codex conversation rollback")?
             .map_err(anyhow::Error::msg)?;
         Ok(None)
@@ -1921,7 +2057,7 @@ fn handle_codex_message(
     thread_id: &Mutex<Option<String>>,
     turn_id: &Mutex<Option<String>>,
     turn_ids: &Mutex<Vec<String>>,
-    pending_rollbacks: &Mutex<HashMap<u64, (usize, Sender<Result<(), String>>)>>,
+    pending_rollbacks: &Mutex<HashMap<u64, PendingRollback>>,
     pending_steers: &Mutex<HashMap<u64, String>>,
     background_rpcs: &Mutex<BackgroundRpcState>,
     goal_rpcs: &Mutex<GoalRpcState>,
@@ -2031,17 +2167,65 @@ fn handle_codex_message(
     if is_response
         && let Some(id) = value.get("id").and_then(Value::as_u64)
         && id != 1
-        && let Some((turns, response)) = pending_rollbacks.lock().remove(&id)
+        && let Some(pending) = pending_rollbacks.lock().remove(&id)
     {
-        let result = value
+        let error = value
             .pointer("/error/message")
             .and_then(Value::as_str)
-            .map_or_else(|| Ok(()), |error| Err(error.to_owned()));
-        if result.is_ok() {
-            let retained = turn_ids.lock().len().saturating_sub(turns);
-            turn_ids.lock().truncate(retained);
+            .map(str::to_owned);
+        match pending {
+            PendingRollback::Page {
+                thread_id,
+                remaining,
+                total_turns,
+                response,
+            } => {
+                if let Some(error) = error {
+                    let _ = response.send(Err(error));
+                } else if let Some(page) = value.pointer("/result/data").and_then(Value::as_array) {
+                    if let Some(turn) = page.get(remaining - 1) {
+                        if let Some(before_turn_id) = turn.get("id").and_then(Value::as_str) {
+                            let _ = commands.send(CommandMessage::RollbackRevert {
+                                thread_id,
+                                before_turn_id: before_turn_id.to_owned(),
+                                turns: total_turns,
+                                response,
+                            });
+                        } else {
+                            let _ =
+                                response.send(Err("Codex returned a turn without an ID.".into()));
+                        }
+                    } else if let Some(cursor) = value
+                        .pointer("/result/nextCursor")
+                        .and_then(Value::as_str)
+                        .filter(|_| !page.is_empty())
+                    {
+                        let _ = commands.send(CommandMessage::RollbackPage {
+                            thread_id,
+                            cursor: Some(cursor.to_owned()),
+                            remaining: remaining - page.len(),
+                            total_turns,
+                            response,
+                        });
+                    } else {
+                        let _ = response.send(Err(
+                            "Codex has fewer turns than the requested rewind.".into(),
+                        ));
+                    }
+                } else {
+                    let _ = response.send(Err("Codex returned an invalid turn page.".into()));
+                }
+            }
+            PendingRollback::Legacy { turns, response }
+            | PendingRollback::Revert { turns, response } => {
+                let result = error.map_or_else(|| Ok(()), Err);
+                if result.is_ok() {
+                    let retained = turn_ids.lock().len().saturating_sub(turns);
+                    turn_ids.lock().truncate(retained);
+                }
+                let _ = response.send(result);
+            }
         }
-        let _ = response.send(result);
         return;
     }
 
@@ -3127,7 +3311,7 @@ mod tests {
         thread_id: Mutex<Option<String>>,
         turn_id: Mutex<Option<String>>,
         turn_ids: Mutex<Vec<String>>,
-        rollbacks: Mutex<HashMap<u64, (usize, Sender<Result<(), String>>)>>,
+        rollbacks: Mutex<HashMap<u64, PendingRollback>>,
         steers: Mutex<HashMap<u64, String>>,
         background: Mutex<BackgroundRpcState>,
         goals: Mutex<GoalRpcState>,
@@ -3658,7 +3842,13 @@ mod tests {
         let goal_rpcs = Mutex::new(GoalRpcState::default());
         let (goal_commands, _goal_command_rx) = unbounded();
         let (response_tx, response_rx) = bounded(1);
-        pending_rollbacks.lock().insert(42, (1, response_tx));
+        pending_rollbacks.lock().insert(
+            42,
+            PendingRollback::Legacy {
+                turns: 1,
+                response: response_tx,
+            },
+        );
         let (event_tx, event_rx) = unbounded();
         let mut stream_state = CodexStreamState::default();
 
@@ -3693,7 +3883,13 @@ mod tests {
         let goal_rpcs = Mutex::new(GoalRpcState::default());
         let (goal_commands, _goal_command_rx) = unbounded();
         let (response_tx, response_rx) = bounded(1);
-        pending_rollbacks.lock().insert(43, (1, response_tx));
+        pending_rollbacks.lock().insert(
+            43,
+            PendingRollback::Legacy {
+                turns: 1,
+                response: response_tx,
+            },
+        );
         let (event_tx, event_rx) = unbounded();
         let mut stream_state = CodexStreamState::default();
 
@@ -3716,6 +3912,92 @@ mod tests {
             Err("cannot roll back".to_owned())
         );
         assert_eq!(*turn_ids.lock(), vec!["turn-1".to_owned()]);
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn paginated_rollback_finds_the_turn_across_pages_before_reverting() {
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(None);
+        let turn_ids = Mutex::new(Vec::new());
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (commands, command_rx) = unbounded();
+        let (response_tx, response_rx) = bounded(1);
+        pending_rollbacks.lock().insert(
+            42,
+            PendingRollback::Page {
+                thread_id: "thread-1".into(),
+                remaining: 3,
+                total_turns: 3,
+                response: response_tx,
+            },
+        );
+        let (events, event_rx) = unbounded();
+        let mut stream_state = CodexStreamState::default();
+        let mut handle = |value| {
+            handle_codex_message(
+                value,
+                &thread_id,
+                &turn_id,
+                &turn_ids,
+                &pending_rollbacks,
+                &pending_steers,
+                &background_rpcs,
+                &goal_rpcs,
+                &commands,
+                &events,
+                &mut stream_state,
+            );
+        };
+
+        handle(json!({"id": 42, "result": {
+            "data": [{"id": "turn-4"}, {"id": "turn-3"}],
+            "nextCursor": "older"
+        }}));
+        let CommandMessage::RollbackPage {
+            cursor,
+            remaining,
+            total_turns,
+            response,
+            ..
+        } = command_rx.try_recv().unwrap()
+        else {
+            panic!("expected next turn page");
+        };
+        assert_eq!(cursor.as_deref(), Some("older"));
+        assert_eq!((remaining, total_turns), (1, 3));
+        pending_rollbacks.lock().insert(
+            43,
+            PendingRollback::Page {
+                thread_id: "thread-1".into(),
+                remaining,
+                total_turns,
+                response,
+            },
+        );
+        handle(json!({"id": 43, "result": {
+            "data": [{"id": "turn-2"}], "nextCursor": null
+        }}));
+        let CommandMessage::RollbackRevert {
+            before_turn_id,
+            turns,
+            response,
+            ..
+        } = command_rx.try_recv().unwrap()
+        else {
+            panic!("expected revert request");
+        };
+        assert_eq!(before_turn_id, "turn-2");
+        assert_eq!(turns, 3);
+        pending_rollbacks
+            .lock()
+            .insert(44, PendingRollback::Revert { turns, response });
+        handle(json!({"id": 44, "result": {"thread": {"id": "thread-1"}}}));
+
+        assert_eq!(response_rx.recv().unwrap(), Ok(()));
         assert!(event_rx.try_recv().is_err());
     }
 
