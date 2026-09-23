@@ -1989,7 +1989,20 @@ impl Backend for WakuBackend {
                         removed.insert(*id);
                     }
                 }
-                self.task_store.save(&mut state)?;
+                // The batch claims the dirty marks up front so a session
+                // re-dirtied while the write runs unlocked keeps its flag.
+                let batch = self.task_store.save_batch(&mut state);
+                state.unmark_sessions_dirty(&batch.dirty_ids);
+                drop(state);
+                if let Err(error) = self.task_store.write_batch(&batch) {
+                    // The rows never landed — the marks go back so the next
+                    // save retries them.
+                    let mut state = self.task_state.lock();
+                    for id in &batch.dirty_ids {
+                        state.mark_session_dirty(*id);
+                    }
+                    return Err(error.into());
+                }
                 let removed_terminals = self.sweep_orphaned_terminals(&cascaded, &cascaded_roots);
                 drop_detached(removed_terminals);
                 let removed_runtimes = cascaded
@@ -2003,6 +2016,7 @@ impl Backend for WakuBackend {
                 for id in cascaded {
                     self.agent.clear_session(id);
                 }
+                let mut state = self.task_state.lock();
                 let sessions = saved_ids
                     .into_iter()
                     .filter_map(|session_id| {

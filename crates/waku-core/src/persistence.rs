@@ -396,6 +396,13 @@ impl PersistedState {
         self.dirty_sessions.insert(id);
     }
 
+    /// Drops the given dirty marks, for a save that claimed them into a
+    /// snapshot. A session re-dirtied afterwards keeps its flag.
+    pub fn unmark_sessions_dirty(&mut self, ids: &HashSet<Uuid>) {
+        self.dirty_sessions
+            .retain(|id| !ids.contains(id));
+    }
+
     pub fn push_session(&mut self, session: AgentSession) {
         self.dirty_sessions.insert(session.id);
         self.sessions.push(session);
@@ -1575,6 +1582,22 @@ impl StateStore {
     /// Persists whatever the app marked as changed, so a streaming turn writes
     /// one session row and a selection change writes no rows at all.
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
+        let batch = self.save_batch(state);
+        self.write_batch(&batch)?;
+        state.dirty_sessions.clear();
+        Ok(())
+    }
+
+    /// Snapshots everything one save writes while the caller still holds the
+    /// state lock, so the write itself — serialization plus the SQLite
+    /// transaction — can run without it. Sessions entered state through a
+    /// path that marks them dirty, so the dirty set is the complete write set.
+    ///
+    /// Callers that drop the state lock between `save_batch` and `write_batch`
+    /// should remove `batch.dirty_ids` from the live dirty set up front and
+    /// re-mark them if the write fails: a session re-dirtied mid-write then
+    /// keeps its flag instead of losing it to a stale clear.
+    pub(crate) fn save_batch(&self, state: &mut PersistedState) -> SaveBatch {
         // Only changed sessions can hold a new inline payload, so the blob walk
         // follows the same set rather than every transcript on every save.
         // Incognito sessions are excluded here too — externalizing would leak
@@ -1588,6 +1611,57 @@ impl StateStore {
             &self.blobs,
         );
 
+        // A draft that has not started yet owns no row, so it counts as
+        // removed until it does. Incognito sessions never own rows: they stay
+        // out of `live_ids` (harmless — the delete sweep only walks
+        // `persisted_sessions`, which they never enter) and skip both upserts.
+        let live_ids = state
+            .sessions
+            .iter()
+            .filter(|session| session.has_started() && !session.incognito)
+            .map(|session| session.id)
+            .collect();
+        let persisted = self.persisted_session_ids();
+        let sessions = state
+            .sessions
+            .iter()
+            .filter(|session| {
+                if !session.has_started() || session.incognito {
+                    return false;
+                }
+                // A skeleton's empty transcript means "not fetched", not
+                // "empty" — it writes list columns only, and only when dirty.
+                if !session.detail_loaded {
+                    return dirty.contains(&session.id);
+                }
+                dirty.contains(&session.id) || !persisted.contains(&session.id)
+            })
+            .cloned()
+            .collect();
+        SaveBatch {
+            app_settings: state.app_settings(),
+            app_state: state.app_state(),
+            projects: state.projects.clone(),
+            live_ids,
+            sessions,
+            dirty_ids: dirty,
+        }
+    }
+
+    /// The ids this connection has already written, snapshot under the
+    /// storage lock — a save's write set is dirty sessions plus any session
+    /// the store has never seen.
+    fn persisted_session_ids(&self) -> HashSet<Uuid> {
+        self.storage
+            .lock()
+            .as_ref()
+            .map(|storage| storage.persisted_sessions.clone())
+            .unwrap_or_default()
+    }
+
+    /// Writes one snapshotted batch. Holds only the storage lock, so it can
+    /// run after the caller's state lock is released.
+    pub(crate) fn write_batch(&self, batch: &SaveBatch) -> io::Result<()> {
         let mut guard = self.storage.lock();
         if guard.is_none() {
             *guard = Some(Storage {
@@ -1602,19 +1676,19 @@ impl StateStore {
         let storage = guard.as_mut().expect("storage opened above");
 
         if self.desktop_files {
-            let app_settings = state.app_settings();
-            let app_settings_fingerprint =
-                fingerprint(&serde_json::to_string(&app_settings).map_err(to_io_error)?);
+            let app_settings_fingerprint = fingerprint(
+                &serde_json::to_string(&batch.app_settings).map_err(to_io_error)?,
+            );
             if app_settings_fingerprint != storage.saved_app_settings {
-                self.write_app_settings(&app_settings)?;
+                self.write_app_settings(&batch.app_settings)?;
                 storage.saved_app_settings = app_settings_fingerprint;
             }
 
-            let app_state = state.app_state();
-            let app_state_fingerprint =
-                fingerprint(&serde_json::to_string(&app_state).map_err(to_io_error)?);
+            let app_state_fingerprint = fingerprint(
+                &serde_json::to_string(&batch.app_state).map_err(to_io_error)?,
+            );
             if app_state_fingerprint != storage.saved_app_state {
-                self.write_app_state(&app_state)?;
+                self.write_app_state(&batch.app_state)?;
                 storage.saved_app_state = app_state_fingerprint;
             }
         }
@@ -1624,13 +1698,13 @@ impl StateStore {
             .unchecked_transaction()
             .map_err(to_io_error)?;
 
-        let projects = serde_json::to_string(&state.projects).map_err(to_io_error)?;
+        let projects = serde_json::to_string(&batch.projects).map_err(to_io_error)?;
         let projects_fingerprint = fingerprint(&projects);
         if projects_fingerprint != storage.saved_projects {
             transaction
                 .execute("DELETE FROM projects", [])
                 .map_err(to_io_error)?;
-            for (position, project) in state.projects.iter().enumerate() {
+            for (position, project) in batch.projects.iter().enumerate() {
                 transaction
                     .execute(
                         INSERT_PROJECT,
@@ -1650,41 +1724,23 @@ impl StateStore {
             storage.saved_projects = projects_fingerprint;
         }
 
-        // Only sessions the app reported as changed are written. A draft that
-        // has not started yet owns no row, so it counts as removed until it
-        // does. Incognito sessions never own rows: they stay out of `live`
-        // (harmless — the delete sweep only walks `persisted_sessions`, which
-        // they never enter) and skip both upserts.
-        let mut live = HashSet::with_capacity(state.sessions.len());
         // Applied only after the commit below, so a transaction that rolls back
         // does not leave this connection believing rows it never wrote are on
         // disk — which would make the next save skip them for good.
         let mut written_messages = Vec::new();
-        for session in state
-            .sessions
-            .iter()
-            .filter(|session| session.has_started() && !session.incognito)
-        {
-            live.insert(session.id);
+        for session in &batch.sessions {
             // A skeleton's empty transcript means "not fetched", not "empty".
             // Its promoted list columns may still have changed (for example,
             // an inactive sidebar row was renamed), so update only those and
             // leave the detail and message rows untouched.
             if !session.detail_loaded {
-                if state.dirty_sessions.contains(&session.id) {
-                    transaction
-                        .execute(
-                            UPSERT_SESSION,
-                            rusqlite::params_from_iter(session_params(session)),
-                        )
-                        .map_err(to_io_error)?;
-                    storage.persisted_sessions.insert(session.id);
-                }
-                continue;
-            }
-            if !state.dirty_sessions.contains(&session.id)
-                && storage.persisted_sessions.contains(&session.id)
-            {
+                transaction
+                    .execute(
+                        UPSERT_SESSION,
+                        rusqlite::params_from_iter(session_params(session)),
+                    )
+                    .map_err(to_io_error)?;
+                storage.persisted_sessions.insert(session.id);
                 continue;
             }
             let data = session_data(session)?;
@@ -1712,7 +1768,7 @@ impl StateStore {
             .persisted_sessions
             .iter()
             .copied()
-            .filter(|id| !live.contains(id))
+            .filter(|id| !batch.live_ids.contains(id))
             .collect::<Vec<_>>();
         for id in removed {
             let key = id.to_string();
@@ -1737,7 +1793,6 @@ impl StateStore {
         for (session_id, fingerprints) in written_messages {
             storage.written_messages.insert(session_id, fingerprints);
         }
-        state.dirty_sessions.clear();
         Ok(())
     }
 
@@ -1925,6 +1980,24 @@ pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSess
     session.environment = stored_environment;
     session.messages = stored.messages;
     session.detail_loaded = true;
+}
+
+/// Everything one save writes, snapshotted by [`StateStore::save_batch`] while
+/// the caller's state lock is held so [`StateStore::write_batch`] can run its
+/// serialization and SQLite transaction without it.
+pub(crate) struct SaveBatch {
+    app_settings: AppSettings,
+    app_state: AppState,
+    projects: Vec<Project>,
+    /// Every started, non-incognito session id — the delete sweep's live set.
+    live_ids: HashSet<Uuid>,
+    /// The dirty sessions to write. Skeletons carry no detail and write their
+    /// list columns only.
+    sessions: Vec<AgentSession>,
+    /// The dirty set as captured. Callers racing the write remove these marks
+    /// up front and re-add them on failure, so a session re-dirtied mid-write
+    /// keeps its flag.
+    pub(crate) dirty_ids: HashSet<Uuid>,
 }
 
 type MessageColumns = (
@@ -2790,6 +2863,37 @@ mod tests {
 
         transaction.rollback().unwrap();
         drop(guard);
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn a_released_batch_keeps_marks_for_sessions_dirtied_during_the_write() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let session_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("Ask");
+        state.sessions[0].push_message(MessageRole::Assistant, "an answer");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+
+        let batch = store.save_batch(&mut state);
+        state.unmark_sessions_dirty(&batch.dirty_ids);
+        // The mark lands while the batch is owned by the in-flight write —
+        // clearing it here would lose the follow-up save.
+        state.mark_session_dirty(session_id);
+        store.write_batch(&batch).unwrap();
+        assert!(state.dirty_sessions.contains(&session_id));
+
+        // The batch itself still wrote the session it captured.
+        let mut restored = store.load().unwrap();
+        store.hydrate(&mut restored.sessions[0]).unwrap();
+        assert!(
+            restored.sessions[0]
+                .messages
+                .iter()
+                .any(|message| message.content == "an answer")
+        );
+
         fs::remove_dir_all(directory).ok();
     }
 
