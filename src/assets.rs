@@ -207,6 +207,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "local",
     "lock",
     "lock-open",
+    "map",
     "maximize",
     "message-square",
     "minimize",

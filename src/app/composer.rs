@@ -2856,7 +2856,7 @@ impl Waku {
             }
             ProjectMapStatus::Ready { indexed_files } => (
                 tr!("project_map.ready", files = *indexed_files),
-                "icons/projects.svg",
+                "icons/map.svg",
                 false,
             ),
             ProjectMapStatus::Refreshing => (
@@ -2874,7 +2874,7 @@ impl Waku {
                     files = *mapped_files,
                     tokens = *estimated_tokens
                 ),
-                "icons/projects.svg",
+                "icons/map.svg",
                 false,
             ),
         };
@@ -2897,7 +2897,7 @@ impl Waku {
                 } else {
                     glyph.into_any_element()
                 })
-                .child(div().max_w(px(220.0)).truncate().child(label))
+                .tooltip(Tooltip::text(label))
                 .into_any_element(),
         )
     }
