@@ -649,7 +649,7 @@ impl Waku {
         });
     }
 
-    fn dismiss_keyboard_options(
+    pub(super) fn dismiss_keyboard_options(
         &mut self,
         restore_focus: bool,
         window: &mut Window,

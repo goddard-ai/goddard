@@ -11,8 +11,12 @@
 //! Clicking a card never navigates: it targets the docked composer at that
 //! session, and clicking again — or sending — returns it to new-task mode.
 //! The arrow keys do the same without a confirm step: they move the highlight
-//! and retarget the composer in one motion. Escape peels off the target first,
-//! then closes the overlay; clicking the scrim closes it outright.
+//! and retarget the composer in one motion. The ranking runs longer than the
+//! grid is wide — the cards on screen are a window of it that scrolls to keep
+//! the highlight mounted, and ⌥←/⌥→ drive that walk from anywhere in the
+//! workspace. Enter opens the highlighted session and exits; ↓ or ⌘↵ drop
+//! focus into the composer. Escape peels off the target first, then closes
+//! the overlay; clicking the scrim closes it outright.
 
 use gpui::{KeyBinding, actions};
 
@@ -65,6 +69,9 @@ actions!(
         BigPictureLeft,
         BigPictureRight,
         BigPictureConfirm,
+        FocusBigPictureComposer,
+        SessionSweepBackward,
+        SessionSweepForward,
     ]
 );
 
@@ -83,6 +90,39 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("left", BigPictureLeft, Some("BigPicture")),
         KeyBinding::new("right", BigPictureRight, Some("BigPicture")),
         KeyBinding::new("enter", BigPictureConfirm, Some("BigPicture")),
+        // Enter opens the highlighted card now, so the docked composer needs
+        // its own way in — ↓ toward it, or the prompt-submit spelling ⌘↵.
+        KeyBinding::new("down", FocusBigPictureComposer, Some("BigPicture")),
+        KeyBinding::new(
+            "secondary-enter",
+            FocusBigPictureComposer,
+            Some("BigPicture"),
+        ),
+        // ⌥←/⌥→ sweep the card ranking. The flag keeps a disabled experiment
+        // from eating the chords, and !Terminal/!Menu spare the shell's word
+        // keys and menu filter fields. The descendant spelling reaches text
+        // fields — registered after input::init, it wins the same-depth tie
+        // with word-jump.
+        KeyBinding::new(
+            "alt-left",
+            SessionSweepBackward,
+            Some("BigPictureEnabled && !Terminal && !Menu"),
+        ),
+        KeyBinding::new(
+            "alt-right",
+            SessionSweepForward,
+            Some("BigPictureEnabled && !Terminal && !Menu"),
+        ),
+        KeyBinding::new(
+            "alt-left",
+            SessionSweepBackward,
+            Some("BigPictureEnabled > TextInput && !Terminal && !Menu"),
+        ),
+        KeyBinding::new(
+            "alt-right",
+            SessionSweepForward,
+            Some("BigPictureEnabled > TextInput && !Terminal && !Menu"),
+        ),
     ]);
     for index in 0..9 {
         cx.bind_keys([KeyBinding::new(
@@ -127,6 +167,9 @@ pub(super) struct BigPictureUi {
     slots: Vec<BigPictureSlot>,
     /// Arrow-key position — the card Enter or a click arms as the target.
     highlighted: Option<Uuid>,
+    /// First index of the card order the grid mounts — the session sweep
+    /// scrolls this window so the highlighted session always has a card.
+    window_start: usize,
     /// The session the docked composer follows up on; `None` starts a task.
     target: Option<Uuid>,
     /// The draft slot the docked composer's content currently belongs to —
@@ -193,6 +236,7 @@ impl BigPictureUi {
             open: false,
             slots: Vec::new(),
             highlighted: None,
+            window_start: 0,
             target: None,
             draft_key: None,
             new_task_project: None,
@@ -263,16 +307,18 @@ fn big_picture_arrow_target(
     order.get(next).copied()
 }
 
-/// The card order for this frame: tier first, then most recently touched.
-/// Waiting sessions rank by `updated_at` — the moment they parked;
-/// everything else ranks by sidebar recency, with the unseen-completion
-/// stamp counting as activity. `limit` is how many cards this frame's grid
-/// can afford.
+/// The full ranked order the grid and the sweep both walk: sessions in
+/// starred projects lead — the same first tier ⌘D and ⌘⇧D navigate by —
+/// then attention tier, then most recently touched. Waiting sessions rank
+/// by `updated_at` — the moment they parked; everything else ranks by
+/// sidebar recency, with the unseen-completion stamp counting as activity.
+/// The grid mounts a window of the result, so nothing is truncated away.
 fn big_picture_order(
     sessions: &[AgentSession],
+    projects: &[Project],
     unseen: &HashMap<Uuid, u64>,
-    limit: usize,
 ) -> Vec<Uuid> {
+    let starred = sessions::starred_project_ids(projects);
     let mut eligible = sessions
         .iter()
         .filter(|session| {
@@ -287,16 +333,32 @@ fn big_picture_order(
                 .max(unseen.get(&session.id).copied().unwrap_or(0))
         };
         (
+            !starred.contains(&session.project_id),
             big_picture_tier(session, unseen),
             std::cmp::Reverse(recency),
             std::cmp::Reverse(session.created_at),
         )
     });
-    eligible
-        .into_iter()
-        .take(limit)
-        .map(|session| session.id)
-        .collect()
+    eligible.into_iter().map(|session| session.id).collect()
+}
+
+/// The window's new start — the smallest slide that keeps the highlighted
+/// card mounted, clamped for a list that shrank under it.
+fn big_picture_window_start(
+    order_len: usize,
+    capacity: usize,
+    start: usize,
+    highlighted: Option<usize>,
+) -> usize {
+    let mut start = start.min(order_len.saturating_sub(capacity));
+    if let Some(index) = highlighted {
+        if index < start {
+            start = index;
+        } else if index >= start + capacity {
+            start = (index + 1).saturating_sub(capacity);
+        }
+    }
+    start
 }
 
 /// One card's resting geometry inside the grid, in grid-local coordinates —
@@ -370,6 +432,9 @@ impl Waku {
         if self.project_switcher.is_open() {
             self.cancel_project_switcher(window, cx);
         }
+        // The option modal paints a layer above this one — without a
+        // dismiss it would hang over the grid, focus stolen.
+        self.dismiss_keyboard_options(true, window, cx);
         self.big_picture.previous_focus = window.focused(cx);
         // Stash the background session's half-typed draft before the overlay
         // takes the composer over — capture resolves against the selection
@@ -377,6 +442,7 @@ impl Waku {
         self.capture_and_save_current_composer_draft(cx);
         self.big_picture.open = true;
         self.big_picture.slots.clear();
+        self.big_picture.window_start = 0;
         self.big_picture.target = None;
         self.big_picture.hydrate_requested.clear();
         // Card scroll state survives opens so a card the reader scrolled
@@ -404,8 +470,8 @@ impl Waku {
         self.big_picture.last_row_count = 0;
         self.big_picture.highlighted = big_picture_order(
             &self.state.sessions,
+            &self.state.projects,
             &self.state.unseen_completions,
-            MAX_CARDS,
         )
         .first()
         .copied();
@@ -680,14 +746,56 @@ impl Waku {
 
     /// Arrows move the highlight *and* retarget the composer — no separate
     /// confirm step. The docked prompt follows whichever card is highlighted.
+    /// The walk runs the full ranked list, not just the mounted window — the
+    /// render scrolls the window to wherever the highlight lands.
     fn move_big_picture_highlight(&mut self, reverse: bool, cx: &mut Context<Self>) {
-        let order = self.big_picture_navigable();
+        let order = big_picture_order(
+            &self.state.sessions,
+            &self.state.projects,
+            &self.state.unseen_completions,
+        );
         let Some(next) = big_picture_arrow_target(&order, self.big_picture.highlighted, reverse)
         else {
             return;
         };
         self.big_picture.highlighted = Some(next);
         self.set_big_picture_target(Some(next), cx);
+    }
+
+    /// ⌥←/⌥→ — the session sweep. A press opens the overlay and steps the
+    /// highlight one rank over; unlike ⌘⇧D it is a pure preview — no
+    /// navigation, no unread stamps, nothing but the highlight and the
+    /// composer target move until Enter lands on a card.
+    fn session_sweep(&mut self, reverse: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.state.big_picture_enabled {
+            return;
+        }
+        if !self.big_picture.open {
+            self.open_big_picture(window, cx);
+            // Anchor at the session on screen so the first step is its
+            // neighbor in the ranking — not the ranking's head, which the
+            // overlay's own seed points at.
+            self.big_picture.highlighted = self.state.selected_session;
+        }
+        self.move_big_picture_highlight(reverse, cx);
+    }
+
+    pub(super) fn session_sweep_backward_action(
+        &mut self,
+        _: &SessionSweepBackward,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_sweep(true, window, cx);
+    }
+
+    pub(super) fn session_sweep_forward_action(
+        &mut self,
+        _: &SessionSweepForward,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_sweep(false, window, cx);
     }
 
     /// Escape peels off one layer at a time: an armed target first, the
@@ -723,14 +831,34 @@ impl Waku {
         self.move_big_picture_highlight(false, cx);
     }
 
-    /// Enter no longer arms the target — arrows and clicks already did. Its
-    /// one remaining job is dropping focus into the docked composer.
+    /// Enter commits the sweep: the armed or highlighted card's session
+    /// takes the window and the overlay closes behind it. With nothing to
+    /// land on it drops focus into the docked composer instead.
     pub(super) fn big_picture_confirm_action(
         &mut self,
         _: &BigPictureConfirm,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(session_id) = self.big_picture.target.or(self.big_picture.highlighted) {
+            self.close_big_picture(window, cx);
+            self.select_session(session_id, cx);
+            return;
+        }
+        self.focus_big_picture_composer(window, cx);
+    }
+
+    /// ↓ / ⌘↵ — into the docked composer without leaving the overlay.
+    pub(super) fn focus_big_picture_composer_action(
+        &mut self,
+        _: &FocusBigPictureComposer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_big_picture_composer(window, cx);
+    }
+
+    fn focus_big_picture_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
     }
@@ -1755,18 +1883,34 @@ impl Waku {
             .clamp(1, MAX_CARDS);
         let max_rows = (((grid_height + CARD_GAP) / (CARD_MIN_ROW_HEIGHT + CARD_GAP)) as usize)
             .clamp(1, MAX_CARDS);
-        let desired = big_picture_order(
+        let order = big_picture_order(
             &self.state.sessions,
+            &self.state.projects,
             &self.state.unseen_completions,
-            (columns * max_rows).min(MAX_CARDS),
         );
+        let capacity = (columns * max_rows).min(MAX_CARDS);
+        // The grid mounts a capacity-sized window of the ranking; the
+        // highlight scrolls it so the sweep never lands off-screen.
+        let highlighted_index = self
+            .big_picture
+            .highlighted
+            .and_then(|id| order.iter().position(|candidate| *candidate == id));
+        let window_start = big_picture_window_start(
+            order.len(),
+            capacity,
+            self.big_picture.window_start,
+            highlighted_index,
+        );
+        self.big_picture.window_start = window_start;
+        let end = (window_start + capacity).min(order.len());
+        let desired = &order[window_start..end];
         let rows = desired.len().div_ceil(columns).max(1);
         let card_width =
             ((row_width - CARD_GAP * (columns - 1) as f32) / columns as f32).max(CARD_MIN_WIDTH);
         let card_height = (grid_height - CARD_GAP * (rows - 1) as f32) / rows as f32;
         let geometry =
             big_picture_card_geometry(desired.len(), rows, row_width, card_width, card_height);
-        self.reconcile_big_picture_slots(&desired, &geometry, cx);
+        self.reconcile_big_picture_slots(desired, &geometry, cx);
         let slots = self.big_picture.slots.clone();
         let cards = slots
             .iter()
@@ -1817,6 +1961,9 @@ impl Waku {
             .on_action(cx.listener(Self::big_picture_left_action))
             .on_action(cx.listener(Self::big_picture_right_action))
             .on_action(cx.listener(Self::big_picture_confirm_action))
+            .on_action(cx.listener(Self::focus_big_picture_composer_action))
+            .on_action(cx.listener(Self::session_sweep_backward_action))
+            .on_action(cx.listener(Self::session_sweep_forward_action))
             .on_action(cx.listener(Self::select_big_picture_card_action))
             // Chords aimed at chrome the overlay covers — the sidebar and
             // panels, other pickers and pages, the editor's find bar — have
@@ -1942,6 +2089,12 @@ mod tests {
         session
     }
 
+    fn project(starred: bool) -> Project {
+        let mut project = Project::from_path(std::path::PathBuf::from("/tmp/waku-big-picture"));
+        project.starred = starred;
+        project
+    }
+
     #[test]
     fn waiting_outranks_unread_which_outranks_running() {
         let running = session(SessionStatus::Working, 100, 100);
@@ -1958,41 +2111,46 @@ mod tests {
         ];
 
         assert_eq!(
-            big_picture_order(&sessions, &unseen, MAX_CARDS),
+            big_picture_order(&sessions, &[], &unseen),
             vec![waiting.id, unread_idle.id, running.id, settled.id]
         );
     }
 
     #[test]
-    fn within_a_tier_the_most_recently_updated_wins() {
-        let older_wait = session(SessionStatus::Waiting, 10, 60);
-        let newer_wait = session(SessionStatus::Waiting, 10, 90);
-        let sessions = vec![older_wait.clone(), newer_wait.clone()];
+    fn starred_projects_lead_the_ranking() {
+        let starred_project = project(true);
+        let plain_project = project(false);
+        let mut starred_idle = session(SessionStatus::Idle, 50, 50);
+        starred_idle.project_id = starred_project.id;
+        let mut plain_waiting = session(SessionStatus::Waiting, 10, 90);
+        plain_waiting.project_id = plain_project.id;
+        let sessions = vec![plain_waiting.clone(), starred_idle.clone()];
+        let projects = vec![starred_project, plain_project];
 
+        // Even an unstarred waiting task falls behind a starred idle one —
+        // the same first tier ⌘D navigates by.
         assert_eq!(
-            big_picture_order(&sessions, &HashMap::new(), MAX_CARDS),
-            vec![newer_wait.id, older_wait.id]
+            big_picture_order(&sessions, &projects, &HashMap::new()),
+            vec![starred_idle.id, plain_waiting.id]
         );
     }
 
     #[test]
-    fn the_grid_caps_at_the_frame_limit_and_skips_unstarted_drafts() {
+    fn the_ranking_runs_the_full_list_and_skips_unstarted_drafts() {
         let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         let mut sessions = vec![draft];
         for index in 0..10 {
             sessions.push(session(SessionStatus::Idle, index as u64 + 1, 0));
         }
-        let ordered = big_picture_order(&sessions, &HashMap::new(), 4);
+        let ordered = big_picture_order(&sessions, &[], &HashMap::new());
 
-        assert_eq!(ordered.len(), 4);
+        // The sweep scrolls a window over the whole ranking — nothing is
+        // truncated at the grid's capacity anymore.
+        assert_eq!(ordered.len(), 10);
         assert!(
             !sessions[0..1]
                 .iter()
                 .any(|draft| ordered.contains(&draft.id))
-        );
-        assert_eq!(
-            big_picture_order(&sessions, &HashMap::new(), MAX_CARDS).len(),
-            MAX_CARDS
         );
     }
 
@@ -2006,9 +2164,23 @@ mod tests {
 
         // The unread task still leads on tier, not recency.
         assert_eq!(
-            big_picture_order(&sessions, &unseen, MAX_CARDS),
+            big_picture_order(&sessions, &[], &unseen),
             vec![stale_unread.id, recent_read.id]
         );
+    }
+
+    #[test]
+    fn the_window_slides_to_keep_the_highlight_mounted() {
+        // Inside the window the start does not move.
+        assert_eq!(big_picture_window_start(10, 4, 1, Some(3)), 1);
+        // Off the right edge it slides just far enough to reveal the card.
+        assert_eq!(big_picture_window_start(10, 4, 1, Some(6)), 3);
+        // Off the left edge it snaps back to the highlight.
+        assert_eq!(big_picture_window_start(10, 4, 5, Some(2)), 2);
+        // A list shorter than the window clamps the start to zero.
+        assert_eq!(big_picture_window_start(3, 4, 5, None), 0);
+        // Wraps land at the extremes.
+        assert_eq!(big_picture_window_start(10, 4, 0, Some(9)), 6);
     }
 
     #[test]

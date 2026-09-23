@@ -838,6 +838,21 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     Some("BigPicture"),
                 ),
                 bound(
+                    tr!("menu.focus_composer"),
+                    big_picture::FocusBigPictureComposer,
+                    Some("BigPicture"),
+                ),
+                bound(
+                    tr!("shortcuts.bigpicture_sweep_back"),
+                    big_picture::SessionSweepBackward,
+                    Some("BigPictureEnabled && !Terminal && !Menu"),
+                ),
+                bound(
+                    tr!("shortcuts.bigpicture_sweep_forward"),
+                    big_picture::SessionSweepForward,
+                    Some("BigPictureEnabled && !Terminal && !Menu"),
+                ),
+                bound(
                     tr!("shortcuts.dismiss"),
                     big_picture::DismissBigPicture,
                     Some("BigPicture"),

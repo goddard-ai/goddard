@@ -3539,7 +3539,8 @@ pub use terminal_close_dialog::init as init_terminal_close_dialog_keys;
 // every dispatchable action by path without making each module public.
 pub use archive_dialog::{ConfirmArchiveDialog, DismissArchiveDialog};
 pub use big_picture::{
-    BigPictureConfirm, BigPictureLeft, BigPictureRight, DismissBigPicture, SelectBigPictureCard,
+    BigPictureConfirm, BigPictureLeft, BigPictureRight, DismissBigPicture, FocusBigPictureComposer,
+    SelectBigPictureCard, SessionSweepBackward, SessionSweepForward,
 };
 pub use close_dialog::{ConfirmAppClose, DismissAppClose};
 pub use command_palette::{

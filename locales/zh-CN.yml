@@ -217,7 +217,7 @@ task_switcher.recently_viewed: 最近查看的任务
 big_picture.new_task_placeholder: 开始新任务…
 big_picture.follow_up_placeholder: "回复 %{title}…"
 big_picture.replying_to: "正在回复 %{title}"
-big_picture.hint: ← → 选择 · enter 设定目标 · esc 关闭
+big_picture.hint: ← → 或 ⌥ ← → 移动 · ↵ 打开 · ↓ 输入 · esc 关闭
 big_picture.loading: 加载中…
 big_picture.empty_transcript: 暂无消息
 
@@ -2455,6 +2455,8 @@ shortcuts.big_picture: 显示或隐藏概览
 shortcuts.bigpicture_move: 聚焦左侧会话
 shortcuts.bigpicture_move_right: 聚焦右侧会话
 shortcuts.bigpicture_open: 打开会话
+shortcuts.bigpicture_sweep_back: 扫到上一个会话
+shortcuts.bigpicture_sweep_forward: 扫到下一个会话
 shortcuts.browser_address: 聚焦地址栏
 shortcuts.browser_address_cancel: 取消地址编辑
 shortcuts.browser_back: 后退

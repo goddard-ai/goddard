@@ -453,7 +453,7 @@ big_picture.follow_up_placeholder:
 big_picture.replying_to:
   en: "Replying to %{title}"
 big_picture.hint:
-  en: ← → to target · esc to untarget, then close
+  en: ← → or ⌥ ← → to move · ↵ to open · ↓ to write · esc to close
 big_picture.loading:
   en: Loading…
 big_picture.empty_transcript:
@@ -4813,6 +4813,10 @@ shortcuts.bigpicture_move_right:
   en: Focus Right Session
 shortcuts.bigpicture_open:
   en: Open Session
+shortcuts.bigpicture_sweep_back:
+  en: Sweep to Previous Session
+shortcuts.bigpicture_sweep_forward:
+  en: Sweep to Next Session
 shortcuts.next_field:
   en: Next Field
 shortcuts.previous_field:

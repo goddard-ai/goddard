@@ -631,10 +631,14 @@ impl Render for Waku {
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
         let content = div()
-            .key_context(if composer_mounted {
-                "Workspace ComposerExists"
-            } else {
-                "Workspace"
+            // BigPictureEnabled arms the ⌥←/⌥→ sweep's contexts — with the
+            // experiment off the bindings match nothing and word-jump is
+            // untouched.
+            .key_context(match (composer_mounted, self.state.big_picture_enabled) {
+                (true, true) => "Workspace ComposerExists BigPictureEnabled",
+                (true, false) => "Workspace ComposerExists",
+                (false, true) => "Workspace BigPictureEnabled",
+                (false, false) => "Workspace",
             })
             .on_action(cx.listener(Self::quit_action))
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
@@ -650,6 +654,8 @@ impl Render for Waku {
             .on_action(cx.listener(Self::double_check_action))
             .on_action(cx.listener(Self::toggle_file_finder_action))
             .on_action(cx.listener(Self::toggle_big_picture_action))
+            .on_action(cx.listener(Self::session_sweep_backward_action))
+            .on_action(cx.listener(Self::session_sweep_forward_action))
             .on_action(cx.listener(Self::open_resume_picker_action))
             .on_action(cx.listener(Self::run_project_script_action))
             .on_action(cx.listener(Self::toggle_fps_counter_action))

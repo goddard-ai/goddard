@@ -941,6 +941,33 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "bigpicture.focus_composer",
+        action: || Box::new(crate::app::FocusBigPictureComposer),
+        title_key: "menu.focus_composer",
+        title_index: None,
+        category: C::BigPicture,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "bigpicture.sweep_back",
+        action: || Box::new(crate::app::SessionSweepBackward),
+        title_key: "shortcuts.bigpicture_sweep_back",
+        title_index: None,
+        category: C::BigPicture,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "bigpicture.sweep_forward",
+        action: || Box::new(crate::app::SessionSweepForward),
+        title_key: "shortcuts.bigpicture_sweep_forward",
+        title_index: None,
+        category: C::BigPicture,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "bigpicture.card.1",
         action: || Box::new(crate::app::SelectBigPictureCard { index: 0 }),
         title_key: "keybind.command.bigpicture_card",
@@ -2537,13 +2564,39 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("dialog.push_base.confirm", All, "enter", PushBaseDialog),
     e("dialog.push_base.dismiss", All, "escape", PushBaseDialog),
     // === app::init_reset_credit_dialog_keys ======================================
-    e("dialog.reset_credit.confirm", All, "enter", ResetCreditDialog),
-    e("dialog.reset_credit.dismiss", All, "escape", ResetCreditDialog),
+    e(
+        "dialog.reset_credit.confirm",
+        All,
+        "enter",
+        ResetCreditDialog,
+    ),
+    e(
+        "dialog.reset_credit.dismiss",
+        All,
+        "escape",
+        ResetCreditDialog,
+    ),
     // === app::init_big_picture_keys ===================================================
     e("bigpicture.dismiss", All, "escape", BigPicture),
     e("bigpicture.left", All, "left", BigPicture),
     e("bigpicture.right", All, "right", BigPicture),
     e("bigpicture.confirm", All, "enter", BigPicture),
+    e("bigpicture.focus_composer", All, "down", BigPicture),
+    e(
+        "bigpicture.focus_composer",
+        All,
+        "secondary-enter",
+        BigPicture,
+    ),
+    e("bigpicture.sweep_back", All, "alt-left", SweepScope),
+    e("bigpicture.sweep_forward", All, "alt-right", SweepScope),
+    e("bigpicture.sweep_back", All, "alt-left", SweepFieldScope),
+    e(
+        "bigpicture.sweep_forward",
+        All,
+        "alt-right",
+        SweepFieldScope,
+    ),
     e("bigpicture.card.1", All, "secondary-1", BigPicture),
     e("bigpicture.card.2", All, "secondary-2", BigPicture),
     e("bigpicture.card.3", All, "secondary-3", BigPicture),
@@ -2911,6 +2964,13 @@ mod ctx {
     pub const TerminalBarInput: &str = "TerminalCommandBar > TextInput";
     pub const TerminalCommandBar: &str = "TerminalCommandBar";
     pub const NotTerminal: &str = "!Terminal";
+    /// The ⌥←/⌥→ session sweep — the experiment flag keeps a disabled Big
+    /// Picture from eating the chords; !Terminal and !Menu spare the
+    /// shell's word keys and menu filter fields.
+    pub const SweepScope: &str = "BigPictureEnabled && !Terminal && !Menu";
+    /// The sweep reaching into text fields — registered after `input::init`,
+    /// it wins the same-depth tie over word-jump.
+    pub const SweepFieldScope: &str = "BigPictureEnabled > TextInput && !Terminal && !Menu";
     pub const Workspace: &str = "Workspace";
     pub const ProjectsPage: &str = "ProjectsPage";
     pub const AutomationsPage: &str = "AutomationsPage";

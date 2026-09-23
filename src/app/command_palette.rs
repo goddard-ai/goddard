@@ -224,6 +224,7 @@ enum PaletteAction {
     MarkAllSessionsRead,
     ToggleSidebar,
     ToggleRightPanel,
+    ToggleBigPicture,
     OpenSettings(SettingsPage),
     SelectTask(Uuid),
     RunCustomCommand(Uuid),
@@ -2331,6 +2332,17 @@ impl Waku {
                 next(),
             ));
         }
+        if self.state.big_picture_enabled {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("shortcuts.big_picture"),
+                "icons/target.svg",
+                Some(ShortcutHint::action(&ToggleBigPicture)),
+                PaletteAction::ToggleBigPicture,
+                "big picture overview zoom out cards grid sessions glance",
+                next(),
+            ));
+        }
         commands.extend([
             CommandPaletteItem::command(
                 PaletteSection::Commands,
@@ -4287,6 +4299,9 @@ impl Waku {
             PaletteAction::ToggleSidebar => self.toggle_sidebar_action(&ToggleSidebar, window, cx),
             PaletteAction::ToggleRightPanel => {
                 self.toggle_right_panel_action(&ToggleRightPanel, window, cx)
+            }
+            PaletteAction::ToggleBigPicture => {
+                self.toggle_big_picture_action(&ToggleBigPicture, window, cx)
             }
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
