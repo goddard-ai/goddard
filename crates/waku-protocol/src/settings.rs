@@ -71,6 +71,11 @@ pub struct DaemonSettings {
     /// in the background, and injects it into each session's first prompt.
     /// Defaults on in development builds, opt-in in release builds.
     pub memory_experiment_enabled: bool,
+    /// Per-provider model override for memory distillation runs. A provider
+    /// absent here distills on its advertised default model; the value is a
+    /// catalog model id handed to that provider's headless driver.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub memory_models: BTreeMap<ProviderKind, String>,
     /// Experimental opt-in for the MCP integrations pane and the daemon's
     /// local MCP proxy. Defaults on in development builds, opt-in in release.
     pub integrations_enabled: bool,
@@ -142,6 +147,7 @@ impl Default for DaemonSettings {
             route_classes: RouteClassMap::new(),
             auto_prompts: Vec::new(),
             memory_experiment_enabled: default_experiment_enabled(),
+            memory_models: BTreeMap::new(),
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),

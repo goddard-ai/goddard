@@ -81,6 +81,9 @@ struct Shared {
     /// The evaluation backend answering `Auto`-mode permission requests,
     /// snapshotted at session start.
     eval: Option<Arc<waku_protocol::eval::EvalSettings>>,
+    /// The live session's id, captured at connect — headless teardown needs
+    /// it to remove the session-state directory.
+    session_id: Option<String>,
     permissions: HashMap<String, oneshot::Sender<String>>,
     user_inputs: HashMap<String, oneshot::Sender<Vec<UserInputAnswer>>>,
 }
@@ -241,7 +244,7 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
 
     let handler = Arc::new(CopilotHandler {
         events: events.clone(),
-        shared,
+        shared: shared.clone(),
     });
     let session = match resume_session_id {
         Some(session_id) => {
@@ -304,10 +307,10 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
             return Ok(());
         }
     };
+    let session_id = session.id().as_str().to_owned();
+    shared.lock().session_id = Some(session_id.clone());
     let _ = events.send(DriverEvent::Connected {
-        provider_cursor: Some(ProviderResumeCursor::Copilot {
-            session_id: session.id().as_str().to_owned(),
-        }),
+        provider_cursor: Some(ProviderResumeCursor::Copilot { session_id }),
     });
 
     let mut stream = CopilotStream::default();
@@ -974,6 +977,18 @@ impl DriverControl for CopilotDriver {
             context_tier: options.context_window.as_deref().map(context_tier),
         });
         true
+    }
+
+    fn delete_provider_session(&self) {
+        let Some(session_id) = self.shared.lock().session_id.clone() else {
+            return;
+        };
+        // The CLI persists every session under session-state/<id>/; dropping
+        // the directory is the delete — a still-running session simply keeps
+        // writing to unlinked paths.
+        if let Err(error) = crate::copilot_session::delete_session(&session_id) {
+            eprintln!("GitHub Copilot session delete failed: {error:#}");
+        }
     }
 
     fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {

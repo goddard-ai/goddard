@@ -88,6 +88,9 @@ fn stop_task_request(request_id: u64, task_id: &str) -> Value {
 pub struct ClaudeDriver {
     commands: Sender<CommandMessage>,
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
+    /// The caller-chosen session id — Claude accepts `--session-id`, so the
+    /// driver knows which transcript file a headless teardown should remove.
+    session_id: String,
     mode: RuntimeMode,
     announced_agent_surface: bool,
 }
@@ -333,7 +336,7 @@ impl ClaudeDriver {
         let writer_turn = turn_active;
         let writer_pending_task_stops = pending_task_stops;
         let writer_title_refresh = super::title_refresh::NativeTitleRefresh::default();
-        let title_session_id = session_id;
+        let title_session_id = session_id.clone();
         thread::Builder::new()
             .name("waku-claude-writer".into())
             .spawn(move || {
@@ -566,6 +569,7 @@ impl ClaudeDriver {
         Ok(Self {
             commands,
             pending_user_inputs,
+            session_id,
             mode,
             announced_agent_surface: agent.is_some(),
         })
@@ -628,6 +632,14 @@ impl DriverControl for ClaudeDriver {
             return false;
         }
         self.commands.send(CommandMessage::Options(options)).is_ok()
+    }
+
+    fn delete_provider_session(&self) {
+        // The transcript lives at ~/.claude/projects/<slug>/<id>.jsonl; a
+        // still-writing process just keeps writing to the unlinked inode.
+        if let Err(error) = crate::claude_session::delete_session(&self.session_id) {
+            eprintln!("Claude session delete failed: {error:#}");
+        }
     }
 
     fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
@@ -2124,6 +2136,7 @@ mod tests {
         let driver = ClaudeDriver {
             commands,
             pending_user_inputs: Arc::new(Mutex::new(HashMap::new())),
+            session_id: Uuid::new_v4().to_string(),
             mode: RuntimeMode::FullAccess,
             announced_agent_surface: false,
         };

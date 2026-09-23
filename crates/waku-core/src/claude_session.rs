@@ -97,6 +97,49 @@ fn find_session_file(projects_directory: &Path, session_id: &str) -> anyhow::Res
     bail!("Claude session {session_id} was not found on disk")
 }
 
+/// Remove a session's transcript file — and the `<id>/` sidecar directory
+/// Claude keeps for subagent output — wherever they sit under `projects/`.
+/// A session that never wrote a transcript is already gone, so a missing
+/// file is success.
+pub fn delete_session(session_id: &str) -> anyhow::Result<()> {
+    delete_session_in(&projects_directory()?, session_id)
+}
+
+fn delete_session_in(projects_directory: &Path, session_id: &str) -> anyhow::Result<()> {
+    Uuid::parse_str(session_id).context("Claude returned an invalid session ID")?;
+    if !projects_directory.is_dir() {
+        return Ok(());
+    }
+    let filename = format!("{session_id}.jsonl");
+    for entry in fs::read_dir(projects_directory).with_context(|| {
+        format!(
+            "could not read Claude's session directory at {}",
+            projects_directory.display()
+        )
+    })? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let transcript = entry.path().join(&filename);
+        match fs::remove_file(&transcript) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("could not remove Claude session {}", transcript.display())
+                });
+            }
+        }
+        let sidecar = entry.path().join(session_id);
+        if sidecar.is_dir() {
+            fs::remove_dir_all(&sidecar).with_context(|| {
+                format!("could not remove Claude session data {}", sidecar.display())
+            })?;
+        }
+    }
+    Ok(())
+}
+
 fn read_entries(path: &Path) -> anyhow::Result<Vec<Value>> {
     let file = fs::File::open(path)
         .with_context(|| format!("could not open Claude session {}", path.display()))?;
@@ -967,6 +1010,26 @@ mod tests {
             message_id_for_turn_in(&projects, SESSION, 2).unwrap(),
             ASSISTANT_THREE
         );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn delete_removes_transcript_and_sidecar() {
+        let (root, source) = fixture();
+        let project = root.join("projects").join("-tmp-project");
+        let sidecar = project.join(SESSION);
+        fs::create_dir_all(&sidecar).unwrap();
+        fs::write(sidecar.join("subagent.jsonl"), b"{}\n").unwrap();
+        let other = project.join(format!("{USER_ONE}.jsonl"));
+        fs::write(&other, b"{}\n").unwrap();
+
+        delete_session_in(&root.join("projects"), SESSION).unwrap();
+        assert!(!source.exists());
+        assert!(!sidecar.exists());
+        assert!(other.exists());
+
+        // A second run — and a session that never wrote anything — are fine.
+        delete_session_in(&root.join("projects"), SESSION).unwrap();
         fs::remove_dir_all(root).ok();
     }
 

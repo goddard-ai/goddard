@@ -870,6 +870,16 @@ impl DriverControl for OpenCodeDriver {
         self.fork(turns).map(Some)
     }
 
+    fn delete_provider_session(&self) {
+        if let Some(server) = self.server.as_deref() {
+            let _ = server.request(
+                "DELETE",
+                &format!("/session/{}", encode_path_segment(&self.session_id)),
+                None,
+            );
+        }
+    }
+
     fn fork(&self, turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
         let server = self
             .server

@@ -182,6 +182,9 @@ pub struct PiDriver {
     flavor: PiFlavor,
     commands: Sender<CommandMessage>,
     computer_use: Option<computer_use_runtime::ComputerUseRuntime>,
+    /// The provider's session file, captured at connect — headless teardown
+    /// deletes it so the run leaves nothing behind.
+    session_file: Arc<Mutex<Option<PathBuf>>>,
 }
 
 fn configure_pi_computer_use_command(
@@ -406,8 +409,10 @@ impl PiDriver {
                     );
                 })?;
 
+        let session_file = Arc::new(Mutex::new(None::<PathBuf>));
         let writer_pending = pending;
         let writer_events = events.clone();
+        let writer_session_file = session_file.clone();
         thread::Builder::new()
             .name("waku-pi-writer".into())
             .spawn(move || {
@@ -519,6 +524,7 @@ impl PiDriver {
                     ));
                     return;
                 };
+                *writer_session_file.lock() = flavor.session_file_from_cursor(&cursor).cloned();
                 let initial_usage = send_request(
                     &mut stdin,
                     &writer_pending,
@@ -800,6 +806,7 @@ impl PiDriver {
             flavor,
             commands,
             computer_use,
+            session_file,
         })
     }
 }
@@ -838,6 +845,22 @@ impl DriverControl for PiDriver {
             return false;
         }
         self.commands.send(CommandMessage::Options(options)).is_ok()
+    }
+
+    fn delete_provider_session(&self) {
+        let Some(session_file) = self.session_file.lock().clone() else {
+            return;
+        };
+        // The provider records the session as one JSONL; a still-writing
+        // process just keeps writing to the unlinked inode.
+        match std::fs::remove_file(&session_file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => eprintln!(
+                "{} session delete failed: {error}",
+                self.flavor.display_name()
+            ),
+        }
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
@@ -1938,6 +1961,7 @@ mod tests {
             flavor: PiFlavor::Pi,
             commands,
             computer_use: None,
+            session_file: Arc::new(Mutex::new(None)),
         };
         let options = |mode| SessionOptions {
             mode,

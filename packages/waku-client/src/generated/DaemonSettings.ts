@@ -74,6 +74,12 @@ auto_prompts?: Array<AutoPromptRule>,
  */
 memory_experiment_enabled: boolean,
 /**
+ * Per-provider model override for memory distillation runs. A provider
+ * absent here distills on its advertised default model; the value is a
+ * catalog model id handed to that provider's headless driver.
+ */
+memory_models?: { [key in ProviderKind]?: string },
+/**
  * Experimental opt-in for the MCP integrations pane and the daemon's
  * local MCP proxy. Defaults on in development builds, opt-in in release.
  */

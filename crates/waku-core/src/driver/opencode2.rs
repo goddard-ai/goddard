@@ -392,14 +392,12 @@ struct Worker {
 pub(super) struct OpenCode2Driver {
     /// The service object is permanent and this is never a lease over the
     /// user's process: nothing about dropping a driver can reach it.
-    #[allow(dead_code)]
     service: Arc<Opencode2Service>,
     /// Dropped before `Shutdown` is sent, so the hub stops fanning frames out
     /// to a worker that is on its way out.
     subscription: Option<Subscription>,
     /// What this driver was started with. The worker owns the live copies —
     /// a mode change is absorbed there — so these are identity, not state.
-    #[allow(dead_code)]
     session_id: String,
     #[allow(dead_code)]
     mode: RuntimeMode,
@@ -952,6 +950,12 @@ impl DriverControl for OpenCode2Driver {
             return false;
         }
         answer.recv_timeout(OPTIONS_TIMEOUT).unwrap_or(false)
+    }
+
+    fn delete_provider_session(&self) {
+        // The service outlives the driver, so the session can be removed
+        // even while the worker is mid-teardown.
+        let _ = opencode2_api::delete_session(&self.service.endpoint(), &self.session_id);
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {

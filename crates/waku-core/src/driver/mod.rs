@@ -167,6 +167,15 @@ impl DriverHandle {
         self.inner.compact();
     }
 
+    /// Remove the provider-side record of this session — the transcript
+    /// file, server session, or thread nothing will ever resume. Headless
+    /// callers (memory distillation) are the only askers; blocking briefly
+    /// to confirm the provider accepted the delete is fine since they run on
+    /// dedicated threads.
+    pub fn delete_provider_session(&self) {
+        self.inner.delete_provider_session();
+    }
+
     pub fn run_computer_tool(&self, request: ComputerToolRequest) {
         self.inner.run_computer_tool(request);
     }
@@ -254,6 +263,10 @@ pub trait DriverControl: Send + Sync {
     fn compact(&self) {
         self.prompt("/compact".to_owned());
     }
+    /// Remove the provider-side record of this session. Only headless
+    /// launches (memory distillation) ask — the default is a no-op for
+    /// providers with no known delete mechanism or nothing left behind.
+    fn delete_provider_session(&self) {}
     fn run_computer_tool(&self, _request: ComputerToolRequest) {}
     fn reject_computer_tool(&self, _request: ComputerToolRequest, _reason: String) {}
     /// Applies changed turn options to the live session, returning whether the

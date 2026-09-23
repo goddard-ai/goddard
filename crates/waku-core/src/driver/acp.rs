@@ -55,6 +55,10 @@ enum CommandMessage {
         answers: Vec<UserInputAnswer>,
     },
     Options(SessionOptions),
+    /// Headless teardown: remove the provider-side session record, then end
+    /// the actor. The sender acknowledges the request resolved one way or
+    /// the other so the caller is not racing the process's exit.
+    DeleteSession(std::sync::mpsc::Sender<()>),
     Shutdown,
 }
 
@@ -1063,6 +1067,26 @@ async fn run_sdk_connection(
                             )
                             .await;
                         }
+                    }
+                    CommandMessage::DeleteSession(done) => {
+                        match connection
+                            .send_request(DeleteSessionRequest::new(session_id.clone()))
+                            .block_task()
+                            .await
+                        {
+                            Ok(_) => {}
+                            // Agents that predate `session/delete` answer
+                            // -32601 — the residue stays, nothing to do.
+                            Err(error) if is_missing_acp_method(&error) => {}
+                            Err(error) => {
+                                eprintln!(
+                                    "{} session delete failed: {error}",
+                                    provider.display_name()
+                                );
+                            }
+                        }
+                        let _ = done.send(());
+                        break;
                     }
                     CommandMessage::Shutdown => break,
                 }
@@ -2990,6 +3014,19 @@ impl DriverControl for AcpDriver {
         self.commands
             .try_send(CommandMessage::Options(options))
             .is_ok()
+    }
+
+    fn delete_provider_session(&self) {
+        let (done, wait) = std::sync::mpsc::channel();
+        if self
+            .commands
+            .try_send(CommandMessage::DeleteSession(done))
+            .is_ok()
+        {
+            // The actor deletes then exits; a dead actor drops the sender
+            // and ends the wait on its own.
+            let _ = wait.recv_timeout(Duration::from_secs(10));
+        }
     }
 
     fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {

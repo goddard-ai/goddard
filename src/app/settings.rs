@@ -4999,7 +4999,7 @@ impl Waku {
                 enabled: self.state.memory_experiment_enabled,
                 set: Self::set_memory_experiment_enabled,
                 eval_backed: false,
-                tuning: None,
+                tuning: Some(Self::memory_tuning),
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -6704,6 +6704,132 @@ impl Waku {
         self.state.memory_experiment_enabled = enabled;
         self.save();
         cx.notify();
+    }
+
+    /// The per-provider memory-distillation override: `None` restores the
+    /// provider's advertised default model.
+    fn set_memory_model(
+        &mut self,
+        provider: ProviderKind,
+        model: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        match model {
+            Some(model) => {
+                self.state.memory_models.insert(provider, model);
+            }
+            None => {
+                self.state.memory_models.remove(&provider);
+            }
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// The project-memory card's tuning block: one model picker per enabled
+    /// provider, governing only the daemon's background distillation runs.
+    fn memory_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let rows = self
+            .probes
+            .iter()
+            .filter(|probe| {
+                probe.installed && !self.state.disabled_providers.contains(&probe.provider)
+            })
+            .map(|probe| self.memory_model_row(probe, theme, cx))
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            return div().into_any_element();
+        }
+        div()
+            .mt(px(10.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(sp(11.5))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("experiments.memory_models_caption")),
+            )
+            .children(rows)
+            .into_any_element()
+    }
+
+    /// One provider's distillation-model picker: provider mark and name on
+    /// the left, a catalog dropdown on the right whose first entry clears
+    /// the override back to the provider default.
+    fn memory_model_row(&self, probe: &ProviderProbe, theme: Theme, cx: &mut Context<Self>) -> Div {
+        let provider = probe.provider;
+        let current = self.state.memory_models.get(&provider).cloned();
+        let label = current
+            .as_deref()
+            .map(|id| {
+                probe
+                    .model(id)
+                    .map(|model| model.name.clone())
+                    .unwrap_or_else(|| id.to_owned())
+            })
+            .unwrap_or_else(|| tr!("experiments.memory_model_default"));
+        let menu_id = format!("memory-model-{}", provider.id());
+        let handle = self.menu_handle(menu_id.clone(), cx);
+        let weak = cx.entity().downgrade();
+        let models = probe.models.clone();
+        div()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(provider_mark(&theme, provider, 15.0, theme.text_secondary))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(provider.display_name()),
+                    ),
+            )
+            .child(dropdown_menu(
+                MenuChip::new(format!("memory-model-selector-{}", provider.id()))
+                    .label(label)
+                    .outlined()
+                    .selected(handle.is_open())
+                    .w(px(160.0))
+                    .justify_between(),
+                format!("memory-model-menu-{}", provider.id()),
+                &handle,
+                MenuAlign::BelowRight,
+                move |_| {
+                    let mut items = vec![{
+                        let weak = weak.clone();
+                        MenuItem::new(tr!("experiments.memory_model_default"), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_memory_model(provider, None, cx);
+                            });
+                        })
+                        .selected(current.is_none())
+                    }];
+                    items.extend(models.iter().map(|model| {
+                        let weak = weak.clone();
+                        let id = model.id.clone();
+                        let selected = current.as_deref() == Some(model.id.as_str());
+                        MenuItem::new(model.name.clone(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_memory_model(provider, Some(id.clone()), cx);
+                            });
+                        })
+                        .selected(selected)
+                    }));
+                    items
+                },
+            ))
     }
 
     /// The sandbox experiment opt-in is daemon-owned like subagents. Turning

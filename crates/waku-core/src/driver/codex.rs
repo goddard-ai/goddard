@@ -85,7 +85,26 @@ enum CommandMessage {
         control_id: String,
     },
     GeneratedTitle(String),
+    /// Headless teardown: `thread/delete` the native thread. The sender
+    /// acknowledges whichever response settles the request so the caller is
+    /// not racing the app-server's exit.
+    DeleteThread {
+        done: Sender<()>,
+    },
+    /// The `thread/archive` fallback for app-servers that predate
+    /// `thread/delete` — the thread leaves `thread/list` either way.
+    ArchiveThread {
+        done: Sender<()>,
+    },
     Shutdown,
+}
+
+/// A `thread/delete`/`thread/archive` request awaiting its response.
+/// `retried` marks the archive fallback so a second failure acknowledges
+/// instead of looping.
+struct PendingThreadRemoval {
+    done: Sender<()>,
+    retried: bool,
 }
 
 enum PendingRollback {
@@ -468,6 +487,7 @@ impl CodexDriver {
         let turn_ids = Arc::new(Mutex::new(Vec::<String>::new()));
         let pending_rollbacks = Arc::new(Mutex::new(HashMap::<u64, PendingRollback>::new()));
         let pending_steers = Arc::new(Mutex::new(HashMap::<u64, String>::new()));
+        let pending_removals = Arc::new(Mutex::new(HashMap::<u64, PendingThreadRemoval>::new()));
         let background_rpcs = Arc::new(Mutex::new(BackgroundRpcState::default()));
         let goal_rpcs = Arc::new(Mutex::new(GoalRpcState::default()));
         let title_generation = Arc::new(Mutex::new(CodexTitleGeneration {
@@ -482,6 +502,7 @@ impl CodexDriver {
         let writer_turn_ids = turn_ids.clone();
         let writer_pending_rollbacks = pending_rollbacks.clone();
         let writer_pending_steers = pending_steers.clone();
+        let writer_pending_removals = pending_removals.clone();
         let writer_background_rpcs = background_rpcs.clone();
         let writer_goal_rpcs = goal_rpcs.clone();
         let writer_title_generation = title_generation.clone();
@@ -1031,6 +1052,44 @@ impl CodexDriver {
                                 "params": {"threadId": thread_id, "name": title}
                             })
                         }
+                        CommandMessage::DeleteThread { done } => {
+                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                                let _ = done.send(());
+                                continue;
+                            };
+                            next_request_id += 1;
+                            writer_pending_removals.lock().insert(
+                                next_request_id,
+                                PendingThreadRemoval {
+                                    done,
+                                    retried: false,
+                                },
+                            );
+                            json!({
+                                "method": "thread/delete",
+                                "id": next_request_id,
+                                "params": {"threadId": thread_id}
+                            })
+                        }
+                        CommandMessage::ArchiveThread { done } => {
+                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                                let _ = done.send(());
+                                continue;
+                            };
+                            next_request_id += 1;
+                            writer_pending_removals.lock().insert(
+                                next_request_id,
+                                PendingThreadRemoval {
+                                    done,
+                                    retried: true,
+                                },
+                            );
+                            json!({
+                                "method": "thread/archive",
+                                "id": next_request_id,
+                                "params": {"threadId": thread_id}
+                            })
+                        }
                         CommandMessage::Shutdown => break,
                     };
                     if let Err(error) = write_json_line(&mut stdin, &message) {
@@ -1050,6 +1109,7 @@ impl CodexDriver {
         let reader_turn_ids = turn_ids.clone();
         let reader_pending_rollbacks = pending_rollbacks.clone();
         let reader_pending_steers = pending_steers.clone();
+        let reader_pending_removals = pending_removals.clone();
         let reader_background_rpcs = background_rpcs.clone();
         let reader_goal_rpcs = goal_rpcs.clone();
         let reader_title_generation = title_generation;
@@ -1083,6 +1143,39 @@ impl CodexDriver {
                                             .send(DriverEvent::Error(error.to_string()));
                                         let _ = reader_commands.send(CommandMessage::Shutdown);
                                         let _ = reader_process_shutdown.try_send(());
+                                        continue;
+                                    }
+                                    // A thread-removal response settles the
+                                    // headless teardown waiter; nothing else
+                                    // interprets the frame.
+                                    if value.get("method").is_none()
+                                        && let Some(id) = value.get("id").and_then(Value::as_u64)
+                                        && let Some(pending) =
+                                            reader_pending_removals.lock().remove(&id)
+                                    {
+                                        match (
+                                            value.pointer("/error/message").and_then(Value::as_str),
+                                            pending.retried,
+                                        ) {
+                                            // `thread/delete` predates this
+                                            // binary — archive hides the
+                                            // thread from `thread/list`
+                                            // instead.
+                                            (Some(_), false) => {
+                                                let _ = reader_commands.send(
+                                                    CommandMessage::ArchiveThread {
+                                                        done: pending.done,
+                                                    },
+                                                );
+                                            }
+                                            (Some(error), true) => {
+                                                eprintln!("Codex thread removal failed: {error}");
+                                                let _ = pending.done.send(());
+                                            }
+                                            (None, _) => {
+                                                let _ = pending.done.send(());
+                                            }
+                                        }
                                         continue;
                                     }
                                     let main_turn_started = is_codex_turn_started(
@@ -1433,6 +1526,19 @@ impl DriverControl for CodexDriver {
 
     fn compact(&self) {
         let _ = self.commands.send(CommandMessage::Compact);
+    }
+
+    fn delete_provider_session(&self) {
+        let (done, wait) = bounded(1);
+        if self
+            .commands
+            .send(CommandMessage::DeleteThread { done })
+            .is_ok()
+        {
+            // The writer issues the request and the reader acknowledges its
+            // response; a dead app-server drops the sender and ends the wait.
+            let _ = wait.recv_timeout(Duration::from_secs(10));
+        }
     }
 
     fn apply_options(&self, options: SessionOptions) -> bool {

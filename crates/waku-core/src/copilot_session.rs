@@ -39,6 +39,28 @@ fn events_path(session_id: &str) -> Option<PathBuf> {
     sessions_directory().map(|directory| directory.join(session_id).join("events.jsonl"))
 }
 
+/// Remove a session's `session-state/<id>/` directory. A session that never
+/// wrote one is already gone, so a missing directory is success.
+pub(crate) fn delete_session(session_id: &str) -> anyhow::Result<()> {
+    // The same id check `events_path` applies — the id must name a directory
+    // verbatim, never a path.
+    if session_id.is_empty()
+        || session_id == ".."
+        || session_id.chars().any(|ch| matches!(ch, '/' | '\\' | '\0'))
+    {
+        bail!("{session_id} is not a Copilot session id");
+    }
+    let Some(directory) = sessions_directory().map(|root| root.join(session_id)) else {
+        return Ok(());
+    };
+    match fs::remove_dir_all(&directory) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error)
+            .with_context(|| format!("could not remove Copilot session {}", directory.display())),
+    }
+}
+
 fn read_events(session_id: &str) -> Option<Vec<Value>> {
     let path = events_path(session_id)?;
     let content = fs::read_to_string(path).ok()?;

@@ -104,9 +104,6 @@ pub struct MemoryService {
 /// Everything a worker needs that is not behind the service's own handles.
 struct SessionSlice {
     provider: ProviderKind,
-    model: Option<String>,
-    reasoning_effort: Option<String>,
-    service_tier: Option<String>,
     /// New rendered transcript segments for this session.
     segments: Vec<String>,
     /// Message count the watermark should advance to after a successful pass.
@@ -328,9 +325,6 @@ impl MemoryService {
                     session.id,
                     SessionSlice {
                         provider: session.provider,
-                        model: session.model.clone(),
-                        reasoning_effort: session.reasoning_effort.clone(),
-                        service_tier: session.service_tier.clone(),
                         segments,
                         new_position: session.messages.len(),
                     },
@@ -344,13 +338,17 @@ impl MemoryService {
         }
         ensure_store(&project_path)?;
 
-        // The write driver's provider and model come from whichever session
-        // contributed the most new transcript — the user's own choice, so
-        // distillation inherits whatever they already pay for.
+        // The write driver's provider comes from whichever session
+        // contributed the most new transcript — the user is already
+        // authenticated and installed there. Its model does not: distillation
+        // is a background chore, so it runs on the provider's default model —
+        // or the user's per-provider override — with effort and tier unset so
+        // a premium session pick cannot leak into it.
         let (_, source) = slices
             .iter()
             .max_by_key(|(_, slice)| slice.segments.len())
             .expect("new_message_count is nonzero");
+        let model = settings.memory_models.get(&source.provider).cloned();
         let segments: Vec<String> = slices
             .iter()
             .flat_map(|(_, slice)| slice.segments.iter().cloned())
@@ -392,15 +390,7 @@ impl MemoryService {
         let prompt = distill_prompt(&memory_md, &log_tail(&store, 30), &excerpts, &commit_refs);
 
         let binary = provider_binary(&settings, source.provider)?;
-        let output = headless_prompt(
-            source.provider,
-            binary,
-            project_path.clone(),
-            source.model.clone(),
-            source.reasoning_effort.clone(),
-            source.service_tier.clone(),
-            prompt,
-        )?;
+        let output = headless_prompt(source.provider, binary, project_path.clone(), model, prompt)?;
         let (notes, memory_md) = parse_distill_output(&output)?;
 
         append_notes(&store, &notes)?;
@@ -1135,18 +1125,16 @@ fn provider_binary(
 /// Run one prompt through a provider driver with no session attached and
 /// collect its text output. `Ask` mode keeps the run read-only — the prompt
 /// tells the model not to touch tools, and any permission request simply
-/// stalls until the deadline drops the driver. The session's model traits
-/// ride along so providers that pack effort/tier into the model id (Devin)
-/// resolve the session's real pick; a model that cannot be resolved at all
-/// falls back to the provider's advertised default rather than sinking the
-/// pass.
+/// stalls until the deadline drops the driver. `model` is the per-provider
+/// override from settings, `None` for the provider's advertised default; a
+/// model that cannot be resolved falls back to that default rather than
+/// sinking the pass. Whatever the outcome, the provider-side session the run
+/// created is deleted before the handle drops — nothing resumes it.
 fn headless_prompt(
     provider: ProviderKind,
     binary: PathBuf,
     cwd: PathBuf,
     model: Option<String>,
-    reasoning_effort: Option<String>,
-    service_tier: Option<String>,
     prompt: String,
 ) -> anyhow::Result<String> {
     let (wake, _wakes) = smol::channel::unbounded();
@@ -1156,8 +1144,8 @@ fn headless_prompt(
         cwd,
         mode: waku_protocol::model::RuntimeMode::Ask,
         model,
-        reasoning_effort,
-        service_tier,
+        reasoning_effort: None,
+        service_tier: None,
         context_window: None,
         agent_preset: None,
         computer_use_enabled: false,
@@ -1173,7 +1161,18 @@ fn headless_prompt(
     let handle = driver::start_local(provider, options, sender)
         .context("could not start the memory distillation driver")?;
     handle.prompt(prompt);
+    let text = collect_distill_text(&handle, &receiver);
+    // Transports that delete over their live connection (ACP session/delete,
+    // Codex thread/archive) need the driver still running, so removal happens
+    // before the handle — not instead of it.
+    handle.delete_provider_session();
+    text
+}
 
+fn collect_distill_text(
+    handle: &driver::DriverHandle,
+    receiver: &crossbeam_channel::Receiver<DriverEvent>,
+) -> anyhow::Result<String> {
     let deadline = Instant::now() + DISTILL_TIMEOUT;
     let mut text = String::new();
     loop {

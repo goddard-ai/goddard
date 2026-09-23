@@ -827,6 +827,10 @@ experiments.memory_title:
   en: Project memory
 experiments.memory_description:
   en: Give each project a persistent memory. Finished sessions are distilled into a .goddard/memory store the next session's first prompt carries — decisions, preferences, and failed approaches included.
+experiments.memory_models_caption:
+  en: Model that distills each provider's finished sessions into memory — a background run, so an expensive interactive pick never applies. The provider's default is used unless you pick one here.
+experiments.memory_model_default:
+  en: Provider default
 experiments.project_map_title:
   en: Project map
 experiments.project_map_description:
