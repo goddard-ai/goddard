@@ -1744,8 +1744,8 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor {
         id: "model.favorite.1",
         action: || Box::new(crate::SelectFavoriteModel { index: 0 }),
-        title_key: "keybind.command.favorite_model",
-        title_index: Some(0),
+        title_key: "keyboard_options.automatic_routing",
+        title_index: None,
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,

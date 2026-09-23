@@ -1727,21 +1727,24 @@ impl Waku {
                     .map(str::trim)
                     .filter(|name| !name.is_empty());
                 let detail = model_picker_subtitle(kind, sub_provider);
-                // The ⌘⌥1–⌘⌥9 chord rides on the first nine starred rows.
+                // ⌘⌥1 is reserved for Auto; ⌘⌥2–⌘⌥9 ride on the first
+                // eight starred rows.
                 // Resolve against the live keymap so a remapped chord
                 // still advertises itself; fall back to the default's
                 // label when the picker's own context path cannot see the
                 // scoped binding.
-                let shortcut_hint = favorite_index.filter(|index| *index < 9).map(|index| {
-                    crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
-                        .resolve(window, cx)
-                        .unwrap_or_else(|| {
-                            crate::ui::shortcut::sequence_label(&format!(
-                                "secondary-alt-{}",
-                                index + 1
-                            ))
-                        })
-                });
+                let shortcut_hint = favorite_index
+                    .filter(|index| (1..=8).contains(index))
+                    .map(|index| {
+                        crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
+                            .resolve(window, cx)
+                            .unwrap_or_else(|| {
+                                crate::ui::shortcut::sequence_label(&format!(
+                                    "secondary-alt-{}",
+                                    index + 1
+                                ))
+                            })
+                    });
                 let mut row_element = model_picker_row_shell(
                     SharedString::from(format!(
                         "model-row-{}-{}-{}-{}",

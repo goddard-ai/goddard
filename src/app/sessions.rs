@@ -4569,6 +4569,12 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
+        // ⌘⌥1 is the stable shortcut for Auto routing. Favorites begin at
+        // ⌘⌥2 so this chord never depends on the user's starred models.
+        if action.index == 0 {
+            self.choose_auto_route(cx);
+            return;
+        }
         let Some(favorite) = self.state.favorite_models.get(action.index).cloned() else {
             return;
         };
