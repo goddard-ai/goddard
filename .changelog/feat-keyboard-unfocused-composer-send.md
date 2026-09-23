@@ -1,0 +1,1 @@
+- Press Enter or ⌘⏎ to send a drafted prompt even when the composer isn't focused — as long as focus isn't inside another text field or a dialog. Enter sends the way the composer's own Enter does, and ⌘⏎ steers the way its chord does; a control that activates on Enter still wins the key.

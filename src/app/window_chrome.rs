@@ -107,11 +107,11 @@ impl Waku {
             .bg(transparent_black())
             // The window frame is the outermost element, which makes it the
             // dispatch tree's root node: with nothing focused, its key
-            // listeners are the only ones a keystroke reaches. Enter-to-
-            // continue and type-to-focus need that seat; when focus is
+            // listeners are the only ones a keystroke reaches. The composer
+            // Enter fallback and type-to-focus need that seat; when focus is
             // inside, the workspace root's own listeners run first and stop
             // propagation on a claim.
-            .on_key_down(cx.listener(Self::enter_to_continue))
+            .on_key_down(cx.listener(Self::enter_outside_composer))
             .on_key_down(cx.listener(Self::type_to_focus_composer))
             .when(!tiling.top, |backdrop| backdrop.pt(inset))
             .when(!tiling.bottom, |backdrop| backdrop.pb(inset))

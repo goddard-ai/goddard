@@ -3534,31 +3534,42 @@ impl Waku {
     /// Enter outside the composer. The field's own binding claims it while
     /// the composer is focused, and a focused control that activates on Enter
     /// — a transcript button, a rail item — stops it earlier in the bubble.
-    /// What arrives here is a keystroke nobody wanted, so when the submit
-    /// affordance is Continue — a stopped turn or an unstarted quarantined
-    /// transfer — Enter fires it exactly like the play button. A draft
-    /// keeps Enter dead: the affordance would be
-    /// Send, and submitting a draft the user may not be looking at is the
-    /// one thing this keystroke must not do.
-    pub(super) fn enter_to_continue(
+    /// What arrives here is a keystroke nobody wanted. A drafted composer
+    /// sends it: Enter submits and ⌘⏎ steers, each exactly as the focused
+    /// field's own chord would. An empty composer keeps Enter's older role —
+    /// firing the stopped-turn Continue affordance exactly like the play
+    /// button.
+    pub(super) fn enter_outside_composer(
         &mut self,
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if event.keystroke.key != "enter" || event.keystroke.modifiers != Modifiers::none() {
+        if event.keystroke.key != "enter" {
+            return;
+        }
+        let steer = event.keystroke.modifiers == Modifiers::secondary_key();
+        if !steer && event.keystroke.modifiers != Modifiers::none() {
             return;
         }
         // The same reach as type-to-focus: a surface that owns its keys — or
         // an overlay whose focus has not landed yet — is not the composer's
         // to take over. Big Picture and an open message edit own Enter for
-        // their own layers too.
+        // their own layers, and the pages that unmount the composer must not
+        // send a draft the user can't see.
         if self.selected_project().is_none()
             || self.settings_page.is_some()
             || self.selected_terminal.is_some()
             || self.projects_page.is_some()
             || self.big_picture.is_open()
             || self.message_edit.is_some()
+            || self.notifications.open
+            || self.drafts_page
+            || self.automations_page
+            || self.selected_friend_watch().is_some()
+            || self.selected_session().is_some_and(|session| {
+                session.provider == ProviderKind::Antigravity && session.has_started()
+            })
         {
             return;
         }
@@ -3591,19 +3602,41 @@ impl Waku {
         let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
             || !self.composer_attachments.is_empty()
             || !self.composer_inline_atoms.is_empty()
-            || !self
-                .transcript_selection
-                .annotations
-                .borrow()
-                .items
-                .is_empty();
-        if self.composer_submit_action_for(session, preparing, has_draft)
-            != composer::ComposerSubmitAction::Continue
-        {
-            return;
+            || self.has_annotations();
+        match self.composer_submit_action_for(session, preparing, has_draft) {
+            composer::ComposerSubmitAction::Send
+                if self.selected_session().is_some() =>
+            {
+                // The focused field clears itself before the owner sees its
+                // event; here the owner is acting on the field's behalf, so
+                // the clear is its job too — including before a fork deferral
+                // reads the field's emptiness.
+                let prompt = self.composer.read(cx).content(cx).trim().to_owned();
+                if !prompt.is_empty() {
+                    self.composer.update(cx, |composer, cx| composer.clear(cx));
+                }
+                if let Some(session_id) = self.selected_session().and_then(|session| {
+                    self.response_fork_preparations
+                        .contains_key(&session.id)
+                        .then_some(session.id)
+                }) {
+                    self.defer_restore_composer_after_fork(session_id, prompt, cx);
+                } else if let Some(submission) = self.submission_with_attachments(&prompt, cx)
+                {
+                    if steer {
+                        self.steer_composer_submission(submission, cx);
+                    } else {
+                        self.submit_composer_submission(submission, cx);
+                    }
+                }
+                cx.stop_propagation();
+            }
+            composer::ComposerSubmitAction::Continue if !steer => {
+                self.continue_interrupted_session(cx);
+                cx.stop_propagation();
+            }
+            _ => {}
         }
-        self.continue_interrupted_session(cx);
-        cx.stop_propagation();
     }
 
     /// The directory the session's agent runs in — its worktree once one is
