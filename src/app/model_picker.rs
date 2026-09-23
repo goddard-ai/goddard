@@ -1438,9 +1438,8 @@ pub(super) fn model_picker_row_shell(
 ) -> Stateful<Div> {
     div()
         .id(id)
-        .w_full()
-        // Margin, not list padding, so the fill stays off the item's own
-        // bounds — padding on the row would just move the edge it paints to.
+        // Let the row size within its list slot so these margins keep its
+        // fill clear of the panel edge.
         .mx(px(4.0))
         .h(MODEL_PICKER_ROW_HEIGHT)
         .px(px(12.0))
