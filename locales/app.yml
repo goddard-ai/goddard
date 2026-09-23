@@ -543,6 +543,36 @@ settings.integrations:
   en: Integrations
 settings.integrations_keywords:
   en: integrations mcp servers tools linear github notion figma sentry stripe supabase vercel atlassian monday slack connect oauth api key agents
+settings.diagnostics:
+  en: Diagnostics
+settings.diagnostics_keywords:
+  en: diagnostics errors error log logs crash panic restart recovery daemon report troubleshooting problem
+settings.diagnostics_description:
+  en: Errors the app reported plus daemon restarts and panics, newest first. Select a row to copy its record.
+settings.diagnostics_empty:
+  en: No errors reported yet.
+diagnostics.loading:
+  en: Loading…
+diagnostics.refresh:
+  en: Refresh
+diagnostics.reveal_logs:
+  en: Logs folder
+diagnostics.source_app:
+  en: App
+diagnostics.source_restart:
+  en: Restart
+diagnostics.source_panic:
+  en: Panic
+diagnostics.recovery_summary:
+  en: "%{cause} → %{outcome}"
+diagnostics.sessions_resumed_one:
+  en: 1 session resumed
+diagnostics.sessions_resumed_many:
+  en: "%{count} sessions resumed"
+diagnostics.panic_unnamed:
+  en: Daemon panic
+diagnostics.copy_record:
+  en: Copy record
 settings.group_sessions:
   en: Sessions
 settings.group_git:

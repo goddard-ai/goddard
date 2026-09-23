@@ -81,7 +81,7 @@ pub(super) struct DaemonQrCode {
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 16] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 17] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -177,6 +177,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 16] = [
         "settings.experiments",
         "icons/beaker.svg",
         "settings.experiments_keywords",
+    ),
+    (
+        SettingsPage::Diagnostics,
+        "settings.diagnostics",
+        "icons/gauge.svg",
+        "settings.diagnostics_keywords",
     ),
 ];
 
@@ -1175,6 +1181,7 @@ impl Waku {
         // container; the Archived page's virtualized list needs the same.
         let fills_viewport = page == SettingsPage::Archived
             || page == SettingsPage::Git
+            || page == SettingsPage::Diagnostics
             || (page == SettingsPage::Usage
                 && matches!(
                     self.usage_view,
@@ -1221,6 +1228,7 @@ impl Waku {
                         SettingsPage::Experiments => tr!("settings.experiments"),
                         SettingsPage::Integrations => tr!("settings.integrations"),
                         SettingsPage::Keybindings => tr!("keybind.title"),
+                        SettingsPage::Diagnostics => tr!("settings.diagnostics"),
                     }),
             )
             .child(match page {
@@ -1240,6 +1248,7 @@ impl Waku {
                 SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
                 SettingsPage::Integrations => self.render_integrations_settings(cx),
                 SettingsPage::Keybindings => div().into_any_element(),
+                SettingsPage::Diagnostics => self.render_diagnostics_settings(cx),
             });
 
         let git_scrollbar = if page == SettingsPage::Git {
@@ -13047,7 +13056,7 @@ fn daemon_qr_view(code: std::sync::Arc<DaemonQrCode>) -> Div {
 /// `compact` shrinks to `integration_button`'s footprint for buttons living
 /// inside list rows.
 #[track_caller]
-fn settings_button<E>(
+pub(super) fn settings_button<E>(
     id: impl Into<ElementId>,
     label: String,
     enabled: bool,

@@ -9,8 +9,9 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Local, Utc};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, ClipboardEntry, ClipboardItem,
-    Context, Div, Entity, EntityId, ExternalPaths, FocusHandle, Focusable, FontWeight,
+    Animation, AnimationExt, AnyElement, App, BackgroundExecutor, Bounds, ClickEvent,
+    ClipboardEntry, ClipboardItem, Context, Div, Entity, EntityId, ExternalPaths, FocusHandle,
+    Focusable, FontWeight,
     HitboxBehavior, Hsla, IntoElement, KeyDownEvent, ListAlignment, ListOffset, ListState,
     Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection,
     ObjectFit, PathPromptOptions, Pixels, Render, ScrollAnchor, ScrollHandle, SharedString,
@@ -299,6 +300,7 @@ enum SettingsPage {
     Experiments,
     Integrations,
     Keybindings,
+    Diagnostics,
 }
 
 impl SettingsPage {
@@ -1685,6 +1687,7 @@ fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
         SettingsPage::Experiments => PersistedSettingsPage::Experiments,
         SettingsPage::Integrations => PersistedSettingsPage::Integrations,
         SettingsPage::Keybindings => PersistedSettingsPage::Keybindings,
+        SettingsPage::Diagnostics => PersistedSettingsPage::Diagnostics,
     }
 }
 
@@ -1706,6 +1709,7 @@ fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
         PersistedSettingsPage::Experiments => SettingsPage::Experiments,
         PersistedSettingsPage::Integrations => SettingsPage::Integrations,
         PersistedSettingsPage::Keybindings => SettingsPage::Keybindings,
+        PersistedSettingsPage::Diagnostics => SettingsPage::Diagnostics,
     }
 }
 
@@ -3039,6 +3043,21 @@ pub struct Waku {
     /// The current query's transcript scan has not landed yet; the empty
     /// state reads "searching" rather than "no match" while this holds.
     archived_message_search_pending: bool,
+    /// The Diagnostics page's loaded feed — `None` until the first scan
+    /// lands; the page reads only this snapshot, never the files.
+    diagnostics: Option<Rc<Vec<crate::diagnostics::DiagnosticEntry>>>,
+    /// A background read of the diagnostics sources is in flight — the
+    /// refresh button dims and repeat asks collapse into it.
+    diagnostics_scan_pending: bool,
+    /// When the snapshot landed; the page rescans once it is stale.
+    diagnostics_scanned_at: Option<Instant>,
+    /// Virtualized feed rows plus its scrollbar.
+    diagnostics_list: ListState,
+    diagnostics_scrollbar: Rc<ScrollbarState>,
+    /// Toasts journal reported errors through this — `show_toast_for` has
+    /// no `cx`, so the handle is kept on the entity for the error log's
+    /// background writes.
+    background_executor: BackgroundExecutor,
     /// The completion-volume slider's in-flight drag, kept on the entity so a
     /// repaint mid-gesture cannot drop it.
     completion_volume_slider: Rc<SliderState>,
@@ -3425,6 +3444,7 @@ mod command_palette;
 mod commit_dialog;
 mod components;
 mod composer;
+mod diagnostics_page;
 mod drafts;
 mod element_inspector;
 mod file_finder;
@@ -3832,6 +3852,20 @@ impl Waku {
         self.toast_generation
     }
 
+    /// Every reported error the app shows also lands in
+    /// `~/.goddard/errors.jsonl` — the Diagnostics page's app-side source.
+    /// The toast itself is transient; the journal keeps the record. The
+    /// append runs on the background executor so the write never touches
+    /// a frame.
+    fn journal_toast_error(&self, kind: &'static str, message: &str) {
+        let message = message.to_owned();
+        self.background_executor
+            .spawn(async move {
+                crate::diagnostics::record_app_error(kind, &message);
+            })
+            .detach();
+    }
+
     fn show_toast_for(
         &mut self,
         message: impl Into<String>,
@@ -3839,6 +3873,12 @@ impl Waku {
         action: Option<ToastAction>,
         duration: Duration,
     ) {
+        let message = message.into();
+        match tone {
+            ToastTone::Alert => self.journal_toast_error("alert", &message),
+            ToastTone::Failure => self.journal_toast_error("failure", &message),
+            _ => {}
+        }
         // A displaced localhost toast re-queues ahead of other pending
         // detections: it was first in line when something else took the slot.
         if let Some(localhost) = self.toast.take().and_then(|toast| toast.localhost) {
@@ -3849,7 +3889,7 @@ impl Waku {
                 });
         }
         self.set_toast(ToastState {
-            message: message.into(),
+            message,
             detail: None,
             tone,
             action,
@@ -3867,16 +3907,24 @@ impl Waku {
     /// to a result does not replay the entrance animation; only
     /// `timer_generation` moves, which retires the in-flight timer.
     pub(super) fn update_toast(&mut self, message: impl Into<String>, tone: ToastTone) {
+        let message = message.into();
         let Some(toast) = self.toast.as_mut() else {
             return;
         };
-        toast.message = message.into();
+        toast.message = message.clone();
         toast.detail = None;
         toast.tone = tone;
         toast.duration_remaining = DEFAULT_TOAST_DURATION;
         toast.timer_started = None;
         self.toast_generation = self.toast_generation.wrapping_add(1);
         toast.timer_generation = self.toast_generation;
+        // A running operation's failure resolves through here rather than
+        // a fresh toast — it is still a reported error.
+        match tone {
+            ToastTone::Alert => self.journal_toast_error("alert", &message),
+            ToastTone::Failure => self.journal_toast_error("failure", &message),
+            _ => {}
+        }
     }
 
     /// A terminal printed a localhost URL. While its toast is up a better
@@ -6118,6 +6166,12 @@ impl Waku {
                 archived_message_matches_query: None,
                 archived_message_matches: HashMap::new(),
                 archived_message_search_pending: false,
+                diagnostics: None,
+                diagnostics_scan_pending: false,
+                diagnostics_scanned_at: None,
+                diagnostics_list: ListState::new(0, ListAlignment::Top, px(256.0)),
+                diagnostics_scrollbar: ScrollbarState::new(),
+                background_executor: cx.background_executor().clone(),
                 completion_volume_slider: SliderState::new(),
                 sidebar_transparency_slider: SliderState::new(),
                 border_intensity_slider: SliderState::new(),

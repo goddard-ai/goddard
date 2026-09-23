@@ -135,6 +135,9 @@ impl Waku {
         if page == SettingsPage::Daemon {
             self.ensure_daemon_discovery();
         }
+        if page == SettingsPage::Diagnostics {
+            self.ensure_diagnostics(false, cx);
+        }
         if page == SettingsPage::Jev {
             // The page renders from the daemon's settings mirror, which may
             // be missing on a first visit — warm it here rather than

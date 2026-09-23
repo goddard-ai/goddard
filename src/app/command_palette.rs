@@ -2592,6 +2592,12 @@ impl Waku {
                 "icons/beaker.svg",
                 "settings preferences experiments experimental beta opt in unfinished preview",
             ),
+            (
+                SettingsPage::Diagnostics,
+                "settings.diagnostics",
+                "icons/gauge.svg",
+                "settings preferences diagnostics errors log logs crash panic restart recovery daemon report troubleshooting",
+            ),
         ] {
             if !page.is_visible_in_navigation(
                 self.state.computer_use_experiment_enabled,

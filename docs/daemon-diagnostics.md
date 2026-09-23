@@ -7,6 +7,7 @@ and how to read them together.
 
 | Signal | Where | What it tells you |
 | --- | --- | --- |
+| `errors.jsonl` | `~/.goddard/` | One JSONL record per error toast the app showed — `{at, kind, message}` where `kind` is `alert` or `failure`. The Diagnostics settings page reads this plus `daemon-recovery.jsonl` and `daemon-panics.jsonl` into one feed |
 | `daemon.recovery` | Umami event | One recovery episode: `cause` (`unexpected_exit`, `disconnect`, `rebuild`), `outcome` (`recovered`, `unreachable`), `sessionsResumed`, `daemonRssMb`/`childrenRssMb` (pre-restart readings), `exitCode`/`exitSignal`/`exitSignalCode` when a real exit happened, `previousBootClean` |
 | `daemon.crash` | Umami event | One OS crash report per unseen `goddard-daemon-*.ips`, scanned at launch: `termination` namespace (`exc_resource` = jetsam/resource limits, `signal` = crash/kill), `signal`, `uptimeSecs` |
 | `daemon-stats.jsonl` | `~/Library/Application Support/<App>/` | One JSONL sample per minute per boot: `boot`, `at`, `daemonRssMb`, `childrenRssMb` (whole descendant tree — provider runtimes carry memory under their own pids), `runtimes`, `terminals`, plus per-subtree `children` rows (`pid`, `name`, subtree `rssMb`, `processes`, `kind`, `sessionId`/`provider` when claimed) and per-session `sessions` rows (`detailLoaded`, `running`, `residentMessages`/`residentActivities`/`residentBytes`). A `"shutdown": true` line is the clean-exit marker |
@@ -15,7 +16,8 @@ and how to read them together.
 
 Analytics are release-only; the files exist in every build and are the
 fallback forensics. `daemon-stats.jsonl` and `daemon-panics.jsonl` each
-cap at 512 KB by keeping the newest half.
+cap at 512 KB by keeping the newest half; `errors.jsonl` caps at 256 KB
+the same way.
 
 ## How the supervisor decides
 

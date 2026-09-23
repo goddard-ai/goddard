@@ -742,6 +742,7 @@ pub enum PersistedSettingsPage {
     Experiments,
     Integrations,
     Keybindings,
+    Diagnostics,
 }
 
 /// The Review surface's chosen diff source — mirrors `review_diff::Source`

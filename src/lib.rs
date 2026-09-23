@@ -37,6 +37,7 @@ mod browser;
 mod computer_use;
 mod custom_commands;
 pub mod daemon;
+mod diagnostics;
 mod driver;
 mod fonts;
 mod input;
