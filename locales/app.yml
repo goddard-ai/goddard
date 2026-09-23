@@ -4099,6 +4099,8 @@ sync_branch.syncing:
   en: "Syncing %{branch}…"
 sync_branch.synced:
   en: Synced %{branch}
+sync_branch.up_to_date:
+  en: "%{branch} is already up to date with %{upstream}"
 sync_branch.busy:
   en: Another Git operation is still running
 

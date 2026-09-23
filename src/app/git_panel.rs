@@ -1924,7 +1924,7 @@ impl Waku {
             Ok(WorkspaceResult::SyncBase { checkout, outcome }) => {
                 self.finish_sync_base(&op, checkout, outcome, cx);
             }
-            Ok(_) => {
+            Ok(result) => {
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {
                     panel.error = None;
                     if matches!(op.pending, GitPanelPending::Committing) {
@@ -1934,11 +1934,23 @@ impl Waku {
                     }
                 }
                 if let Some(branch) = &op.sync_branch_name {
-                    self.settle_operation_toast(
-                        op.toast_id,
-                        tr!("sync_branch.synced", branch = branch.clone()),
-                        ToastTone::Success,
-                    );
+                    let (message, tone) = match result {
+                        WorkspaceResult::Pull {
+                            outcome: PullOutcome::UpToDate { upstream },
+                        } => (
+                            tr!(
+                                "sync_branch.up_to_date",
+                                branch = branch.clone(),
+                                upstream = upstream
+                            ),
+                            ToastTone::Notice,
+                        ),
+                        _ => (
+                            tr!("sync_branch.synced", branch = branch.clone()),
+                            ToastTone::Success,
+                        ),
+                    };
+                    self.settle_operation_toast(op.toast_id, message, tone);
                 }
                 self.invalidate_workspace_queries(cx);
                 self.refresh_git_panel(cx);

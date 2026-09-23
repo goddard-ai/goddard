@@ -475,8 +475,9 @@ impl Waku {
         self.refresh_git_panel_commits(cx);
     }
 
-    /// A `SyncBase` op resolved. `Clean` re-fires the push the modal was
-    /// recovering; `Conflict` hands off to the sync-conflict modal rooted
+    /// A `SyncBase` op resolved. `Clean` — or `UpToDate`, the same thing
+    /// for a base that had nothing to take — re-fires the push the modal
+    /// was recovering; `Conflict` hands off to the sync-conflict modal rooted
     /// at the checkout that owns the base — its `workspace` drives the
     /// modal's resolve/abort/merge actions, so it must be that checkout,
     /// not the session worktree the request came from.
@@ -488,7 +489,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         match outcome {
-            PullOutcome::Clean => {
+            PullOutcome::Clean | PullOutcome::UpToDate { .. } => {
                 self.invalidate_base_push_state(&op.workspace);
                 self.invalidate_workspace_queries(cx);
                 self.refresh_git_panel(cx);
@@ -496,11 +497,18 @@ impl Waku {
                 if let Some((workspace, base)) = self.push_base_retry.take() {
                     self.start_push_base(workspace, base, cx);
                 } else {
-                    self.settle_operation_toast(
-                        op.toast_id,
-                        tr!("push_base.synced"),
-                        ToastTone::Success,
-                    );
+                    let (message, tone) = match outcome {
+                        PullOutcome::UpToDate { upstream } => (
+                            tr!(
+                                "push_base.up_to_date",
+                                base = op.base.clone().unwrap_or_default(),
+                                upstream = upstream
+                            ),
+                            ToastTone::Notice,
+                        ),
+                        _ => (tr!("push_base.synced"), ToastTone::Success),
+                    };
+                    self.settle_operation_toast(op.toast_id, message, tone);
                 }
             }
             PullOutcome::Conflict { in_progress, files } => {

@@ -1152,7 +1152,7 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
                   onPress={() =>
                     runOp("pull", async (client) => {
                       const outcome = await pullWorkspace(client, root);
-                      if (outcome !== "clean") {
+                      if (typeof outcome === "object" && "conflict" in outcome) {
                         throw new Error(
                           `Pull stopped on a conflict in ${outcome.conflict.files.length} ${
                             outcome.conflict.files.length === 1 ? "file" : "files"

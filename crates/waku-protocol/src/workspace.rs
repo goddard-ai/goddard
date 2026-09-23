@@ -940,8 +940,10 @@ pub enum WorkspaceOperation {
         path: String,
     },
     /// Integrate upstream changes (`git pull --rebase` or `--no-rebase`).
-    /// Conflict means an integration is still in progress; `AbortSync` or
-    /// the agent has to resolve it before anything else can commit.
+    /// An upstream with nothing HEAD lacks reports `UpToDate` — the fetch
+    /// ran but no merge or rebase did. `Conflict` means an integration is
+    /// still in progress; `AbortSync` or the agent has to resolve it before
+    /// anything else can commit.
     PullUpstream {
         #[ts(type = "string")]
         cwd: PathBuf,

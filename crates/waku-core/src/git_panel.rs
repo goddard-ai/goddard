@@ -217,8 +217,23 @@ pub fn ignore(cwd: &Path, path: &str) -> anyhow::Result<()> {
 /// Integrate upstream: `git pull --rebase` or `--no-rebase`. A clean pull
 /// reports `Clean`; a conflicted one leaves the integration in progress and
 /// reports `Conflict`, leaving the caller to offer resolve/merge/abort.
+/// When the upstream has nothing HEAD lacks — measured after refreshing its
+/// tracking ref — the merge or rebase never runs and the pull reports
+/// `UpToDate`: a no-op `git pull` still fires hooks, and the rebase form
+/// refuses outright on a dirty tree it had no work to do in.
 pub fn pull(cwd: &Path, strategy: PullStrategy) -> anyhow::Result<PullOutcome> {
     ensure_repository(cwd)?;
+    // A stopped rebase or merge answers Conflict before anything else —
+    // `git pull` would just fail on top of it.
+    if let Some(in_progress) = sync_in_progress(cwd)? {
+        return Ok(PullOutcome::Conflict {
+            in_progress,
+            files: conflicted_paths(cwd)?,
+        });
+    }
+    if let Some((upstream, 0)) = upstream_pending(cwd)? {
+        return Ok(PullOutcome::UpToDate { upstream });
+    }
     let flag = match strategy {
         PullStrategy::Rebase => "--rebase",
         PullStrategy::Merge => "--no-rebase",
@@ -234,6 +249,33 @@ pub fn pull(cwd: &Path, strategy: PullStrategy) -> anyhow::Result<PullOutcome> {
         });
     }
     bail!("{}", command_error(&output))
+}
+
+/// The checkout's tracking ref and the commits it has that HEAD lacks —
+/// `None` when there is nothing to measure: a detached HEAD, a branch
+/// tracking nothing, or a tracking ref that still does not resolve after a
+/// fetch (the remote branch is gone, or the config maps it nowhere). The
+/// fetch runs scoped like [`fetch_upstream`]'s, so a `0` describes the
+/// remote now rather than the last time anything fetched.
+fn upstream_pending(cwd: &Path) -> anyhow::Result<Option<(String, u64)>> {
+    let Some(branch) = git_optional_stdout(cwd, &["branch", "--show-current"])?
+        .filter(|branch| !branch.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(upstream) = branch_upstream(cwd, &branch)? else {
+        return Ok(None);
+    };
+    let (remote, remote_branch) = fetch_source(cwd, &branch)?;
+    // `.` tracks another local branch — nothing to fetch, the count reads it.
+    if remote != "." {
+        scoped_fetch(cwd, &remote, &remote_branch)?;
+    }
+    Ok(
+        git_optional_stdout(cwd, &["rev-list", "--count", "HEAD..@{upstream}"])?
+            .and_then(|count| count.parse::<u64>().ok())
+            .map(|behind| (upstream, behind)),
+    )
 }
 
 /// The working-tree paths still unmerged — what `git status` shows as
@@ -324,35 +366,52 @@ pub fn base_push_state(cwd: &Path, base: &str) -> anyhow::Result<BasePushState> 
     })
 }
 
-/// Refresh `base`'s remote-tracking ref: `git fetch <remote> <branch>`,
-/// scoped so only that tracking ref (and FETCH_HEAD) moves — the local base
-/// and the working tree are untouched. `Ok(false)` when `base` tracks a
+/// What `branch`'s upstream config fetches: `branch.<name>.remote` — "origin"
+/// when unset, `.` when the upstream is another local branch — and the
+/// remote branch `branch.<name>.merge` names, defaulting to `branch` itself.
+fn fetch_source(cwd: &Path, branch: &str) -> anyhow::Result<(String, String)> {
+    let remote = git_optional_stdout(cwd, &["config", &format!("branch.{branch}.remote")])?
+        .unwrap_or_else(|| "origin".to_owned());
+    let remote_branch = git_optional_stdout(cwd, &["config", &format!("branch.{branch}.merge")])?
+        .and_then(|merge| merge.strip_prefix("refs/heads/").map(str::to_owned))
+        .unwrap_or_else(|| branch.to_owned());
+    Ok((remote, remote_branch))
+}
+
+/// `git fetch <remote> <branch>`, scoped so only that tracking ref (and
+/// FETCH_HEAD) moves — the local branch and the working tree are untouched.
+/// BatchMode makes a key that needs a passphrase fail fast rather than
+/// prompt from a fetch the user did not ask for. A configured
+/// `core.sshCommand` (or an exported GIT_SSH_COMMAND, which outranks the
+/// `-c` flag) wins — that is the user's own setup.
+fn scoped_fetch(cwd: &Path, remote: &str, remote_branch: &str) -> anyhow::Result<()> {
+    let mut args: Vec<String> = Vec::new();
+    if git_optional_stdout(cwd, &["config", "core.sshCommand"])?.is_none() {
+        args.push("-c".to_owned());
+        args.push("core.sshCommand=ssh -oBatchMode=yes".to_owned());
+    }
+    args.extend([
+        "fetch".to_owned(),
+        remote.to_owned(),
+        remote_branch.to_owned(),
+    ]);
+    git_success(cwd, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    Ok(())
+}
+
+/// Refresh `base`'s remote-tracking ref. `Ok(false)` when `base` tracks a
 /// local branch or nothing at all: there is no remote to ask.
 pub fn fetch_upstream(cwd: &Path, base: &str) -> anyhow::Result<bool> {
     ensure_repository(cwd)?;
     if branch_upstream(cwd, base)?.is_none() {
         return Ok(false);
     }
-    let remote = git_optional_stdout(cwd, &["config", &format!("branch.{base}.remote")])?
-        .unwrap_or_else(|| "origin".to_owned());
+    let (remote, remote_branch) = fetch_source(cwd, base)?;
     // `.` tracks another local branch — nothing remote to fetch.
     if remote == "." {
         return Ok(false);
     }
-    let remote_branch = git_optional_stdout(cwd, &["config", &format!("branch.{base}.merge")])?
-        .and_then(|merge| merge.strip_prefix("refs/heads/").map(str::to_owned))
-        .unwrap_or_else(|| base.to_owned());
-    // BatchMode makes a key that needs a passphrase fail fast rather than
-    // prompt from a background fetch the user did not ask for. A configured
-    // `core.sshCommand` (or an exported GIT_SSH_COMMAND, which outranks the
-    // `-c` flag) wins — that is the user's own setup.
-    let mut args: Vec<String> = Vec::new();
-    if git_optional_stdout(cwd, &["config", "core.sshCommand"])?.is_none() {
-        args.push("-c".to_owned());
-        args.push("core.sshCommand=ssh -oBatchMode=yes".to_owned());
-    }
-    args.extend(["fetch".to_owned(), remote, remote_branch]);
-    git_success(cwd, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    scoped_fetch(cwd, &remote, &remote_branch)?;
     Ok(true)
 }
 
@@ -1697,6 +1756,43 @@ mod tests {
             panic!("expected Rejected, got {outcome:?}");
         };
         assert!(message.contains("rejected") || message.contains("fetch first"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn pull_reports_up_to_date_without_integrating() {
+        let (root, repository, _remote) = remote_repository();
+        // A dirty tree makes `git pull --rebase` refuse outright — with
+        // nothing upstream to take, the pull never gets that far.
+        std::fs::write(repository.join("file.txt"), "uncommitted\n").unwrap();
+
+        let outcome = pull(&repository, PullStrategy::Rebase).unwrap();
+        assert_eq!(
+            outcome,
+            PullOutcome::UpToDate {
+                upstream: "origin/main".to_owned()
+            }
+        );
+        // No integration ran: the edit is still there and nothing is
+        // in progress.
+        assert_eq!(
+            git_stdout(&repository, &["status", "--porcelain"]).unwrap(),
+            " M file.txt"
+        );
+        assert!(sync_in_progress(&repository).unwrap().is_none());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn pull_fetches_then_integrates_upstream_commits() {
+        let (root, repository, remote) = remote_repository();
+        // Another writer moves the upstream after the clone — the stale
+        // tracking ref alone would read nothing behind.
+        remote_writer(&root, &remote);
+
+        let outcome = pull(&repository, PullStrategy::Merge).unwrap();
+        assert_eq!(outcome, PullOutcome::Clean);
+        assert!(repository.join("remote.txt").exists());
         std::fs::remove_dir_all(root).ok();
     }
 

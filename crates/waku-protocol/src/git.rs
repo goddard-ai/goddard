@@ -248,6 +248,10 @@ pub enum SyncInProgress {
 pub enum PullOutcome {
     /// The pull applied cleanly; the checkout is caught up.
     Clean,
+    /// The upstream had nothing HEAD lacked — the fetch ran but no
+    /// integration did. `upstream` is the tracking ref the check measured
+    /// against ("origin/main").
+    UpToDate { upstream: String },
     /// The pull stopped on conflicts and an integration is still in progress.
     Conflict {
         in_progress: SyncInProgress,
