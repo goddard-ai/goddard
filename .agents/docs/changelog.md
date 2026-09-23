@@ -1,5 +1,32 @@
 # Changelog
 
+## Write for the reader
+
+Write for a developer who uses Goddard but knows nothing about the
+implementation or the work that led to the change. Assume they are competent
+and busy, but missing context. Each entry should help them understand what
+changed for them.
+
+- Start with the action they can take or the problem they will stop encountering.
+- Name the relevant screen, control, or situation so they can recognize it.
+- Explain unfamiliar concepts briefly when they are necessary.
+- Include defaults, opt-in requirements, and limitations when they affect use.
+- Keep implementation details only when they help the reader make a decision.
+- Describe the finished behavior. Omit development history, internal identifiers,
+  and explanations of how the code broke.
+- Prefer one short sentence. Add a second when the reader needs context.
+
+For example, replace “Fixed a crash caused by registering a file link's context
+menu while the transcript was locked for rendering” with “Fixed a crash when a
+task's activity included a clickable file name.”
+
+Before submitting, ask: **Could someone who never saw the task understand this
+entry, recognize when it matters, and know where to try it?** If not, rewrite it.
+Check that simpler wording still describes the actual behavior without adding
+unsupported promises.
+
+## Fragment and release rules
+
 - Record changes as `.changelog/<prefix>-<slug>.md` fragments — one bullet
   per file — never by editing `CHANGELOG.md` directly; `bun run changelog`
   folds them into the released version's section, grouped under

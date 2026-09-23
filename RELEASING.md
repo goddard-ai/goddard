@@ -182,8 +182,12 @@ GitHub release at the end — that stays a human's click.
    bun run changelog
    ```
    This creates the `## [<version>]` section for the Cargo version in each
-   changelog that has fragments and deletes the consumed ones. Commit it with
-   the version bump (`chore: release v<version>`).
+   changelog that has fragments and deletes the consumed ones. Before committing
+   or tagging, review the new desktop and mobile sections as complete release
+   notes using the [changelog writing guidance](.agents/docs/changelog.md#write-for-the-reader).
+   Remove unexplained jargon, combine related entries, and check each claim
+   against what actually ships. Commit the reviewed notes with the version bump
+   (`chore: release v<version>`).
 7. **Promote `dev` to `main`** — `dev` is a shared branch, so commits can land
    after the audit. Re-check the delta first, and give any new arrival the same
    fragment audit (a missed fragment just means a missing release-notes bullet —
