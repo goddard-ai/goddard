@@ -817,6 +817,7 @@ mod tests {
                 cwd: cwd.clone(),
                 session_id,
                 turn_count: 1,
+                untouched: false,
             },
             WorkspaceOperation::CreateWorktree {
                 project_path: cwd.clone(),

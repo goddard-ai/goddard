@@ -1,0 +1,1 @@
+- Stopping a turn before it uses a tool that could change files no longer makes the next message wait for a full worktree check. Files changed in earlier turns remain available in the checkpoint.

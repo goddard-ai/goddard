@@ -386,8 +386,17 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             cwd,
             session_id,
             turn_count,
+            untouched,
         } => WorkspaceResult::Checkpoint {
-            checkpoint: crate::checkpoint::capture_turn(&cwd, session_id, turn_count)?,
+            checkpoint: if untouched {
+                crate::checkpoint::capture_untouched_turn(&cwd, session_id, turn_count)?
+            } else {
+                None
+            }
+            .map_or_else(
+                || crate::checkpoint::capture_turn(&cwd, session_id, turn_count),
+                Ok,
+            )?,
         },
         WorkspaceOperation::CaptureRef { cwd, git_ref } => {
             crate::checkpoint::capture_ref(&cwd, &git_ref)?;

@@ -169,6 +169,37 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
     })
 }
 
+/// An interrupted turn that never ran a tool can use its starting snapshot.
+/// Preserve the existing dirty worktree in that snapshot without scanning it
+/// a second time. A moved HEAD or branch needs the normal branch-aware capture.
+pub fn capture_untouched_turn(
+    cwd: &Path,
+    session_id: Uuid,
+    turn_count: usize,
+) -> anyhow::Result<Option<Checkpoint>> {
+    let start_ref = turn_start_ref(session_id, turn_count);
+    if !has_ref(cwd, &start_ref) {
+        return Ok(None);
+    }
+    let metadata = turn_start_metadata(cwd, &start_ref)?;
+    if metadata.head != resolve_ref(cwd, "HEAD") || metadata.branch != symbolic_head(cwd) {
+        return Ok(None);
+    }
+    let git_ref = checkpoint_ref(session_id, turn_count);
+    let start_commit = resolve_ref(cwd, &start_ref)
+        .ok_or_else(|| anyhow!("turn starting checkpoint `{start_ref}` is unavailable"))?;
+    git_output(cwd, ["update-ref", &git_ref, &start_commit])?;
+    Ok(Some(Checkpoint {
+        turn_count,
+        git_ref,
+        status: CheckpointStatus::Ready,
+        files: Vec::new(),
+        additions: 0,
+        deletions: 0,
+        created_at: unix_time(),
+    }))
+}
+
 /// Snapshot the whole worktree — including untracked files — into `git_ref`.
 /// The commit's first parent is the checkout's HEAD, so a worktree recreated
 /// from the ref can come up on the real commit with the snapshot's
@@ -1290,6 +1321,42 @@ mod tests {
 
         assert_eq!(second.files.len(), 1);
         assert_eq!(second.files[0].path, "second-turn.txt");
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn untouched_later_turn_reuses_its_starting_snapshot() {
+        let directory = diverged_repository();
+        let session_id = Uuid::new_v4();
+        capture_turn_start(&directory, session_id, 1).unwrap();
+        fs::write(directory.join("first-turn.txt"), "first\n").unwrap();
+        capture_turn(&directory, session_id, 1).unwrap();
+
+        capture_turn_start(&directory, session_id, 2).unwrap();
+        let checkpoint = capture_untouched_turn(&directory, session_id, 2)
+            .unwrap()
+            .unwrap();
+        assert!(checkpoint.files.is_empty());
+        assert_eq!(
+            resolve_ref(&directory, &checkpoint.git_ref),
+            resolve_ref(&directory, &turn_start_ref(session_id, 2))
+        );
+        assert_eq!(
+            git_output(
+                &directory,
+                ["show", &format!("{}:first-turn.txt", checkpoint.git_ref)]
+            )
+            .unwrap(),
+            "first\n"
+        );
+
+        capture_turn_start(&directory, session_id, 3).unwrap();
+        git_ok(&directory, &["switch", "--quiet", "feature"]);
+        assert!(
+            capture_untouched_turn(&directory, session_id, 3)
+                .unwrap()
+                .is_none()
+        );
         fs::remove_dir_all(directory).ok();
     }
 

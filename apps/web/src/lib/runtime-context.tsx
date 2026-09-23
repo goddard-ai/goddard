@@ -369,6 +369,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           sessionCwd(saved, project),
           saved.id,
           turn.turn_count,
+          turn.status === 'interrupted' && !saved.transcript_blocks.some((block) =>
+            block.turn_id === turn.id && block.content.kind === 'activities' &&
+            block.content.data.some((activity) =>
+              (activity.file_changes?.length ?? 0) > 0 || activity.kind === 'command' ||
+              activity.kind === 'fileChange' || activity.kind === 'tool',
+            ),
+          ),
         )
       } catch (error) {
         toast.error(translate(localeRef.current, 'errors.capture_turn_checkpoint', {

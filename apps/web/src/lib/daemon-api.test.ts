@@ -154,7 +154,7 @@ describe('turn checkpoints', () => {
       },
     } as unknown as WakuClient
 
-    await expect(captureTurnCheckpoint(client, '/srv/waku', 'session', 2))
+    await expect(captureTurnCheckpoint(client, '/srv/waku', 'session', 2, false))
       .resolves.toEqual(checkpoint)
     expect(command).toEqual({
       type: 'workspace',
@@ -163,6 +163,7 @@ describe('turn checkpoints', () => {
         cwd: '/srv/waku',
         session_id: 'session',
         turn_count: 2,
+        untouched: false,
       },
     })
   })

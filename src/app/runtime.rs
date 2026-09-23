@@ -3621,6 +3621,7 @@ impl Waku {
                     session_id,
                     turn_count,
                     project_path,
+                    untouched: false,
                 });
             }
             for message in &mut session.messages {
@@ -4381,7 +4382,7 @@ impl Waku {
     /// [`Self::start_pending_checkpoint_captures`], which every caller that
     /// holds a `Context` runs straight after queueing.
     pub(super) fn capture_latest_turn_checkpoint_for(&mut self, session_id: Uuid) {
-        let Some((session, turn_count)) = self
+        let Some((session, turn)) = self
             .state
             .sessions
             .iter()
@@ -4391,11 +4392,12 @@ impl Waku {
                     .turns
                     .last()
                     .filter(|turn| turn.status != TurnStatus::Running)
-                    .map(|turn| (session, turn.turn_count))
+                    .map(|turn| (session, turn))
             })
         else {
             return;
         };
+        let turn_count = turn.turn_count;
         // Incognito sessions leave no artifacts behind — a checkpoint is a
         // git ref that outlives the session.
         if session.incognito {
@@ -4415,6 +4417,19 @@ impl Waku {
                 session_id,
                 turn_count,
                 project_path,
+                untouched: turn.status == TurnStatus::Interrupted
+                    && !session.transcript_blocks.iter().any(|block| {
+                        block.turn_id == Some(turn.id)
+                            && block.activities.iter().any(|activity| {
+                                !activity.file_changes.is_empty()
+                                    || matches!(
+                                        activity.kind,
+                                        ActivityKind::Command
+                                            | ActivityKind::FileChange
+                                            | ActivityKind::Tool
+                                    )
+                            })
+                    }),
             });
     }
 
@@ -4431,6 +4446,7 @@ impl Waku {
                 session_id,
                 turn_count,
                 project_path,
+                untouched,
             } = request;
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
                 continue;
@@ -4452,6 +4468,7 @@ impl Waku {
                                     cwd: project_path,
                                     session_id,
                                     turn_count,
+                                    untouched,
                                 },
                             )? {
                                 waku_client::WorkspaceResult::Checkpoint { checkpoint } => {

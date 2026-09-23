@@ -862,6 +862,7 @@ struct PendingCheckpointCapture {
     session_id: Uuid,
     turn_count: usize,
     project_path: PathBuf,
+    untouched: bool,
 }
 
 /// Sessions between accepting a submission and handing it to a provider.
@@ -4854,6 +4855,7 @@ impl Waku {
                     session_id: session.id,
                     turn_count,
                     project_path,
+                    untouched: false,
                 });
             }
             for message in &mut session.messages {

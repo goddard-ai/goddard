@@ -702,6 +702,7 @@ impl WakuBackend {
         cwd: PathBuf,
         session_id: Uuid,
         turn_count: usize,
+        untouched: bool,
     ) -> anyhow::Result<Checkpoint> {
         let capture_lock = self
             .checkpoint_capture_locks
@@ -737,7 +738,15 @@ impl WakuBackend {
         }
 
         let capture_started = std::time::Instant::now();
-        let checkpoint = crate::checkpoint::capture_turn(&cwd, session_id, turn_count)?;
+        let checkpoint = if untouched {
+            crate::checkpoint::capture_untouched_turn(&cwd, session_id, turn_count)?
+        } else {
+            None
+        }
+        .map_or_else(
+            || crate::checkpoint::capture_turn(&cwd, session_id, turn_count),
+            Ok,
+        )?;
         // The transcript holds a "checking for changes" card open for this
         // round trip — the elapsed line is the only record of how long the
         // worktree snapshot actually took.
@@ -2450,10 +2459,12 @@ impl Backend for WakuBackend {
                         cwd,
                         session_id,
                         turn_count,
+                        untouched,
                     },
             } => Ok(ResponsePayload::Workspace {
                 result: WorkspaceResult::Checkpoint {
-                    checkpoint: self.capture_turn_checkpoint(cwd, session_id, turn_count)?,
+                    checkpoint: self
+                        .capture_turn_checkpoint(cwd, session_id, turn_count, untouched)?,
                 },
             }),
             Command::Workspace { operation } => {

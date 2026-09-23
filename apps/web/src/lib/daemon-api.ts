@@ -411,12 +411,14 @@ export async function captureTurnCheckpoint(
   cwd: string,
   sessionId: string,
   turnCount: number,
+  untouched: boolean,
 ): Promise<Checkpoint> {
   const result = await workspaceRequest(client, {
     type: 'captureTurn',
     cwd,
     session_id: sessionId,
     turn_count: turnCount,
+    untouched,
   })
   if (result.type !== 'checkpoint') {
     throw new Error('The daemon returned an unexpected checkpoint response')

@@ -1080,6 +1080,8 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         session_id: Uuid,
         turn_count: usize,
+        #[serde(default)]
+        untouched: bool,
     },
     CaptureRef {
         #[ts(type = "string")]
