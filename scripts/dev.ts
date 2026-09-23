@@ -2,6 +2,7 @@
 
 import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
+import { startDevServe, type DevServe } from "./dev-serve";
 import {
   mkdirSync,
   readFileSync,
@@ -15,11 +16,19 @@ import { WakuClient } from "../packages/waku-client/src/client";
 
 const root = resolve(import.meta.dir, "..");
 const isMacOS = process.platform === "darwin";
-const appName = "Goddard Debug";
+// --serve: the watcher builds a signed release bundle and publishes it as the
+// Dev channel's appcast (see dev-serve.ts) instead of a debug app.
+const serveMode = Bun.argv.slice(2).includes("--serve");
+if (serveMode && !isMacOS) {
+  console.error("[goddard-dev] --serve requires macOS.");
+  process.exit(2);
+}
+const profile = serveMode ? "release" : "debug";
+const appName = serveMode ? "Goddard" : "Goddard Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const appPath = isMacOS
-  ? join(targetDir, "debug/Goddard Debug.app")
+  ? join(targetDir, `${profile}/${appName}.app`)
   : join(targetDir, `debug/goddard${executableSuffix}`);
 const daemonPath = join(
   targetDir,
@@ -118,6 +127,7 @@ $.cwd(root);
 
 let app: ReturnType<typeof Bun.spawn> | undefined;
 let daemon: ReturnType<typeof Bun.spawn> | undefined;
+let serve: DevServe | undefined;
 let daemonBind: string | undefined;
 let daemonAddress: string | undefined;
 let daemonRestartPending = false;
@@ -629,12 +639,17 @@ async function build(target: BuildTarget): Promise<boolean> {
   }
   const appArgs = isMacOS
     ? [
+        ...(serveMode ? ["--release"] : []),
         "--package",
         "waku",
         "--bin",
         "goddard",
         "--bin",
         "goddard_js_repl",
+        // The release bundle embeds its own daemon next to the executable.
+        ...(serveMode
+          ? ["--package", "waku-daemon", "--bin", "goddard-daemon"]
+          : []),
         "--package",
         "waku-agent",
         "--bin",
@@ -664,12 +679,15 @@ async function build(target: BuildTarget): Promise<boolean> {
     // The watcher already ran cargo itself so it could draw progress;
     // bundle.sh only packages and signs the binaries it just produced.
     const result =
-      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${join(root, "scripts/bundle.sh")} debug`.nothrow();
+      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${join(root, "scripts/bundle.sh")} ${profile}`.nothrow();
     if (result.exitCode !== 0) {
       console.error(
         "[goddard-dev] Bundle failed; keeping the current app open.",
       );
       return false;
+    }
+    if (serveMode && serve !== undefined && !(await serve.deploy(appPath))) {
+      console.error("[goddard-dev] Deploy failed; the update feed is stale.");
     }
   } else {
     try {
@@ -1077,7 +1095,10 @@ function printBanner(): void {
   console.log(
     `\n  ${bold("goddard dev")} ${dim("— watching for changes")}\n\n` +
       `  ${green("➜")}  ${dim("app")}     ${appName}${isMacOS ? ".app" : ""}\n` +
-      `  ${green("➜")}  ${dim("daemon")}  ${daemonAddress} ${dim(`(${daemonDetail})`)}`,
+      `  ${green("➜")}  ${dim("daemon")}  ${daemonAddress} ${dim(`(${daemonDetail})`)}` +
+      (serve === undefined
+        ? ""
+        : `\n  ${green("➜")}  ${dim("feed")}    ${serve.appcastUrl} ${dim(`(serving ${serve.updatesDir})`)}`),
   );
 }
 
@@ -1477,6 +1498,7 @@ async function cleanup(): Promise<void> {
   closeCommandLoop();
   await stopApp();
   await stopDaemon();
+  await serve?.stop();
   await releaseHyprlandRules();
 }
 
@@ -1484,6 +1506,15 @@ process.on("SIGINT", () => void cleanup());
 process.on("SIGTERM", () => void cleanup());
 
 startWatchers();
+if (serveMode) {
+  try {
+    serve = await startDevServe({ root, targetDir });
+  } catch (error) {
+    console.error("[goddard-dev] Could not start the update feed:", error);
+    closeWatchers();
+    process.exit(1);
+  }
+}
 building = true;
 const initialAppRevision = appChangeRevision;
 const initialBuildSucceeded = await build("app");

@@ -1703,6 +1703,26 @@ impl Waku {
                 theme,
                 search,
             ));
+            if cfg!(target_os = "macos") {
+                let channel = self.state.update_channel;
+                head_cards.extend(setting_card(
+                    tr!("settings.update_channel"),
+                    tr!("settings.update_channel_description"),
+                    self.setting_selector(
+                        "update-channel-selector",
+                        UpdateChannel::ALL
+                            .into_iter()
+                            .map(|option| (option, tr!(option.label_key())))
+                            .collect(),
+                        channel,
+                        220.0,
+                        cx,
+                        |this, channel, _window, cx| this.set_update_channel(channel, cx),
+                    ),
+                    theme,
+                    search,
+                ));
+            }
         }
 
         let mut session_cards: Vec<AnyElement> = [
@@ -2603,6 +2623,26 @@ impl Waku {
             .and_then(|updater| updater.0.as_ref())
         {
             updater.set_automatically_checks_for_updates(enabled);
+        }
+        cx.notify();
+    }
+
+    fn set_update_channel(&mut self, channel: UpdateChannel, cx: &mut Context<Self>) {
+        if self.state.update_channel == channel {
+            return;
+        }
+        self.state.update_channel = channel;
+        self.save();
+        if let Some(updater) = cx
+            .try_global::<crate::updater::UpdaterState>()
+            .and_then(|updater| updater.0.as_ref())
+        {
+            updater.set_update_channel(channel);
+            // The new feed should answer now rather than at the next
+            // scheduled check — silent, like the launch-time one.
+            if updater.automatically_checks_for_updates() {
+                updater.check_for_updates_in_background();
+            }
         }
         cx.notify();
     }

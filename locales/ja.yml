@@ -543,6 +543,10 @@ settings.automatic_updates_description: バックグラウンドで新しいバ�
 settings.check_for_updates: アップデートの確認
 settings.check_for_updates_description: "バージョン %{version} がインストールされています"
 settings.check_now: 今すぐ確認
+settings.update_channel: アップデートチャンネル
+settings.update_channel_description: Dev はリリース版ではなく dev ワークツリーが公開したビルドを取得します
+settings.update_channel_stable: 安定版
+settings.update_channel_dev: Dev
 settings.share_anonymous_usage_data: 匿名の使用状況データを共有
 settings.share_anonymous_usage_data_description: 機能の利用状況と信頼性に関するデータを共有して、Goddard の改善にご協力ください。プロンプト、回答、プロジェクト名、ファイルパスなどの個人データは一切含まれません
 

@@ -13,6 +13,8 @@
 //! real from a debug bundle.
 
 use gpui::Global;
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+use waku_client::persistence::UpdateChannel;
 
 /// App-wide handle to the updater, if this build can update itself.
 pub struct UpdaterState(pub Option<Updater>);
@@ -59,11 +61,16 @@ mod macos {
     use objc2_foundation::NSString;
 
     use super::{UpdateStatus, UpdaterEvent};
+    use waku_client::persistence::{UpdateChannel, load_update_channel};
 
     const USER_UPDATE_CHOICE_INSTALL: isize = 1;
     const UPDATE_CHECK_USER_INITIATED: isize = 0;
     const UPDATE_CHECK_IN_BACKGROUND: isize = 1;
     const MANUAL_CHECK_MAX_RETRIES: u16 = 200;
+    /// The Dev channel's feed: a Cloudflare tunnel in front of the serving
+    /// worktree (`bun run dev --serve`). `None` — the default — falls back to
+    /// the bundle's SUFeedURL.
+    const DEV_FEED_URL: &str = "https://dev.goddardai.org/appcast.xml";
 
     extern_protocol!(
         /// Dynamically loaded from the embedded Sparkle framework.
@@ -90,6 +97,10 @@ mod macos {
         manual_check_requested: Rc<Cell<bool>>,
         manual_check_retry_count: Cell<u16>,
         pending_update: RefCell<Option<PendingUpdate>>,
+        /// The Dev channel's feed URL; `None` leaves the check on the
+        /// bundle's SUFeedURL. Sparkle asks for it on every check through
+        /// `feedURLStringForUpdater:`, so a channel change applies live.
+        feed_url: RefCell<Option<Retained<NSString>>>,
         status: Rc<Cell<UpdateStatus>>,
         events: smol::channel::Sender<UpdaterEvent>,
     }
@@ -405,6 +416,20 @@ mod macos {
         }
 
         unsafe impl SPUUpdaterDelegate for UserDriver {
+            /// Sparkle consults this on each check; `nil` keeps the bundle's
+            /// SUFeedURL, so only the Dev channel answers an override. The
+            /// returned string is borrowed — the ivar keeps it alive and
+            /// Sparkle retains it on receipt.
+            #[unsafe(method(feedURLStringForUpdater:))]
+            fn feed_url_string_for_updater(&self, _updater: &AnyObject) -> *mut NSString {
+                self.ivars()
+                    .feed_url
+                    .borrow()
+                    .as_ref()
+                    .map(|url| (&**url as *const NSString).cast_mut())
+                    .unwrap_or(std::ptr::null_mut())
+            }
+
             #[unsafe(method(updater:didFinishUpdateCycleForUpdateCheck:error:))]
             fn did_finish_update_cycle(
                 &self,
@@ -426,6 +451,7 @@ mod macos {
         fn new(
             mtm: MainThreadMarker,
             standard_driver: Retained<AnyObject>,
+            feed_url: Option<Retained<NSString>>,
             status: Rc<Cell<UpdateStatus>>,
             events: smol::channel::Sender<UpdaterEvent>,
         ) -> Retained<Self> {
@@ -436,10 +462,15 @@ mod macos {
                 manual_check_requested: Rc::new(Cell::new(false)),
                 manual_check_retry_count: Cell::new(0),
                 pending_update: RefCell::new(None),
+                feed_url: RefCell::new(feed_url),
                 status,
                 events,
             });
             unsafe { msg_send![super(this), init] }
+        }
+
+        fn set_feed_url(&self, feed_url: Option<Retained<NSString>>) {
+            self.ivars().feed_url.replace(feed_url);
         }
 
         fn uses_standard_presentation(&self) -> bool {
@@ -637,7 +668,11 @@ mod macos {
             }));
             let (event_tx, events) = smol::channel::unbounded();
             let preview_events = preview.then(|| event_tx.clone());
-            let user_driver = UserDriver::new(mtm, standard_driver, status.clone(), event_tx);
+            // The settings file is the only place the channel exists this
+            // early — the full state load happens after the window opens.
+            let feed_url = channel_feed_url(load_update_channel());
+            let user_driver =
+                UserDriver::new(mtm, standard_driver, feed_url, status.clone(), event_tx);
             let updater = unsafe {
                 let allocated: *mut AnyObject = msg_send![updater_class, alloc];
                 let initialized: *mut AnyObject = msg_send![
@@ -723,6 +758,23 @@ mod macos {
             self.events.clone()
         }
 
+        /// Point checks at the picked channel's feed. Sparkle asks the
+        /// delegate for the URL on every check, so this takes effect on the
+        /// next check — call `check_for_updates_in_background` to run one now.
+        pub fn set_update_channel(&self, channel: UpdateChannel) {
+            if let Some(user_driver) = &self.user_driver {
+                user_driver.set_feed_url(channel_feed_url(channel));
+            }
+        }
+
+        /// A silent check like the launch-time one — the channel switch uses
+        /// it so the new feed answers now instead of at the next interval.
+        pub fn check_for_updates_in_background(&self) {
+            if let Some(updater) = &self.updater {
+                let _: () = unsafe { msg_send![&**updater, checkForUpdatesInBackground] };
+            }
+        }
+
         /// Whether Sparkle checks for updates on its own schedule. Sparkle
         /// owns the persisted value in this app's user defaults.
         pub fn automatically_checks_for_updates(&self) -> bool {
@@ -757,6 +809,15 @@ mod macos {
             {
                 let _ = events.try_send(UpdaterEvent::StatusChanged(status));
             }
+        }
+    }
+
+    /// `Some` when the channel serves its own feed, `None` when the bundle's
+    /// SUFeedURL should answer.
+    fn channel_feed_url(channel: UpdateChannel) -> Option<Retained<NSString>> {
+        match channel {
+            UpdateChannel::Stable => None,
+            UpdateChannel::Dev => Some(NSString::from_str(DEV_FEED_URL)),
         }
     }
 
@@ -990,6 +1051,7 @@ mod windows {
 
     use super::feed::{self, AppcastItem};
     use super::{UpdateStatus, UpdaterEvent};
+    use waku_client::persistence::UpdateChannel;
 
     /// One feed per architecture. A Sparkle appcast has no way to say which
     /// binary an item is for, and guessing from the enclosure filename would
@@ -1074,6 +1136,15 @@ mod windows {
         /// "already current" and failures.
         pub fn check_for_updates(&self) {
             self.start_check(true);
+        }
+
+        /// The Dev channel is a macOS feed; this updater keeps its own
+        /// per-architecture URL.
+        pub fn set_update_channel(&self, _channel: UpdateChannel) {}
+
+        /// Matches the macOS interface; a plain silent check.
+        pub fn check_for_updates_in_background(&self) {
+            self.start_check(false);
         }
 
         /// `user_initiated` decides only what is reported at the end. A check
@@ -1468,6 +1539,10 @@ impl Updater {
     }
 
     pub fn check_for_updates(&self) {}
+
+    pub fn set_update_channel(&self, _channel: UpdateChannel) {}
+
+    pub fn check_for_updates_in_background(&self) {}
 
     pub fn install_available_update(&self) -> bool {
         false

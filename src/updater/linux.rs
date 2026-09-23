@@ -22,6 +22,7 @@ use flate2::read::GzDecoder;
 
 use super::feed::{self, AppcastItem};
 use super::{UpdateStatus, UpdaterEvent};
+use waku_client::persistence::UpdateChannel;
 
 const PUBLIC_ED_KEY: &str = env!("GODDARD_SPARKLE_PUBLIC_ED_KEY");
 const MANAGED_MARKER: &str = "share/goddard/self-update-v1";
@@ -187,6 +188,15 @@ impl Updater {
 
     pub fn check_for_updates(&self) {
         self.start_check(true);
+    }
+
+    /// The Dev channel is a macOS feed; this updater keeps its own
+    /// per-architecture URL.
+    pub fn set_update_channel(&self, _channel: UpdateChannel) {}
+
+    /// Matches the macOS interface; a plain silent check.
+    pub fn check_for_updates_in_background(&self) {
+        self.start_check(false);
     }
 
     fn start_check(&self, user_initiated: bool) {

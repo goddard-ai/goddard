@@ -68,6 +68,7 @@ use crate::persistence::{
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
     PersistedTranscriptScrollPosition, PersistedWindowState, RecentModelUse,
     SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
+    UpdateChannel,
     VoiceBriefingTtsModel,
 };
 use crate::query::{Query, QueryCache};

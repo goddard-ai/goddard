@@ -176,6 +176,29 @@ impl DefaultWorkspace {
     }
 }
 
+/// Which appcast the updater checks: released builds from
+/// releases.goddardai.org, or builds published by a dev worktree serving
+/// dev.goddardai.org (`bun run dev --serve`). macOS only — the Windows and
+/// Linux updaters keep their own fixed feeds.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Dev,
+}
+
+impl UpdateChannel {
+    pub const ALL: [Self; 2] = [Self::Stable, Self::Dev];
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::Stable => "settings.update_channel_stable",
+            Self::Dev => "settings.update_channel_dev",
+        }
+    }
+}
+
 /// One of the bundled sounds the desktop can play when a task the user is
 /// not looking at finishes its turn. `Crystal` is reserved for starred
 /// projects' completions — it plays in place of the configured sound and is
@@ -895,6 +918,9 @@ pub struct AppSettings {
     /// owning task's chat a commit reminder — unless its last message
     /// already names a commit.
     pub auto_commit_reminder_on_land: bool,
+    /// The appcast the updater checks. Stable reads the bundle's SUFeedURL;
+    /// Dev overrides it with the dev worktree's feed.
+    pub update_channel: UpdateChannel,
     /// Which workspace a fresh task draft opens with: the mode last chosen
     /// for the project, always the local checkout, or always a new
     /// worktree.
@@ -1082,6 +1108,7 @@ impl Default for AppSettings {
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
             auto_commit_reminder_on_land: false,
+            update_channel: UpdateChannel::default(),
             default_workspace: DefaultWorkspace::default(),
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
@@ -1436,6 +1463,10 @@ pub struct PersistedState {
     /// already names a commit.
     #[serde(default)]
     pub auto_commit_reminder_on_land: bool,
+    /// The appcast the updater checks. Stable reads the bundle's SUFeedURL;
+    /// Dev overrides it with the dev worktree's feed.
+    #[serde(default)]
+    pub update_channel: UpdateChannel,
     /// Which workspace a fresh task draft opens with: the mode last chosen
     /// for the project, always the local checkout, or always a new
     /// worktree.
@@ -1872,6 +1903,7 @@ impl PersistedState {
             auto_resolve_in_chat: false,
             auto_resolve_land_conflicts: false,
             auto_commit_reminder_on_land: false,
+            update_channel: UpdateChannel::default(),
             default_workspace: DefaultWorkspace::default(),
             new_worktree_default_branch: false,
             new_worktree_sync_default_branch: false,
@@ -2257,6 +2289,7 @@ impl PersistedState {
             auto_resolve_in_chat: self.auto_resolve_in_chat,
             auto_resolve_land_conflicts: self.auto_resolve_land_conflicts,
             auto_commit_reminder_on_land: self.auto_commit_reminder_on_land,
+            update_channel: self.update_channel,
             default_workspace: self.default_workspace,
             new_worktree_default_branch: self.new_worktree_default_branch,
             new_worktree_sync_default_branch: self.new_worktree_sync_default_branch,
@@ -2377,6 +2410,7 @@ impl PersistedState {
         self.auto_resolve_in_chat = settings.auto_resolve_in_chat;
         self.auto_resolve_land_conflicts = settings.auto_resolve_land_conflicts;
         self.auto_commit_reminder_on_land = settings.auto_commit_reminder_on_land;
+        self.update_channel = settings.update_channel;
         self.default_workspace = settings.default_workspace;
         self.new_worktree_default_branch = settings.new_worktree_default_branch;
         self.new_worktree_sync_default_branch = settings.new_worktree_sync_default_branch;
@@ -2633,6 +2667,21 @@ fn read_app_state_file(path: &Path) -> Option<AppState> {
 /// `WindowOptions` needs its frame at `open_window` time.
 pub fn load_window_state() -> Option<PersistedWindowState> {
     read_app_state_file(&default_app_state_path())?.window_state
+}
+
+/// The picked update channel ahead of the full state load: the updater
+/// chooses its feed while starting, before the daemon's `StateStore` exists.
+/// Missing or unreadable settings leave the stable feed in charge.
+pub fn load_update_channel() -> UpdateChannel {
+    read_app_settings_source(
+        &default_app_settings_path(),
+        &default_legacy_settings_paths(),
+    )
+    .ok()
+    .flatten()
+    .and_then(|(bytes, _)| serde_json::from_slice::<AppSettings>(&bytes).ok())
+    .map(|settings| settings.update_channel)
+    .unwrap_or_default()
 }
 
 fn default_legacy_settings_paths() -> Vec<PathBuf> {
@@ -3694,6 +3743,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.auto_commit_reminder_on_land);
+    }
+
+    #[test]
+    fn update_channel_defaults_stable_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.update_channel, UpdateChannel::Stable);
+        let mut state = PersistedState::empty();
+        assert_eq!(state.update_channel, UpdateChannel::Stable);
+        state.update_channel = UpdateChannel::Dev;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["update_channel"], "dev");
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("update_channel")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.update_channel, UpdateChannel::Dev);
     }
 
     #[test]

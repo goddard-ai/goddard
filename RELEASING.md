@@ -366,6 +366,28 @@ secrets first:
 
 ---
 
+## The dev channel
+
+Settings → General can switch the updater between **Stable** (the bundle's
+`SUFeedURL`, `releases.goddardai.org`) and **Dev** (`dev.goddardai.org`). The
+pick persists in the app settings file and Sparkle consults it on every
+check — switching back to Stable restores the production feed.
+
+`bun run dev --serve` is the publisher: the same watcher, except it builds a
+signed release `Goddard.app`, stamps `CFBundleVersion` with the derived
+release number plus an epoch suffix (`2001.<seconds>` — ahead of the matching
+release, behind the next one), zips it, regenerates `appcast.xml` signed with
+the same Sparkle key releases use, and serves the directory through a named
+Cloudflare tunnel to `dev.goddardai.org`. The tunnel (`goddard-dev`) and its
+DNS route are created on first run when `cloudflared` is logged in; overrides:
+`GODDARD_DEV_HOSTNAME`, `GODDARD_DEV_TUNNEL`, `GODDARD_DEV_SERVE_PORT`.
+
+An update installed from the dev feed is a full signed release — the app it
+lands on keeps working, and its own channel setting decides where it looks
+next.
+
+---
+
 ## Notes
 
 - **Two artifacts per release:** the notarized `.dmg` (what people download)

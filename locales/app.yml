@@ -1659,6 +1659,14 @@ settings.check_for_updates_description:
   en: "Version %{version} is installed"
 settings.check_now:
   en: Check now
+settings.update_channel:
+  en: Update channel
+settings.update_channel_description:
+  en: Dev pulls builds published by a dev worktree instead of released versions
+settings.update_channel_stable:
+  en: Stable
+settings.update_channel_dev:
+  en: Dev
 settings.share_anonymous_usage_data:
   en: Share anonymous usage data
 settings.share_anonymous_usage_data_description:

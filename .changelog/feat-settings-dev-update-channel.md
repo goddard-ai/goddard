@@ -1,0 +1,1 @@
+- **Settings**: On macOS, General settings can now switch the update channel between Stable and Dev. Dev checks dev.goddardai.org — the feed a dev worktree publishes with `bun run dev --serve` — instead of released versions.
