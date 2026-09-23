@@ -56,7 +56,7 @@ impl Waku {
         if page == SettingsPage::Integrations && !self.state.integrations_enabled {
             return;
         }
-        self.open_settings_page_ungated(page, window, cx);
+        self.visit_settings_page(page, window, cx);
     }
 
     /// `open_settings_page` without the opt-in gates — a deep link lands on
@@ -70,12 +70,45 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_settings_page_ungated(page, window, cx);
+        self.visit_settings_page(page, window, cx);
     }
 
-    fn open_settings_page_ungated(
+    /// The departing page as a history entry — page plus the scroll offset
+    /// it is left at, so back/forward can land where it was abandoned.
+    pub(super) fn current_settings_entry(&self) -> Option<SettingsHistoryEntry> {
+        self.settings_page.map(|page| SettingsHistoryEntry {
+            page,
+            offset: self.settings_scroll.offset(),
+        })
+    }
+
+    /// Switch to `page`, recording the departing page in the settings
+    /// back/forward history. Shared by the gated and deep-link entry
+    /// points — a deep link is a visit too.
+    fn visit_settings_page(
         &mut self,
         page: SettingsPage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Reaching a page while settings was closed is a fresh visit —
+        // whichever entry point landed here, the last visit's stack is dead.
+        if self.settings_page.is_none() {
+            self.settings_navigation.clear();
+        }
+        let current = self.current_settings_entry();
+        self.show_settings_page(page, gpui::Point::default(), window, cx);
+        self.settings_navigation.visit(current, page);
+    }
+
+    /// `open_settings_page` minus the history record — the switch itself,
+    /// landing at `offset` rather than the page top when a back/forward hop
+    /// supplies one. History navigation calls this so a hop does not record
+    /// a visit of its own.
+    pub(super) fn show_settings_page(
+        &mut self,
+        page: SettingsPage,
+        offset: gpui::Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -111,8 +144,9 @@ impl Waku {
         // dock's own hover may keep it alive across the swap.
         self.sidebar_dock_zone_hovered = false;
         // Each page starts at its own top; a scroll position carried over
-        // from the previous page would land mid-content.
-        self.settings_scroll.set_offset(gpui::Point::default());
+        // from the previous page would land mid-content. History hops pass
+        // the offset the page was abandoned at instead of the top.
+        self.settings_scroll.set_offset(offset);
         if page == SettingsPage::Usage {
             self.ensure_usage_history(false, cx);
         }

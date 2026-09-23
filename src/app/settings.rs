@@ -972,6 +972,35 @@ impl Waku {
             })
     }
 
+    /// Back/forward between the panes visited this settings visit — the
+    /// same hop ⌘[ and ⌘] (or the titlebar arrows) perform. Returns false
+    /// when the pane history is exhausted — or while the results column is
+    /// up, where a page switch would be invisible — so the caller can fall
+    /// back to leaving settings.
+    pub(super) fn navigate_settings_history(
+        &mut self,
+        back: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.settings_search_query(cx).is_empty() {
+            return false;
+        }
+        let Some(current) = self.current_settings_entry() else {
+            return false;
+        };
+        let target = if back {
+            self.settings_navigation.go_back(current)
+        } else {
+            self.settings_navigation.go_forward(current)
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        self.show_settings_page(target.page, target.offset, window, cx);
+        true
+    }
+
     /// The search field's content, normalized the way the page filter expects.
     fn settings_search_query(&self, cx: &App) -> String {
         self.settings_search
@@ -1071,12 +1100,17 @@ impl Waku {
         // this side. Windows keeps all three on the far side, and a desktop
         // like GNOME keeps none here, so there is nothing to clear and the
         // strip is only somewhere to drag the window by — the content
-        // column's own titlebar carries the rest of that job.
-        let height = if cfg!(target_os = "macos") || left_window_controls.is_some() {
-            48.0
-        } else {
-            12.0
-        };
+        // column's own titlebar carries the rest of that job. The 12px form
+        // is too short for the back/forward pair, which drops to keyboard
+        // and mouse-button hops alone on those platforms.
+        let tall_titlebar = cfg!(target_os = "macos") || left_window_controls.is_some();
+        let height = if tall_titlebar { 48.0 } else { 12.0 };
+
+        // While the results column is up a page hop would be invisible, so
+        // the buttons park along with `navigate_settings_history`.
+        let searching = !self.settings_search_query(cx).is_empty();
+        let back_enabled = !searching && self.settings_navigation.back_target().is_some();
+        let forward_enabled = !searching && self.settings_navigation.forward_target().is_some();
 
         div()
             .id("settings-sidebar-titlebar")
@@ -1095,6 +1129,28 @@ impl Waku {
                     cx,
                 ),
             )
+            .when(tall_titlebar, |titlebar| {
+                titlebar.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .child(self.render_history_button(
+                            "settings-navigate-back",
+                            "icons/arrow-left.svg",
+                            back_enabled,
+                            true,
+                            cx,
+                        ))
+                        .child(self.render_history_button(
+                            "settings-navigate-forward",
+                            "icons/arrow-right.svg",
+                            forward_enabled,
+                            false,
+                            cx,
+                        )),
+                )
+            })
             .child(
                 self.render_settings_drag_region("settings-sidebar-titlebar-drag-region", cx)
                     .h(px(height))
@@ -6605,6 +6661,7 @@ impl Waku {
         self.state.computer_use_experiment_enabled = enabled;
         if !enabled {
             self.state.computer_use_enabled = false;
+            self.settings_navigation.remove(SettingsPage::ComputerUse);
         }
         self.save();
         cx.notify();
@@ -6623,6 +6680,9 @@ impl Waku {
         if !enabled && self.settings_page == Some(SettingsPage::Friends) {
             self.settings_page = None;
         }
+        if !enabled {
+            self.settings_navigation.remove(SettingsPage::Friends);
+        }
         self.state.friends_enabled = enabled;
         self.save();
         cx.notify();
@@ -6633,6 +6693,9 @@ impl Waku {
     fn close_jev_page_if_unused(&mut self) {
         if !self.jev_in_use() && self.settings_page == Some(SettingsPage::Jev) {
             self.settings_page = None;
+        }
+        if !self.jev_in_use() {
+            self.settings_navigation.remove(SettingsPage::Jev);
         }
     }
 
@@ -12010,6 +12073,9 @@ impl Waku {
     fn set_integrations_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if !enabled && self.settings_page == Some(SettingsPage::Integrations) {
             self.settings_page = None;
+        }
+        if !enabled {
+            self.settings_navigation.remove(SettingsPage::Integrations);
         }
         self.state.integrations_enabled = enabled;
         self.save();

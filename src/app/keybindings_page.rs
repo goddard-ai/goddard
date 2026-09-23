@@ -394,10 +394,19 @@ impl super::Waku {
     }
 
     pub(super) fn open_keybindings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Reached directly (palette) a fresh visit starts clean; reached
+        // through `open_settings_page`'s divert the departing pane is
+        // already recorded — the visit below folds to the same entry.
+        if self.settings_page.is_none() {
+            self.settings_navigation.clear();
+        }
+        let current = self.current_settings_entry();
         if self.keybindings.is_none() {
             self.keybindings = Some(KeybindingsUi::new(window, cx));
         }
         self.settings_page = Some(super::SettingsPage::Keybindings);
+        self.settings_navigation
+            .visit(current, super::SettingsPage::Keybindings);
         // Settings-family pages close the inbox on open; the early return
         // in `open_settings_page` skips its clear, so match it here.
         self.notifications.open = false;

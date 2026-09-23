@@ -1517,6 +1517,73 @@ impl SessionNavigation {
     }
 }
 
+/// One settings pane visit in the settings back/forward history: the page
+/// and the scroll offset it was left at, so returning lands where the pane
+/// was abandoned — the same contract macOS Settings keeps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SettingsHistoryEntry {
+    page: SettingsPage,
+    offset: gpui::Point<Pixels>,
+}
+
+/// Back/forward history over settings panes. Kept separate from
+/// `SessionNavigation`: the settings surface replaces the main column
+/// rather than living in it, so its history lives and dies with the visit
+/// and back runs out by leaving settings.
+#[derive(Debug, Default)]
+struct SettingsNavigation {
+    back: Vec<SettingsHistoryEntry>,
+    forward: Vec<SettingsHistoryEntry>,
+}
+
+impl SettingsNavigation {
+    fn visit(&mut self, current: Option<SettingsHistoryEntry>, next: SettingsPage) {
+        // `next` becomes the current location, so it can no longer be a
+        // back/forward target — an entry pointing at it is a dead hop.
+        self.back.retain(|entry| entry.page != next);
+        self.forward.retain(|entry| entry.page != next);
+        if let Some(current) = current.filter(|entry| entry.page != next) {
+            // `current` is pushed exactly once; earlier visits to it are
+            // folded away so the stack never repeats a page.
+            self.back.retain(|entry| entry.page != current.page);
+            self.back.push(current);
+            self.forward.clear();
+        }
+    }
+
+    fn go_back(&mut self, current: SettingsHistoryEntry) -> Option<SettingsHistoryEntry> {
+        let target = self.back.pop()?;
+        self.forward.push(current);
+        Some(target)
+    }
+
+    fn back_target(&self) -> Option<SettingsHistoryEntry> {
+        self.back.last().copied()
+    }
+
+    fn go_forward(&mut self, current: SettingsHistoryEntry) -> Option<SettingsHistoryEntry> {
+        let target = self.forward.pop()?;
+        self.back.push(current);
+        Some(target)
+    }
+
+    fn forward_target(&self) -> Option<SettingsHistoryEntry> {
+        self.forward.last().copied()
+    }
+
+    /// A page whose navigation gate closed is no longer a target — a stale
+    /// entry would land on a page the sidebar no longer lists.
+    fn remove(&mut self, page: SettingsPage) {
+        self.back.retain(|entry| entry.page != page);
+        self.forward.retain(|entry| entry.page != page);
+    }
+
+    fn clear(&mut self) {
+        self.back.clear();
+        self.forward.clear();
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionActivationTransition {
     Visit,
@@ -2977,6 +3044,9 @@ pub struct Waku {
     /// swapping in frozen page pixels while an overlay is open.
     scene_overlay_enabled: bool,
     settings_page: Option<SettingsPage>,
+    /// Pane back/forward history for the open settings visit; cleared when
+    /// a fresh visit starts.
+    settings_navigation: SettingsNavigation,
     /// `GODDARD_DEV_STATE` — set only when the dev watcher launched this app.
     /// The command palette's auto-restart toggle writes to this file, which
     /// the watcher reads after each rebuild.
@@ -6174,6 +6244,7 @@ impl Waku {
                 skills_detail_scrollbar: ScrollbarState::new(),
                 skills_source_filter: None,
                 skills_delete_arming: None,
+                settings_navigation: SettingsNavigation::default(),
                 settings_scroll: ScrollHandle::new(),
                 settings_scrollbar: ScrollbarState::new(),
                 settings_search_sections: Vec::new(),

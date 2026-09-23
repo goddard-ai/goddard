@@ -24,24 +24,25 @@ use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationLocation, PendingUserInput,
-    SessionNavigation, StreamDeltaKind, TranscriptLanding, TranscriptRowKind::*,
-    TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
-    active_navigation_turn_index, activity_group_is_live, activity_header_title,
-    append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
-    assistant_response_footer_time, compact_driver_error, disclosure_leading_space, fenced_code,
-    fitted_file_tree_width, fitted_panel_widths, folded_transcript_row_kinds,
-    format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
-    message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
-    navigation_rail_height, navigation_rail_scale, next_navigation_turn_index,
-    paused_toast_duration, pop_stream_batch, previous_navigation_turn_index, push_reasoning_delta,
-    push_transcript_activity, response_footer_message_index, response_row_turn_id,
-    retain_fading_working_indicator, row_starts_followup_turn, session_accepts_turn_output,
-    session_is_reapable, settle_stream_segment, should_refresh_branch_after_activity,
-    should_show_navigation_rail, should_show_scroll_to_bottom, task_id_from_notification_tag,
-    task_notification_tag, transcript_anchor_end_space, transcript_navigation_turns,
-    transcript_position_landing, transcript_rests_at_tail, transcript_row_kinds,
-    transcript_row_splice, transcript_rows_fingerprint, update_transcript_activity,
-    widened_panel_width_for_file_editor, widened_panel_width_for_review,
+    SessionNavigation, SettingsHistoryEntry, SettingsNavigation, StreamDeltaKind,
+    TranscriptLanding, TranscriptRowKind::*, TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT,
+    WorkingIndicatorFade, active_navigation_turn_index, activity_group_is_live,
+    activity_header_title, append_text_delta_to_session, assistant_response_footer,
+    assistant_response_footer_index, assistant_response_footer_time, compact_driver_error,
+    disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
+    folded_transcript_row_kinds, format_worked_duration, format_working_elapsed,
+    maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
+    navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
+    navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
+    previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
+    response_footer_message_index, response_row_turn_id, retain_fading_working_indicator,
+    row_starts_followup_turn, session_accepts_turn_output, session_is_reapable,
+    settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
+    should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
+    transcript_anchor_end_space, transcript_navigation_turns, transcript_position_landing,
+    transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
+    transcript_rows_fingerprint, update_transcript_activity, widened_panel_width_for_file_editor,
+    widened_panel_width_for_review,
 };
 use crate::git_branch::BranchEntry;
 use crate::model::{
@@ -995,6 +996,70 @@ fn session_navigation_never_targets_the_current_location() {
         navigation.go_back(NavigationLocation::Terminal(second)),
         Some(task)
     );
+}
+
+fn settings_entry(page: super::SettingsPage, y: f32) -> SettingsHistoryEntry {
+    SettingsHistoryEntry {
+        page,
+        offset: gpui::point(gpui::px(0.0), gpui::px(y)),
+    }
+}
+
+#[test]
+fn settings_navigation_tracks_pane_back_forward() {
+    use super::SettingsPage::*;
+    let mut navigation = SettingsNavigation::default();
+
+    // General -> Appearance -> Git: back walks the hops in reverse,
+    // carrying the scroll offset each pane was abandoned at; forward then
+    // replays them.
+    navigation.visit(Some(settings_entry(General, 0.0)), Appearance);
+    navigation.visit(Some(settings_entry(Appearance, 120.0)), Git);
+    assert_eq!(
+        navigation.go_back(settings_entry(Git, 40.0)),
+        Some(settings_entry(Appearance, 120.0))
+    );
+    assert_eq!(
+        navigation.go_back(settings_entry(Appearance, 8.0)),
+        Some(settings_entry(General, 0.0))
+    );
+    assert_eq!(navigation.back_target(), None);
+    assert_eq!(
+        navigation.go_forward(settings_entry(General, 0.0)),
+        Some(settings_entry(Appearance, 8.0))
+    );
+}
+
+#[test]
+fn settings_navigation_folds_revisits_and_drops_gated_pages() {
+    use super::SettingsPage::*;
+    let mut navigation = SettingsNavigation::default();
+
+    // General -> Appearance -> Git -> Appearance: the earlier Appearance
+    // entry folds away, so back reaches Git then General without repeating
+    // a pane.
+    navigation.visit(Some(settings_entry(General, 0.0)), Appearance);
+    navigation.visit(Some(settings_entry(Appearance, 0.0)), Git);
+    navigation.visit(Some(settings_entry(Git, 0.0)), Appearance);
+    assert_eq!(
+        navigation.go_back(settings_entry(Appearance, 0.0)),
+        Some(settings_entry(Git, 0.0))
+    );
+    assert_eq!(
+        navigation.go_back(settings_entry(Git, 0.0)),
+        Some(settings_entry(General, 0.0))
+    );
+
+    // A fresh visit clears forward; a gate closing drops the page from
+    // both stacks.
+    navigation.visit(Some(settings_entry(General, 0.0)), Appearance);
+    navigation.visit(Some(settings_entry(Appearance, 0.0)), Friends);
+    assert_eq!(
+        navigation.go_back(settings_entry(Friends, 0.0)),
+        Some(settings_entry(Appearance, 0.0))
+    );
+    navigation.remove(Friends);
+    assert_eq!(navigation.go_forward(settings_entry(Appearance, 0.0)), None);
 }
 
 /// A session skeleton, as the session list holds them: stored rows report

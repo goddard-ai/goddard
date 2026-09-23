@@ -2719,11 +2719,11 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = Some(SettingsPage::General);
-        self.settings_scroll.set_offset(gpui::Point::default());
-        // The footer's hover zone unmounts without firing hover-off; only the
-        // dock's own hover may keep it alive across the swap.
-        self.sidebar_dock_zone_hovered = false;
+        // Re-invoking while settings is already open records a visit to
+        // the root page like any other, so the way back to the pane it
+        // interrupted stays reachable; a closed settings starts a fresh
+        // pane history inside `open_settings_page`.
+        self.open_settings_page(SettingsPage::General, window, cx);
         // Sparkle owns this value and its consent prompt can flip it outside
         // the settings UI, so re-mirror it each time settings opens.
         self.automatic_updates_enabled = cx
@@ -3089,7 +3089,13 @@ impl Waku {
         if self.big_picture.is_open() {
             return;
         }
-        if self.settings_page.take().is_some() {
+        if self.settings_page.is_some() {
+            // Pane history first; running out — or the results column being
+            // up — keeps back's old job of leaving settings.
+            if self.navigate_settings_history(true, window, cx) {
+                return;
+            }
+            self.settings_page = None;
             let focus_handle = self.composer_focus(cx);
             window.focus(&focus_handle, cx);
             cx.notify();
@@ -3143,6 +3149,7 @@ impl Waku {
             return;
         }
         if self.settings_page.is_some() {
+            self.navigate_settings_history(false, window, cx);
             return;
         }
 

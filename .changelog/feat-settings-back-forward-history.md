@@ -1,0 +1,1 @@
+- Settings keeps a back/forward history across panes: ⌘[ and ⌘] — or the new arrow buttons in the titlebar — step through the pages visited this session, restoring each page's scroll position, and back steps out of Settings once the history is spent.
