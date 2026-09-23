@@ -1,0 +1,1 @@
+- ⌘↩ while the agent is generating now queues the message as a follow-up instead of injecting it mid-turn — a provider could acknowledge the steer and still drop it when the turn settled. Steering still applies to a task waiting on background work, where the message wakes the open turn directly.

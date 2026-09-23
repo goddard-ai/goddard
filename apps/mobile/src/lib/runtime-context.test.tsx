@@ -78,6 +78,7 @@ function fixture(options: { attached?: boolean } = {}) {
             subagents_enabled: false, project_map_enabled: false,
             memory_experiment_enabled: false, integrations_enabled: false,
             sandbox_experiment_enabled: false, sandbox_default_enabled: false,
+            keep_awake: false,
           } };
         case 'loadTaskState':
           return {
@@ -148,7 +149,9 @@ describe('mobile runtime history', () => {
     const f = fixture();
     f.queryClient.setQueryData(f.key, f.history);
     await f.runtime.attachSession(f.history);
-    await f.runtime.steerPrompt(f.history, '/review changes', [], 'Review changes carefully');
+    // Only a parked turn takes a steer; a working provider queues instead.
+    f.emit('turnParked', null);
+    await f.runtime.steerPrompt(f.current(), '/review changes', [], 'Review changes carefully');
     expect(f.commands.find((command) => command.type === 'steer'))
       .toEqual({ type: 'steer', prompt: 'Review changes carefully' });
     f.emit('steerAccepted', { message: 'Review changes carefully' });

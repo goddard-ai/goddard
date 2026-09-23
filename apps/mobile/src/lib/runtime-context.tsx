@@ -677,8 +677,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     sendPromptRef.current = sendPrompt;
   }, [sendPrompt]);
 
-  /** Inject a prompt into the running turn when the provider supports it;
-   * otherwise fall through to sendPrompt, which queues while busy. */
+  /** Inject a prompt into a parked turn when the provider supports it —
+   * the idle provider wakes inside the open turn. Every other status falls
+   * through to sendPrompt, which queues while busy: a steer sent mid-
+   * generation can sit in a volatile buffer and vanish when the turn
+   * settles. */
   const steerPrompt = useCallback(async (
     session: AgentSession,
     rawPrompt: string,
@@ -693,10 +696,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       : providerPromptOverride.trim();
     if (!client || daemon.phase !== 'connected') throw new Error('Goddard daemon is disconnected');
     const runtime = entries.current.get(session.id);
-    if (
-      !runtime || !runtime.supportsSteer ||
-      session.status === 'connecting' || session.status === 'idle' || session.status === 'failed'
-    ) {
+    if (!runtime || !runtime.supportsSteer || session.status !== 'background') {
       await sendPrompt(session, prompt, attachments, providerPrompt);
       return;
     }

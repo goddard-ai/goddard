@@ -1026,13 +1026,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           ].filter(Boolean).join(' ')
         : providerPromptOverride.trim()
       const runtime = entries.current.get(session.id)
-      if (
-        !runtime ||
-        !runtime.supportsSteer ||
-        session.status === 'connecting' ||
-        session.status === 'idle' ||
-        session.status === 'failed'
-      ) {
+      // A steer only reaches a parked turn: the provider is idle, so the
+      // message wakes it directly. Every other status falls through to
+      // sendPrompt, which queues while the session is busy — a steer sent
+      // mid-generation can sit in a volatile buffer and vanish at settle.
+      if (!runtime || !runtime.supportsSteer || session.status !== 'background') {
         await sendPrompt(session, prompt, attachments, providerPrompt)
         return
       }

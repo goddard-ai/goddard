@@ -42,8 +42,8 @@ Cursor, or other agent subscription is what you pay with.
 - Use more than one agent CLI and want a single consistent interface — one
   model picker, one permission system, one transcript — instead of learning
   each CLI's TUI.
-- Want to queue follow-up messages or steer a running agent instead of waiting
-  for it to finish.
+- Want to queue follow-up messages while an agent works, or steer a task
+  waiting on background work instead of starting a new turn.
 - Want conversation-aware rewind and branching that also rolls back the Git
   working tree.
 - Care about keyboard-driven workflows, native performance, and a UI that
@@ -225,13 +225,13 @@ is told its working directory changed.
 ### The composer
 
 - **Send** with Enter; newline with Shift+Enter.
-- **Queue a follow-up** while the agent is working — queued messages appear as
-  cards above the composer with per-message actions (steer it into the running
-  turn, remove it), and start a new turn when the current one settles. With an
-  empty composer, Cmd/Ctrl+Enter steers the oldest queued follow-up.
-- **Steer** with Cmd/Ctrl+Enter: inject the message into the *running* turn
-  when the provider supports it. If steering is refused or unsupported, the
-  message falls back to the follow-up queue automatically.
+- **Queue a follow-up** while the agent is working — Enter or Cmd/Ctrl+Enter
+  both park the message as a card above the composer until the turn settles.
+- **Steer a waiting turn** with Cmd/Ctrl+Enter while the task shows the
+  hourglass: the reply ended on work the provider still runs detached, so the
+  message wakes the open turn instead of queueing. A queued card on a waiting
+  turn offers the same action per message, and an empty composer steers the
+  oldest one.
 - **Edit and resend** earlier messages.
 - **Structured questions** — when an agent needs input, the composer turns
   into a multi-question form with progress ("1 of 3"), Back/Next navigation,

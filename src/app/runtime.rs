@@ -242,12 +242,24 @@ pub(super) fn submitted_prompt_identity(session: &AgentSession) -> (Option<Uuid>
     (Some(turn_id), message_id)
 }
 
+/// The provider has an open, started turn — whether it is actively
+/// generating the reply or parked on detached work.
 pub(super) fn session_has_active_provider_turn(session: &AgentSession) -> bool {
     session.is_busy()
         && session
             .turns
             .last()
             .is_some_and(|turn| turn.status == TurnStatus::Running && turn.provider_turn_started)
+}
+
+/// A parked turn — the provider's reply ended on detached work it will wake
+/// the session for — is the one place a steer can land reliably: the
+/// provider is idle, so the message feeds the open turn directly. While the
+/// provider is working, a mid-turn steer can sit in a volatile input buffer
+/// and vanish if the turn settles without another model call, so the
+/// composer queues those submissions as follow-ups instead.
+pub(super) fn session_has_parked_provider_turn(session: &AgentSession) -> bool {
+    session.status == SessionStatus::Background && session_has_active_provider_turn(session)
 }
 
 /// Merge the daemon's list-only session projection into the desktop catalog.
@@ -5849,9 +5861,10 @@ impl Waku {
         self.submit_submission_for_session(session.id, submission, cx);
     }
 
-    /// Deliver a steering message into the running turn. Providers without a
-    /// live-turn transport (or a session that is not actively working) fall
-    /// back to queueing a follow-up.
+    /// Deliver a steering message into a parked turn, waking the idle
+    /// provider inside it. Any other session state falls back to queueing a
+    /// follow-up: a steer sent while the provider is generating can be
+    /// acknowledged into a volatile buffer and lost when the turn settles.
     pub(super) fn steer_composer_submission(
         &mut self,
         submission: ComposerSubmission,
@@ -5884,9 +5897,10 @@ impl Waku {
             self.submit_composer_submission_to(session.id, submission, cx);
             return;
         }
-        // A turn that has not reached the provider yet cannot be steered; the
+        // Only a parked turn takes a steer; anything else parks the message
+        // as a queued follow-up that drains when the turn settles. A live
         // driver reports the outcome asynchronously via SteerAccepted or
-        // SteerRejected once it is handed off.
+        // SteerRejected once a steer is handed off.
         if !self.session_can_steer(&session) {
             self.enqueue_follow_up_submission(session.id, submission, cx);
             return;
@@ -5908,7 +5922,7 @@ impl Waku {
     }
 
     pub(super) fn session_can_steer(&self, session: &AgentSession) -> bool {
-        session_has_active_provider_turn(session)
+        session_has_parked_provider_turn(session)
             && self
                 .runtimes
                 .get(&session.id)

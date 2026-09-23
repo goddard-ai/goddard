@@ -226,7 +226,11 @@ export function Composer({
   const hasDraft = Boolean(
     prompt.trim() || attachments.length || draftAnnotations.current.length,
   )
-  const canSteer = busy && session.status !== 'connecting' && runtime?.supportsSteer
+  // Only a parked turn takes a steer — the provider is idle, so the message
+  // wakes the open turn. While the provider is generating, a mid-turn steer
+  // can be acknowledged into a volatile buffer and lost when the turn
+  // settles, so ⌘↩ queues a follow-up like Enter instead.
+  const canSteer = session.status === 'background' && Boolean(runtime?.supportsSteer)
   const workspace = session.workspace ?? { kind: 'local' as const }
   const projectChoices = selectableProjects(projects, project)
   const projectless = isProjectlessProject(project)

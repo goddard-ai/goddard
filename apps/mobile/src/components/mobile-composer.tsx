@@ -206,7 +206,11 @@ export function MobileComposer({
     : models.find((item) => item.is_default) ?? models[0];
   const busy = sessionBusy(session);
   const liveRuntime = runtime.runtimes[session.id];
-  const canSteer = busy && Boolean(liveRuntime?.supportsSteer) && session.status !== 'connecting';
+  // Only a parked turn takes a steer — the provider is idle, so the message
+  // wakes the open turn. While the provider is generating, a mid-turn steer
+  // can be acknowledged into a volatile buffer and lost when the turn
+  // settles, so a busy session queues a follow-up instead.
+  const canSteer = session.status === 'background' && Boolean(liveRuntime?.supportsSteer);
   const permission = runtime.permissions[session.id];
   const userInput = runtime.userInputs[session.id];
   const runtimeError = runtime.errors[session.id];

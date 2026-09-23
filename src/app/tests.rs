@@ -6,7 +6,10 @@ use super::composer::{
     remap_marker_seats, splice_inline_atoms, supports_reasoning_default_reset,
     visible_branch_entries, workspace_subject_for,
 };
-use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
+use super::runtime::{
+    merge_remote_session_catalog, session_has_active_provider_turn,
+    session_has_parked_provider_turn,
+};
 use super::sessions::{
     next_attention_target, next_idle_session, next_non_busy_session, next_unread_completion,
 };
@@ -340,7 +343,7 @@ fn composer_offers_continue_only_for_an_empty_composer_on_a_stopped_turn() {
 }
 
 #[test]
-fn connecting_status_does_not_hide_a_started_provider_turn_from_steering() {
+fn connecting_status_does_not_hide_a_started_provider_turn() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     session.begin_turn("inspect the project");
     session.mark_active_turn_provider_started();
@@ -350,7 +353,7 @@ fn connecting_status_does_not_hide_a_started_provider_turn_from_steering() {
 }
 
 #[test]
-fn foreground_output_recovers_a_missed_provider_turn_start_for_steering() {
+fn foreground_output_recovers_a_missed_provider_turn_start() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     session.begin_turn("inspect the project");
     session.status = SessionStatus::Connecting;
@@ -359,6 +362,33 @@ fn foreground_output_recovers_a_missed_provider_turn_start_for_steering() {
     assert!(session_accepts_turn_output(&mut session));
     assert_eq!(session.status, SessionStatus::Working);
     assert!(session_has_active_provider_turn(&session));
+}
+
+#[test]
+fn only_a_parked_turn_accepts_a_steer() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("inspect the project");
+    session.mark_active_turn_provider_started();
+
+    // A mid-turn steer can be acknowledged into a volatile provider buffer
+    // and lost at settle, so a working turn queues the message instead.
+    session.status = SessionStatus::Working;
+    assert!(!session_has_parked_provider_turn(&session));
+
+    session.status = SessionStatus::Waiting;
+    assert!(!session_has_parked_provider_turn(&session));
+
+    session.status = SessionStatus::Connecting;
+    assert!(!session_has_parked_provider_turn(&session));
+
+    // The parked turn is the exception: the provider is idle inside the
+    // still-open turn, so a message steered in wakes it directly.
+    session.status = SessionStatus::Background;
+    assert!(session_has_parked_provider_turn(&session));
+
+    // A backgrounded status without a live provider turn is not steerable.
+    session.turns.last_mut().unwrap().status = TurnStatus::Completed;
+    assert!(!session_has_parked_provider_turn(&session));
 }
 
 #[test]
