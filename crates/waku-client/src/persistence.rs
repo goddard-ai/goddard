@@ -2661,6 +2661,10 @@ pub struct StateStore {
     /// Per-session send baselines for incremental saves. Cursors live only
     /// for this client boot, so a restart always begins with a full save.
     save_cursors: Mutex<HashMap<Uuid, SaveCursor>>,
+    /// Content hashes of the app files as last written — a save runs every
+    /// stream tick and skips the atomic rewrite while they are unchanged.
+    written_app_settings: Mutex<u64>,
+    written_app_state: Mutex<u64>,
 }
 
 /// One provider's resumable sessions merged across connected daemons, plus
@@ -2713,6 +2717,8 @@ impl StateStore {
             remote_default_cwd: Mutex::new(None),
             task_state_loaded: AtomicBool::new(false),
             save_cursors: Mutex::new(HashMap::new()),
+            written_app_settings: Mutex::new(0),
+            written_app_state: Mutex::new(0),
         }
     }
 
@@ -3157,11 +3163,15 @@ impl StateStore {
     }
 
     fn write_app_settings(&self, settings: &AppSettings) -> io::Result<()> {
-        write_json_atomically(&self.app_settings_path, settings)
+        write_app_file(
+            settings,
+            &self.app_settings_path,
+            &self.written_app_settings,
+        )
     }
 
     fn write_app_state(&self, state: &AppState) -> io::Result<()> {
-        write_json_atomically(&self.app_state_path, state)
+        write_app_file(state, &self.app_state_path, &self.written_app_state)
     }
 }
 
@@ -3188,18 +3198,47 @@ pub fn hydrate_session(
     }
 }
 
+/// Serializes to memory and rewrites the file only when the content
+/// actually changed — `save` calls this every stream tick and the app
+/// files are mostly stable.
+fn write_app_file(
+    value: &impl Serialize,
+    path: &Path,
+    written: &Mutex<u64>,
+) -> io::Result<()> {
+    let data = serde_json::to_vec_pretty(value).map_err(to_io_error)?;
+    let fingerprint = content_fingerprint(&data);
+    let mut last = written.lock();
+    if *last == fingerprint {
+        return Ok(());
+    }
+    write_bytes_atomically(path, &data)?;
+    *last = fingerprint;
+    Ok(())
+}
+
 fn write_json_atomically(path: &Path, value: &impl Serialize) -> io::Result<()> {
+    let data = serde_json::to_vec_pretty(value).map_err(to_io_error)?;
+    write_bytes_atomically(path, &data)
+}
+
+fn content_fingerprint(data: &[u8]) -> u64 {
+    data.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+fn write_bytes_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let data = serde_json::to_vec_pretty(value).map_err(to_io_error)?;
     let temporary = path.with_extension("json.tmp");
     let mut options = OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     options.mode(0o600);
     let mut file = options.open(&temporary)?;
-    file.write_all(&data)?;
+    file.write_all(data)?;
     file.sync_all()?;
     fs::rename(&temporary, path)?;
     #[cfg(unix)]
@@ -3327,6 +3366,29 @@ mod tests {
         assert!(tails.is_empty());
         assert!(!wire.detail_loaded);
         assert!(sent.is_none());
+    }
+
+    #[test]
+    fn app_file_writes_skip_unchanged_content() {
+        let directory = std::env::temp_dir().join(format!("waku-app-file-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("settings.json");
+        let written = Mutex::new(0);
+        let settings = serde_json::json!({"sidebarWidth": 252.0});
+
+        write_app_file(&settings, &path, &written).unwrap();
+        assert!(path.exists());
+        // A save whose app file content did not move never touches the file.
+        fs::remove_file(&path).unwrap();
+        write_app_file(&settings, &path, &written).unwrap();
+        assert!(!path.exists());
+
+        // Changed content writes again.
+        let changed = serde_json::json!({"sidebarWidth": 300.0});
+        write_app_file(&changed, &path, &written).unwrap();
+        assert!(path.exists());
+
+        fs::remove_dir_all(&directory).ok();
     }
 
     #[test]
