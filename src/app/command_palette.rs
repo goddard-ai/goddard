@@ -191,6 +191,10 @@ enum PaletteAction {
     SelectResumeProvider(ProviderKind),
     ResumeProviderSession(waku_client::DaemonKey, ProviderSessionSummary),
     OpenProject,
+    GoToProjects,
+    GoToInbox,
+    GoToAutomations,
+    AddRemoteHost,
     OpenRemoveProject,
     RemoveProject(Uuid),
     FocusComposer,
@@ -2173,6 +2177,63 @@ impl Waku {
             "view open drafts list page saved",
             next(),
         ));
+        if self.state.projects_page_enabled
+            && self
+                .state
+                .projects
+                .iter()
+                .any(|project| !project.is_projectless())
+        {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.go_to_projects"),
+                "icons/folder.svg",
+                Some(ShortcutHint::action(&ToggleProjectsPage)),
+                PaletteAction::GoToProjects,
+                "go to projects project page overview browse",
+                next(),
+            ));
+        }
+        if self.state.github_enabled {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.go_to_inbox"),
+                "icons/inbox.svg",
+                Some(ShortcutHint::action(&ToggleInboxPage)),
+                PaletteAction::GoToInbox,
+                "go to inbox notifications github review queue",
+                next(),
+            ));
+        }
+        if self.state.automations_enabled {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.go_to_automations"),
+                "icons/folder-clock.svg",
+                Some(ShortcutHint::action(&ToggleAutomationsPage)),
+                PaletteAction::GoToAutomations,
+                "go to automations scheduled tasks runs",
+                next(),
+            ));
+        }
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Commands,
+            tr!("command_palette.go_to_archived_chats"),
+            "icons/archive.svg",
+            None,
+            PaletteAction::OpenSettings(SettingsPage::Archived),
+            "go to archived chats archive sessions history restore",
+            next(),
+        ));
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Commands,
+            tr!("command_palette.add_remote_host"),
+            "icons/server.svg",
+            None,
+            PaletteAction::AddRemoteHost,
+            "add remote host daemon ssh server connection",
+            next(),
+        ));
         for identifier in PaletteIdentifier::ALL {
             if identifier.value(self.selected_session()).is_some() {
                 commands.push(CommandPaletteItem::command(
@@ -4129,6 +4190,14 @@ impl Waku {
                 self.new_incognito_task_in_same_worktree(window, cx)
             }
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
+            PaletteAction::GoToProjects => self.open_projects_page(None, window, cx),
+            PaletteAction::GoToInbox => self.open_inbox(window, cx),
+            PaletteAction::GoToAutomations => self.open_automations_page(window, cx),
+            PaletteAction::AddRemoteHost => {
+                self.open_settings_action(&OpenSettings, window, cx);
+                self.open_settings_page(SettingsPage::Daemon, window, cx);
+                self.open_remote_host_editor(None, window, cx);
+            }
             PaletteAction::AddFriend => {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(SettingsPage::Friends, window, cx);

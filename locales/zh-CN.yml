@@ -64,6 +64,11 @@ command_palette.commands: 命令
 command_palette.custom_commands: 自定义命令
 command_palette.settings: 设置
 command_palette.new_task: 新建任务
+command_palette.go_to_projects: 前往项目
+command_palette.go_to_inbox: 前往收件箱
+command_palette.go_to_automations: 前往自动化
+command_palette.go_to_archived_chats: 前往已归档的聊天
+command_palette.add_remote_host: 添加远程主机…
 command_palette.add_friend: 添加好友…
 command_palette.copy_friend_code: 复制我的好友代码
 command_palette.friend_code_copied: 已复制好友代码

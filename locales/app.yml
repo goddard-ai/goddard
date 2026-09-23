@@ -129,6 +129,16 @@ command_palette.settings:
   en: Settings
 command_palette.new_task:
   en: New task
+command_palette.go_to_projects:
+  en: Go to Projects
+command_palette.go_to_inbox:
+  en: Go to Inbox
+command_palette.go_to_automations:
+  en: Go to Automations
+command_palette.go_to_archived_chats:
+  en: Go to Archived Chats
+command_palette.add_remote_host:
+  en: Add Remote Host…
 command_palette.add_friend:
   en: Add friend…
 command_palette.copy_friend_code:

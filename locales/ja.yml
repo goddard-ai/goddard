@@ -65,6 +65,11 @@ command_palette.commands: コマンド
 command_palette.custom_commands: カスタムコマンド
 command_palette.settings: 設定
 command_palette.new_task: 新規タスク
+command_palette.go_to_projects: プロジェクトへ移動
+command_palette.go_to_inbox: 受信トレイへ移動
+command_palette.go_to_automations: オートメーションへ移動
+command_palette.go_to_archived_chats: アーカイブ済みチャットへ移動
+command_palette.add_remote_host: リモートホストを追加…
 command_palette.add_friend: フレンドを追加…
 command_palette.copy_friend_code: 自分のフレンドコードをコピー
 command_palette.friend_code_copied: フレンドコードをコピーしました
