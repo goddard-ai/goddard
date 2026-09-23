@@ -39,7 +39,7 @@ struct StatusMarker {
 }
 
 /// Which theme color a marker's icon and label take.
-enum MarkerTone {
+pub(super) enum MarkerTone {
     Success,
     Info,
     Warning,
@@ -48,7 +48,7 @@ enum MarkerTone {
 }
 
 impl MarkerTone {
-    fn color(&self, theme: &Theme) -> Hsla {
+    pub(super) fn color(&self, theme: &Theme) -> Hsla {
         match self {
             Self::Success => theme.success,
             Self::Info => theme.info,
@@ -821,6 +821,42 @@ fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) ->
         )
 }
 
+/// What the sidebar status slot can say about a session's last turn. The
+/// footer's many chips collapse to two glyphs — chat for endings that
+/// wait on the user's reply, block for endings that hit a wall — because
+/// the slot's job is glanceability: more shapes would be harder to keep
+/// straight than the verdict they carry.
+pub(super) struct SidebarStatusMarker {
+    pub(super) icon: &'static str,
+    pub(super) label_key: &'static str,
+    pub(super) tone: MarkerTone,
+}
+
+/// Which of the two sidebar glyphs a marker maps to, if any. Endings that
+/// leave nothing pending for the user (`complete`, `answered`,
+/// `nothing-to-do`, `pushed-back`, `other`) and every flag stay
+/// footer-only.
+fn sidebar_bucket(marker: &StatusMarker) -> Option<(&'static str, MarkerTone)> {
+    match marker.id {
+        "awaiting-input" | "go-ahead" | "decision" | "details" | "partial"
+        | "needs-continuation" => Some(("icons/chat.svg", MarkerTone::Info)),
+        "blocked" | "failed" | "errors-remain" => Some(("icons/block.svg", MarkerTone::Danger)),
+        _ => None,
+    }
+}
+
+fn sidebar_marker(evaluation: &Evaluation) -> Option<SidebarStatusMarker> {
+    cleared_markers(evaluation)
+        .into_iter()
+        .find_map(|(marker, _)| {
+            sidebar_bucket(marker).map(|(icon, tone)| SidebarStatusMarker {
+                icon,
+                label_key: marker.label_key,
+                tone,
+            })
+        })
+}
+
 impl Waku {
     /// Status-driven actions take the composer suggestion slot when the
     /// latest settled turn clearly asks for a response from the user.
@@ -1256,6 +1292,22 @@ impl Waku {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// The sidebar status-slot glyph for a session, when its last turn's
+    /// verdict maps to one of the two sidebar icons. Only the last turn
+    /// counts — an older turn's verdict under newer work would
+    /// misattribute it — so a turn still unscored shows nothing until its
+    /// eval lands, and the glyph otherwise rides the row as ambient state
+    /// until the next turn is judged.
+    pub(super) fn session_sidebar_marker(
+        &self,
+        session: &AgentSession,
+    ) -> Option<SidebarStatusMarker> {
+        if !self.state.status_markers_enabled {
+            return None;
+        }
+        sidebar_marker(self.turn_status_markers.get(&session.turns.last()?.id)?)
     }
 
     /// The settled last turn's chips floated over the transcript's bottom
@@ -1765,6 +1817,66 @@ mod tests {
             .map(|(marker, _)| marker.id)
             .collect();
         assert_eq!(ids, ["pushed-back", "unverified"]);
+    }
+
+    #[test]
+    fn sidebar_marker_keeps_only_actionable_endings() {
+        let ending = |choice: &str, probability: f64| {
+            evaluation(BTreeMap::from([(
+                ENDING_QUESTION.to_owned(),
+                ending_choice(choice, &[(choice, probability), ("other", 1.0 - probability)]),
+            )]))
+        };
+        // Endings that wait on the user's reply collapse to the chat glyph;
+        // endings that hit a wall collapse to the block glyph.
+        for choice in ["awaiting-input", "partial"] {
+            let marker = sidebar_marker(&ending(choice, 0.90)).unwrap();
+            assert_eq!(marker.icon, "icons/chat.svg");
+        }
+        for choice in ["blocked", "failed"] {
+            let marker = sidebar_marker(&ending(choice, 0.90)).unwrap();
+            assert_eq!(marker.icon, "icons/block.svg");
+        }
+        // Quiet endings never claim the slot.
+        assert!(sidebar_marker(&ending("complete", 0.90)).is_none());
+        assert!(sidebar_marker(&ending("other", 0.90)).is_none());
+    }
+
+    #[test]
+    fn sidebar_marker_uses_the_cleared_subtype_and_ignores_flags() {
+        // A decision refines awaiting-input; the glyph buckets by what the
+        // turn wants while the tooltip keeps the subtype's own label.
+        let decision = evaluation(BTreeMap::from([
+            (
+                ENDING_QUESTION.to_owned(),
+                ending_choice(
+                    "awaiting-input",
+                    &[("awaiting-input", 0.88), ("other", 0.12)],
+                ),
+            ),
+            (
+                INPUT_QUESTION.to_owned(),
+                ending_choice("decision", &[("decision", 0.82)]),
+            ),
+        ]));
+        let marker = sidebar_marker(&decision).unwrap();
+        assert_eq!(marker.icon, "icons/chat.svg");
+        assert_eq!(marker.label_key, "status_markers.decision");
+
+        // A flag alone never claims the slot, even as the only cleared
+        // marker — flags stay footer-level nuance.
+        let untested = evaluation(BTreeMap::from([
+            (
+                ENDING_QUESTION.to_owned(),
+                ending_choice("complete", &[("complete", 0.90), ("other", 0.10)]),
+            ),
+            ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+            (
+                VERIFICATION_QUESTION.to_owned(),
+                ending_choice("not-tested", &[("not-tested", 0.80)]),
+            ),
+        ]));
+        assert!(sidebar_marker(&untested).is_none());
     }
 
     #[test]

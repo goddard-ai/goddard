@@ -4697,6 +4697,25 @@ impl Waku {
                             .into_any_element(),
                     )
                 }
+                // An idle, all-seen task can still carry its last turn's
+                // Jev verdict: the marker rides the slot as ambient state
+                // until the next turn is scored.
+                SessionStatus::Idle => self
+                    .session_sidebar_marker(session)
+                    .map(|marker| {
+                        div()
+                            .id(SharedString::from(format!(
+                                "session-marker-{session_id}"
+                            )))
+                            .flex_none()
+                            .size(px(12.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .tooltip(Tooltip::text(tr!(marker.label_key)))
+                            .child(icon(marker.icon, 12.0, marker.tone.color(&theme)))
+                            .into_any_element()
+                    }),
                 _ => None,
             }
         };

@@ -1,0 +1,1 @@
+- Idle tasks in the sidebar now show how their last turn ended under the turn status markers experiment: a chat icon when the agent is waiting on a reply, a block icon when it hit a wall. The unread dot still takes precedence.
