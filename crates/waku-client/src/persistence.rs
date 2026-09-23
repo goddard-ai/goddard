@@ -15,14 +15,17 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::daemons::{DaemonKey, DaemonMap};
-use crate::{Command, DaemonExposureSettings, DaemonSettings, DaemonSupervisor, ResponsePayload};
+use crate::{
+    Command, DaemonExposureSettings, DaemonSettings, DaemonSupervisor, ResponsePayload,
+    SessionDetailTail,
+};
 use waku_protocol::computer_use::ComputerAppGrant;
 use waku_protocol::i18n::AppLanguage;
 use waku_protocol::identity::DATA_DIRECTORY_NAME;
 use waku_protocol::model::{
     AgentSession, FavoriteModel, Project, ProviderKind, ProviderResumeCursor,
     ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, RuntimeMode,
-    SessionEnvironment, SessionWorkspace,
+    SessionEnvironment, SessionWorkspace, detail_prefix_signature,
 };
 use waku_protocol::theme::ThemeSettings;
 
@@ -2576,6 +2579,71 @@ pub fn load_or_create_app_settings() -> io::Result<AppSettings> {
 }
 
 /// Desktop state store: app files stay local, task data crosses RPC.
+/// After this many tail-only sends, a session's next save ships its detail
+/// whole again — a bound on how long a prefix divergence the signature
+/// missed can persist in the daemon's copy.
+const FULL_DETAIL_INTERVAL: u32 = 32;
+
+/// The transcript state a daemon last acknowledged receiving for one
+/// session — the baseline an incremental save's tail splices onto.
+#[derive(Clone, Copy)]
+struct SaveCursor {
+    /// `messages`/`transcript_blocks` lengths as last sent.
+    messages: usize,
+    blocks: usize,
+    /// `detail_prefix_signature` over those prefixes.
+    signature: u64,
+    tail_sends: u32,
+}
+
+/// The session as it goes on the wire: whole, or stripped to the tail
+/// appended since the last acknowledged send when the cursor's prefix
+/// still matches. The second return is the baseline the send advances to
+/// once the daemon acknowledges it — applied only on `notify` success.
+fn wire_session(
+    session: &AgentSession,
+    cursor: Option<SaveCursor>,
+    tails: &mut Vec<SessionDetailTail>,
+) -> (AgentSession, Option<SaveCursor>) {
+    // Skeletons ship list columns only; they own no detail baseline.
+    if !session.detail_loaded {
+        return (session.clone(), None);
+    }
+    let cursor = cursor.filter(|cursor| {
+        cursor.tail_sends < FULL_DETAIL_INTERVAL
+            && session.messages.len() >= cursor.messages
+            && session.transcript_blocks.len() >= cursor.blocks
+            && detail_prefix_signature(
+                &session.messages[..cursor.messages],
+                &session.transcript_blocks[..cursor.blocks],
+            ) == cursor.signature
+    });
+    let (wire, tail_sends) = match cursor {
+        // A prefix the daemon already holds plus a tail — a rewind or an
+        // edit inside the old range falls out of `eligible` and sends whole.
+        Some(cursor) => {
+            let mut wire = session.clone();
+            wire.messages = wire.messages.split_off(cursor.messages);
+            wire.transcript_blocks = wire.transcript_blocks.split_off(cursor.blocks);
+            tails.push(SessionDetailTail {
+                session_id: session.id,
+                messages_from: cursor.messages as u32,
+                transcript_blocks_from: cursor.blocks as u32,
+                prefix_signature: cursor.signature,
+            });
+            (wire, cursor.tail_sends + 1)
+        }
+        None => (session.clone(), 0),
+    };
+    let sent = SaveCursor {
+        messages: session.messages.len(),
+        blocks: session.transcript_blocks.len(),
+        signature: detail_prefix_signature(&session.messages, &session.transcript_blocks),
+        tail_sends,
+    };
+    (wire, Some(sent))
+}
+
 pub struct StateStore {
     path: PathBuf,
     app_state_path: PathBuf,
@@ -2590,6 +2658,9 @@ pub struct StateStore {
     /// into a destructive replacement of the daemon database. Per remote
     /// host, `DaemonMap::catalog_loaded` gates the same way.
     task_state_loaded: AtomicBool,
+    /// Per-session send baselines for incremental saves. Cursors live only
+    /// for this client boot, so a restart always begins with a full save.
+    save_cursors: Mutex<HashMap<Uuid, SaveCursor>>,
 }
 
 /// One provider's resumable sessions merged across connected daemons, plus
@@ -2641,6 +2712,7 @@ impl StateStore {
             daemons: DaemonMap::new(daemon),
             remote_default_cwd: Mutex::new(None),
             task_state_loaded: AtomicBool::new(false),
+            save_cursors: Mutex::new(HashMap::new()),
         }
     }
 
@@ -2900,6 +2972,21 @@ impl StateStore {
         };
         match hydrate_session(&daemon, session.id)? {
             Some(stored) => {
+                // The hydrated copy is exactly the daemon's stored prefix —
+                // seed the save cursor so the next save can send a tail
+                // instead of re-shipping the whole transcript.
+                self.save_cursors.lock().insert(
+                    session.id,
+                    SaveCursor {
+                        messages: stored.messages.len(),
+                        blocks: stored.transcript_blocks.len(),
+                        signature: detail_prefix_signature(
+                            &stored.messages,
+                            &stored.transcript_blocks,
+                        ),
+                        tail_sends: 0,
+                    },
+                );
                 *session = stored;
                 Ok(())
             }
@@ -2954,13 +3041,22 @@ impl StateStore {
             // not started owns no daemon row, and shipping one would
             // catalogue it as a phantom "New task" skeleton in every client's
             // next load.
+            let mut session_tails = Vec::new();
+            let mut sent_cursors = Vec::new();
             let sessions: Vec<AgentSession> = state
                 .sessions
                 .iter()
                 .filter(|session| {
                     dirty_ids.contains(&session.id) && session.has_started() && owned(&session.id)
                 })
-                .cloned()
+                .map(|session| {
+                    let cursor = self.save_cursors.lock().get(&session.id).copied();
+                    let (wire, sent) = wire_session(session, cursor, &mut session_tails);
+                    if let Some(sent) = sent {
+                        sent_cursors.push((session.id, sent));
+                    }
+                    wire
+                })
                 .collect();
             let dirty_for_daemon: HashSet<Uuid> =
                 sessions.iter().map(|session| session.id).collect();
@@ -2971,9 +3067,16 @@ impl StateStore {
                     projects,
                     live_session_ids,
                     sessions,
+                    session_tails,
                 },
             ) {
-                Ok(()) => saved_ids.extend(dirty_for_daemon),
+                Ok(()) => {
+                    saved_ids.extend(dirty_for_daemon);
+                    let mut cursors = self.save_cursors.lock();
+                    for (session_id, cursor) in sent_cursors {
+                        cursors.insert(session_id, cursor);
+                    }
+                }
                 Err(error) if first_error.is_none() => {
                     first_error = Some(to_io_error(error));
                 }
@@ -3007,6 +3110,7 @@ impl StateStore {
             None => Ok(()),
         };
         self.daemons.drop_session(session_id);
+        self.save_cursors.lock().remove(&session_id);
         result
     }
 
@@ -3112,6 +3216,118 @@ fn restore_task_state_skeletons(sessions: &mut [AgentSession]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waku_protocol::model::MessageRole;
+
+    fn detailed_session() -> AgentSession {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("Ask");
+        session.push_message(MessageRole::Assistant, "an answer");
+        session
+    }
+
+    #[test]
+    fn wire_session_ships_full_detail_without_a_baseline() {
+        let session = detailed_session();
+        let mut tails = Vec::new();
+        let (wire, sent) = wire_session(&session, None, &mut tails);
+
+        assert!(tails.is_empty());
+        assert_eq!(wire.messages.len(), session.messages.len());
+        let sent = sent.unwrap();
+        assert_eq!(sent.messages, session.messages.len());
+        assert_eq!(sent.tail_sends, 0);
+    }
+
+    #[test]
+    fn wire_session_ships_only_the_tail_when_the_prefix_is_unchanged() {
+        let baseline = detailed_session();
+        let cursor = SaveCursor {
+            messages: baseline.messages.len(),
+            blocks: baseline.transcript_blocks.len(),
+            signature: detail_prefix_signature(
+                &baseline.messages,
+                &baseline.transcript_blocks,
+            ),
+            tail_sends: 0,
+        };
+        let mut session = baseline.clone();
+        session.push_message(MessageRole::Assistant, "a follow-up");
+        session.push_message(MessageRole::Assistant, "another");
+
+        let mut tails = Vec::new();
+        let (wire, sent) = wire_session(&session, Some(cursor), &mut tails);
+
+        assert_eq!(tails.len(), 1);
+        let tail = &tails[0];
+        assert_eq!(tail.messages_from as usize, baseline.messages.len());
+        assert_eq!(wire.messages.len(), 2);
+        assert_eq!(wire.messages[0].content, "a follow-up");
+        let sent = sent.unwrap();
+        assert_eq!(sent.messages, session.messages.len());
+        assert_eq!(sent.tail_sends, 1);
+    }
+
+    #[test]
+    fn wire_session_ships_full_detail_after_a_prefix_edit_or_rewind() {
+        let baseline = detailed_session();
+        let cursor = SaveCursor {
+            messages: baseline.messages.len(),
+            blocks: baseline.transcript_blocks.len(),
+            signature: detail_prefix_signature(
+                &baseline.messages,
+                &baseline.transcript_blocks,
+            ),
+            tail_sends: 0,
+        };
+
+        // A mutation inside the claimed prefix fails verification.
+        let mut edited = baseline.clone();
+        edited.messages[1].content = "a different answer".to_owned();
+        edited.push_message(MessageRole::Assistant, "a follow-up");
+        let mut tails = Vec::new();
+        let (wire, sent) = wire_session(&edited, Some(cursor), &mut tails);
+        assert!(tails.is_empty());
+        assert_eq!(wire.messages.len(), edited.messages.len());
+        assert_eq!(sent.unwrap().tail_sends, 0);
+
+        // A rewind shrinks below the cursor — also a full save.
+        let mut rewound = baseline.clone();
+        rewound.messages.truncate(1);
+        let mut tails = Vec::new();
+        let (wire, sent) = wire_session(&rewound, Some(cursor), &mut tails);
+        assert!(tails.is_empty());
+        assert_eq!(wire.messages.len(), 1);
+        assert_eq!(sent.unwrap().tail_sends, 0);
+    }
+
+    #[test]
+    fn wire_session_heals_with_a_full_save_after_enough_tails() {
+        let baseline = detailed_session();
+        let cursor = SaveCursor {
+            messages: baseline.messages.len(),
+            blocks: baseline.transcript_blocks.len(),
+            signature: detail_prefix_signature(
+                &baseline.messages,
+                &baseline.transcript_blocks,
+            ),
+            tail_sends: FULL_DETAIL_INTERVAL,
+        };
+        let mut tails = Vec::new();
+        let (wire, sent) = wire_session(&baseline, Some(cursor), &mut tails);
+        assert!(tails.is_empty());
+        assert_eq!(wire.messages.len(), baseline.messages.len());
+        assert_eq!(sent.unwrap().tail_sends, 0);
+    }
+
+    #[test]
+    fn wire_session_leaves_skeletons_without_a_cursor() {
+        let session = detailed_session().list_projection();
+        let mut tails = Vec::new();
+        let (wire, sent) = wire_session(&session, None, &mut tails);
+        assert!(tails.is_empty());
+        assert!(!wire.detail_loaded);
+        assert!(sent.is_none());
+    }
 
     #[test]
     fn sidebar_transparency_defaults_and_persists_as_an_app_preference() {

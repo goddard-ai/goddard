@@ -27,7 +27,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
@@ -103,6 +103,25 @@ pub struct ReplayCursor {
     /// Identifies the daemon process that assigned `sequence`.
     pub epoch: Uuid,
     pub sequence: u64,
+}
+
+/// The splice point for one session's incremental `SaveTaskState` entry. The
+/// wire session's `messages` and `transcript_blocks` hold only what was
+/// appended after the client's previous save; the daemon keeps its stored
+/// prefix and appends the tail.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDetailTail {
+    pub session_id: Uuid,
+    /// `messages[..messages_from]` of the sending session are already stored;
+    /// the wire session's `messages` carry only the appended tail.
+    pub messages_from: u32,
+    pub transcript_blocks_from: u32,
+    /// [`crate::model::detail_prefix_signature`] over the kept prefix. The
+    /// daemon verifies it against its stored prefix before splicing — a
+    /// mismatch (another writer, a rewind in flight, a write that never
+    /// landed) merges list columns only until the next full save.
+    pub prefix_signature: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -299,6 +318,12 @@ pub enum Command {
         projects: Vec<Project>,
         live_session_ids: Vec<Uuid>,
         sessions: Vec<AgentSession>,
+        /// Sessions whose `messages`/`transcript_blocks` carry only the tail
+        /// appended since the client's last save — spliced onto the daemon's
+        /// stored prefix rather than replacing it. Entries not listed here
+        /// are complete sessions as before.
+        #[serde(default)]
+        session_tails: Vec<SessionDetailTail>,
     },
     /// Explicitly remove one daemon-owned task. Ordinary state saves are
     /// merge-only so a stale client snapshot cannot delete tasks another
@@ -1422,13 +1447,46 @@ mod tests {
     }
 
     #[test]
+    fn save_task_state_tails_round_trip_and_default_to_full_saves() {
+        let command = Command::SaveTaskState {
+            projects: Vec::new(),
+            live_session_ids: Vec::new(),
+            sessions: Vec::new(),
+            session_tails: vec![SessionDetailTail {
+                session_id: Uuid::from_u128(7),
+                messages_from: 3,
+                transcript_blocks_from: 2,
+                prefix_signature: 42,
+            }],
+        };
+
+        let json = serde_json::to_value(&command).unwrap();
+        assert_eq!(json["type"], "saveTaskState");
+        assert_eq!(json["sessionTails"][0]["sessionId"], "00000000-0000-0000-0000-000000000007");
+        assert_eq!(json["sessionTails"][0]["messagesFrom"], 3);
+        assert_eq!(json["sessionTails"][0]["transcriptBlocksFrom"], 2);
+        assert_eq!(json["sessionTails"][0]["prefixSignature"], 42);
+
+        // A payload that predates the field parses with no tails — every
+        // session entry is a complete save, as before.
+        let mut legacy = json.clone();
+        legacy.as_object_mut().unwrap().remove("sessionTails");
+        let Command::SaveTaskState { session_tails, .. } =
+            serde_json::from_value(legacy).unwrap()
+        else {
+            panic!("unexpected command variant");
+        };
+        assert!(session_tails.is_empty());
+    }
+
+    #[test]
     fn response_fork_command_uses_stable_camel_case_fields() {
         let json =
             serde_json::to_value(Command::ForkSessionFromResponse { turn_count: 7 }).unwrap();
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 13);
+        assert_eq!(PROTOCOL_VERSION, 14);
     }
 
     #[test]
@@ -1437,7 +1495,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 13);
+        assert_eq!(PROTOCOL_VERSION, 14);
     }
 
     #[test]

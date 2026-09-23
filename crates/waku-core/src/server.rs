@@ -2443,6 +2443,7 @@ mod tests {
                         projects: Vec::new(),
                         live_session_ids: vec![session_id],
                         sessions: vec![session],
+                        session_tails: Vec::new(),
                     },
                 )
                 .unwrap(),
@@ -2475,6 +2476,7 @@ mod tests {
                     projects: Vec::new(),
                     live_session_ids: vec![session_id],
                     sessions: vec![checkpoint],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();
@@ -2497,6 +2499,7 @@ mod tests {
                     projects: Vec::new(),
                     live_session_ids: vec![session_id, second_id],
                     sessions: vec![second],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();
@@ -2585,6 +2588,7 @@ mod tests {
                     projects: vec![project.clone()],
                     live_session_ids: vec![session.id],
                     sessions: vec![session.clone()],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();
@@ -2599,6 +2603,7 @@ mod tests {
                     projects: vec![project],
                     live_session_ids: vec![session.id],
                     sessions: vec![session],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap()
@@ -2659,6 +2664,7 @@ mod tests {
                     projects: vec![project.clone()],
                     live_session_ids: vec![draft.id],
                     sessions: vec![draft.clone()],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap()
@@ -2685,6 +2691,7 @@ mod tests {
                     projects: vec![project],
                     live_session_ids: vec![started.id],
                     sessions: vec![started.clone()],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap()
@@ -2767,6 +2774,7 @@ mod tests {
                     projects: vec![project.clone()],
                     live_session_ids: vec![],
                     sessions: vec![],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();
@@ -2797,6 +2805,7 @@ mod tests {
                     projects: vec![stale.clone()],
                     live_session_ids: vec![],
                     sessions: vec![],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();
@@ -2828,6 +2837,7 @@ mod tests {
                     projects: vec![claimed.clone()],
                     live_session_ids: vec![session.id],
                     sessions: vec![session],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();
@@ -3026,6 +3036,7 @@ mod tests {
                     projects: Vec::new(),
                     live_session_ids: vec![session_id],
                     sessions: vec![skeleton],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();
@@ -3104,6 +3115,7 @@ mod tests {
                     projects: Vec::new(),
                     live_session_ids: vec![session_id],
                     sessions: vec![skeleton, ghost],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();
@@ -3204,6 +3216,7 @@ mod tests {
                     projects: vec![project],
                     live_session_ids: vec![],
                     sessions: vec![target],
+                    session_tails: Vec::new(),
                 },
             )
             .unwrap();

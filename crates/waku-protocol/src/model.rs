@@ -5206,6 +5206,116 @@ impl<'de> Deserialize<'de> for TranscriptBlock {
     }
 }
 
+/// Content hash over a transcript prefix — the `messages` and
+/// `transcript_blocks` a tail save keeps rather than resends. The daemon
+/// computes the same value over its stored prefix and splices only when the
+/// two agree, so a diverged base falls back to a list-columns merge instead
+/// of mixing histories.
+///
+/// Hashing the string fields directly keeps the check cheap on sessions with
+/// large transcripts; small structured fields go through their serialized
+/// form. Coverage does not need to be exhaustive — a field that escapes the
+/// hash only delays a divergence until the periodic full save.
+pub fn detail_prefix_signature(messages: &[Message], transcript_blocks: &[TranscriptBlock]) -> u64 {
+    let mut hash = PrefixSignature::default();
+    for message in messages {
+        hash.marker(0x01);
+        hash.id(&message.id);
+        hash.json(&message.turn_id);
+        hash.json(&message.role);
+        hash.text(&message.content);
+        hash.json(&message.notice);
+        hash.option_text(message.display_content.as_deref());
+        hash.json(&message.attachments);
+        hash.json(&message.sent_by_task);
+        hash.boolean(message.hidden);
+        hash.number(message.created_at);
+        hash.boolean(message.streaming);
+    }
+    for block in transcript_blocks {
+        hash.marker(0x02);
+        hash.number(block.after_message as u64);
+        hash.json(&block.turn_id);
+        for activity in &block.activities {
+            hash.marker(0x03);
+            hash.id(&activity.id);
+            hash.json(&activity.source_id);
+            hash.json(&activity.kind);
+            hash.text(&activity.title);
+            hash.json(&activity.title_i18n);
+            hash.json(&activity.tool_name);
+            hash.json(&activity.mcp_server);
+            hash.option_text(activity.detail.as_deref());
+            hash.option_text(activity.arguments.as_deref());
+            hash.option_text(activity.output.as_deref());
+            hash.boolean(activity.output_truncated);
+            for image in &activity.image_urls {
+                hash.text(image);
+            }
+            hash.boolean(activity.failed);
+            hash.boolean(activity.complete);
+            hash.json(&activity.file_changes);
+            hash.option_text(activity.display_target.as_deref());
+            hash.option_text(activity.display_description.as_deref());
+            if let Some(reasoning) = &activity.reasoning {
+                hash.text(&reasoning.content);
+                hash.number(reasoning.started_at_ms);
+                hash.number(reasoning.finished_at_ms);
+            }
+        }
+    }
+    hash.0
+}
+
+/// FNV-1a over field bytes; `0xff`/`0xfe` separators can never appear inside
+/// the UTF-8 or JSON text they delimit.
+#[derive(Default)]
+struct PrefixSignature(u64);
+
+impl PrefixSignature {
+    fn bytes(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    fn marker(&mut self, byte: u8) {
+        self.bytes(&[byte]);
+    }
+
+    fn text(&mut self, text: &str) {
+        self.bytes(text.as_bytes());
+        self.marker(0xff);
+    }
+
+    fn option_text(&mut self, text: Option<&str>) {
+        match text {
+            Some(text) => self.text(text),
+            None => self.marker(0xfe),
+        }
+    }
+
+    fn json<T: Serialize>(&mut self, value: &T) {
+        if let Ok(bytes) = serde_json::to_vec(value) {
+            self.bytes(&bytes);
+        }
+        self.marker(0xfe);
+    }
+
+    fn boolean(&mut self, value: bool) {
+        self.bytes(&[u8::from(value)]);
+    }
+
+    fn number(&mut self, value: u64) {
+        self.bytes(&value.to_le_bytes());
+    }
+
+    fn id(&mut self, id: &Uuid) {
+        self.bytes(id.as_bytes());
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PendingPermission {
     pub request_id: String,
@@ -7060,5 +7170,56 @@ mod tests {
         assert!(projection.transcript_blocks.is_empty());
         assert!(projection.turns.is_empty());
         assert!(projection.queued_messages.is_empty());
+    }
+
+    #[test]
+    fn detail_prefix_signature_tracks_prefix_content_not_length() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.begin_turn("Ask");
+        session.push_message(MessageRole::Assistant, "an answer");
+        session.transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: None,
+            activities: vec![ActivityItem::new(
+                None,
+                ActivityKind::Tool,
+                "Inspect files",
+                None,
+                false,
+            )],
+        });
+
+        let signature =
+            detail_prefix_signature(&session.messages, &session.transcript_blocks);
+        assert_eq!(
+            signature,
+            detail_prefix_signature(&session.messages, &session.transcript_blocks)
+        );
+
+        // Appending later items leaves the prefix signature alone.
+        let mut extended = session.clone();
+        extended.push_message(MessageRole::Assistant, "a follow-up");
+        assert_eq!(
+            signature,
+            detail_prefix_signature(
+                &extended.messages[..session.messages.len()],
+                &extended.transcript_blocks[..session.transcript_blocks.len()],
+            )
+        );
+
+        // An edit inside the prefix — the tail-splice verification — changes it.
+        let mut edited = session.clone();
+        edited.messages[1].content = "a different answer".to_owned();
+        assert_ne!(
+            signature,
+            detail_prefix_signature(&edited.messages, &edited.transcript_blocks)
+        );
+        let mut completed = session.clone();
+        completed.transcript_blocks[0].activities[0].complete = true;
+        assert_ne!(
+            signature,
+            detail_prefix_signature(&completed.messages, &completed.transcript_blocks)
+        );
     }
 }

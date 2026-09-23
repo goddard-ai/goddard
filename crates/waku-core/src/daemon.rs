@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::{
     AgentPromptDelivery, AgentWorkspace, Backend, Command, EventSink, Request, ResponsePayload,
-    WireDriverEvent, WorkspaceOperation, WorkspaceResult,
+    SessionDetailTail, WireDriverEvent, WorkspaceOperation, WorkspaceResult,
 };
 use anyhow::{Context as _, anyhow, bail};
 use parking_lot::{Condvar, Mutex};
@@ -21,6 +21,7 @@ use crate::model::{
     AgentSession, AgentSessionSearchHit, Checkpoint, CheckpointStatus, DriverEvent, Project,
     ProjectMapStatus, ProviderKind, ProviderModelOption, ProviderResumeCursor,
     ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace, TurnStatus,
+    detail_prefix_signature,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -1863,6 +1864,7 @@ impl Backend for WakuBackend {
                 projects,
                 live_session_ids: _,
                 sessions,
+                session_tails,
             } => {
                 let active_runtimes = self
                     .sessions
@@ -1870,6 +1872,35 @@ impl Backend for WakuBackend {
                     .iter()
                     .map(|(session_id, entry)| (*session_id, entry.runtime_id))
                     .collect::<HashMap<_, _>>();
+                // Incremental saves carry only each session's appended tail;
+                // the prefix comes from the resident session when it is
+                // loaded and from the store's own read connection when it is
+                // not — either way outside the merge lock.
+                let mut tails: HashMap<Uuid, SessionDetailTail> = session_tails
+                    .into_iter()
+                    .map(|tail| (tail.session_id, tail))
+                    .collect();
+                let mut bases: HashMap<Uuid, AgentSession> = HashMap::new();
+                if !tails.is_empty() {
+                    let cold = {
+                        let state = self.task_state.lock();
+                        sessions
+                            .iter()
+                            .filter(|session| tails.contains_key(&session.id))
+                            .filter(|session| {
+                                !state.sessions.iter().any(|resident| {
+                                    resident.id == session.id && resident.detail_loaded
+                                })
+                            })
+                            .map(|session| session.id)
+                            .collect::<Vec<_>>()
+                    };
+                    for session_id in cold {
+                        if let Some(stored) = self.task_store.load_session_detail(session_id)? {
+                            bases.insert(session_id, stored);
+                        }
+                    }
+                }
                 let mut state = self.task_state.lock();
                 let removed_project_ids = self.removed_project_ids.lock();
                 for project in projects {
@@ -1896,6 +1927,9 @@ impl Backend for WakuBackend {
                 let mut saved_ids = Vec::with_capacity(sessions.len());
                 for mut session in sessions {
                     let session_id = session.id;
+                    if let Some(tail) = tails.remove(&session_id) {
+                        splice_session_tail(&state.sessions, &mut bases, &mut session, tail);
+                    }
                     let applied = if let Some(existing) = state
                         .sessions
                         .iter_mut()
@@ -2753,6 +2787,71 @@ fn session_projection_precedes(
         (Some(_), None) if existing.status.is_busy() => true,
         _ => incoming.updated_at < existing.updated_at,
     }
+}
+
+/// Rebuilds the complete session behind an incremental save: the wire
+/// entry's scalars plus the stored prefix its tail claims. The prefix comes
+/// from the resident session when loaded, else from the stored row read
+/// before the merge lock. A tail whose prefix cannot be verified degrades
+/// the entry to a skeleton — the merge then touches list columns only, and
+/// the client's next full save heals the detail.
+fn splice_session_tail(
+    sessions: &[AgentSession],
+    bases: &mut HashMap<Uuid, AgentSession>,
+    session: &mut AgentSession,
+    tail: SessionDetailTail,
+) {
+    let messages_from = tail.messages_from as usize;
+    let blocks_from = tail.transcript_blocks_from as usize;
+    let verified = |base: &AgentSession| {
+        base.messages.len() >= messages_from
+            && base.transcript_blocks.len() >= blocks_from
+            && detail_prefix_signature(
+                &base.messages[..messages_from],
+                &base.transcript_blocks[..blocks_from],
+            ) == tail.prefix_signature
+    };
+
+    if let Some(resident) = sessions
+        .iter()
+        .find(|resident| resident.id == tail.session_id && resident.detail_loaded)
+    {
+        if verified(resident) {
+            let mut messages = resident.messages[..messages_from].to_vec();
+            messages.append(&mut session.messages);
+            let mut blocks = resident.transcript_blocks[..blocks_from].to_vec();
+            blocks.append(&mut session.transcript_blocks);
+            session.messages = messages;
+            session.transcript_blocks = blocks;
+            return;
+        }
+        degrade_tail_session(session);
+        return;
+    }
+
+    match bases.remove(&tail.session_id) {
+        // No claimed prefix — the wire detail is already complete.
+        _ if messages_from == 0 && blocks_from == 0 => {}
+        Some(mut base) if verified(&base) => {
+            base.messages.truncate(messages_from);
+            base.messages.append(&mut session.messages);
+            base.transcript_blocks.truncate(blocks_from);
+            base.transcript_blocks.append(&mut session.transcript_blocks);
+            session.messages = base.messages;
+            session.transcript_blocks = base.transcript_blocks;
+        }
+        _ => degrade_tail_session(session),
+    }
+}
+
+/// Marks a tail-sent session as a skeleton so the merge updates only its list
+/// columns, leaving the stored transcript untouched until a full save lands.
+fn degrade_tail_session(session: &mut AgentSession) {
+    session.detail_loaded = false;
+    session.messages.clear();
+    session.transcript_blocks.clear();
+    session.turns.clear();
+    session.queued_messages.clear();
 }
 
 /// Applies the fields a list projection legitimately carries.
@@ -6167,6 +6266,118 @@ fn record_provider_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::MessageRole;
+
+    fn detailed_session() -> AgentSession {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("Ask");
+        session.push_message(MessageRole::Assistant, "an answer");
+        session
+    }
+
+    /// The wire session a client sends after `baseline`: full scalars, but
+    /// `messages`/`transcript_blocks` carry only the appended tail.
+    fn tail_wire(base: &AgentSession, full: &AgentSession) -> (AgentSession, SessionDetailTail) {
+        let mut wire = full.clone();
+        wire.messages = wire.messages.split_off(base.messages.len());
+        wire.transcript_blocks = wire.transcript_blocks.split_off(base.transcript_blocks.len());
+        let tail = SessionDetailTail {
+            session_id: base.id,
+            messages_from: base.messages.len() as u32,
+            transcript_blocks_from: base.transcript_blocks.len() as u32,
+            prefix_signature: detail_prefix_signature(
+                &base.messages,
+                &base.transcript_blocks,
+            ),
+        };
+        (wire, tail)
+    }
+
+    #[test]
+    fn tail_save_splices_onto_the_resident_prefix() {
+        let baseline = detailed_session();
+        let mut full = baseline.clone();
+        full.push_message(MessageRole::Assistant, "a follow-up");
+        let (mut wire, tail) = tail_wire(&baseline, &full);
+
+        let mut bases = HashMap::new();
+        splice_session_tail(&[baseline], &mut bases, &mut wire, tail);
+
+        assert_eq!(wire.messages.len(), full.messages.len());
+        assert_eq!(
+            wire.messages.last().unwrap().content,
+            full.messages.last().unwrap().content
+        );
+        assert_eq!(
+            wire.messages[..2].iter().map(|m| m.content.clone()).collect::<Vec<_>>(),
+            vec!["Ask".to_owned(), "an answer".to_owned()]
+        );
+    }
+
+    #[test]
+    fn tail_save_with_a_diverged_resident_prefix_merges_as_a_skeleton() {
+        let baseline = detailed_session();
+        let mut resident = baseline.clone();
+        // Another writer landed first — the resident prefix no longer
+        // matches the client's claimed one.
+        resident.messages[1].content = "someone else's answer".to_owned();
+        let mut full = baseline.clone();
+        full.push_message(MessageRole::Assistant, "a follow-up");
+        let (mut wire, tail) = tail_wire(&baseline, &full);
+
+        let mut bases = HashMap::new();
+        splice_session_tail(&[resident], &mut bases, &mut wire, tail);
+
+        assert!(!wire.detail_loaded);
+        assert!(wire.messages.is_empty());
+        assert!(wire.transcript_blocks.is_empty());
+    }
+
+    #[test]
+    fn tail_save_splices_onto_a_stored_row_when_nothing_is_resident() {
+        let baseline = detailed_session();
+        let mut full = baseline.clone();
+        full.push_message(MessageRole::Assistant, "a follow-up");
+        let (mut wire, tail) = tail_wire(&baseline, &full);
+
+        let mut bases = HashMap::from([(baseline.id, baseline)]);
+        splice_session_tail(&[], &mut bases, &mut wire, tail);
+
+        assert_eq!(wire.messages.len(), full.messages.len());
+        assert_eq!(wire.messages.last().unwrap().content, "a follow-up");
+    }
+
+    #[test]
+    fn tail_save_without_any_prefix_merges_as_a_skeleton() {
+        let baseline = detailed_session();
+        let mut full = baseline.clone();
+        full.push_message(MessageRole::Assistant, "a follow-up");
+        let (mut wire, tail) = tail_wire(&baseline, &full);
+
+        // Neither resident nor stored — the tail has nothing to land on.
+        let mut bases = HashMap::new();
+        splice_session_tail(&[], &mut bases, &mut wire, tail);
+
+        assert!(!wire.detail_loaded);
+        assert!(wire.messages.is_empty());
+    }
+
+    #[test]
+    fn a_zero_prefix_tail_is_a_complete_save() {
+        let session = detailed_session();
+        let mut wire = session.clone();
+        let tail = SessionDetailTail {
+            session_id: session.id,
+            messages_from: 0,
+            transcript_blocks_from: 0,
+            prefix_signature: 0,
+        };
+        let mut bases = HashMap::new();
+        splice_session_tail(&[], &mut bases, &mut wire, tail);
+
+        assert!(wire.detail_loaded);
+        assert_eq!(wire.messages.len(), session.messages.len());
+    }
 
     #[test]
     fn managed_goal_turn_has_one_claimant_across_clients() {
@@ -6937,6 +7148,7 @@ mod tests {
                         projects: vec![project.clone(), other_project.clone()],
                         live_session_ids: vec![parent.id, other_session.id],
                         sessions: vec![parent.clone(), other_session.clone()],
+                        session_tails: Vec::new(),
                     },
                 },
                 EventSink::detached(),

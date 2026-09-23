@@ -72,7 +72,7 @@ pub use protocol::{
     DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady, DaemonSessionSample,
     DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION,
     ReplayCursor, Request, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent,
-    ServerMessage, TASK_LINK_PREFIX, WireComputerToolRequest, WireDriverEvent,
+    ServerMessage, SessionDetailTail, TASK_LINK_PREFIX, WireComputerToolRequest, WireDriverEvent,
     WireDriverStartOptions, WireSessionOptions,
 };
 pub use protocol::{KeyedError, WireTranslation};
