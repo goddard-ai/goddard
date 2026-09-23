@@ -1260,7 +1260,7 @@ workspace.worktree: ワークツリー
 suggestions.tooltip: 次のおすすめアクション
 suggestions.settings_title: 提案するプロンプト
 suggestions.automatic_actions_title: 自動で実行する提案
-suggestions.automatic_action_description: 有効にすると、Jev の確率が設定値（最低 95%）に達したときに自動で実行します。
+suggestions.automatic_action_description: 有効にすると、Jev の確率が設定値（最低 80%）に達したときに自動で実行します。
 suggestions.choice_template: 選択への返信
 suggestions.edit_prompt: 編集
 suggestions.reset_prompt: リセット

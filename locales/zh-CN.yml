@@ -1232,7 +1232,7 @@ workspace.worktree: 工作树
 suggestions.tooltip: 建议的下一步
 suggestions.settings_title: 建议提示词
 suggestions.automatic_actions_title: 自动执行的建议操作
-suggestions.automatic_action_description: 启用后，Jev 的概率达到设定阈值（最低 95%）时自动执行。
+suggestions.automatic_action_description: 启用后，Jev 的概率达到设定阈值（最低 80%）时自动执行。
 suggestions.choice_template: 选项回复
 suggestions.edit_prompt: 编辑
 suggestions.reset_prompt: 重置

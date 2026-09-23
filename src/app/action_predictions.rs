@@ -194,7 +194,7 @@ fn automatic_action_allowed(
 ) -> bool {
     AUTOMATIC_ACTIONS.contains(&action)
         && thresholds.get(action).is_some_and(|threshold| {
-            probability.is_finite() && probability >= f64::from((*threshold).clamp(95, 100)) / 100.0
+            probability.is_finite() && probability >= f64::from((*threshold).clamp(80, 100)) / 100.0
         })
 }
 
@@ -1286,12 +1286,12 @@ mod tests {
     }
 
     #[test]
-    fn automatic_actions_require_an_explicit_opt_in_and_at_least_95_percent() {
+    fn automatic_actions_require_an_explicit_opt_in_and_at_least_80_percent() {
         let mut thresholds = BTreeMap::new();
         assert!(!automatic_action_allowed("run-tests", 1.0, &thresholds));
-        thresholds.insert("run-tests".to_owned(), 90);
-        assert!(!automatic_action_allowed("run-tests", 0.949, &thresholds));
-        assert!(automatic_action_allowed("run-tests", 0.95, &thresholds));
+        thresholds.insert("run-tests".to_owned(), 70);
+        assert!(!automatic_action_allowed("run-tests", 0.799, &thresholds));
+        assert!(automatic_action_allowed("run-tests", 0.80, &thresholds));
         thresholds.insert("run-tests".to_owned(), 99);
         assert!(!automatic_action_allowed("run-tests", 0.98, &thresholds));
         assert!(automatic_action_allowed("run-tests", 0.99, &thresholds));

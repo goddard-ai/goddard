@@ -3247,7 +3247,7 @@ suggestions.settings_title:
 suggestions.automatic_actions_title:
   en: Automatic suggested actions
 suggestions.automatic_action_description:
-  en: Opt in to run this suggestion automatically when Jev reaches the required probability (95% minimum).
+  en: Opt in to run this suggestion automatically when Jev reaches the required probability (80% minimum).
 suggestions.choice_template:
   en: Decision reply
 suggestions.edit_prompt:

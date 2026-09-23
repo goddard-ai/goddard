@@ -1054,7 +1054,7 @@ pub struct AppSettings {
     /// Desktop-owned overrides for the fixed suggested-prompt actions.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub suggested_prompts: BTreeMap<String, String>,
-    /// Action id -> minimum Jev probability (95–100). Presence is opt-in.
+    /// Action id -> minimum Jev probability (80–100). Presence is opt-in.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub automatic_suggested_actions: BTreeMap<String, u8>,
     /// Experimental: the Automations page — daemon-scheduled prompts that
@@ -2465,7 +2465,7 @@ impl PersistedState {
         self.automatic_suggested_actions = settings
             .automatic_suggested_actions
             .into_iter()
-            .map(|(id, threshold)| (id, threshold.clamp(95, 100)))
+            .map(|(id, threshold)| (id, threshold.clamp(80, 100)))
             .collect();
         self.automations_enabled = settings.automations_enabled;
         self.sidebar_dock_enabled = settings.sidebar_dock_enabled;
@@ -4118,7 +4118,7 @@ mod tests {
             .automatic_suggested_actions
             .insert("push".to_owned(), 1);
         restored.apply_app_settings(invalid);
-        assert_eq!(restored.automatic_suggested_actions.get("push"), Some(&95));
+        assert_eq!(restored.automatic_suggested_actions.get("push"), Some(&80));
     }
 
     #[test]

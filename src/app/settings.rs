@@ -6668,7 +6668,7 @@ impl Waku {
         if let Some(threshold) = threshold {
             self.state
                 .automatic_suggested_actions
-                .insert(id.to_owned(), threshold.clamp(95, 100));
+                .insert(id.to_owned(), threshold.clamp(80, 100));
         } else {
             self.state.automatic_suggested_actions.remove(id);
         }
@@ -6719,7 +6719,7 @@ impl Waku {
                     .child(settings_button(
                         format!("automatic-action-decrease-{id}"),
                         "−".to_owned(),
-                        threshold.is_some_and(|value| value > 95),
+                        threshold.is_some_and(|value| value > 80),
                         false,
                         true,
                         theme,
