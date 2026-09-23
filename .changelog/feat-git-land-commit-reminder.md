@@ -1,1 +1,0 @@
-- New General setting "Remind the task to commit after an empty land" (off by default): when a land reports the base already contains every commit, the owning task's chat gets a commit reminder unless its last message already names a commit

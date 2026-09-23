@@ -1,1 +1,0 @@
-- Switching a task to a new provider now hands off a compact per-turn index — the user's messages verbatim plus Jev-selected transcript excerpts — and the fresh session pulls any turn's full text on demand with `goddard-agent read`, instead of ingesting the whole extracted transcript; a missing Jev backend degrades to a pointer-only handoff rather than blocking the switch

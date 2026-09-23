@@ -1,1 +1,0 @@
-- Side chats open with a snapshot index of their parent task — its user messages verbatim plus one cue line per turn's work — delivered as hidden context, and can pull any turn's current text with `goddard-agent read`

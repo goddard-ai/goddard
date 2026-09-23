@@ -1,1 +1,0 @@
-- ⌘⇧N is always "New task in…" — it no longer opens the project switcher on the New Task page, and only cycles that overlay in reverse while ⌘N has it up; ⌘N in Big Picture now raises the same visible project switcher for the new-task draft instead of stepping the destination invisibly

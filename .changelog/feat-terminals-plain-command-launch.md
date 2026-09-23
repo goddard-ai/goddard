@@ -1,1 +1,0 @@
-- Custom commands, the workspace sync strip, and other app-run terminal commands now run as plain typed commands in shells with Goddard's integration hooks (zsh, bash 4.4+, fish) — no more opaque `source`-d script files — and print their script first on shells that still need the file

@@ -1,1 +1,0 @@
-- Native Markdown rendering treats soft line breaks as spaces while explicit hard breaks remain line breaks.

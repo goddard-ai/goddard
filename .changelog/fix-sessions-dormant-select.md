@@ -1,1 +1,0 @@
-- Selecting a task in the Dormant group no longer wakes it — dormant tasks stay put while you browse them and only return to the live groups when a prompt is sent or they're restored from the context menu.

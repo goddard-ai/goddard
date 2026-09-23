@@ -1,1 +1,0 @@
-- The archive toast's Undo now selects the restored task directly instead of showing a second "Task unarchived" toast with a "View now" button.

@@ -1,1 +1,0 @@
-- The "Checking for changes…" card now appears only once a prompt is queued behind the turn's checkpoint — a capture that finishes before you send stays silent instead of flashing the card

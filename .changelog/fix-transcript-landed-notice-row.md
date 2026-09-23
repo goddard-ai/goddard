@@ -1,1 +1,0 @@
-- The "Landed on `<base>`" card is its own transcript row again instead of stacking onto the response above, and its label no longer shows a text cursor on hover

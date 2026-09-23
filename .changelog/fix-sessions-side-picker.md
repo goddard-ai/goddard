@@ -1,1 +1,0 @@
-- The `/side` command never appeared in the composer's slash-command picker; it is now listed for every provider alongside `/resume` and `/land`.

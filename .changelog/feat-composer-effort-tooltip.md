@@ -1,1 +1,0 @@
-- The composer's model-options chip now shows a tooltip on hover, including the ⌘E shortcut that cycles reasoning effort.

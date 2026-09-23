@@ -34,6 +34,69 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.8.0]
+
+### Features
+
+- **Sessions**
+  - Prompts a task's agent sends to another task with `goddard-agent prompt` now arrive labeled for the receiving agent — "from your side chat" or "the agent of another Goddard task," with the sender's task id and how to reply — instead of reading as text the user typed. The transcript still shows the sender's own words under the "Sent by agent" chip.
+  - `goddard-agent read` returns a task's transcript as turn-tagged entries — messages and condensed tool activity — and can pull a single turn with `{"turn": N}`; a session's credential can always read its own task (and a side chat's parent), even with the cross-task agent tools off
+  - Agents can now search the transcripts of sibling tasks in their own project through `goddard-agent search` — the same full-text corpus ⌘K scans — returning matching task ids, titles, status, and excerpts so an agent can find prior work without loading every transcript, then `read` the one that matters
+  - Reclaim disk space from idle worktree sessions: a new "Reclaim Disk Space…" command (command palette and task context menu) lists started, inactive worktrees alongside the dependency installs and build outputs they still hold, and deletes only git-ignored regenerable directories — source changes and task history stay untouched.
+  - Session search (⌘K and `goddard-agent search`) now understands `field:value` filters — `project:<name>`, `status:<idle|connecting|working|waiting|background|failed|busy>`, `archived:<true|false|any>`, and `limit:<n>` — with the remaining words searched as transcript text, so `status:idle retry logic` finds the idle task that mentioned retry logic
+  - Side chats open with a snapshot index of their parent task — its user messages verbatim plus one cue line per turn's work — delivered as hidden context, and can pull any turn's current text with `goddard-agent read`
+- **Composer**
+  - The composer's model-options chip now shows a tooltip on hover, including the ⌘E shortcut that cycles reasoning effort.
+  - `pasted text` chips in the composer are now editable: click one and a floating editor opens below it with the paste loaded — click away to save, press Escape to discard, or hit the trash icon to remove the chip. It replaces the old double-click-to-expand.
+  - `@` task mentions in the composer now suggest only sessions from the task's own project — reference a session from another project by dragging it in from the sidebar.
+- **Providers**
+  - Codex plan meters now show banked reset credits with their nearest expiry, and a **Use reset** row redeems one behind a confirmation that spells out the weekly-reset anchor moving; the meter refreshes with the cleared windows
+  - Switching a task to a new provider now hands off a compact per-turn index — the user's messages verbatim plus Jev-selected transcript excerpts — and the fresh session pulls any turn's full text on demand with `goddard-agent read`, instead of ingesting the whole extracted transcript; a missing Jev backend degrades to a pointer-only handoff rather than blocking the switch
+- **Git**
+  - Right-clicking a commit link in an agent response now lets you copy its full hash or message, or open its diff in the Git panel.
+  - New General setting "Remind the task to commit after an empty land" (off by default): when a land reports the base already contains every commit, the owning task's chat gets a commit reminder unless its last message already names a commit
+  - Syncing a branch closes the picker and shows pull progress in a toast.
+- Add Alt+Shift+Tab to cycle favorite models backward.
+- Projects can be starred from the New task project picker. A starred project's tasks lead ⌘D navigation — even ahead of unread completions elsewhere — and its group sits at the top of the sidebar's Project grouping; ⌘D shows a star next to the bell when it will land on one, and an off-screen starred completion plays a distinct sound (toggleable in Settings → Sounds).
+- New "Keep awake" toggle in Settings → Daemon: while on, the daemon holds the host's sleep assertions so the mobile and web apps stay reachable — on AC power the machine stays awake even with the lid closed
+- Choose which task events send system notifications while the app is in the background: new "Finished turn" and "Waiting for input" toggles under Settings → Notifications — and a task blocked on your approval or a question now banners instead of waiting silently
+- Sidebar draft previews get a "Draft preview color" setting (General, under "Sidebar draft previews") with Subtle — now the default, matching the row's detail line — Accent, and Loud, the alert red they shipped with
+- Custom commands, the workspace sync strip, and other app-run terminal commands now run as plain typed commands in shells with Goddard's integration hooks (zsh, bash 4.4+, fish) — no more opaque `source`-d script files — and print their script first on shells that still need the file
+- Transcripts can link to another task with `[title](goddard://task/<task-id>)`: the link renders like any other and opens that task when clicked, which `goddard-agent search` results suggest so agent replies can point at the tasks they cite
+
+### Experiments
+
+- **Sessions**
+  - **[Experimental]** Tasks can now run in the provider's own hosted environment — the composer's Environment menu gains a named cloud row (Devin Cloud, Codex Cloud, Claude Cloud, Cursor Cloud, Copilot Cloud, Droid Cloud) for providers that support one. Cloud tasks run against the repo's pushed state only, so Goddard asks you to push an unpushed branch or commits before submitting, and the task runs and reports like any other session.
+  - **[Experimental]** Sandbox VM: provider credentials now live in one shared home per provider instead of a per-worktree directory, so sign-in happens once per provider; when a sandboxed session has no credentials its launch parks the prompt and opens the provider's interactive sign-in as a terminal tab in the session's right panel — and the VM now covers Amp, Cursor, Devin, Droid, Fx, Goose, Grok, Kimi, Pi, and Oh My Pi alongside Claude and Codex
+- **[Experimental]** Turn status markers now float over the transcript's bottom edge while the settled turn's footer is scrolled below the fold, so the verdict stays visible while reading a long response; clicking the float scrolls the footer back into view
+
+### Fixed
+
+- **Sessions**
+  - Selecting a task in the Dormant group no longer wakes it — dormant tasks stay put while you browse them and only return to the live groups when a prompt is sent or they're restored from the context menu.
+  - Creating a task with no project no longer fails at submit when the workspace it restores was archived while still empty — an entry-less archive now recreates the directory instead of dying on "No such file or directory"
+  - Choosing "No project" in the project switcher or project pickers now provisions a fresh scratch workspace instead of binding the new task to an earlier projectless task's directory — the stale binding could resurrect a finished task's files or fail outright when that directory was gone
+  - The `/side` command never appeared in the composer's slash-command picker; it is now listed for every provider alongside `/resume` and `/land`.
+  - The archive toast's Undo now selects the restored task directly instead of showing a second "Task unarchived" toast with a "View now" button.
+- **Composer**
+  - Move the Big Picture shortcut hint above the composer so the composer docks at the bottom of the overlay
+  - Unstarring a model in the model picker no longer drops its row out of the favorites block — the star empties and the ⌘⌥ shortcuts compact immediately, but the row stays put until the picker closes so re-starring is a one-click undo.
+- **Providers**
+  - Explain that Codex thread conflicts and thread-open failures may come from the ChatGPT app or Codex CLI, and tell users to close the thread there before retrying in Goddard.
+  - Fixed the reasoning effort menu disappearing on Grok models the hardcoded list predates (like Grok 4.7); effort options now come from the CLI's own model catalog, so newly released and custom models get their real ladder
+- **Transcript**
+  - Fixed a crash that could quit the app as soon as a transcript showed an activity row whose detail is a file name — the link's context menu was being registered while the transcript was locked for rendering.
+  - The "Checking for changes…" card now appears only once a prompt is queued behind the turn's checkpoint — a capture that finishes before you send stays silent instead of flashing the card
+  - The "Landed on `<base>`" card is its own transcript row again instead of stacking onto the response above, and its label no longer shows a text cursor on hover
+- Keep the selected commit header clear of macOS traffic lights when the sidebar is hidden.
+- ⌘⇧N is always "New task in…" — it no longer opens the project switcher on the New Task page, and only cycles that overlay in reverse while ⌘N has it up; ⌘N in Big Picture now raises the same visible project switcher for the new-task draft instead of stepping the destination invisibly
+- Native Markdown rendering treats soft line breaks as spaces while explicit hard breaks remain line breaks.
+- Reduced memory usage in long-running windows: transcripts of tasks nobody is viewing, remote images, parked panel file buffers and diffs, and cached issue/PR details are now released when idle and reload on demand instead of accumulating for the life of the window.
+- Fix icons that never rendered: transcript status notices, the quit confirmation's Quit action, Git panel unstage buttons, the GitHub "Fix checks" action, draft attachment badges, and Projects worktree badges.
+- The Git and right-panel toggles no longer shift position when a panel opens — the panel headers now match the top bar's height, inset, and icon spacing.
+- Renaming a session in the sidebar could leave its status indicator offset from the row's right edge; the indicator now stays pinned to the timestamp edge through renames.
+
 ## [0.7.0]
 
 ### Features

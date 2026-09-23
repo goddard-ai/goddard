@@ -1,1 +1,0 @@
-- Turn status markers now float over the transcript's bottom edge while the settled turn's footer is scrolled below the fold, so the verdict stays visible while reading a long response; clicking the float scrolls the footer back into view

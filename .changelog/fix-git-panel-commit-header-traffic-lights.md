@@ -1,1 +1,0 @@
-- Keep the selected commit header clear of macOS traffic lights when the sidebar is hidden.

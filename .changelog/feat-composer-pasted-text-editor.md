@@ -1,1 +1,0 @@
-- `pasted text` chips in the composer are now editable: click one and a floating editor opens below it with the paste loaded — click away to save, press Escape to discard, or hit the trash icon to remove the chip. It replaces the old double-click-to-expand.

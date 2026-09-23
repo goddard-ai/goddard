@@ -1,1 +1,0 @@
-- Codex plan meters now show banked reset credits with their nearest expiry, and a **Use reset** row redeems one behind a confirmation that spells out the weekly-reset anchor moving; the meter refreshes with the cleared windows

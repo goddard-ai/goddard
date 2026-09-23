@@ -1,1 +1,0 @@
-- Session search (⌘K and `goddard-agent search`) now understands `field:value` filters — `project:<name>`, `status:<idle|connecting|working|waiting|background|failed|busy>`, `archived:<true|false|any>`, and `limit:<n>` — with the remaining words searched as transcript text, so `status:idle retry logic` finds the idle task that mentioned retry logic

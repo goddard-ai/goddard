@@ -1,1 +1,0 @@
-- Syncing a branch closes the picker and shows pull progress in a toast.

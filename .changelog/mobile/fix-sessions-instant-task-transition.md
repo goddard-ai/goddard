@@ -1,1 +1,0 @@
-- Newly created tasks open on mobile as soon as they are saved, while provider startup continues.

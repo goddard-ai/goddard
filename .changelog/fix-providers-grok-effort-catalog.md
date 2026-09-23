@@ -1,1 +1,0 @@
-- Fixed the reasoning effort menu disappearing on Grok models the hardcoded list predates (like Grok 4.7); effort options now come from the CLI's own model catalog, so newly released and custom models get their real ladder

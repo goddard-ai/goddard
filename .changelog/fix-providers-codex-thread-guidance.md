@@ -1,1 +1,0 @@
-- Explain that Codex thread conflicts and thread-open failures may come from the ChatGPT app or Codex CLI, and tell users to close the thread there before retrying in Goddard.
