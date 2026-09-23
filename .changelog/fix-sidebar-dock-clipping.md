@@ -1,0 +1,1 @@
+- The experimental sidebar dock is no longer cut off at the sidebar's edge — it draws above the rest of the window, and the hover strip that raises it reaches a little higher above the bottom bar.

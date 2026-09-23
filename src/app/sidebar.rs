@@ -276,12 +276,22 @@ const DOCK_HIDDEN_DEPTH: f32 = 120.0;
 /// Rise on hover; the drop is quicker so the dock clears promptly.
 const DOCK_RISE: Duration = Duration::from_millis(180);
 const DOCK_DROP: Duration = Duration::from_millis(140);
+/// The footer bar's visible height. The dock's hover trigger runs a
+/// quarter taller, reaching into the list above without changing the bar.
+const SIDEBAR_FOOTER_HEIGHT: f32 = 40.0;
+const DOCK_TRIGGER_HEIGHT: f32 = SIDEBAR_FOOTER_HEIGHT * 1.25;
+/// The hover-label slot above each button.
+const DOCK_LABEL_HEIGHT: f32 = 20.5;
+/// The strip the risen dock owns along the window's bottom-left — label
+/// slot, peak diameter, resting inset — for hit-testing the pointer
+/// against it from outside its element tree.
+const DOCK_STRIP_HEIGHT: f32 = DOCK_LABEL_HEIGHT + DOCK_ITEM_PEAK + DOCK_BOTTOM_INSET;
 
 /// A dock glyph recolored to the theme's body text. The source SVGs draw the
-/// mark three times — a blurred drop shadow, the solid fill, an inner
-/// highlight — so the glyph's `fill` is rewritten and the result rendered as
-/// an `img()` to keep those authored layers. The image id is a content hash,
-/// so repeated renders hit the asset cache.
+/// mark twice — a blurred drop shadow under the solid fill — so the glyph's
+/// `fill` is rewritten and the result rendered as an `img()` to keep those
+/// authored layers. The image id is a content hash, so repeated renders hit
+/// the asset cache.
 fn dock_glyph_image(path: &'static str, color: Hsla, cx: &App) -> Option<Arc<gpui::Image>> {
     use gpui::AssetSource;
 
@@ -1724,24 +1734,8 @@ impl Waku {
         let theme = Theme::current(cx);
         div()
             .id("sidebar-footer")
-            // Hovering anywhere across the bottom strip — not just the
-            // settings cog — raises the quick-action dock.
-            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                this.sidebar_dock_zone_hovered = *hovered;
-                if !*hovered && !this.sidebar_dock_hovered {
-                    this.sidebar_dock_mouse_x = None;
-                }
-                cx.notify();
-            }))
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                let mouse_x = f32::from(event.position.x);
-                if this.sidebar_dock_mouse_x != Some(mouse_x) {
-                    this.sidebar_dock_mouse_x = Some(mouse_x);
-                    cx.notify();
-                }
-            }))
             .flex_none()
-            .h(px(40.0))
+            .h(px(SIDEBAR_FOOTER_HEIGHT))
             .px(px(10.0))
             .flex()
             .items_center()
@@ -1808,9 +1802,12 @@ impl Waku {
     }
 
     /// The quick-action dock that rises above the footer while the sidebar's
-    /// bottom strip is hovered. It keeps its own hover state so the pointer
-    /// can cross from the footer onto it without flicker — and so it survives
-    /// the sidebar swap when a button opens the settings page.
+    /// bottom strip is hovered. It mounts in the window's root layer rather
+    /// than inside the sidebar, so the pane's clip and the surfaces beside
+    /// it can never cut it off — it anchors to the window's bottom-left and
+    /// drops off the bottom edge to hide. It keeps its own hover state so
+    /// the pointer can cross from the footer onto it without flicker — and
+    /// so it survives the sidebar swap when a button opens the settings page.
     pub(super) fn render_sidebar_dock(
         &self,
         window: &Window,
@@ -1916,16 +1913,16 @@ impl Waku {
             DOCK_ITEM_REST + (DOCK_ITEM_PEAK - DOCK_ITEM_REST) * influence
         };
         // Sketch "Dock": the buttons overlap the bar that raised them — their
-        // bottoms land 3.5px above the sidebar's bottom edge, and the row is
+        // bottoms land 3.5px above the window's bottom edge, and the row is
         // anchored 4.5px off its leading edge. Occluding keeps clicks on the
-        // buttons (and the gaps between them) from leaking to the footer
-        // hitboxes they cover.
+        // buttons (and the gaps between them) from leaking to the hitboxes
+        // they cover.
         Some(
             div()
                 .id("sidebar-dock")
                 .absolute()
                 .bottom(px(bottom))
-                .left(px(4.5))
+                .left(px(DOCK_LEFT_INSET))
                 .occlude()
                 .flex()
                 .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
@@ -1957,6 +1954,24 @@ impl Waku {
                 ))
                 .into_any_element(),
         )
+    }
+
+    /// Whether the risen dock owns the pointer's position. The dock mounts
+    /// in the window's root layer and occludes, so a hover probe beneath it
+    /// — the sidebar peek overlay's exit probe — reads a pointer resting on
+    /// the dock as having left. Checking the dock's footprint directly keeps
+    /// that from firing a false exit.
+    pub(super) fn sidebar_dock_covers_pointer(&self, window: &Window) -> bool {
+        if !self.state.sidebar_dock_enabled
+            || matches!(self.sidebar_dock_motion.get(), SidebarDockMotion::Hidden)
+        {
+            return false;
+        }
+        let items = 4 + usize::from(self.state.friends_enabled);
+        let right = DOCK_LEFT_INSET + items as f32 * (DOCK_ITEM_REST + DOCK_ITEM_GAP);
+        let top = f32::from(window.viewport_size().height) - DOCK_STRIP_HEIGHT;
+        let position = window.mouse_position();
+        f32::from(position.x) <= right && f32::from(position.y) >= top
     }
 
     #[track_caller]
@@ -2032,7 +2047,7 @@ impl Waku {
                 }
                 cx.notify();
             }))
-            .child(div().h(px(20.5)).flex().when(hovered, |slot| {
+            .child(div().h(px(DOCK_LABEL_HEIGHT)).flex().when(hovered, |slot| {
                 slot.child(
                     div()
                         .h(px(17.5))
@@ -2684,13 +2699,38 @@ impl Waku {
                 div()
                     .flex_none()
                     .relative()
-                    // The dock overlaps the footer it rises from, so it must
-                    // paint after it to stay on top — visually and in the
-                    // hit-test order.
                     .child(self.render_sidebar_footer(cx))
-                    .when_some(self.render_sidebar_dock(window, cx), |container, dock| {
-                        container.child(dock)
-                    }),
+                    // Hovering anywhere across the bottom strip — not just
+                    // the settings cog — raises the quick-action dock. The
+                    // zone runs a quarter taller than the bar and reaches
+                    // into the list above it; a Normal hitbox, so the rows
+                    // and footer buttons beneath stay hovered and clickable.
+                    .child(
+                        div()
+                            .id("sidebar-dock-zone")
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .h(px(DOCK_TRIGGER_HEIGHT))
+                            .cursor_default()
+                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                this.sidebar_dock_zone_hovered = *hovered;
+                                if !*hovered && !this.sidebar_dock_hovered {
+                                    this.sidebar_dock_mouse_x = None;
+                                }
+                                cx.notify();
+                            }))
+                            .on_mouse_move(cx.listener(
+                                |this, event: &MouseMoveEvent, _, cx| {
+                                    let mouse_x = f32::from(event.position.x);
+                                    if this.sidebar_dock_mouse_x != Some(mouse_x) {
+                                        this.sidebar_dock_mouse_x = Some(mouse_x);
+                                        cx.notify();
+                                    }
+                                },
+                            )),
+                    ),
             )
     }
 

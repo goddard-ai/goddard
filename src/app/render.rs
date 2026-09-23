@@ -299,7 +299,7 @@ impl Waku {
     fn sidebar_peek_overlay_hover(
         &mut self,
         hovered: &bool,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if *hovered {
@@ -314,10 +314,11 @@ impl Waku {
             }
             return;
         }
-        if self.any_menu_open(cx) {
-            // An open menu claimed the pointer. Defer the exit to
-            // `settle_sidebar_peek`, which re-checks it once the menu closes.
-            self.sidebar_peek_menu_hold = true;
+        if self.any_menu_open(cx) || self.sidebar_dock_covers_pointer(window) {
+            // An open menu claimed the pointer — or it is on the dock, which
+            // mounts above this overlay and so reads as an exit here. Defer
+            // to `settle_sidebar_peek`, which re-checks once the claim ends.
+            self.sidebar_peek_exit_hold = true;
             return;
         }
         self.begin_sidebar_peek_exit(cx);
@@ -358,17 +359,21 @@ impl Waku {
         // retires without its nudge-out.
         if self.settings_page.is_some() || !self.sidebar_peek_allowed() {
             self.sidebar_peek = SidebarPeek::Hidden;
-            self.sidebar_peek_menu_hold = false;
+            self.sidebar_peek_exit_hold = false;
             self.sidebar_peek_action_hold = false;
             return None;
         }
-        // Settle a hover exit a menu card claimed: once no menu is open, a
-        // pointer that ended up outside the panel dismisses it here rather
-        // than waiting for the next mouse move to resend the hover. A row
-        // action run from that menu keeps the overlay instead — the action
-        // hold releases the next time the pointer enters the panel.
-        if self.sidebar_peek_menu_hold && !self.any_menu_open(cx) {
-            self.sidebar_peek_menu_hold = false;
+        // Settle a hover exit a menu card or the root-mounted dock claimed:
+        // once neither holds the pointer, a pointer that ended up outside
+        // the panel dismisses it here rather than waiting for the next mouse
+        // move to resend the hover. A row action run from that menu keeps
+        // the overlay instead — the action hold releases the next time the
+        // pointer enters the panel.
+        if self.sidebar_peek_exit_hold
+            && !self.any_menu_open(cx)
+            && !self.sidebar_dock_covers_pointer(window)
+        {
+            self.sidebar_peek_exit_hold = false;
             let right_edge = px(self.sidebar_peek_width(window));
             if window.mouse_position().x > right_edge && !self.sidebar_peek_action_hold {
                 self.begin_sidebar_peek_exit(cx);
@@ -582,6 +587,12 @@ impl Render for Waku {
                 .children(big_picture)
                 .children(keyboard_options)
                 .children(speed_reader)
+                // The quick-action dock mounts in the root layer, above
+                // everything else — this page has no trigger zone, so it
+                // renders only while the pointer that raised it stays on it.
+                .when_some(self.render_sidebar_dock(window, cx), |content, dock| {
+                    content.child(dock)
+                })
                 .into_any_element();
             return self.render_window_frame(content, window, cx);
         }
@@ -985,12 +996,12 @@ impl Render for Waku {
                                 .clone()
                                 .cached(StyleRefinement::default().size_full()),
                         )
-                        // The hover surface is a probe painted last: the
-                        // footer's quick-action dock occludes the hitboxes
-                        // beneath it, so the overlay's own hitbox would read
-                        // as unhovered — starting the exit nudge — while the
-                        // pointer is on the dock. A topmost Normal hitbox
-                        // spanning the panel stays hovered instead.
+                        // The hover surface is a probe painted last: a
+                        // topmost Normal hitbox spanning the panel stays
+                        // hovered over anything the pane paints inside it.
+                        // The dock mounts above this probe in the window's
+                        // root layer, so `sidebar_peek_overlay_hover` defers
+                        // to `sidebar_dock_covers_pointer` for it instead.
                         .child(
                             div()
                                 .id("sidebar-peek-hover")
@@ -1026,6 +1037,13 @@ impl Render for Waku {
             .children(big_picture)
             .children(keyboard_options)
             .children(speed_reader)
+            // The quick-action dock mounts in the root layer rather than
+            // inside the sidebar, so neither the pane's slide clip nor the
+            // surfaces beside it can cut it off — it anchors to the
+            // window's bottom-left, above every other element.
+            .when_some(self.render_sidebar_dock(window, cx), |content, dock| {
+                content.child(dock)
+            })
             .into_any_element();
 
         self.render_window_frame(content, window, cx)

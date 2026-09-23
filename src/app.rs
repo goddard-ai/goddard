@@ -2826,9 +2826,10 @@ pub struct Waku {
     right_panel_rendered_width: f32,
     /// The closed sidebar's hover-peek overlay — see [`SidebarPeek`].
     sidebar_peek: SidebarPeek,
-    /// A hover exit the peek overlay deferred because a menu card was open
-    /// above it. Settled once no menu is open by re-checking the pointer.
-    sidebar_peek_menu_hold: bool,
+    /// A hover exit the peek overlay deferred because a menu card — or the
+    /// root-mounted dock, which occludes the exit probe — held the pointer.
+    /// Settled once neither does by re-checking the pointer.
+    sidebar_peek_exit_hold: bool,
     /// A row action (pin, archive) ran from the peek-mounted sidebar, so the
     /// deferred exit at menu close is suppressed — the overlay stays until
     /// the pointer next enters and leaves it.
@@ -6130,7 +6131,7 @@ impl Waku {
                     0.0
                 },
                 sidebar_peek: SidebarPeek::Hidden,
-                sidebar_peek_menu_hold: false,
+                sidebar_peek_exit_hold: false,
                 sidebar_peek_action_hold: false,
                 sidebar_dock_zone_hovered: false,
                 sidebar_dock_hovered: false,

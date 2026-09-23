@@ -964,12 +964,6 @@ impl Waku {
             )
             .child(div().h(px(18.0)))
             .child(div().px(px(12.0)).child(navigation))
-            // The dock has no trigger zone on this page; it renders only while
-            // the pointer it was raised under is still on it, and drops on the
-            // first hover-off.
-            .when_some(self.render_sidebar_dock(window, cx), |sidebar, dock| {
-                sidebar.child(dock)
-            })
     }
 
     /// Back/forward between the panes visited this settings visit — the

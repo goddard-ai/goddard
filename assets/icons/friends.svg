@@ -8,12 +8,6 @@
             <feGaussianBlur stdDeviation="0.75" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
             <feColorMatrix values="0 0 0 0 0   0 0 0 0 0   0 0 0 0 0  0 0 0 0.4 0" type="matrix" in="shadowBlurOuter1"></feColorMatrix>
         </filter>
-        <filter x="-5.2%" y="-4.1%" width="110.5%" height="110.5%" filterUnits="objectBoundingBox" id="filter-3">
-            <feGaussianBlur stdDeviation="0.25" in="SourceAlpha" result="shadowBlurInner1"></feGaussianBlur>
-            <feOffset dx="0" dy="1" in="shadowBlurInner1" result="shadowOffsetInner1"></feOffset>
-            <feComposite in="shadowOffsetInner1" in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1" result="shadowInnerInner1"></feComposite>
-            <feColorMatrix values="0 0 0 0 1   0 0 0 0 1   0 0 0 0 1  0 0 0 0.395718444 0" type="matrix" in="shadowInnerInner1"></feColorMatrix>
-        </filter>
     </defs>
     <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
         <g id="Goddard-Website" transform="translate(-31, -730)">
@@ -21,7 +15,6 @@
                 <g id="Friends" transform="translate(9, 41)">
                     <use fill="black" fill-opacity="1" filter="url(#filter-2)" xlink:href="#path-1"></use>
                     <use fill="#000000" fill-rule="evenodd" xlink:href="#path-1"></use>
-                    <use fill="black" fill-opacity="1" filter="url(#filter-3)" xlink:href="#path-1"></use>
                 </g>
             </g>
         </g>
