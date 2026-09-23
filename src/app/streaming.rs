@@ -559,7 +559,26 @@ impl Waku {
                     // it lands in the turn's record without a transcript row
                     // and never entered the composer's pending steers.
                     if let Some(session) = self.state.session_mut(session_id) {
-                        session.push_hidden_user_message(message);
+                        session.push_hidden_user_message(message.clone());
+                        // A project-move steer acknowledged while the turn
+                        // was parked reached the provider — retire the
+                        // pending notice so the next prompt does not repeat
+                        // it. One acknowledged while the provider was still
+                        // generating can sit in a volatile buffer and vanish
+                        // with the turn, so the flag stays and the next
+                        // prompt re-warns.
+                        if session.status == SessionStatus::Background
+                            && session.workspace_move.as_ref().is_some_and(|mv| {
+                                AgentSession::workspace_move_notice_text(
+                                    &mv.from,
+                                    &mv.to,
+                                    mv.project_switch,
+                                    mv.cross_repo,
+                                ) == message
+                            })
+                        {
+                            session.workspace_move = None;
+                        }
                         self.state.mark_session_dirty(session_id);
                     }
                     return true;
@@ -960,6 +979,16 @@ impl Waku {
                         cx,
                     );
                 }
+                // A project switch that landed mid-turn retires the driver
+                // now that the turn settled: the next turn spawns in the
+                // new project root instead of reusing a process still
+                // rooted in the old one.
+                if self.project_switch_reset_pending.remove(&session_id) {
+                    runtime.driver.cancel();
+                    runtime.driver.close();
+                    self.mark_background_work_lost(session_id);
+                    return false;
+                }
             }
             DriverEvent::Error(error) => {
                 let error = compact_driver_error(&error);
@@ -1010,6 +1039,9 @@ impl Waku {
                 if allow_queue_drain && self.cancel_drains.remove(&session_id).is_some() {
                     self.pending_queue_drains.push(session_id);
                 }
+                // The runtime a pending project-switch reset would drop is
+                // already gone.
+                self.project_switch_reset_pending.remove(&session_id);
                 self.mark_background_work_lost(session_id);
                 let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
                 self.finish_streaming_assistant(session_id);

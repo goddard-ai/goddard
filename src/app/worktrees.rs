@@ -390,6 +390,256 @@ impl Waku {
             .detach();
     }
 
+    /// Whether a started task can move to another project at all: it runs
+    /// in the local environment — a remote path means nothing to a sandbox
+    /// or cloud workspace — and at least one non-projectless project on the
+    /// same daemon is not its current one. Unlike
+    /// [`Self::can_move_session_to_worktree`] a busy session qualifies: the
+    /// switch rebinds metadata now and the move notice reaches the provider
+    /// as a hidden steer or a folded preamble on the next prompt.
+    pub(super) fn can_switch_session_project(&self, session_id: Uuid) -> bool {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return false;
+        };
+        // A friend's task belongs to their catalog, and a side chat shares
+        // its parent's workspace — neither owns a project binding to move.
+        if !session.has_started()
+            || !session.environment().is_local()
+            || session.is_side_chat()
+            || self.is_friend_session(session_id)
+        {
+            return false;
+        }
+        let owner = self.daemons.session_owner(session_id);
+        self.state.projects.iter().any(|project| {
+            project.id != session.project_id
+                && !project.is_projectless()
+                && !project.temporary
+                && self.daemons.project_owner(project.id) == owner
+        })
+    }
+
+    /// Move a started task to `project_id`'s ordinary checkout. Targets in
+    /// the same repository apply outright; a different repository confirms
+    /// first — the agent lands in an unrelated codebase on a stray click
+    /// otherwise. The repository check runs against the session's daemon on
+    /// the background executor, so a slow or unreachable host only delays
+    /// the prompt.
+    pub(super) fn request_session_project_switch(
+        &mut self,
+        session_id: Uuid,
+        project_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if session.project_id == project_id
+            || !self.can_switch_session_project(session_id)
+            || !self.project_switch_pending.insert(session_id)
+        {
+            return;
+        }
+        let Some(target) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+        else {
+            self.project_switch_pending.remove(&session_id);
+            return;
+        };
+        if target.is_projectless()
+            || self.daemons.project_owner(project_id) != self.daemons.session_owner(session_id)
+        {
+            self.project_switch_pending.remove(&session_id);
+            return;
+        }
+        let to = target.path.clone();
+        let Some(from) = self
+            .workspace_path_for_session(session)
+            .map(std::path::Path::to_path_buf)
+        else {
+            self.project_switch_pending.remove(&session_id);
+            return;
+        };
+        let Some(workspace) = self.workspace_client_for_session(session_id) else {
+            self.project_switch_pending.remove(&session_id);
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let same_repo = cx
+                .background_executor()
+                .spawn(async move {
+                    let from_dir = workspace
+                        .request(waku_client::WorkspaceOperation::GitCommonDir { cwd: from });
+                    let to_dir = workspace
+                        .request(waku_client::WorkspaceOperation::GitCommonDir { cwd: to });
+                    matches!(
+                        (from_dir, to_dir),
+                        (
+                            Ok(waku_client::WorkspaceResult::GitCommonDir { dir: Some(a) }),
+                            Ok(waku_client::WorkspaceResult::GitCommonDir { dir: Some(b) })
+                        ) if a == b
+                    )
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                waku.project_switch_pending.remove(&session_id);
+                if same_repo {
+                    waku.apply_session_project_switch(session_id, project_id, false, cx);
+                } else {
+                    waku.confirm_session_project_switch(session_id, project_id, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The misclick guard for a cross-repository switch: confirm before the
+    /// task lands in an unrelated codebase. Same-repo picks never reach
+    /// this — they apply directly.
+    fn confirm_session_project_switch(
+        &mut self,
+        session_id: Uuid,
+        project_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(name) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(Project::display_name)
+        else {
+            return;
+        };
+        let answer = self.window_handle.update(cx, move |_, window, cx| {
+            window.prompt(
+                gpui::PromptLevel::Warning,
+                &tr!("session.project_switch_confirm", name = name.clone()),
+                Some(&tr!("session.project_switch_confirm_detail")),
+                &[
+                    gpui::PromptButton::cancel(tr!("common.cancel")),
+                    gpui::PromptButton::ok(tr!("session.project_switch")),
+                ],
+                cx,
+            )
+        });
+        let Ok(answer) = answer else {
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            if answer.await.ok() != Some(1) {
+                return;
+            }
+            let _ = waku.update(cx, |waku, cx| {
+                waku.apply_session_project_switch(session_id, project_id, true, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Rebind the task to `project_id`'s ordinary checkout and queue the
+    /// working-directory correction: a live steer-capable turn hears it as
+    /// a hidden steer now, any other state folds it into the next outbound
+    /// prompt. The transcript keeps only the marker — the notice text is
+    /// provider-facing. A retained driver still runs in the old root until
+    /// its turn settles, then drops so the next turn spawns in the new
+    /// project; an idle runtime resets immediately.
+    fn apply_session_project_switch(
+        &mut self,
+        session_id: Uuid,
+        project_id: Uuid,
+        cross_repo: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+        else {
+            return;
+        };
+        let to = project.path.clone();
+        let name = project.display_name();
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let Some(from) = self
+            .workspace_path_for_session(session)
+            .map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+        let busy = session.is_busy();
+        let notice = AgentSession::workspace_move_notice_text(&from, &to, true, cross_repo);
+        let steer = busy
+            && runtime::session_has_active_provider_turn(session)
+            && self
+                .runtimes
+                .get(&session_id)
+                .is_some_and(|runtime| runtime.driver.supports_steer());
+        let Some(session) = self.state.session_mut(session_id) else {
+            return;
+        };
+        session.project_id = project_id;
+        session.workspace = SessionWorkspace::Local;
+        session.workspace_moved_from = None;
+        session.workspace_move = Some(WorkspaceMove {
+            from,
+            to,
+            project_switch: true,
+            cross_repo,
+        });
+        session.push_notice_message(
+            MessageRole::System,
+            tr!("session.moved_to_project", name = name.clone()),
+            TranscriptNotice::Status {
+                kind: TranscriptNoticeStatus::ProjectSwitched,
+            },
+        );
+        session.updated_at = unix_time();
+        self.state.mark_session_dirty(session_id);
+        self.save();
+        if busy {
+            if steer && let Some(runtime) = self.runtimes.get(&session_id) {
+                runtime.driver.steer(notice, true);
+            }
+            self.project_switch_reset_pending.insert(session_id);
+        } else {
+            self.reset_session_runtime(session_id);
+        }
+        if self.state.selected_session == Some(session_id) {
+            // The selection's project scope follows the task — activation
+            // does the same when a task is picked.
+            self.state.selected_project = Some(project_id);
+            self.invalidate_workspace_queries(cx);
+            self.reload_clean_right_panel_file_editors(cx);
+            self.ensure_right_panel_terminals(cx);
+        }
+        self.show_toast(tr!("session.moved_to_project", name = name));
+        cx.notify();
+    }
+
     /// Recreates a session's worktree on the background executor when its
     /// directory is gone — archived tasks outlive their worktrees once
     /// archive cleanup removes them. Submission preparation runs the same

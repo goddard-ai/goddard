@@ -13,6 +13,24 @@ use anyhow::{Context as _, bail};
 
 pub use waku_protocol::workspace::{BranchDeleteFailure, RepoBranch, RepoWorktree};
 
+/// The repository identity `cwd` belongs to: its shared Git directory,
+/// equal across every linked worktree and checkout of one repository and
+/// different across repositories. `Ok(None)` means `cwd` is not inside a
+/// Git repository.
+pub fn common_git_dir(cwd: &Path) -> anyhow::Result<Option<PathBuf>> {
+    let output = crate::command_env::search_path_command("git")
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .current_dir(cwd)
+        .output()
+        .context("failed to execute git")?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    // Resolve links so two spellings of one directory compare equal.
+    Ok(Some(dunce::canonicalize(&dir).unwrap_or(dir)))
+}
+
 /// The repository's worktrees — the ordinary checkout first, then linked
 /// ones — enriched with per-checkout status. `Ok(None)` means `cwd` is not
 /// inside a Git repository. A read that fails for one worktree degrades that

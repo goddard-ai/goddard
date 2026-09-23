@@ -3,4 +3,4 @@
 /**
  * Which icon a [`TranscriptNotice::Status`] row leads with.
  */
-export type TranscriptNoticeStatus = "stopped" | "completed" | "stoppedBeforeResponse" | "outOfContext" | "declined" | "stoppedWithReason" | "exited" | "startFailed" | "error" | "goal";
+export type TranscriptNoticeStatus = "stopped" | "completed" | "stoppedBeforeResponse" | "outOfContext" | "declined" | "stoppedWithReason" | "exited" | "startFailed" | "error" | "goal" | "projectSwitched";

@@ -169,6 +169,11 @@ pub enum Command {
     },
     Steer {
         prompt: String,
+        /// The steer carries client-injected context rather than user text:
+        /// the daemon records it as hidden, so the accepted echo lands as a
+        /// provider-facing message no client renders as a transcript row.
+        #[serde(default, skip_serializing_if = "crate::model::is_false")]
+        hidden: bool,
     },
     /// Ask the live provider runtime to compact the session's context.
     /// Fire-and-forget like [`Self::Goal`]: admission, progress, and the

@@ -6044,7 +6044,7 @@ impl Waku {
             &self.resolve_skill_submission(session.provider, &submission.prompt),
         );
         if let Some(runtime) = self.runtimes.get_mut(&session.id) {
-            runtime.driver.steer(provider_prompt);
+            runtime.driver.steer(provider_prompt, false);
             runtime.pending_steers.push_back(submission);
         } else {
             self.enqueue_follow_up_submission(session.id, submission, cx);

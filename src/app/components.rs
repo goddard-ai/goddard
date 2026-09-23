@@ -1514,6 +1514,7 @@ fn status_notice_icon(status: TranscriptNoticeStatus) -> &'static str {
         TranscriptNoticeStatus::StartFailed => "icons/circle-alert.svg",
         TranscriptNoticeStatus::Error => "icons/alert.svg",
         TranscriptNoticeStatus::Goal => "icons/goal.svg",
+        TranscriptNoticeStatus::ProjectSwitched => "icons/folder.svg",
     }
 }
 

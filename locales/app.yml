@@ -3615,6 +3615,14 @@ session.agy_relaunch:
   en: Relaunch session
 session.moved_to_worktree:
   en: "Moved to worktree %{name}"
+session.moved_to_project:
+  en: "Moved to %{name}"
+session.project_switch:
+  en: Move task
+session.project_switch_confirm:
+  en: "Move this task to %{name}?"
+session.project_switch_confirm_detail:
+  en: The agent will be told its working directory changed to a different repository. Anything it was doing in the old checkout keeps running there.
 
 right_panel.browser:
   en: Browser

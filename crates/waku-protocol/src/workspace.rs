@@ -744,6 +744,14 @@ pub enum WorkspaceOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_ref: Option<String>,
     },
+    /// The repository `cwd` belongs to, identified by its shared Git
+    /// directory — equal across every linked worktree and checkout of one
+    /// repository, different across repositories. Returns `GitCommonDir`;
+    /// `None` outside a Git repository.
+    GitCommonDir {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
     /// The repository's worktrees — the ordinary checkout and each linked
     /// one — with per-checkout status for the Projects page's worktree
     /// table. Returns `RepoWorktrees`; `None` outside a Git repository.
@@ -1448,6 +1456,11 @@ pub enum WorkspaceResult {
     /// `None` when `cwd` is not inside a Git repository.
     RepoWorktrees {
         entries: Option<Vec<RepoWorktree>>,
+    },
+    /// `None` when `cwd` is not inside a Git repository.
+    GitCommonDir {
+        #[ts(type = "string | null")]
+        dir: Option<PathBuf>,
     },
     /// `None` when `cwd` is not inside a Git repository.
     RepoBranches {

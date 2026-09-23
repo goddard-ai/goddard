@@ -228,5 +228,6 @@ export type { WorkItemComment } from "./WorkItemComment";
 export type { WorkItemKind } from "./WorkItemKind";
 export type { WorkItemQueryState } from "./WorkItemQueryState";
 export type { WorkingTreeEntry } from "./WorkingTreeEntry";
+export type { WorkspaceMove } from "./WorkspaceMove";
 export type { WorkspaceOperation } from "./WorkspaceOperation";
 export type { WorkspaceResult } from "./WorkspaceResult";

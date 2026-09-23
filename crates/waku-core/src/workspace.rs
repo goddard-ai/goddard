@@ -188,6 +188,9 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
                 branch: None,
             },
         },
+        WorkspaceOperation::GitCommonDir { cwd } => WorkspaceResult::GitCommonDir {
+            dir: crate::repo::common_git_dir(&cwd)?,
+        },
         WorkspaceOperation::ListWorktrees { cwd } => WorkspaceResult::RepoWorktrees {
             entries: crate::repo::list_worktrees(&cwd)?,
         },

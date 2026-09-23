@@ -16,6 +16,7 @@ import type { SessionWorkspace } from "./SessionWorkspace";
 import type { SuspendedProviderSession } from "./SuspendedProviderSession";
 import type { ThreadGoal } from "./ThreadGoal";
 import type { TranscriptBlock } from "./TranscriptBlock";
+import type { WorkspaceMove } from "./WorkspaceMove";
 
 export type AgentSession = { id: string,
 /**
@@ -39,6 +40,15 @@ workspace?: SessionWorkspace,
  * the old checkout's paths.
  */
 workspace_moved_from?: string | null,
+/**
+ * The workspace move the session has not yet told the provider about.
+ * Unlike `workspace_moved_from` it records the destination explicitly —
+ * a project switch's `Local` target has no path of its own — and wins
+ * when both are set: `workspace_moved_from` alone means a save from
+ * before this field existed, whose target is the session's materialized
+ * worktree.
+ */
+workspace_move?: WorkspaceMove | null,
 /**
  * When `Some`, this session is a side chat spawned from the named
  * parent task. Side chats are hidden from task lists, opened in the

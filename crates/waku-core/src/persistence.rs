@@ -1914,6 +1914,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         project_id: Uuid::parse_str(&project_id).ok()?,
         workspace,
         workspace_moved_from: None,
+        workspace_move: None,
         // Same duplication story as `workspace`: the daemon's side-chat
         // cascade and launch environment need it without a hydrate.
         side_chat_of: side_chat_of.and_then(|id| Uuid::parse_str(&id).ok()),

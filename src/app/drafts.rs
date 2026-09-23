@@ -327,6 +327,21 @@ impl Waku {
             self.create_projectless_session_from_composer(cx);
             return;
         }
+        // A started task's pick rebinds its project outright — the provider
+        // hears about the move and the transcript marks it. Big Picture's
+        // chip means "destination for new tasks" even when it points at a
+        // started task, so it keeps the draft semantics below.
+        if !self.big_picture.is_open()
+            && let Some(session_id) = self.workspace_subject().0
+            && self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id && session.has_started())
+        {
+            self.request_session_project_switch(session_id, project_id, cx);
+            return;
+        }
         let source = self.composer_draft_key();
         // The composing draft follows the pick — retargeted outright, or
         // collapsed into the draft the destination already holds once the

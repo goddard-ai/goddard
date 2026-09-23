@@ -1692,6 +1692,7 @@ impl Waku {
         self.goal_observed_at.remove(&session_id);
         self.state.unseen_completions.remove(&session_id);
         self.pending_workspace_cleanups.remove(&session_id);
+        self.project_switch_pending.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.background_work.remove(&session_id);
         self.agy_terminals.remove(&session_id);
@@ -4047,6 +4048,7 @@ impl Waku {
             runtime.driver.close();
             self.mark_background_work_lost(session_id);
         }
+        self.project_switch_reset_pending.remove(&session_id);
     }
 
     fn remember_selected_model_traits(&mut self) {

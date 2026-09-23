@@ -65,8 +65,12 @@ impl DriverHandle {
         self.inner.supports_steer()
     }
 
-    pub fn steer(&self, prompt: String) {
-        self.inner.steer(prompt);
+    /// Deliver a steering message into the running turn. `hidden` marks
+    /// client-injected context: the daemon records it so the accepted or
+    /// rejected echo republishes hidden and no client paints a transcript
+    /// row for it.
+    pub fn steer(&self, prompt: String, hidden: bool) {
+        self.inner.steer(prompt, hidden);
     }
 
     pub fn cancel(&self) {
@@ -158,7 +162,7 @@ pub trait DriverControl: Send + Sync {
     fn supports_steer(&self) -> bool {
         false
     }
-    fn steer(&self, _prompt: String) {}
+    fn steer(&self, _prompt: String, _hidden: bool) {}
     fn cancel(&self);
     fn cancel_computer_use(&self) {}
     fn refresh_background_work(&self) {}

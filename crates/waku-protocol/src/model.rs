@@ -1127,6 +1127,27 @@ pub enum SessionWorkspace {
     },
 }
 
+/// A working-directory change the provider has not been told about yet.
+/// Recorded on [`AgentSession::workspace_move`] so a quit between the
+/// switch and its delivery does not lose the correction.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMove {
+    /// The checkout the session ran in — now a stale copy any recorded
+    /// absolute paths still name.
+    pub from: PathBuf,
+    /// The root the session must treat as its working directory now.
+    pub to: PathBuf,
+    /// The user picked a different project rather than another checkout of
+    /// the same one — the notice names their action so a mid-turn agent
+    /// does not read the relocation as ambient drift.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub project_switch: bool,
+    /// `to` belongs to a different repository than `from`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub cross_repo: bool,
+}
+
 impl SessionWorkspace {
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local)
@@ -1546,6 +1567,14 @@ pub struct AgentSession {
     /// the old checkout's paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_moved_from: Option<PathBuf>,
+    /// The workspace move the session has not yet told the provider about.
+    /// Unlike `workspace_moved_from` it records the destination explicitly —
+    /// a project switch's `Local` target has no path of its own — and wins
+    /// when both are set: `workspace_moved_from` alone means a save from
+    /// before this field existed, whose target is the session's materialized
+    /// worktree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_move: Option<WorkspaceMove>,
     /// When `Some`, this session is a side chat spawned from the named
     /// parent task. Side chats are hidden from task lists, opened in the
     /// parent's right panel, and deleted when the parent is archived or
@@ -1762,6 +1791,7 @@ impl AgentSession {
             project_id,
             workspace: SessionWorkspace::Local,
             workspace_moved_from: None,
+            workspace_move: None,
             side_chat_of: None,
             provider,
             model: None,
@@ -1818,6 +1848,7 @@ impl AgentSession {
             // branch labels from it before the session is ever opened.
             workspace: self.workspace.clone(),
             workspace_moved_from: None,
+            workspace_move: None,
             // List consumers need the link: it is how they know to keep the
             // row out of the task list.
             side_chat_of: self.side_chat_of,
@@ -2104,20 +2135,69 @@ impl AgentSession {
     }
 
     /// The one-shot working-directory note for the first prompt sent after a
-    /// move into a worktree, or `None` when nothing is pending — or when the
-    /// session is somehow not on a worktree, in which case the flag stays so
-    /// a later, valid send still announces the move it recorded.
+    /// move, or `None` when nothing is pending — or, for the legacy
+    /// `workspace_moved_from` flag, when the session is somehow not on a
+    /// worktree, in which case the flag stays so a later, valid send still
+    /// announces the move it recorded. A recorded [`WorkspaceMove`] always
+    /// fires: it carries its own destination.
     pub fn take_workspace_move_notice(&mut self) -> Option<String> {
-        let to = self.workspace.path()?.to_path_buf();
-        let from = self.workspace_moved_from.take()?;
-        Some(format!(
-            "The working directory for this session moved to {}. The checkout \
-             it ran in before, {}, still exists but is now a stale copy — \
-             absolute paths recorded earlier in this conversation point \
-             there. Read and write files only under the new directory.",
-            to.display(),
-            from.display()
+        let (from, to, project_switch, cross_repo) = match self.workspace_move.take() {
+            Some(mv) => {
+                self.workspace_moved_from = None;
+                (mv.from, mv.to, mv.project_switch, mv.cross_repo)
+            }
+            None => {
+                let to = self.workspace.path()?.to_path_buf();
+                (self.workspace_moved_from.take()?, to, false, false)
+            }
+        };
+        Some(Self::workspace_move_notice_text(
+            &from,
+            &to,
+            project_switch,
+            cross_repo,
         ))
+    }
+
+    /// The provider-facing text a pending workspace move delivers — folded
+    /// into the next outbound prompt, or injected mid-turn as a hidden
+    /// steer. A project switch names the user's action so a mid-turn agent
+    /// does not read the relocation as ambient drift; `cross_repo` adds
+    /// that the new root belongs to a different repository.
+    pub fn workspace_move_notice_text(
+        from: &Path,
+        to: &Path,
+        project_switch: bool,
+        cross_repo: bool,
+    ) -> String {
+        if project_switch {
+            let repo = if cross_repo {
+                " The new root belongs to a different repository than the old one."
+            } else {
+                ""
+            };
+            format!(
+                "The user moved this session to a different project — your \
+                 working directory is now {}. Treat it as the project root: \
+                 read and write files only under it.{} The checkout it ran \
+                 in before, {}, still exists but is now a stale copy — \
+                 absolute paths recorded earlier in this conversation point \
+                 there.",
+                to.display(),
+                repo,
+                from.display()
+            )
+        } else {
+            format!(
+                "The working directory for this session moved to {}. The \
+                 checkout it ran in before, {}, still exists but is now a \
+                 stale copy — absolute paths recorded earlier in this \
+                 conversation point there. Read and write files only under \
+                 the new directory.",
+                to.display(),
+                from.display()
+            )
+        }
     }
 
     /// Where the transcript stands now, recorded as a suspended provider's
@@ -2961,6 +3041,8 @@ pub enum TranscriptNoticeStatus {
     Error,
     /// A goal was set on the session.
     Goal,
+    /// The session's project changed — `content` names the destination.
+    ProjectSwitched,
 }
 
 /// A position in the persisted transcript: how many `messages` and
@@ -6249,6 +6331,44 @@ mod tests {
         assert!(notice.contains("/tmp/waku"));
         assert_eq!(session.workspace_moved_from, None);
         assert_eq!(session.take_workspace_move_notice(), None);
+    }
+
+    #[test]
+    fn workspace_move_notice_names_the_users_project_switch() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        // A project switch targets `Local` — the destination only lives on
+        // the recorded move, not on the workspace itself.
+        session.workspace_move = Some(WorkspaceMove {
+            from: PathBuf::from("/tmp/waku-worktrees/task"),
+            to: PathBuf::from("/tmp/other"),
+            project_switch: true,
+            cross_repo: true,
+        });
+
+        let notice = session.take_workspace_move_notice().unwrap();
+        assert!(notice.contains("moved this session to a different project"));
+        assert!(notice.contains("/tmp/other"));
+        assert!(notice.contains("different repository"));
+        assert!(notice.contains("/tmp/waku-worktrees/task"));
+        assert_eq!(session.workspace_move, None);
+        assert_eq!(session.take_workspace_move_notice(), None);
+    }
+
+    #[test]
+    fn workspace_move_notice_stays_quiet_about_same_repo_switches() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.workspace_move = Some(WorkspaceMove {
+            from: PathBuf::from("/tmp/waku-worktrees/task"),
+            to: PathBuf::from("/tmp/waku"),
+            project_switch: true,
+            cross_repo: false,
+        });
+
+        let notice = session.take_workspace_move_notice().unwrap();
+        assert!(notice.contains("moved this session to a different project"));
+        assert!(!notice.contains("different repository"));
     }
 
     #[test]

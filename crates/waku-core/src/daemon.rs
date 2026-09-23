@@ -2787,6 +2787,26 @@ impl Backend for WakuBackend {
                         let _ = events.send(wire);
                     }
                 }
+                if let Command::Steer {
+                    prompt,
+                    hidden: true,
+                } = &command
+                {
+                    // A client asked for a hidden injection: record it so the
+                    // provider's echo republishes as hidden and no attached
+                    // client paints a transcript row for it.
+                    self.agent.record_pending_steer(
+                        session_id,
+                        crate::agent::AgentPrompt {
+                            prompt: prompt.clone(),
+                            transport: None,
+                            sender: None,
+                            queued_id: None,
+                            context: None,
+                            hidden: true,
+                        },
+                    );
+                }
                 handle_driver_command(&driver, command)
             }
         }
@@ -4551,6 +4571,7 @@ impl WakuBackend {
                 } else {
                     crate::agent::ContextSteer::Blocks
                 }),
+                hidden: false,
             },
         );
         driver.steer(steer);
@@ -4785,6 +4806,7 @@ impl WakuBackend {
                         // A direct steer never parks — no chip to mirror.
                         queued_id: None,
                         context: None,
+                        hidden: false,
                     },
                 );
                 driver.steer(transport.unwrap_or(prompt));
@@ -4819,6 +4841,7 @@ impl WakuBackend {
                 sender,
                 queued_id: Some(queued_id),
                 context: None,
+                hidden: false,
             },
         );
         if self.agent.is_working(target) {
@@ -5477,7 +5500,7 @@ fn handle_driver_command(
             attachments,
             ..
         } => driver.prompt_with_attachments(prompt, attachments),
-        Command::Steer { prompt } => driver.steer(prompt),
+        Command::Steer { prompt, .. } => driver.steer(prompt),
         Command::ClarifyUserInput {
             request_id,
             content,
@@ -5776,7 +5799,9 @@ fn forward_driver_events(
                     .map(|steer| steer.prompt.clone())
                     .unwrap_or(message);
                 let sent_by_task = steer.as_ref().and_then(|steer| steer.sender);
-                let hidden = steer.as_ref().is_some_and(|steer| steer.context.is_some());
+                let hidden = steer
+                    .as_ref()
+                    .is_some_and(|steer| steer.hidden || steer.context.is_some());
                 if let Some(sender) = sent_by_task {
                     record_agent_steer(&task_state, &task_store, session_id, &message, sender);
                 }
@@ -5840,7 +5865,7 @@ fn forward_driver_events(
                     message,
                     reason,
                     reason_i18n,
-                    hidden: false,
+                    hidden: rejected_steer.as_ref().is_some_and(|steer| steer.hidden),
                 }
             }
             event => event,
@@ -6278,6 +6303,7 @@ fn rehydrate_agent_queue(
                         sender: sent_by,
                         queued_id: Some(queued.id),
                         context: None,
+                        hidden: false,
                     })
                 }
                 crate::model::QueuedMessageSource::User => None,
@@ -8147,6 +8173,7 @@ mod tests {
                 sender: None,
                 queued_id: Some(Uuid::new_v4()),
                 context: None,
+                hidden: false,
             },
         );
 

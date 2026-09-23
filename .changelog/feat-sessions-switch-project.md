@@ -1,0 +1,1 @@
+- A task's project can be changed from the project picker at any time — even mid-turn. The agent is told its new working directory immediately, a marker in the transcript records the move, and switching to a different repository asks for confirmation first.

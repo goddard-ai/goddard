@@ -37,7 +37,7 @@ name?: string | null, } | { "type": "removeWorktree", path: string,
 /**
  * `false` matches older clients that did not send the field.
  */
-force: boolean, } | { "type": "ensureWorktree", project_path: string, path: string, branch?: string | null, base_ref?: string | null, } | { "type": "listWorktrees", cwd: string, } | { "type": "listRepoBranches", cwd: string, } | { "type": "fetchRemote", cwd: string, remote: string, } | { "type": "deleteBranches", cwd: string, names: Array<string>,
+force: boolean, } | { "type": "ensureWorktree", project_path: string, path: string, branch?: string | null, base_ref?: string | null, } | { "type": "gitCommonDir", cwd: string, } | { "type": "listWorktrees", cwd: string, } | { "type": "listRepoBranches", cwd: string, } | { "type": "fetchRemote", cwd: string, remote: string, } | { "type": "deleteBranches", cwd: string, names: Array<string>,
 /**
  * `false` matches older clients that did not send the field.
  */

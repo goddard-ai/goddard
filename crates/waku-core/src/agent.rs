@@ -52,6 +52,11 @@ pub struct AgentPrompt {
     /// memory injection delivered. A rejection leaves the session eligible
     /// so the next prompt retries.
     pub context: Option<ContextSteer>,
+    /// A client asked for a hidden steer — its accepted or rejected echo is
+    /// republished with `hidden: true` so attached clients keep it out of
+    /// the transcript, but it settles nothing on the daemon side beyond the
+    /// echo itself.
+    pub hidden: bool,
 }
 
 /// What accepting a hidden context steer settles for the session.
@@ -757,6 +762,7 @@ mod tests {
             sender,
             queued_id: Some(Uuid::new_v4()),
             context: None,
+            hidden: false,
         }
     }
 
@@ -841,6 +847,7 @@ mod tests {
                     sender: None,
                     queued_id: Some(restored_id),
                     context: None,
+                    hidden: false,
                 },
                 prompt("three", None),
             ],
@@ -873,6 +880,7 @@ mod tests {
                 sender: None,
                 queued_id: None,
                 context: None,
+                hidden: false,
             },
         );
 
@@ -915,6 +923,7 @@ mod tests {
                 sender: None,
                 queued_id: None,
                 context: Some(ContextSteer::Memory),
+                hidden: false,
             },
         );
         assert!(state.context_steer_pending(session));

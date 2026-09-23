@@ -689,13 +689,20 @@ impl Waku {
                 .projects
                 .iter()
                 .any(|project| project.id == project_id)
-            && self
-                .selected_session()
-                .is_some_and(|session| !session.has_started())
+            && self.selected_session().is_some_and(|session| {
+                // A started task commits through the switch path — the
+                // same route the composer chip takes — not the draft
+                // retarget below.
+                !session.has_started() || self.can_switch_session_project(session.id)
+            })
             && (projectless_target
                 || self
                     .selected_session()
                     .is_some_and(|session| session.project_id != project_id))
+            && (!projectless_target
+                || self
+                    .selected_session()
+                    .is_some_and(|session| !session.has_started()))
         {
             let was_in_settings = self.settings_page.is_some();
             self.settings_page = None;

@@ -41,7 +41,7 @@ use crate::model::{
     ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
     ReasoningBlock, RuntimeEventCursor, RuntimeMode, SessionEnvironment, SessionStatus,
     SessionWorkspace, TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus,
-    UserInputAnswer, UserInputQuestion, compact_path, unix_time, unix_time_millis,
+    UserInputAnswer, UserInputQuestion, WorkspaceMove, compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -2349,6 +2349,14 @@ pub struct Waku {
     worktree_creation_pending: bool,
     /// Tasks with an in-flight move into a newly created worktree.
     worktree_move_pending: HashSet<Uuid>,
+    /// Tasks whose project switch is awaiting the cross-repository confirm
+    /// — the check and the dialog are async, so a second pick must not
+    /// stack another prompt behind the first.
+    project_switch_pending: HashSet<Uuid>,
+    /// Tasks whose project switch landed mid-turn: the retained driver is
+    /// still running in the old root until its turn settles, at which point
+    /// it is dropped so the next turn spawns in the new project.
+    project_switch_reset_pending: HashSet<Uuid>,
     /// Git subprocess results per concrete workspace path. Render only reads
     /// this in-memory cache; misses are fulfilled on the background executor.
     branch_snapshots: QueryCache<PathBuf, Result<Option<BranchSnapshot>, String>>,
@@ -5907,6 +5915,8 @@ impl Waku {
                 worktree_picker_highlight: None,
                 worktree_creation_pending: false,
                 worktree_move_pending: HashSet::new(),
+                project_switch_pending: HashSet::new(),
+                project_switch_reset_pending: HashSet::new(),
                 settings_search,
                 friend_code_input,
                 friend_name_input,

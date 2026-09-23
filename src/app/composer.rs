@@ -6220,6 +6220,9 @@ impl Waku {
             subject_configurable,
             subject_movable,
             subject_moving,
+            subject_switchable,
+            subject_started,
+            subject_owner,
             subject_projectless,
             project_name,
             subject_project_path,
@@ -6242,6 +6245,9 @@ impl Waku {
                     .is_some_and(|session| self.can_move_session_to_worktree(session.id)),
                 subject_session
                     .is_some_and(|session| self.worktree_move_pending.contains(&session.id)),
+                subject_session.is_some_and(|session| self.can_switch_session_project(session.id)),
+                subject_session.is_some_and(AgentSession::has_started),
+                subject_session_id.map(|session_id| self.daemons.session_owner(session_id)),
                 subject_project.is_some_and(Project::is_projectless),
                 subject_project
                     .map(|project| {
@@ -6265,10 +6271,13 @@ impl Waku {
         // The Projects page always stands in for a real project — "No
         // project" has no page to point at, so its picker omits the row.
         let on_projects_page = self.projects_page.is_some();
+        let big_picture_open = self.big_picture.is_open();
         // A started task can't reconfigure its workspace, but a local one
-        // can still move into a worktree carrying its state.
+        // can still move into a worktree carrying its state — and any
+        // started task can move to another project outright.
         let can_move_to_worktree = subject_movable;
         let can_pick_worktree = can_configure_workspace || can_move_to_worktree;
+        let can_pick_project = can_configure_workspace || subject_switchable;
         let moving_to_worktree = subject_moving;
 
         let project_handle = self.menu_handle("workspace-project", cx);
@@ -6276,25 +6285,35 @@ impl Waku {
             .icon("icons/folder.svg", theme.text_tertiary)
             .label(project_name)
             .caret(false)
-            .disabled(!can_configure_workspace)
-            .selected(can_configure_workspace && project_handle.is_open())
+            .disabled(!can_pick_project)
+            .selected(can_pick_project && project_handle.is_open())
             .max_w(px(190.0))
-            .when(can_configure_workspace, |chip| {
+            .when(can_pick_project, |chip| {
                 chip.tooltip(tr!("project.choose"))
                     .shortcut_action(&SwitchProjectForward)
             });
-        let project_selector = if can_configure_workspace {
+        let project_selector = if can_pick_project {
             let project_options = self
                 .state
                 .projects
                 .iter()
                 .filter(|project| !project.is_projectless())
+                // A started task can only move to a project its own daemon
+                // can run — a remote host's path means nothing here.
+                .filter(|project| {
+                    !subject_started
+                        || Some(self.daemons.project_owner(project.id)) == subject_owner
+                })
                 .filter(|project| Some(project.id) == subject_project_id)
                 .chain(
                     self.state
                         .projects
                         .iter()
                         .filter(|project| !project.is_projectless())
+                        .filter(|project| {
+                            !subject_started
+                                || Some(self.daemons.project_owner(project.id)) == subject_owner
+                        })
                         .filter(|project| Some(project.id) != subject_project_id),
                 )
                 .map(|project| (project.id, project.display_name(), project.starred))
@@ -6339,7 +6358,11 @@ impl Waku {
                         .shortcut_action(&NewProject),
                     );
                     let projectless = weak.clone();
-                    if !on_projects_page {
+                    // "No project" names a destination for a fresh draft — a
+                    // started task cannot become projectless, so its menu
+                    // omits the row. Big Picture's chip stays a destination
+                    // control and keeps it.
+                    if !on_projects_page && (!subject_started || big_picture_open) {
                         items.push(
                             MenuItem::new(tr!("project.no_project"), move |_, cx| {
                                 let _ = projectless.update(cx, |this, cx| {
