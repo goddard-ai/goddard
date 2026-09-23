@@ -17,6 +17,7 @@ import {
   managedGoalEvaluation,
   managedGoalOperation,
   MANAGED_GOAL_QUESTION,
+  sessionAcceptsImmediateSteer,
 } from '@waku/client'
 import {
   createContext,
@@ -1132,11 +1133,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           ].filter(Boolean).join(' ')
         : providerPromptOverride.trim()
       const runtime = entries.current.get(session.id)
-      // A steer only reaches a parked turn: the provider is idle, so the
-      // message wakes it directly. Every other status falls through to
-      // sendPrompt, which queues while the session is busy — a steer sent
-      // mid-generation can sit in a volatile buffer and vanish at settle.
-      if (!runtime || !runtime.supportsSteer || session.status !== 'background') {
+      if (!runtime || !runtime.supportsSteer || !sessionAcceptsImmediateSteer(session)) {
         await sendPrompt(session, prompt, attachments, providerPrompt)
         return
       }

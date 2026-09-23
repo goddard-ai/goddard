@@ -61,9 +61,9 @@ Outputs ([model.rs:973](../crates/waku-core/src/model.rs)): `Connected`,
 A transport that can inject a user message into the *running* turn advertises
 it through `DriverControl::supports_steer` and delivers it with `steer`; the
 outcome comes back asynchronously as `SteerAccepted` or `SteerRejected`. The
-composer steers only a parked turn — the provider is idle inside it, holding
-detached work the message wakes. While the provider is generating, or steering
-is unsupported or refused, the app falls back to its own follow-up queue — the
+composer steers a started turn while the provider is reasoning, using tools,
+waiting for input, or parked on detached work. While assistant text is
+streaming, or steering is unsupported or refused, the app uses its follow-up queue — the
 message stays visible above the composer and starts a fresh turn once the
 current one settles. Queueing there is load-bearing: a mid-generation steer
 can be acknowledged into a volatile input buffer and vanish if the turn ends
@@ -1068,7 +1068,7 @@ What the long-lived session buys, and what Goddard pays for not having it:
 | Interactive approvals | Every provider: Claude via the SDK's `canUseTool` (including `AskUserQuestion` and `ExitPlanMode`), Cursor/Grok via ACP `session/request_permission`, Codex via `*requestApproval*` | Every provider except Amp and Pi, neither of which exposes a request to answer |
 | Interrupt | `session/cancel`, `query.interrupt()` (plus `stopTask()` for runaway subagents) | Protocol interrupt everywhere except Amp, which has none and is stopped outright |
 | Change model mid-session | `capabilities.sessionModelSwitch: "in-session"` → `session/set_model`, `query.setModel()` | Every transport keeps the session except Amp, whose mode is a launch argument |
-| Mid-turn prompt | Queued into the live agent loop as a **steer**, same turn | `⌘↩` steers a parked turn on every provider, waking the idle provider inside it; while the provider is generating, `⌘↩` and `Enter` alike queue a visible, editable follow-up that runs once the turn settles — a mid-generation steer can be acknowledged into a volatile provider buffer and lost |
+| Mid-turn prompt | Queued into the live agent loop as a **steer**, same turn | `⌘↩` steers a started turn during reasoning, tool use, input waits, or detached work; during assistant text generation it queues a visible, editable follow-up that runs once the turn settles |
 | Native rollback | `rollbackThread` on the adapter contract | Codex/Pi natively; the rest emulated out-of-band by the `*_session.rs` helpers |
 | Idle cleanup | `ProviderSessionReaper` stops sessions idle 30 min, swept every 5 min, skipping threads with an active turn | same, on the same thresholds |
 

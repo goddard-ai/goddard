@@ -15,6 +15,7 @@ import {
   managedGoalEvaluation,
   managedGoalOperation,
   MANAGED_GOAL_QUESTION,
+  sessionAcceptsImmediateSteer,
 } from '@waku/client';
 import { isAgentQueuedMessage, reduceRuntimeEvent } from '@waku/client/event-reducer';
 import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
@@ -758,11 +759,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  /** Inject a prompt into a parked turn when the provider supports it —
-   * the idle provider wakes inside the open turn. Every other status falls
-   * through to sendPrompt, which queues while busy: a steer sent mid-
-   * generation can sit in a volatile buffer and vanish when the turn
-   * settles. */
+  /** Inject a prompt while the open turn can still consume it. */
   const steerPrompt = useCallback(async (
     session: AgentSession,
     rawPrompt: string,
@@ -777,7 +774,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       : providerPromptOverride.trim();
     if (!client || daemon.phase !== 'connected') throw new Error('Goddard daemon is disconnected');
     const runtime = entries.current.get(session.id);
-    if (!runtime || !runtime.supportsSteer || session.status !== 'background') {
+    if (!runtime || !runtime.supportsSteer || !sessionAcceptsImmediateSteer(session)) {
       await sendPrompt(session, prompt, attachments, providerPrompt);
       return;
     }

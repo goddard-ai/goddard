@@ -10,8 +10,7 @@ use super::model_picker::{
     PickerRow, PolicyRowId, next_picker_highlight, picker_rows, supports_reasoning_default_reset,
 };
 use super::runtime::{
-    merge_remote_session_catalog, session_has_active_provider_turn,
-    session_has_parked_provider_turn,
+    merge_remote_session_catalog, session_accepts_immediate_steer, session_has_active_provider_turn,
 };
 use super::sessions::{
     dormant_session_ids, next_attention_target, next_idle_session, next_non_busy_session,
@@ -371,30 +370,32 @@ fn foreground_output_recovers_a_missed_provider_turn_start() {
 }
 
 #[test]
-fn only_a_parked_turn_accepts_a_steer() {
+fn steer_waits_during_assistant_text_but_not_reasoning_or_tools() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     session.begin_turn("inspect the project");
     session.mark_active_turn_provider_started();
 
-    // A mid-turn steer can be acknowledged into a volatile provider buffer
-    // and lost at settle, so a working turn queues the message instead.
     session.status = SessionStatus::Working;
-    assert!(!session_has_parked_provider_turn(&session));
+    assert!(session_accepts_immediate_steer(&session));
+
+    session.push_message(MessageRole::Assistant, "Final reply");
+    session.messages.last_mut().unwrap().streaming = true;
+    assert!(!session_accepts_immediate_steer(&session));
+    session.messages.last_mut().unwrap().streaming = false;
+    assert!(session_accepts_immediate_steer(&session));
 
     session.status = SessionStatus::Waiting;
-    assert!(!session_has_parked_provider_turn(&session));
+    assert!(session_accepts_immediate_steer(&session));
 
     session.status = SessionStatus::Connecting;
-    assert!(!session_has_parked_provider_turn(&session));
+    assert!(!session_accepts_immediate_steer(&session));
 
-    // The parked turn is the exception: the provider is idle inside the
-    // still-open turn, so a message steered in wakes it directly.
     session.status = SessionStatus::Background;
-    assert!(session_has_parked_provider_turn(&session));
+    assert!(session_accepts_immediate_steer(&session));
 
     // A backgrounded status without a live provider turn is not steerable.
     session.turns.last_mut().unwrap().status = TurnStatus::Completed;
-    assert!(!session_has_parked_provider_turn(&session));
+    assert!(!session_accepts_immediate_steer(&session));
 }
 
 #[test]

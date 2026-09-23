@@ -5,7 +5,7 @@ import type {
   PendingUserInput,
   UserInputAnswer,
 } from '@waku/client';
-import { annotationBubbleContent, annotationPromptPrefix, attachmentPromptToken, isAgentQueuedMessage } from '@waku/client';
+import { annotationBubbleContent, annotationPromptPrefix, attachmentPromptToken, isAgentQueuedMessage, sessionAcceptsImmediateSteer } from '@waku/client';
 import { atomVisibleText } from '@waku/client/transcript-presentation';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
@@ -207,11 +207,7 @@ export function MobileComposer({
     : models.find((item) => item.is_default) ?? models[0];
   const busy = sessionBusy(session);
   const liveRuntime = runtime.runtimes[session.id];
-  // Only a parked turn takes a steer — the provider is idle, so the message
-  // wakes the open turn. While the provider is generating, a mid-turn steer
-  // can be acknowledged into a volatile buffer and lost when the turn
-  // settles, so a busy session queues a follow-up instead.
-  const canSteer = session.status === 'background' && Boolean(liveRuntime?.supportsSteer);
+  const canSteer = sessionAcceptsImmediateSteer(session) && Boolean(liveRuntime?.supportsSteer);
   const permission = runtime.permissions[session.id];
   const userInput = runtime.userInputs[session.id];
   const runtimeError = runtime.errors[session.id];

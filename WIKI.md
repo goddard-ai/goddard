@@ -42,8 +42,8 @@ Cursor, or other agent subscription is what you pay with.
 - Use more than one agent CLI and want a single consistent interface — one
   model picker, one permission system, one transcript — instead of learning
   each CLI's TUI.
-- Want to queue follow-up messages while an agent works, or steer a task
-  waiting on background work instead of starting a new turn.
+- Want to queue follow-up messages while an agent writes its reply, or steer
+  its current turn during thinking, tool use, or background work.
 - Want conversation-aware rewind and branching that also rolls back the Git
   working tree.
 - Care about keyboard-driven workflows, native performance, and a UI that

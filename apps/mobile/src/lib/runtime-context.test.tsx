@@ -149,14 +149,25 @@ describe('mobile runtime history', () => {
     const f = fixture();
     f.queryClient.setQueryData(f.key, f.history);
     await f.runtime.attachSession(f.history);
-    // Only a parked turn takes a steer; a working provider queues instead.
-    f.emit('turnParked', null);
+    // A new tool ends the fixture's streamed reply text, so this steer
+    // reaches the still-running turn.
+    f.emit('activity', { id: 'tool-1', kind: 'tool', title: 'Inspect', complete: false });
+    expect(f.current().messages.at(-1)?.streaming).toBe(false);
     await f.runtime.steerPrompt(f.current(), '/review changes', [], 'Review changes carefully');
     expect(f.commands.find((command) => command.type === 'steer'))
       .toEqual({ type: 'steer', prompt: 'Review changes carefully' });
     f.emit('steerAccepted', { message: 'Review changes carefully' });
     expect(f.current().messages.at(-1))
       .toMatchObject({ content: 'Review changes carefully', display_content: '/review changes' });
+  });
+
+  test('queues a steer while assistant text is streaming', async () => {
+    const f = fixture();
+    f.queryClient.setQueryData(f.key, f.history);
+    await f.runtime.attachSession(f.history);
+    await f.runtime.steerPrompt(f.current(), 'Follow up');
+    expect(f.commands.some((command) => command.type === 'steer')).toBe(false);
+    expect(f.current().queued_messages?.at(-1)?.content).toBe('Follow up');
   });
 
   test('queues expanded command content without starting another provider turn', async () => {
