@@ -277,6 +277,31 @@ const DOCK_HIDDEN_DEPTH: f32 = 120.0;
 const DOCK_RISE: Duration = Duration::from_millis(180);
 const DOCK_DROP: Duration = Duration::from_millis(140);
 
+/// A dock glyph recolored to the theme's body text. The source SVGs draw the
+/// mark three times — a blurred drop shadow, the solid fill, an inner
+/// highlight — so the glyph's `fill` is rewritten and the result rendered as
+/// an `img()` to keep those authored layers. The image id is a content hash,
+/// so repeated renders hit the asset cache.
+fn dock_glyph_image(path: &'static str, color: Hsla, cx: &App) -> Option<Arc<gpui::Image>> {
+    use gpui::AssetSource;
+
+    let bytes = cx.asset_source().load(path).ok()??;
+    let rgb = color.to_rgb();
+    let fill = format!(
+        "fill=\"#{:02x}{:02x}{:02x}\"",
+        (rgb.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgb.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgb.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    );
+    let source = String::from_utf8_lossy(&bytes)
+        .replace("fill=\"black\"", &fill)
+        .replace("fill=\"#000000\"", &fill);
+    Some(Arc::new(gpui::Image::from_bytes(
+        gpui::ImageFormat::Svg,
+        source.into_bytes(),
+    )))
+}
+
 /// The session row's trailing time: how long ago the agent last replied,
 /// shown through a live turn too. A session that has never replied shows
 /// nothing.
@@ -1979,13 +2004,10 @@ impl Waku {
             ),
         };
         let hovered = self.sidebar_dock_hover_item == Some(item);
-        // Sketch "Dock": solid white buttons with solid black glyphs.
-        let pill_surface = linear_gradient(
-            180.0,
-            linear_color_stop(rgb(0xFFFFFF), 0.0),
-            linear_color_stop(rgb(0xEDF5FF), 1.0),
-        );
-        let surface_border = gpui::hsla(0.0, 0.0, 0.0, 0.12);
+        // The Sketch "Dock" whites now track the theme: the buttons and their
+        // hover labels take the composer surface, the glyphs the body text.
+        let pill_surface = theme.composer;
+        let surface_border = theme.border_subtle;
         let surface_shadow = vec![gpui::BoxShadow {
             color: rgb(0xDAEAFF).into(),
             offset: point(px(0.0), px(1.0)),
@@ -1993,7 +2015,7 @@ impl Waku {
             spread_radius: px(0.0),
             inset: false,
         }];
-        let glyph: Hsla = rgb(0x000000).into();
+        let glyph = theme.text;
         div()
             .id(SharedString::from(format!("sidebar-dock-{id}")))
             .tab_index(0)
@@ -2032,7 +2054,7 @@ impl Waku {
                 div()
                     .size(px(diameter))
                     .rounded_full()
-                    .bg(rgb(0xFFFFFF))
+                    .bg(theme.composer)
                     .relative()
                     .flex()
                     .items_center()
@@ -2043,13 +2065,16 @@ impl Waku {
                             .inset_0()
                             .size_full(),
                     )
-                    // img() keeps the SVG's authored colors and blur-filtered
-                    // shadows; icon() would flatten it to a tinted alpha mask.
+                    // The recolored SVG keeps its blur-filtered shadows;
+                    // icon() would flatten it to a tinted alpha mask.
                     .child(
-                        img(path)
-                            .w(glyph_size.width * (diameter / DOCK_ITEM_PEAK))
-                            .h(glyph_size.height * (diameter / DOCK_ITEM_PEAK))
-                            .flex_none(),
+                        match dock_glyph_image(path, theme.text, cx) {
+                            Some(image) => img(image),
+                            None => img(path),
+                        }
+                        .w(glyph_size.width * (diameter / DOCK_ITEM_PEAK))
+                        .h(glyph_size.height * (diameter / DOCK_ITEM_PEAK))
+                        .flex_none(),
                     ),
             )
             .focus_visible(|style| style.rounded(px(12.0)).bg(theme.focus_highlight()))

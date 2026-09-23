@@ -1,0 +1,1 @@
+- The dock's circular buttons in the sidebar now follow the active theme: their background uses the composer input color and their icons use the body text color instead of fixed white and black.
