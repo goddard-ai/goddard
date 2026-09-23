@@ -2501,13 +2501,19 @@ impl AgentSession {
 
     /// Undo [`Self::begin_turn`] for a turn whose provider never started —
     /// the submission-preparation failure path, where the prompt returns to
-    /// the composer. The turn and its messages leave the transcript, and a
+    /// the composer, and a Continue retry of a settled turn whose prompt was
+    /// never delivered. The turn and its messages leave the transcript, and a
     /// first-prompt unwind also gives back the default title that
     /// [`Self::set_title_from_prompt`] replaced. Its submission timestamp stays
     /// as the session's latest activity.
     pub fn unwind_unstarted_turn(&mut self, turn_id: Uuid) {
         let unstarted = self.turns.last().is_some_and(|turn| {
-            turn.id == turn_id && turn.status == TurnStatus::Running && !turn.provider_turn_started
+            turn.id == turn_id
+                && !turn.provider_turn_started
+                && matches!(
+                    turn.status,
+                    TurnStatus::Running | TurnStatus::Failed | TurnStatus::Interrupted
+                )
         });
         if !unstarted {
             return;
@@ -6086,6 +6092,41 @@ mod tests {
         session.unwind_unstarted_turn(started);
         assert_eq!(session.turns.len(), 2);
         assert_eq!(session.messages.len(), 3);
+    }
+
+    /// A settled turn whose prompt never reached the provider still unwinds:
+    /// the Continue retry resends the prompt rather than nudging a provider
+    /// session that has no context for it. A turn the provider confirmed
+    /// stays put whichever way it settled.
+    #[test]
+    fn an_undelivered_settled_turn_unwinds() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+
+        let failed = session.begin_turn("the prompt that never sent");
+        session.push_notice_message(
+            MessageRole::Assistant,
+            "Could not start the agent",
+            TranscriptNotice::Status {
+                kind: TranscriptNoticeStatus::StartFailed,
+            },
+        );
+        session.finish_active_turn(TurnStatus::Failed);
+        session.unwind_unstarted_turn(failed);
+        assert!(session.turns.is_empty());
+        assert!(session.messages.is_empty());
+
+        let interrupted = session.begin_turn("stopped while connecting");
+        session.finish_active_turn(TurnStatus::Interrupted);
+        session.unwind_unstarted_turn(interrupted);
+        assert!(session.turns.is_empty());
+
+        let confirmed = session.begin_turn("the provider saw this one");
+        session.mark_active_turn_provider_started();
+        session.finish_active_turn(TurnStatus::Failed);
+        session.unwind_unstarted_turn(confirmed);
+        assert_eq!(session.turns.len(), 1);
+        assert_eq!(session.messages.len(), 1);
     }
 
     #[test]

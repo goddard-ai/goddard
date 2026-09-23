@@ -45,7 +45,7 @@ use crate::model::{
     ActivityItem, ActivityKind, AgentSession, Checkpoint, CheckpointFile, CheckpointStatus,
     DriverEvent, Message, MessageAttachment, MessageRole, Project, ProviderKind, QueuedMessage,
     ReasoningBlock, RuntimeEventCursor, SessionStatus, SessionWorkspace, TranscriptBlock,
-    TurnStatus, UserInputOption, UserInputQuestion,
+    TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputOption, UserInputQuestion,
 };
 
 #[test]
@@ -2889,6 +2889,45 @@ fn a_hidden_prompt_renders_no_row_but_keeps_its_turn() {
     assert_eq!(nav.len(), 1);
     assert_eq!(nav[0].message_index, 0);
     assert_eq!(nav[0].response, "Built it.");
+}
+
+/// Continue on a turn the provider never confirmed resends the undelivered
+/// prompt — a canned nudge would reach a provider session with no context
+/// for it. A confirmed turn still gets the hidden continue instead.
+#[test]
+fn continue_resends_a_prompt_the_provider_never_saw() {
+    use super::composer::undelivered_turn_resend;
+
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Devin);
+    let turn_id = session.begin_turn("fix the model picker");
+    session.push_notice_message(
+        MessageRole::Assistant,
+        "Could not start the agent",
+        TranscriptNotice::Status {
+            kind: TranscriptNoticeStatus::StartFailed,
+        },
+    );
+    session.finish_active_turn(TurnStatus::Failed);
+    session.status = SessionStatus::Idle;
+
+    let (dead_turn, dead_message, submission) =
+        undelivered_turn_resend(&session).expect("the undelivered prompt is resent");
+    assert_eq!(dead_turn, turn_id);
+    assert_eq!(dead_message, session.messages[0].id);
+    assert_eq!(submission.prompt, "fix the model picker");
+    assert!(!submission.hidden);
+
+    // The retry unwinds the dead turn, so the resent prompt takes its slot.
+    session.unwind_unstarted_turn(dead_turn);
+    assert!(session.turns.is_empty());
+    assert!(session.messages.is_empty());
+
+    // A turn the provider confirmed keeps the canned-continue path.
+    let confirmed = session.begin_turn("real work");
+    session.mark_active_turn_provider_started();
+    session.finish_active_turn(TurnStatus::Interrupted);
+    assert!(undelivered_turn_resend(&session).is_none());
+    let _ = confirmed;
 }
 
 /// A daemon restart auto-resumes only a session whose turn the provider

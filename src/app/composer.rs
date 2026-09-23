@@ -324,6 +324,37 @@ pub(super) fn session_awaits_continue(session: &AgentSession) -> bool {
             .is_some_and(|turn| matches!(turn.status, TurnStatus::Interrupted | TurnStatus::Failed))
 }
 
+/// A stopped turn the provider never confirmed is still holding its prompt:
+/// Continue resends that prompt rather than nudging a provider session that
+/// has no context for it. The returned ids name the dead turn and its user
+/// message — the caller unwinds the turn so the retry takes its transcript
+/// slot and re-keys the message's sent annotations onto the resend.
+pub(super) fn undelivered_turn_resend(
+    session: &AgentSession,
+) -> Option<(Uuid, Uuid, ComposerSubmission)> {
+    let turn = session.turns.last()?;
+    if turn.provider_turn_started {
+        return None;
+    }
+    let message = session
+        .messages
+        .iter()
+        .find(|message| message.turn_id == Some(turn.id) && message.role == MessageRole::User)?;
+    Some((
+        turn.id,
+        message.id,
+        ComposerSubmission {
+            prompt: message.content.clone(),
+            display_content: message.display_content.clone(),
+            human_content: None,
+            attachments: message.attachments.clone(),
+            atoms: Vec::new(),
+            annotations: Vec::new(),
+            hidden: message.hidden,
+        },
+    ))
+}
+
 pub(super) fn composer_submit_action(
     session: Option<&AgentSession>,
     preparing: bool,

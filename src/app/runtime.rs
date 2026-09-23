@@ -5739,7 +5739,24 @@ impl Waku {
             return;
         }
         let session_id = session.id;
-        let submission = ComposerSubmission::hidden_continue();
+        let resend = composer::undelivered_turn_resend(session);
+        let submission = match resend {
+            Some((turn_id, message_id, mut submission)) => {
+                // The dead turn's annotations move to the resend so an
+                // "Annotation N" citation in its reply still resolves; the
+                // set keyed to the unwound message is dead weight.
+                if let Some(sets) = self.sent_annotations.get_mut(&session_id) {
+                    if let Some(position) = sets.iter().position(|(id, _)| *id == message_id) {
+                        submission.annotations = sets.remove(position).1.as_ref().clone();
+                    }
+                }
+                if let Some(session) = self.state.session_mut(session_id) {
+                    session.unwind_unstarted_turn(turn_id);
+                }
+                submission
+            }
+            None => ComposerSubmission::hidden_continue(),
+        };
         if self.big_picture.is_open() {
             self.submit_composer_submission_to(session_id, submission, cx);
         } else {
