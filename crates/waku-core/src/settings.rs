@@ -60,6 +60,10 @@ impl DaemonSettingsStore {
             Err(error) => return Err(error),
         };
         settings.discard_legacy_app_keys();
+        let write_current = write_current
+            || waku_protocol::auto_prompts::refresh_untouched_shipped_rules(
+                &mut settings.auto_prompts,
+            );
         if write_current {
             write_atomic(&path, &settings)?;
         }

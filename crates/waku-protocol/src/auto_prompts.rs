@@ -36,6 +36,31 @@ pub fn default_rules() -> Vec<AutoPromptRule> {
     vec![AutoPromptRule {
         id: Uuid::from_u128(0x161bb5c7_f758_410c_9d39_a93483d1ad38),
         name: "Sharpen complex answers".into(),
+        prompt: "Rewrite your answer only if it is materially too long, dense, or broad for the user's request. If it is already concise and sufficient, do not add or send anything.".into(),
+        questions: vec![
+            AutoPromptQuestion {
+                id: Uuid::from_u128(0x07cb3e33_a1f5_4c8c_a4d7_a2d3dac7ac6f),
+                instructions: "Does the response materially overwhelm the user because it is much longer, denser, or broader than needed for their request? An answer that is already concise, direct, and sufficient must score near zero. Do not count minor edits or merely imaginable shortening.".into(),
+                weight: Some(1.0),
+            },
+        ],
+        threshold: Some(0.85),
+        enabled: true,
+    }]
+}
+
+/// Replace the original shipped rule when it is still untouched. Preserve any
+/// user edits to the built-in rule and all user-created rules.
+pub fn refresh_untouched_shipped_rules(rules: &mut [AutoPromptRule]) -> bool {
+    let Some(rule) = rules
+        .iter_mut()
+        .find(|rule| rule.id == Uuid::from_u128(0x161bb5c7_f758_410c_9d39_a93483d1ad38))
+    else {
+        return false;
+    };
+    let original = AutoPromptRule {
+        id: Uuid::from_u128(0x161bb5c7_f758_410c_9d39_a93483d1ad38),
+        name: "Sharpen complex answers".into(),
         prompt: "I need to understand this quickly. Please sharpen your explanation.".into(),
         questions: vec![
             AutoPromptQuestion {
@@ -56,7 +81,12 @@ pub fn default_rules() -> Vec<AutoPromptRule> {
         ],
         threshold: Some(0.65),
         enabled: true,
-    }]
+    };
+    if *rule != original {
+        return false;
+    }
+    *rule = default_rules().remove(0);
+    true
 }
 
 impl AutoPromptRule {
