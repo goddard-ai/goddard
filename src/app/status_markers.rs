@@ -392,6 +392,12 @@ const FILES_CHANGED_STATE_MAX: usize = 50;
 /// calibration dataset keeps them distinct from ad-hoc `evaluate` calls.
 const EVAL_FEATURE: &str = "turn-status";
 
+/// What sits below the marker chips inside the response footer row: the
+/// 27px `render_message_footer` strip plus the column gap and the marker
+/// wrapper's bottom margin. The float measures the chips' position against
+/// the viewport, so this much of the row's bottom edge is not theirs.
+const FOOTER_ROW_BELOW_MARKERS: Pixels = px(33.0);
+
 /// The question map sent with every turn evaluation: one `Choice` for the
 /// ending, conditional subtype choices, plus one `Noul` per flag.
 fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
@@ -1170,8 +1176,8 @@ impl Waku {
     }
 
     /// The settled last turn's chips floated over the transcript's bottom
-    /// edge while its footer row sits below the fold, so a reader partway up
-    /// a long response still sees how the turn resolved. The footer keeps
+    /// edge while their inline copy sits below the fold, so a reader partway
+    /// up a long response still sees how the turn resolved. The footer keeps
     /// the real row; activating the float scrolls the footer back into
     /// view. Only the session's last turn qualifies — pinning an older
     /// turn's verdict under a newer response would misattribute it.
@@ -1195,7 +1201,13 @@ impl Waku {
             })?;
         // Unmeasured rows report `None`: no float until the footer has been
         // laid out once and the list can say where it sits.
-        if transcript_rows.item_is_below_viewport(footer_row) != Some(true) {
+        let footer_bounds = transcript_rows.bounds_for_item(footer_row)?;
+        // The chips ride inside the footer row below the changed-files
+        // card, which can hold the row's top edge on screen while the chips
+        // have already slid under the fold — so judge where they end, not
+        // where the row starts.
+        let markers_bottom = footer_bounds.bottom() - FOOTER_ROW_BELOW_MARKERS;
+        if markers_bottom <= transcript_rows.viewport_bounds().bottom() {
             return None;
         }
         let focus = self.transcript_control_focus("transcript-status-markers", cx);
