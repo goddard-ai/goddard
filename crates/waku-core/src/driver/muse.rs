@@ -103,6 +103,7 @@ struct WorkerState {
     eval: Option<Arc<waku_protocol::eval::EvalSettings>>,
     model: Option<String>,
     reasoning_effort: Option<String>,
+    computer_use_instruction: Option<String>,
     active_turn: Option<String>,
     /// Finished turns in order — every `turn/completed`, whatever its
     /// terminal, so the list lines up with Goddard's provider-turn count.
@@ -130,6 +131,7 @@ pub(super) struct MuseDriver {
     #[allow(dead_code)]
     service: MuseService,
     commands: Sender<DriverCommand>,
+    computer_use: Option<super::computer_use::ComputerUseRuntime>,
 }
 
 impl MuseDriver {
@@ -147,7 +149,7 @@ impl MuseDriver {
             service_tier: _,
             context_window: _,
             agent_preset: _,
-            computer_use_enabled: _,
+            computer_use_enabled,
             agent: _,
             read_own_transcript: _,
             subagents: _,
@@ -173,6 +175,21 @@ impl MuseDriver {
         };
 
         let service = muse_service::acquire(&binary)?;
+        let computer_use = computer_use_enabled
+            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
+            .transpose()?;
+        let computer_use_config = computer_use.as_ref().map(|runtime| {
+            let config = &runtime.config;
+            json!({"mcpServers": {"goddard_js_repl": {
+                "transport": "stdio",
+                "command": config.repl_path,
+                "args": [],
+                "env": {
+                    "GODDARD_COMPUTER_USE_SERVER": config.server_path,
+                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY": config.process_directory,
+                }
+            }}})
+        });
         // Goddard mints the id (UUIDv7 is the host's session-id shape) so the
         // subscription can exist before `session/start` returns.
         let resuming = resumed_id.is_some();
@@ -193,6 +210,9 @@ impl MuseDriver {
                 // without replaying items the daemon already stored.
                 params["history"] = json!("snapshot");
             }
+            if let Some(config) = &computer_use_config {
+                params["config"] = config.clone();
+            }
             service.call("session/resume", params)
         } else {
             let mut params = json!({
@@ -203,6 +223,9 @@ impl MuseDriver {
             });
             if let Some(model) = model.as_deref() {
                 params["modelId"] = json!(model);
+            }
+            if let Some(config) = &computer_use_config {
+                params["config"] = config.clone();
             }
             service.call("session/start", params)
         };
@@ -223,6 +246,10 @@ impl MuseDriver {
             eval: eval.map(Arc::new),
             model,
             reasoning_effort,
+            computer_use_instruction: computer_use.as_ref().map(|runtime| format!(
+                "[Goddard Computer Use: When I ask you to interact with a local app, use goddard_js_repl. Read the skill at {} for its API.]",
+                runtime.config.skill_path.display()
+            )),
             active_turn: session
                 .get("activeTurnId")
                 .and_then(Value::as_str)
@@ -304,7 +331,11 @@ impl MuseDriver {
                 }
             })?;
 
-        Ok(Self { service, commands })
+        Ok(Self {
+            service,
+            commands,
+            computer_use,
+        })
     }
 }
 
@@ -454,10 +485,15 @@ fn muse_error(context: &str, error: &MuseError) -> anyhow::Error {
 fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerState) -> bool {
     match message {
         DriverCommand::Prompt { text, attachments } => {
+            let input_text = state
+                .computer_use_instruction
+                .take()
+                .map(|instruction| format!("{instruction}\n\n{text}"))
+                .unwrap_or_else(|| text.clone());
             let mut params = json!({
                 "commandId": worker.service.mint_command_id(),
                 "sessionId": state.session_id,
-                "input": input_parts(&text, &attachments),
+                "input": input_parts(&input_text, &attachments),
                 "displayText": text,
                 // A second prompt during a running turn waits in the host's
                 // queue rather than erroring, matching steer-less providers.
@@ -1676,6 +1712,11 @@ fn truncate(text: &str, max: usize) -> String {
 }
 
 impl DriverControl for MuseDriver {
+    fn cancel_computer_use(&self) {
+        if let Some(computer_use) = &self.computer_use {
+            computer_use.stop();
+        }
+    }
     fn prompt(&self, prompt: String) {
         self.prompt_with_attachments(prompt, Vec::new());
     }
@@ -2223,6 +2264,7 @@ mod tests {
             eval: None,
             model: None,
             reasoning_effort: None,
+            computer_use_instruction: None,
             active_turn: None,
             finished_turns: Vec::new(),
             queued_turns: Vec::new(),

@@ -22,11 +22,14 @@ if (!globalThis.cua) {
 
 After `js_reset`, bootstrap again before using `cua`. Module imports and Node
 subprocess APIs are unavailable. The native runtime is managed by Goddard.
+The first access to an app, browser tabs, the clipboard, or the whole desktop
+may pause until the user approves it in Goddard. A denial ends that call;
+do not retry it without a new user request. Full access does not skip this gate.
 
 Use `jsRepl.write(value)` for text or structured output and
 `await jsRepl.emitImage(image)` to show a returned image. Prefer top-level `var`
-for names reused across calls. Calls default to 30 seconds; set `timeout_ms`
-when an observation needs longer.
+for names reused across calls. Calls allow up to 5 minutes so a user can answer
+an access request. Set a shorter `timeout_ms` for quick observations when useful.
 
 <!-- BEGIN NATIVE API -->
 ## API surface

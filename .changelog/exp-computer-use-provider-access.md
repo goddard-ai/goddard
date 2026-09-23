@@ -1,0 +1,1 @@
+- Computer Use now asks before an agent accesses an app, browser tabs, the clipboard, or the whole desktop, including in Full access. The Goddard JavaScript REPL is available to more local providers, and app approvals can be saved and revoked in Settings.

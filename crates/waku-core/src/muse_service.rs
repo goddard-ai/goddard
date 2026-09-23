@@ -350,6 +350,7 @@ impl MuseHost {
                     "title": "Goddard",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
+                "capabilities": {"requestedCapabilities": ["sessionMcp"]},
             }),
         ) {
             Ok(result) => result,

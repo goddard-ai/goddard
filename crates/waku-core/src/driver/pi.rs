@@ -116,10 +116,8 @@ impl PiFlavor {
         matches!(self, Self::OhMyPi)
     }
 
-    /// Goddard's computer-use bridge is a Pi extension written against Pi's
-    /// extension API. Oh My Pi ships its own `/computer` instead.
     fn supports_goddard_computer_use(self) -> bool {
-        matches!(self, Self::Pi)
+        true
     }
 
     fn cursor(self, session_id: String, session_file: Option<PathBuf>) -> ProviderResumeCursor {
@@ -265,8 +263,16 @@ impl PiDriver {
             .transpose()?;
         let pi_extension = computer_use
             .as_ref()
+            .filter(|_| flavor == PiFlavor::Pi)
             .map(|_| crate::computer_use::pi_extension_path())
             .transpose()?;
+        let omp_computer_use_skill = (flavor == PiFlavor::OhMyPi)
+            .then(|| {
+                computer_use
+                    .as_ref()
+                    .map(|runtime| runtime.config.skill_path.clone())
+            })
+            .flatten();
         // Pi has no built-in subagent tool, so delegation arrives as a
         // goddard-owned extension: a `goddard_delegate` tool that runs `pi -p`
         // subprocesses on the spec's models. The file lives in Goddard's
@@ -302,6 +308,18 @@ impl PiDriver {
                 .zip(pi_extension.as_deref())
                 .map(|(runtime, extension)| (&runtime.config, extension)),
         );
+        if flavor == PiFlavor::OhMyPi
+            && let Some(runtime) = &computer_use
+        {
+            let mcp_config = runtime.config.process_directory.join("omp-mcp.json");
+            std::fs::write(
+                &mcp_config,
+                serde_json::to_vec(&serde_json::json!({
+                    "mcpServers": { "goddard_js_repl": runtime.config.mcp_server() }
+                }))?,
+            )?;
+            command.arg("--mcp-config").arg(mcp_config);
+        }
         if let Some((extension, spec_json)) = &subagent_extension {
             command
                 .arg("--extension")
@@ -572,9 +590,21 @@ impl PiDriver {
                 // an RPC on the live session rather than a restart.
                 let mut current_model = model;
                 let mut current_effort = reasoning_effort;
+                let mut computer_use_announced = false;
                 while let Ok(message) = command_rx.recv() {
                     match message {
                         CommandMessage::Prompt(prompt) => {
+                            let prompt = if let Some(skill) = omp_computer_use_skill.as_ref()
+                                && !computer_use_announced
+                            {
+                                computer_use_announced = true;
+                                format!(
+                                    "[Goddard Computer Use: When I ask you to interact with a local app, use goddard_js_repl. Read the skill at {} for its API.]\n\n{prompt}",
+                                    skill.display()
+                                )
+                            } else {
+                                prompt
+                            };
                             let result = send_prompt(
                                 &mut stdin,
                                 &writer_pending,

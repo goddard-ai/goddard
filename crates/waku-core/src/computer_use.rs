@@ -444,6 +444,7 @@ mod tests {
         let grant = ComputerAppGrant {
             bundle_id: "net.imput.helium".into(),
             app_name: "Helium".into(),
+            verified: true,
         };
         assert_eq!(target.grant_key(), grant.key());
         assert!(target.persistable());

@@ -409,6 +409,7 @@ impl CodexDriver {
         let computer_use_skill_root = computer_use
             .as_ref()
             .map(|config| config.skill_root.clone());
+        let announce_computer_use = computer_use.is_some();
         let computer_use_process_directory = computer_use
             .as_ref()
             .map(|config| config.process_directory.clone());
@@ -580,6 +581,9 @@ impl CodexDriver {
                 // field.
                 let mut developer_instructions: Vec<String> =
                     agent_instruction.iter().cloned().collect();
+                if announce_computer_use {
+                    developer_instructions.push("When the user asks you to interact with a local app, use the `js` tool from `goddard_js_repl`. Read the bundled Goddard Computer Use skill for its API and operating instructions.".into());
+                }
                 if subagents
                     .as_ref()
                     .is_some_and(|spec| !spec.agents.is_empty())

@@ -2768,8 +2768,16 @@ computer_use.always_allow_app:
   en: Always allow app
 computer_use.allow_control:
   en: Allow Goddard to control %{app}?
+computer_use.approval_app:
+  en: The agent can inspect and control %{app} windows.
+computer_use.approval_browser:
+  en: The agent can inspect and control browser tabs.
+computer_use.approval_clipboard:
+  en: The agent can read or change the clipboard.
+computer_use.approval_desktop:
+  en: The agent can inspect or control the whole desktop.
 computer_use.screenshot_shared:
-  en: A screenshot of this window will be shared with the active Codex model
+  en: A screenshot of this window will be shared with the active model
 computer_use.sensitive_action:
   en: This action can type text or press keys
 computer_use.bundle_id:

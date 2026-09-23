@@ -5262,6 +5262,8 @@ impl Waku {
         option_id: String,
         cx: &mut Context<Self>,
     ) {
+        let computer_approval =
+            waku_protocol::computer_use::ComputerApprovalId::decode(&request_id);
         let Some(session_id) = self.state.selected_session else {
             return;
         };
@@ -5285,7 +5287,7 @@ impl Waku {
                     "other",
                     |option| if option.allow { "allow" } else { "deny" },
                 );
-            runtime.driver.respond(request_id, option_id);
+            runtime.driver.respond(request_id, option_id.clone());
             runtime.pending_permission = None;
             Some(decision)
         } else {
@@ -5295,9 +5297,28 @@ impl Waku {
             self.analytics
                 .track(crate::analytics::Event::PermissionResponded {
                     provider,
-                    kind: "provider",
+                    kind: if computer_approval.is_some() {
+                        "computer_use"
+                    } else {
+                        "provider"
+                    },
                     decision,
                 });
+        }
+        if option_id == "always"
+            && let Some(grant) = computer_approval.and_then(|approval| approval.app_grant())
+        {
+            if let Some(saved) = self
+                .state
+                .computer_use_allowed_apps
+                .iter_mut()
+                .find(|saved| saved.key() == grant.key())
+            {
+                *saved = grant;
+            } else {
+                self.state.computer_use_allowed_apps.push(grant);
+            }
+            self.save();
         }
         if let Some(session) = self.selected_session_mut() {
             session.status = SessionStatus::Working;
@@ -5570,13 +5591,17 @@ impl Waku {
                 let grant = crate::computer_use::ComputerAppGrant {
                     bundle_id: pending.target.bundle_id.clone(),
                     app_name: pending.target.app_name.clone(),
+                    verified: true,
                 };
-                if !self
+                if let Some(existing) = self
                     .state
                     .computer_use_allowed_apps
-                    .iter()
-                    .any(|existing| existing.key() == grant.key())
+                    .iter_mut()
+                    .find(|existing| existing.key() == grant.key())
                 {
+                    *existing = grant;
+                    self.save();
+                } else {
                     self.state.computer_use_allowed_apps.push(grant);
                     self.save();
                 }

@@ -11679,7 +11679,13 @@ impl Waku {
         let pending = self.computer_permission_request_pending;
         let helper_name = crate::computer_use::helper_display_name();
         let mut allowed_apps = div().flex().flex_col().gap(px(1.0));
-        if self.state.computer_use_allowed_apps.is_empty() {
+        let verified_apps = self
+            .state
+            .computer_use_allowed_apps
+            .iter()
+            .filter(|grant| grant.verified)
+            .collect::<Vec<_>>();
+        if verified_apps.is_empty() {
             allowed_apps = allowed_apps.child(
                 div()
                     .py(px(12.0))
@@ -11688,10 +11694,10 @@ impl Waku {
                     .child(tr!("computer_use.no_always_allowed_apps")),
             );
         } else {
-            for (index, grant) in self.state.computer_use_allowed_apps.iter().enumerate() {
+            for (index, grant) in verified_apps.iter().enumerate() {
                 let key = grant.key();
                 let revoke_name = grant.app_name.clone();
-                let is_last = index + 1 == self.state.computer_use_allowed_apps.len();
+                let is_last = index + 1 == verified_apps.len();
                 let app_icon = self.computer_use_app_icon(&grant.bundle_id, cx);
                 allowed_apps = allowed_apps.child(
                     div()

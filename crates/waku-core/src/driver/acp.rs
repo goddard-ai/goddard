@@ -13,14 +13,14 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ClientCapabilities, ContentBlock, DeleteSessionRequest, Implementation,
-    InitializeRequest, InitializeResponse, LoadSessionRequest, NewSessionRequest,
-    PermissionOptionKind, PromptRequest, PromptResponse, RequestId, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, ResumeSessionRequest,
-    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigOptionValue, SessionConfigSelectOptions, SessionId, SessionModeId,
-    SessionModeState, SessionNotification, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    StopReason, TextContent,
+    CancelNotification, ClientCapabilities, ContentBlock, DeleteSessionRequest, EnvVariable,
+    Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest, McpServer,
+    McpServerStdio, NewSessionRequest, PermissionOptionKind, PromptRequest, PromptResponse,
+    RequestId, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    ResumeSessionRequest, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
+    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOptions, SessionId,
+    SessionModeId, SessionModeState, SessionNotification, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, StopReason, TextContent,
 };
 use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent, Client, ConnectTo, ConnectionTo, Handled, LineDirection,
@@ -67,6 +67,7 @@ pub struct AcpDriver {
     supports_steer: bool,
     mode: RuntimeMode,
     computer_use: Option<super::support::HeadlessComputerUseRuntime>,
+    native_computer_use: Option<super::computer_use::ComputerUseRuntime>,
 }
 
 /// Per-provider launch details. Everything after process launch is ACP.
@@ -175,6 +176,12 @@ impl AcpDriver {
         let computer_use = (provider == ProviderKind::Grok && computer_use_enabled)
             .then(|| super::support::HeadlessComputerUseRuntime::start(provider, events.clone()))
             .transpose()?;
+        let native_computer_use = (provider != ProviderKind::Grok && computer_use_enabled)
+            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
+            .transpose()?;
+        let native_computer_use_config = native_computer_use
+            .as_ref()
+            .map(|runtime| runtime.config.clone());
         let grok_title_home = computer_use
             .as_ref()
             .and_then(super::support::HeadlessComputerUseRuntime::grok_home)
@@ -226,6 +233,7 @@ impl AcpDriver {
                     resume_session_id,
                     fork_context,
                     grok_title_home,
+                    native_computer_use_config,
                     eval,
                     command_rx,
                     thread_events.clone(),
@@ -248,6 +256,7 @@ impl AcpDriver {
             supports_steer: provider != ProviderKind::Fx && provider != ProviderKind::Droid,
             mode,
             computer_use,
+            native_computer_use,
         })
     }
 }
@@ -694,6 +703,7 @@ async fn run_sdk_connection(
     resume_session_id: Option<String>,
     fork_context: Option<String>,
     grok_title_home: Option<std::path::PathBuf>,
+    native_computer_use: Option<super::computer_use::ComputerUseConfig>,
     eval: Option<waku_protocol::eval::EvalSettings>,
     commands: smol::channel::Receiver<CommandMessage>,
     events: DriverEventSender,
@@ -877,6 +887,7 @@ async fn run_sdk_connection(
                 resume_session_id.as_deref(),
                 &cwd,
                 &suppress_session_updates,
+                native_computer_use.as_ref(),
             )
             .await?;
 
@@ -918,6 +929,7 @@ async fn run_sdk_connection(
             )
             .await;
             let mut fork_context = fork_context;
+            let mut computer_use_announced = false;
 
             while let Ok(command) = commands.recv().await {
                 match command {
@@ -942,6 +954,17 @@ async fn run_sdk_connection(
                             first.clone()
                         } else {
                             None
+                        };
+                        let text = if let Some(config) = native_computer_use.as_ref()
+                            && !computer_use_announced
+                        {
+                            computer_use_announced = true;
+                            format!(
+                                "[Goddard Computer Use: When I ask you to interact with a local app, use the goddard_js_repl MCP tool. Read the skill at {} for its API.]\n\n{text}",
+                                config.skill_path.display()
+                            )
+                        } else {
+                            text
                         };
                         let _ = events.send(DriverEvent::TurnStarted);
                         if let Err(error) = send_prompt(
@@ -1104,6 +1127,7 @@ async fn establish_session(
     resume_session_id: Option<&str>,
     cwd: &Path,
     suppress_session_updates: &AtomicBool,
+    computer_use: Option<&super::computer_use::ComputerUseConfig>,
 ) -> agent_client_protocol::Result<(
     SessionId,
     Option<SessionModeState>,
@@ -1118,7 +1142,10 @@ async fn establish_session(
             .is_some()
         {
             match connection
-                .send_request(ResumeSessionRequest::new(existing.to_owned(), cwd))
+                .send_request(
+                    ResumeSessionRequest::new(existing.to_owned(), cwd)
+                        .mcp_servers(computer_use_mcp_servers(computer_use)),
+                )
                 .block_task()
                 .await
             {
@@ -1140,7 +1167,10 @@ async fn establish_session(
             // process shuts down, so retry failures the agent flags as
             // retryable before giving up.
             let mut response = connection
-                .send_request(LoadSessionRequest::new(existing.to_owned(), cwd))
+                .send_request(
+                    LoadSessionRequest::new(existing.to_owned(), cwd)
+                        .mcp_servers(computer_use_mcp_servers(computer_use)),
+                )
                 .block_task()
                 .await;
             for _ in 0..ACP_SESSION_LOAD_RETRIES {
@@ -1153,7 +1183,10 @@ async fn establish_session(
                 }
                 smol::Timer::after(ACP_SESSION_LOAD_RETRY_DELAY).await;
                 response = connection
-                    .send_request(LoadSessionRequest::new(existing.to_owned(), cwd))
+                    .send_request(
+                        LoadSessionRequest::new(existing.to_owned(), cwd)
+                            .mcp_servers(computer_use_mcp_servers(computer_use)),
+                    )
                     .block_task()
                     .await;
             }
@@ -1177,10 +1210,33 @@ async fn establish_session(
     }
 
     let response = connection
-        .send_request(NewSessionRequest::new(cwd))
+        .send_request(
+            NewSessionRequest::new(cwd).mcp_servers(computer_use_mcp_servers(computer_use)),
+        )
         .block_task()
         .await?;
     Ok((response.session_id, response.modes, response.config_options))
+}
+
+fn computer_use_mcp_servers(
+    config: Option<&super::computer_use::ComputerUseConfig>,
+) -> Vec<McpServer> {
+    config
+        .map(|config| {
+            vec![McpServer::Stdio(
+                McpServerStdio::new("goddard_js_repl", config.repl_path.clone()).env(vec![
+                    EnvVariable::new(
+                        "GODDARD_COMPUTER_USE_SERVER",
+                        config.server_path.to_string_lossy().into_owned(),
+                    ),
+                    EnvVariable::new(
+                        "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY",
+                        config.process_directory.to_string_lossy().into_owned(),
+                    ),
+                ]),
+            )]
+        })
+        .unwrap_or_default()
 }
 
 const ACP_SESSION_LOAD_RETRIES: usize = 6;
@@ -2989,6 +3045,9 @@ impl DriverControl for AcpDriver {
 
     fn cancel_computer_use(&self) {
         if let Some(computer_use) = self.computer_use.as_ref() {
+            computer_use.stop();
+        }
+        if let Some(computer_use) = self.native_computer_use.as_ref() {
             computer_use.stop();
         }
     }

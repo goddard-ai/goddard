@@ -93,6 +93,7 @@ pub struct ClaudeDriver {
     session_id: String,
     mode: RuntimeMode,
     announced_agent_surface: bool,
+    computer_use: Option<super::computer_use::ComputerUseRuntime>,
 }
 
 /// The permission posture Claude is launched with.
@@ -182,7 +183,7 @@ impl ClaudeDriver {
             service_tier: _,
             context_window,
             agent_preset: _,
-            computer_use_enabled: _,
+            computer_use_enabled,
             agent,
             read_own_transcript: _,
             subagents,
@@ -214,7 +215,24 @@ impl ClaudeDriver {
         let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd);
         configure_stream_command(&mut command, mode);
+        let computer_use = computer_use_enabled
+            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
+            .transpose()?;
         let mut system_appendix: Vec<String> = Vec::new();
+        if let Some(runtime) = &computer_use {
+            let config_path = runtime.config.process_directory.join("claude-mcp.json");
+            std::fs::write(
+                &config_path,
+                serde_json::to_vec(&json!({
+                    "mcpServers": {"goddard_js_repl": runtime.config.mcp_server()}
+                }))?,
+            )?;
+            command.args(["--mcp-config", &config_path.to_string_lossy()]);
+            system_appendix.push(format!(
+                "When the user asks you to interact with a local app, use `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
+                runtime.config.skill_path.display()
+            ));
+        }
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
             // `goddard-agent` is on PATH but nothing else tells the model it
@@ -572,6 +590,7 @@ impl ClaudeDriver {
             session_id,
             mode,
             announced_agent_surface: agent.is_some(),
+            computer_use,
         })
     }
 }
@@ -599,6 +618,12 @@ impl DriverControl for ClaudeDriver {
 
     fn cancel(&self) {
         let _ = self.commands.send(CommandMessage::Cancel);
+    }
+
+    fn cancel_computer_use(&self) {
+        if let Some(computer_use) = &self.computer_use {
+            computer_use.stop();
+        }
     }
 
     fn stop_background_work(&self, key: BackgroundWorkKey, control_id: String) {
@@ -2139,6 +2164,7 @@ mod tests {
             session_id: Uuid::new_v4().to_string(),
             mode: RuntimeMode::FullAccess,
             announced_agent_surface: false,
+            computer_use: None,
         };
 
         assert!(driver.supports_steer());

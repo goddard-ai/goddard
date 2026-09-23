@@ -1577,12 +1577,32 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::UpdateSettings { settings } => {
+                let revoked_app_grant =
+                    self.settings
+                        .get()
+                        .computer_use_allowed_apps
+                        .iter()
+                        .any(|grant| {
+                            grant.verified
+                                && !settings
+                                    .computer_use_allowed_apps
+                                    .iter()
+                                    .any(|next| next.verified && next.bundle_id == grant.bundle_id)
+                        });
+                let computer_use_enabled = crate::computer_use::resolve_enabled(
+                    settings.computer_use_enabled,
+                    settings.computer_use_experiment_enabled,
+                );
                 self.settings.replace(settings)?;
                 self.apply_wake_setting();
                 crate::integrations::deliver::sync_file_providers(
                     &self.settings.get(),
                     &self.integrations,
                 );
+                crate::driver::set_computer_use_enabled_for_runtimes(computer_use_enabled);
+                if revoked_app_grant {
+                    crate::driver::revoke_computer_app_grants_for_runtimes();
+                }
                 events.settings_changed(self.settings.get());
                 Ok(ResponsePayload::Ack)
             }
@@ -3942,6 +3962,9 @@ impl WakuBackend {
         // subagents, project map, integrations) would all point at a host
         // the remote side cannot see. They stay off for cloud launches.
         let cloud_launch = environment.is_cloud();
+        // The native helper and the REPL approval channel live on this host.
+        // A cloud process or sandbox guest cannot reach either one directly.
+        options.computer_use_enabled &= !cloud_launch && !environment.is_sandbox();
         if !cloud_launch
             && (daemon_settings.agent_tools_enabled
                 || daemon_settings.agent_settings_enabled

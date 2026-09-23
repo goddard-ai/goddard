@@ -1022,7 +1022,11 @@ agent_preset.no_description: 暂无描述。
 computer_use.allow_for_task: 本次任务允许
 computer_use.always_allow_app: 始终允许此应用
 computer_use.allow_control: 允许 Goddard 控制“%{app}”吗？
-computer_use.screenshot_shared: 此窗口的截图将发送给当前使用的 Codex 模型
+computer_use.approval_app: 智能体可以查看和操控“%{app}”的窗口。
+computer_use.approval_browser: 智能体可以查看和操控浏览器标签页。
+computer_use.approval_clipboard: 智能体可以读取或修改剪贴板。
+computer_use.approval_desktop: 智能体可以查看或操控整个桌面。
+computer_use.screenshot_shared: 此窗口的截图将发送给当前使用的模型
 computer_use.sensitive_action: 此操作可以输入文字或按下按键
 computer_use.bundle_id: "Bundle ID：%{id}"
 computer_use.no_bundle_id: 此应用没有 Bundle ID，因此无法设为始终允许

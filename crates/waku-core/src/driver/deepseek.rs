@@ -97,6 +97,7 @@ pub struct DeepSeekDriver {
     agent_preset: Option<String>,
     commands: Sender<CommandMessage>,
     completed_turn_seqs: Arc<Mutex<Vec<u64>>>,
+    computer_use: Option<super::computer_use::ComputerUseRuntime>,
 }
 
 impl DeepSeekDriver {
@@ -110,7 +111,7 @@ impl DeepSeekDriver {
             service_tier,
             context_window: _,
             agent_preset,
-            computer_use_enabled: _,
+            computer_use_enabled,
             agent,
             read_own_transcript: _,
             subagents: _,
@@ -138,16 +139,25 @@ impl DeepSeekDriver {
         // row per server. A session carrying either the agent surface or
         // integrations gets a dedicated host — the pooled host serves many
         // sessions and must not bake either into its launch.
-        let patch_args = if integrations.is_empty() {
+        let computer_use = computer_use_enabled
+            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
+            .transpose()?;
+        let patch_args = if integrations.is_empty() && computer_use.is_none() {
             Vec::new()
         } else {
             let path = std::env::temp_dir()
                 .join(format!("goddard-dsh-mcp-{}.yaml", Uuid::new_v4().simple()));
-            std::fs::write(
-                &path,
-                crate::integrations::deliver::deepseek_overlay_yaml(&integrations),
-            )
-            .context("could not write the DeepSeek MCP patch")?;
+            let mut patch = crate::integrations::deliver::deepseek_overlay_yaml(&integrations);
+            if let Some(runtime) = &computer_use {
+                let config = &runtime.config;
+                patch.push_str(&format!(
+                    "- id: goddard-computer-use\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: goddard_js_repl\n    transport: stdio\n    command: {}\n    args: []\n    env:\n      GODDARD_COMPUTER_USE_SERVER: {}\n      GODDARD_COMPUTER_USE_PROCESS_DIRECTORY: {}\n    toolCallTimeoutMs: 300000\n",
+                    serde_json::to_string(&config.repl_path.to_string_lossy())?,
+                    serde_json::to_string(&config.server_path.to_string_lossy())?,
+                    serde_json::to_string(&config.process_directory.to_string_lossy())?,
+                ));
+            }
+            std::fs::write(&path, patch).context("could not write the DeepSeek MCP patch")?;
             vec!["--patch".to_owned(), path.to_string_lossy().into_owned()]
         };
         let server = if agent.is_some() || !patch_args.is_empty() {
@@ -301,6 +311,7 @@ impl DeepSeekDriver {
             agent_preset: selected_agent_preset,
             commands,
             completed_turn_seqs,
+            computer_use,
         })
     }
 }
@@ -320,6 +331,12 @@ impl DriverControl for DeepSeekDriver {
 
     fn cancel(&self) {
         let _ = self.commands.send(CommandMessage::Cancel);
+    }
+
+    fn cancel_computer_use(&self) {
+        if let Some(computer_use) = &self.computer_use {
+            computer_use.stop();
+        }
     }
 
     fn respond(&self, request_id: String, option_id: String) {

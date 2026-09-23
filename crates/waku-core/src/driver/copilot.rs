@@ -34,9 +34,9 @@ use github_copilot_sdk::session_events::{
     ToolExecutionCompleteData, ToolExecutionStartData,
 };
 use github_copilot_sdk::types::{
-    Attachment, DeliveryMode, ExitPlanModeData, MessageOptions, PermissionRequestData,
-    PermissionRequestKind, RequestId, ResumeSessionConfig, SessionConfig, SessionEvent, SessionId,
-    SetModelOptions, SystemMessageConfig,
+    Attachment, DeliveryMode, ExitPlanModeData, McpServerConfig, McpStdioServerConfig,
+    MessageOptions, PermissionRequestData, PermissionRequestKind, RequestId, ResumeSessionConfig,
+    SessionConfig, SessionEvent, SessionId, SetModelOptions, SystemMessageConfig,
 };
 use github_copilot_sdk::{CliProgram, Client, ClientInfo, ClientOptions};
 use parking_lot::Mutex;
@@ -92,6 +92,7 @@ pub struct CopilotDriver {
     commands: UnboundedSender<CommandMessage>,
     shared: Arc<Mutex<Shared>>,
     announced_agent_surface: bool,
+    computer_use: Option<super::computer_use::ComputerUseRuntime>,
 }
 
 struct CopilotRun {
@@ -107,6 +108,37 @@ struct CopilotRun {
     events: DriverEventSender,
     shared: Arc<Mutex<Shared>>,
     commands: UnboundedReceiver<CommandMessage>,
+    computer_use_config: Option<super::computer_use::ComputerUseConfig>,
+}
+
+fn computer_use_hint(config: &super::computer_use::ComputerUseConfig) -> String {
+    format!(
+        "When the user asks you to interact with a local app, use `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
+        config.skill_path.display()
+    )
+}
+
+fn computer_use_mcp_server(
+    config: &super::computer_use::ComputerUseConfig,
+) -> (String, McpServerConfig) {
+    (
+        "goddard_js_repl".into(),
+        McpServerConfig::Stdio(McpStdioServerConfig {
+            command: config.repl_path.display().to_string(),
+            env: [
+                (
+                    "GODDARD_COMPUTER_USE_SERVER".into(),
+                    config.server_path.display().to_string(),
+                ),
+                (
+                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".into(),
+                    config.process_directory.display().to_string(),
+                ),
+            ]
+            .into(),
+            ..Default::default()
+        }),
+    )
 }
 
 impl CopilotDriver {
@@ -120,7 +152,7 @@ impl CopilotDriver {
             service_tier,
             context_window,
             agent_preset,
-            computer_use_enabled: _,
+            computer_use_enabled,
             agent,
             read_own_transcript: _,
             subagents,
@@ -156,6 +188,10 @@ impl CopilotDriver {
         // so it reports `Silent` and hears about the surface through
         // first-prompt context instead.
         let announced_agent_surface = agent.is_some() && resume_session_id.is_none();
+        let computer_use = computer_use_enabled
+            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
+            .transpose()?;
+        let computer_use_config = computer_use.as_ref().map(|runtime| runtime.config.clone());
         // `UnboundedSender::send` is synchronous, so the `DriverControl`
         // methods talk straight into the runtime task — no pump thread.
         let (commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -189,6 +225,7 @@ impl CopilotDriver {
                     events: thread_events.clone(),
                     shared: thread_shared,
                     commands: command_rx,
+                    computer_use_config,
                 }));
                 let _ = thread_events.send(DriverEvent::ProcessExited);
             })
@@ -198,6 +235,7 @@ impl CopilotDriver {
             commands,
             shared,
             announced_agent_surface,
+            computer_use,
         })
     }
 }
@@ -223,6 +261,7 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
         events,
         shared,
         mut commands,
+        computer_use_config,
     } = launch;
 
     let mut client_options = ClientOptions::default();
@@ -266,6 +305,25 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
             {
                 resume = resume.with_custom_agents(agents);
             }
+            if let Some(computer_use) = &computer_use_config {
+                resume.mcp_servers = Some(
+                    [computer_use_mcp_server(computer_use)]
+                        .into_iter()
+                        .collect(),
+                );
+                resume.skill_directories = Some(vec![
+                    computer_use
+                        .skill_path
+                        .parent()
+                        .expect("bundled skill has a directory")
+                        .to_path_buf(),
+                ]);
+                resume.system_message = Some(
+                    SystemMessageConfig::new()
+                        .with_mode("append")
+                        .with_content(computer_use_hint(computer_use)),
+                );
+            }
             client.resume_session(resume).await
         }
         None => {
@@ -287,14 +345,39 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
             {
                 config = config.with_custom_agents(agents);
             }
+            if let Some(computer_use) = &computer_use_config {
+                config.mcp_servers = Some(
+                    [computer_use_mcp_server(computer_use)]
+                        .into_iter()
+                        .collect(),
+                );
+                config.skill_directories = Some(vec![
+                    computer_use
+                        .skill_path
+                        .parent()
+                        .expect("bundled skill has a directory")
+                        .to_path_buf(),
+                ]);
+            }
             // `goddard-agent` is on PATH but nothing else tells the model it
             // exists — the system-message append is this provider's
             // announcement channel.
+            let mut instructions = Vec::new();
             if let Some(agent) = &agent {
-                config.system_message =
-                    Some(SystemMessageConfig::new().with_mode("append").with_content(
-                        crate::agent::surface_instruction("goddard-agent", &agent.scope()),
-                    ));
+                instructions.push(crate::agent::surface_instruction(
+                    "goddard-agent",
+                    &agent.scope(),
+                ));
+            }
+            if let Some(computer_use) = &computer_use_config {
+                instructions.push(computer_use_hint(computer_use));
+            }
+            if !instructions.is_empty() {
+                config.system_message = Some(
+                    SystemMessageConfig::new()
+                        .with_mode("append")
+                        .with_content(instructions.join("\n\n")),
+                );
             }
             client.create_session(config).await
         }
@@ -935,6 +1018,12 @@ impl DriverControl for CopilotDriver {
 
     fn cancel(&self) {
         let _ = self.commands.send(CommandMessage::Cancel);
+    }
+
+    fn cancel_computer_use(&self) {
+        if let Some(computer_use) = &self.computer_use {
+            computer_use.stop();
+        }
     }
 
     fn respond(&self, request_id: String, option_id: String) {

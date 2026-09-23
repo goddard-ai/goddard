@@ -45,6 +45,7 @@ enum CommandMessage {
 pub struct AmpDriver {
     commands: Sender<CommandMessage>,
     interrupt: Arc<Mutex<Option<crate::sandbox::DriverInterrupt>>>,
+    computer_use: Option<super::computer_use::ComputerUseRuntime>,
 }
 
 /// Amp's thread arguments. The prompt never rides here — it goes in on stdin.
@@ -95,7 +96,7 @@ impl AmpDriver {
             service_tier,
             context_window: _,
             agent_preset: _,
-            computer_use_enabled: _,
+            computer_use_enabled,
             agent,
             read_own_transcript: _,
             subagents: _,
@@ -124,6 +125,10 @@ impl AmpDriver {
 
         let title_binary = binary.clone();
         let title_cwd = cwd.clone();
+        let computer_use = computer_use_enabled
+            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
+            .transpose()?;
+        let computer_use_config = computer_use.as_ref().map(|runtime| runtime.config.clone());
         let reader_initial_thread_id = thread_id.clone();
         let mut command: Command = crate::command_env::command(&binary);
         command.current_dir(&cwd).args(amp_args(
@@ -132,6 +137,14 @@ impl AmpDriver {
             service_tier.as_deref(),
             thread_id.as_deref(),
         ));
+        if let Some(config) = &computer_use_config {
+            command.arg("--mcp-config").arg(
+                serde_json::json!({
+                    "goddard_js_repl": config.mcp_server()
+                })
+                .to_string(),
+            );
+        }
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
         }
@@ -215,6 +228,7 @@ impl AmpDriver {
                 // A branch replays its retained history in the first prompt,
                 // because Amp has no way to seed a thread otherwise.
                 let mut fork_context = fork_context;
+                let mut computer_use_announced = false;
                 while let Ok(message) = command_rx.recv() {
                     match message {
                         CommandMessage::Prompt(text) => {
@@ -224,6 +238,17 @@ impl AmpDriver {
                                     crate::amp_session::prompt_with_fork_context(&context, &text)
                                 })
                                 .unwrap_or(text);
+                            let text = if let Some(config) = computer_use_config.as_ref()
+                                && !computer_use_announced
+                            {
+                                computer_use_announced = true;
+                                format!(
+                                    "[Goddard Computer Use: When I ask you to interact with a local app, use goddard_js_repl. Read the skill at {} for its API.]\n\n{text}",
+                                    config.skill_path.display()
+                                )
+                            } else {
+                                text
+                            };
                             *writer_turn.lock() = true;
                             let _ = writer_events.send(DriverEvent::TurnStarted);
                             let written = write_line(
@@ -366,11 +391,17 @@ impl AmpDriver {
         Ok(Self {
             commands,
             interrupt,
+            computer_use,
         })
     }
 }
 
 impl DriverControl for AmpDriver {
+    fn cancel_computer_use(&self) {
+        if let Some(computer_use) = &self.computer_use {
+            computer_use.stop();
+        }
+    }
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
     }

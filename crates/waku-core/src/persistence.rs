@@ -3450,6 +3450,7 @@ mod tests {
         state.computer_use_allowed_apps.push(ComputerAppGrant {
             bundle_id: "com.apple.Safari".into(),
             app_name: "Safari".into(),
+            verified: false,
         });
         state.sessions[0].begin_turn("Persist this session");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
@@ -4592,10 +4593,12 @@ mod tests {
             ComputerAppGrant {
                 bundle_id: "net.imput.helium".into(),
                 app_name: "Helium Preview".into(),
+                verified: false,
             },
             ComputerAppGrant {
                 bundle_id: String::new(),
                 app_name: "Missing identity".into(),
+                verified: false,
             },
         ];
         normalize_computer_app_grants(&mut grants);

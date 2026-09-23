@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
@@ -8,6 +9,48 @@ use ts_rs::TS;
 /// starts.
 pub const fn resolve_enabled(requested: bool, experiment_enabled: bool) -> bool {
     requested && experiment_enabled
+}
+
+/// Identifies an approval issued by Goddard's REPL rather than by a provider.
+/// The opaque request id travels through the existing permission event path.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ComputerApprovalId {
+    pub nonce: String,
+    pub scope: String,
+    pub app_name: String,
+    pub bundle_id: Option<String>,
+}
+
+impl ComputerApprovalId {
+    const PREFIX: &'static str = "goddard-computer-use:";
+
+    pub fn encode(&self) -> String {
+        format!(
+            "{}{}",
+            Self::PREFIX,
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(self).expect("Computer Approval ID is serializable"))
+        )
+    }
+
+    pub fn decode(value: &str) -> Option<Self> {
+        let encoded = value.strip_prefix(Self::PREFIX)?;
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(encoded)
+            .ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    pub fn app_grant(&self) -> Option<ComputerAppGrant> {
+        self.bundle_id
+            .as_ref()
+            .is_some_and(|id| !id.is_empty() && self.scope == format!("app:{id}"))
+            .then(|| ComputerAppGrant {
+                bundle_id: self.bundle_id.clone().unwrap_or_default(),
+                app_name: self.app_name.clone(),
+                verified: true,
+            })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -100,6 +143,9 @@ impl ComputerTarget {
 pub struct ComputerAppGrant {
     pub bundle_id: String,
     pub app_name: String,
+    /// Old app grants predate enforcement and must not authorize the REPL.
+    #[serde(default)]
+    pub verified: bool,
 }
 
 impl ComputerAppGrant {
@@ -127,12 +173,41 @@ pub struct ComputerUseState {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_enabled;
+    use super::{ComputerAppGrant, ComputerApprovalId, resolve_enabled};
 
     #[test]
     fn computer_use_requires_the_experiment_opt_in() {
         assert!(!resolve_enabled(false, true));
         assert!(!resolve_enabled(true, false));
         assert!(resolve_enabled(true, true));
+    }
+
+    #[test]
+    fn computer_approval_ids_round_trip_and_only_apps_persist() {
+        let approval = ComputerApprovalId {
+            nonce: "nonce".into(),
+            scope: "app:com.example.Editor".into(),
+            app_name: "Editor".into(),
+            bundle_id: Some("com.example.Editor".into()),
+        };
+        let decoded = ComputerApprovalId::decode(&approval.encode()).unwrap();
+        let grant = decoded.app_grant().unwrap();
+        assert_eq!(grant.bundle_id, "com.example.Editor");
+        assert!(grant.verified);
+        assert!(ComputerApprovalId::decode("provider-request").is_none());
+
+        for scope in ["browser", "clipboard", "desktop"] {
+            let mut temporary = approval.clone();
+            temporary.scope = scope.into();
+            assert!(temporary.app_grant().is_none());
+        }
+    }
+
+    #[test]
+    fn old_app_grants_do_not_authorize_the_repl() {
+        let old: ComputerAppGrant =
+            serde_json::from_str(r#"{"bundleId":"com.example.Editor","appName":"Editor"}"#)
+                .unwrap();
+        assert!(!old.verified);
     }
 }

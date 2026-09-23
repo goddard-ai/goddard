@@ -484,18 +484,35 @@ impl Waku {
                 options,
             } => {
                 if self.accepts_turn_output(session_id) {
-                    runtime.pending_permission = Some(PendingPermission {
-                        request_id,
-                        title,
-                        title_i18n,
-                        detail,
-                        detail_i18n,
-                        options,
-                    });
-                    if let Some(session) = self.state.session_mut(session_id) {
-                        session.status = SessionStatus::Waiting;
+                    let already_allowed =
+                        waku_protocol::computer_use::ComputerApprovalId::decode(&request_id)
+                            .and_then(|approval| approval.app_grant())
+                            .is_some_and(|grant| {
+                                self.state
+                                    .computer_use_allowed_apps
+                                    .iter()
+                                    .any(|saved| saved.verified && saved.key() == grant.key())
+                            });
+                    if already_allowed && self.state.computer_use_enabled {
+                        runtime.driver.respond(request_id, "task".into());
+                    } else {
+                        runtime.pending_permission = Some(PendingPermission {
+                            request_id,
+                            title,
+                            title_i18n,
+                            detail,
+                            detail_i18n,
+                            options,
+                        });
+                        if let Some(session) = self.state.session_mut(session_id) {
+                            session.status = SessionStatus::Waiting;
+                        }
+                        self.notify_waiting_input(
+                            session_id,
+                            tr!("session.waiting_for_approval"),
+                            cx,
+                        );
                     }
-                    self.notify_waiting_input(session_id, tr!("session.waiting_for_approval"), cx);
                 }
             }
             DriverEvent::UserInputRequested {

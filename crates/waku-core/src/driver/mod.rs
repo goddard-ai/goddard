@@ -19,6 +19,14 @@ mod title_refresh;
 
 pub(crate) use acp::{catalog_agent, discover_devin_models_via_acp};
 
+pub(crate) fn set_computer_use_enabled_for_runtimes(enabled: bool) {
+    computer_use::set_enabled_for_runtimes(enabled);
+}
+
+pub(crate) fn revoke_computer_app_grants_for_runtimes() {
+    computer_use::revoke_app_grants_for_runtimes();
+}
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -132,7 +140,9 @@ impl DriverHandle {
     }
 
     pub fn respond(&self, request_id: String, option_id: String) {
-        self.inner.respond(request_id, option_id);
+        if !computer_use::respond_approval(&request_id, &option_id) {
+            self.inner.respond(request_id, option_id);
+        }
     }
 
     pub fn respond_user_input(&self, request_id: String, answers: Vec<UserInputAnswer>) {

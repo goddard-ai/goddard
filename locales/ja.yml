@@ -1040,7 +1040,11 @@ agent_preset.no_description: 説明はありません。
 computer_use.allow_for_task: このタスクで許可
 computer_use.always_allow_app: このアプリを常に許可
 computer_use.allow_control: Goddard に「%{app}」の操作を許可しますか？
-computer_use.screenshot_shared: このウインドウのスクリーンショットが、使用中の Codex モデルと共有されます
+computer_use.approval_app: エージェントは「%{app}」のウインドウを確認・操作できます。
+computer_use.approval_browser: エージェントはブラウザーのタブを確認・操作できます。
+computer_use.approval_clipboard: エージェントはクリップボードの内容を読み取り・変更できます。
+computer_use.approval_desktop: エージェントはデスクトップ全体を確認・操作できます。
+computer_use.screenshot_shared: このウインドウのスクリーンショットが、使用中のモデルと共有されます
 computer_use.sensitive_action: この操作ではテキストの入力やキー操作が行われる可能性があります
 computer_use.bundle_id: "Bundle ID：%{id}"
 computer_use.no_bundle_id: このアプリには Bundle ID がないため、常に許可することはできません

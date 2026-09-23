@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -15,9 +15,11 @@ use rquickjs::context::EvalOptions;
 use rquickjs::{Context, Ctx, Exception, Function, Persistent, Promise, Runtime, Value};
 use serde::Deserialize;
 use serde_json::{Map, Value as JsonValue, json};
+use uuid::Uuid;
+use waku_protocol::computer_use::ComputerApprovalId;
 
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
-const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 300_000;
 const MAX_EXECUTION_TIMEOUT_MS: u64 = 300_000;
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 // Goddard writes this file into the session's process directory to cancel the
@@ -27,10 +29,10 @@ const KERNEL_CANCEL_FILE: &str = "cancel-kernel";
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 // Instructions for Goddard's persistent QuickJS runtime and its jsRepl helpers.
-const SERVER_INSTRUCTIONS: &str = "Use `js` to run JavaScript in the persistent QuickJS kernel. When a skill or prompt says to use `goddard_js_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `jsRepl.cwd`, `jsRepl.homeDir`, `jsRepl.tmpDir`, `jsRepl.requestMeta`, `jsRepl.setResponseMeta(...)`, and `await jsRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name.";
+const SERVER_INSTRUCTIONS: &str = "Use `js` to run JavaScript in the persistent QuickJS kernel. When a skill or prompt says to use `goddard_js_repl`, call this server's `js` execution tool. Calls default to a 300000 ms (5 minutes) timeout when `timeout_ms` is omitted. The runtime exposes `jsRepl.cwd`, `jsRepl.homeDir`, `jsRepl.tmpDir`, `jsRepl.requestMeta`, `jsRepl.setResponseMeta(...)`, and `await jsRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name.";
 
 const KERNEL_BOOTSTRAP: &str = include_str!("js_repl_bootstrap.js");
-const JS_TOOL_DESCRIPTION: &str = "Run JavaScript in a persistent QuickJS kernel with top-level await. This is the JavaScript execution tool for the `goddard_js_repl` MCP server; use it whenever instructions say to use `goddard_js_repl`, the Goddard JavaScript REPL MCP, or run Goddard JavaScript REPL code. If `timeout_ms` is omitted, execution times out after 30000 ms (30 seconds); pass a larger `timeout_ms` for slow Computer Use automation or other long-running operations. Use `jsRepl.cwd`, `jsRepl.homeDir`, and `jsRepl.tmpDir` to inspect host paths. Use `jsRepl.requestMeta` to inspect the current MCP request `_meta` object during a tool call. Use `jsRepl.setResponseMeta(meta)` to attach top-level MCP result `_meta`; repeated calls shallow-merge object keys for the current tool call. Use `jsRepl.write(value)` to add output without a newline. Strings are unchanged; other values use console-style formatting, including BigInt and circular objects. Prefer it over `console.log(...)` for final output; `console.log(...)` remains useful for debugging or multiple values. Use `await jsRepl.emitImage(imageLike)` to return images; each call adds one image to the outer tool result, so call it multiple times to emit multiple images. Supported image inputs are a base64 data URL, a file URL, an object with a `url` property, or a Cua image content block with `data` and `mimeType`. Saved references to `jsRepl.write(...)` and `jsRepl.emitImage(...)` stay reusable across calls. Scheduled callbacks only run while a JavaScript execution call is active; overdue timers resume at the start of the next call. Top-level bindings persist across calls until `js_reset`. If a call throws, prior bindings remain available and bindings that finished initializing before the throw often remain reusable. For reusable names that may be assigned again later, prefer top-level `var name = ...`; `var` can be redeclared across calls. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the existing binding if possible, reassign it only if it was declared with `let` or `var`, or pick a new name instead of resetting immediately; a previous `const x` cannot be changed into `var x`. Use a short `{ ... }` block only for temporary scratch names, and do not wrap an entire call in block scope if you want those names reusable later. Initialize Cua Driver with `await setupComputerUseRuntime({ globals: globalThis })`, which exposes every native tool as `cua.<tool_name>(arguments)`, such as `cua.list_apps()` or `cua.click(arguments)`. The bundled Computer Use skill documents the method signatures; call the methods directly. Module imports are not supported. Prefer `jsRepl.write(...)` for text or formatted values and `jsRepl.emitImage(...)` for images.";
+const JS_TOOL_DESCRIPTION: &str = "Run JavaScript in a persistent QuickJS kernel with top-level await. This is the JavaScript execution tool for the `goddard_js_repl` MCP server; use it whenever instructions say to use `goddard_js_repl`, the Goddard JavaScript REPL MCP, or run Goddard JavaScript REPL code. If `timeout_ms` is omitted, execution times out after 300000 ms (5 minutes), allowing time to answer Computer Use approvals. Use `jsRepl.cwd`, `jsRepl.homeDir`, and `jsRepl.tmpDir` to inspect host paths. Use `jsRepl.requestMeta` to inspect the current MCP request `_meta` object during a tool call. Use `jsRepl.setResponseMeta(meta)` to attach top-level MCP result `_meta`; repeated calls shallow-merge object keys for the current tool call. Use `jsRepl.write(value)` to add output without a newline. Strings are unchanged; other values use console-style formatting, including BigInt and circular objects. Prefer it over `console.log(...)` for final output; `console.log(...)` remains useful for debugging or multiple values. Use `await jsRepl.emitImage(imageLike)` to return images; each call adds one image to the outer tool result, so call it multiple times to emit multiple images. Supported image inputs are a base64 data URL, a file URL, an object with a `url` property, or a Cua image content block with `data` and `mimeType`. Saved references to `jsRepl.write(...)` and `jsRepl.emitImage(...)` stay reusable across calls. Scheduled callbacks only run while a JavaScript execution call is active; overdue timers resume at the start of the next call. Top-level bindings persist across calls until `js_reset`. If a call throws, prior bindings remain available and bindings that finished initializing before the throw often remain reusable. For reusable names that may be assigned again later, prefer top-level `var name = ...`; `var` can be redeclared across calls. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the existing binding if possible, reassign it only if it was declared with `let` or `var`, or pick a new name instead of resetting immediately; a previous `const x` cannot be changed into `var x`. Use a short `{ ... }` block only for temporary scratch names, and do not wrap an entire call in block scope if you want those names reusable later. Initialize Cua Driver with `await setupComputerUseRuntime({ globals: globalThis })`, which exposes every native tool as `cua.<tool_name>(arguments)`, such as `cua.list_apps()` or `cua.click(arguments)`. The bundled Computer Use skill documents the method signatures; call the methods directly. Module imports are not supported. Prefer `jsRepl.write(...)` for text or formatted values and `jsRepl.emitImage(...)` for images.";
 
 #[derive(Default)]
 struct CallOutput {
@@ -269,6 +271,8 @@ impl ReplHost {
                     let repl = JavaScriptRepl::with_bridge(NativeComputerUseClient {
                         connection: None,
                         config: Some(config.clone()),
+                        grants: HashSet::new(),
+                        grants_revision: None,
                     })?;
                     kernels.insert(session.to_owned(), (config, repl));
                 }
@@ -310,7 +314,7 @@ fn tool_definitions() -> Vec<JsonValue> {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 300000,
-                        "description": "Optional execution timeout in milliseconds. Defaults to 30000 (30 seconds) when omitted. Values above 300000 (5 minutes) are clamped."
+                        "description": "Optional execution timeout in milliseconds. Defaults to 300000 (5 minutes) when omitted so a user can answer a Computer Use approval. Values above 300000 are clamped."
                     },
                     "title": {
                         "type": "string",
@@ -934,6 +938,8 @@ fn image_mime_type(path: &Path, bytes: &[u8]) -> anyhow::Result<&'static str> {
 struct NativeComputerUseClient {
     connection: Option<HelperConnection>,
     config: Option<SessionConfig>,
+    grants: HashSet<String>,
+    grants_revision: Option<String>,
 }
 
 impl NativeComputerUseClient {
@@ -941,6 +947,8 @@ impl NativeComputerUseClient {
         Self {
             connection: None,
             config: None,
+            grants: HashSet::new(),
+            grants_revision: None,
         }
     }
 
@@ -953,6 +961,32 @@ impl NativeComputerUseClient {
         if !matches!(method, "tools/list" | "tools/call") {
             bail!("unsupported Cua Driver request: {method}");
         }
+        if method == "tools/call" {
+            let directory = self.approval_directory()?;
+            if directory.join("computer-use-disabled").exists() {
+                bail!("Computer Use is disabled for this task");
+            }
+            self.authorize(&arguments, deadline)?;
+        }
+        self.call_unchecked(method, arguments, deadline)
+    }
+
+    fn approval_directory(&self) -> anyhow::Result<PathBuf> {
+        self.config
+            .as_ref()
+            .map(|config| config.process_directory.clone())
+            .or_else(|| {
+                std::env::var_os("GODDARD_COMPUTER_USE_PROCESS_DIRECTORY").map(PathBuf::from)
+            })
+            .ok_or_else(|| anyhow!("Computer Use has no task-scoped approval channel"))
+    }
+
+    fn call_unchecked(
+        &mut self,
+        method: &str,
+        arguments: JsonValue,
+        deadline: Option<Instant>,
+    ) -> anyhow::Result<JsonValue> {
         if self.connection.is_none() {
             self.connection = Some(HelperConnection::start(deadline, self.config.as_ref())?);
         }
@@ -966,6 +1000,112 @@ impl NativeComputerUseClient {
             .request(method, arguments, deadline);
         if result.is_err() {
             self.connection = None;
+        }
+        result
+    }
+
+    fn authorize(&mut self, call: &JsonValue, deadline: Option<Instant>) -> anyhow::Result<()> {
+        let name = call
+            .get("name")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        if matches!(name, "list_apps" | "get_screen_size" | "check_permissions") {
+            return Ok(());
+        }
+        let args = call.get("arguments").unwrap_or(&JsonValue::Null);
+        let (scope, app_name, bundle_id) = if name.starts_with("clipboard_") {
+            ("clipboard".to_owned(), "the clipboard".to_owned(), None)
+        } else if name.starts_with("browser_") || name == "page" || name == "get_browser_state" {
+            ("browser".to_owned(), "browser tabs".to_owned(), None)
+        } else if name == "launch_app" {
+            let bundle = args
+                .get("bundle_id")
+                .and_then(JsonValue::as_str)
+                .filter(|bundle| !bundle.is_empty())
+                .map(str::to_owned);
+            match bundle {
+                Some(bundle) => (format!("app:{bundle}"), bundle.clone(), Some(bundle)),
+                None => bail!("Computer Use needs a bundle_id to approve launching an app"),
+            }
+        } else if args.get("scope").and_then(JsonValue::as_str) == Some("desktop")
+            || args.pointer("/target/kind").and_then(JsonValue::as_str) == Some("desktop")
+        {
+            ("desktop".to_owned(), "the desktop".to_owned(), None)
+        } else if let Some(pid) = args.get("pid").and_then(JsonValue::as_u64) {
+            let apps = self.call_unchecked(
+                "tools/call",
+                json!({"name":"list_apps","arguments":{}}),
+                deadline,
+            )?;
+            let app = apps
+                .pointer("/structuredContent/apps")
+                .and_then(JsonValue::as_array)
+                .and_then(|apps| {
+                    apps.iter()
+                        .find(|app| app.get("pid").and_then(JsonValue::as_u64) == Some(pid))
+                })
+                .ok_or_else(|| anyhow!("Computer Use cannot identify the target app"))?;
+            let bundle = app
+                .get("bundle_id")
+                .and_then(JsonValue::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned);
+            let app_name = app
+                .get("name")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("this app")
+                .to_owned();
+            match bundle {
+                Some(bundle) => (format!("app:{bundle}"), app_name, Some(bundle)),
+                None => ("desktop".to_owned(), "the desktop".to_owned(), None),
+            }
+        } else {
+            ("desktop".to_owned(), "the desktop".to_owned(), None)
+        };
+        let directory = self.approval_directory()?;
+        if directory.join("computer-use-disabled").exists() {
+            bail!("Computer Use is disabled for this task");
+        }
+        let revision = fs::read_to_string(directory.join("computer-use-grants-revision")).ok();
+        if self.grants_revision != revision {
+            self.grants.clear();
+            self.grants_revision = revision;
+        }
+        if self.grants.contains(&scope) {
+            return Ok(());
+        }
+        let approval = ComputerApprovalId {
+            nonce: Uuid::new_v4().simple().to_string(),
+            scope: scope.clone(),
+            app_name,
+            bundle_id,
+        };
+        let request = directory.join(format!("approval-request-{}.json", approval.nonce));
+        let response = directory.join(format!("approval-response-{}.txt", approval.nonce));
+        let temporary = request.with_extension("tmp");
+        fs::write(&temporary, serde_json::to_vec(&approval)?)?;
+        fs::rename(&temporary, &request)?;
+        let result = loop {
+            if directory.join("computer-use-disabled").exists()
+                || directory.join(KERNEL_CANCEL_FILE).exists()
+            {
+                break Err(anyhow!("Computer Use was stopped"));
+            }
+            if let Ok(decision) = fs::read_to_string(&response) {
+                break match decision.as_str() {
+                    "task" | "always" => Ok(()),
+                    _ => Err(anyhow!("The user denied Computer Use access")),
+                };
+            }
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                break Err(anyhow!("Computer Use approval timed out"));
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        let _ = fs::remove_file(request);
+        let _ = fs::remove_file(response);
+        if result.is_ok() {
+            self.grants.insert(scope);
         }
         result
     }
@@ -1496,6 +1636,8 @@ mod tests {
                 process_directory: directory.clone(),
                 cwd: directory.clone(),
             }),
+            grants: HashSet::new(),
+            grants_revision: None,
         })
         .unwrap();
         let marker = directory.join(KERNEL_CANCEL_FILE);
@@ -1558,5 +1700,75 @@ mod tests {
         let image = decode_image_reference("data:image/png;base64,aGVsbG8=").unwrap();
         assert_eq!(image.mime_type, "image/png");
         assert_eq!(image.data, "aGVsbG8=");
+    }
+
+    #[test]
+    fn native_call_waits_for_task_approval_and_disable_stops_it() {
+        let directory = std::env::temp_dir().join(format!("waku-repl-approval-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut client = NativeComputerUseClient {
+            connection: None,
+            config: Some(SessionConfig {
+                server_path: PathBuf::from("unused-in-this-test"),
+                process_directory: directory.clone(),
+                cwd: directory.clone(),
+            }),
+            grants: HashSet::new(),
+            grants_revision: None,
+        };
+        let call = json!({"name":"clipboard_read","arguments":{}});
+        let worker = thread::spawn(move || {
+            let result = client.authorize(&call, Some(Instant::now() + Duration::from_secs(2)));
+            (result, client)
+        });
+        let request = (0..200)
+            .find_map(|_| {
+                let path = fs::read_dir(&directory)
+                    .unwrap()
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .find(|path| {
+                        path.file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .starts_with("approval-request-")
+                    });
+                if path.is_none() {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                path
+            })
+            .expect("approval request was never written");
+        let approval: ComputerApprovalId =
+            serde_json::from_slice(&fs::read(request).unwrap()).unwrap();
+        fs::write(
+            directory.join(format!("approval-response-{}.txt", approval.nonce)),
+            "task",
+        )
+        .unwrap();
+        let (result, mut client) = worker.join().unwrap();
+        result.unwrap();
+        assert!(client.grants.contains("clipboard"));
+        fs::write(directory.join("computer-use-grants-revision"), "revoked").unwrap();
+        assert!(
+            client
+                .authorize(
+                    &json!({"name":"clipboard_read","arguments":{}}),
+                    Some(Instant::now() + Duration::from_millis(50)),
+                )
+                .is_err()
+        );
+        assert!(!client.grants.contains("clipboard"));
+        fs::write(directory.join("computer-use-disabled"), "").unwrap();
+        assert!(
+            client
+                .call(
+                    "tools/call",
+                    json!({"name":"list_apps","arguments":{}}),
+                    None
+                )
+                .is_err()
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 }
