@@ -270,6 +270,50 @@ impl Waku {
         self.transcript_is_scrolled.set(true);
     }
 
+    /// Whether the departing viewport shows the live turn — the state where
+    /// leaving the session asks a later selection to rejoin its tail rather
+    /// than the exact row the reader happened to sit on. It takes a busy
+    /// session with a running turn whose rows reach the viewport; a turn row
+    /// the list has not measured yet is past the rendered window, so it
+    /// counts as below the viewport rather than on it.
+    pub(super) fn transcript_watches_live_turn(&self) -> bool {
+        let Some(session) = self.selected_session() else {
+            return false;
+        };
+        if !session.is_busy() {
+            return false;
+        }
+        let Some(turn_id) = session.active_turn_id() else {
+            return false;
+        };
+        self.refresh_transcript_row_kinds();
+        let row_kinds = self.transcript_row_kinds.borrow();
+        let Some(first_row) = row_kinds
+            .iter()
+            .position(|row| row_turn_id(session, *row) == Some(turn_id))
+        else {
+            return false;
+        };
+        // The turn runs to the end of the list, so its first row not being
+        // entirely below the viewport means some of it is on screen.
+        self.active_transcript_rows()
+            .item_is_below_viewport(first_row)
+            == Some(false)
+    }
+
+    /// The landing a session's parked scroll position asks for.
+    /// `tail_while_busy` rejoins the tail only while the session is still
+    /// working — one that settled in the meantime restores the parked spot.
+    pub(super) fn saved_transcript_landing(&self, session_id: Uuid) -> Option<TranscriptLanding> {
+        let position = self.transcript_scroll_positions.get(&session_id).copied()?;
+        let busy = self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.is_busy());
+        Some(transcript_position_landing(position, busy))
+    }
+
     /// Park the transcript where a session activation should land. Runs after
     /// `reset_transcript_rows`, which leaves the bottom-aligned list on its
     /// tail. `attention` says the session held unseen state when it was
@@ -280,11 +324,7 @@ impl Waku {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
-        let saved = self
-            .transcript_scroll_positions
-            .get(&session_id)
-            .copied()
-            .map(TranscriptLanding::Position);
+        let saved = self.saved_transcript_landing(session_id);
         let landing = if attention {
             // Open on the last turn so the new work — or the pending
             // question — is what's on screen.
@@ -321,6 +361,9 @@ impl Waku {
                 self.transcript_anchor_following.set(false);
                 self.active_transcript_rows().scroll_to(offset);
                 self.transcript_is_scrolled.set(true);
+            }
+            TranscriptLanding::Tail => {
+                self.pin_transcript_to_tail();
             }
             TranscriptLanding::LastTurn => {
                 if let Some(message_id) = self.navigation_turns().last().map(|turn| turn.message_id)
@@ -1334,6 +1377,20 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         .iter()
         .rposition(|row| !is_answer_text(row))
         .map_or(0, |index| index + 1)
+}
+
+/// What a parked position asks of the next activation. `tail_while_busy`
+/// rejoins the tail only while the session is still working; a session that
+/// settled in the meantime restores the parked spot instead.
+pub(super) fn transcript_position_landing(
+    position: TranscriptScrollPosition,
+    session_busy: bool,
+) -> TranscriptLanding {
+    if position.tail_while_busy && session_busy {
+        TranscriptLanding::Tail
+    } else {
+        TranscriptLanding::Position(position.offset)
+    }
 }
 
 fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {

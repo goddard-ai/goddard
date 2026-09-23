@@ -20,8 +20,9 @@ use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationLocation, PendingUserInput,
-    SessionNavigation, StreamDeltaKind, TranscriptRowKind::*, WORKING_INDICATOR_FADE_OUT,
-    WorkingIndicatorFade, active_navigation_turn_index, activity_group_is_live,
+    SessionNavigation, StreamDeltaKind, TranscriptLanding, TranscriptRowKind::*,
+    TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
+    active_navigation_turn_index, activity_group_is_live,
     activity_header_title, append_text_delta_to_session, assistant_response_footer,
     assistant_response_footer_index, assistant_response_footer_time, compact_driver_error,
     disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
@@ -34,10 +35,10 @@ use super::{
     row_starts_followup_turn, session_accepts_turn_output, session_is_reapable,
     settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
     should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
-    transcript_anchor_end_space, transcript_navigation_turns, transcript_rests_at_tail,
-    transcript_row_kinds, transcript_row_splice, transcript_rows_fingerprint,
-    update_transcript_activity, widened_panel_width_for_file_editor,
-    widened_panel_width_for_review,
+    transcript_anchor_end_space, transcript_navigation_turns, transcript_position_landing,
+    transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
+    transcript_rows_fingerprint, update_transcript_activity,
+    widened_panel_width_for_file_editor, widened_panel_width_for_review,
 };
 use crate::git_branch::BranchEntry;
 use crate::model::{
@@ -85,7 +86,7 @@ fn structured_user_input_preserves_question_order_and_custom_answer_precedence()
     assert_eq!(answers[1].question_id, "notes");
     assert_eq!(answers[1].answers, ["Use the EU region"]);
 }
-use gpui::{ListAlignment, ListState, Pixels, px};
+use gpui::{ListAlignment, ListOffset, ListState, Pixels, px};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
@@ -3356,6 +3357,45 @@ fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
         folded_transcript_row_kinds(&session, &HashSet::new(), None),
         vec![Message(0), Message(1), ResponseFooter(turn_id, 1)]
     );
+}
+
+/// Leaving a busy session while the live turn is on screen parks a
+/// tail-while-busy position: reselecting it rejoins the stream while the
+/// session still works, and falls back to the parked spot once it settles.
+#[test]
+fn a_parked_position_tails_only_while_the_session_still_works() {
+    let offset = ListOffset {
+        item_ix: 4,
+        offset_in_item: px(12.0),
+    };
+    let watching = TranscriptScrollPosition {
+        offset,
+        tail_while_busy: true,
+    };
+    assert!(matches!(
+        transcript_position_landing(watching, true),
+        TranscriptLanding::Tail
+    ));
+    assert!(matches!(
+        transcript_position_landing(watching, false),
+        TranscriptLanding::Position(stored)
+            if stored.item_ix == offset.item_ix
+                && stored.offset_in_item == offset.offset_in_item
+    ));
+
+    // An ordinary reading spot restores verbatim either way.
+    let reading = TranscriptScrollPosition {
+        offset,
+        tail_while_busy: false,
+    };
+    for busy in [true, false] {
+        assert!(matches!(
+            transcript_position_landing(reading, busy),
+            TranscriptLanding::Position(stored)
+                if stored.item_ix == offset.item_ix
+                    && stored.offset_in_item == offset.offset_in_item
+        ));
+    }
 }
 
 /// A settled turn whose checkpoint capture is still queued or in flight

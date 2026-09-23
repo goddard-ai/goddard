@@ -671,6 +671,19 @@ pub struct PersistedListOffset {
     pub offset_in_item: f32,
 }
 
+/// A transcript's parked scroll position. `tail_while_busy` marks a reader
+/// who left a busy session while the viewport showed the live turn: a
+/// session still working on return rejoins the tail instead of this spot.
+/// Missing on state files written before the flag existed, where every
+/// position is an exact restore.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PersistedTranscriptScrollPosition {
+    pub item_ix: usize,
+    pub offset_in_item: f32,
+    #[serde(default)]
+    pub tail_while_busy: bool,
+}
+
 /// A right-panel tab that can be reopened without runtime objects. Terminal,
 /// browser, and background-work surfaces are omitted: their PTYs, webviews,
 /// and output buffers die with the app. Side chats persist — they are
@@ -1215,7 +1228,7 @@ struct AppState {
     navigation_forward: Vec<PersistedNavigationLocation>,
     /// Reading position each task's transcript held when last on screen.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    transcript_scroll_positions: HashMap<Uuid, PersistedListOffset>,
+    transcript_scroll_positions: HashMap<Uuid, PersistedTranscriptScrollPosition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sidebar_scroll: Option<PersistedListOffset>,
     /// The Projects page claiming the main column, if it was on screen.
@@ -1519,7 +1532,7 @@ pub struct PersistedState {
     pub navigation_forward: Vec<PersistedNavigationLocation>,
     /// Reading position each task's transcript held when last on screen.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub transcript_scroll_positions: HashMap<Uuid, PersistedListOffset>,
+    pub transcript_scroll_positions: HashMap<Uuid, PersistedTranscriptScrollPosition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_scroll: Option<PersistedListOffset>,
     /// The Projects page claiming the main column, if it was on screen.

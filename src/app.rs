@@ -66,8 +66,8 @@ use crate::persistence::{
     DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource,
     PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
-    PersistedWindowState, RecentModelUse, SidebarDraftPreviewColor, SidebarGrouping,
-    SidebarOrdering, StateStore, TerminalLinkModifier,
+    PersistedTranscriptScrollPosition, PersistedWindowState, RecentModelUse,
+    SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -1555,6 +1555,28 @@ fn list_offset_from_persisted(offset: PersistedListOffset) -> ListOffset {
     }
 }
 
+fn persisted_transcript_scroll_position(
+    position: TranscriptScrollPosition,
+) -> PersistedTranscriptScrollPosition {
+    PersistedTranscriptScrollPosition {
+        item_ix: position.offset.item_ix,
+        offset_in_item: f32::from(position.offset.offset_in_item),
+        tail_while_busy: position.tail_while_busy,
+    }
+}
+
+fn transcript_scroll_position_from_persisted(
+    position: PersistedTranscriptScrollPosition,
+) -> TranscriptScrollPosition {
+    TranscriptScrollPosition {
+        offset: ListOffset {
+            item_ix: position.item_ix,
+            offset_in_item: px(position.offset_in_item),
+        },
+        tail_while_busy: position.tail_while_busy,
+    }
+}
+
 fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRightPanelSurface> {
     match surface {
         RightPanelSurface::Files => Some(PersistedRightPanelSurface::Files),
@@ -1756,14 +1778,27 @@ struct NewContentDot {
 }
 
 /// Where a session activation parks the transcript.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum TranscriptLanding {
     /// The reading position the session held when the reader left it;
     /// back/forward history restores it.
     Position(ListOffset),
+    /// The streaming tail — the reader left a busy session while its live
+    /// turn was on screen and the session is still working.
+    Tail,
     /// The top of the final turn — the same spot the navigation rail's last
     /// button jumps to.
     LastTurn,
+}
+
+/// A session's parked transcript position. `tail_while_busy` marks a reader
+/// who left a busy session while the viewport showed the live turn's rows:
+/// reselecting the session rejoins the tail while it is still working, and
+/// restores `offset` once the session has settled.
+#[derive(Clone, Copy, Debug)]
+struct TranscriptScrollPosition {
+    offset: ListOffset,
+    tail_while_busy: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -3200,7 +3235,7 @@ pub struct Waku {
     /// The scroll position each session held when the reader left it, so
     /// back/forward history can restore where the transcript was instead of
     /// picking a fresh landing.
-    transcript_scroll_positions: HashMap<Uuid, ListOffset>,
+    transcript_scroll_positions: HashMap<Uuid, TranscriptScrollPosition>,
     /// The landing the current session's activation chose. A runtime attach
     /// that lands after activation resets the rows again, so the same landing
     /// is re-applied there rather than snapping the transcript to its tail.

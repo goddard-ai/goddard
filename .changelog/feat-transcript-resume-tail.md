@@ -1,0 +1,1 @@
+- Returning to a task that's still working now lands on the live end of its transcript whenever you left while watching the current turn, even if you had scrolled up within it. Leaving while reading older turns still restores your exact spot, and a task that finished while you were away keeps its usual landing.

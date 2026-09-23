@@ -708,7 +708,9 @@ impl Waku {
         self.state.transcript_scroll_positions = self
             .transcript_scroll_positions
             .iter()
-            .map(|(session_id, offset)| (*session_id, persisted_list_offset(*offset)))
+            .map(|(session_id, position)| {
+                (*session_id, persisted_transcript_scroll_position(*position))
+            })
             .collect();
         let sidebar_top = self.sidebar_list_state.logical_scroll_top();
         self.state.sidebar_scroll = (sidebar_top.item_ix > 0
@@ -817,7 +819,7 @@ impl Waku {
             .transcript_scroll_positions
             .iter()
             .filter(|(id, _)| task_exists(id))
-            .map(|(id, offset)| (*id, list_offset_from_persisted(*offset)))
+            .map(|(id, position)| (*id, transcript_scroll_position_from_persisted(*position)))
             .collect();
         self.pending_sidebar_scroll
             .set(self.state.sidebar_scroll.map(list_offset_from_persisted));
@@ -857,8 +859,7 @@ impl Waku {
             // The strip just mounted answers to this owner until a page
             // restore below swaps it out again.
             self.right_panel_live_owner = self.active_right_panel_owner();
-            if let Some(offset) = self.transcript_scroll_positions.get(&session_id).copied() {
-                let landing = TranscriptLanding::Position(offset);
+            if let Some(landing) = self.saved_transcript_landing(session_id) {
                 // The runtime attach that lands after this resets the rows
                 // again — `transcript_landing` re-applies the position there.
                 self.transcript_landing = Some((session_id, landing));
@@ -907,7 +908,13 @@ impl Waku {
         // A bottom-aligned list reports a past-the-end index while parked on
         // the tail; there is nothing to restore — the tail is the default.
         if offset.item_ix < rows.item_count() {
-            self.transcript_scroll_positions.insert(session_id, offset);
+            self.transcript_scroll_positions.insert(
+                session_id,
+                TranscriptScrollPosition {
+                    offset,
+                    tail_while_busy: self.transcript_watches_live_turn(),
+                },
+            );
         } else {
             self.transcript_scroll_positions.remove(&session_id);
         }
