@@ -63,6 +63,9 @@ enum Outgoing {
 
 struct ClientInner {
     outgoing: Sender<Outgoing>,
+    /// Fire-and-forget traffic — saves and removals — queued behind
+    /// interactive frames rather than ahead of them.
+    bulk: Sender<ClientMessage>,
     /// The address this connection was opened against — the one a webhook
     /// URL must point at to reach the same daemon.
     address: String,
@@ -162,8 +165,10 @@ impl DaemonClient {
         set_client_read_timeout(&mut socket, Some(READ_POLL_INTERVAL))?;
 
         let (outgoing, outgoing_rx) = unbounded();
+        let (bulk, bulk_rx) = unbounded();
         let inner = Arc::new(ClientInner {
             outgoing,
+            bulk,
             address: address.to_owned(),
             daemon_version,
             daemon_commit,
@@ -185,7 +190,7 @@ impl DaemonClient {
         let thread_inner = inner.clone();
         std::thread::Builder::new()
             .name("goddard-daemon-client".into())
-            .spawn(move || run_client(socket, outgoing_rx, thread_inner))
+            .spawn(move || run_client(socket, outgoing_rx, bulk_rx, thread_inner))
             .context("could not start Goddard daemon client thread")?;
         Ok(Self { inner })
     }
@@ -415,8 +420,8 @@ impl DaemonClient {
             bail!("Goddard daemon is disconnected");
         }
         self.inner
-            .outgoing
-            .send(Outgoing::Message(ClientMessage::Request(Request {
+            .bulk
+            .send(ClientMessage::Request(Request {
                 // The nil request id is reserved for fire-and-forget controls;
                 // the daemon executes them in the runtime mailbox but does
                 // not allocate or send a response.
@@ -424,7 +429,7 @@ impl DaemonClient {
                 session_id,
                 runtime_id,
                 command,
-            })))
+            }))
             .map_err(|_| anyhow!("Goddard daemon connection is closed"))
     }
 
@@ -528,13 +533,24 @@ fn daemon_url(address: &str) -> anyhow::Result<String> {
     Ok(url.into())
 }
 
+/// The next queued frame to write: interactive traffic first, then bulk.
+/// Checking interactive on every call means a request enqueued mid-burst
+/// waits at most one bulk frame — never a whole drain of queued saves.
+fn next_outgoing(outgoing: &Receiver<Outgoing>, bulk: &Receiver<ClientMessage>) -> Option<Outgoing> {
+    outgoing
+        .try_recv()
+        .ok()
+        .or_else(|| bulk.try_recv().ok().map(Outgoing::Message))
+}
+
 fn run_client(
     mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
     outgoing: Receiver<Outgoing>,
+    bulk: Receiver<ClientMessage>,
     inner: Arc<ClientInner>,
 ) {
     'connection: loop {
-        while let Ok(message) = outgoing.try_recv() {
+        while let Some(message) = next_outgoing(&outgoing, &bulk) {
             match message {
                 Outgoing::Message(message) => {
                     if write_json(&mut socket, &message).is_err() {
@@ -930,5 +946,67 @@ mod tests {
             daemon_url("wss://waku.example.test/old?ignored=1").unwrap(),
             "wss://waku.example.test/v1"
         );
+    }
+
+    #[test]
+    fn interactive_frames_outrun_queued_bulk_saves() {
+        let save = || {
+            ClientMessage::Request(Request {
+                request_id: Uuid::nil(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::SaveTaskState {
+                    projects: Vec::new(),
+                    live_session_ids: Vec::new(),
+                    sessions: Vec::new(),
+                    session_tails: Vec::new(),
+                },
+            })
+        };
+        let interactive = || {
+            Outgoing::Message(ClientMessage::Request(Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::AttachSession,
+            }))
+        };
+        let (outgoing_tx, outgoing_rx) = unbounded();
+        let (bulk_tx, bulk_rx) = unbounded();
+
+        // Two saves queue first, the click arrives behind them — the
+        // interactive frame still leaves first.
+        bulk_tx.send(save()).unwrap();
+        bulk_tx.send(save()).unwrap();
+        outgoing_tx.send(interactive()).unwrap();
+        let first = next_outgoing(&outgoing_rx, &bulk_rx).expect("a queued frame");
+        assert!(matches!(
+            first,
+            Outgoing::Message(ClientMessage::Request(Request {
+                command: Command::AttachSession,
+                ..
+            }))
+        ));
+
+        // Bulk then drains in order, re-checking interactive between frames.
+        outgoing_tx.send(interactive()).unwrap();
+        let second = next_outgoing(&outgoing_rx, &bulk_rx).expect("a queued frame");
+        assert!(matches!(
+            second,
+            Outgoing::Message(ClientMessage::Request(Request {
+                command: Command::AttachSession,
+                ..
+            }))
+        ));
+        let third = next_outgoing(&outgoing_rx, &bulk_rx).expect("a queued frame");
+        assert!(matches!(
+            third,
+            Outgoing::Message(ClientMessage::Request(Request {
+                command: Command::SaveTaskState { .. },
+                ..
+            }))
+        ));
+        assert!(next_outgoing(&outgoing_rx, &bulk_rx).is_some());
+        assert!(next_outgoing(&outgoing_rx, &bulk_rx).is_none());
     }
 }
