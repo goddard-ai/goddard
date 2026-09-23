@@ -284,6 +284,7 @@ export async function persistSession(
       projects: project ? [project] : [],
       liveSessionIds: [session.id],
       sessions: [session],
+      sessionTails: [],
     }),
     'taskStateSaved',
   )
@@ -640,6 +641,7 @@ export async function persistProject(
       projects,
       liveSessionIds: current.sessions.map((session) => session.id),
       sessions: [],
+      sessionTails: [],
     }),
     'taskStateSaved',
   )

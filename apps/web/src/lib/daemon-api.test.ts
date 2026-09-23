@@ -274,6 +274,7 @@ describe('persistProject', () => {
         projects: [existing, candidate],
         liveSessionIds: ['session'],
         sessions: [],
+        sessionTails: [],
       },
     ])
   })
@@ -318,6 +319,7 @@ describe('persistSession', () => {
       projects: [],
       liveSessionIds: [saved.id],
       sessions: [saved],
+      sessionTails: [],
     }])
   })
 })
