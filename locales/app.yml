@@ -1778,6 +1778,16 @@ reclaim.completed:
   en: "Reclaimed %{size}"
 reclaim.completed_partial:
   en: "Reclaimed %{size}; %{count} folders could not be deleted"
+reclaim.running:
+  en: Reclaiming disk space…
+reclaim.progress:
+  en: "%{done} of %{total} worktrees cleared — %{size} freed"
+reclaim.failures:
+  en: "%{count} folders could not be deleted"
+reclaim.finished_tooltip:
+  en: Reclaim finished
+reclaim.done:
+  en: Done
 
 sidebar.today:
   en: Today

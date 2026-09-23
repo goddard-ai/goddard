@@ -2274,10 +2274,12 @@ pub struct Waku {
     /// The "Reclaim Disk Space" listing: idle worktrees and the
     /// regenerable output each still holds. The generation invalidates
     /// scans in flight for a replaced dialog; `reclaim_batch` collects a
-    /// confirm's background purges until the toast fires.
+    /// confirm's background purges, and `reclaim_result` holds the landed
+    /// totals until the header popover's confirm acknowledges them.
     reclaim_dialog: Option<reclaim_dialog::ReclaimDialogState>,
     reclaim_dialog_generation: u64,
     reclaim_batch: Option<reclaim_dialog::ReclaimBatch>,
+    reclaim_result: Option<reclaim_dialog::ReclaimResult>,
     /// The one-time confirmation gating the first switch to Full access;
     /// `state.full_access_acknowledged` records that it was accepted.
     full_access_dialog: Option<full_access_dialog::FullAccessDialogState>,
@@ -5792,6 +5794,7 @@ impl Waku {
                 reclaim_dialog: None,
                 reclaim_dialog_generation: 0,
                 reclaim_batch: None,
+                reclaim_result: None,
                 terminal_close_dialog: None,
                 close_dialog: None,
                 provider_switch_dialog: None,

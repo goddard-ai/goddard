@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use gpui::{KeyBinding, actions};
+use gpui::{KeyBinding, actions, relative};
 
 use super::*;
 
@@ -21,6 +21,8 @@ actions!(
 
 const DIALOG_CONTEXT: &str = "ReclaimDialog";
 const LIST_MAX_HEIGHT: f32 = 260.0;
+const RECLAIM_PROGRESS_MENU_ID: &str = "reclaim-progress";
+const RECLAIM_RESULT_DONE_FOCUS: &str = "reclaim-result-done";
 
 /// How long a worktree sits untouched before its regenerable output is
 /// worth offering back — the "won't notice a cold install" window.
@@ -60,15 +62,26 @@ struct ReclaimDialogRow {
     focus: FocusHandle,
 }
 
-/// Totals for one confirm's background purges. The completion toast
-/// fires when the last request lands; `generation` drops results of a
-/// batch a newer confirm superseded.
+/// Totals for one confirm's background purges. The result card lands
+/// when the last request does; `generation` drops results of a batch a
+/// newer confirm superseded, and `total` lets the header popover say how
+/// far along the batch is.
 #[derive(Default)]
 pub(super) struct ReclaimBatch {
     generation: u64,
     pending: usize,
+    total: usize,
     reclaimed_bytes: u64,
     failures: usize,
+}
+
+/// A finished batch awaiting acknowledgment. The header indicator keeps
+/// its done state until the card's confirm clears this; `reveal` is the
+/// one-shot that auto-opens the popover on completion.
+pub(super) struct ReclaimResult {
+    reclaimed_bytes: u64,
+    failures: usize,
+    reveal: bool,
 }
 
 impl Waku {
@@ -269,21 +282,13 @@ impl Waku {
                     batch.failures += failures;
                     batch.pending -= 1;
                     if batch.pending == 0 {
-                        let bytes = batch.reclaimed_bytes;
-                        let failures = batch.failures;
+                        let result = ReclaimResult {
+                            reclaimed_bytes: batch.reclaimed_bytes,
+                            failures: batch.failures,
+                            reveal: true,
+                        };
                         waku.reclaim_batch = None;
-                        if failures > 0 {
-                            waku.show_toast(tr!(
-                                "reclaim.completed_partial",
-                                size = format_reclaim_bytes(bytes),
-                                count = failures
-                            ));
-                        } else {
-                            waku.show_success_toast(tr!(
-                                "reclaim.completed",
-                                size = format_reclaim_bytes(bytes)
-                            ));
-                        }
+                        waku.reclaim_result = Some(result);
                     }
                     cx.notify();
                 });
@@ -291,6 +296,10 @@ impl Waku {
             .detach();
         }
         if batch.pending > 0 {
+            batch.total = batch.pending;
+            // A new confirm retires any result still awaiting
+            // acknowledgment — the indicator reads from the batch again.
+            self.reclaim_result = None;
             self.reclaim_batch = Some(batch);
         }
         let focus = self.composer_focus(cx);
@@ -305,6 +314,133 @@ impl Waku {
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
         cx.notify();
+    }
+
+    /// The result card's confirm: clears the result, which retires the
+    /// header toggle — the popover closes with the state it renders.
+    fn acknowledge_reclaim_result(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reclaim_result = None;
+        if let Some(handle) = self
+            .menus
+            .borrow()
+            .get(RECLAIM_PROGRESS_MENU_ID)
+            .cloned()
+        {
+            handle.close(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// The header's reclaim toggle: a live indicator while a confirmed
+    /// batch purges, a done state once it lands, gone once the user
+    /// confirms the result card. `None` when no reclaim is in flight or
+    /// awaiting acknowledgment.
+    pub(super) fn render_reclaim_indicator(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let batch = self.reclaim_batch.as_ref();
+        let result = self.reclaim_result.as_ref();
+        if batch.is_none() && result.is_none() {
+            return None;
+        }
+        let theme = Theme::current(cx);
+        let done = result.is_some();
+        // Completion can't open the popover itself — the spawn's update
+        // has no window — so `reveal` is honored from the render path,
+        // where defer_in lands after the entity lease releases.
+        if result.is_some_and(|result| result.reveal) {
+            cx.defer_in(window, |this, window, _cx| {
+                let Some(result) = this.reclaim_result.as_mut() else {
+                    return;
+                };
+                result.reveal = false;
+                let Some(handle) = this
+                    .menus
+                    .borrow()
+                    .get(RECLAIM_PROGRESS_MENU_ID)
+                    .cloned()
+                else {
+                    return;
+                };
+                // The anchor reads the trigger's painted bounds, so the
+                // open waits one frame — a fast batch can land its result
+                // on the indicator's first-ever render.
+                window.on_next_frame(move |window, cx| {
+                    // Already open means the user is watching progress;
+                    // the card flips to the finished state in place.
+                    if !handle.is_open() {
+                        crate::ui::menu::toggle_popover(
+                            &handle,
+                            MenuAlign::BelowRight,
+                            window,
+                            cx,
+                        );
+                    }
+                });
+            });
+        }
+
+        let handle = self.menu_handle(RECLAIM_PROGRESS_MENU_ID, cx);
+        let trigger = div()
+            .id("reclaim-progress-trigger")
+            .size(px(28.0))
+            .relative()
+            .rounded(px(9.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|style| style.bg(theme.overlay))
+            .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text(if done {
+                tr!("reclaim.finished_tooltip")
+            } else {
+                tr!("reclaim.running")
+            }))
+            .child(if done {
+                icon("icons/check.svg", 15.0, theme.success)
+            } else {
+                icon("icons/container.svg", 15.0, theme.text_tertiary)
+            })
+            .when(!done, |trigger| {
+                trigger.child(
+                    div()
+                        .absolute()
+                        .top(px(4.0))
+                        .right(px(4.0))
+                        .child(pulse_dot(5.0, theme.accent)),
+                )
+            });
+
+        let progress = batch.map(|batch| {
+            (
+                batch.total - batch.pending,
+                batch.total,
+                batch.reclaimed_bytes,
+            )
+        });
+        let outcome = result.map(|result| (result.reclaimed_bytes, result.failures));
+        let done_focus = self.transcript_control_focus(RECLAIM_RESULT_DONE_FOCUS, cx);
+        let weak = cx.entity().downgrade();
+        Some(popover(
+            trigger,
+            &handle,
+            MenuAlign::BelowRight,
+            move |handle, _, cx| {
+                render_reclaim_progress_card(
+                    handle,
+                    progress,
+                    outcome,
+                    done_focus.clone(),
+                    weak.clone(),
+                    cx,
+                )
+            },
+        ))
     }
 
     pub(super) fn render_reclaim_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -545,6 +681,118 @@ impl Waku {
                 .into_any_element(),
         )
     }
+}
+
+/// The header popover's card: request-count progress while a batch runs,
+/// the reclaimed total and an explicit confirm once it lands.
+fn render_reclaim_progress_card(
+    handle: &ContextMenuHandle,
+    progress: Option<(usize, usize, u64)>,
+    outcome: Option<(u64, usize)>,
+    done_focus: FocusHandle,
+    weak: WeakEntity<Waku>,
+    cx: &mut App,
+) -> AnyElement {
+    let theme = Theme::current(cx);
+    let body: AnyElement = if let Some((done, total, freed)) = progress {
+        let fraction = if total > 0 {
+            done as f32 / total as f32
+        } else {
+            0.0
+        };
+        div()
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text)
+                    .child(tr!("reclaim.running")),
+            )
+            .child(
+                div()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!(
+                        "reclaim.progress",
+                        done = done,
+                        total = total,
+                        size = format_reclaim_bytes(freed)
+                    )),
+            )
+            .child(
+                div()
+                    .h(px(3.0))
+                    .w_full()
+                    .rounded_full()
+                    .bg(theme.overlay_strong)
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(fraction))
+                            .rounded_full()
+                            .bg(theme.accent),
+                    ),
+            )
+            .into_any_element()
+    } else if let Some((reclaimed_bytes, failures)) = outcome {
+        div()
+            .p(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .px(px(4.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text)
+                            .child(tr!(
+                                "reclaim.completed",
+                                size = format_reclaim_bytes(reclaimed_bytes)
+                            )),
+                    )
+                    .when(failures > 0, |element| {
+                        element.child(
+                            div()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("reclaim.failures", count = failures)),
+                        )
+                    }),
+            )
+            .child(div().h(hairline()).bg(theme.separator))
+            .child(archive_dialog::render_archive_action_row(
+                "reclaim-result-done",
+                &done_focus,
+                "icons/check.svg",
+                tr!("reclaim.done"),
+                weak,
+                &theme,
+                |waku, window, cx| waku.acknowledge_reclaim_result(window, cx),
+            ))
+            .into_any_element()
+    } else {
+        div().into_any_element()
+    };
+    div()
+        .id("reclaim-progress-card")
+        .track_focus(handle.focus_handle())
+        .w(px(280.0))
+        .rounded(px(15.0))
+        .border(hairline())
+        .border_color(theme.border_subtle)
+        .overflow_hidden()
+        .bg(theme.raised)
+        .shadow_lg()
+        .child(body)
+        .into_any_element()
 }
 
 /// The "what would go" line under a row's title: each distinct directory

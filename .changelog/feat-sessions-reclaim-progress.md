@@ -1,0 +1,1 @@
+- Confirming Reclaim Disk Space now shows a header toggle with live progress, opens a popover with the space freed when it finishes, and stays until you confirm the result.

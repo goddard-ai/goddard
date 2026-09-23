@@ -5383,6 +5383,7 @@ impl Waku {
                     }),
             )
             .child(self.render_background_work_summary(cx))
+            .children(self.render_reclaim_indicator(window, cx))
             .when(!self.right_panel_slot_visible(), |element| {
                 element
                     .when(self.fps_counter_visible, |element| {
