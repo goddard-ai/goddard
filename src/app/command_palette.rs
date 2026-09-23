@@ -189,6 +189,7 @@ enum PaletteAction {
     NewTask,
     NewTaskIn,
     NewTaskInDirectory(PathBuf, bool),
+    NewTaskProjectless(bool),
     NewTaskInSameWorktree,
     NewIncognitoTask,
     NewIncognitoTaskIn,
@@ -3691,11 +3692,13 @@ impl Waku {
         self.finish_drill_in_refresh(selected_action.flatten(), None);
     }
 
-    /// "New task in…" rows: every registered project first (a pick reuses
-    /// it rather than duplicating it), then the daemon's directory scan
-    /// minus those same paths. Both resolve through `NewTaskInDirectory`;
-    /// the handler decides whether the directory becomes a temporary
-    /// project or joins an existing one.
+    /// "New task in…" rows: "No project" first (a pick provisions a
+    /// projectless scratch workspace rather than binding the task to a
+    /// directory), then every registered project (a pick reuses it rather
+    /// than duplicating it), then the daemon's directory scan minus those
+    /// same paths. Directories resolve through `NewTaskInDirectory`; the
+    /// handler decides whether the directory becomes a temporary project
+    /// or joins an existing one.
     fn command_palette_new_task_candidates(&self) -> Vec<CommandPaletteItem> {
         let mut order = 0usize;
         let home = self.home_directory.as_deref();
@@ -3735,13 +3738,27 @@ impl Waku {
                 recency: 0,
             }
         };
-        let mut items = self
-            .state
-            .projects
-            .iter()
-            .filter(|project| !project.is_projectless())
-            .map(|project| directory_item(&mut order, project.path.clone(), Some(project)))
-            .collect::<Vec<_>>();
+        let no_project_label = tr!("project.no_project_name");
+        let mut items = vec![CommandPaletteItem {
+            section: PaletteSection::Directories,
+            detail: Some(tr!("project.no_project")),
+            icon: PaletteIcon::Asset("icons/x.svg"),
+            shortcut: None,
+            action: PaletteAction::NewTaskProjectless(self.command_palette.new_task_incognito),
+            content_match: None,
+            search_text: format!("{no_project_label} projectless"),
+            order,
+            label: no_project_label,
+            recency: 0,
+        }];
+        order += 1;
+        items.extend(
+            self.state
+                .projects
+                .iter()
+                .filter(|project| !project.is_projectless())
+                .map(|project| directory_item(&mut order, project.path.clone(), Some(project))),
+        );
         let project_paths: HashSet<PathBuf> = self
             .state
             .projects
@@ -4470,6 +4487,9 @@ impl Waku {
             PaletteAction::NewIncognitoTask => self.new_incognito_session_action(window, cx),
             PaletteAction::NewTaskInDirectory(path, incognito) => {
                 self.create_task_in_directory(path, incognito, window, cx)
+            }
+            PaletteAction::NewTaskProjectless(incognito) => {
+                self.create_projectless_task(incognito, window, cx)
             }
             PaletteAction::NewTaskInSameWorktree => self.new_task_in_same_worktree(window, cx),
             PaletteAction::NewIncognitoTaskInSameWorktree => {

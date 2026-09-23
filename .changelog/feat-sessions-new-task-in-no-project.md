@@ -1,0 +1,1 @@
+- Pick "No project" at the top of the "New task in…" picker to start a task that isn't attached to a project.

@@ -2660,6 +2660,25 @@ impl Waku {
         }
     }
 
+    /// "New task in…" → "No project": a task draft bound to no project —
+    /// draft reuse and workspace provisioning live in
+    /// `create_projectless_session_inner`.
+    pub(super) fn create_projectless_task(
+        &mut self,
+        incognito: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_page = None;
+        if incognito {
+            self.create_incognito_projectless_session(cx);
+        } else {
+            self.create_projectless_session(cx);
+        }
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+    }
+
     /// Flips a project's starred flag. The mutation rides the ordinary
     /// `SaveTaskState` partition, so a remote-owned project's star reaches
     /// its owning daemon on the same save as a local one's.
