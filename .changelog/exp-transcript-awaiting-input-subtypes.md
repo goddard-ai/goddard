@@ -1,1 +1,1 @@
-- Turn status markers suggest a matching next step for go-aheads, decisions, missing details, unfinished work, repairable errors, and untested code.
+- Turn status markers suggest a matching next step for go-aheads, decisions, missing details, unfinished work, repairable errors, and untested code. Suggested prompt text can be edited or reset in Jev settings.

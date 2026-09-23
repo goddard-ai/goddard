@@ -5023,7 +5023,10 @@ impl Waku {
         self.record_action(
             Some(session_id),
             action_predictions::JournalAction::PromptSend {
-                canned: action_predictions::canned_prompt_id(&submission.prompt),
+                canned: action_predictions::canned_prompt_id(
+                    &submission.prompt,
+                    &self.state.suggested_prompts,
+                ),
             },
         );
 
@@ -5750,7 +5753,10 @@ impl Waku {
             self.record_action(
                 Some(session_id),
                 action_predictions::JournalAction::PromptSend {
-                    canned: action_predictions::canned_prompt_id(&submission.prompt),
+                    canned: action_predictions::canned_prompt_id(
+                        &submission.prompt,
+                        &self.state.suggested_prompts,
+                    ),
                 },
             );
         }
@@ -5780,6 +5786,31 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        self.submit_composer_submission_to_with_canned(session_id, submission, None, cx);
+    }
+
+    pub(super) fn submit_canned_prompt_to(
+        &mut self,
+        session_id: Uuid,
+        action_id: &'static str,
+        prompt: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.submit_composer_submission_to_with_canned(
+            session_id,
+            ComposerSubmission::plain(prompt),
+            Some(action_id),
+            cx,
+        );
+    }
+
+    fn submit_composer_submission_to_with_canned(
+        &mut self,
+        session_id: Uuid,
+        submission: ComposerSubmission,
+        canned: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(session) = self
             .state
             .sessions
@@ -5798,7 +5829,12 @@ impl Waku {
             self.record_action(
                 Some(session_id),
                 action_predictions::JournalAction::PromptSend {
-                    canned: action_predictions::canned_prompt_id(&submission.prompt),
+                    canned: canned.or_else(|| {
+                        action_predictions::canned_prompt_id(
+                            &submission.prompt,
+                            &self.state.suggested_prompts,
+                        )
+                    }),
                 },
             );
         }

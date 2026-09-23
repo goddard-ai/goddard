@@ -2940,6 +2940,26 @@ workspace.worktree:
   en: Worktree
 suggestions.tooltip:
   en: Suggested next step
+suggestions.settings_title:
+  en: Suggested prompts
+suggestions.choice_template:
+  en: Decision reply
+suggestions.edit_prompt:
+  en: Edit
+suggestions.reset_prompt:
+  en: Reset
+suggestions.prompt_text:
+  en: Suggested prompt text
+suggestions.prompt_editor_description:
+  en: Clicking the suggestion sends this text.
+suggestions.choice_template_description:
+  en: Include {option} exactly once. It is replaced with the chosen option.
+suggestions.option_placeholder_required:
+  en: Include {option} exactly once.
+suggestions.prompt_invalid:
+  en: Enter a prompt of at most 2,000 characters.
+suggestions.prompt_duplicate:
+  en: Another suggested action already sends this prompt.
 suggestions.proceed:
   en: Yes, proceed.
 suggestions.choose_option:

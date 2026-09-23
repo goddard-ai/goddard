@@ -950,6 +950,9 @@ pub struct AppSettings {
     /// or the evaluation model says planning ended, and report the phase on
     /// the sidebar row. Defaults on in debug builds.
     pub phase_routing_enabled: bool,
+    /// Desktop-owned overrides for the fixed suggested-prompt actions.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub suggested_prompts: BTreeMap<String, String>,
     /// Experimental: the Automations page — daemon-scheduled prompts that
     /// run as tasks whether or not the app is open. Defaults on in debug
     /// builds.
@@ -1030,6 +1033,7 @@ impl Default for AppSettings {
             status_markers_enabled: default_experiment_enabled(),
             action_predictions_enabled: default_experiment_enabled(),
             phase_routing_enabled: default_experiment_enabled(),
+            suggested_prompts: BTreeMap::new(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
             guided_reading_enabled: default_experiment_enabled(),
@@ -1453,6 +1457,9 @@ pub struct PersistedState {
     pub status_markers_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub action_predictions_enabled: bool,
+    /// Customized text for stable suggested-prompt action ids.
+    #[serde(default)]
+    pub suggested_prompts: BTreeMap<String, String>,
     #[serde(default = "default_experiment_enabled")]
     pub phase_routing_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
@@ -1775,6 +1782,7 @@ impl PersistedState {
             status_markers_enabled: default_experiment_enabled(),
             action_predictions_enabled: default_experiment_enabled(),
             phase_routing_enabled: default_experiment_enabled(),
+            suggested_prompts: BTreeMap::new(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
             guided_reading_enabled: default_experiment_enabled(),
@@ -2142,6 +2150,7 @@ impl PersistedState {
             status_markers_enabled: self.status_markers_enabled,
             action_predictions_enabled: self.action_predictions_enabled,
             phase_routing_enabled: self.phase_routing_enabled,
+            suggested_prompts: self.suggested_prompts.clone(),
             automations_enabled: self.automations_enabled,
             sidebar_dock_enabled: self.sidebar_dock_enabled,
             guided_reading_enabled: self.guided_reading_enabled,
@@ -2257,6 +2266,7 @@ impl PersistedState {
         self.status_markers_enabled = settings.status_markers_enabled;
         self.action_predictions_enabled = settings.action_predictions_enabled;
         self.phase_routing_enabled = settings.phase_routing_enabled;
+        self.suggested_prompts = settings.suggested_prompts;
         self.automations_enabled = settings.automations_enabled;
         self.sidebar_dock_enabled = settings.sidebar_dock_enabled;
         self.guided_reading_enabled = settings.guided_reading_enabled;
@@ -3557,6 +3567,22 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(legacy.icon, CustomCommandIcon::Terminal);
+    }
+
+    #[test]
+    fn suggested_prompts_round_trip_through_app_settings() {
+        let mut state = PersistedState::empty();
+        state
+            .suggested_prompts
+            .insert("run-tests".to_owned(), "Run the focused tests".to_owned());
+
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.suggested_prompts, state.suggested_prompts);
+
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(legacy.suggested_prompts.is_empty());
     }
 
     #[test]

@@ -804,12 +804,29 @@ impl Waku {
                             .children(actions.iter().enumerate().map(|(index, action)| {
                                 let (icon_path, label) = match action {
                                     StatusSuggestedAction::Proceed => {
-                                        ("icons/chat.svg", tr!("suggestions.proceed"))
+                                        (
+                                            "icons/chat.svg",
+                                            action_predictions::suggested_prompt(
+                                                "proceed",
+                                                &self.state.suggested_prompts,
+                                                None,
+                                            )
+                                            .unwrap_or_else(|| tr!("suggestions.proceed")),
+                                        )
                                     }
-                                    StatusSuggestedAction::Choose { option } => (
-                                        "icons/chat.svg",
-                                        tr!("suggestions.choose_option", option = option),
-                                    ),
+                                    StatusSuggestedAction::Choose { option } => {
+                                        (
+                                            "icons/chat.svg",
+                                            action_predictions::suggested_prompt(
+                                                action_predictions::CHOICE_PROMPT_ID,
+                                                &self.state.suggested_prompts,
+                                                Some(option),
+                                            )
+                                            .unwrap_or_else(|| {
+                                                tr!("suggestions.chosen_option", option = option)
+                                            }),
+                                        )
+                                    }
                                     StatusSuggestedAction::AddDetails => {
                                         ("icons/chat.svg", tr!("suggestions.add_details"))
                                     }
@@ -817,14 +834,48 @@ impl Waku {
                                         ("icons/chat.svg", tr!("suggestions.choose_manually"))
                                     }
                                     StatusSuggestedAction::KeepGoing => {
-                                        ("icons/sparkle.svg", tr!("suggestions.keep_going"))
+                                        (
+                                            "icons/sparkle.svg",
+                                            action_predictions::suggested_prompt(
+                                                "keep-going",
+                                                &self.state.suggested_prompts,
+                                                None,
+                                            )
+                                            .unwrap_or_else(|| tr!("suggestions.keep_going")),
+                                        )
                                     }
                                     StatusSuggestedAction::FixErrors => {
-                                        ("icons/sparkle.svg", tr!("suggestions.fix_errors"))
+                                        (
+                                            "icons/sparkle.svg",
+                                            action_predictions::suggested_prompt(
+                                                "fix-errors",
+                                                &self.state.suggested_prompts,
+                                                None,
+                                            )
+                                            .unwrap_or_else(|| tr!("suggestions.fix_errors")),
+                                        )
                                     }
                                     StatusSuggestedAction::RunTests => {
-                                        ("icons/sparkle.svg", tr!("suggestions.run_tests"))
+                                        (
+                                            "icons/sparkle.svg",
+                                            action_predictions::suggested_prompt(
+                                                "run-tests",
+                                                &self.state.suggested_prompts,
+                                                None,
+                                            )
+                                            .unwrap_or_else(|| tr!("suggestions.run_tests")),
+                                        )
                                     }
+                                };
+                                let tooltip = label.clone();
+                                let display_label: String =
+                                    label.replace('\n', " ").chars().take(56).collect();
+                                let display_label = if label.chars().count() > 56
+                                    || label.contains('\n')
+                                {
+                                    format!("{display_label}…")
+                                } else {
+                                    display_label
                                 };
                                 let action = action.clone();
                                 let keyboard_action = action.clone();
@@ -845,8 +896,8 @@ impl Waku {
                                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                                     .hover(|element| element.bg(theme.overlay_strong))
                                     .child(icon(icon_path, 11.0, theme.text_secondary))
-                                    .child(label)
-                                    .tooltip(Tooltip::text(tr!("suggestions.tooltip")))
+                                    .child(display_label)
+                                    .tooltip(Tooltip::text(tooltip))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.accept_status_suggestion(turn_id, &action, window, cx);
                                     }))
@@ -897,19 +948,27 @@ impl Waku {
         let session_id = session.id;
         match action {
             StatusSuggestedAction::Proceed => {
+                let prompt = action_predictions::suggested_prompt(
+                    "proceed",
+                    &self.state.suggested_prompts,
+                    None,
+                )
+                .unwrap_or_else(|| tr!("suggestions.proceed"));
                 self.turn_status_suggestions.insert(turn_id, Vec::new());
-                self.submit_composer_submission_to(
-                    session_id,
-                    ComposerSubmission::plain(tr!("suggestions.proceed")),
-                    cx,
-                );
+                self.submit_canned_prompt_to(session_id, "proceed", prompt, cx);
             }
             StatusSuggestedAction::Choose { option } => {
-                let prompt = tr!("suggestions.chosen_option", option = option);
+                let prompt = action_predictions::suggested_prompt(
+                    action_predictions::CHOICE_PROMPT_ID,
+                    &self.state.suggested_prompts,
+                    Some(option),
+                )
+                .unwrap_or_else(|| tr!("suggestions.chosen_option", option = option));
                 self.turn_status_suggestions.insert(turn_id, Vec::new());
-                self.submit_composer_submission_to(
+                self.submit_canned_prompt_to(
                     session_id,
-                    ComposerSubmission::plain(prompt),
+                    action_predictions::CHOICE_PROMPT_ID,
+                    prompt,
                     cx,
                 );
             }
@@ -919,18 +978,21 @@ impl Waku {
             StatusSuggestedAction::KeepGoing
             | StatusSuggestedAction::FixErrors
             | StatusSuggestedAction::RunTests => {
-                let prompt = match action {
-                    StatusSuggestedAction::KeepGoing => tr!("suggestions.keep_going"),
-                    StatusSuggestedAction::FixErrors => tr!("suggestions.fix_errors"),
-                    StatusSuggestedAction::RunTests => tr!("suggestions.run_tests"),
+                let action_id = match action {
+                    StatusSuggestedAction::KeepGoing => "keep-going",
+                    StatusSuggestedAction::FixErrors => "fix-errors",
+                    StatusSuggestedAction::RunTests => "run-tests",
                     _ => unreachable!(),
                 };
+                let Some(prompt) = action_predictions::suggested_prompt(
+                    action_id,
+                    &self.state.suggested_prompts,
+                    None,
+                ) else {
+                    return;
+                };
                 self.turn_status_suggestions.insert(turn_id, Vec::new());
-                self.submit_composer_submission_to(
-                    session_id,
-                    ComposerSubmission::plain(prompt),
-                    cx,
-                );
+                self.submit_canned_prompt_to(session_id, action_id, prompt, cx);
             }
         }
     }

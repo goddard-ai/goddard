@@ -1164,6 +1164,16 @@ workspace.from_default: デフォルトブランチから
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
 suggestions.tooltip: 次のおすすめアクション
+suggestions.settings_title: 提案するプロンプト
+suggestions.choice_template: 選択への返信
+suggestions.edit_prompt: 編集
+suggestions.reset_prompt: リセット
+suggestions.prompt_text: 提案するプロンプトの本文
+suggestions.prompt_editor_description: 提案をクリックすると、この文が送信されます。
+suggestions.choice_template_description: '{option}を1回だけ含めてください。選んだ項目に置き換わります。'
+suggestions.option_placeholder_required: '{option}を1回だけ含めてください。'
+suggestions.prompt_invalid: 2,000文字以内のプロンプトを入力してください。
+suggestions.prompt_duplicate: 別の提案アクションが同じプロンプトを送信します。
 suggestions.proceed: はい、進めてください。
 suggestions.choose_option: '{option}を選ぶ'
 suggestions.chosen_option: '{option}を選びます。'

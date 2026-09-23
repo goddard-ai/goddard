@@ -2892,6 +2892,7 @@ pub struct Waku {
     keybindings: Option<keybindings_page::KeybindingsUi>,
     /// The Commands settings page's open editor; `None` shows the list.
     custom_command_editor: Option<settings::CustomCommandEditor>,
+    suggested_prompt_editor: Option<settings::SuggestedPromptEditor>,
     /// The Daemon page's open remote-host editor; `None` shows the list.
     remote_host_editor: Option<settings::RemoteHostEditor>,
     /// The Skills page's library snapshot, scanned off-thread. Frames read
@@ -5987,6 +5988,7 @@ impl Waku {
                 auto_restart_enabled,
                 keybindings: None,
                 custom_command_editor: None,
+                suggested_prompt_editor: None,
                 remote_host_editor: None,
                 skills_catalog: None,
                 skills_catalogs: HashMap::new(),

@@ -192,6 +192,12 @@ pub(super) struct CustomCommandEditor {
     pub(super) exit_settings_on_save: bool,
 }
 
+pub(super) struct SuggestedPromptEditor {
+    id: &'static str,
+    input: Entity<TextInput>,
+    error: Option<String>,
+}
+
 /// The Integrations page's open connect form. The API-key input exists only
 /// for services that accept one; OAuth-only services go straight to the
 /// browser.
@@ -5221,6 +5227,240 @@ impl Waku {
         self.render_model_routing_settings(Theme::current(cx), search, cx)
     }
 
+    fn open_suggested_prompt_editor(
+        &mut self,
+        id: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(prompt) = action_predictions::suggested_prompt(
+            id,
+            &self.state.suggested_prompts,
+            Some("{option}"),
+        ) else {
+            return;
+        };
+        let input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .multi_line()
+                .auto_height()
+                .max_lines(10)
+                .accessibility_label(tr!("suggestions.prompt_text"));
+            input.set_content(prompt, cx);
+            input
+        });
+        let focus = input.read(cx).focus_handle(cx);
+        self.suggested_prompt_editor = Some(SuggestedPromptEditor {
+            id,
+            input,
+            error: None,
+        });
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    fn save_suggested_prompt_editor(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = &self.suggested_prompt_editor else {
+            return;
+        };
+        let id = editor.id;
+        let prompt = editor.input.read(cx).content().trim().to_owned();
+        if !action_predictions::valid_suggested_prompt(id, &prompt) {
+            self.suggested_prompt_editor.as_mut().unwrap().error = Some(if id
+                == action_predictions::CHOICE_PROMPT_ID
+                && prompt.matches("{option}").count() != 1
+            {
+                tr!("suggestions.option_placeholder_required", option = "{option}")
+            } else {
+                tr!("suggestions.prompt_invalid")
+            });
+            cx.notify();
+            return;
+        }
+        if id != action_predictions::CHOICE_PROMPT_ID
+            && action_predictions::CANNED_PROMPTS.iter().any(|(other, _)| {
+                *other != id
+                    && action_predictions::suggested_prompt(
+                        other,
+                        &self.state.suggested_prompts,
+                        None,
+                    )
+                    .is_some_and(|value| value.trim().eq_ignore_ascii_case(&prompt))
+            })
+        {
+            self.suggested_prompt_editor.as_mut().unwrap().error =
+                Some(tr!("suggestions.prompt_duplicate"));
+            cx.notify();
+            return;
+        }
+        if action_predictions::default_suggested_prompt(id).as_deref() == Some(prompt.as_str()) {
+            self.state.suggested_prompts.remove(id);
+        } else {
+            self.state.suggested_prompts.insert(id.to_owned(), prompt);
+        }
+        self.suggested_prompt_editor = None;
+        self.save();
+        cx.notify();
+    }
+
+    fn reset_suggested_prompt(&mut self, id: &'static str, cx: &mut Context<Self>) {
+        self.state.suggested_prompts.remove(id);
+        if self
+            .suggested_prompt_editor
+            .as_ref()
+            .is_some_and(|editor| editor.id == id)
+        {
+            self.suggested_prompt_editor = None;
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn render_suggested_prompts_settings(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let entries = action_predictions::CANNED_PROMPTS
+            .iter()
+            .copied()
+            .chain([(
+                action_predictions::CHOICE_PROMPT_ID,
+                "suggestions.choice_template",
+            )]);
+        let rows = entries
+            .map(|(id, label_key)| {
+                let title = tr!(label_key);
+                let prompt = action_predictions::suggested_prompt(
+                    id,
+                    &self.state.suggested_prompts,
+                    Some("{option}"),
+                )?;
+                let preview: String = prompt.chars().take(120).collect();
+                let description = if prompt.chars().count() > 120 {
+                    format!("{preview}…")
+                } else {
+                    preview
+                };
+                let controls = div()
+                    .flex()
+                    .items_center()
+                    .gap(px(7.0))
+                    .child(settings_button(
+                        format!("edit-suggested-prompt-{id}"),
+                        tr!("suggestions.edit_prompt"),
+                        true,
+                        false,
+                        true,
+                        theme,
+                        cx,
+                        move |this, window, cx| {
+                            this.open_suggested_prompt_editor(id, window, cx)
+                        },
+                    ))
+                    .child(settings_button(
+                        format!("reset-suggested-prompt-{id}"),
+                        tr!("suggestions.reset_prompt"),
+                        self.state.suggested_prompts.contains_key(id),
+                        false,
+                        true,
+                        theme,
+                        cx,
+                        move |this, _, cx| this.reset_suggested_prompt(id, cx),
+                    ));
+                settings_row(title, description, controls, theme, search)
+            })
+            .collect::<Vec<_>>();
+        let mut cards = Vec::new();
+        if let Some(rows) = settings_row_card(rows, theme) {
+            cards.push(rows.into_any_element());
+        }
+        if !search.active() {
+            if let Some(editor) = &self.suggested_prompt_editor {
+                let form = div()
+                    .w_full()
+                    .px(px(20.0))
+                    .py(px(15.0))
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .flex_col()
+                    .gap(px(9.0))
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("suggestions.edit_prompt")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_tertiary)
+                            .child(if editor.id == action_predictions::CHOICE_PROMPT_ID {
+                                tr!("suggestions.choice_template_description", option = "{option}")
+                            } else {
+                                tr!("suggestions.prompt_editor_description")
+                            }),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .px(px(8.0))
+                            .py(px(6.0))
+                            .rounded(px(8.0))
+                            .border(hairline())
+                            .border_color(theme.border_strong)
+                            .bg(theme.inset)
+                            .text_size(sp(12.5))
+                            .line_height(sp(17.0))
+                            .child(editor.input.clone()),
+                    )
+                    .when_some(editor.error.as_ref(), |card, error| {
+                        card.child(
+                            div()
+                                .text_size(sp(12.0))
+                                .text_color(theme.danger)
+                                .child(error.clone()),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap(px(8.0))
+                            .child(settings_button(
+                                "cancel-suggested-prompt-editor",
+                                tr!("commands.cancel"),
+                                true,
+                                false,
+                                true,
+                                theme,
+                                cx,
+                                |this, _, cx| {
+                                    this.suggested_prompt_editor = None;
+                                    cx.notify();
+                                },
+                            ))
+                            .child(settings_button(
+                                "save-suggested-prompt-editor",
+                                tr!("commands.save"),
+                                true,
+                                false,
+                                true,
+                                theme,
+                                cx,
+                                |this, _, cx| this.save_suggested_prompt_editor(cx),
+                            )),
+                    );
+                cards.push(form.into_any_element());
+            }
+        }
+        settings_group(tr!("suggestions.settings_title"), cards, theme)
+    }
+
     fn experiment_card(
         &self,
         experiment: &ExperimentDef,
@@ -6098,6 +6338,7 @@ impl Waku {
         div()
             .children(credentials)
             .children(classes)
+            .children(self.render_suggested_prompts_settings(theme, search, cx))
             .children(usage)
             .into_any_element()
     }

@@ -89,11 +89,10 @@ impl JournalAction {
     }
 }
 
-/// The fixed follow-up prompts a suggestion could send verbatim. `id` is
-/// the journal's `canned` value and the candidate key; `key` is the locale
-/// key whose translation is both the chip's label and the sent payload, so
-/// a hand-typed equivalent in the current locale matches by comparison.
-const CANNED_PROMPTS: &[(&str, &str)] = &[
+/// Stable ids and localized defaults for suggested prompts. The settings
+/// page edits the payload while predictions keep these ids unchanged.
+pub(super) const CANNED_PROMPTS: &[(&str, &str)] = &[
+    ("proceed", "suggestions.proceed"),
     ("keep-going", "suggestions.keep_going"),
     ("run-tests", "suggestions.run_tests"),
     ("fix-errors", "suggestions.fix_errors"),
@@ -102,15 +101,55 @@ const CANNED_PROMPTS: &[(&str, &str)] = &[
     ("review-changes", "suggestions.review_changes"),
     ("open-pr", "suggestions.open_pr"),
 ];
+pub(super) const CHOICE_PROMPT_ID: &str = "choose-option";
+
+pub(super) fn default_suggested_prompt(action: &str) -> Option<String> {
+    if action == CHOICE_PROMPT_ID {
+        return Some(tr!("suggestions.chosen_option", option = "{option}"));
+    }
+    let (_, key) = CANNED_PROMPTS.iter().find(|(id, _)| *id == action)?;
+    Some(tr!(key))
+}
+
+pub(super) fn suggested_prompt(
+    action: &str,
+    overrides: &BTreeMap<String, String>,
+    option: Option<&str>,
+) -> Option<String> {
+    let default = default_suggested_prompt(action)?;
+    let template = overrides
+        .get(action)
+        .filter(|value| valid_suggested_prompt(action, value))
+        .cloned()
+        .unwrap_or(default);
+    if action == CHOICE_PROMPT_ID {
+        Some(template.replace("{option}", option?))
+    } else {
+        Some(template)
+    }
+}
+
+pub(super) fn valid_suggested_prompt(action: &str, prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().count() <= 2_000
+        && (action != CHOICE_PROMPT_ID || trimmed.matches("{option}").count() == 1)
+}
 
 /// The canned id for a submitted prompt, when its text is one of the fixed
 /// follow-ups — case- and whitespace-insensitive, so a hand-typed
 /// equivalent counts as the same outcome.
-pub(super) fn canned_prompt_id(prompt: &str) -> Option<&'static str> {
+pub(super) fn canned_prompt_id(
+    prompt: &str,
+    overrides: &BTreeMap<String, String>,
+) -> Option<&'static str> {
     let normalized = prompt.trim();
     CANNED_PROMPTS
         .iter()
-        .find(|(_, key)| tr!(key).eq_ignore_ascii_case(normalized))
+        .find(|(id, _)| {
+            suggested_prompt(id, overrides, None)
+                .is_some_and(|configured| configured.trim().eq_ignore_ascii_case(normalized))
+        })
         .map(|(id, _)| *id)
 }
 
@@ -202,7 +241,7 @@ fn suggestion_dispatch(action: &str) -> Option<SuggestionDispatch> {
         canned => CANNED_PROMPTS
             .iter()
             .find(|(id, _)| *id == canned)
-            .map(|(_, key)| SuggestionDispatch::Prompt(key)),
+            .map(|(id, _)| SuggestionDispatch::Prompt(id)),
     }
 }
 
@@ -703,18 +742,17 @@ impl Waku {
     /// The chip's presentation: icon and localized label. `None` means the
     /// candidate is not renderable — call sites reach here only through
     /// `gated_suggestion`, which already filtered to actionable ids.
-    fn suggestion_parts(action: &str) -> Option<(&'static str, String)> {
-        let (icon, label_key) = match action {
-            "commit" => ("icons/git-commit-horizontal.svg", "suggestions.commit"),
-            "push" => ("icons/arrow-up.svg", "suggestions.push"),
-            "sync" => ("icons/arrow-down.svg", "suggestions.sync"),
-            "land" => ("icons/git-merge.svg", "suggestions.land"),
+    fn suggestion_parts(&self, action: &str) -> Option<(&'static str, String)> {
+        match action {
+            "commit" => Some(("icons/git-commit-horizontal.svg", tr!("suggestions.commit"))),
+            "push" => Some(("icons/arrow-up.svg", tr!("suggestions.push"))),
+            "sync" => Some(("icons/arrow-down.svg", tr!("suggestions.sync"))),
+            "land" => Some(("icons/git-merge.svg", tr!("suggestions.land"))),
             canned => {
-                let (_, key) = CANNED_PROMPTS.iter().find(|(id, _)| *id == canned)?;
-                ("icons/sparkle.svg", *key)
+                let prompt = suggested_prompt(canned, &self.state.suggested_prompts, None)?;
+                Some(("icons/sparkle.svg", prompt))
             }
-        };
-        Some((icon, tr!(label_key)))
+        }
     }
 
     /// The suggestion row floating above the composer lane. The row itself
@@ -734,7 +772,14 @@ impl Waku {
         if self.composer_session().map(|session| session.id) != Some(suggestion.session_id) {
             return None;
         }
-        let (icon_path, label) = Self::suggestion_parts(suggestion.action)?;
+        let (icon_path, label) = self.suggestion_parts(suggestion.action)?;
+        let tooltip = label.clone();
+        let display_label: String = label.replace('\n', " ").chars().take(96).collect();
+        let display_label = if label.chars().count() > 96 || label.contains('\n') {
+            format!("{display_label}…")
+        } else {
+            display_label
+        };
         let theme = Theme::current(cx);
         Some(
             div().w_full().h(px(0.0)).relative().child(
@@ -770,8 +815,8 @@ impl Waku {
                                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                                     .hover(|element| element.bg(theme.overlay_strong))
                                     .child(icon(icon_path, 11.0, theme.text_secondary))
-                                    .child(label)
-                                    .tooltip(Tooltip::text(tr!("suggestions.tooltip")))
+                                    .child(display_label)
+                                    .tooltip(Tooltip::text(tooltip))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.accept_action_suggestion(window, cx);
                                     }))
@@ -808,12 +853,10 @@ impl Waku {
             prediction.adopted = true;
         }
         match suggestion_dispatch(suggestion.action) {
-            Some(SuggestionDispatch::Prompt(key)) => {
-                self.submit_composer_submission_to(
-                    suggestion.session_id,
-                    ComposerSubmission::plain(tr!(key)),
-                    cx,
-                );
+            Some(SuggestionDispatch::Prompt(id)) => {
+                if let Some(prompt) = suggested_prompt(id, &self.state.suggested_prompts, None) {
+                    self.submit_canned_prompt_to(suggestion.session_id, id, prompt, cx);
+                }
             }
             Some(SuggestionDispatch::Commit) => self.open_commit_dialog(window, cx),
             Some(SuggestionDispatch::Land) => self.land_composer_session(PullStrategy::Rebase, cx),
@@ -876,11 +919,46 @@ mod tests {
 
     #[test]
     fn canned_prompt_ids_match_the_submitted_text() {
-        assert_eq!(canned_prompt_id("Run the tests"), Some("run-tests"));
-        assert_eq!(canned_prompt_id("  keep going  "), Some("keep-going"));
-        assert_eq!(canned_prompt_id("KEEP GOING"), Some("keep-going"));
-        assert_eq!(canned_prompt_id("run the tests please"), None);
-        assert_eq!(canned_prompt_id(""), None);
+        let defaults = BTreeMap::new();
+        assert_eq!(
+            canned_prompt_id("Run the tests", &defaults),
+            Some("run-tests")
+        );
+        assert_eq!(
+            canned_prompt_id("  keep going  ", &defaults),
+            Some("keep-going")
+        );
+        assert_eq!(
+            canned_prompt_id("KEEP GOING", &defaults),
+            Some("keep-going")
+        );
+        assert_eq!(canned_prompt_id("run the tests please", &defaults), None);
+        assert_eq!(canned_prompt_id("", &defaults), None);
+
+        let overrides = BTreeMap::from([("run-tests".to_owned(), "Run focused tests".to_owned())]);
+        assert_eq!(
+            suggested_prompt("run-tests", &overrides, None).as_deref(),
+            Some("Run focused tests")
+        );
+        assert_eq!(
+            canned_prompt_id("run focused tests", &overrides),
+            Some("run-tests")
+        );
+        assert_eq!(canned_prompt_id("Run the tests", &overrides), None);
+        assert!(valid_suggested_prompt(CHOICE_PROMPT_ID, "Choose {option}"));
+        assert!(!valid_suggested_prompt(CHOICE_PROMPT_ID, "Choose this"));
+        assert_eq!(
+            suggested_prompt(
+                CHOICE_PROMPT_ID,
+                &BTreeMap::from([(
+                    CHOICE_PROMPT_ID.to_owned(),
+                    "Select {option} and continue".to_owned()
+                )]),
+                Some("A. SQLite")
+            )
+            .as_deref(),
+            Some("Select A. SQLite and continue")
+        );
     }
 
     #[test]

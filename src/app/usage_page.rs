@@ -89,6 +89,9 @@ impl Waku {
         if page != SettingsPage::Commands {
             self.custom_command_editor = None;
         }
+        if page != SettingsPage::Jev {
+            self.suggested_prompt_editor = None;
+        }
         // The Archived page's filter belongs to the visit: a remount starts
         // empty rather than reviving the last visit's query. Reopening the
         // already-selected page keeps the in-progress text.

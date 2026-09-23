@@ -1136,6 +1136,16 @@ workspace.from_default: 从默认分支
 workspace.workspace: 工作区
 workspace.worktree: 工作树
 suggestions.tooltip: 建议的下一步
+suggestions.settings_title: 建议提示词
+suggestions.choice_template: 选项回复
+suggestions.edit_prompt: 编辑
+suggestions.reset_prompt: 重置
+suggestions.prompt_text: 建议提示词内容
+suggestions.prompt_editor_description: 点击建议后会发送此文本。
+suggestions.choice_template_description: 请恰好包含一次{option}，发送时会替换为所选选项。
+suggestions.option_placeholder_required: 请恰好包含一次{option}。
+suggestions.prompt_invalid: 请输入不超过 2,000 个字符的提示词。
+suggestions.prompt_duplicate: 另一个建议操作已使用此提示词。
 suggestions.proceed: 好的，请继续。
 suggestions.choose_option: 选择{option}
 suggestions.chosen_option: 我选择{option}。
