@@ -141,6 +141,7 @@ interface RuntimeContextValue {
   updateSessionOptions: (sessionId: string, changes: SessionOptionChanges) => Promise<void>;
   sendGoalOperation: (session: AgentSession, operation: GoalOperation) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  setAgentRenameAllowed: (sessionId: string, allowed: boolean) => Promise<void>;
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   setSessionArchived: (sessionId: string, archived: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -976,6 +977,17 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await persistOrdered(next);
   }, [cacheSession, loadFullSession, persistOrdered]);
 
+  const setAgentRenameAllowed = useCallback(async (sessionId: string, allowed: boolean) => {
+    const current = await loadFullSession(sessionId);
+    const next = {
+      ...current,
+      agent_rename_allowed: allowed,
+      updated_at: clock.nowSeconds(),
+    };
+    cacheSession(next);
+    await persistOrdered(next);
+  }, [cacheSession, loadFullSession, persistOrdered]);
+
   /** Pin/unpin — desktop's toggle_session_pin: a plain flag flip plus save,
    * limited to started, unarchived tasks. */
   const setSessionPinned = useCallback(async (sessionId: string, pinned: boolean) => {
@@ -1183,6 +1195,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       updateSessionOptions,
       sendGoalOperation,
       renameSession,
+      setAgentRenameAllowed,
       setSessionPinned,
       setSessionArchived,
       deleteSession,

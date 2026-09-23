@@ -258,6 +258,14 @@ export function MobileComposer({
     contextKey: session.id,
     onServiceTier: (serviceTier) => runtime.updateSessionOptions(session.id, { serviceTier }),
     onGoal: (operation) => runtime.sendGoalOperation(session, operation),
+    onRename: async (title) => {
+      if (title === null) {
+        draftSync.markEdited();
+        setDraft('/rename ');
+        return;
+      }
+      await runtime.renameSession(session.id, title);
+    },
     onLand: async () => {
       if (!daemon.client || !project) throw new Error('Select a task to see its Git state');
       const outcome = await landWorkspace(

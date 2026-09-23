@@ -80,6 +80,7 @@ import { transcriptLinkRoute } from '@/lib/transcript-links'
 import { shouldShowInitialDestination } from '@/lib/workspace-presentation'
 import { agentPresetIdLabel } from '@/lib/agent-preset-presentation'
 import { isProjectlessProject, projectDisplayName } from '@/lib/project-presentation'
+import { sessionHasStarted } from '@/lib/sidebar-presentation'
 import {
   useRuntime,
   type BackgroundWorkItem,
@@ -810,6 +811,17 @@ export function WakuApp() {
     }
   }
 
+  async function toggleAgentRename(sessionId: string) {
+    if (!client) throw new Error(t('errors.daemon_disconnected'))
+    const hydrated = await hydrateSession(client, sessionId)
+    if (!hydrated) throw new Error(t('errors.task_not_found'))
+    await saveSession({
+      ...hydrated,
+      agent_rename_allowed: !hydrated.agent_rename_allowed,
+      updated_at: Math.floor(Date.now() / 1_000),
+    })
+  }
+
   async function removeSessionById(sessionId: string) {
     if (!client || !config) throw new Error(t('errors.daemon_disconnected'))
     const stateKey = daemonKeys.taskState(config.address)
@@ -1063,6 +1075,7 @@ export function WakuApp() {
           onMenu={showSidebar}
           onOpenChanges={() => openPanel('changes', 'uncommitted')}
           onTogglePanel={toggleRightPanel}
+          onToggleAgentRename={(sessionId) => void toggleAgentRename(sessionId).catch((error) => toast.error(errorMessage(error)))}
           project={activeProject}
           session={activeSession}
           sidebarVisible={sidebarVisible}
@@ -1311,6 +1324,7 @@ function TaskHeader({
   onCompareBranch,
   onOpenBackgroundWork,
   onTogglePanel,
+  onToggleAgentRename,
   sidebarVisible,
 }: {
   title: string
@@ -1322,6 +1336,7 @@ function TaskHeader({
   onCompareBranch: () => void
   onOpenBackgroundWork: (key: BackgroundWorkKey) => void
   onTogglePanel: () => void
+  onToggleAgentRename: (sessionId: string) => void
   sidebarVisible: boolean
 }) {
   const { t } = useI18n()
@@ -1348,6 +1363,17 @@ function TaskHeader({
         </span>
       )}
       <div className="flex-1" />
+      {session && sessionHasStarted(session) && (
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-pressed={Boolean(session.agent_rename_allowed)}
+          title={t('session.agent_rename_hint')}
+          onClick={() => onToggleAgentRename(session.id)}
+        >
+          {t(session.agent_rename_allowed ? 'session.agent_rename_allowed' : 'session.allow_agent_rename')}
+        </Button>
+      )}
       {branches.data && (branches.data.additions > 0 || branches.data.deletions > 0) && (
         <button
           className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] hover:bg-accent"

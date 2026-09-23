@@ -314,6 +314,12 @@ export function SessionView({
         setModelSheetOpen(true);
       } else if (command === 'rename') {
         setRenaming(true);
+      } else if (command === 'agent-rename-grant') {
+        const current = sessionRef.current;
+        if (current) {
+          void runtime.setAgentRenameAllowed(current.id, !current.agent_rename_allowed)
+            .catch((cause) => Alert.alert('Couldn’t change agent rename permission', cause instanceof Error ? cause.message : String(cause)));
+        }
       } else if (command === 'find') {
         setFindOpen(true);
       } else if (command === 'copy-last-response') {
@@ -328,7 +334,7 @@ export function SessionView({
         confirmDelete();
       }
     },
-    [compactSession, confirmDelete, confirmRollback, copyLastResponse, openTaskSurface],
+    [compactSession, confirmDelete, confirmRollback, copyLastResponse, openTaskSurface, runtime],
   );
 
   const taskState = useTaskState().data;
@@ -480,6 +486,11 @@ export function SessionView({
         displayInline: true,
         subactions: [
           { id: 'model', title: modelLabel, image: modelIcon, imageColor: theme.text },
+          {
+            id: 'agent-rename-grant',
+            title: session?.agent_rename_allowed ? 'Revoke agent rename' : 'Allow agent rename',
+            image: 'pencil',
+          },
           ...TASK_MENU_COMMANDS.map((item) => ({
             id: item.id,
             title: item.title,
@@ -489,7 +500,7 @@ export function SessionView({
         ],
       },
     ],
-    [modelIcon, modelLabel, theme.text],
+    [modelIcon, modelLabel, session?.agent_rename_allowed, theme.text],
   );
 
   // The chrome lives in the native navigation bar, so it stays put while the

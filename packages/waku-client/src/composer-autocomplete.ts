@@ -81,6 +81,13 @@ export function isResumeSubmission(prompt: string): boolean {
   return prompt.trim() === '/resume'
 }
 
+/** Undefined for other text, null for bare /rename, or the requested title. */
+export function parseRenameSubmission(prompt: string): string | null | undefined {
+  const match = /^\/rename(?:\s+(.*))?$/.exec(prompt.trim())
+  if (!match) return undefined
+  return match[1]?.trim() || null
+}
+
 /** Goddard's provider-neutral land command — rebase the workspace onto its
  * base branch and fast-forward the base. Reserved daemon-side like
  * `/resume`, so it never crosses into a provider transport. */

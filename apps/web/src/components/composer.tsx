@@ -60,6 +60,7 @@ import {
   isLandSubmission,
   mergeComposerCommands,
   parseGoalSubmission,
+  parseRenameSubmission,
   replaceComposerTrigger,
   toggledFastServiceTier,
   type ComposerAutocompleteRow,
@@ -384,9 +385,23 @@ export function Composer({
 
   function executeLocalComposerCommand(submittedPrompt = prompt): boolean {
     return executeResumeCommand(submittedPrompt)
+      || executeRenameCommand(submittedPrompt)
       || executeLandCommand(submittedPrompt)
       || executeFastModeToggle(submittedPrompt)
       || executeGoalCommand(submittedPrompt)
+  }
+
+  function executeRenameCommand(submittedPrompt: string): boolean {
+    const title = parseRenameSubmission(submittedPrompt)
+    if (title === undefined) return false
+    if (title === null) {
+      setPrompt('/rename ')
+      setCursor('/rename '.length)
+      return true
+    }
+    savePatch({ title })
+    clearComposerDraft()
+    return true
   }
 
   function clearComposerDraft() {

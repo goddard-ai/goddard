@@ -13,6 +13,7 @@ import {
   isLandSubmission,
   isResumeSubmission,
   parseGoalSubmission,
+  parseRenameSubmission,
   toggledFastServiceTier,
 } from '@waku/client/composer-autocomplete';
 import { fuzzyScore } from '@waku/client/fuzzy-search';
@@ -50,6 +51,7 @@ export function useComposerLocalCommands({
   onServiceTier,
   onGoal,
   onLand,
+  onRename,
   onClear,
 }: {
   provider: ProviderKind | null;
@@ -61,6 +63,7 @@ export function useComposerLocalCommands({
   onServiceTier: (tier: string) => void | Promise<void>;
   onGoal: (operation: GoalOperation) => Promise<void>;
   onLand?: () => Promise<void>;
+  onRename?: (title: string | null) => void | Promise<void>;
   onClear: () => void;
 }) {
   const daemon = useDaemon();
@@ -73,6 +76,14 @@ export function useComposerLocalCommands({
   }, [contextKey, daemon.activeProfile?.id, provider]);
 
   async function execute(prompt: string, commands: SlashCommand[]): Promise<boolean> {
+    const rename = parseRenameSubmission(prompt);
+    if (rename !== undefined) {
+      if (!onRename) throw new Error('Select a task to rename');
+      if (rename === null) onClear();
+      await onRename(rename);
+      if (rename !== null) onClear();
+      return true;
+    }
     if (!provider) return false;
     if (isResumeSubmission(prompt)) {
       // Resume lists sessions the provider itself ran, so a disabled
