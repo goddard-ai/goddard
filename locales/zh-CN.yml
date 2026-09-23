@@ -138,6 +138,11 @@ command_palette.scripts: 脚本
 command_palette.run_script_project_placeholder: 选择项目…
 command_palette.run_script_placeholder: 选择要运行的脚本…
 command_palette.loading_scripts: 正在查找脚本…
+command_palette.worktrees: 工作树
+command_palette.run_script_worktree_placeholder: 选择工作树…
+command_palette.loading_worktrees: 正在查找工作树…
+command_palette.run_script_task_worktree: 此任务的工作树
+command_palette.run_script_local_checkout: 本地检出
 command_palette.no_projects: 没有项目
 command_palette.no_projects_hint: 打开一个项目以运行其脚本
 command_palette.no_scripts: 未找到脚本
@@ -234,9 +239,24 @@ settings.daemon: 守护进程
 settings.computer_use: 电脑操作
 settings.commands: 命令
 settings.terminal: 终端
+settings.diagnostics: 诊断
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 声音 提示音 音量 通知 完成 回合 sound audio notification volume 触控板 轻扫 三指 手势 导航 后退 前进 trackpad swipe gesture 侧边栏 快捷键 标签 数字 sidebar shortcut tags 草稿 未发送 预览 preview 休眠 归档 工作区 默认 工作树 分支 合并 同步 冲突 解决 worktree merge sync conflict resolve archive dormant
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 等宽 大小 编辑器 侧边栏 透明 边框 分隔线 粗 细 预览 preview 数学 公式 表达式 math latex markdown 文件 渲染 源码 转录 令牌 速度 token speed footer
 settings.terminal_keywords: 终端 终端机 控制台 shell 字体 字号 等宽 链接 修饰键 点击 打开 鼠标 程序 vim htop 复制 选择 剪贴板 粘贴 terminal shell font size link modifier click open mouse copy select clipboard paste
+settings.diagnostics_keywords: 诊断 错误 日志 崩溃 panic 重启 恢复 守护进程 报告 故障排查 问题 diagnostics errors error log logs crash panic restart recovery daemon report troubleshooting problem
+settings.diagnostics_description: 应用报告的错误以及守护进程的重启和 panic，最新在前。选择一行即可复制其记录。
+settings.diagnostics_empty: 还没有报告过错误。
+diagnostics.loading: 正在加载…
+diagnostics.refresh: 刷新
+diagnostics.reveal_logs: 日志文件夹
+diagnostics.source_app: 应用
+diagnostics.source_restart: 重启
+diagnostics.source_panic: Panic
+diagnostics.recovery_summary: "%{cause} → %{outcome}"
+diagnostics.sessions_resumed_one: 已恢复 1 个会话
+diagnostics.sessions_resumed_many: "已恢复 %{count} 个会话"
+diagnostics.panic_unnamed: 守护进程 panic
+diagnostics.copy_record: 复制记录
 settings.group_sessions: 会话
 settings.group_git: Git
 settings.group_notifications: 通知
@@ -603,6 +623,11 @@ reclaim.confirm: "回收 %{size}"
 reclaim.confirm_generic: 回收
 reclaim.completed: "已回收 %{size}"
 reclaim.completed_partial: "已回收 %{size}；%{count} 个文件夹无法删除"
+reclaim.running: 正在回收磁盘空间…
+reclaim.progress: "已清理 %{total} 个工作树中的 %{done} 个 — 已释放 %{size}"
+reclaim.failures: "%{count} 个文件夹无法删除"
+reclaim.finished_tooltip: 回收完成
+reclaim.done: 完成
 
 sidebar.today: 今天
 sidebar.search: 搜索
@@ -951,7 +976,6 @@ provider_switch.working: "正在为 %{provider} 压缩历史记录…"
 provider_switch.failed: "切换 provider 失败 — %{error}"
 provider_switch.needs_eval_backend: 切换 provider 需要评估后端来压缩转录 — 尚未配置。
 provider_switch.needs_eval_backend_remote: 切换 provider 需要评估后端来压缩转录 — 远程主机上尚未配置。
-provider_switch.no_eval_backend: 切换 provider 需要评估（Jev）后端 — 请在“设置 → Jev”中配置。
 sandbox.environment: 环境
 sandbox.this_mac: 这台 Mac
 sandbox.this_mac_description: 在此 Mac 上运行命令和编辑
@@ -1549,6 +1573,7 @@ diff.rows_hidden: "还有 %{count} 行 · 打开审阅查看完整更改"
 terminal.transport_failed: 终端传输失败
 terminal.no_workspace_description: 请先选择一个任务，再打开终端。
 terminal.process_exited: 进程已退出
+terminal.moved_to_group: 任务的工作空间已变更 — 其终端已移至“终端”分组。
 browser.back: 后退（%{shortcut}）
 browser.forward: 前进（%{shortcut}）
 browser.stop_loading: 停止加载（Esc）
@@ -2083,6 +2108,8 @@ experiments.integrations_description: 新增“设置 → 集成”页面，一�
 experiments.integrations_title: MCP 集成
 experiments.memory_description: 为每个项目提供持久记忆。已完成的会话会被提炼进 .goddard/memory 存储，下一个会话的首条提示词会携带它 — 包括决策、偏好和失败的尝试。
 experiments.memory_title: 项目记忆
+experiments.memory_models_caption: 用于将各服务商已完成的会话提炼进记忆的模型 — 在后台运行，因此不会套用为交互式选择的高价模型。除非在此另行选择，否则使用服务商默认值。
+experiments.memory_model_default: 服务商默认值
 experiments.model_router_description: 在模型选择器中新增“自动”。任务的第一个提示词由评估模型分类，然后按你的路由策略路由到某个服务商和模型。
 experiments.model_router_title: 自动模型路由
 experiments.needs_eval_backend: 使用评估后端 — 尚未配置。
@@ -2182,6 +2209,17 @@ friends.sync_refused_title: "已跳过 %{branch} 的同步"
 friends.sync_toast_conflict: "%{branch} 上发生同步冲突 — 请到“设置 → 好友”中处理"
 friends.sync_toast_refused: "已跳过 %{branch} 的同步 — 有未提交的更改"
 friends.sync_waiting: 等待好友
+friends.transfer_from: "来自 %{name}"
+friends.transfer_items: "%{count} 个项目"
+friends.transfer_empty_folder: 空文件夹
+friends.transfer_file: 文件
+friends.transfer_open: 打开
+friends.transfer_open_quarantined: 信任这些文件并打开
+friends.transfer_preview: 预览
+friends.transfer_show_more: "再显示 %{count} 个"
+friends.transfer_show_fewer: 收起
+friends.transfer_showing_first: "正在显示 %{total} 个中的前 %{count} 个"
+friends.transfer_more: "…以及另外 %{count} 个"
 friends.transfers: 传输
 friends.transfers_active: "%{count} 个传输进行中 — 打开“好友”"
 friends.trust: 信任文件
@@ -2245,6 +2283,7 @@ keybind.command.automations_tab: "选择自动化标签 %{n}"
 keybind.command.cycle_effort: 循环切换推理强度
 keybind.command.cycle_effort_backward: 反向循环切换推理强度
 keybind.command.cycle_favorite: 循环切换收藏模型
+keybind.command.cycle_favorite_backward: 反向循环切换收藏模型
 keybind.command.favorite_model: "选择收藏模型 %{n}"
 keybind.conflict.banner: 与 %{other} 冲突
 keybind.conflict.confirm: 按 Enter 仍然保存
