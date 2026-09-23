@@ -853,6 +853,11 @@ impl Waku {
             None
         };
         let theme = Theme::current(cx);
+        // The turn's verdict pill leads the row while the footer holding its
+        // inline copy sits below the fold — the standalone transcript float
+        // yields to this row, so the two never occupy the same slot.
+        let marker_pill =
+            self.floating_status_marker_pill(self.active_transcript_rows(), &theme, cx);
         Some(
             div().w_full().h(px(0.0)).relative().child(
                 div()
@@ -869,6 +874,7 @@ impl Waku {
                             .pl(px(COMPOSER_CHIP_INSET))
                             .flex()
                             .gap(px(6.0))
+                            .children(marker_pill)
                             .children(actions.iter().enumerate().map(|(index, action)| {
                                 let (icon_path, label) = match action {
                                     StatusSuggestedAction::Proceed => {
@@ -1257,8 +1263,47 @@ impl Waku {
     /// up a long response still sees how the turn resolved. The footer keeps
     /// the real row; activating the float scrolls the footer back into
     /// view. Only the session's last turn qualifies — pinning an older
-    /// turn's verdict under a newer response would misattribute it.
+    /// turn's verdict under a newer response would misattribute it. The
+    /// composer suggestion row claims the same slot when it is up, so the
+    /// pill rides inside that row then rather than floating beside it.
     pub(super) fn render_floating_status_markers(
+        &self,
+        transcript_rows: &ListState,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if self.action_suggestion_row_visible() {
+            return None;
+        }
+        let pill = self.floating_status_marker_pill(transcript_rows, theme, cx)?;
+        Some(
+            div()
+                .absolute()
+                .bottom(px(8.0))
+                .left_0()
+                .right_0()
+                // Transcript-row insets and content width; the extra left
+                // inset lands the float's edge on the project chip's icon,
+                // matching the suggestion chips beside it.
+                .px(px(20.0))
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .mx_auto()
+                        .pl(px(COMPOSER_CHIP_INSET - COMPOSER_OVERHANG))
+                        .flex()
+                        .child(pill),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The float's verdict pill and its "is the footer still below the
+    /// fold" gate, shared with the composer suggestion row — while that row
+    /// is up the pill renders as its first item instead of as this float.
+    /// Both mounts keep the same id, focus handle, and click-to-reveal.
+    pub(super) fn floating_status_marker_pill(
         &self,
         transcript_rows: &ListState,
         theme: &Theme,
@@ -1290,60 +1335,38 @@ impl Waku {
         let focus = self.transcript_control_focus("transcript-status-markers", cx);
         Some(
             div()
-                .absolute()
-                .bottom(px(8.0))
-                .left_0()
-                .right_0()
-                // Transcript-row insets and content width; the extra left
-                // inset lands the float's edge on the project chip's icon,
-                // matching the suggestion chips beside it.
-                .px(px(20.0))
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH))
-                        .mx_auto()
-                        .pl(px(COMPOSER_CHIP_INSET - COMPOSER_OVERHANG))
-                        .flex()
-                        .child(
-                            div()
-                                .id("transcript-status-markers")
-                                .flex()
-                                .items_center()
-                                .gap(px(12.0))
-                                .py(px(5.0))
-                                .px(px(9.0))
-                                .rounded(px(8.0))
-                                .border(hairline())
-                                .border_color(theme.border_subtle)
-                                .bg(theme.raised)
-                                .shadow_xs()
-                                .cursor_default()
-                                .track_focus(&focus)
-                                .tab_index(0)
-                                .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                .children(cleared.into_iter().map(|(marker, probability)| {
-                                    status_marker_chip(marker, probability, theme)
-                                }))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.active_transcript_rows()
-                                        .scroll_to_reveal_item(footer_row);
-                                    cx.notify();
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, _, cx| {
-                                        if matches!(
-                                            event.keystroke.key.as_str(),
-                                            "enter" | "space"
-                                        ) {
-                                            this.active_transcript_rows()
-                                                .scroll_to_reveal_item(footer_row);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
-                        ),
-                )
+                .id("transcript-status-markers")
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .py(px(5.0))
+                .px(px(9.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border_subtle)
+                .bg(theme.raised)
+                .shadow_xs()
+                .cursor_default()
+                .track_focus(&focus)
+                .tab_index(0)
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .children(cleared.into_iter().map(|(marker, probability)| {
+                    status_marker_chip(marker, probability, theme)
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.active_transcript_rows()
+                        .scroll_to_reveal_item(footer_row);
+                    cx.notify();
+                }))
+                .on_key_down(cx.listener(
+                    move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.active_transcript_rows()
+                                .scroll_to_reveal_item(footer_row);
+                            cx.stop_propagation();
+                        }
+                    },
+                ))
                 .into_any_element(),
         )
     }

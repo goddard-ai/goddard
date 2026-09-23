@@ -758,6 +758,29 @@ impl Waku {
         }
     }
 
+    /// Whether the suggestion row renders this frame, mirroring
+    /// `render_action_suggestion`'s layering: a settled turn's status row
+    /// claims the slot first — an empty `turn_status_suggestions` entry
+    /// still claims it, suppressing the prediction fallback — and the
+    /// predicted action chips in only when no entry does. Floats sharing
+    /// the row's slot check this so the two never overlap.
+    pub(super) fn action_suggestion_row_visible(&self) -> bool {
+        let Some(session) = self.composer_session() else {
+            return false;
+        };
+        if let Some(turn) = session.turns.last()
+            && let Some(actions) = self.turn_status_suggestions.get(&turn.id)
+        {
+            return self.state.status_markers_enabled
+                && turn.status == TurnStatus::Completed
+                && !actions.is_empty();
+        }
+        self.action_suggestion.as_ref().is_some_and(|suggestion| {
+            suggestion.session_id == session.id
+                && self.suggestion_parts(&suggestion.action).is_some()
+        })
+    }
+
     /// The suggestion row floating above the composer lane. The row itself
     /// is a zero-height sibling at the lane's top — it takes no layout
     /// space, so a chip appearing or clearing never moves the composer or
@@ -797,6 +820,11 @@ impl Waku {
             display_label
         };
         let theme = Theme::current(cx);
+        // The turn's verdict pill leads the row while the footer holding its
+        // inline copy sits below the fold — the standalone transcript float
+        // yields to this row, so the two never occupy the same slot.
+        let marker_pill =
+            self.floating_status_marker_pill(self.active_transcript_rows(), &theme, cx);
         Some(
             div().w_full().h(px(0.0)).relative().child(
                 div()
@@ -815,6 +843,8 @@ impl Waku {
                             .mx_auto()
                             .pl(px(COMPOSER_CHIP_INSET))
                             .flex()
+                            .gap(px(6.0))
+                            .children(marker_pill)
                             .child(
                                 div()
                                     .id("action-suggestion")
