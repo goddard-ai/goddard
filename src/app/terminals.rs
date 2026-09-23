@@ -295,6 +295,90 @@ impl Waku {
         }
     }
 
+    /// Move a session-scoped terminal out of every session strip and into
+    /// the Terminals group, keeping its PTY. Called when the workspace it
+    /// tracked moved: the running shell can't follow, and respawning would
+    /// kill whatever the user ran — or re-run a launch line — so the record
+    /// drops its session, pins the live directory, and the surface leaves
+    /// every strip that borrowed it.
+    pub(super) fn detach_terminal_to_group(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        let Some(record) = self.terminal_records.get_mut(&terminal_id) else {
+            return;
+        };
+        record.session = None;
+        if record.working_directory.is_none() {
+            record.working_directory = self
+                .right_panel_terminals
+                .get(&terminal_id)
+                .map(|terminal| terminal.read(cx).working_directory().to_path_buf());
+        }
+        // The live strip is the terminal's own when it fills the main area —
+        // its tab belongs there; anywhere else it sat on a session's loan.
+        if self.right_panel_live_owner != RightPanelOwner::Terminal(terminal_id)
+            && let Some(index) = self
+                .right_panel_surfaces
+                .iter()
+                .position(|surface| surface.terminal_id() == Some(terminal_id))
+        {
+            self.right_panel_surfaces.remove(index);
+            self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
+                None
+            } else {
+                Some(match self.right_panel_active_surface {
+                    Some(active) if active > index => active - 1,
+                    Some(active) if active == index => index.saturating_sub(1),
+                    Some(active) => active.min(self.right_panel_surfaces.len() - 1),
+                    None => 0,
+                })
+            };
+            if let Some(active) = self.right_panel_active_surface {
+                self.reveal_right_panel_tab(active);
+                self.request_active_terminal_focus();
+                self.request_active_browser_focus();
+            } else {
+                self.right_panel_pending_tab_reveal = None;
+                self.right_panel_pending_terminal_focus = None;
+                self.right_panel_pending_browser_focus = None;
+                self.set_right_panel_visible(false, cx);
+            }
+        }
+        if self.right_panel_last_focused_terminal == Some(terminal_id) {
+            self.right_panel_last_focused_terminal = None;
+        }
+        for (owner, state) in self.right_panel_states.iter_mut() {
+            if matches!(owner, RightPanelOwner::Terminal(id) if *id == terminal_id) {
+                continue;
+            }
+            let Some(index) = state
+                .surfaces
+                .iter()
+                .position(|surface| surface.terminal_id() == Some(terminal_id))
+            else {
+                continue;
+            };
+            state.surfaces.remove(index);
+            state.active_surface = if state.surfaces.is_empty() {
+                None
+            } else {
+                Some(match state.active_surface {
+                    Some(active) if active > index => active - 1,
+                    Some(active) if active == index => index.saturating_sub(1),
+                    Some(active) => active.min(state.surfaces.len() - 1),
+                    None => 0,
+                })
+            };
+            if state.last_focused_terminal == Some(terminal_id) {
+                state.last_focused_terminal = None;
+            }
+        }
+        self.sidebar_rows_fingerprint.set(None);
+        // Reveal the terminal's new home — under a folded group the row
+        // hides and the vanished tab reads as a kill after all.
+        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        self.show_toast(tr!("terminal.moved_to_group"));
+        cx.notify();
+    }
+
     /// Spawn the PTY-backed view for a terminal id. Shared by the right
     /// panel's lazy ensure and the Terminals group's direct creation.
     pub(super) fn spawn_terminal_entity(

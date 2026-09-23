@@ -3213,6 +3213,8 @@ terminal.close_description:
   en: A command is still running in this shell. Closing the terminal kills the process.
 terminal.kill:
   en: Kill Terminal
+terminal.moved_to_group:
+  en: The task's workspace changed — its terminal moved to the Terminals group.
 
 project.add_project:
   en: Add project

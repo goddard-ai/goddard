@@ -3762,11 +3762,27 @@ impl Waku {
             None => self.spawn_terminal_entity(terminal_id, working_directory, cx),
             // A workspace-tracking terminal follows the workspace when it
             // moves — the spawn directory is the test, never the live cwd,
-            // so a `cd` inside the shell can't read as a move and kill the
-            // PTY. A terminal spawned at a recorded directory stays where
-            // it was put.
+            // so a `cd` inside the shell can't read as a move. A terminal
+            // spawned at a recorded directory stays where it was put.
             Some(spawned_at) if workspace_bound && spawned_at != working_directory => {
-                self.spawn_terminal_entity(terminal_id, working_directory, cx)
+                // Respawning is invisible for a terminal that has only ever
+                // shown a prompt, but one that has run anything holds work
+                // the PTY kill would destroy — or a launch line it would
+                // re-run — so it detaches to the Terminals group instead.
+                let has_run = self
+                    .right_panel_terminals
+                    .get(&terminal_id)
+                    .is_some_and(|terminal| {
+                        terminal.read(cx).last_command_started_at().is_some()
+                    })
+                    || self
+                        .right_panel_terminal_programs
+                        .contains_key(&terminal_id);
+                if has_run {
+                    self.detach_terminal_to_group(terminal_id, cx);
+                } else {
+                    self.spawn_terminal_entity(terminal_id, working_directory, cx);
+                }
             }
             Some(_) => {}
         }
