@@ -10913,6 +10913,121 @@ impl Waku {
                     .text_color(theme.text_ghost)
                     .child(SharedString::from(caption)),
             )
+            .when(
+                !matches!(kind, ProviderKind::DeepSeek | ProviderKind::Fx),
+                |element| element.child(self.title_model_row(kind, theme, cx)),
+            )
+    }
+
+    fn set_title_model(
+        &mut self,
+        provider: ProviderKind,
+        model: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        match model {
+            Some(model) => {
+                self.state.title_models.insert(provider, model);
+            }
+            None => {
+                self.state.title_models.remove(&provider);
+            }
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn title_model_row(&self, provider: ProviderKind, theme: Theme, cx: &mut Context<Self>) -> Div {
+        let models = self
+            .provider_probe(provider)
+            .map(|probe| probe.models.clone())
+            .unwrap_or_default();
+        let selected = self.state.title_models.get(&provider).cloned();
+        let default = match provider {
+            ProviderKind::Claude => Some(waku_protocol::git::CLAUDE_COMMIT_MODEL),
+            ProviderKind::Codex => Some(waku_protocol::git::CODEX_COMMIT_MODEL),
+            _ => None,
+        };
+        let label = selected
+            .as_deref()
+            .or(default)
+            .map(|id| {
+                models
+                    .iter()
+                    .find(|model| model.id == id)
+                    .map(|model| model.name.as_str())
+                    .unwrap_or(id)
+            })
+            .map(str::to_owned)
+            .unwrap_or_else(|| tr!("providers.title_model_choose"));
+        let handle = self.menu_handle(format!("title-model-{}", provider.id()), cx);
+        let weak = cx.entity().downgrade();
+        div()
+            .mt(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text)
+                            .child(tr!("providers.title_model")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("providers.title_model_description")),
+                    ),
+            )
+            .child(dropdown_menu(
+                MenuChip::new(format!("title-model-selector-{}", provider.id()))
+                    .label(label)
+                    .outlined()
+                    .selected(handle.is_open())
+                    .w(px(180.0))
+                    .justify_between(),
+                format!("title-model-menu-{}", provider.id()),
+                &handle,
+                MenuAlign::BelowRight,
+                move |_| {
+                    let mut items = vec![{
+                        let weak = weak.clone();
+                        MenuItem::new(
+                            if default.is_some() {
+                                tr!("providers.title_model_default")
+                            } else {
+                                tr!("providers.title_model_disabled")
+                            },
+                            move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_title_model(provider, None, cx)
+                                });
+                            },
+                        )
+                        .selected(selected.is_none())
+                    }];
+                    items.extend(models.iter().map(|model| {
+                        let weak = weak.clone();
+                        let id = model.id.clone();
+                        let chosen = selected.as_deref() == Some(id.as_str());
+                        MenuItem::new(model.name.clone(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_title_model(provider, Some(id.clone()), cx)
+                            });
+                        })
+                        .selected(chosen)
+                    }));
+                    items
+                },
+            ))
     }
 
     /// The expanded row's setup block: the provider's documented install and
@@ -12972,6 +13087,7 @@ fn eval_feature_label(feature: &str) -> String {
     match feature {
         "evaluate" => tr!("routing.feature_evaluate"),
         "turn-status" => tr!("routing.feature_turn_status"),
+        "title-quality" => tr!("routing.feature_title_quality"),
         "route" => tr!("routing.feature_route"),
         "route-effort" => tr!("routing.feature_route_effort"),
         "route-phase" => tr!("routing.feature_route_phase"),
@@ -12996,6 +13112,7 @@ fn eval_feature_description(feature: &str) -> Option<String> {
     Some(match feature {
         "evaluate" => tr!("routing.feature_evaluate_description"),
         "turn-status" => tr!("routing.feature_turn_status_description"),
+        "title-quality" => tr!("routing.feature_title_quality_description"),
         "route" => tr!("routing.feature_route_description"),
         "route-effort" => tr!("routing.feature_route_effort_description"),
         "route-phase" => tr!("routing.feature_route_phase_description"),

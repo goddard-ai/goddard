@@ -270,8 +270,19 @@ impl Waku {
                 }
             }
             DriverEvent::AutoTitleUpdated(title) => {
-                if let Some(session) = self.state.session_mut(session_id) {
-                    session.set_auto_title(title);
+                let finished_turn = self.state.session_mut(session_id).and_then(|session| {
+                    if !session.set_auto_title(title) || session.active_turn_id().is_some() {
+                        return None;
+                    }
+                    session
+                        .turns
+                        .iter()
+                        .rev()
+                        .find(|turn| turn.status == TurnStatus::Completed)
+                        .map(|turn| turn.id)
+                });
+                if let Some(turn_id) = finished_turn {
+                    self.check_session_title_quality(session_id, Some(turn_id), None, cx);
                 }
             }
             DriverEvent::AvailableCommands(names) => {
@@ -867,6 +878,12 @@ impl Waku {
                         cx,
                     );
                     self.note_turn_finished_for_phase_eval(
+                        session_id,
+                        finished_turn_id,
+                        summary.clone(),
+                        cx,
+                    );
+                    self.check_session_title_quality(
                         session_id,
                         finished_turn_id,
                         summary.clone(),

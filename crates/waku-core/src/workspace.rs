@@ -237,6 +237,21 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         } => WorkspaceResult::CommitMessage {
             message: crate::git_commit::generate_message(&cwd, include_unstaged, &invocation)?,
         },
+        WorkspaceOperation::GenerateSessionTitle {
+            cwd,
+            current_title,
+            user_request,
+            completion,
+            invocation,
+        } => WorkspaceResult::SessionTitle {
+            title: crate::git_commit::generate_session_title(
+                &cwd,
+                &current_title,
+                &user_request,
+                &completion,
+                &invocation,
+            )?,
+        },
         WorkspaceOperation::GenerateTerminalCommand {
             cwd,
             request,

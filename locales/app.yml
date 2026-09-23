@@ -887,6 +887,20 @@ experiments.memory_models_caption:
   en: Model that distills each provider's finished sessions into memory — a background run, so an expensive interactive pick never applies. The provider's default is used unless you pick one here.
 experiments.memory_model_default:
   en: Provider default
+providers.title_model:
+  en: Title cleanup model
+providers.title_model_description:
+  en: When Jev is configured, it checks finished tasks for confusing titles; this model rewrites them. Claude and Codex have inexpensive defaults. Choose a model for other supported providers.
+providers.title_model_default:
+  en: Use inexpensive default
+providers.title_model_disabled:
+  en: Off until a model is chosen
+providers.title_model_choose:
+  en: Choose a model
+routing.feature_title_quality:
+  en: Task titles
+routing.feature_title_quality_description:
+  en: Checks whether an automatic task title is confusing or noisy.
 experiments.project_map_title:
   en: Project map
 experiments.project_map_description:

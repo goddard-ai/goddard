@@ -834,6 +834,14 @@ pub enum WorkspaceOperation {
         include_unstaged: bool,
         invocation: AgentInvocation,
     },
+    GenerateSessionTitle {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        current_title: String,
+        user_request: String,
+        completion: String,
+        invocation: AgentInvocation,
+    },
     /// One-shot agent generation of a shell command for a terminal's
     /// command bar. `scrollback` is the client's recent terminal output and
     /// `shell` the PTY's shell name — both arrive already bounded.
@@ -1327,6 +1335,9 @@ pub enum WorkspaceResult {
     },
     CommitMessage {
         message: String,
+    },
+    SessionTitle {
+        title: String,
     },
     TerminalCommand {
         command: String,

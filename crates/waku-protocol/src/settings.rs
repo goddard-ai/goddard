@@ -78,6 +78,11 @@ pub struct DaemonSettings {
     /// catalog model id handed to that provider's headless driver.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub memory_models: BTreeMap<ProviderKind, String>,
+    /// Preferred inexpensive model for background session title rewrites.
+    /// Claude and Codex have inexpensive defaults; other supported providers
+    /// need a selected model before background title rewrites can run.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub title_models: BTreeMap<ProviderKind, String>,
     /// Experimental opt-in for the MCP integrations pane and the daemon's
     /// local MCP proxy. Defaults on in development builds, opt-in in release.
     pub integrations_enabled: bool,
@@ -150,6 +155,7 @@ impl Default for DaemonSettings {
             auto_prompts: crate::auto_prompts::default_rules(),
             memory_experiment_enabled: default_experiment_enabled(),
             memory_models: BTreeMap::new(),
+            title_models: BTreeMap::new(),
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),

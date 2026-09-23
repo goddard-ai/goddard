@@ -167,6 +167,33 @@ pub fn generate_message(
     })
 }
 
+/// A bounded label for a completed task. The prompt supplies all context and
+/// forbids tools so this request cannot alter the task's workspace.
+pub fn generate_session_title(
+    cwd: &Path,
+    current_title: &str,
+    user_request: &str,
+    completion: &str,
+    invocation: &AgentInvocation,
+) -> anyhow::Result<String> {
+    let prompt = format!(
+        "Write a clear, specific title for this completed task. Return exactly one line, at most 80 characters, without quotes, Markdown, or a trailing period. Do not call tools.\n\nCurrent title: {}\nUser request: {}\nOutcome: {}",
+        current_title.chars().take(160).collect::<String>(),
+        user_request.chars().take(2_000).collect::<String>(),
+        completion.chars().take(2_000).collect::<String>(),
+    );
+    let output = agent_oneshot_with_model(cwd, &prompt, invocation, "a task title", true)?;
+    let title = output.trim().trim_matches(['"', '\'', '`']).trim();
+    let title = title.trim_end_matches('.');
+    if title.is_empty() || title.contains('\n') || title.chars().count() > 80 {
+        bail!(
+            "{} returned an invalid task title",
+            invocation.provider.display_name()
+        );
+    }
+    Ok(title.to_owned())
+}
+
 /// Shared one-shot provider invocation for generated text — commit subjects
 /// and terminal commands take the same path. `description` names what was
 /// being generated in failure messages ("a commit message"). Returns the
@@ -176,6 +203,18 @@ pub(crate) fn agent_oneshot(
     prompt: &str,
     invocation: &AgentInvocation,
     description: &str,
+) -> anyhow::Result<String> {
+    agent_oneshot_with_model(cwd, prompt, invocation, description, false)
+}
+
+/// Run an isolated text request using the caller's selected model, including
+/// for providers whose commit-message path pins a separate cheap tier.
+pub(crate) fn agent_oneshot_with_model(
+    cwd: &Path,
+    prompt: &str,
+    invocation: &AgentInvocation,
+    description: &str,
+    use_requested_model: bool,
 ) -> anyhow::Result<String> {
     let amp_settings = if invocation.provider == ProviderKind::Amp {
         let path = std::env::temp_dir().join(format!("waku-amp-commit-{}.json", Uuid::new_v4()));
@@ -188,13 +227,24 @@ pub(crate) fn agent_oneshot(
     } else {
         None
     };
-    let mut args = agent_arguments(
-        invocation.provider,
-        invocation.model.as_deref(),
-        invocation.reasoning_effort.as_deref(),
-        prompt,
-        amp_settings.as_deref(),
-    );
+    let mut args = if use_requested_model {
+        agent_arguments_with_model(
+            invocation.provider,
+            invocation.model.as_deref(),
+            invocation.reasoning_effort.as_deref(),
+            prompt,
+            amp_settings.as_deref(),
+            true,
+        )
+    } else {
+        agent_arguments(
+            invocation.provider,
+            invocation.model.as_deref(),
+            invocation.reasoning_effort.as_deref(),
+            prompt,
+            amp_settings.as_deref(),
+        )
+    };
     if invocation.provider == ProviderKind::Muse && muse_supports_no_session_log(&invocation.binary)
     {
         // Keep a commit-subject run out of the user's session history.
@@ -328,6 +378,24 @@ pub(crate) fn agent_arguments(
     prompt: &str,
     amp_settings: Option<&Path>,
 ) -> Vec<OsString> {
+    agent_arguments_with_model(
+        provider,
+        model,
+        reasoning_effort,
+        prompt,
+        amp_settings,
+        false,
+    )
+}
+
+fn agent_arguments_with_model(
+    provider: ProviderKind,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+    prompt: &str,
+    amp_settings: Option<&Path>,
+    use_requested_model: bool,
+) -> Vec<OsString> {
     let mut args = Vec::<OsString>::new();
     fn push(args: &mut Vec<OsString>, value: &str) {
         args.push(OsString::from(value));
@@ -374,9 +442,23 @@ pub(crate) fn agent_arguments(
             push(&mut args, "--no-session-persistence");
             push(&mut args, "--no-chrome");
             push(&mut args, "--model");
-            push(&mut args, CLAUDE_COMMIT_MODEL);
+            push(
+                &mut args,
+                if use_requested_model {
+                    model.unwrap_or(CLAUDE_COMMIT_MODEL)
+                } else {
+                    CLAUDE_COMMIT_MODEL
+                },
+            );
             push(&mut args, "--effort");
-            push(&mut args, CLAUDE_COMMIT_EFFORT);
+            push(
+                &mut args,
+                if use_requested_model {
+                    reasoning_effort.unwrap_or(CLAUDE_COMMIT_EFFORT)
+                } else {
+                    CLAUDE_COMMIT_EFFORT
+                },
+            );
         }
         ProviderKind::Codex => {
             push(&mut args, "exec");
@@ -387,9 +469,23 @@ pub(crate) fn agent_arguments(
             push(&mut args, "never");
             push(&mut args, "--skip-git-repo-check");
             push(&mut args, "--model");
-            push(&mut args, CODEX_COMMIT_MODEL);
+            push(
+                &mut args,
+                if use_requested_model {
+                    model.unwrap_or(CODEX_COMMIT_MODEL)
+                } else {
+                    CODEX_COMMIT_MODEL
+                },
+            );
             push(&mut args, "-c");
-            push(&mut args, CODEX_COMMIT_EFFORT);
+            push(
+                &mut args,
+                if use_requested_model && model.is_some_and(|model| model != CODEX_COMMIT_MODEL) {
+                    r#"model_reasoning_effort="low""#
+                } else {
+                    CODEX_COMMIT_EFFORT
+                },
+            );
         }
         // Copilot's single-shot mode is `-p`; `--silent` keeps stdout to the
         // answer alone and custom instructions stay off so a repo's own
@@ -1185,5 +1281,20 @@ mod tests {
         assert!(has_pair(&codex, "-c", CODEX_COMMIT_EFFORT));
         assert!(!has(&codex, "gpt-5.6-sol"));
         assert!(!has(&codex, "high"));
+    }
+
+    #[test]
+    fn title_generation_uses_the_selected_provider_model() {
+        for provider in [ProviderKind::Claude, ProviderKind::Codex] {
+            let args = agent_arguments_with_model(
+                provider,
+                Some("my-inexpensive-model"),
+                None,
+                "Write title",
+                None,
+                true,
+            );
+            assert!(has_pair(&args, "--model", "my-inexpensive-model"));
+        }
     }
 }

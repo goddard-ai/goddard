@@ -1687,6 +1687,8 @@ pub struct PersistedState {
     /// mirrored here so the settings surface can read and edit them.
     #[serde(skip)]
     pub memory_models: std::collections::BTreeMap<ProviderKind, String>,
+    #[serde(skip)]
+    pub title_models: std::collections::BTreeMap<ProviderKind, String>,
     /// Experimental: whether new sessions get the workspace project map
     /// prepended to their first prompt. Daemon-owned; mirrored here so
     /// clients can render the toggle.
@@ -1954,6 +1956,7 @@ impl PersistedState {
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
             memory_models: Default::default(),
+            title_models: Default::default(),
             project_map_enabled: default_experiment_enabled(),
             eval: None,
             route_classes: Default::default(),
@@ -2187,6 +2190,7 @@ impl PersistedState {
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
             memory_models: self.memory_models.clone(),
+            title_models: self.title_models.clone(),
             project_map_enabled: self.project_map_enabled,
             custom_commands: self.custom_commands.clone(),
             eval: self.eval.clone(),
@@ -2219,6 +2223,7 @@ impl PersistedState {
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
         self.memory_models = settings.memory_models;
+        self.title_models = settings.title_models;
         self.project_map_enabled = settings.project_map_enabled;
         self.custom_commands = settings.custom_commands;
         self.eval = settings.eval;

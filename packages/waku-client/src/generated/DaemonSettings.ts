@@ -82,6 +82,12 @@ memory_experiment_enabled: boolean,
  */
 memory_models?: { [key in ProviderKind]?: string },
 /**
+ * Preferred inexpensive model for background session title rewrites.
+ * Claude and Codex have inexpensive defaults; other supported providers
+ * need a selected model before background title rewrites can run.
+ */
+title_models?: { [key in ProviderKind]?: string },
+/**
  * Experimental opt-in for the MCP integrations pane and the daemon's
  * local MCP proxy. Defaults on in development builds, opt-in in release.
  */

@@ -2582,6 +2582,9 @@ pub struct Waku {
     /// Sessions with a phase evaluation in flight — keyed by session, not
     /// turn, because the answer moves the session's model and only the
     /// freshest verdict matters.
+    title_quality_in_flight: HashSet<Uuid>,
+    title_quality_tx: Sender<(Uuid, String, Option<String>)>,
+    title_quality_events: Receiver<(Uuid, String, Option<String>)>,
     phase_eval_in_flight: HashSet<Uuid>,
     phase_eval_tx: Sender<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     phase_eval_events: Receiver<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
@@ -3617,6 +3620,7 @@ mod sync_branch;
 mod task_switcher;
 mod terminal_close_dialog;
 mod terminals;
+mod title_quality;
 mod transcript;
 mod transcript_search;
 mod transcript_view;
@@ -4924,6 +4928,7 @@ impl Waku {
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
+        let (title_quality_tx, title_quality_events) = unbounded();
         let (phase_eval_tx, phase_eval_events) = unbounded();
         let (action_prediction_tx, action_prediction_events) = unbounded();
         #[cfg(target_os = "macos")]
@@ -6083,6 +6088,9 @@ impl Waku {
                 status_marker_in_flight: HashSet::new(),
                 status_marker_tx,
                 status_marker_events,
+                title_quality_in_flight: HashSet::new(),
+                title_quality_tx,
+                title_quality_events,
                 phase_eval_in_flight: HashSet::new(),
                 phase_eval_tx,
                 phase_eval_events,
