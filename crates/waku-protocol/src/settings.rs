@@ -64,7 +64,9 @@ pub struct DaemonSettings {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub route_classes: RouteClassMap,
     /// User-authorized Jev rules that may send a follow-up after a task turn.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// An absent key seeds the shipped defaults; an explicit empty list
+    /// means the user removed them, so the field always serializes.
+    #[serde(default = "crate::auto_prompts::default_rules")]
     pub auto_prompts: Vec<AutoPromptRule>,
     /// Experimental opt-in for project memory: the daemon maintains a
     /// `.goddard/memory/` store per project, distills finished turns into it
@@ -145,7 +147,7 @@ impl Default for DaemonSettings {
             provider_binary_overrides: HashMap::new(),
             eval: None,
             route_classes: RouteClassMap::new(),
-            auto_prompts: Vec::new(),
+            auto_prompts: crate::auto_prompts::default_rules(),
             memory_experiment_enabled: default_experiment_enabled(),
             memory_models: BTreeMap::new(),
             integrations_enabled: default_experiment_enabled(),

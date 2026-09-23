@@ -156,6 +156,46 @@ mod tests {
     }
 
     #[test]
+    fn absent_auto_prompts_seed_the_shipped_defaults() {
+        let path = std::env::temp_dir().join(format!("waku-settings-{}.json", Uuid::new_v4()));
+        fs::write(&path, r#"{"computer_use_enabled":true}"#).unwrap();
+
+        let store = DaemonSettingsStore::open(path.clone()).unwrap();
+        let settings = store.get();
+        assert_eq!(
+            settings.auto_prompts,
+            waku_protocol::auto_prompts::default_rules()
+        );
+        assert!(settings.auto_prompts.iter().all(|rule| rule.enabled));
+        store.replace(settings).unwrap();
+
+        // Once written, the seeded rule survives reloads.
+        let store = DaemonSettingsStore::open(path.clone()).unwrap();
+        assert_eq!(
+            store.get().auto_prompts,
+            waku_protocol::auto_prompts::default_rules()
+        );
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn explicit_empty_auto_prompts_stay_empty() {
+        let path = std::env::temp_dir().join(format!("waku-settings-{}.json", Uuid::new_v4()));
+        fs::write(&path, r#"{"auto_prompts":[]}"#).unwrap();
+
+        let store = DaemonSettingsStore::open(path.clone()).unwrap();
+        assert!(store.get().auto_prompts.is_empty());
+        store.replace(store.get()).unwrap();
+
+        // An emptied list serializes explicitly, so reloads must not reseed.
+        let value: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value["auto_prompts"], Value::Array(Vec::new()));
+        let store = DaemonSettingsStore::open(path.clone()).unwrap();
+        assert!(store.get().auto_prompts.is_empty());
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
     fn corrupt_current_settings_are_quarantined_and_replaced() {
         let directory = std::env::temp_dir().join(format!("waku-settings-{}", Uuid::new_v4()));
         let path = directory.join("settings.json");

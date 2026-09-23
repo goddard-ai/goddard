@@ -29,6 +29,36 @@ pub struct AutoPromptRule {
     pub enabled: bool,
 }
 
+/// The built-in rules seeded into `DaemonSettings.auto_prompts` when the
+/// settings document predates the field. Fixed ids let a future release
+/// recognize a shipped rule even after the user edits it.
+pub fn default_rules() -> Vec<AutoPromptRule> {
+    vec![AutoPromptRule {
+        id: Uuid::from_u128(0x161bb5c7_f758_410c_9d39_a93483d1ad38),
+        name: "Sharpen complex answers".into(),
+        prompt: "I need to understand this quickly. Please sharpen your explanation.".into(),
+        questions: vec![
+            AutoPromptQuestion {
+                id: Uuid::from_u128(0x07cb3e33_a1f5_4c8c_a4d7_a2d3dac7ac6f),
+                instructions: "Read the user's prompt and the agent's response. Is the \
+                    response likely to overwhelm the user — longer, denser, or broader \
+                    than what they asked for and can quickly act on?"
+                    .into(),
+                weight: Some(1.0),
+            },
+            AutoPromptQuestion {
+                id: Uuid::from_u128(0x68fc32f8_9c2c_416f_a37f_f94cdd135148),
+                instructions: "Could the response's essential answer be delivered in a \
+                    much shorter reply without losing what the user needs?"
+                    .into(),
+                weight: Some(0.5),
+            },
+        ],
+        threshold: Some(0.65),
+        enabled: true,
+    }]
+}
+
 impl AutoPromptRule {
     pub fn valid_for_dispatch(&self) -> bool {
         self.enabled && self.valid_for_dispatch_without_enabled()
