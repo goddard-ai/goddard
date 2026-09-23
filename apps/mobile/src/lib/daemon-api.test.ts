@@ -109,6 +109,7 @@ describe('mobile daemon API', () => {
       projects: [project],
       liveSessionIds: ['live'],
       sessions: [],
+      sessionTails: [],
     });
   });
 });
