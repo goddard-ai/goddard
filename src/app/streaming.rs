@@ -403,6 +403,7 @@ impl Waku {
                         && self.state.selected_session == Some(session_id);
                     let item = ActivityItem::new(id, kind, title, detail, complete);
                     self.observe_foreground_command_activity(session_id, &item);
+                    self.note_phase_activity(session_id, &item, cx);
                     self.update_activity(session_id, runtime, item);
                     if refresh_branch {
                         self.refresh_selected_branch_snapshot(cx);
@@ -415,6 +416,7 @@ impl Waku {
                         should_refresh_branch_after_activity(item.kind, item.complete)
                             && self.state.selected_session == Some(session_id);
                     self.observe_foreground_command_activity(session_id, &item);
+                    self.note_phase_activity(session_id, &item, cx);
                     self.update_activity(session_id, runtime, item);
                     if refresh_branch {
                         self.refresh_selected_branch_snapshot(cx);
@@ -848,6 +850,12 @@ impl Waku {
                         cx,
                     );
                     self.note_turn_finished_for_action_predictions(
+                        session_id,
+                        finished_turn_id,
+                        summary.clone(),
+                        cx,
+                    );
+                    self.note_turn_finished_for_phase_eval(
                         session_id,
                         finished_turn_id,
                         summary.clone(),

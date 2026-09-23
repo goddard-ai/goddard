@@ -167,6 +167,7 @@ export type { ServerMessage } from "./ServerMessage";
 export type { SessionEnvironment } from "./SessionEnvironment";
 export type { SessionMessageMatch } from "./SessionMessageMatch";
 export type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
+export type { SessionPhase } from "./SessionPhase";
 export type { SessionStatus } from "./SessionStatus";
 export type { SessionWorkspace } from "./SessionWorkspace";
 export type { SharedProjectInfo } from "./SharedProjectInfo";

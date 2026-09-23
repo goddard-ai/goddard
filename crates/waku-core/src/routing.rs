@@ -36,6 +36,15 @@ choice is unclear.";
 /// the session keeps the default route.
 const MIN_CLASS_CONFIDENCE: f64 = 0.55;
 
+const NEEDS_PLANNING_INSTRUCTIONS: &str = "Does this task warrant a distinct planning phase — \
+exploring unfamiliar code, weighing approaches, or decomposing work — before implementation? \
+Answer high for ambiguous, multi-step, or design-sensitive tasks; low for mechanical or \
+single-step work whose approach is already obvious.";
+
+/// The planning answer must clear this probability before the session is
+/// marked phased; below it the task runs its class target end to end.
+const MIN_PLANNING_PROBABILITY: f64 = 0.6;
+
 /// Route one new-session submission. Never fails hard: every degraded path
 /// still returns a usable target with the reason recorded.
 pub fn route_task(
@@ -52,6 +61,9 @@ pub fn route_task(
     // resolution produced — including fallback targets.
     let mut class_answered: Option<TaskClass> = None;
     let mut class_confidence: Option<f64> = None;
+    // Whether the task earned a planning phase — applied onto whichever
+    // resolution path ran, including fallbacks that skip the eval entirely.
+    let mut phased = false;
 
     let (target, reasons) = 'resolve: {
         if candidates.is_empty() {
@@ -99,10 +111,22 @@ pub fn route_task(
             break 'resolve default(vec!["low-class-confidence"]);
         }
 
-        match classes.get(&class) {
+        phased = matches!(
+            evaluation.answers.get("needs_planning"),
+            Some(EvalAnswer::Noul { noul }) if *noul >= MIN_PLANNING_PROBABILITY
+        );
+        // A plan-worthy task starts on the hardest-class entry whatever its
+        // own class — the planning phase is what the frontier model is for,
+        // and the boundary downshift pays the spend back. An unmapped hard
+        // entry falls back to the task's own class entry.
+        let start_class = if phased { TaskClass::Demanding } else { class };
+        match classes.get(&start_class).or_else(|| classes.get(&class)) {
             Some(entry) => {
                 let (target, note) = resolve_entry(entry, candidates, last_used);
                 let mut reasons = vec!["class-map"];
+                if start_class != class {
+                    reasons.push("phase-planning");
+                }
                 reasons.extend(note);
                 (target, reasons)
             }
@@ -114,6 +138,7 @@ pub fn route_task(
         target,
         class: class_answered,
         class_confidence,
+        phased,
         reason: reasons.join("+"),
         backend: eval_settings.map(|settings| settings.backend),
         eval_latency_ms: Some(started.elapsed().as_millis() as u64),
@@ -125,26 +150,35 @@ pub fn route_task(
 /// The question every route asks, shared so the decision log can reconstruct
 /// exactly what the classifier saw.
 pub fn routing_questions() -> BTreeMap<String, EvalQuestion> {
-    BTreeMap::from([(
-        "class".to_owned(),
-        EvalQuestion::Choice {
-            instructions: CLASS_INSTRUCTIONS.to_owned(),
-            criteria: BTreeMap::from([
-                (
-                    "easy".to_owned(),
-                    Some("mechanical, low-risk, or single-step work".to_owned()),
-                ),
-                (
-                    "medium".to_owned(),
-                    Some("ordinary work; the default".to_owned()),
-                ),
-                (
-                    "hard".to_owned(),
-                    Some("subtle, high-stakes, or long-horizon work".to_owned()),
-                ),
-            ]),
-        },
-    )])
+    BTreeMap::from([
+        (
+            "class".to_owned(),
+            EvalQuestion::Choice {
+                instructions: CLASS_INSTRUCTIONS.to_owned(),
+                criteria: BTreeMap::from([
+                    (
+                        "easy".to_owned(),
+                        Some("mechanical, low-risk, or single-step work".to_owned()),
+                    ),
+                    (
+                        "medium".to_owned(),
+                        Some("ordinary work; the default".to_owned()),
+                    ),
+                    (
+                        "hard".to_owned(),
+                        Some("subtle, high-stakes, or long-horizon work".to_owned()),
+                    ),
+                ]),
+            },
+        ),
+        (
+            "needs_planning".to_owned(),
+            EvalQuestion::Noul {
+                instructions: NEEDS_PLANNING_INSTRUCTIONS.to_owned(),
+                criteria: None,
+            },
+        ),
+    ])
 }
 
 fn choice_answer(evaluation: &Evaluation, key: &str) -> Option<(String, Option<f64>)> {

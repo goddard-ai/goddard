@@ -10,6 +10,7 @@ import type { RouteDecision } from "./RouteDecision";
 import type { RuntimeEventCursor } from "./RuntimeEventCursor";
 import type { RuntimeMode } from "./RuntimeMode";
 import type { SessionEnvironment } from "./SessionEnvironment";
+import type { SessionPhase } from "./SessionPhase";
 import type { SessionStatus } from "./SessionStatus";
 import type { SessionWorkspace } from "./SessionWorkspace";
 import type { SuspendedProviderSession } from "./SuspendedProviderSession";
@@ -79,7 +80,14 @@ auto_route?: boolean,
  * The routing decision that produced this session's provider and model.
  * Present only on sessions that started through Auto.
  */
-route_decision?: RouteDecision | null, status: SessionStatus, created_at: number,
+route_decision?: RouteDecision | null,
+/**
+ * Where the task sits in a plan-then-execute lifecycle — `None` until
+ * the tool stream produces a signal worth classifying. Phase routing
+ * reads it for the sidebar marker and the downshift decision; a rewind
+ * re-derives it from what survives.
+ */
+phase?: SessionPhase | null, status: SessionStatus, created_at: number,
 /**
  * Any mutation, including title edits and truncation. Use
  * [`Self::last_reply_at`] for conversation recency.

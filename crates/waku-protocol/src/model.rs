@@ -1545,6 +1545,12 @@ pub struct AgentSession {
     /// Present only on sessions that started through Auto.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route_decision: Option<RouteDecision>,
+    /// Where the task sits in a plan-then-execute lifecycle — `None` until
+    /// the tool stream produces a signal worth classifying. Phase routing
+    /// reads it for the sidebar marker and the downshift decision; a rewind
+    /// re-derives it from what survives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<crate::routing::SessionPhase>,
     pub status: SessionStatus,
     pub created_at: u64,
     /// Any mutation, including title edits and truncation. Use
@@ -1724,6 +1730,7 @@ impl AgentSession {
             agent_preset: None,
             auto_route: false,
             route_decision: None,
+            phase: None,
             status: SessionStatus::Idle,
             created_at: now,
             updated_at: now,
@@ -1781,6 +1788,8 @@ impl AgentSession {
             agent_preset: None,
             auto_route: self.auto_route,
             route_decision: self.route_decision.clone(),
+            // A sidebar row shows the phase before the session is opened.
+            phase: self.phase,
             status: self.status,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -2635,7 +2644,30 @@ impl AgentSession {
         for block in &mut self.transcript_blocks {
             block.after_message = block.after_message.min(message_count);
         }
+        self.rederive_phase();
         self.updated_at = unix_time();
+    }
+
+    /// Phase is derived state: a rewind can cut back across the
+    /// planning→implementation boundary, so truncation recomputes it from
+    /// the surviving activities rather than trusting what was recorded.
+    fn rederive_phase(&mut self) {
+        let mut saw_activity = false;
+        let committing = self
+            .transcript_blocks
+            .iter()
+            .flat_map(|block| block.activities.iter())
+            .any(|activity| {
+                saw_activity = true;
+                activity.phase_signal() == crate::routing::PhaseSignal::Committing
+            });
+        self.phase = if committing {
+            Some(crate::routing::SessionPhase::Executing)
+        } else if saw_activity {
+            Some(crate::routing::SessionPhase::Planning)
+        } else {
+            None
+        };
     }
 
     pub fn fork_through_turn(
@@ -3820,6 +3852,39 @@ impl ActivityItem {
         self
     }
 
+    /// What this activity says about a session's planning→implementation
+    /// boundary. Runs on every streamed event and on rewind re-derivation,
+    /// so it stays deterministic and free of evaluation calls: a durable
+    /// edit to a non-doc path commits to execution, a shell command or a
+    /// doc-shaped write stays ambiguous, and everything else is planning
+    /// evidence.
+    pub fn phase_signal(&self) -> crate::routing::PhaseSignal {
+        use crate::routing::PhaseSignal;
+        if self.failed {
+            // A refused or failed write is still the agent deciding — not a
+            // commitment the turn followed through on.
+            return PhaseSignal::Ambiguous;
+        }
+        match self.kind {
+            ActivityKind::FileChange => {
+                let doc_only = if self.file_changes.is_empty() {
+                    self.display_target.as_deref().is_some_and(plan_doc_shaped)
+                } else {
+                    self.file_changes
+                        .iter()
+                        .all(|change| plan_doc_shaped(&change.path))
+                };
+                if doc_only {
+                    PhaseSignal::Ambiguous
+                } else {
+                    PhaseSignal::Committing
+                }
+            }
+            ActivityKind::Command => PhaseSignal::Ambiguous,
+            _ => PhaseSignal::Planning,
+        }
+    }
+
     /// Extracts the common tool-input shapes emitted by every provider. This
     /// runs while handling an event (and once for legacy persisted rows), never
     /// from a transcript row builder.
@@ -4133,6 +4198,31 @@ fn is_command_output_image(value: &serde_json::Value) -> bool {
         .and_then(serde_json::Value::as_str);
     matches!(item_type, Some("image" | "inputImage"))
         || (item_type == Some("file") && mime.is_some_and(|mime| mime.starts_with("image/")))
+}
+
+/// Whether a file path reads as the plan itself — a doc, spec, or notes
+/// file. A write whose only targets are doc-shaped is planning output, not
+/// the start of implementation, so it stays ambiguous for the phase signal.
+fn plan_doc_shaped(target: &str) -> bool {
+    let name = Path::new(target)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(target)
+        .to_lowercase();
+    if matches!(
+        name.rsplit('.').next(),
+        Some("md" | "markdown" | "mdx" | "txt" | "rst")
+    ) {
+        return true;
+    }
+    let stem = name.split('.').next().unwrap_or_default();
+    ["plan", "plans", "spec", "design", "rfc", "proposal"]
+        .iter()
+        .any(|word| {
+            stem.strip_prefix(word).is_some_and(|rest| {
+                rest.is_empty() || rest.starts_with('-') || rest.starts_with('_')
+            })
+        })
 }
 
 fn fallback_activity_display_target(kind: ActivityKind, title: &str) -> Option<String> {

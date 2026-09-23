@@ -1824,6 +1824,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         agent_preset: None,
         auto_route: false,
         route_decision: None,
+        phase: None,
         status: serde_json::from_value(serde_json::Value::String(status)).ok()?,
         created_at: created_at as u64,
         updated_at: updated_at as u64,

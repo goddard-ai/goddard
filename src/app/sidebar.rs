@@ -4781,6 +4781,13 @@ impl Waku {
             ))
         .then(|| sidebar_draft_preview(&self.composer_drafts, session))
         .flatten();
+        // The status line is shared: an unsent draft outranks the phase
+        // marker — it is user-owned text — while the marker still shows on
+        // the selected row, which never carries a draft preview.
+        let phase_marker = draft_preview
+            .is_none()
+            .then(|| phases::sidebar_phase_marker(self.state.phase_routing_enabled, session))
+            .flatten();
         let pull_request_badge = self
             .sidebar_pull_requests
             .borrow()
@@ -5006,6 +5013,21 @@ impl Waku {
                         .text_color(draft_color)
                         .child(icon("icons/pencil.svg", 12.0, draft_color))
                         .child(div().flex_1().min_w_0().truncate().child(preview)),
+                )
+            })
+            .when_some(phase_marker, |element, (icon_path, label_key)| {
+                element.child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(15.0))
+                        .text_color(theme.text_tertiary)
+                        .child(icon(icon_path, 12.0, theme.text_tertiary))
+                        .child(div().flex_1().min_w_0().truncate().child(tr!(label_key))),
                 )
             })
             .child(

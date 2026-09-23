@@ -4986,6 +4986,16 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
+                id: "phase-routing-experiment-toggle",
+                title_key: "experiments.phase_routing_title",
+                description_key: "experiments.phase_routing_description",
+                enabled: self.state.phase_routing_enabled,
+                set: Self::set_phase_routing_enabled,
+                eval_backed: true,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
                 id: "computer-use-experiment-toggle",
                 title_key: "experiments.computer_use_title",
                 description_key: "experiments.computer_use_description",
@@ -5578,6 +5588,21 @@ impl Waku {
         }
         self.state.action_predictions_enabled = enabled;
         self.close_jev_page_if_unused();
+        self.save();
+        cx.notify();
+    }
+
+    fn set_phase_routing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.phase_routing_enabled = enabled;
+        if !enabled {
+            self.phase_eval_in_flight.clear();
+        }
+        self.close_jev_page_if_unused();
+        if enabled {
+            // The Jev page reads the eval mirror — warm it rather than
+            // waiting for the first frame to discover it is missing.
+            self.seed_eval_inputs(cx);
+        }
         self.save();
         cx.notify();
     }

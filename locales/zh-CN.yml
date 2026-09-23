@@ -1996,6 +1996,8 @@ experiments.model_router_description: 在模型选择器中新增“自动”。
 experiments.model_router_title: 自动模型路由
 experiments.needs_eval_backend: 使用评估后端 — 尚未配置。
 experiments.open_jev_settings: 打开 Jev 设置
+experiments.phase_routing_description: 评估模型判定需要规划阶段的自动路由任务，先用最强档模型启动，待工具流或评估模型判定规划结束后降一档切换模型 — 实现停滞时会切回。侧边栏任务行显示当前阶段。
+experiments.phase_routing_title: 分阶段路由
 experiments.project_map_description: 为每个新会话提供一份工作区的紧凑结构地图 — 最常被引用文件的顶层符号，预算约 1,000 个令牌 — 让智能体跳过冷启动的仓库探索。对开启后启动的会话生效。
 experiments.project_map_title: 项目地图
 experiments.projects_page_description: 按 ⌘⇧P 打开每个项目的页面，列出其工作树、分支、issue 和拉取请求，⌘⌥1–4 可直接跳转到对应标签页。
@@ -2279,6 +2281,7 @@ routing.feature_provider_switch: 服务商切换
 routing.feature_route: 任务路由
 routing.feature_route_class_suggest: 类别建议
 routing.feature_route_effort: 投入度调整
+routing.feature_route_phase: 阶段判定
 routing.feature_turn_status: 回合状态标记
 routing.in_progress: 正在路由任务…
 routing.last_used: 上次使用
@@ -2496,6 +2499,8 @@ status_markers.needs_review: 待复核
 status_markers.partial: 部分完成
 status_markers.thrash: 反复试错
 status_markers.unverified: 未验证
+phase.planning: 规划中
+phase.executing: 执行中
 sync_branch.busy: 另一个 Git 操作仍在运行
 sync_branch.current: 当前分支
 sync_branch.loading: 正在加载分支…

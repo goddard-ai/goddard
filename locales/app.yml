@@ -773,6 +773,10 @@ experiments.action_predictions_title:
   en: Action predictions
 experiments.action_predictions_description:
   en: When an assistant turn ends, the evaluation model predicts your next move from a fixed set — follow-up prompts, Git actions, session management — and a local journal of consequential actions resolves each prediction. Nothing is suggested yet; verdicts are logged to ~/.goddard/action-predictions.jsonl to measure accuracy first.
+experiments.phase_routing_title:
+  en: Phase-aware routing
+experiments.phase_routing_description:
+  en: Auto-routed tasks the evaluator judges plan-worthy start on your hardest-class model, then downshift one class tier once the tool stream or the evaluator says planning ended — and climb back if implementation stalls. Sidebar rows show the task's phase.
 experiments.sidebar_dock_title:
   en: Sidebar dock
 experiments.sidebar_dock_description:
@@ -831,6 +835,10 @@ status_markers.thrash:
   en: Thrashing
 status_markers.assumed:
   en: Assumed
+phase.planning:
+  en: Planning
+phase.executing:
+  en: Executing
 routing.backend:
   en: Evaluation backend
 routing.backend_description:
@@ -927,6 +935,8 @@ routing.feature_route_effort:
   en: Effort adjustment
 routing.feature_route_class_suggest:
   en: Class suggestions
+routing.feature_route_phase:
+  en: Phase boundaries
 routing.feature_provider_switch:
   en: Provider switching
 routing.feature_memory_rank:

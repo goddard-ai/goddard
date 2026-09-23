@@ -2404,6 +2404,12 @@ pub struct Waku {
     status_marker_in_flight: HashSet<Uuid>,
     status_marker_tx: Sender<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     status_marker_events: Receiver<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
+    /// Sessions with a phase evaluation in flight — keyed by session, not
+    /// turn, because the answer moves the session's model and only the
+    /// freshest verdict matters.
+    phase_eval_in_flight: HashSet<Uuid>,
+    phase_eval_tx: Sender<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
+    phase_eval_events: Receiver<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     /// The action journal's in-memory tail — the `recentActions` prior each
     /// prediction's state carries. The file is the durable record.
     action_journal: VecDeque<action_predictions::JournalRecord>,
@@ -3368,6 +3374,7 @@ mod issue_dialog;
 mod keybindings_page;
 mod keyboard_options;
 mod notifications;
+mod phases;
 mod project_switcher;
 mod projects;
 mod provider_switch;
@@ -4653,6 +4660,7 @@ impl Waku {
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
+        let (phase_eval_tx, phase_eval_events) = unbounded();
         let (action_prediction_tx, action_prediction_events) = unbounded();
         #[cfg(target_os = "macos")]
         if state.computer_use_experiment_enabled {
@@ -5758,6 +5766,9 @@ impl Waku {
                 status_marker_in_flight: HashSet::new(),
                 status_marker_tx,
                 status_marker_events,
+                phase_eval_in_flight: HashSet::new(),
+                phase_eval_tx,
+                phase_eval_events,
                 action_journal: action_predictions::load_action_journal(),
                 pending_action_predictions: Vec::new(),
                 action_suggestion: None,

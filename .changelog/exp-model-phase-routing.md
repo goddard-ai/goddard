@@ -1,0 +1,1 @@
+- Phase-aware routing (requires Auto model routing): tasks the evaluator judges plan-worthy open on your hardest-class model, downshift one class tier once the tool stream or the evaluator says planning ended, and climb back if implementation stalls — sidebar rows show Planning/Executing while it runs.

@@ -13,6 +13,12 @@ export type RouteDecision = { target: RouteTarget, class?: TaskClass | null,
  */
 classConfidence?: number | null,
 /**
+ * The intake evaluation judged this task worth a planning phase: it
+ * started on the hardest-class entry and may downshift a class tier
+ * once planning ends. `false` when the eval skipped the question.
+ */
+phased?: boolean,
+/**
  * Why this target won: "class-map", "class-unmapped",
  * "low-class-confidence", "eval-failed", "eval-unconfigured",
  * "model-ineligible", "provider-ineligible", and friends.

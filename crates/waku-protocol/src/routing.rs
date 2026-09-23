@@ -43,6 +43,45 @@ impl TaskClass {
             TaskClass::Demanding => "hard",
         }
     }
+
+    /// The tier a task drops to once its plan exists — planning absorbed the
+    /// hard reasoning, so implementation runs one class cheaper.
+    pub fn implementation_class(&self) -> TaskClass {
+        match self {
+            TaskClass::Demanding => TaskClass::General,
+            TaskClass::General | TaskClass::Routine => TaskClass::Routine,
+        }
+    }
+}
+
+/// Where a task sits in a plan-then-execute lifecycle. Phase routing derives
+/// it from the tool stream and settle evaluations — descriptive session
+/// state the provider is never told about.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionPhase {
+    /// Reads, searches, and plan tools only so far — no durable edits.
+    Planning,
+    /// The task committed to implementation: a real file change ran, or an
+    /// evaluation judged planning done.
+    Executing,
+}
+
+/// What one streamed activity says about the planning→implementation
+/// boundary. The classifier is deliberately conservative: ambiguous work
+/// waits for the turn-settle evaluation rather than flipping on a guess.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PhaseSignal {
+    /// A durable edit to a non-doc path — unambiguous execution. Flips
+    /// Planning → Executing immediately, no evaluation needed.
+    Committing,
+    /// Could be either side of the boundary: a shell command, or a write
+    /// whose target reads as the plan document itself. Defers to the
+    /// settle evaluation.
+    Ambiguous,
+    /// Reads, searches, plan tools, failures — planning evidence. Never
+    /// flips the phase.
+    Planning,
 }
 
 /// One provider the router may pick, with the model ids the app knows are
@@ -96,6 +135,11 @@ pub struct RouteDecision {
     /// Confidence the backend reported for the class answer, 0–1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class_confidence: Option<f64>,
+    /// The intake evaluation judged this task worth a planning phase: it
+    /// started on the hardest-class entry and may downshift a class tier
+    /// once planning ends. `false` when the eval skipped the question.
+    #[serde(default, skip_serializing_if = "crate::model::is_false")]
+    pub phased: bool,
     /// Why this target won: "class-map", "class-unmapped",
     /// "low-class-confidence", "eval-failed", "eval-unconfigured",
     /// "model-ineligible", "provider-ineligible", and friends.

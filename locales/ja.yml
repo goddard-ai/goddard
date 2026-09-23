@@ -2045,6 +2045,8 @@ experiments.model_router_description: モデル選択に「自動」を追加し
 experiments.model_router_title: 自動モデルルーティング
 experiments.needs_eval_backend: 評価バックエンドを使用します — まだ構成されていません。
 experiments.open_jev_settings: Jev 設定を開く
+experiments.phase_routing_description: 計画フェーズが必要と評価モデルが判定した自動振り分けタスクは、最上位クラスのモデルで開始し、ツールイベントまたは評価モデルが計画の終了を判断した時点で1クラス下のモデルに切り替えます — 実装が停滞した場合は元に戻ります。サイドバーの行にタスクのフェーズを表示します。
+experiments.phase_routing_title: フェーズ対応ルーティング
 experiments.project_map_description: 新しいセッションにワークスペースのコンパクトな構造マップを渡します — 最も参照されるファイルのトップレベルシンボルを約 1,000 トークンに収め、エージェントが初見のリポジトリ探索を省けます。有効化後に開始したセッションに適用されます。
 experiments.project_map_title: プロジェクトマップ
 experiments.projects_page_description: ⌘⇧P でプロジェクトごとのページを開き、ワークツリー、ブランチ、Issue、プルリクエストを一覧します。⌘⌥1–4 でタブに直接移動できます。
@@ -2328,6 +2330,7 @@ routing.feature_provider_switch: プロバイダー切り替え
 routing.feature_route: タスク振り分け
 routing.feature_route_class_suggest: クラス提案
 routing.feature_route_effort: エフォート調整
+routing.feature_route_phase: フェーズ判定
 routing.feature_turn_status: ターン状態マーカー
 routing.in_progress: タスクを振り分け中…
 routing.last_used: 前回使用
@@ -2545,6 +2548,8 @@ status_markers.needs_review: 要レビュー
 status_markers.partial: 一部完了
 status_markers.thrash: 空回り
 status_markers.unverified: 未検証
+phase.planning: 計画中
+phase.executing: 実行中
 sync_branch.busy: 別の Git 操作がまだ実行中です
 sync_branch.current: 現在のブランチ
 sync_branch.loading: ブランチを読み込み中…
