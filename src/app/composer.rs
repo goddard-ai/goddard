@@ -21,6 +21,8 @@ pub(super) const SESSION_DROP_GROUP: &str = "session-file-drop";
 /// opens itself, rather than a block of bytes folded into every draft sync.
 const PASTED_TEXT_FILE_BYTES: usize = 64 * 1024;
 
+const DOUBLE_CHECK_PROMPT: &str = "Double check the parent task's current position. Read its relevant transcript and identify the strongest reasonable challenge to its assumptions, reasoning, or conclusion. Be cordial but firm, specific, and fair. If the human holds a strong belief, acknowledge its importance and apologize briefly if the challenge may feel uncomfortable; then explore the disagreement thoughtfully and respectfully without dismissing the belief. Distinguish evidence from interpretation, concede sound points, and explain what would change your mind. If the parent agent can be messaged, send it one focused challenge and consider its reply. Otherwise, present the challenge here. Do not edit files or take other actions beyond reading and this discussion. If there is no clear position yet, ask the human what they want checked.";
+
 /// Key context the pasted-text editor card declares, so Escape reaches it
 /// as an action whether the field or the card's own controls hold focus.
 pub(super) const PASTED_TEXT_CONTEXT: &str = "PastedText";
@@ -3677,6 +3679,50 @@ impl Waku {
             self.submit_composer_submission_to(side_chat_id, ComposerSubmission::plain(prompt), cx);
         }
         true
+    }
+
+    /// Start a separate, read-only challenge of the current task. The side
+    /// chat receives the parent's transcript index through the usual path.
+    pub(super) fn double_check_action(
+        &mut self,
+        _: &crate::DoubleCheck,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_double_check(cx);
+    }
+
+    pub(super) fn start_double_check(&mut self, cx: &mut Context<Self>) {
+        let Some(parent) = self
+            .composer_session()
+            .filter(|session| session.has_started())
+        else {
+            self.show_toast(tr!("side_chat.no_task"));
+            return;
+        };
+        if parent.is_side_chat() {
+            self.show_toast(tr!("side_chat.no_nesting"));
+            return;
+        }
+        let parent_id = parent.id;
+        let Some(side_chat_id) = self.create_side_chat(parent_id, cx) else {
+            return;
+        };
+        if let Some(side_chat) = self
+            .state
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == side_chat_id)
+        {
+            side_chat.set_title(tr!("shortcuts.double_check"));
+            self.save();
+        }
+        self.open_right_panel_surface(RightPanelSurface::SideChat(side_chat_id), cx);
+        self.submit_composer_submission_to(
+            side_chat_id,
+            ComposerSubmission::plain(DOUBLE_CHECK_PROMPT.to_owned()),
+            cx,
+        );
     }
 
     /// `/incognito [prompt]` — flag the current draft so the task it starts

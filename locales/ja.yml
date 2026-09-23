@@ -2418,6 +2418,7 @@ shortcuts.done: 完了
 shortcuts.exit_fullscreen_panel: 全画面パネルを終了
 shortcuts.file_finder: ファイル検索
 shortcuts.save_prompt_as_template: プロンプトをテンプレートとして保存
+shortcuts.double_check: ダブルチェック…
 shortcuts.find: ファイル内を検索
 shortcuts.find_case: 大文字小文字の区別を切り替える
 shortcuts.find_next: 次の一致

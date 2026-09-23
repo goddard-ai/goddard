@@ -1454,6 +1454,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "composer.double_check",
+        action: || Box::new(crate::DoubleCheck),
+        title_key: "shortcuts.double_check",
+        title_index: None,
+        category: C::Workspace,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "workspace.focus_terminal",
         action: || Box::new(crate::FocusTerminal),
         title_key: "menu.focus_terminal",
@@ -2642,6 +2651,12 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "composer.save_prompt_as_template",
         All,
         "secondary-alt-t",
+        ComposerScope,
+    ),
+    e(
+        "composer.double_check",
+        All,
+        "secondary-alt-c",
         ComposerScope,
     ),
     e("model.cycle_effort", All, "secondary-e", ComposerScope),

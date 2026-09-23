@@ -84,6 +84,7 @@ actions!(
         ToggleGitPanel,
         ToggleCommandPalette,
         SavePromptAsTemplate,
+        DoubleCheck,
         ToggleFileFinder,
         ToggleProjectsPage,
         SelectAllProjectsRows,
@@ -685,6 +686,16 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "secondary-alt-9",
             SelectFavoriteModel { index: 8 },
+            Some("ComposerExists && !Terminal"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-t",
+            SavePromptAsTemplate,
+            Some("ComposerExists && !Terminal"),
+        ),
+        KeyBinding::new(
+            "secondary-alt-c",
+            DoubleCheck,
             Some("ComposerExists && !Terminal"),
         ),
         // ⌘E cycles the composer session's reasoning effort through the

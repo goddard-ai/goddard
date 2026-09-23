@@ -223,6 +223,7 @@ enum PaletteAction {
     NewCustomCommand,
     InsertPromptTemplate(SlashCommand),
     OpenSavePrompt,
+    DoubleCheck,
     SavePromptAs(String),
     RevealPromptTemplates,
     InspectElements,
@@ -2275,6 +2276,20 @@ impl Waku {
             "save create add prompt template composer draft reusable",
             next(),
         ));
+        if self
+            .composer_session()
+            .is_some_and(|session| session.has_started() && !session.is_side_chat())
+        {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Prompts,
+                tr!("shortcuts.double_check"),
+                "icons/chat.svg",
+                Some(ShortcutHint::action(&crate::DoubleCheck)),
+                PaletteAction::DoubleCheck,
+                "challenge critique debate second opinion double check agent",
+                next(),
+            ));
+        }
         commands.push(CommandPaletteItem::command(
             PaletteSection::Prompts,
             tr!("command_palette.open_prompts_folder"),
@@ -3898,6 +3913,7 @@ impl Waku {
             PaletteAction::RemoveProject(project_id) => self.remove_project(project_id, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
             PaletteAction::CreateDraft => self.create_saved_draft(window, cx),
+            PaletteAction::DoubleCheck => self.start_double_check(cx),
             PaletteAction::ViewDrafts => self.open_drafts_page(window, cx),
             PaletteAction::CopyIdentifier(identifier) => {
                 if let Some(value) = identifier.value(self.selected_session()) {
