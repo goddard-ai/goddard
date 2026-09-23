@@ -301,6 +301,7 @@ enum SettingsPage {
     Terminal,
     Appearance,
     Git,
+    Memory,
     Jev,
     Experiments,
     Integrations,
@@ -1767,6 +1768,7 @@ fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
         SettingsPage::Terminal => PersistedSettingsPage::Terminal,
         SettingsPage::Appearance => PersistedSettingsPage::Appearance,
         SettingsPage::Git => PersistedSettingsPage::Git,
+        SettingsPage::Memory => PersistedSettingsPage::Memory,
         SettingsPage::Jev => PersistedSettingsPage::Jev,
         SettingsPage::Experiments => PersistedSettingsPage::Experiments,
         SettingsPage::Integrations => PersistedSettingsPage::Integrations,
@@ -1789,6 +1791,7 @@ fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
         PersistedSettingsPage::Terminal => SettingsPage::Terminal,
         PersistedSettingsPage::Appearance => SettingsPage::Appearance,
         PersistedSettingsPage::Git => SettingsPage::Git,
+        PersistedSettingsPage::Memory => SettingsPage::Memory,
         PersistedSettingsPage::Jev => SettingsPage::Jev,
         PersistedSettingsPage::Experiments => SettingsPage::Experiments,
         PersistedSettingsPage::Integrations => SettingsPage::Integrations,
@@ -3327,6 +3330,12 @@ pub struct Waku {
     /// The Settings → Git page's project selection — which repo's worktrees
     /// and branches the page lists.
     settings_git_project: Option<Uuid>,
+    /// The project and last loaded contents shown by Settings → Memory.
+    settings_memory_project: Option<Uuid>,
+    settings_memory_requested_project: Option<Uuid>,
+    settings_memory_content: Option<projects::ProjectMemoryContent>,
+    settings_memory_generation: u64,
+    settings_memory_page: usize,
     /// Set when the Git page's data should be (re)fetched on its next
     /// render — opening the page or switching its project. Cleared once
     /// `projects_refresh` runs with state in place.
@@ -6441,6 +6450,11 @@ impl Waku {
                 automations_row_focus: cx.focus_handle(),
                 automations_new_focus: cx.focus_handle(),
                 settings_git_project: None,
+                settings_memory_project: None,
+                settings_memory_requested_project: None,
+                settings_memory_content: None,
+                settings_memory_generation: 0,
+                settings_memory_page: 0,
                 git_page_refresh_pending: false,
                 missing_projects: HashSet::new(),
                 project_location_generation: Cell::new(0),

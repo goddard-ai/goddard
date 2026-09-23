@@ -2763,6 +2763,12 @@ impl Waku {
                 "settings preferences git worktrees branches repository checkout",
             ),
             (
+                SettingsPage::Memory,
+                "settings.memory",
+                "icons/book-open.svg",
+                "settings preferences project memory memories change log history",
+            ),
+            (
                 SettingsPage::Usage,
                 "settings.usage",
                 "icons/chart-column.svg",

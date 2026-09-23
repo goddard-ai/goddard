@@ -4482,6 +4482,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Commands,
         SettingsPage::Terminal,
         SettingsPage::Git,
+        SettingsPage::Memory,
         SettingsPage::Usage,
         SettingsPage::Archived,
         SettingsPage::Daemon,

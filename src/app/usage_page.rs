@@ -162,6 +162,9 @@ impl Waku {
         if page == SettingsPage::Git {
             self.git_page_refresh_pending = true;
         }
+        if page == SettingsPage::Memory {
+            self.refresh_memory_settings(cx);
+        }
         if page == SettingsPage::Friends {
             self.probe_friends(cx);
             self.start_friends_presence_loop(cx);

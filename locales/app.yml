@@ -545,6 +545,32 @@ settings.git_keywords:
   en: git worktrees branches repository checkout local repo commits remote prune
 settings.git_no_projects:
   en: Add a project to browse its worktrees and branches.
+settings.memory:
+  en: Memory
+settings.memory_keywords:
+  en: project memory memories change log history notes
+settings.memory_no_projects:
+  en: Add a project to see its memory and change log.
+settings.memory_summary:
+  en: Project memory
+settings.memory_log:
+  en: Change log
+settings.memory_empty:
+  en: No memory has been recorded for this project yet.
+settings.memory_log_empty:
+  en: No changes have been recorded for this project yet.
+settings.memory_refresh:
+  en: Refresh
+settings.memory_unavailable:
+  en: Could not load this project's memory.
+settings.memory_loading:
+  en: Loading project memory…
+settings.memory_disabled:
+  en: Memory is off. Enable it in Settings → Experiments to record new entries.
+settings.memory_older:
+  en: Older
+settings.memory_newer:
+  en: Newer
 settings.archived_keywords:
   en: archived chats conversations hidden history restore unarchive remove
 settings.archived_description:

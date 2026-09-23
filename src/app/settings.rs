@@ -83,7 +83,7 @@ pub(super) struct DaemonQrCode {
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 17] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 18] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -131,6 +131,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 17] = [
         "settings.git",
         "icons/git-branch.svg",
         "settings.git_keywords",
+    ),
+    (
+        SettingsPage::Memory,
+        "settings.memory",
+        "icons/book-open.svg",
+        "settings.memory_keywords",
     ),
     (
         SettingsPage::Usage,
@@ -1309,6 +1315,7 @@ impl Waku {
                         SettingsPage::Terminal => tr!("settings.terminal"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
                         SettingsPage::Git => tr!("settings.git"),
+                        SettingsPage::Memory => tr!("settings.memory"),
                         SettingsPage::Jev => tr!("settings.jev"),
                         SettingsPage::Experiments => tr!("settings.experiments"),
                         SettingsPage::Integrations => tr!("settings.integrations"),
@@ -1329,6 +1336,7 @@ impl Waku {
                 SettingsPage::Terminal => self.render_terminal_settings(&search, cx),
                 SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
                 SettingsPage::Git => self.render_git_settings(window, cx),
+                SettingsPage::Memory => self.render_memory_settings(cx),
                 SettingsPage::Jev => self.render_jev_settings(&search, cx),
                 SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
                 SettingsPage::Integrations => self.render_integrations_settings(cx),

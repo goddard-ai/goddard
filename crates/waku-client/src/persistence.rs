@@ -810,6 +810,7 @@ pub enum PersistedSettingsPage {
     Terminal,
     Appearance,
     Git,
+    Memory,
     Jev,
     Experiments,
     Integrations,

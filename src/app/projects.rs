@@ -19,6 +19,35 @@ use waku_client::{
     GitHubAvailability, PullRequestSummary, RepoBranch, RepoWorktree, WorkItemQueryState,
 };
 
+pub(super) struct ProjectMemoryContent {
+    project_id: Uuid,
+    memory: String,
+    log: Vec<String>,
+    error: Option<String>,
+}
+
+fn read_project_memory_file(
+    workspace: &waku_client::WorkspaceClient,
+    root: &std::path::Path,
+    name: &str,
+) -> Result<String, String> {
+    match workspace.request(waku_client::WorkspaceOperation::ReadTextFile {
+        root: root.to_path_buf(),
+        relative_path: std::path::PathBuf::from(format!(".goddard/memory/{name}")),
+    }) {
+        Ok(waku_client::WorkspaceResult::TextFile { content }) => Ok(content),
+        Ok(_) => Err("unexpected workspace response".into()),
+        Err(error) => {
+            let message = error.to_string();
+            if message.contains("No such file") || message.contains("os error 2") {
+                Ok(String::new())
+            } else {
+                Err(message)
+            }
+        }
+    }
+}
+
 /// The two surfaces' tabs. Issues, Pull Requests, and Activity read through
 /// the daemon's `gh` operations and form the Projects page; Worktrees and
 /// Branches read the local repo and form the Settings → Git page.
@@ -3896,6 +3925,307 @@ impl Waku {
                 }))
                 .into_any_element(),
         )
+    }
+
+    // ----- Settings → Memory page -----
+
+    fn resolve_memory_settings_project(&mut self) -> Option<Uuid> {
+        let valid = |id: &Uuid| {
+            self.state
+                .projects
+                .iter()
+                .any(|project| project.id == *id && !project.is_projectless())
+        };
+        let resolved = self
+            .settings_memory_project
+            .filter(&valid)
+            .or_else(|| self.last_projects_page_project.filter(&valid))
+            .or_else(|| self.state.selected_project.filter(&valid))
+            .or_else(|| {
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| !project.is_projectless())
+                    .map(|project| project.id)
+            });
+        self.settings_memory_project = resolved;
+        resolved
+    }
+
+    pub(super) fn refresh_memory_settings(&mut self, cx: &mut Context<Self>) {
+        let Some(project_id) = self.resolve_memory_settings_project() else {
+            self.settings_memory_requested_project = None;
+            self.settings_memory_content = None;
+            return;
+        };
+        self.settings_memory_requested_project = Some(project_id);
+        self.settings_memory_generation += 1;
+        let generation = self.settings_memory_generation;
+        self.settings_memory_page = 0;
+        self.settings_memory_content = None;
+        let Some(root) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            self.settings_memory_content = Some(ProjectMemoryContent {
+                project_id,
+                memory: String::new(),
+                log: Vec::new(),
+                error: Some(tr!("settings.memory_unavailable")),
+            });
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let content = cx
+                .background_executor()
+                .spawn(async move {
+                    let memory = read_project_memory_file(&workspace, &root, "MEMORY.md");
+                    let log = read_project_memory_file(&workspace, &root, "LOG.txt");
+                    ProjectMemoryContent {
+                        project_id,
+                        memory: memory.as_ref().cloned().unwrap_or_default(),
+                        log: log
+                            .as_ref()
+                            .map(|text| text.lines().rev().map(str::to_owned).collect())
+                            .unwrap_or_default(),
+                        error: memory.err().or_else(|| log.err()),
+                    }
+                })
+                .await;
+            let _ = waku.update(cx, |this, cx| {
+                if this.settings_memory_generation == generation
+                    && this.settings_memory_project == Some(project_id)
+                {
+                    this.settings_memory_content = Some(content);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(super) fn render_memory_settings(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(project_id) = self.resolve_memory_settings_project() else {
+            return div()
+                .mt(px(20.0))
+                .text_color(theme.text_secondary)
+                .child(tr!("settings.memory_no_projects"))
+                .into_any_element();
+        };
+        if self.settings_memory_requested_project != Some(project_id) {
+            self.refresh_memory_settings(cx);
+        }
+        let project_name = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.display_name())
+            .unwrap_or_else(|| tr!("sidebar.unknown_project"));
+        let menu_handle = self.menu_handle("memory-settings-project-selector", cx);
+        let selector_open = menu_handle.is_open();
+        let weak = cx.entity().downgrade();
+        let selector = dropdown_menu(
+            MenuChip::new("memory-settings-project-selector")
+                .icon("icons/folder.svg", theme.text_tertiary)
+                .label(project_name)
+                .outlined()
+                .selected(selector_open)
+                .max_w(px(220.0)),
+            "memory-settings-project-selector-menu",
+            &menu_handle,
+            MenuAlign::BelowLeft,
+            move |cx| {
+                weak.update(cx, |this, _| {
+                    this.state
+                        .projects
+                        .iter()
+                        .filter(|project| !project.is_projectless())
+                        .map(|project| (project.id, project.display_name()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(id, label)| {
+                    let weak = weak.clone();
+                    MenuItem::new(label, move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.settings_memory_project = Some(id);
+                            this.refresh_memory_settings(cx);
+                        });
+                    })
+                    .selected(id == project_id)
+                })
+                .collect()
+            },
+        );
+        let content = self
+            .settings_memory_content
+            .as_ref()
+            .filter(|content| content.project_id == project_id);
+        let body = match content {
+            None => div()
+                .mt(px(24.0))
+                .text_color(theme.text_secondary)
+                .child(tr!("settings.memory_loading"))
+                .into_any_element(),
+            Some(content) => {
+                Self::render_memory_settings_content(content, self.settings_memory_page, cx)
+            }
+        };
+        div()
+            .mt(px(15.0))
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(selector)
+                    .child(super::settings::settings_button(
+                        "memory-settings-refresh",
+                        tr!("settings.memory_refresh"),
+                        true,
+                        false,
+                        true,
+                        theme,
+                        cx,
+                        |this, _, cx| this.refresh_memory_settings(cx),
+                    )),
+            )
+            .when(!self.state.memory_experiment_enabled, |element| {
+                element.child(
+                    div()
+                        .text_color(theme.text_secondary)
+                        .child(tr!("settings.memory_disabled")),
+                )
+            })
+            .child(body)
+            .into_any_element()
+    }
+
+    fn render_memory_settings_content(
+        content: &ProjectMemoryContent,
+        current_page: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        if content.error.is_some() {
+            return div()
+                .text_color(theme.text_secondary)
+                .child(tr!("settings.memory_unavailable"))
+                .into_any_element();
+        }
+        let count = content.log.len();
+        let page = current_page.min(count.saturating_sub(1) / 30);
+        let start = page * 30;
+        let end = (start + 30).min(count);
+        let memory_lines: Vec<String> = content.memory.lines().map(str::to_owned).collect();
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(22.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(tr!("settings.memory_summary")),
+                    )
+                    .child(if memory_lines.is_empty() {
+                        div()
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.memory_empty"))
+                    } else {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .text_color(theme.text_secondary)
+                            .children(
+                                memory_lines.into_iter().map(|line| {
+                                    div().min_h(px(18.0)).whitespace_normal().child(line)
+                                }),
+                            )
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(tr!("settings.memory_log")),
+                    )
+                    .when(count == 0, |element| {
+                        element.child(
+                            div()
+                                .text_color(theme.text_secondary)
+                                .child(tr!("settings.memory_log_empty")),
+                        )
+                    })
+                    .children(content.log[start..end].iter().map(|entry| {
+                        div()
+                            .py(px(7.0))
+                            .border_b(hairline())
+                            .border_color(theme.separator)
+                            .whitespace_normal()
+                            .text_color(theme.text_secondary)
+                            .child(entry.clone())
+                    }))
+                    .when(count > 30, |element| {
+                        element.child(
+                            div()
+                                .flex()
+                                .gap(px(8.0))
+                                .child(super::settings::settings_button(
+                                    "memory-settings-newer",
+                                    tr!("settings.memory_newer"),
+                                    page > 0,
+                                    false,
+                                    true,
+                                    theme,
+                                    cx,
+                                    |this, _, cx| {
+                                        this.settings_memory_page =
+                                            this.settings_memory_page.saturating_sub(1);
+                                        cx.notify();
+                                    },
+                                ))
+                                .child(super::settings::settings_button(
+                                    "memory-settings-older",
+                                    tr!("settings.memory_older"),
+                                    (page + 1) * 30 < count,
+                                    false,
+                                    true,
+                                    theme,
+                                    cx,
+                                    |this, _, cx| {
+                                        this.settings_memory_page += 1;
+                                        cx.notify();
+                                    },
+                                )),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 
     // ----- Settings → Git page -----

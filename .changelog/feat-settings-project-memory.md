@@ -1,0 +1,1 @@
+- Open Settings → Memory to read a project's saved memory and browse its dated change log. New entries require Project memory to be enabled under Experiments.
