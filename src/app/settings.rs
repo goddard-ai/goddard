@@ -1706,6 +1706,7 @@ impl Waku {
             if cfg!(target_os = "macos") {
                 let channel = self.state.update_channel;
                 head_cards.extend(setting_card(
+                    "icons/git-branch.svg",
                     tr!("settings.update_channel"),
                     tr!("settings.update_channel_description"),
                     self.setting_selector(
@@ -5343,6 +5344,7 @@ impl Waku {
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
                 id: "voice-briefing-experiment-toggle",
+                icon: "icons/volume-2.svg",
                 title_key: "experiments.voice_briefing_title",
                 description_key: "experiments.voice_briefing_description",
                 enabled: self.state.voice_briefing_enabled,
