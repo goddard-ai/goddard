@@ -2514,6 +2514,9 @@ sidebar.needs_auth: 需要密码
 sidebar.offline: 离线
 status_markers.assumed: 按假设执行
 status_markers.awaiting_input: 等待输入
+status_markers.go_ahead: 等待确认
+status_markers.decision: 等待决定
+status_markers.details: 等待补充信息
 status_markers.blocked: 受阻
 status_markers.complete: 已完成
 status_markers.drifted: 已偏离

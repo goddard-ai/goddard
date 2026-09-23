@@ -835,6 +835,12 @@ status_markers.complete:
   en: Complete
 status_markers.awaiting_input:
   en: Awaiting input
+status_markers.go_ahead:
+  en: Awaiting go-ahead
+status_markers.decision:
+  en: Awaiting decision
+status_markers.details:
+  en: Awaiting details
 status_markers.unverified:
   en: Unverified
 status_markers.partial:

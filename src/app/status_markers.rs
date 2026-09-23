@@ -1,7 +1,8 @@
 //! Turn status markers: while the experiment is on, each assistant turn that
 //! ends naturally is scored by the daemon's evaluation model — one `Choice`
 //! question picks how the turn ended (complete, awaiting input, partial,
-//! blocked, failed, other) while independent Nouls flag qualities that can
+//! blocked, failed, other). A second choice clarifies what input is needed
+//! when the turn awaits the user, while independent Nouls flag qualities that can
 //! co-occur with any ending (unverified, drifted). Cleared markers render as
 //! chips on the response footer: colored icon and name, dim confidence
 //! percent.
@@ -64,6 +65,8 @@ impl MarkerTone {
 /// `complete` only renders when the model is sure.
 const ENDING_QUESTION: &str = "ending";
 const ENDING_OTHER_OPTION: &str = "other";
+const INPUT_QUESTION: &str = "awaiting-input-kind";
+const INPUT_OTHER_OPTION: &str = "other";
 const ENDING_MARKERS: &[StatusMarker] = &[
     StatusMarker {
         id: "complete",
@@ -81,9 +84,9 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/chat.svg",
         tone: MarkerTone::Info,
         threshold: 0.55,
-        instructions: "The turn ends waiting on the user — an unanswered question, a \
-            choice the user must pick, or input the assistant needs before it can \
-            continue.",
+        instructions: "The requested work remains unfinished because the assistant \
+            asks the user for a go-ahead, a decision, or missing details before \
+            continuing. A rhetorical question after completed work does not count.",
     },
     StatusMarker {
         id: "partial",
@@ -114,6 +117,41 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         instructions: "The turn failed — a reported error, a tool failure that ended \
             the work, or the assistant saying it could not complete the request; \
             `toolErrors` lists the calls that went wrong.",
+    },
+];
+
+/// Only one input subtype can replace the generic awaiting-input chip. Keep
+/// the generic chip when the subtype is ambiguous or its score is weak.
+const INPUT_MARKERS: &[StatusMarker] = &[
+    StatusMarker {
+        id: "go-ahead",
+        label_key: "status_markers.go_ahead",
+        icon: "icons/chat.svg",
+        tone: MarkerTone::Info,
+        threshold: 0.55,
+        instructions: "The assistant asks whether it should proceed with proposed \
+            work or requests the user's approval before taking a concrete next \
+            action. Examples include 'Want me to proceed?' and 'May I deploy it?'",
+    },
+    StatusMarker {
+        id: "decision",
+        label_key: "status_markers.decision",
+        icon: "icons/chat.svg",
+        tone: MarkerTone::Info,
+        threshold: 0.55,
+        instructions: "The assistant presents two or more viable options and \
+            needs the user to choose one before continuing. A yes/no question \
+            about whether to proceed is a go-ahead instead.",
+    },
+    StatusMarker {
+        id: "details",
+        label_key: "status_markers.details",
+        icon: "icons/chat.svg",
+        tone: MarkerTone::Info,
+        threshold: 0.55,
+        instructions: "The assistant needs missing facts, requirements, files, or \
+            clarification from the user before continuing. A request to approve \
+            an already specified action is a go-ahead instead.",
     },
 ];
 
@@ -211,8 +249,7 @@ const FILES_CHANGED_STATE_MAX: usize = 50;
 const EVAL_FEATURE: &str = "turn-status";
 
 /// The question map sent with every turn evaluation: one `Choice` for the
-/// ending — options compete so only the dominant ending renders — plus one
-/// `Noul` per flag so qualities can co-surface with any ending.
+/// ending, another for the kind of input needed, plus one `Noul` per flag.
 fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
     let mut questions = BTreeMap::from([(
         ENDING_QUESTION.to_owned(),
@@ -229,6 +266,20 @@ fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
                 .collect(),
         },
     )]);
+    questions.insert(
+        INPUT_QUESTION.to_owned(),
+        EvalQuestion::Choice {
+            instructions: "If this turn ends awaiting input, what kind of response \
+                does the assistant need from the user? Judge the closing `response` \
+                against the unfinished work. Otherwise choose `other`."
+                .to_owned(),
+            criteria: INPUT_MARKERS
+                .iter()
+                .map(|marker| (marker.id.to_owned(), Some(marker.instructions.to_owned())))
+                .chain([(INPUT_OTHER_OPTION.to_owned(), None)])
+                .collect(),
+        },
+    );
     for marker in FLAG_MARKERS {
         questions.insert(
             marker.id.to_owned(),
@@ -464,7 +515,28 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
     {
         let winner = probabilities.get(choice).copied().unwrap_or(0.0);
         if winner >= marker.threshold {
-            cleared.push((marker, winner));
+            let subtype = (marker.id == "awaiting-input")
+                .then(|| evaluation.answers.get(INPUT_QUESTION))
+                .flatten()
+                .and_then(|answer| match answer {
+                    EvalAnswer::Choice {
+                        choice,
+                        probabilities,
+                        ..
+                    } => INPUT_MARKERS
+                        .iter()
+                        .find(|subtype| subtype.id == choice)
+                        .and_then(|subtype| {
+                            let score = probabilities.get(choice).copied().unwrap_or(0.0);
+                            (score >= subtype.threshold).then_some((subtype, score))
+                        }),
+                    _ => None,
+                });
+            cleared.push(
+                subtype
+                    .map(|(subtype, score)| (subtype, winner * score))
+                    .unwrap_or((marker, winner)),
+            );
         }
     }
     for marker in FLAG_MARKERS {
@@ -786,7 +858,7 @@ mod tests {
     #[test]
     fn questions_split_the_ending_choice_from_flag_nouls() {
         let questions = status_marker_questions();
-        assert_eq!(questions.len(), FLAG_MARKERS.len() + 1);
+        assert_eq!(questions.len(), FLAG_MARKERS.len() + 2);
         let Some(EvalQuestion::Choice { criteria, .. }) = questions.get(ENDING_QUESTION) else {
             panic!("the ending question must be a choice");
         };
@@ -794,12 +866,55 @@ mod tests {
             assert!(criteria.contains_key(marker.id));
         }
         assert!(criteria.contains_key(ENDING_OTHER_OPTION));
+        let Some(EvalQuestion::Choice { criteria, .. }) = questions.get(INPUT_QUESTION) else {
+            panic!("the input subtype question must be a choice");
+        };
+        for marker in INPUT_MARKERS {
+            assert!(criteria.contains_key(marker.id));
+        }
+        assert!(criteria.contains_key(INPUT_OTHER_OPTION));
         for marker in FLAG_MARKERS {
             assert!(matches!(
                 questions.get(marker.id),
                 Some(EvalQuestion::Noul { .. })
             ));
         }
+    }
+
+    #[test]
+    fn awaiting_input_uses_a_confident_subtype_or_the_generic_label() {
+        let answers = |input_choice: &str, confidence: f64| {
+            evaluation(BTreeMap::from([
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice(
+                        "awaiting-input",
+                        &[("awaiting-input", 0.88), ("other", 0.12)],
+                    ),
+                ),
+                (
+                    INPUT_QUESTION.to_owned(),
+                    ending_choice(input_choice, &[(input_choice, confidence)]),
+                ),
+            ]))
+        };
+        for (choice, expected) in [
+            ("go-ahead", "go-ahead"),
+            ("decision", "decision"),
+            ("details", "details"),
+        ] {
+            let markers = cleared_markers(&answers(choice, 0.82));
+            assert_eq!(markers[0].0.id, expected);
+            assert!((markers[0].1 - 0.88 * 0.82).abs() < f64::EPSILON);
+        }
+        assert_eq!(
+            cleared_markers(&answers("go-ahead", 0.40))[0].0.id,
+            "awaiting-input"
+        );
+        assert_eq!(
+            cleared_markers(&answers("other", 0.90))[0].0.id,
+            "awaiting-input"
+        );
     }
 
     #[test]

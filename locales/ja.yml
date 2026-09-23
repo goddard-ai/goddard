@@ -2563,6 +2563,9 @@ sidebar.needs_auth: パスワードが必要
 sidebar.offline: オフライン
 status_markers.assumed: 仮定で実行
 status_markers.awaiting_input: 入力待ち
+status_markers.go_ahead: 承認待ち
+status_markers.decision: 選択待ち
+status_markers.details: 詳細待ち
 status_markers.blocked: ブロック中
 status_markers.complete: 完了
 status_markers.drifted: 脱線
