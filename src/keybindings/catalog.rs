@@ -2807,12 +2807,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "down",
         ProjectSwitcherInput,
     ),
-    e(
-        "switcher.project_backward",
-        All,
-        "up",
-        ProjectSwitcherInput,
-    ),
+    e("switcher.project_backward", All, "up", ProjectSwitcherInput),
     e(
         "switcher.project_confirm",
         All,
