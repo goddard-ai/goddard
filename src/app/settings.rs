@@ -5160,6 +5160,16 @@ impl Waku {
                 tuning: None,
             },
             ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "voice-briefing-experiment-toggle",
+                title_key: "experiments.voice_briefing_title",
+                description_key: "experiments.voice_briefing_description",
+                enabled: self.state.voice_briefing_enabled,
+                set: Self::set_voice_briefing_enabled,
+                eval_backed: false,
+                tuning: Some(Self::voice_briefing_tuning),
+            },
+            ExperimentDef {
                 group: ExperimentGroup::Git,
                 id: "git-panel-experiment-toggle",
                 title_key: "experiments.git_panel_title",
@@ -6810,6 +6820,132 @@ impl Waku {
         }
         self.save();
         cx.notify();
+    }
+
+    /// The voice briefing card's tuning block: the shared AI Gateway
+    /// credential, the chat model that writes the transcript, and which
+    /// Gemini TTS tier speaks it.
+    fn voice_briefing_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let row = |label: String, control: AnyElement| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .w(px(110.0))
+                        .flex_none()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(label),
+                )
+                .child(control)
+        };
+
+        let tts = self.state.voice_briefing_tts_model;
+        let handle = self.menu_handle("voice-briefing-tts-model".to_owned(), cx);
+        let weak = cx.entity().downgrade();
+        let tts_selector = dropdown_menu(
+            MenuChip::new("voice-briefing-tts-model")
+                .label(tts.label())
+                .outlined()
+                .selected(handle.is_open())
+                .w(px(200.0))
+                .justify_between(),
+            "voice-briefing-tts-model-menu",
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                VoiceBriefingTtsModel::ALL
+                    .into_iter()
+                    .map(|option| {
+                        let weak = weak.clone();
+                        MenuItem::new(option.label(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_voice_briefing_tts_model(option, cx)
+                            });
+                        })
+                        .selected(option == tts)
+                    })
+                    .collect()
+            },
+        );
+
+        div()
+            .mt(px(10.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(sp(11.5))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("experiments.voice_briefing_caption")),
+            )
+            .child(row(
+                tr!("experiments.voice_briefing_key"),
+                TextField::new("voice-briefing-key", self.voice_briefing_key_input.clone())
+                    .w(px(280.0))
+                    .into_any_element(),
+            ))
+            .child(row(
+                tr!("experiments.voice_briefing_model"),
+                TextField::new(
+                    "voice-briefing-model",
+                    self.voice_briefing_model_input.clone(),
+                )
+                .w(px(280.0))
+                .into_any_element(),
+            ))
+            .child(row(
+                tr!("experiments.voice_briefing_tts"),
+                tts_selector.into_any_element(),
+            ))
+            .into_any_element()
+    }
+
+    fn set_voice_briefing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.voice_briefing_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_tts_model(
+        &mut self,
+        model: VoiceBriefingTtsModel,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.voice_briefing_tts_model == model {
+            return;
+        }
+        self.state.voice_briefing_tts_model = model;
+        self.save();
+        cx.notify();
+    }
+
+    /// The card's two text fields write straight into app state on each
+    /// edit — a cleared model restores the default rather than storing a
+    /// blank the pipeline's gate then reads as unconfigured.
+    pub(super) fn save_voice_briefing_fields(&mut self, cx: &mut Context<Self>) {
+        self.state.voice_briefing_gateway_key = self
+            .voice_briefing_key_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        let model = self
+            .voice_briefing_model_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        self.state.voice_briefing_summary_model = if model.is_empty() {
+            crate::persistence::default_voice_briefing_summary_model()
+        } else {
+            model
+        };
+        self.save();
     }
 
     /// The project-memory card's tuning block: one model picker per enabled

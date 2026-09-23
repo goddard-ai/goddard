@@ -914,6 +914,10 @@ impl Waku {
                         self.state.completion_sound_volume,
                     );
                 }
+                // The briefing's clip builds while the task is still
+                // unread, so landing on it plays instantly rather than
+                // waiting on both gateway calls.
+                self.prefetch_voice_brief(session_id, cx);
                 if let Some((title, body)) = task_notification {
                     crate::platform::show_task_notification(
                         &task_notification_tag(session_id),

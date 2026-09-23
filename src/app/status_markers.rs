@@ -516,7 +516,7 @@ fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
 
 /// The last `max` chars of `text` — conclusions and error lines live at the
 /// tail, so that is the end excerpts keep.
-fn tail_chars(text: &str, max: usize) -> String {
+pub(super) fn tail_chars(text: &str, max: usize) -> String {
     let count = text.chars().count();
     text.chars().skip(count.saturating_sub(max)).collect()
 }

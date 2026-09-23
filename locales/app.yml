@@ -863,6 +863,22 @@ experiments.guided_reading_saccade:
   en: Saccade
 experiments.guided_reading_opacity:
   en: Opacity
+experiments.voice_briefing_title:
+  en: Voice briefing
+experiments.voice_briefing_description:
+  en: Landing on a task whose latest reply is long speaks a ~45-second summary aloud — what the agent did, then any decision or action it needs from you. Runs on your AI Gateway key with the models below.
+experiments.voice_briefing_caption:
+  en: Both calls go through the AI Gateway — the summary model writes the transcript, the voice model speaks it. The key stays in this app's settings file.
+experiments.voice_briefing_key:
+  en: AI Gateway key
+experiments.voice_briefing_key_placeholder:
+  en: AI Gateway API key
+experiments.voice_briefing_model:
+  en: Summary model
+experiments.voice_briefing_model_placeholder:
+  en: provider/model — e.g. google/gemini-3-flash
+experiments.voice_briefing_tts:
+  en: Voice model
 experiments.memory_title:
   en: Project memory
 experiments.memory_description:
@@ -3270,6 +3286,8 @@ session.daemon_restarted_resuming:
 
 errors.open_session:
   en: "Could not open that session: %{error}"
+errors.voice_briefing:
+  en: The voice briefing could not be generated
 errors.create_projectless_task:
   en: "Could not create a task beneath ~/.goddard/projects: %{error}"
 errors.save_projectless_migration:

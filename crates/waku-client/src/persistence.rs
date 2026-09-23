@@ -214,8 +214,46 @@ impl CompletionSound {
     }
 }
 
+/// The Gemini TTS tier the voice briefing speaks through. Both answer
+/// through the AI Gateway's speech endpoint; Flash Lite trades voice
+/// fidelity for a cheaper, faster clip.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceBriefingTtsModel {
+    #[default]
+    Flash,
+    FlashLite,
+}
+
+impl VoiceBriefingTtsModel {
+    pub const ALL: [Self; 2] = [Self::Flash, Self::FlashLite];
+
+    /// The gateway slug carried in the speech endpoint's `ai-model-id`
+    /// header.
+    pub fn model_id(self) -> &'static str {
+        match self {
+            Self::Flash => "google/gemini-3.8-flash-tts",
+            Self::FlashLite => "google/gemini-3.8-flash-lite-tts",
+        }
+    }
+
+    /// Model names are product names and stay untranslated.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Flash => "Gemini 3.8 Flash TTS",
+            Self::FlashLite => "Gemini 3.8 Flash-Lite TTS",
+        }
+    }
+}
+
 fn default_notification_enabled() -> bool {
     true
+}
+
+/// The briefing writer's default gateway model — a cheap, fast tier fits a
+/// ~45-second summary; the settings field accepts any chat slug.
+pub fn default_voice_briefing_summary_model() -> String {
+    "google/gemini-3-flash".to_owned()
 }
 
 fn default_sidebar_visibility() -> bool {
@@ -1007,6 +1045,18 @@ pub struct AppSettings {
     pub guided_reading_saccade: u8,
     /// Opacity percent for the unemphasized text; 100 keeps full contrast.
     pub guided_reading_opacity: u8,
+    /// Experimental: landing on a task whose latest reply is long speaks a
+    /// ~45-second "what happened / what you decide" briefing aloud.
+    /// Defaults on in debug builds.
+    pub voice_briefing_enabled: bool,
+    /// AI Gateway bearer the briefing's summarize and speech calls share —
+    /// a secret, app-local like the remote-host tokens.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_briefing_gateway_key: String,
+    /// Gateway chat model that writes the spoken transcript.
+    pub voice_briefing_summary_model: String,
+    /// Which Gemini TTS tier voices the transcript.
+    pub voice_briefing_tts_model: VoiceBriefingTtsModel,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -1078,6 +1128,10 @@ impl Default for AppSettings {
             guided_reading_fixation: default_guided_reading_fixation(),
             guided_reading_saccade: default_guided_reading_saccade(),
             guided_reading_opacity: default_guided_reading_opacity(),
+            voice_briefing_enabled: default_experiment_enabled(),
+            voice_briefing_gateway_key: String::new(),
+            voice_briefing_summary_model: default_voice_briefing_summary_model(),
+            voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             remote_hosts: Vec::new(),
         }
     }
@@ -1518,6 +1572,21 @@ pub struct PersistedState {
     pub guided_reading_saccade: u8,
     #[serde(default = "default_guided_reading_opacity")]
     pub guided_reading_opacity: u8,
+    /// Experimental: landing on a task whose latest reply is long speaks a
+    /// ~45-second "what happened / what you decide" briefing. App-owned —
+    /// the audio plays on this client and the calls ride the gateway
+    /// credential below, so the daemon never sees either.
+    #[serde(default = "default_experiment_enabled")]
+    pub voice_briefing_enabled: bool,
+    /// AI Gateway bearer the briefing's summarize and speech calls share.
+    /// App-local like the remote-host tokens.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_briefing_gateway_key: String,
+    /// Gateway chat model that writes the spoken transcript.
+    #[serde(default = "default_voice_briefing_summary_model")]
+    pub voice_briefing_summary_model: String,
+    #[serde(default)]
+    pub voice_briefing_tts_model: VoiceBriefingTtsModel,
     /// Whether the user has confirmed the Experiments page's warning
     /// interstitial. Gates the page's toggles, not the flags themselves —
     /// an experiment already on stays on.
@@ -1847,6 +1916,10 @@ impl PersistedState {
             guided_reading_fixation: default_guided_reading_fixation(),
             guided_reading_saccade: default_guided_reading_saccade(),
             guided_reading_opacity: default_guided_reading_opacity(),
+            voice_briefing_enabled: default_experiment_enabled(),
+            voice_briefing_gateway_key: String::new(),
+            voice_briefing_summary_model: default_voice_briefing_summary_model(),
+            voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             experiments_warning_acknowledged: false,
             remote_hosts: Vec::new(),
             sidebar_visible: true,
@@ -2226,6 +2299,10 @@ impl PersistedState {
             guided_reading_fixation: self.guided_reading_fixation,
             guided_reading_saccade: self.guided_reading_saccade,
             guided_reading_opacity: self.guided_reading_opacity,
+            voice_briefing_enabled: self.voice_briefing_enabled,
+            voice_briefing_gateway_key: self.voice_briefing_gateway_key.clone(),
+            voice_briefing_summary_model: self.voice_briefing_summary_model.clone(),
+            voice_briefing_tts_model: self.voice_briefing_tts_model,
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -2347,6 +2424,10 @@ impl PersistedState {
         self.guided_reading_saccade =
             (settings.guided_reading_saccade.saturating_add(5) / 10 * 10).clamp(10, 50);
         self.guided_reading_opacity = settings.guided_reading_opacity.min(100);
+        self.voice_briefing_enabled = settings.voice_briefing_enabled;
+        self.voice_briefing_gateway_key = settings.voice_briefing_gateway_key;
+        self.voice_briefing_summary_model = settings.voice_briefing_summary_model;
+        self.voice_briefing_tts_model = settings.voice_briefing_tts_model;
         self.remote_hosts = settings.remote_hosts;
     }
 

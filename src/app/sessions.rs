@@ -736,6 +736,7 @@ impl Waku {
         if session_changed {
             self.drain_pending_workspace_cleanups(cx);
         }
+        self.maybe_voice_brief(session_id, cx);
         cx.notify();
     }
 

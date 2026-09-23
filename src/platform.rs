@@ -271,6 +271,11 @@ thread_local! {
     static PLAYING_COMPLETION_SOUND:
         std::cell::RefCell<Option<objc2::rc::Retained<objc2_avf_audio::AVAudioPlayer>>> =
         const { std::cell::RefCell::new(None) };
+    /// Briefings run ~45 seconds, so they get their own slot — a new one
+    /// replacing the slot stops the old clip rather than mixing over it.
+    static PLAYING_BRIEFING:
+        std::cell::RefCell<Option<objc2::rc::Retained<objc2_avf_audio::AVAudioPlayer>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// The bundled sounds' embedded MP3 payloads.
@@ -328,6 +333,34 @@ pub fn play_completion_sound(sound: waku_client::persistence::CompletionSound, v
 
 #[cfg(not(target_os = "macos"))]
 pub fn play_completion_sound(_: waku_client::persistence::CompletionSound, _: f32) {}
+
+/// Play a voice-briefing clip — encoded audio bytes in any container
+/// `AVAudioPlayer` decodes (the gateway answers WAV). Reuses the
+/// completion-sound volume so the experiment honors the existing slider.
+/// Like the bundled sounds there is no smaller portable API, so other
+/// platforms stay silent for now.
+#[cfg(target_os = "macos")]
+pub fn play_briefing_audio(bytes: &[u8], volume: f32) {
+    use objc2::AnyThread;
+    use objc2_avf_audio::AVAudioPlayer;
+    use objc2_foundation::NSData;
+
+    let volume = volume.clamp(0.0, waku_client::persistence::MAX_COMPLETION_SOUND_VOLUME);
+    let data = NSData::with_bytes(bytes);
+    let Ok(player) = (unsafe { AVAudioPlayer::initWithData_error(AVAudioPlayer::alloc(), &data) })
+    else {
+        return;
+    };
+    unsafe {
+        player.setVolume(volume);
+        if player.play() {
+            PLAYING_BRIEFING.with_borrow_mut(|slot| *slot = Some(player));
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn play_briefing_audio(_: &[u8], _: f32) {}
 
 #[cfg(target_os = "macos")]
 fn app_icon_for_application_path(

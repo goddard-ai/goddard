@@ -68,6 +68,7 @@ use crate::persistence::{
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
     PersistedTranscriptScrollPosition, PersistedWindowState, RecentModelUse,
     SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
+    VoiceBriefingTtsModel,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -2114,6 +2115,22 @@ pub struct Waku {
     eval_cloudflare_account_input: Entity<TextInput>,
     eval_cloudflare_token_input: Entity<TextInput>,
     eval_inputs_seeded: bool,
+    /// The voice briefing's settings fields, seeded from app state at
+    /// startup — the gateway key stays masked like every secret field.
+    voice_briefing_key_input: Entity<TextInput>,
+    voice_briefing_model_input: Entity<TextInput>,
+    /// Replies already briefed this run, keyed by message id — landing on
+    /// the same task twice replays nothing.
+    briefed_messages: HashSet<Uuid>,
+    /// Finished clips keyed by the reply they voice, filled by the
+    /// settle-time prefetch so landing on a task plays instantly.
+    briefing_clips: HashMap<Uuid, Vec<u8>>,
+    /// Insertion order for `briefing_clips` eviction — the cache is a small
+    /// FIFO, not a library.
+    briefing_clip_order: VecDeque<Uuid>,
+    /// Pipelines in flight per reply message; the bool marks an activation
+    /// waiting on the clip, which plays the moment it lands.
+    briefing_pending: HashMap<Uuid, bool>,
     /// The Jev page's "Test connection" probe — `Some` once a run answers,
     /// `Ok` carrying the answering model id and round-trip latency.
     /// Runtime-only; re-run after edits rather than cleared per keystroke.
@@ -3602,6 +3619,7 @@ mod transcript_search;
 mod transcript_view;
 mod usage_meter;
 mod usage_page;
+mod voice_briefing;
 mod window_chrome;
 mod worktrees;
 
@@ -4613,6 +4631,25 @@ impl Waku {
                 .accessibility_label(tr!("routing.cloudflare_account"))
                 .placeholder(tr!("routing.cloudflare_account_placeholder"))
         });
+        let voice_briefing_key_input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .masked()
+                .tab_index(0)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("experiments.voice_briefing_key"))
+                .placeholder(tr!("experiments.voice_briefing_key_placeholder"));
+            input.set_content(state.voice_briefing_gateway_key.clone(), cx);
+            input
+        });
+        let voice_briefing_model_input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("experiments.voice_briefing_model"))
+                .placeholder(tr!("experiments.voice_briefing_model_placeholder"));
+            input.set_content(state.voice_briefing_summary_model.clone(), cx);
+            input
+        });
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .tab_index(0)
@@ -5553,6 +5590,19 @@ impl Waku {
                 )
                 .detach();
             }
+            // The briefing fields write straight through — they edit app
+            // state, not a staged daemon document like the eval keys.
+            for input in [&voice_briefing_key_input, &voice_briefing_model_input] {
+                cx.subscribe(
+                    input,
+                    |this: &mut Self, _, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Edited) {
+                            this.save_voice_briefing_fields(cx);
+                        }
+                    },
+                )
+                .detach();
+            }
             cx.subscribe(&skills_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
@@ -5841,6 +5891,12 @@ impl Waku {
                 eval_cloudflare_account_input,
                 eval_cloudflare_token_input,
                 eval_inputs_seeded: false,
+                voice_briefing_key_input,
+                voice_briefing_model_input,
+                briefed_messages: HashSet::new(),
+                briefing_clips: HashMap::new(),
+                briefing_clip_order: VecDeque::new(),
+                briefing_pending: HashMap::new(),
                 eval_probe_pending: false,
                 eval_probe_result: None,
                 eval_usage_stats: None,
