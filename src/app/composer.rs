@@ -1938,7 +1938,7 @@ impl Waku {
     /// through the switch dialog — so only a skeleton, whose unloaded
     /// transcript cannot be compacted, still locks the picker. The
     /// automation editor never locks one.
-    fn model_picker_locked_provider(&self) -> Option<ProviderKind> {
+    pub(super) fn model_picker_locked_provider(&self) -> Option<ProviderKind> {
         match self.model_picker_target {
             ModelPickerTarget::Composer => self
                 .composer_session()
@@ -1950,7 +1950,7 @@ impl Waku {
 
     /// The picker's "current" row — the composer session's effective combo, or
     /// the editor's bare provider/model pair (no effort, no tier).
-    fn model_picker_selection(
+    pub(super) fn model_picker_selection(
         &self,
         cx: &App,
     ) -> Option<(ProviderKind, String, Option<String>, bool)> {
@@ -1969,7 +1969,7 @@ impl Waku {
 
     /// The Auto row only exists for the composer — the editor stores a bare
     /// `provider:model` pair, so it cannot express routing.
-    fn model_picker_offers_auto_route(&self) -> bool {
+    pub(super) fn model_picker_offers_auto_route(&self) -> bool {
         self.model_picker_target == ModelPickerTarget::Composer && self.auto_route_available()
     }
 

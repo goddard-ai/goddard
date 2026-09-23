@@ -2503,3 +2503,19 @@ terminal.localhost_open: 打开
 terminal.localhost_open_in_tab: 按 %{keys} 在浏览器标签页中打开
 terminal.pinned: 终端已置顶
 terminal.unpinned: 终端已取消置顶
+keyboard_options.choose_model: 选择模型
+keyboard_options.favorite_models: 收藏和最近使用的模型
+keyboard_options.choose_reasoning_effort: 选择推理强度
+keyboard_options.choose_access_control: 选择访问权限和运行环境
+keyboard_options.access_mode: 访问模式
+keyboard_options.choose_workspace: 选择工作区
+keyboard_options.current_worktree: 保留当前工作树 — %{branch}
+keyboard_options.current_worktree_unknown: 保留当前工作树
+keyboard_options.choose_branch: 选择分支
+keyboard_options.create_branch: 创建并检出分支
+keyboard_options.default_effort: 默认
+keyboard_options.default_effort_description: 使用此模型的默认推理强度
+keyboard_options.automatic_routing: 自动路由
+keyboard_options.automatic_routing_description: 发送时为任务选择合适的模型
+keyboard_options.fast: 快速
+keyboard_options.keyboard_hint: ↑ ↓ 移动 · Enter 选择 · Esc 关闭

@@ -83,9 +83,8 @@ use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CheckForUpdates,
     CloseFind, CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection,
     CopyWorkingDirectory, CycleFavoriteModel, CycleReasoningEffort, DismissDraftsLayer,
-    DismissInbox, DismissProjectsLayer, EffortCycleDirection, ExitPanelFullscreen,
-    FavoriteModelCycleDirection, FindNext, FindPrevious, FocusComposer, FocusProjectsFilter,
-    FocusTerminal, GoToNextTurn,
+    DismissInbox, DismissProjectsLayer, EffortCycleDirection, ExitPanelFullscreen, FindNext,
+    FindPrevious, FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn,
     GoToNextUnreadCompletion, GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle,
     NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind,
     OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, PushBaseBranch, Quit,
@@ -1945,6 +1944,7 @@ pub struct Waku {
     sync_branch: sync_branch::SyncBranchUi,
     task_switcher: task_switcher::TaskSwitcherUi,
     project_switcher: project_switcher::ProjectSwitcherUi,
+    keyboard_options: keyboard_options::KeyboardOptionsUi,
     big_picture: big_picture::BigPictureUi,
     model_search: Entity<TextInput>,
     /// The routing class picker's filter field — one shared set serves all
@@ -3363,6 +3363,7 @@ mod goal_dialog;
 mod image_preview;
 mod issue_dialog;
 mod keybindings_page;
+mod keyboard_options;
 mod notifications;
 mod project_switcher;
 mod projects;
@@ -4774,6 +4775,7 @@ impl Waku {
             )
             .detach();
             let project_switcher = project_switcher::ProjectSwitcherUi::new(project_switcher_focus);
+            let keyboard_options = keyboard_options::KeyboardOptionsUi::new(cx.focus_handle());
             let big_picture = big_picture::BigPictureUi::new(cx.focus_handle());
 
             cx.on_focus(&updater_button_focus, window, |this: &mut Self, _, cx| {
@@ -5549,6 +5551,7 @@ impl Waku {
                 sync_branch: sync_branch::SyncBranchUi::new(sync_branch_search),
                 task_switcher,
                 project_switcher,
+                keyboard_options,
                 big_picture,
                 model_search,
                 route_class_search,

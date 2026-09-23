@@ -5044,3 +5044,35 @@ experiments.automations_title:
   en: Automations
 experiments.automations_description:
   en: An Automations page that schedules prompts on a timer — hourly, daily, weekdays, weekly, or cron — running each as its own task or into an existing one, with run history and one-off manual runs.
+keyboard_options.choose_model:
+  en: Choose a model
+keyboard_options.favorite_models:
+  en: Favorite and recent models
+keyboard_options.choose_reasoning_effort:
+  en: Choose reasoning effort
+keyboard_options.choose_access_control:
+  en: Choose access and environment
+keyboard_options.access_mode:
+  en: Access mode
+keyboard_options.choose_workspace:
+  en: Choose a workspace
+keyboard_options.current_worktree:
+  en: Keep current worktree — %{branch}
+keyboard_options.current_worktree_unknown:
+  en: Keep current worktree
+keyboard_options.choose_branch:
+  en: Choose a branch
+keyboard_options.create_branch:
+  en: Create and check out a branch
+keyboard_options.default_effort:
+  en: Default
+keyboard_options.default_effort_description:
+  en: Use this model's default reasoning effort
+keyboard_options.automatic_routing:
+  en: Automatic routing
+keyboard_options.automatic_routing_description:
+  en: Choose a model for the task when you send it
+keyboard_options.fast:
+  en: Fast
+keyboard_options.keyboard_hint:
+  en: ↑ ↓ Move · Enter Select · Esc Close

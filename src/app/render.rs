@@ -499,6 +499,7 @@ impl Render for Waku {
         let image_preview = self.render_image_preview(cx);
         let task_switcher = self.render_task_switcher(window, cx);
         let project_switcher = self.render_project_switcher(window, cx);
+        let keyboard_options = self.render_keyboard_options(window, cx);
         let big_picture = self.render_big_picture(window, cx);
         if self.settings_page.is_some() {
             let command_palette = self.render_command_palette(window, cx);
@@ -578,6 +579,7 @@ impl Render for Waku {
                 .children(task_switcher)
                 .children(project_switcher)
                 .children(big_picture)
+                .children(keyboard_options)
                 .into_any_element();
             return self.render_window_frame(content, window, cx);
         }
@@ -1012,6 +1014,7 @@ impl Render for Waku {
             .children(task_switcher)
             .children(project_switcher)
             .children(big_picture)
+            .children(keyboard_options)
             .into_any_element();
 
         self.render_window_frame(content, window, cx)

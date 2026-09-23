@@ -1026,17 +1026,6 @@ pub fn toggle_popover(
     toggle_keyboard_anchored(handle, align, SurfaceFocus::Content, window, cx);
 }
 
-/// [`toggle_popover`] for a [`dropdown_menu`]: the card takes focus, so its
-/// arrow keys and escape work exactly like a clicked-open menu.
-pub fn toggle_dropdown(
-    handle: &ContextMenuHandle,
-    align: MenuAlign,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    toggle_keyboard_anchored(handle, align, SurfaceFocus::Card, window, cx);
-}
-
 fn toggle_keyboard_anchored(
     handle: &ContextMenuHandle,
     align: MenuAlign,

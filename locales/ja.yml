@@ -2552,3 +2552,19 @@ terminal.localhost_open: 開く
 terminal.localhost_open_in_tab: "%{keys} でブラウザタブに開きます"
 terminal.pinned: ターミナルをピン留めしました
 terminal.unpinned: ターミナルのピン留めを解除しました
+keyboard_options.choose_model: モデルを選択
+keyboard_options.favorite_models: お気に入りと最近使用したモデル
+keyboard_options.choose_reasoning_effort: 推論レベルを選択
+keyboard_options.choose_access_control: アクセスと実行環境を選択
+keyboard_options.access_mode: アクセスモード
+keyboard_options.choose_workspace: ワークスペースを選択
+keyboard_options.current_worktree: 現在のワークツリーを維持 — %{branch}
+keyboard_options.current_worktree_unknown: 現在のワークツリーを維持
+keyboard_options.choose_branch: ブランチを選択
+keyboard_options.create_branch: ブランチを作成してチェックアウト
+keyboard_options.default_effort: デフォルト
+keyboard_options.default_effort_description: このモデルのデフォルトの推論レベルを使用
+keyboard_options.automatic_routing: 自動ルーティング
+keyboard_options.automatic_routing_description: 送信時にタスクに合ったモデルを選択
+keyboard_options.fast: 高速
+keyboard_options.keyboard_hint: ↑ ↓ 移動 · Enter 選択 · Esc 閉じる

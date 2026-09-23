@@ -1317,13 +1317,12 @@ impl Waku {
     }
 
     /// Primary modifier + Shift + T: flip the draft between the local checkout
-    /// and a new worktree — the same two rows the "Work in" menu offers. The
-    /// guards mirror its disabled states; `select_workspace` restores the
-    /// remembered base branch.
+    /// Primary modifier + Shift + T opens the available workspace choices in
+    /// a centered modal. Mouse clicks continue to use the footer menu.
     pub(super) fn toggle_workspace_action(
         &mut self,
         _: &ToggleWorkspace,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.settings_page.is_some() {
@@ -1353,22 +1352,65 @@ impl Waku {
         {
             return;
         }
-        let next = if session
-            .map(|session| session.workspace.is_local())
-            .unwrap_or_else(|| {
-                matches!(
-                    self.state.workspace_for_new_session(project_id),
-                    SessionWorkspace::Local
-                )
-            }) {
-            SessionWorkspace::NewWorktree { base_branch: None }
-        } else {
-            SessionWorkspace::Local
-        };
-        let Some(session_id) = self.ensure_workspace_subject_session(cx) else {
-            return;
-        };
-        self.select_workspace_for(session_id, next, cx);
+        let current = session
+            .map(|session| session.workspace.clone())
+            .unwrap_or_else(|| self.state.workspace_for_new_session(project_id));
+        let mut items = vec![
+            keyboard_options::KeyboardOptionItem::Choice(
+                keyboard_options::KeyboardOptionChoice::new(
+                    tr!("workspace.local"),
+                    None,
+                    None,
+                    current.is_local(),
+                    true,
+                    keyboard_options::KeyboardOptionAction::Workspace(SessionWorkspace::Local),
+                ),
+            ),
+            keyboard_options::KeyboardOptionItem::Choice(
+                keyboard_options::KeyboardOptionChoice::new(
+                    tr!("workspace.new_worktree"),
+                    None,
+                    Some("icons/git-branch.svg"),
+                    matches!(&current, SessionWorkspace::NewWorktree { .. }),
+                    true,
+                    keyboard_options::KeyboardOptionAction::Workspace(
+                        SessionWorkspace::NewWorktree { base_branch: None },
+                    ),
+                ),
+            ),
+        ];
+        if let SessionWorkspace::Worktree { branch, .. } = &current {
+            let label = branch
+                .as_deref()
+                .filter(|branch| !branch.is_empty())
+                .map(|branch| tr!("keyboard_options.current_worktree", branch = branch).to_string())
+                .unwrap_or_else(|| tr!("keyboard_options.current_worktree_unknown").to_string());
+            items.push(keyboard_options::KeyboardOptionItem::Choice(
+                keyboard_options::KeyboardOptionChoice::new(
+                    label,
+                    None,
+                    Some("icons/git-branch.svg"),
+                    true,
+                    true,
+                    keyboard_options::KeyboardOptionAction::Workspace(current.clone()),
+                ),
+            ));
+        }
+        let highlighted = items.iter().position(|item| {
+            matches!(
+                item,
+                keyboard_options::KeyboardOptionItem::Choice(choice)
+                    if choice.selected
+            )
+        });
+        self.open_keyboard_options(
+            tr!("keyboard_options.choose_workspace").to_string(),
+            items,
+            highlighted,
+            keyboard_options::KeyboardOptionFocus::Modal,
+            window,
+            cx,
+        );
     }
 
     /// Remove a project from its owning daemon and drop every task it owns.
@@ -3987,7 +4029,8 @@ impl Waku {
         cx.notify();
     }
 
-    /// Primary modifier + /: toggle the composer's model picker as if its chip were clicked.
+    /// Primary modifier + / opens the composer's complete model choices in a
+    /// centered modal. Mouse clicks continue to use the anchored model menu.
     pub(super) fn toggle_model_picker_action(
         &mut self,
         _: &ToggleModelPicker,
@@ -4006,23 +4049,103 @@ impl Waku {
             );
             return;
         }
-        if !self
-            .composer_session()
-            .is_some_and(|session| session.can_choose_model(session.provider))
-        {
+        let Some(session) = self.composer_session().cloned() else {
+            return;
+        };
+        if !session.can_choose_model(session.provider) {
             return;
         }
-        self.defer_menu_toggle(
-            MODEL_PICKER_MENU_ID,
-            crate::ui::menu::toggle_popover,
+        self.model_picker_target = composer::ModelPickerTarget::Composer;
+        let selection = self.model_picker_selection(cx);
+        let auto_route = session.auto_route;
+        let enabled = !session.is_busy();
+        let rows = composer::visible_picker_rows_with_pins(
+            &self.probes,
+            &self.state.favorite_models,
+            &self.pinned_unfavorites,
+            &self.state.recent_model_uses,
+            &self.state.disabled_providers,
+            self.model_picker_locked_provider(),
+            "",
+            self.model_picker_offers_auto_route(),
+            composer::PickerGranularity::Combos,
+        );
+        let items = rows
+            .into_iter()
+            .map(|row| {
+                let selected = if row.auto {
+                    auto_route
+                } else {
+                    selection
+                        .as_ref()
+                        .is_some_and(|(provider, model, effort, fast)| {
+                            *provider == row.provider
+                                && model == &row.model.id
+                                && effort == &row.effort
+                                && *fast == row.fast
+                        })
+                };
+                if row.auto {
+                    return keyboard_options::KeyboardOptionItem::Choice(
+                        keyboard_options::KeyboardOptionChoice::new(
+                            tr!("keyboard_options.automatic_routing"),
+                            Some(tr!("keyboard_options.automatic_routing_description").to_string()),
+                            None,
+                            selected,
+                            enabled,
+                            keyboard_options::KeyboardOptionAction::AutoRoute,
+                        ),
+                    );
+                }
+                let mut details = vec![row.provider.display_name().to_string()];
+                if let Some(effort) = &row.effort {
+                    details.push(
+                        row.model
+                            .reasoning_efforts
+                            .iter()
+                            .find(|option| option.id == *effort)
+                            .map(|option| option.label.clone())
+                            .unwrap_or_else(|| effort.clone()),
+                    );
+                }
+                if row.fast {
+                    details.push(tr!("keyboard_options.fast").to_string());
+                }
+                keyboard_options::KeyboardOptionItem::Choice(
+                    keyboard_options::KeyboardOptionChoice::new(
+                        row.model.name.clone(),
+                        Some(details.join(" · ")),
+                        None,
+                        selected,
+                        enabled && session.can_choose_model(row.provider),
+                        keyboard_options::KeyboardOptionAction::Model {
+                            provider: row.provider,
+                            model: row.model.id,
+                            effort: row.effort,
+                            fast: row.fast,
+                        },
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let highlighted = items.iter().position(|item| {
+            matches!(
+                item,
+                keyboard_options::KeyboardOptionItem::Choice(choice) if choice.selected
+            )
+        });
+        self.open_keyboard_options(
+            tr!("keyboard_options.choose_model").to_string(),
+            items,
+            highlighted,
+            keyboard_options::KeyboardOptionFocus::Modal,
             window,
             cx,
         );
     }
 
-    /// Primary modifier + Shift + B: toggle the branch picker as if its chip
-    /// were clicked — a worktree draft's base branch, or a checkout's current
-    /// branch. The guards mirror the selector's disabled states.
+    /// Primary modifier + Shift + B opens branch choices in a centered modal.
+    /// Mouse clicks continue to use the anchored branch popover.
     pub(super) fn toggle_branch_picker_action(
         &mut self,
         _: &ToggleBranchPicker,
@@ -4032,42 +4155,117 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
-        let Some(session) = self.composer_session() else {
-            return;
-        };
-        if session.is_busy() || self.branch_operation_pending {
+        let (subject_session_id, subject_project_id) = self.workspace_subject();
+        let session = subject_session_id.and_then(|session_id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .cloned()
+        });
+        if session.as_ref().is_some_and(AgentSession::is_busy) || self.branch_operation_pending {
             return;
         }
-        if self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == session.project_id)
+        let Some(project) = subject_project_id
+            .and_then(|project_id| self.state.projects.iter().find(|p| p.id == project_id))
             .filter(|project| !project.is_projectless())
-            .is_none()
-        {
-            return;
-        }
-        let Some(workspace_path) = self.workspace_path_for_session(session) else {
+        else {
             return;
         };
-        let workspace_path = workspace_path.to_path_buf();
-        if self
-            .branch_snapshot_for_workspace(&workspace_path, cx)
-            .is_none()
-        {
+        let workspace = session
+            .as_ref()
+            .map(|session| session.workspace.clone())
+            .unwrap_or_else(|| self.state.workspace_for_new_session(project.id));
+        let workspace_path = session
+            .as_ref()
+            .and_then(|session| session.workspace.path())
+            .unwrap_or(&project.path)
+            .to_path_buf();
+        let Some(snapshot) = self.branch_snapshot_for_workspace(&workspace_path, cx) else {
             return;
+        };
+        self.refresh_workspace_branch_snapshot(&workspace_path, cx);
+        let picks_base = worktrees::workspace_picks_base(&workspace, session.as_ref());
+        let selected_branch = match &workspace {
+            SessionWorkspace::Local => snapshot.display_branch().map(str::to_owned),
+            SessionWorkspace::NewWorktree { base_branch } => base_branch
+                .clone()
+                .or_else(|| snapshot.default_branch.clone())
+                .or_else(|| snapshot.display_branch().map(str::to_owned)),
+            SessionWorkspace::Worktree { base_branch, .. } if picks_base => snapshot
+                .current
+                .clone()
+                .or_else(|| base_branch.clone())
+                .or_else(|| snapshot.default_branch.clone())
+                .or_else(|| snapshot.detached_head.clone()),
+            SessionWorkspace::Worktree { branch, .. } => snapshot
+                .current
+                .clone()
+                .or_else(|| branch.clone())
+                .or_else(|| snapshot.detached_head.clone()),
         }
-        self.defer_menu_toggle(
-            BRANCH_PICKER_MENU_ID,
-            crate::ui::menu::toggle_popover,
+        .unwrap_or_else(|| tr!("branches.detached_head"));
+        let now_unix_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0);
+        let branches = composer::visible_branch_entries(
+            &snapshot.branches,
+            &selected_branch,
+            "",
+            now_unix_secs,
+        );
+        let mut items = branches
+            .into_iter()
+            .map(|branch| {
+                let enabled = picks_base || !branch.checked_out_elsewhere;
+                keyboard_options::KeyboardOptionItem::Choice(
+                    keyboard_options::KeyboardOptionChoice::new(
+                        branch.name.clone(),
+                        None,
+                        Some("icons/git-branch.svg"),
+                        branch.name == selected_branch,
+                        enabled,
+                        keyboard_options::KeyboardOptionAction::Branch(branch.name),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        if !picks_base {
+            items.push(keyboard_options::KeyboardOptionItem::Choice(
+                keyboard_options::KeyboardOptionChoice::new(
+                    tr!("branches.create_and_checkout_ellipsis"),
+                    None,
+                    Some("icons/plus.svg"),
+                    false,
+                    true,
+                    keyboard_options::KeyboardOptionAction::CreateBranch,
+                ),
+            ));
+        }
+        let highlighted = items.iter().position(|item| {
+            matches!(
+                item,
+                keyboard_options::KeyboardOptionItem::Choice(choice)
+                    if choice.selected
+            )
+        });
+        self.branch_picker_mode = BranchPickerMode::Browse;
+        self.branch_search.update(cx, |input, cx| input.clear(cx));
+        self.branch_create_input
+            .update(cx, |input, cx| input.clear(cx));
+        self.open_keyboard_options(
+            tr!("keyboard_options.choose_branch").to_string(),
+            items,
+            highlighted,
+            keyboard_options::KeyboardOptionFocus::Modal,
             window,
             cx,
         );
     }
 
-    /// Primary modifier + .: toggle the composer's runtime-mode menu as if
-    /// its chip were clicked.
+    /// Primary modifier + . opens access and environment choices in a
+    /// centered modal. Mouse clicks continue to use the anchored menu.
     pub(super) fn toggle_runtime_mode_picker_action(
         &mut self,
         _: &ToggleRuntimeModePicker,
@@ -4077,41 +4275,21 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
-        self.defer_menu_toggle(
-            RUNTIME_MODE_MENU_ID,
-            crate::ui::menu::toggle_dropdown,
-            window,
-            cx,
-        );
+        self.open_access_control_options(window, cx);
     }
 
-    /// Primary modifier + Shift + .: cycle the draft through the rows the
-    /// mode menu's Environment section offers — This Mac, the Sandbox VM,
-    /// and the provider's cloud when it has one. `set_environment` carries
-    /// the guards: no session to retarget, or a task already started,
-    /// leaves the pick untouched.
+    /// Primary modifier + Shift + . opens the access and environment
+    /// choices together, instead of cycling the environment in isolation.
     pub(super) fn toggle_environment_action(
         &mut self,
         _: &ToggleEnvironment,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.settings_page.is_some() || !self.state.sandbox_experiment_enabled {
             return;
         }
-        let Some((environment, provider)) = self
-            .composer_session()
-            .map(|session| (session.environment(), session.provider))
-        else {
-            return;
-        };
-        let options = SessionEnvironment::options_for(provider);
-        let next = options
-            .iter()
-            .position(|option| *option == environment)
-            .map(|index| options[(index + 1) % options.len()])
-            .unwrap_or(SessionEnvironment::Local);
-        self.set_environment(next, cx);
+        self.open_access_control_options(window, cx);
     }
 
     /// A keyboard toggle produces no mouse-down for another open menu's
@@ -4211,15 +4389,12 @@ impl Waku {
             })
     }
 
-    /// ⌥Tab rotates the composer session through the starred combos followed
-    /// by the most recently used selection, wrapping at the end. Entries the
-    /// session can't run — a provider it can't choose, or one switched off —
-    /// drop out of the rotation, and a recent that duplicates a favorite
-    /// adds nothing.
+    /// ⌥Tab and ⌥⇧Tab open eligible starred combos and the most recent
+    /// selection together, so the user can choose directly.
     pub(super) fn cycle_favorite_model_action(
         &mut self,
-        action: &CycleFavoriteModel,
-        _window: &mut Window,
+        _action: &CycleFavoriteModel,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.settings_page.is_some() {
@@ -4274,30 +4449,69 @@ impl Waku {
         let current = self
             .session_model_combo(session)
             .map(|(model, effort, fast)| (session.provider, model, effort, fast));
-        let position =
-            current.and_then(|current| combos.iter().position(|combo| *combo == current));
-        // Off-rotation selections start at the first or last stop depending
-        // on the requested direction.
-        let next = match action.direction {
-            FavoriteModelCycleDirection::Forward => position
-                .map(|index| (index + 1) % combos.len())
-                .unwrap_or(0),
-            FavoriteModelCycleDirection::Backward => position
-                .map(|index| (index + combos.len() - 1) % combos.len())
-                .unwrap_or(combos.len() - 1),
-        };
-        let (provider, model, effort, fast) = combos[next].clone();
-        self.choose_model(provider, model, effort, fast, cx);
+        let items = combos
+            .iter()
+            .map(|(provider, model, effort, fast)| {
+                let label = self
+                    .provider_probe(*provider)
+                    .and_then(|probe| probe.model(model))
+                    .map(|model| model.name.clone())
+                    .unwrap_or_else(|| model.clone());
+                let mut details = vec![provider.display_name().to_string()];
+                if let Some(effort) = effort {
+                    details.push(effort.clone());
+                }
+                if *fast {
+                    details.push(tr!("keyboard_options.fast").to_string());
+                }
+                let selected = current.as_ref().is_some_and(
+                    |(current_provider, current_model, current_effort, current_fast)| {
+                        current_provider == provider
+                            && current_model == model
+                            && current_effort == effort
+                            && current_fast == fast
+                    },
+                );
+                keyboard_options::KeyboardOptionItem::Choice(
+                    keyboard_options::KeyboardOptionChoice::new(
+                        label,
+                        Some(details.join(" · ")),
+                        None,
+                        selected,
+                        true,
+                        keyboard_options::KeyboardOptionAction::Model {
+                            provider: *provider,
+                            model: model.clone(),
+                            effort: effort.clone(),
+                            fast: *fast,
+                        },
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let highlighted = items.iter().position(|item| {
+            matches!(
+                item,
+                keyboard_options::KeyboardOptionItem::Choice(choice)
+                    if choice.selected
+            )
+        });
+        self.open_keyboard_options(
+            tr!("keyboard_options.favorite_models").to_string(),
+            items,
+            highlighted,
+            keyboard_options::KeyboardOptionFocus::Modal,
+            window,
+            cx,
+        );
     }
 
-    /// ⌘E steps the composer session's reasoning effort through the current
-    /// model's ladder, ⌘⇧E the other way — both wrap at the ends. Providers
-    /// that can return to a base `default` variant include the unset step in
-    /// the cycle.
+    /// ⌘E and ⌘⇧E show the current model's complete reasoning-effort ladder.
+    /// Providers that can return to a base default include the unset step.
     pub(super) fn cycle_reasoning_effort_action(
         &mut self,
-        action: &CycleReasoningEffort,
-        _window: &mut Window,
+        _action: &CycleReasoningEffort,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.settings_page.is_some() {
@@ -4325,21 +4539,57 @@ impl Waku {
         }) else {
             return;
         };
-        let position = steps.iter().position(|step| *step == current);
-        let next = match action.direction {
-            // An unset or unlisted effort takes the ladder's first step
-            // going forward, its last going backward.
-            EffortCycleDirection::Forward => {
-                (position.unwrap_or_else(|| steps.len().saturating_sub(1)) + 1) % steps.len()
-            }
-            EffortCycleDirection::Backward => {
-                (position.unwrap_or(0) + steps.len() - 1) % steps.len()
-            }
+        let Some(session) = self.composer_session() else {
+            return;
         };
-        match steps[next].clone() {
-            Some(effort) => self.set_reasoning_effort(effort, cx),
-            None => self.clear_reasoning_effort(cx),
-        }
+        let Some(model) = self.model_metadata_for_session(session) else {
+            return;
+        };
+        let items = steps
+            .iter()
+            .map(|effort| {
+                let (label, description) = match effort {
+                    Some(effort) => (
+                        model
+                            .reasoning_efforts
+                            .iter()
+                            .find(|option| option.id == *effort)
+                            .map(|option| option.label.clone())
+                            .unwrap_or_else(|| effort.clone()),
+                        None,
+                    ),
+                    None => (
+                        tr!("keyboard_options.default_effort").to_string(),
+                        Some(tr!("keyboard_options.default_effort_description").to_string()),
+                    ),
+                };
+                keyboard_options::KeyboardOptionItem::Choice(
+                    keyboard_options::KeyboardOptionChoice::new(
+                        label,
+                        description,
+                        None,
+                        effort == &current,
+                        !session.is_busy(),
+                        keyboard_options::KeyboardOptionAction::ReasoningEffort(effort.clone()),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let highlighted = items.iter().position(|item| {
+            matches!(
+                item,
+                keyboard_options::KeyboardOptionItem::Choice(choice)
+                    if choice.selected
+            )
+        });
+        self.open_keyboard_options(
+            tr!("keyboard_options.choose_reasoning_effort").to_string(),
+            items,
+            highlighted,
+            keyboard_options::KeyboardOptionFocus::Modal,
+            window,
+            cx,
+        );
     }
 
     pub(super) fn toggle_favorite_model(
