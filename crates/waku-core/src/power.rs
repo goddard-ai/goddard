@@ -101,7 +101,7 @@ mod imp {
 
 #[cfg(target_os = "windows")]
 mod imp {
-    use windows_sys::Win32::System::Threading::{
+    use windows_sys::Win32::System::Power::{
         ES_CONTINUOUS, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
     };
 
