@@ -21,6 +21,10 @@ auto_prompts.question_placeholder: 応答は作業の完了を示しています
 auto_prompts.weight: 質問の重み
 auto_prompts.threshold: トリガーのしきい値
 auto_prompts.threshold_description: 加重平均が 0〜1 のこの値に達すると送信します。
+auto_prompts.sensitivity: 感度
+auto_prompts.sensitivity_description: フォローアップが必要だと Jev が判断する確率を設定します。
+auto_prompts.more_often: 頻繁に
+auto_prompts.less_often: 控えめに
 auto_prompts.add_question: 質問を追加
 auto_prompts.advanced: 詳細
 auto_prompts.suggest: 値を提案

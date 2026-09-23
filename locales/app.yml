@@ -1141,6 +1141,14 @@ auto_prompts.threshold:
   en: Trigger threshold
 auto_prompts.threshold_description:
   en: Send when the weighted average reaches this value from 0 to 1.
+auto_prompts.sensitivity:
+  en: Sensitivity
+auto_prompts.sensitivity_description:
+  en: Set how likely Jev must think a follow-up is needed before it sends.
+auto_prompts.more_often:
+  en: More often
+auto_prompts.less_often:
+  en: Less often
 auto_prompts.add_question:
   en: Add question
 auto_prompts.advanced:

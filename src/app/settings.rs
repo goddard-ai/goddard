@@ -5678,6 +5678,56 @@ impl Waku {
                 &SettingSearch::new(""),
             ));
         }
+        let threshold = editor
+            .threshold
+            .read(cx)
+            .content()
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.85)
+            .clamp(0.0, 1.0);
+        let shown_threshold = self.auto_prompt_sensitivity_slider.shown(threshold * 100.0);
+        let sensitivity_slider = slider::slider(
+            "auto-prompt-sensitivity-slider",
+            &self.auto_prompt_sensitivity_slider,
+            100.0,
+            threshold * 100.0,
+            cx,
+            |this, value, window, cx| this.set_auto_prompt_sensitivity(value, window, cx),
+        );
+        rows.push(settings_row(
+            "icons/gauge.svg",
+            tr!("auto_prompts.sensitivity"),
+            tr!("auto_prompts.sensitivity_description"),
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("auto_prompts.more_often")),
+                )
+                .child(sensitivity_slider.w(px(130.0)).flex_none())
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("auto_prompts.less_often")),
+                )
+                .child(
+                    div()
+                        .w(px(36.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(format!("{shown_threshold:.0}%")),
+                ),
+            theme,
+            &SettingSearch::new(""),
+        ));
         if editor.advanced {
             rows.push(settings_row(
                 "icons/gauge.svg",
@@ -5800,6 +5850,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.auto_prompt_sensitivity_slider.cancel();
         let existing = id.and_then(|id| {
             self.state
                 .auto_prompts
@@ -5888,6 +5939,24 @@ impl Waku {
         }
     }
 
+    fn set_auto_prompt_sensitivity(
+        &mut self,
+        value: f32,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.auto_prompt_editor.as_mut() else {
+            return;
+        };
+        let threshold = (value.round() as i32).clamp(0, 100) as f64 / 100.0;
+        editor.threshold.update(cx, |input, cx| {
+            input.set_content(format!("{threshold:.2}"), cx)
+        });
+        editor.preview = None;
+        editor.status = None;
+        cx.notify();
+    }
+
     pub(super) fn set_auto_prompt_enabled(
         &mut self,
         id: Uuid,
@@ -5930,6 +5999,7 @@ impl Waku {
             .is_some_and(|editor| editor.id == id)
         {
             self.auto_prompt_editor = None;
+            self.auto_prompt_sensitivity_slider.cancel();
         }
         self.save();
         cx.notify();

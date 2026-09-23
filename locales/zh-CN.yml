@@ -21,6 +21,10 @@ auto_prompts.question_placeholder: 回复是否声称工作已完成？
 auto_prompts.weight: 问题权重
 auto_prompts.threshold: 触发阈值
 auto_prompts.threshold_description: 加权平均值达到此 0 到 1 之间的数值时发送。
+auto_prompts.sensitivity: 灵敏度
+auto_prompts.sensitivity_description: 设置 Jev 认为需要跟进时触发的可能性。
+auto_prompts.more_often: 更频繁
+auto_prompts.less_often: 更少
 auto_prompts.add_question: 添加问题
 auto_prompts.advanced: 高级
 auto_prompts.suggest: 建议数值

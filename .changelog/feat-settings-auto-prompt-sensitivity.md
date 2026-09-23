@@ -1,0 +1,1 @@
+- Adjust an auto prompt’s sensitivity to make its follow-up trigger more or less often.
