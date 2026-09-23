@@ -47,6 +47,7 @@ pub(super) struct ProjectSwitcherUi {
     recent_project_ids: Vec<Uuid>,
     search: Option<Entity<TextInput>>,
     searching: bool,
+    cycling: bool,
     highlighted_project_id: Option<Uuid>,
     original_session_id: Option<Uuid>,
     target: ProjectSwitcherTarget,
@@ -64,6 +65,7 @@ impl ProjectSwitcherUi {
             recent_project_ids: Vec::new(),
             search: None,
             searching: false,
+            cycling: false,
             highlighted_project_id: None,
             original_session_id: None,
             target: ProjectSwitcherTarget::Draft,
@@ -112,6 +114,7 @@ impl ProjectSwitcherUi {
         self.ordered_project_ids.clear();
         self.recent_project_ids.clear();
         self.searching = false;
+        self.cycling = false;
         self.highlighted_project_id = None;
         self.original_session_id = None;
         self.target = ProjectSwitcherTarget::Draft;
@@ -270,7 +273,10 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.project_switcher.open && !self.project_switcher.searching && !event.secondary() {
+        if self.project_switcher.open
+            && (!self.project_switcher.searching || self.project_switcher.cycling)
+            && !event.secondary()
+        {
             self.finish_project_switcher(false, window, cx);
         }
     }
@@ -282,8 +288,11 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if self.project_switcher.open {
-            if self.project_switcher.searching && window.modifiers().secondary() {
-                self.project_switcher.searching = false;
+            if self.project_switcher.searching
+                && !self.project_switcher.cycling
+                && window.modifiers().secondary()
+            {
+                self.project_switcher.cycling = true;
                 self.project_switcher.ordered_project_ids =
                     self.project_switcher.recent_project_ids.clone();
                 self.project_switcher.highlighted_project_id =
@@ -521,6 +530,7 @@ impl Waku {
         };
 
         self.project_switcher.open = true;
+        self.project_switcher.cycling = false;
         self.project_switcher.ordered_project_ids = ordered;
         self.project_switcher.highlighted_project_id = self
             .project_switcher
