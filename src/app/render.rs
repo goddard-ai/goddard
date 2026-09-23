@@ -645,9 +645,8 @@ impl Render for Waku {
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
         let content = div()
-            // BigPictureEnabled arms the ⌥←/⌥→ sweep's contexts — with the
-            // experiment off the bindings match nothing and word-jump is
-            // untouched.
+            // BigPictureEnabled arms the ⌘⌥←/⌘⌥→ sweep's context — with the
+            // experiment off the bindings match nothing.
             .key_context(match (composer_mounted, self.state.big_picture_enabled) {
                 (true, true) => "Workspace ComposerExists BigPictureEnabled",
                 (true, false) => "Workspace ComposerExists",

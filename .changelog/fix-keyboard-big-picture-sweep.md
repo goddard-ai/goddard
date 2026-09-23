@@ -1,0 +1,1 @@
+- Use ⌘⌥← and ⌘⌥→ to sweep through Big Picture tasks while keeping ⌥← and ⌥→ available for moving through words in text fields.

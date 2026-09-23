@@ -13,7 +13,7 @@
 //! The arrow keys do the same without a confirm step: they move the highlight
 //! and retarget the composer in one motion. The ranking runs longer than the
 //! grid is wide — the cards on screen are a window of it that scrolls to keep
-//! the highlight mounted, and ⌥←/⌥→ drive that walk from anywhere in the
+//! the highlight mounted, and ⌘⌥←/⌘⌥→ drive that walk from anywhere in the
 //! workspace. Enter opens the highlighted session and exits; ↓ or ⌘↵ drop
 //! focus into the composer. Escape peels off the target first, then closes
 //! the overlay; clicking the scrim closes it outright.
@@ -98,30 +98,18 @@ pub fn init(cx: &mut App) {
             FocusBigPictureComposer,
             Some("BigPicture"),
         ),
-        // ⌥←/⌥→ sweep the card ranking. The flag keeps a disabled experiment
-        // from eating the chords, and !Terminal/!Menu spare the shell's word
-        // keys and menu filter fields. The descendant spelling reaches text
-        // fields — registered after input::init, it wins the same-depth tie
-        // with word-jump.
+        // ⌘⌥←/⌘⌥→ sweep the card ranking. The flag keeps a disabled
+        // experiment from eating the chords, and !Terminal/!Menu spare
+        // terminal and menu input.
         KeyBinding::new(
-            "alt-left",
+            "secondary-alt-left",
             SessionSweepBackward,
             Some("BigPictureEnabled && !Terminal && !Menu"),
         ),
         KeyBinding::new(
-            "alt-right",
+            "secondary-alt-right",
             SessionSweepForward,
             Some("BigPictureEnabled && !Terminal && !Menu"),
-        ),
-        KeyBinding::new(
-            "alt-left",
-            SessionSweepBackward,
-            Some("BigPictureEnabled > TextInput && !Terminal && !Menu"),
-        ),
-        KeyBinding::new(
-            "alt-right",
-            SessionSweepForward,
-            Some("BigPictureEnabled > TextInput && !Terminal && !Menu"),
         ),
     ]);
     for index in 0..9 {
@@ -762,7 +750,7 @@ impl Waku {
         self.set_big_picture_target(Some(next), cx);
     }
 
-    /// ⌥←/⌥→ — the session sweep. A press opens the overlay and steps the
+    /// ⌘⌥←/⌘⌥→ — the session sweep. A press opens the overlay and steps the
     /// highlight one rank over; unlike ⌘⇧D it is a pure preview — no
     /// navigation, no unread stamps, nothing but the highlight and the
     /// composer target move until Enter lands on a card.

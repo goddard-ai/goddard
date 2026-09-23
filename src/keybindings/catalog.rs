@@ -2588,14 +2588,17 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "secondary-enter",
         BigPicture,
     ),
-    e("bigpicture.sweep_back", All, "alt-left", SweepScope),
-    e("bigpicture.sweep_forward", All, "alt-right", SweepScope),
-    e("bigpicture.sweep_back", All, "alt-left", SweepFieldScope),
+    e(
+        "bigpicture.sweep_back",
+        All,
+        "secondary-alt-left",
+        SweepScope,
+    ),
     e(
         "bigpicture.sweep_forward",
         All,
-        "alt-right",
-        SweepFieldScope,
+        "secondary-alt-right",
+        SweepScope,
     ),
     e("bigpicture.card.1", All, "secondary-1", BigPicture),
     e("bigpicture.card.2", All, "secondary-2", BigPicture),
@@ -2976,13 +2979,9 @@ mod ctx {
     pub const TerminalBarInput: &str = "TerminalCommandBar > TextInput";
     pub const TerminalCommandBar: &str = "TerminalCommandBar";
     pub const NotTerminal: &str = "!Terminal";
-    /// The ⌥←/⌥→ session sweep — the experiment flag keeps a disabled Big
-    /// Picture from eating the chords; !Terminal and !Menu spare the
-    /// shell's word keys and menu filter fields.
+    /// The ⌘⌥←/⌘⌥→ session sweep — the experiment flag keeps a disabled Big
+    /// Picture from eating the chords; !Terminal and !Menu spare their input.
     pub const SweepScope: &str = "BigPictureEnabled && !Terminal && !Menu";
-    /// The sweep reaching into text fields — registered after `input::init`,
-    /// it wins the same-depth tie over word-jump.
-    pub const SweepFieldScope: &str = "BigPictureEnabled > TextInput && !Terminal && !Menu";
     pub const Workspace: &str = "Workspace";
     pub const ProjectsPage: &str = "ProjectsPage";
     pub const AutomationsPage: &str = "AutomationsPage";
