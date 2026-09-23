@@ -358,6 +358,9 @@ impl WakuBackend {
         let integrations =
             crate::integrations::IntegrationService::new(settings.clone(), data_dir.clone())
                 .context("could not start the integrations service")?;
+        // The proxy port is ephemeral: file providers' managed entries still
+        // carry the previous daemon's address until this rewrites them.
+        crate::integrations::deliver::sync_file_providers(&settings.get(), &integrations);
         let our_name = std::env::var("USER")
             .ok()
             .filter(|name| !name.is_empty())
@@ -1481,6 +1484,10 @@ impl Backend for WakuBackend {
             Command::UpdateSettings { settings } => {
                 self.settings.replace(settings)?;
                 self.apply_wake_setting();
+                crate::integrations::deliver::sync_file_providers(
+                    &self.settings.get(),
+                    &self.integrations,
+                );
                 events.settings_changed(self.settings.get());
                 Ok(ResponsePayload::Ack)
             }

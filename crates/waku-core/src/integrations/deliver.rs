@@ -35,14 +35,14 @@ const FILE_PROVIDERS: &[ProviderKind] = &[
     ProviderKind::Grok,
 ];
 
-/// Rewrite every file provider's managed entries from `settings`. Called
-/// after connect/disconnect/provider-set changes. Errors for one provider
-/// are logged and do not stop the others — a broken config file should not
-/// wedge the pane.
+/// Rewrite every file provider's managed entries from `settings`. Called at
+/// startup — the proxy's port is ephemeral, so entries written by an earlier
+/// daemon point at a dead listener until this runs — and after
+/// connect/disconnect/provider-set/settings changes. With the experiment
+/// off, every provider's desired set is empty, which strips leftover
+/// `goddard_*` entries. Errors for one provider are logged and do not stop
+/// the others — a broken config file should not wedge the pane.
 pub fn sync_file_providers(settings: &DaemonSettings, service: &super::IntegrationService) {
-    if !settings.integrations_enabled {
-        return;
-    }
     for provider in FILE_PROVIDERS {
         let entries = desired_entries(settings, service, *provider);
         if let Err(error) = sync_provider(*provider, &entries) {
@@ -60,6 +60,9 @@ fn desired_entries(
     service: &super::IntegrationService,
     provider: ProviderKind,
 ) -> BTreeMap<String, Value> {
+    if !settings.integrations_enabled {
+        return BTreeMap::new();
+    }
     settings
         .integrations
         .iter()
@@ -168,7 +171,13 @@ fn sync_json(
             .as_object_mut()
             .ok_or_else(|| anyhow!("{}.{key} is not an object; skipping", path.display()))?;
     }
+    let had_managed = node.keys().any(|name| name.starts_with("goddard_"));
     node.retain(|name, _| !name.starts_with("goddard_"));
+    if entries.is_empty() && !had_managed {
+        // Nothing managed to add or strip: leave the file — including a
+        // missing one — untouched.
+        return Ok(());
+    }
     for (name, entry) in entries {
         node.insert(name.clone(), entry.clone());
     }
@@ -193,7 +202,11 @@ fn sync_grok(entries: &BTreeMap<String, Value>) -> anyhow::Result<()> {
         .or_insert_with(|| toml::Value::Table(toml::Table::new()))
         .as_table_mut()
         .ok_or_else(|| anyhow!("{}.mcp_servers is not a table; skipping", path.display()))?;
+    let had_managed = servers.keys().any(|name| name.starts_with("goddard_"));
     servers.retain(|name, _| !name.starts_with("goddard_"));
+    if entries.is_empty() && !had_managed {
+        return Ok(());
+    }
     for (name, entry) in entries {
         let url = entry
             .get("url")
@@ -360,6 +373,23 @@ mod tests {
         let document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert!(document["mcpServers"].get("goddard_linear").is_none());
         assert!(document["mcpServers"].get("mine").is_some());
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn sync_json_with_no_entries_does_not_create_a_missing_file() {
+        let path = temp_path("nocreate.json");
+        sync_json(&path, &["mcpServers"], &BTreeMap::new()).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn sync_json_with_no_entries_leaves_an_unmanaged_file_untouched() {
+        let path = temp_path("untouched.json");
+        let raw = r#"{"mcpServers": {"mine": {"url": "x"}}}"#;
+        fs::write(&path, raw).unwrap();
+        sync_json(&path, &["mcpServers"], &BTreeMap::new()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), raw);
         fs::remove_file(path).ok();
     }
 

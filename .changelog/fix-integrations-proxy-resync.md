@@ -1,0 +1,1 @@
+- Fixed connected integrations going silent in file-configured providers (Devin, Claude Code, Cursor, and others) after a Goddard restart: the provider's MCP entry now refreshes to the current proxy address on every launch instead of pointing at the previous daemon's dead port.
