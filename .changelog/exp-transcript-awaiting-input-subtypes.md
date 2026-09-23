@@ -1,1 +1,1 @@
-- Turn status markers distinguish a request to proceed, a decision, and missing details when an agent waits for your input, with a matching action above the composer.
+- Turn status markers suggest a matching next step for go-aheads, decisions, missing details, unfinished work, repairable errors, and untested code.

@@ -2526,8 +2526,11 @@ status_markers.blocked: 受阻
 status_markers.complete: 已完成
 status_markers.drifted: 已偏离
 status_markers.failed: 失败
+status_markers.errors_remain: 仍有错误
+status_markers.not_tested: 未测试
 status_markers.needs_review: 待复核
 status_markers.partial: 部分完成
+status_markers.needs_continuation: 需要继续
 status_markers.thrash: 反复试错
 status_markers.unverified: 未验证
 phase.planning: 规划中

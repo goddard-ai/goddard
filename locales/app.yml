@@ -845,10 +845,16 @@ status_markers.unverified:
   en: Unverified
 status_markers.partial:
   en: Partial
+status_markers.needs_continuation:
+  en: Needs continuation
 status_markers.blocked:
   en: Blocked
 status_markers.failed:
   en: Failed
+status_markers.errors_remain:
+  en: Errors remain
+status_markers.not_tested:
+  en: Not tested
 status_markers.drifted:
   en: Drifted
 status_markers.needs_review:

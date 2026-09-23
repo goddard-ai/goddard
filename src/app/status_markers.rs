@@ -1,9 +1,9 @@
 //! Turn status markers: while the experiment is on, each assistant turn that
 //! ends naturally is scored by the daemon's evaluation model — one `Choice`
 //! question picks how the turn ended (complete, awaiting input, partial,
-//! blocked, failed, other). A second choice clarifies what input is needed
-//! when the turn awaits the user, while independent Nouls flag qualities that can
-//! co-occur with any ending (unverified, drifted). Cleared markers render as
+//! blocked, failed, other). Follow-up choices refine actionable endings and
+//! verification, while independent Nouls flag qualities that can co-occur
+//! with any ending (unverified, drifted). Cleared markers render as
 //! chips on the response footer: colored icon and name, dim confidence
 //! percent.
 //!
@@ -67,6 +67,9 @@ const ENDING_QUESTION: &str = "ending";
 const ENDING_OTHER_OPTION: &str = "other";
 const INPUT_QUESTION: &str = "awaiting-input-kind";
 const INPUT_OTHER_OPTION: &str = "other";
+const PARTIAL_QUESTION: &str = "partial-kind";
+const FAILURE_QUESTION: &str = "failure-kind";
+const VERIFICATION_QUESTION: &str = "verification-kind";
 const ENDING_MARKERS: &[StatusMarker] = &[
     StatusMarker {
         id: "complete",
@@ -155,6 +158,40 @@ const INPUT_MARKERS: &[StatusMarker] = &[
     },
 ];
 
+const PARTIAL_MARKERS: &[StatusMarker] = &[StatusMarker {
+    id: "needs-continuation",
+    label_key: "status_markers.needs_continuation",
+    icon: "icons/hourglass.svg",
+    tone: MarkerTone::Warning,
+    threshold: 0.55,
+    instructions: "The requested work remains unfinished, and the agent can make \
+        useful progress if the user tells it to continue. No missing decision, \
+        permission, credential, or outside resource is required.",
+}];
+
+const FAILURE_MARKERS: &[StatusMarker] = &[StatusMarker {
+    id: "errors-remain",
+    label_key: "status_markers.errors_remain",
+    icon: "icons/x-bold.svg",
+    tone: MarkerTone::Danger,
+    threshold: 0.55,
+    instructions: "Build, test, or implementation errors remain unresolved, and \
+        the agent can plausibly repair them with another turn. Do not choose \
+        this for a missing credential, permission, tool, or external resource.",
+}];
+
+const VERIFICATION_MARKERS: &[StatusMarker] = &[StatusMarker {
+    id: "not-tested",
+    label_key: "status_markers.not_tested",
+    icon: "icons/eye.svg",
+    tone: MarkerTone::Warning,
+    threshold: 0.55,
+    instructions: "The agent changed executable code and did not run relevant \
+        tests or an equivalent behavioral check before ending. The user did \
+        not ask it to skip testing. A successful compile alone does not count \
+        as testing; docs-only changes do not count.",
+}];
+
 /// A user action justified by the latest settled turn's input marker.
 /// Decision labels come only from short, explicitly enumerated options.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,6 +200,9 @@ pub(super) enum StatusSuggestedAction {
     Choose { option: String },
     AddDetails,
     ChooseManually,
+    KeepGoing,
+    FixErrors,
+    RunTests,
 }
 
 fn explicit_decision_options(response: &str) -> Vec<String> {
@@ -226,9 +266,17 @@ fn explicit_decision_options(response: &str) -> Vec<String> {
 }
 
 fn suggested_actions(evaluation: &Evaluation, response: &str) -> Vec<StatusSuggestedAction> {
-    let marker = cleared_markers(evaluation)
-        .into_iter()
-        .find(|(marker, _)| matches!(marker.id, "go-ahead" | "decision" | "details"));
+    let marker = cleared_markers(evaluation).into_iter().find(|(marker, _)| {
+        matches!(
+            marker.id,
+            "go-ahead"
+                | "decision"
+                | "details"
+                | "needs-continuation"
+                | "errors-remain"
+                | "not-tested"
+        )
+    });
     match marker.map(|(marker, _)| marker.id) {
         Some("go-ahead") => vec![StatusSuggestedAction::Proceed],
         Some("details") => vec![StatusSuggestedAction::AddDetails],
@@ -243,6 +291,9 @@ fn suggested_actions(evaluation: &Evaluation, response: &str) -> Vec<StatusSugge
                     .collect()
             }
         }
+        Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
+        Some("errors-remain") => vec![StatusSuggestedAction::FixErrors],
+        Some("not-tested") => vec![StatusSuggestedAction::RunTests],
         _ => Vec::new(),
     }
 }
@@ -258,10 +309,11 @@ const FLAG_MARKERS: &[StatusMarker] = &[
         icon: "icons/eye.svg",
         tone: MarkerTone::Warning,
         threshold: 0.75,
-        instructions: "Did the turn finish without its work being verified — code it \
-            changed but never built, tested, or ran, claims it did not check, or the \
-            last build/test/run in `toolSequence` ended `(failed)` and the turn closed \
-            without a passing rerun? `toolErrors` carries the failing output tails.",
+        instructions: "Did the turn finish without adequate verification of its \
+            changed behavior — relevant tests or a live behavioral check were \
+            skipped, it claims it did not check, or the last build/test/run in \
+            `toolSequence` failed without a passing rerun? A compile alone does \
+            not verify behavior. `toolErrors` carries failing output tails.",
     },
     StatusMarker {
         id: "drifted",
@@ -341,7 +393,7 @@ const FILES_CHANGED_STATE_MAX: usize = 50;
 const EVAL_FEATURE: &str = "turn-status";
 
 /// The question map sent with every turn evaluation: one `Choice` for the
-/// ending, another for the kind of input needed, plus one `Noul` per flag.
+/// ending, conditional subtype choices, plus one `Noul` per flag.
 fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
     let mut questions = BTreeMap::from([(
         ENDING_QUESTION.to_owned(),
@@ -372,6 +424,40 @@ fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
                 .collect(),
         },
     );
+    for (key, instructions, markers) in [
+        (
+            PARTIAL_QUESTION,
+            "If the ending is `partial`, can the agent make useful progress on \
+                the unfinished request after a simple 'keep going' prompt? \
+                Otherwise choose `other`.",
+            PARTIAL_MARKERS,
+        ),
+        (
+            FAILURE_QUESTION,
+            "If the ending is `failed`, are there repairable errors still \
+                unresolved? Otherwise choose `other`.",
+            FAILURE_MARKERS,
+        ),
+        (
+            VERIFICATION_QUESTION,
+            "If `unverified` is true, did the agent change executable code \
+                without running relevant tests or equivalent behavioral checks? \
+                Otherwise choose `other`.",
+            VERIFICATION_MARKERS,
+        ),
+    ] {
+        questions.insert(
+            key.to_owned(),
+            EvalQuestion::Choice {
+                instructions: instructions.to_owned(),
+                criteria: markers
+                    .iter()
+                    .map(|marker| (marker.id.to_owned(), Some(marker.instructions.to_owned())))
+                    .chain([("other".to_owned(), None)])
+                    .collect(),
+            },
+        );
+    }
     for marker in FLAG_MARKERS {
         questions.insert(
             marker.id.to_owned(),
@@ -596,6 +682,24 @@ pub(super) fn turn_eval_state(
 /// threshold. `complete` then yields whenever another marker cleared: it is
 /// the nothing-to-see-here chip, and "done" beside a warning or a question
 /// reads as a contradiction.
+fn cleared_subtype(
+    evaluation: &Evaluation,
+    question: &str,
+    markers: &'static [StatusMarker],
+) -> Option<(&'static StatusMarker, f64)> {
+    let EvalAnswer::Choice {
+        choice,
+        probabilities,
+        ..
+    } = evaluation.answers.get(question)?
+    else {
+        return None;
+    };
+    let marker = markers.iter().find(|marker| marker.id == choice)?;
+    let score = probabilities.get(choice).copied().unwrap_or(0.0);
+    (score >= marker.threshold).then_some((marker, score))
+}
+
 fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)> {
     let mut cleared: Vec<(&'static StatusMarker, f64)> = Vec::new();
     if let Some(EvalAnswer::Choice {
@@ -607,23 +711,12 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
     {
         let winner = probabilities.get(choice).copied().unwrap_or(0.0);
         if winner >= marker.threshold {
-            let subtype = (marker.id == "awaiting-input")
-                .then(|| evaluation.answers.get(INPUT_QUESTION))
-                .flatten()
-                .and_then(|answer| match answer {
-                    EvalAnswer::Choice {
-                        choice,
-                        probabilities,
-                        ..
-                    } => INPUT_MARKERS
-                        .iter()
-                        .find(|subtype| subtype.id == choice)
-                        .and_then(|subtype| {
-                            let score = probabilities.get(choice).copied().unwrap_or(0.0);
-                            (score >= subtype.threshold).then_some((subtype, score))
-                        }),
-                    _ => None,
-                });
+            let subtype = match marker.id {
+                "awaiting-input" => cleared_subtype(evaluation, INPUT_QUESTION, INPUT_MARKERS),
+                "partial" => cleared_subtype(evaluation, PARTIAL_QUESTION, PARTIAL_MARKERS),
+                "failed" => cleared_subtype(evaluation, FAILURE_QUESTION, FAILURE_MARKERS),
+                _ => None,
+            };
             cleared.push(
                 subtype
                     .map(|(subtype, score)| (subtype, winner * score))
@@ -635,7 +728,14 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
         if let Some(EvalAnswer::Noul { noul }) = evaluation.answers.get(marker.id)
             && *noul >= marker.threshold
         {
-            cleared.push((marker, *noul));
+            let subtype = (marker.id == "unverified")
+                .then(|| cleared_subtype(evaluation, VERIFICATION_QUESTION, VERIFICATION_MARKERS))
+                .flatten();
+            cleared.push(
+                subtype
+                    .map(|(subtype, score)| (subtype, *noul * score))
+                    .unwrap_or((marker, *noul)),
+            );
         }
     }
     if cleared.len() > 1 {
@@ -715,6 +815,15 @@ impl Waku {
                                     }
                                     StatusSuggestedAction::ChooseManually => {
                                         ("icons/chat.svg", tr!("suggestions.choose_manually"))
+                                    }
+                                    StatusSuggestedAction::KeepGoing => {
+                                        ("icons/sparkle.svg", tr!("suggestions.keep_going"))
+                                    }
+                                    StatusSuggestedAction::FixErrors => {
+                                        ("icons/sparkle.svg", tr!("suggestions.fix_errors"))
+                                    }
+                                    StatusSuggestedAction::RunTests => {
+                                        ("icons/sparkle.svg", tr!("suggestions.run_tests"))
                                     }
                                 };
                                 let action = action.clone();
@@ -806,6 +915,22 @@ impl Waku {
             }
             StatusSuggestedAction::AddDetails | StatusSuggestedAction::ChooseManually => {
                 window.focus(&self.composer_focus(cx), cx);
+            }
+            StatusSuggestedAction::KeepGoing
+            | StatusSuggestedAction::FixErrors
+            | StatusSuggestedAction::RunTests => {
+                let prompt = match action {
+                    StatusSuggestedAction::KeepGoing => tr!("suggestions.keep_going"),
+                    StatusSuggestedAction::FixErrors => tr!("suggestions.fix_errors"),
+                    StatusSuggestedAction::RunTests => tr!("suggestions.run_tests"),
+                    _ => unreachable!(),
+                };
+                self.turn_status_suggestions.insert(turn_id, Vec::new());
+                self.submit_composer_submission_to(
+                    session_id,
+                    ComposerSubmission::plain(prompt),
+                    cx,
+                );
             }
         }
     }
@@ -1113,7 +1238,7 @@ mod tests {
     #[test]
     fn questions_split_the_ending_choice_from_flag_nouls() {
         let questions = status_marker_questions();
-        assert_eq!(questions.len(), FLAG_MARKERS.len() + 2);
+        assert_eq!(questions.len(), FLAG_MARKERS.len() + 5);
         let Some(EvalQuestion::Choice { criteria, .. }) = questions.get(ENDING_QUESTION) else {
             panic!("the ending question must be a choice");
         };
@@ -1128,6 +1253,19 @@ mod tests {
             assert!(criteria.contains_key(marker.id));
         }
         assert!(criteria.contains_key(INPUT_OTHER_OPTION));
+        for (question, markers) in [
+            (PARTIAL_QUESTION, PARTIAL_MARKERS),
+            (FAILURE_QUESTION, FAILURE_MARKERS),
+            (VERIFICATION_QUESTION, VERIFICATION_MARKERS),
+        ] {
+            let Some(EvalQuestion::Choice { criteria, .. }) = questions.get(question) else {
+                panic!("subtype question must be a choice");
+            };
+            for marker in markers {
+                assert!(criteria.contains_key(marker.id));
+            }
+            assert!(criteria.contains_key("other"));
+        }
         for marker in FLAG_MARKERS {
             assert!(matches!(
                 questions.get(marker.id),
@@ -1213,6 +1351,67 @@ mod tests {
             [StatusSuggestedAction::ChooseManually]
         );
         assert!(suggested_actions(&verdict("other"), "Want me to proceed?").is_empty());
+    }
+
+    #[test]
+    fn actionable_subtypes_replace_only_their_cleared_parent() {
+        for (parent, question, subtype, action) in [
+            (
+                "partial",
+                PARTIAL_QUESTION,
+                "needs-continuation",
+                StatusSuggestedAction::KeepGoing,
+            ),
+            (
+                "failed",
+                FAILURE_QUESTION,
+                "errors-remain",
+                StatusSuggestedAction::FixErrors,
+            ),
+        ] {
+            let verdict = |score| {
+                evaluation(BTreeMap::from([
+                    (
+                        ENDING_QUESTION.to_owned(),
+                        ending_choice(parent, &[(parent, 0.80)]),
+                    ),
+                    (
+                        question.to_owned(),
+                        ending_choice(subtype, &[(subtype, score)]),
+                    ),
+                ]))
+            };
+            assert_eq!(cleared_markers(&verdict(0.80))[0].0.id, subtype);
+            assert_eq!(suggested_actions(&verdict(0.80), ""), [action]);
+            assert_eq!(cleared_markers(&verdict(0.40))[0].0.id, parent);
+            assert!(suggested_actions(&verdict(0.40), "").is_empty());
+        }
+
+        let untested = evaluation(BTreeMap::from([
+            (
+                ENDING_QUESTION.to_owned(),
+                ending_choice("complete", &[("complete", 0.80)]),
+            ),
+            ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+            (
+                VERIFICATION_QUESTION.to_owned(),
+                ending_choice("not-tested", &[("not-tested", 0.80)]),
+            ),
+        ]));
+        assert_eq!(cleared_markers(&untested)[0].0.id, "not-tested");
+        assert_eq!(
+            suggested_actions(&untested, ""),
+            [StatusSuggestedAction::RunTests]
+        );
+        let unverified = evaluation(BTreeMap::from([
+            ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+            (
+                VERIFICATION_QUESTION.to_owned(),
+                ending_choice("not-tested", &[("not-tested", 0.40)]),
+            ),
+        ]));
+        assert_eq!(cleared_markers(&unverified)[0].0.id, "unverified");
+        assert!(suggested_actions(&unverified, "").is_empty());
     }
 
     #[test]
