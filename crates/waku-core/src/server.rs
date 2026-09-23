@@ -870,6 +870,7 @@ impl RequestDispatcher {
         let backend = self.backend.clone();
         let hub = self.hub.clone();
         let failed_request_id = request.request_id;
+        let failed_session_id = request.session_id;
         let failed_outgoing = outgoing.clone();
         if let Err(error) = std::thread::Builder::new()
             .name("goddard-daemon-request".into())
@@ -879,6 +880,7 @@ impl RequestDispatcher {
         {
             send_dispatch_error(
                 failed_request_id,
+                failed_session_id,
                 failed_outgoing,
                 &self.hub,
                 format!("could not start daemon request worker: {error}"),
@@ -953,6 +955,7 @@ impl RequestDispatcher {
                 drop(mailboxes);
                 send_dispatch_error(
                     failed_request_id,
+                    session_id,
                     failed_outgoing,
                     &self.hub,
                     format!("could not start runtime worker: {error}"),
@@ -1790,6 +1793,10 @@ fn handle_request(
     let session_id = request.session_id;
     let runtime_id = request.runtime_id;
     let task_catalog_action = task_catalog_action(&request.command);
+    // A fire-and-forget command gets no response, so a rejection must be
+    // named before the request moves into the backend for the log line
+    // below to know what failed.
+    let command_kind = notification.then(|| command_kind(&request.command));
     let starts_runtime = matches!(
         &request.command,
         Command::Start { .. } | Command::OpenTerminal { .. }
@@ -1861,8 +1868,26 @@ fn handle_request(
             request_id,
             outcome: outcome.clone(),
         });
+    } else if let ResponseOutcome::Error { error } = &outcome {
+        // No response channel exists — without this line a rejected
+        // prompt, e.g. one sent to a runtime the daemon already retired,
+        // leaves no trace anywhere.
+        eprintln!(
+            "goddard-daemon: fire-and-forget {} for session {session_id} failed: {}",
+            command_kind.as_deref().unwrap_or("command"),
+            error.message
+        );
     }
     HandledRequest { outcome, executed }
+}
+
+/// A command's wire `type` tag, for naming a fire-and-forget failure
+/// without dumping its payload (prompt text, attachments) into stderr.
+fn command_kind(command: &Command) -> String {
+    serde_json::to_value(command)
+        .ok()
+        .and_then(|value| value.get("type")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown".into())
 }
 
 fn task_catalog_action(command: &Command) -> TaskCatalogAction {
@@ -1891,11 +1916,17 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
 
 fn send_dispatch_error(
     request_id: Uuid,
+    session_id: Uuid,
     outgoing: Sender<ServerMessage>,
     hub: &Arc<Hub>,
     message: String,
 ) {
     if request_id.is_nil() {
+        // Fire-and-forget commands have no response channel — the log is
+        // the only place this failure can surface.
+        eprintln!(
+            "goddard-daemon: fire-and-forget command for session {session_id} failed to dispatch: {message}"
+        );
         return;
     }
     let outcome = hub
