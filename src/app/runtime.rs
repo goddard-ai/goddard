@@ -7107,7 +7107,7 @@ impl Waku {
             | self.drain_friend_session_closed_events(cx)
             | self.drain_status_marker_events()
             | self.drain_title_quality_events(cx)
-            | self.drain_action_prediction_events()
+            | self.drain_action_prediction_events(cx)
             | self.drain_phase_eval_events(cx)
         {
             cx.notify();

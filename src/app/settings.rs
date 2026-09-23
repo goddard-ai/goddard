@@ -6659,6 +6659,115 @@ impl Waku {
         settings_group(tr!("suggestions.settings_title"), cards, theme)
     }
 
+    fn set_automatic_suggested_action(
+        &mut self,
+        id: &'static str,
+        threshold: Option<u8>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(threshold) = threshold {
+            self.state
+                .automatic_suggested_actions
+                .insert(id.to_owned(), threshold.clamp(95, 100));
+        } else {
+            self.state.automatic_suggested_actions.remove(id);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn render_automatic_suggested_actions_settings(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let rows = action_predictions::AUTOMATIC_ACTIONS
+            .iter()
+            .filter_map(|&id| {
+                let title = match id {
+                    "push" => tr!("suggestions.push"),
+                    "sync" => tr!("suggestions.sync"),
+                    "land" => tr!("suggestions.land"),
+                    _ => action_predictions::default_suggested_prompt(id)?,
+                };
+                let threshold = self.state.automatic_suggested_actions.get(id).copied();
+                let controls = div()
+                    .flex()
+                    .items_center()
+                    .gap(px(7.0))
+                    .child(settings_button(
+                        format!("automatic-action-toggle-{id}"),
+                        if threshold.is_some() {
+                            tr!("auto_prompts.disable")
+                        } else {
+                            tr!("auto_prompts.enable")
+                        },
+                        true,
+                        false,
+                        true,
+                        theme,
+                        cx,
+                        move |this, _, cx| {
+                            this.set_automatic_suggested_action(
+                                id,
+                                threshold.is_none().then_some(95),
+                                cx,
+                            )
+                        },
+                    ))
+                    .child(settings_button(
+                        format!("automatic-action-decrease-{id}"),
+                        "−".to_owned(),
+                        threshold.is_some_and(|value| value > 95),
+                        false,
+                        true,
+                        theme,
+                        cx,
+                        move |this, _, cx| {
+                            this.set_automatic_suggested_action(
+                                id,
+                                threshold.map(|value| value.saturating_sub(1)),
+                                cx,
+                            )
+                        },
+                    ))
+                    .child(format!("{}%", threshold.unwrap_or(95)))
+                    .child(settings_button(
+                        format!("automatic-action-increase-{id}"),
+                        "+".to_owned(),
+                        threshold.is_some_and(|value| value < 100),
+                        false,
+                        true,
+                        theme,
+                        cx,
+                        move |this, _, cx| {
+                            this.set_automatic_suggested_action(
+                                id,
+                                threshold.map(|value| value.saturating_add(1)),
+                                cx,
+                            )
+                        },
+                    ));
+                settings_row(
+                    "icons/zap.svg",
+                    title,
+                    tr!("suggestions.automatic_action_description"),
+                    controls,
+                    theme,
+                    search,
+                )
+            })
+            .map(Some)
+            .collect();
+        let card = settings_row_card(rows, theme)?;
+        settings_group(
+            tr!("suggestions.automatic_actions_title"),
+            vec![card.into_any_element()],
+            theme,
+        )
+    }
+
     fn experiment_card(
         &self,
         experiment: &ExperimentDef,
@@ -7802,6 +7911,7 @@ impl Waku {
             .children(credentials)
             .children(classes)
             .children(self.render_suggested_prompts_settings(theme, search, cx))
+            .children(self.render_automatic_suggested_actions_settings(theme, search, cx))
             .children(usage)
             .into_any_element()
     }

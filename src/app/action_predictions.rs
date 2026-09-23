@@ -1,10 +1,9 @@
-//! Next-action predictions, shadow mode: while the experiment is on, each
-//! naturally settled turn gets one evaluation call that classifies the task
-//! and picks the user's likely next move from a fixed candidate set. Nothing
-//! renders — a prediction sits pending until the user's next journaled
-//! action resolves it, and every verdict lands in
-//! `~/.goddard/action-predictions.jsonl` so calibration is measured before
-//! any suggestion UI ships.
+//! Next-action predictions: while the experiment is on, each naturally
+//! settled turn gets one evaluation call that classifies the task and picks
+//! the user's likely next move from a fixed candidate set. Confident picks
+//! appear as suggestions; individually opted-in picks may run automatically
+//! above their configured threshold. Every verdict lands in
+//! `~/.goddard/action-predictions.jsonl` for calibration.
 //!
 //! The action journal (`~/.goddard/actions.jsonl`) is the raw material: a
 //! closed vocabulary of consequential moves — prompt sends, Git operations,
@@ -174,6 +173,31 @@ const ACTIONABLE_SUGGESTIONS: &[&str] = &[
     "land",
 ];
 
+/// Commit remains review-gated because its dispatcher opens the commit dialog.
+pub(super) const AUTOMATIC_ACTIONS: &[&str] = &[
+    "keep-going",
+    "run-tests",
+    "fix-errors",
+    "commit-changes",
+    "add-tests",
+    "review-changes",
+    "open-pr",
+    "push",
+    "sync",
+    "land",
+];
+
+fn automatic_action_allowed(
+    action: &str,
+    probability: f64,
+    thresholds: &BTreeMap<String, u8>,
+) -> bool {
+    AUTOMATIC_ACTIONS.contains(&action)
+        && thresholds.get(action).is_some_and(|threshold| {
+            probability.is_finite() && probability >= f64::from((*threshold).clamp(95, 100)) / 100.0
+        })
+}
+
 /// A suggestion renders only when the model is confident and committed:
 /// the argmax clears this probability and beats the runner-up by this
 /// margin. Both are starting values to revisit against the shadow log.
@@ -198,8 +222,8 @@ pub(super) struct PendingActionPrediction {
     /// Every option the question offered — an unlisted action hitting an
     /// `other` prediction is a hit, not silence.
     pub candidates: Vec<String>,
-    /// The user clicked this prediction's chip — adoption, distinct from
-    /// the correctness outcome the resolution records.
+    /// The suggestion was accepted or run automatically — adoption, distinct
+    /// from the correctness outcome the resolution records.
     pub adopted: bool,
 }
 
@@ -552,13 +576,13 @@ impl Waku {
     /// Land answered predictions. A failed call drops quietly — the pending
     /// list simply never gains the entry, matching every other eval
     /// fallback.
-    pub(super) fn drain_action_prediction_events(&mut self) -> bool {
+    pub(super) fn drain_action_prediction_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         while let Ok((session_id, turn_id, result)) = self.action_prediction_events.try_recv() {
             self.action_prediction_in_flight.remove(&turn_id);
             match result {
                 Ok(evaluation) => {
-                    self.log_prediction(session_id, turn_id, &evaluation);
+                    self.log_prediction(session_id, turn_id, &evaluation, cx);
                     changed = true;
                 }
                 Err(error) => {
@@ -574,7 +598,13 @@ impl Waku {
     /// so the log can answer both "was the argmax right" and "was the
     /// distribution honest" at analysis time. `taskType` is logged for the
     /// same reason and never read at runtime.
-    fn log_prediction(&mut self, session_id: Uuid, turn_id: Uuid, evaluation: &Evaluation) {
+    fn log_prediction(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        evaluation: &Evaluation,
+        cx: &mut Context<Self>,
+    ) {
         // Incognito sessions write nothing to the prediction log either.
         if self.session_incognito(session_id) {
             return;
@@ -607,7 +637,8 @@ impl Waku {
         {
             self.action_suggestion = None;
         }
-        if let Some(action) = gated_suggestion(choice, probabilities) {
+        let suggestion = gated_suggestion(choice, probabilities);
+        if let Some(action) = suggestion {
             self.action_suggestion = Some(ActionSuggestion {
                 prediction_id: prediction.id,
                 session_id,
@@ -629,6 +660,68 @@ impl Waku {
             }),
         );
         self.pending_action_predictions.push(prediction);
+        let Some(action) = suggestion else { return };
+        if !self.state.action_predictions_enabled
+            || !automatic_action_allowed(
+                action,
+                probabilities.get(action).copied().unwrap_or(0.0),
+                &self.state.automatic_suggested_actions,
+            )
+            || self.state.selected_session != Some(session_id)
+            || (action == "land"
+                && self.composer_session().map(|session| session.id) != Some(session_id))
+            || self.action_journal.iter().any(|record| {
+                record.session == Some(session_id)
+                    && self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .and_then(|session| session.turns.last())
+                        .and_then(|turn| turn.completed_at)
+                        .is_some_and(|completed_at| record.at > completed_at)
+            })
+            || !self.state.sessions.iter().any(|session| {
+                session.id == session_id
+                    && session.status == SessionStatus::Idle
+                    && session.queued_messages.is_empty()
+                    && session.turns.last().is_some_and(|turn| {
+                        turn.id == turn_id && turn.status == TurnStatus::Completed
+                    })
+            })
+        {
+            return;
+        }
+        if let Some(pending) = self.pending_action_predictions.last_mut() {
+            pending.adopted = true;
+        }
+        match suggestion_dispatch(action) {
+            Some(SuggestionDispatch::Prompt(id)) => {
+                if let Some(prompt) = suggested_prompt(id, &self.state.suggested_prompts, None) {
+                    self.submit_canned_prompt_to(session_id, id, prompt, cx);
+                }
+            }
+            Some(SuggestionDispatch::Push | SuggestionDispatch::Sync) => {
+                let workspace = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .and_then(|session| {
+                        self.workspace_path_for_session(session)
+                            .map(Path::to_path_buf)
+                    });
+                if let Some(workspace) = workspace {
+                    if action == "push" {
+                        self.start_workspace_push(workspace, cx);
+                    } else {
+                        self.start_workspace_sync(workspace, PullStrategy::Rebase, cx);
+                    }
+                }
+            }
+            Some(SuggestionDispatch::Land) => self.land_composer_session(PullStrategy::Rebase, cx),
+            _ => {}
+        }
     }
 
     /// The journal's one entry point: every consequential-action dispatch
@@ -1190,5 +1283,19 @@ mod tests {
             base_branch: None,
         };
         assert!(candidate_ids(&session, turn_id).contains(&"land"));
+    }
+
+    #[test]
+    fn automatic_actions_require_an_explicit_opt_in_and_at_least_95_percent() {
+        let mut thresholds = BTreeMap::new();
+        assert!(!automatic_action_allowed("run-tests", 1.0, &thresholds));
+        thresholds.insert("run-tests".to_owned(), 90);
+        assert!(!automatic_action_allowed("run-tests", 0.949, &thresholds));
+        assert!(automatic_action_allowed("run-tests", 0.95, &thresholds));
+        thresholds.insert("run-tests".to_owned(), 99);
+        assert!(!automatic_action_allowed("run-tests", 0.98, &thresholds));
+        assert!(automatic_action_allowed("run-tests", 0.99, &thresholds));
+        thresholds.insert("commit".to_owned(), 95);
+        assert!(!automatic_action_allowed("commit", 1.0, &thresholds));
     }
 }

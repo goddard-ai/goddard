@@ -1054,6 +1054,9 @@ pub struct AppSettings {
     /// Desktop-owned overrides for the fixed suggested-prompt actions.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub suggested_prompts: BTreeMap<String, String>,
+    /// Action id -> minimum Jev probability (95–100). Presence is opt-in.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub automatic_suggested_actions: BTreeMap<String, u8>,
     /// Experimental: the Automations page — daemon-scheduled prompts that
     /// run as tasks whether or not the app is open. Defaults on in debug
     /// builds.
@@ -1150,6 +1153,7 @@ impl Default for AppSettings {
             action_predictions_enabled: default_experiment_enabled(),
             phase_routing_enabled: default_experiment_enabled(),
             suggested_prompts: BTreeMap::new(),
+            automatic_suggested_actions: BTreeMap::new(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
             guided_reading_enabled: default_experiment_enabled(),
@@ -1590,6 +1594,8 @@ pub struct PersistedState {
     /// Customized text for stable suggested-prompt action ids.
     #[serde(default)]
     pub suggested_prompts: BTreeMap<String, String>,
+    #[serde(default)]
+    pub automatic_suggested_actions: BTreeMap<String, u8>,
     #[serde(default = "default_experiment_enabled")]
     pub phase_routing_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
@@ -1945,6 +1951,7 @@ impl PersistedState {
             action_predictions_enabled: default_experiment_enabled(),
             phase_routing_enabled: default_experiment_enabled(),
             suggested_prompts: BTreeMap::new(),
+            automatic_suggested_actions: BTreeMap::new(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
             guided_reading_enabled: default_experiment_enabled(),
@@ -2331,6 +2338,7 @@ impl PersistedState {
             action_predictions_enabled: self.action_predictions_enabled,
             phase_routing_enabled: self.phase_routing_enabled,
             suggested_prompts: self.suggested_prompts.clone(),
+            automatic_suggested_actions: self.automatic_suggested_actions.clone(),
             automations_enabled: self.automations_enabled,
             sidebar_dock_enabled: self.sidebar_dock_enabled,
             guided_reading_enabled: self.guided_reading_enabled,
@@ -2454,6 +2462,11 @@ impl PersistedState {
         self.action_predictions_enabled = settings.action_predictions_enabled;
         self.phase_routing_enabled = settings.phase_routing_enabled;
         self.suggested_prompts = settings.suggested_prompts;
+        self.automatic_suggested_actions = settings
+            .automatic_suggested_actions
+            .into_iter()
+            .map(|(id, threshold)| (id, threshold.clamp(95, 100)))
+            .collect();
         self.automations_enabled = settings.automations_enabled;
         self.sidebar_dock_enabled = settings.sidebar_dock_enabled;
         self.guided_reading_enabled = settings.guided_reading_enabled;
@@ -4083,14 +4096,29 @@ mod tests {
         state
             .suggested_prompts
             .insert("run-tests".to_owned(), "Run the focused tests".to_owned());
+        state
+            .automatic_suggested_actions
+            .insert("run-tests".to_owned(), 97);
 
         let settings = serde_json::to_value(state.app_settings()).unwrap();
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert_eq!(restored.suggested_prompts, state.suggested_prompts);
+        assert_eq!(
+            restored.automatic_suggested_actions,
+            state.automatic_suggested_actions
+        );
 
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(legacy.suggested_prompts.is_empty());
+        assert!(legacy.automatic_suggested_actions.is_empty());
+
+        let mut invalid = legacy;
+        invalid
+            .automatic_suggested_actions
+            .insert("push".to_owned(), 1);
+        restored.apply_app_settings(invalid);
+        assert_eq!(restored.automatic_suggested_actions.get("push"), Some(&95));
     }
 
     #[test]
