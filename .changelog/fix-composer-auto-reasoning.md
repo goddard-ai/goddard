@@ -1,0 +1,1 @@
+- Hide the manual reasoning effort control in the composer while Auto (Jev) is selected, since Jev chooses the effort for each turn.

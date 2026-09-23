@@ -2091,7 +2091,10 @@ impl Waku {
         let theme = Theme::current(cx);
         let session = self.composer_session()?;
         let model = self.model_metadata_for_session(session)?;
-        if model.reasoning_efforts.is_empty()
+        // Auto (Jev) chooses the effort for each turn, so don't offer a
+        // manual effort control while that route is active.
+        let show_reasoning_effort = !session.auto_route;
+        if (!show_reasoning_effort || model.reasoning_efforts.is_empty())
             && model.service_tiers.is_empty()
             && model.context_windows.is_empty()
         {
@@ -2142,7 +2145,7 @@ impl Waku {
                     .map(|option| option.id.clone())
             });
         }
-        let effort_label = if model.reasoning_efforts.is_empty() {
+        let effort_label = if !show_reasoning_effort || model.reasoning_efforts.is_empty() {
             None
         } else if selected_effort.is_none() {
             Some(tr!("common.default"))
@@ -2236,7 +2239,11 @@ impl Waku {
             (label, Some(window)) => format!("{label} · {window}"),
             (label, None) => label,
         };
-        let reasoning_efforts = model.reasoning_efforts.clone();
+        let reasoning_efforts = if show_reasoning_effort {
+            model.reasoning_efforts.clone()
+        } else {
+            Vec::new()
+        };
         let service_tiers = model.service_tiers.clone();
         let context_windows = model.context_windows.clone();
         let weak = cx.entity().downgrade();
