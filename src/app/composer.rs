@@ -2334,11 +2334,13 @@ impl Waku {
         let handle = self.menu_handle("model-traits", cx);
         Some(dropdown_menu(
             MenuChip::new("model-traits")
-                .when(fast, |trigger| {
-                    trigger.icon("icons/zap.svg", theme.text_tertiary)
-                })
+                .when(fast, |trigger| trigger.icon("icons/zap.svg", theme.accent))
                 .label(trigger_label)
-                .label_color(theme.text_tertiary)
+                .label_color(if fast {
+                    theme.accent
+                } else {
+                    theme.text_tertiary
+                })
                 .tooltip(tr!("models.options"))
                 // ⌘E only cycles effort — a tier/window-only model has no
                 // ladder for it to step through, so the hint stays off.
