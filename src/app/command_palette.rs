@@ -51,6 +51,9 @@ const DIRECTORY_SEARCH_CAP: usize = 5_000;
 const MAX_DIRECTORY_RESULTS: usize = 50;
 const FOOTER_HEIGHT: f32 = 30.0;
 const MAX_CARD_HEIGHT: f32 = 480.0;
+/// ⌘K-then-↵ is muscle memory for clearing terminal scrollback: an Enter
+/// this close to opening is the chord's tail, not a selection.
+const CONFIRM_OPEN_GRACE: Duration = Duration::from_millis(250);
 
 /// Bind list navigation beneath the focused one-line input. This is registered
 /// after the input's bindings, although the more-specific key context would
@@ -504,6 +507,10 @@ fn should_keep_previous_command_palette_results(
     next_result_count == 0 && search_pending && previous_result_count > 0
 }
 
+fn confirm_within_open_grace(opened_at: Option<Instant>, now: Instant) -> bool {
+    opened_at.is_some_and(|at| now.saturating_duration_since(at) < CONFIRM_OPEN_GRACE)
+}
+
 fn same_provider_session(left: &ProviderResumeCursor, right: &ProviderResumeCursor) -> bool {
     left.provider() == right.provider() && left.native_id() == right.native_id()
 }
@@ -538,6 +545,9 @@ fn command_palette_results_height(results: &[CommandPaletteItem], show_empty_sta
 pub(super) struct CommandPaletteUi {
     search: Entity<TextInput>,
     open: bool,
+    /// Stamped on open; the Confirm action swallows an Enter inside
+    /// `CONFIRM_OPEN_GRACE` of it.
+    opened_at: Option<Instant>,
     focus_generation: u64,
     previous_focus: Option<FocusHandle>,
     view: CommandPaletteView,
@@ -597,6 +607,7 @@ impl CommandPaletteUi {
         Self {
             search,
             open: false,
+            opened_at: None,
             focus_generation: 0,
             previous_focus: None,
             view: CommandPaletteView::Commands,
@@ -751,6 +762,7 @@ impl Waku {
         };
 
         self.command_palette.open = true;
+        self.command_palette.opened_at = Some(Instant::now());
         self.command_palette.view = CommandPaletteView::Commands;
         self.command_palette.focus_generation =
             self.command_palette.focus_generation.wrapping_add(1);
@@ -830,6 +842,7 @@ impl Waku {
             return;
         }
         self.command_palette.open = false;
+        self.command_palette.opened_at = None;
         self.command_palette.focus_generation =
             self.command_palette.focus_generation.wrapping_add(1);
         self.command_palette.active_message_query = None;
@@ -4969,6 +4982,9 @@ impl Waku {
                     this.move_command_palette_selection(-PAGE_STEP, cx)
                 }))
                 .on_action(cx.listener(|this, _: &Confirm, window, cx| {
+                    if confirm_within_open_grace(this.command_palette.opened_at, Instant::now()) {
+                        return;
+                    }
                     this.execute_command_palette_selection(None, window, cx)
                 }))
                 .on_action(cx.listener(|this, _: &Dismiss, window, cx| {
@@ -5268,6 +5284,24 @@ mod tests {
             command_palette_results_height(&providers, false),
             PROVIDER_SECTION_TOP_MARGIN + RESULT_ROW_HEIGHT * 2.0 + RESULTS_BOTTOM_PADDING
         );
+    }
+
+    #[test]
+    fn confirm_grace_swallows_only_the_scrollback_chord() {
+        let opened = Instant::now();
+        assert!(confirm_within_open_grace(
+            Some(opened),
+            opened + Duration::from_millis(50)
+        ));
+        assert!(!confirm_within_open_grace(
+            Some(opened),
+            opened + CONFIRM_OPEN_GRACE
+        ));
+        assert!(!confirm_within_open_grace(
+            Some(opened),
+            opened + Duration::from_secs(10)
+        ));
+        assert!(!confirm_within_open_grace(None, opened));
     }
 
     #[test]

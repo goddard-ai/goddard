@@ -41,6 +41,10 @@ interface PaletteItem {
   run: () => void | Promise<void>
 }
 
+// ⌘K-then-↵ is muscle memory for clearing terminal scrollback: an Enter
+// this close to opening is the chord's tail, not a selection.
+const ENTER_OPEN_GRACE_MS = 250
+
 export interface CommandPaletteActions {
   newTask: () => void
   openProject: () => void
@@ -99,6 +103,7 @@ export function CommandPalette({
   const input = useRef<HTMLInputElement>(null)
   const resumeProviderButton = useRef<HTMLButtonElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
+  const openedAt = useRef(0)
   const messageSearchCache = useRef(new Map<string, SessionMessageMatch[]>())
   const macShortcuts = useMacLikePlatform()
 
@@ -136,6 +141,7 @@ export function CommandPalette({
     previousFocus.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null
+    openedAt.current = performance.now()
     setView(initialView)
     setResumeProvider(enabledResumeProvider())
     setQuery('')
@@ -428,6 +434,7 @@ export function CommandPalette({
                 setSelected((current) => Math.max(0, Math.min(items.length - 1, current + page)))
               } else if (event.key === 'Enter') {
                 event.preventDefault()
+                if (performance.now() - openedAt.current < ENTER_OPEN_GRACE_MS) return
                 execute()
               } else if (event.key === 'Escape') {
                 event.preventDefault()
