@@ -2712,7 +2712,11 @@ impl AgentSession {
         {
             self.thread_goal = None;
         }
-        self.rederive_phase();
+        // Rewind should not classify a session that has never opted into
+        // phase tracking. A tracking feature can classify its next activity.
+        if self.phase.is_some() {
+            self.rederive_phase();
+        }
         self.updated_at = unix_time();
     }
 
@@ -6599,6 +6603,27 @@ mod tests {
         assert_eq!(session.transcript_blocks.len(), 1);
         assert_eq!(session.transcript_blocks[0].turn_id, Some(first_turn));
         assert_eq!(session.transcript_blocks[0].after_message, 2);
+    }
+
+    #[test]
+    fn rewind_does_not_classify_an_untracked_session() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        let turn = session.begin_turn("inspect");
+        session.transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: Some(turn),
+            activities: vec![ActivityItem::new(
+                None,
+                ActivityKind::FileRead,
+                "Read src/main.rs",
+                None,
+                true,
+            )],
+        });
+        session.finish_active_turn(TurnStatus::Completed);
+        session.truncate_after_turn(1);
+        assert_eq!(session.phase, None);
     }
 
     #[test]

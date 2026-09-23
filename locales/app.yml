@@ -874,7 +874,7 @@ experiments.action_predictions_description:
 experiments.phase_routing_title:
   en: Phase-aware routing
 experiments.phase_routing_description:
-  en: Auto-routed tasks the evaluator judges plan-worthy start on your hardest-class model, then downshift one class tier once the tool stream or the evaluator says planning ended — and climb back if implementation stalls. Sidebar rows show the task's phase.
+  en: Auto-routed tasks the evaluator judges plan-worthy start on your hardest-class model, then downshift one class tier once the tool stream or the evaluator says planning ended — and climb back if implementation stalls. Also classifies tasks as Planning or Executing.
 experiments.sidebar_dock_title:
   en: Sidebar dock
 experiments.sidebar_dock_description:
@@ -1552,7 +1552,7 @@ settings.sidebar_composer_drafts_description:
 settings.sidebar_phase_groups:
   en: Group recent Executing and Planning tasks
 settings.sidebar_phase_groups_description:
-  en: In Date view, move tasks active in the last 30 minutes above Today, below Pinned. Requires Phase routing in Experiments
+  en: Classify tasks by Planning or Executing and move those active in the last 30 minutes above Today in Date view
 settings.sidebar_hide_phase_labels:
   en: Hide executing/planning labels in sidebar
 settings.sidebar_hide_phase_labels_description:

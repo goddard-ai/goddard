@@ -52,7 +52,7 @@ const MIN_IMPL_CONFIDENCE: f64 = 0.6;
 const STUCK_FAILURE_COUNT: usize = 2;
 
 /// The icon and label a sidebar row shows for a known phase — `None` when
-/// the experiment is off or the session's tool stream has not classified
+/// classification is off or the session's tool stream has not classified
 /// yet. Icon and text both carry the meaning; color is only decoration.
 pub(super) fn sidebar_phase_marker(
     enabled: bool,
@@ -231,36 +231,49 @@ struct PhaseTarget {
 }
 
 impl Waku {
-    /// Fold one streamed tool event into the session's phase. A Committing
-    /// signal flips Planning → Executing in place and retunes immediately
-    /// so the boundary turn's tail already runs the cheaper model;
-    /// ambiguous signals wait for the settle evaluation.
+    pub(super) fn phase_classification_enabled(&self) -> bool {
+        self.state.sidebar_phase_groups || self.state.phase_routing_enabled
+    }
+
+    /// Fold one streamed tool event into the session's phase when a feature
+    /// needs it. A Committing signal flips Planning → Executing; phase-aware
+    /// routing also retunes the model at that boundary. Ambiguous signals
+    /// wait for a settle evaluation only when routing owns the task.
     pub(super) fn note_phase_activity(
         &mut self,
         session_id: Uuid,
         item: &ActivityItem,
         cx: &mut Context<Self>,
     ) {
-        if !self.state.phase_routing_enabled {
+        if !self.phase_classification_enabled() {
             return;
         }
-        let flipped = {
+        let (changed, committed) = {
             let Some(session) = self.state.session_mut(session_id) else {
                 return;
             };
+            let previous = session.phase;
             let phase = session.phase.get_or_insert(SessionPhase::Planning);
             if *phase == SessionPhase::Planning && item.phase_signal() == PhaseSignal::Committing {
                 *phase = SessionPhase::Executing;
-                session.updated_at = unix_time();
-                true
-            } else {
-                false
             }
+            let changed = session.phase != previous;
+            if changed {
+                session.updated_at = unix_time();
+            }
+            (
+                changed,
+                session.phase == Some(SessionPhase::Executing) && changed,
+            )
         };
-        if !flipped {
+        if !changed {
             return;
         }
         self.state.mark_session_dirty(session_id);
+        cx.notify();
+        if !committed || !self.state.phase_routing_enabled {
+            return;
+        }
         // The class map supplies the implementation model when it can;
         // when its tier entry points at another provider the evaluator
         // picks inside this provider's catalog instead — asked now so the

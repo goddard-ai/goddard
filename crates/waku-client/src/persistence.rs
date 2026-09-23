@@ -1053,8 +1053,8 @@ pub struct AppSettings {
     pub action_predictions_enabled: bool,
     /// Experimental: Auto-routed tasks judged plan-worthy start on the
     /// hardest-class target, downshift one class tier once the tool stream
-    /// or the evaluation model says planning ended, and report the phase on
-    /// the sidebar row. Defaults on in debug builds.
+    /// or the evaluation model says planning ended. Off by default,
+    /// including debug builds.
     pub phase_routing_enabled: bool,
     /// Desktop-owned overrides for the fixed suggested-prompt actions.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1158,7 +1158,7 @@ impl Default for AppSettings {
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
             action_predictions_enabled: default_experiment_enabled(),
-            phase_routing_enabled: default_experiment_enabled(),
+            phase_routing_enabled: false,
             suggested_prompts: BTreeMap::new(),
             automatic_suggested_actions: BTreeMap::new(),
             automations_enabled: default_experiment_enabled(),
@@ -1583,7 +1583,8 @@ pub struct PersistedState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental feature opt-ins from the Experiments settings page.
-    /// Each defaults on in debug builds; an explicit `false` still wins.
+    /// Most default on in debug builds; phase routing defaults off.
+    /// An explicit saved preference still wins.
     #[serde(default = "default_experiment_enabled")]
     pub big_picture_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
@@ -1607,7 +1608,7 @@ pub struct PersistedState {
     pub suggested_prompts: BTreeMap<String, String>,
     #[serde(default)]
     pub automatic_suggested_actions: BTreeMap<String, u8>,
-    #[serde(default = "default_experiment_enabled")]
+    #[serde(default)]
     pub phase_routing_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub automations_enabled: bool,
@@ -1962,7 +1963,7 @@ impl PersistedState {
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
             action_predictions_enabled: default_experiment_enabled(),
-            phase_routing_enabled: default_experiment_enabled(),
+            phase_routing_enabled: false,
             suggested_prompts: BTreeMap::new(),
             automatic_suggested_actions: BTreeMap::new(),
             automations_enabled: default_experiment_enabled(),
@@ -4004,16 +4005,21 @@ mod tests {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(!defaults.sidebar_phase_groups);
         assert!(!defaults.sidebar_hide_phase_labels);
+        assert!(!defaults.phase_routing_enabled);
         let mut state = PersistedState::empty();
+        assert!(!state.phase_routing_enabled);
         state.sidebar_phase_groups = true;
         state.sidebar_hide_phase_labels = true;
+        state.phase_routing_enabled = true;
         let settings = serde_json::to_value(state.app_settings()).unwrap();
         assert_eq!(settings["sidebar_phase_groups"], true);
         assert_eq!(settings["sidebar_hide_phase_labels"], true);
+        assert_eq!(settings["phase_routing_enabled"], true);
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.sidebar_phase_groups);
         assert!(restored.sidebar_hide_phase_labels);
+        assert!(restored.phase_routing_enabled);
     }
 
     #[test]

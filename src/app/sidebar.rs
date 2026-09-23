@@ -3018,7 +3018,7 @@ impl Waku {
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
             fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
             fingerprint = mix(fingerprint, u64::from(session.incognito));
-            if self.state.sidebar_phase_groups && self.state.phase_routing_enabled {
+            if self.state.sidebar_phase_groups {
                 fingerprint = mix(
                     fingerprint,
                     match recent_phase_group(session, now) {
@@ -3200,7 +3200,7 @@ impl Waku {
                     .map(|session| session.id)
                     .collect::<Vec<_>>();
                 sorted_sessions.retain(|session| !dormant_set.contains(&session.id));
-                if self.state.sidebar_phase_groups && self.state.phase_routing_enabled {
+                if self.state.sidebar_phase_groups {
                     for phase in [
                         waku_protocol::routing::SessionPhase::Executing,
                         waku_protocol::routing::SessionPhase::Planning,
@@ -4916,7 +4916,7 @@ impl Waku {
             .is_none()
             .then(|| {
                 phases::sidebar_phase_marker(
-                    self.state.phase_routing_enabled
+                    self.phase_classification_enabled()
                         && !(self.state.sidebar_phase_groups
                             && self.state.sidebar_hide_phase_labels),
                     session,
@@ -5332,7 +5332,7 @@ impl Waku {
         let header_phase = session_surface
             .then(|| {
                 session.and_then(|session| {
-                    phases::sidebar_phase_marker(self.state.phase_routing_enabled, session)
+                    phases::sidebar_phase_marker(self.phase_classification_enabled(), session)
                 })
             })
             .flatten();
