@@ -1,0 +1,1 @@
+- Right-click a link in a response or a Markdown file preview to open it, copy it, open it in a built-in browser tab, or open it in a private window of your default browser (when the browser supports it).

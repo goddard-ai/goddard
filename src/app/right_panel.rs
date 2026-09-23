@@ -1990,6 +1990,55 @@ impl Waku {
         true
     }
 
+    /// The link-specific actions a right-clicked URL contributes before the
+    /// surface's usual context-menu items. Web destinations also offer the
+    /// built-in browser and, where the default browser has a known incognito
+    /// flag, a private window; other schemes keep the same open and copy
+    /// every destination gets.
+    pub(super) fn transcript_link_menu_items(
+        &self,
+        url: &str,
+        cx: &mut Context<Self>,
+    ) -> Vec<MenuItem> {
+        let open_target = url.to_owned();
+        let waku = cx.entity().downgrade();
+        let mut items = vec![MenuItem::new(tr!("common.open_link"), move |_, cx| {
+            let handled = waku
+                .update(cx, |this, cx| this.open_transcript_link(&open_target, cx))
+                .unwrap_or(false);
+            if !handled {
+                cx.open_url(&open_target);
+            }
+        })];
+        let web =
+            url::Url::parse(url).is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https"));
+        if web {
+            let tab_target = url.to_owned();
+            let waku = cx.entity().downgrade();
+            items.push(MenuItem::new(
+                tr!("common.open_link_in_browser_tab"),
+                move |window, cx| {
+                    let _ = waku.update(cx, |this, cx| {
+                        this.settings_page = None;
+                        this.open_url_in_browser_tab(tab_target.clone(), window, cx);
+                    });
+                },
+            ));
+            if crate::platform::can_open_url_in_private_window() {
+                let private_target = url.to_owned();
+                items.push(MenuItem::new(
+                    tr!("common.open_link_in_private_window"),
+                    move |_, _| crate::platform::open_url_in_private_window(&private_target),
+                ));
+            }
+        }
+        let copy_target = url.to_owned();
+        items.push(MenuItem::new(tr!("common.copy_link"), move |_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(copy_target.clone()));
+        }));
+        items
+    }
+
     /// Open a path a tool reported, from an activity in the transcript.
     ///
     /// Providers name a changed file however they like — absolute, or relative
@@ -3279,13 +3328,15 @@ impl Waku {
                             MarkdownMetrics::BODY
                         });
                     let animate_streaming = message.streaming && !cx.reduce_motion();
-                    let ctx = self.markdown_ctx(
-                        format!("side-chat-message-{}", message.id),
-                        &palette,
-                        metrics,
-                        animate_streaming,
-                        cx,
-                    );
+                    let ctx = self
+                        .markdown_ctx(
+                            format!("side-chat-message-{}", message.id),
+                            &palette,
+                            metrics,
+                            animate_streaming,
+                            cx,
+                        )
+                        .with_context_menu(menu.clone());
                     let work_item_refs = (message.role == MessageRole::User)
                         .then(|| {
                             self.work_item_refs_for_content(
@@ -5802,6 +5853,7 @@ impl Waku {
                 },
             )]
         }))
+        .with_link_items(self.markdown_link_menu_items.clone())
         .with_link_handler(self.markdown_link_handler.clone());
         let document = md::render::markdown(view, &ctx);
 

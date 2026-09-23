@@ -1258,6 +1258,7 @@ impl Waku {
             .with_families(crate::fonts::current(cx))
             .with_math_enabled(self.state.render_math)
             .with_guided_reading(self.guided_reading())
+            .with_link_items(self.markdown_link_menu_items.clone())
             .with_standalone_context_menu(self.menu_handle("skill-detail-math", cx));
             div()
                 .mt(px(18.0))

@@ -296,6 +296,7 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
         let file_items = ctx.file_ref_items.clone();
         let commit_refs = flat.commit_refs.clone();
         let commit_items = ctx.commit_ref_items.clone();
+        let link_items = ctx.link_items.clone();
         let resolved_commits = ctx.selection.resolved_commits.clone();
         let menu = menu.clone();
         wrapper = wrapper.on_mouse_down(MouseButton::Right, move |event, _, cx| {
@@ -317,12 +318,18 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
                 && let Some(path) = file_ref_at(&file_hit, &file_refs, &links, event.position)
             {
                 menu.set_context_items(items(&path, cx));
+            } else if let Some(items) = &link_items
+                && let Some(url) = super::link_at(&file_hit, &links, event.position)
+            {
+                menu.set_context_items(items(&url, cx));
             }
             // Bubble to the Markdown/message wrapper so its usual actions
             // remain in the same menu.
         });
         let data = flat.math.as_ref().unwrap().clone();
         let hit = geometry.clone();
+        let link_items = ctx.link_items.clone();
+        let links = flat.links.clone();
         let menu = ctx.context_menu.as_ref().unwrap().clone();
         wrapper = wrapper.on_key_down(move |event, window, cx| {
             if event.keystroke.key != "contextmenu"
@@ -331,15 +338,12 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
                 return;
             }
             let indexes = hit.formula_indexes();
-            if indexes.is_empty() {
-                return;
-            }
             let items = if indexes.len() == 1 {
                 vec![copy_expression_item(
                     data.spans[indexes[0]].latex.clone(),
                     tr!("common.copy_expression"),
                 )]
-            } else {
+            } else if !indexes.is_empty() {
                 // Keyboard invocation can choose every expression in this
                 // paragraph, without relying on the pointer's position.
                 std::iter::once(MenuItem::Header(tr!("common.copy_expression").into()))
@@ -348,6 +352,14 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
                         copy_expression_item(latex.clone(), latex.to_string())
                     }))
                     .collect()
+            } else if let Some(items) = &link_items
+                && let Some((_, url)) = data.active_link.get().and_then(|index| links.get(index))
+            {
+                // No formulas to copy: the keyboard-focused link gets its own
+                // actions, the same set a right-click builds.
+                items(url, cx)
+            } else {
+                return;
             };
             menu.set_context_items(items);
             menu.open_context_menu(window, cx);
@@ -863,12 +875,14 @@ mod tests {
         markdown: MarkdownView,
         selection: TranscriptSelection,
         menu: ContextMenuHandle,
+        link_clicks: Rc<RefCell<Vec<String>>>,
         enabled: bool,
     }
 
     impl gpui::Render for MenuHarness {
         fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
             let palette = Palette::from_theme(&Theme::dark());
+            let link_clicks = self.link_clicks.clone();
             let ctx = Ctx::new(
                 "math-menu-test",
                 &palette,
@@ -883,6 +897,15 @@ mod tests {
                 vec![MenuItem::new(format!("Copy {path}"), move |_, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
                 })]
+            }))
+            .with_link_items(Rc::new(|url: &str, _| {
+                let url = url.to_owned();
+                vec![MenuItem::new(format!("Copy {url}"), move |_, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                })]
+            }))
+            .with_link_handler(Rc::new(move |url, _, _| {
+                link_clicks.borrow_mut().push(url.to_owned());
             }));
             context_menu(
                 div()
@@ -913,6 +936,7 @@ mod tests {
             markdown,
             menu,
             selection: TranscriptSelection::default(),
+            link_clicks: Rc::new(RefCell::new(Vec::new())),
             enabled: false,
         });
         cx.run_until_parked();
@@ -983,6 +1007,7 @@ mod tests {
             markdown,
             menu: menu.clone(),
             selection: TranscriptSelection::default(),
+            link_clicks: Rc::new(RefCell::new(Vec::new())),
             enabled: true,
         });
         cx.run_until_parked();
@@ -1063,6 +1088,7 @@ mod tests {
             markdown,
             menu: menu.clone(),
             selection: TranscriptSelection::default(),
+            link_clicks: Rc::new(RefCell::new(Vec::new())),
             enabled: true,
         });
         cx.run_until_parked();
@@ -1117,6 +1143,143 @@ mod tests {
                 cx.read_from_clipboard().unwrap().text().unwrap(),
                 "whole message"
             )
+        });
+    }
+
+    /// The center of the bare URL's glyphs, resolved through the same registry
+    /// the pointer hit-tests.
+    fn bare_url_point(view: &MenuHarness, url: &str) -> Point<Pixels> {
+        let registry = view.selection.registry.borrow();
+        registry
+            .entries()
+            .iter()
+            .find_map(|entry| {
+                let start = entry.text.find(url)?;
+                text_range_bounds(&entry.geometry, &(start..start + url.len()))
+                    .first()
+                    .map(|rect| rect.center())
+            })
+            .expect("a registered text element holds the bare URL")
+    }
+
+    #[gpui::test]
+    fn link_context_actions_copy_the_clicked_url_and_preserve_message_actions(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut markdown = MarkdownView::new();
+        markdown.set_text("see https://example.com/docs for details", false);
+        let menu = cx.update(ContextMenuHandle::new);
+        let (view, cx) = cx.add_window_view(|_, _| MenuHarness {
+            markdown,
+            menu: menu.clone(),
+            selection: TranscriptSelection::default(),
+            link_clicks: Rc::new(RefCell::new(Vec::new())),
+            enabled: true,
+        });
+        cx.run_until_parked();
+        let link_point = view.read_with(cx, |view, _| {
+            bare_url_point(view, "https://example.com/docs")
+        });
+        cx.simulate_mouse_down(link_point, MouseButton::Right, gpui::Modifiers::none());
+        assert!(menu.is_open());
+        cx.update(|window, cx| window.focus(menu.focus_handle(), cx));
+        cx.simulate_keystrokes("down enter");
+        cx.update(|_, cx| {
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap(),
+                "https://example.com/docs"
+            )
+        });
+
+        // The ordinary message action remains after the link's own.
+        cx.simulate_mouse_down(link_point, MouseButton::Right, gpui::Modifiers::none());
+        cx.update(|window, cx| window.focus(menu.focus_handle(), cx));
+        cx.simulate_keystrokes("down down enter");
+        cx.update(|_, cx| {
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap(),
+                "whole message"
+            )
+        });
+    }
+
+    #[gpui::test]
+    fn a_link_inside_math_text_gets_the_same_context_actions(cx: &mut gpui::TestAppContext) {
+        let mut markdown = MarkdownView::new();
+        markdown.set_text(r"sum $x^2$ see https://example.com/math done", false);
+        let menu = cx.update(ContextMenuHandle::new);
+        let (view, cx) = cx.add_window_view(|_, _| MenuHarness {
+            markdown,
+            menu: menu.clone(),
+            selection: TranscriptSelection::default(),
+            link_clicks: Rc::new(RefCell::new(Vec::new())),
+            enabled: true,
+        });
+        cx.run_until_parked();
+        let link_point = view.read_with(cx, |view, _| {
+            bare_url_point(view, "https://example.com/math")
+        });
+        cx.simulate_mouse_down(link_point, MouseButton::Right, gpui::Modifiers::none());
+        assert!(menu.is_open());
+        cx.update(|window, cx| window.focus(menu.focus_handle(), cx));
+        cx.simulate_keystrokes("down enter");
+        cx.update(|_, cx| {
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap(),
+                "https://example.com/math"
+            )
+        });
+    }
+
+    #[gpui::test]
+    fn a_right_release_on_a_link_does_not_open_it(cx: &mut gpui::TestAppContext) {
+        let mut markdown = MarkdownView::new();
+        markdown.set_text("see https://example.com/docs for details", false);
+        let menu = cx.update(ContextMenuHandle::new);
+        let (view, cx) = cx.add_window_view(|_, _| MenuHarness {
+            markdown,
+            menu: menu.clone(),
+            selection: TranscriptSelection::default(),
+            link_clicks: Rc::new(RefCell::new(Vec::new())),
+            enabled: true,
+        });
+        cx.run_until_parked();
+        let link_point = view.read_with(cx, |view, _| {
+            bare_url_point(view, "https://example.com/docs")
+        });
+        // A press-and-release reads as a right-click: the menu opens and the
+        // link itself is not activated.
+        cx.simulate_mouse_down(link_point, MouseButton::Right, gpui::Modifiers::none());
+        assert!(menu.is_open());
+        cx.simulate_mouse_up(link_point, MouseButton::Right, gpui::Modifiers::none());
+        view.read_with(cx, |view, _| {
+            assert!(view.link_clicks.borrow().is_empty());
+        });
+        cx.update(|window, cx| window.focus(menu.focus_handle(), cx));
+        cx.simulate_keystrokes("escape");
+
+        // A dragged release back over the text closes the menu without
+        // activating the link either.
+        cx.simulate_mouse_down(link_point, MouseButton::Right, gpui::Modifiers::none());
+        assert!(menu.is_open());
+        cx.simulate_mouse_up(
+            point(px(2.0), link_point.y),
+            MouseButton::Right,
+            gpui::Modifiers::none(),
+        );
+        assert!(!menu.is_open());
+        view.read_with(cx, |view, _| {
+            assert!(view.link_clicks.borrow().is_empty());
+        });
+
+        // A left click still activates.
+        cx.simulate_mouse_down(link_point, MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_up(link_point, MouseButton::Left, gpui::Modifiers::none());
+        view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.link_clicks.borrow().as_slice(),
+                &["https://example.com/docs".to_owned()]
+            );
         });
     }
 

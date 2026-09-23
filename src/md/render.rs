@@ -107,6 +107,11 @@ pub type FileRefMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
 /// transcript row's context menu.
 pub type CommitRefMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
 
+/// The rows a right-clicked link contributes to the row's context menu, built
+/// from the link's destination. The renderer stays unaware of browsers and
+/// workspaces, so the caller decides what a URL can do.
+pub type LinkMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
+
 /// Additional actions for a standalone Markdown surface's context menu.
 pub type ContextMenuItems = Rc<dyn Fn(&mut gpui::App) -> Vec<MenuItem>>;
 
@@ -1311,6 +1316,8 @@ pub struct Ctx<'a> {
     file_ref_items: Option<FileRefMenuItems>,
     /// Builds the menu rows a right-clicked commit SHA contributes.
     commit_ref_items: Option<CommitRefMenuItems>,
+    /// Builds the menu rows a right-clicked link contributes.
+    link_items: Option<LinkMenuItems>,
     /// Extra actions for a standalone Markdown surface's context menu.
     context_menu_items: Option<ContextMenuItems>,
     now: Instant,
@@ -1348,6 +1355,7 @@ impl<'a> Ctx<'a> {
             wrap_context_menu: false,
             file_ref_items: None,
             commit_ref_items: None,
+            link_items: None,
             context_menu_items: None,
             now: Instant::now(),
         }
@@ -1456,6 +1464,12 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// Enable link context actions — see `link_items`.
+    pub fn with_link_items(mut self, items: LinkMenuItems) -> Self {
+        self.link_items = Some(items);
+        self
+    }
+
     /// Add actions to a standalone Markdown surface's context menu.
     pub fn with_context_menu_items(mut self, items: ContextMenuItems) -> Self {
         self.context_menu_items = Some(items);
@@ -1488,6 +1502,7 @@ impl<'a> Ctx<'a> {
             wrap_context_menu: self.wrap_context_menu,
             file_ref_items: self.file_ref_items.clone(),
             commit_ref_items: self.commit_ref_items.clone(),
+            link_items: self.link_items.clone(),
             context_menu_items: self.context_menu_items.clone(),
             now: Instant::now(),
         }
@@ -1600,6 +1615,7 @@ fn text_element_with_selection(
     link_handler: Option<LinkHandler>,
     file_menu: Option<(ContextMenuHandle, FileRefMenuItems)>,
     commit_menu: Option<(ContextMenuHandle, CommitRefMenuItems)>,
+    link_menu: Option<(ContextMenuHandle, LinkMenuItems)>,
     code_wash: Hsla,
     atom_wash: Hsla,
     selection_wash: Hsla,
@@ -1820,13 +1836,44 @@ fn text_element_with_selection(
         .w_full()
         .min_w_0()
         .cursor(CursorStyle::IBeam);
+    // `InteractiveText` counts a press of any button toward its click, so a
+    // right press on a link still primes its activation. Remember whether the
+    // press landed on a link and swallow that release — a right-click is the
+    // menu's gesture, not an activation.
+    let link_press = Rc::new(Cell::new(false));
+    if !flat.links.is_empty() {
+        let geometry = TextGeometry::Text(layout.clone());
+        let links = flat.links.clone();
+        let down_press = link_press.clone();
+        let menu = link_menu
+            .as_ref()
+            .map(|(menu, _)| menu.clone())
+            .or_else(|| commit_menu.as_ref().map(|(menu, _)| menu.clone()))
+            .or_else(|| file_menu.as_ref().map(|(menu, _)| menu.clone()));
+        element = element
+            .on_mouse_down(MouseButton::Right, move |event, _, _| {
+                down_press.set(link_at(&geometry, &links, event.position).is_some());
+            })
+            .capture_any_mouse_up(move |event, window, cx| {
+                if event.button == MouseButton::Right && link_press.replace(false) {
+                    cx.stop_propagation();
+                    // A release over the text but off the open card would
+                    // otherwise dismiss through the menu's out handler.
+                    if let Some(menu) = &menu {
+                        menu.close(window, cx);
+                    }
+                }
+            });
+    }
     if (!flat.file_refs.is_empty() && file_menu.is_some())
         || (!flat.commit_refs.is_empty() && commit_menu.is_some())
+        || (!flat.links.is_empty() && link_menu.is_some())
     {
         let menu = commit_menu
             .as_ref()
             .map(|(menu, _)| menu.clone())
-            .or_else(|| file_menu.as_ref().map(|(menu, _)| menu.clone()));
+            .or_else(|| file_menu.as_ref().map(|(menu, _)| menu.clone()))
+            .or_else(|| link_menu.as_ref().map(|(menu, _)| menu.clone()));
         let Some(menu) = menu else {
             return element.child(underlay).child(body).into_any_element();
         };
@@ -1848,6 +1895,10 @@ fn text_element_with_selection(
                 && let Some((_, items)) = &file_menu
             {
                 menu.set_context_items(items(&path, cx));
+            } else if let Some(url) = link_at(&geometry, &links, event.position)
+                && let Some((_, items)) = &link_menu
+            {
+                menu.set_context_items(items(&url, cx));
             }
             // Bubble to the row's own menu so these actions appear ahead of
             // its usual ones.
@@ -1882,6 +1933,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.link_handler.clone(),
         ctx.context_menu.clone().zip(ctx.file_ref_items.clone()),
         ctx.context_menu.clone().zip(ctx.commit_ref_items.clone()),
+        ctx.context_menu.clone().zip(ctx.link_items.clone()),
         ctx.palette.code_wash,
         ctx.palette.accent.opacity(0.12),
         ctx.palette.selection,
@@ -1914,6 +1966,7 @@ pub fn selectable_flat_text(
         flat.runs.clone(),
         key,
         selection,
+        None,
         None,
         None,
         None,
@@ -2115,6 +2168,31 @@ pub(super) fn commit_ref_at(
                     .any(|rect| rect.contains(&position))
         })
         .map(|(_, sha)| sha.clone())
+}
+
+/// The destination of the link under `position`, when the point lands inside
+/// one of its glyph boxes. `@`-mentions share `links` for the click, so a
+/// caller that offers mention actions probes `file_ref_at` first.
+pub(super) fn link_at(
+    geometry: &TextGeometry,
+    links: &[(Range<usize>, String)],
+    position: Point<Pixels>,
+) -> Option<String> {
+    if links.is_empty() || geometry.is_missing() {
+        return None;
+    }
+    let index = geometry
+        .index_for_position(position)
+        .unwrap_or_else(|index| index);
+    links
+        .iter()
+        .find(|(range, _)| {
+            range.contains(&index)
+                && text_range_bounds(geometry, range)
+                    .iter()
+                    .any(|rect| rect.contains(&position))
+        })
+        .map(|(_, url)| url.clone())
 }
 
 /// `TextLayout::bounds` panics before prepaint has run. A row that was spliced
@@ -2522,6 +2600,7 @@ fn markdown_capped<'a>(
         if ctx.wrap_context_menu
             && (ctx.math_enabled
                 || ctx.file_link_root.is_some()
+                || ctx.link_items.is_some()
                 || ctx.context_menu_items.is_some())
             && let Some(menu) = &ctx.context_menu
         {

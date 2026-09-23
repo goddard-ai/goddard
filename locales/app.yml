@@ -2348,6 +2348,14 @@ common.copy_code:
   en: Copy Code
 common.copy_expression:
   en: Copy Expression
+common.copy_link:
+  en: Copy Link
+common.open_link:
+  en: Open Link
+common.open_link_in_browser_tab:
+  en: Open in Browser Tab
+common.open_link_in_private_window:
+  en: Open in Private Window
 common.search_with_google:
   en: Search with Google
 common.cancel:

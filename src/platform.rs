@@ -572,6 +572,70 @@ fn termy_open_url(path: &std::path::Path) -> String {
 #[cfg(not(target_os = "macos"))]
 pub fn open_path_in_app(_: &std::path::Path, _: &str) {}
 
+/// The default browser's bundle id plus the flag a fresh process of it reads
+/// as "open a private window". Launch Services is asked for the https
+/// handler; Safari and unknown handlers have no CLI private path, so callers
+/// hide the item rather than open a plain window labeled private.
+#[cfg(target_os = "macos")]
+fn default_browser_private_mode() -> Option<(String, &'static str)> {
+    use objc2_app_kit::NSWorkspace;
+    use objc2_foundation::{NSBundle, NSString, NSURL};
+
+    let https = NSURL::URLWithString(&NSString::from_str("https://open.invalid"))?;
+    let app = NSWorkspace::sharedWorkspace().URLForApplicationToOpenURL(&https)?;
+    let bundle_id = NSBundle::bundleWithURL(&app)?
+        .bundleIdentifier()?
+        .to_string();
+    let flag = match bundle_id.as_str() {
+        "com.google.Chrome"
+        | "com.google.Chrome.canary"
+        | "org.chromium.Chromium"
+        | "com.brave.Browser"
+        | "com.vivaldi.Vivaldi"
+        | "company.thebrowser.Browser" => "--incognito",
+        "com.microsoft.edgemac" | "com.microsoft.edgemac.Dev" | "com.microsoft.edgemac.Canary" => {
+            "--inprivate"
+        }
+        "org.mozilla.firefox" | "org.mozilla.firefoxdeveloperedition" | "org.mozilla.nightly" => {
+            "--private-window"
+        }
+        _ => return None,
+    };
+    Some((bundle_id, flag))
+}
+
+/// Whether an "open in private window" menu item can do what it says — the
+/// default browser is a build whose incognito flag we know.
+#[cfg(target_os = "macos")]
+pub fn can_open_url_in_private_window() -> bool {
+    default_browser_private_mode().is_some()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn can_open_url_in_private_window() -> bool {
+    false
+}
+
+/// Open `url` in a private window of the default browser. `open -n` spawns a
+/// fresh process whose argv carries the incognito flag plus the URL — the
+/// already-running browser performs the actual open, so this never blocks.
+#[cfg(target_os = "macos")]
+pub fn open_url_in_private_window(url: &str) {
+    if let Some((bundle_id, flag)) = default_browser_private_mode() {
+        let _ = std::process::Command::new("open")
+            .arg("-n")
+            .arg("-b")
+            .arg(bundle_id)
+            .arg("--args")
+            .arg(flag)
+            .arg(url)
+            .spawn();
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn open_url_in_private_window(_: &str) {}
+
 /// Select `path` in the platform file manager. GPUI dispatches Linux portal
 /// and subprocess work away from the UI thread.
 pub fn reveal_in_file_manager(path: &std::path::Path, cx: &gpui::App) {

@@ -3459,6 +3459,9 @@ pub struct Waku {
     markdown_file_menu_items: md::render::FileRefMenuItems,
     /// The rows a right-clicked commit SHA contributes to its message menu.
     markdown_commit_menu_items: md::render::CommitRefMenuItems,
+    /// The rows a right-clicked link contributes to a transcript or Markdown
+    /// preview menu.
+    markdown_link_menu_items: md::render::LinkMenuItems,
     /// Transcript-wide text selection, spanning messages and tool output. Its
     /// `annotations` handle holds the commented highlights of the session on
     /// screen.
@@ -5811,6 +5814,19 @@ impl Waku {
                 })
             };
 
+            let markdown_link_menu_items: md::render::LinkMenuItems = {
+                let waku = cx.entity().downgrade();
+                Rc::new(move |url, cx| {
+                    let mut items = waku
+                        .update(cx, |this, cx| this.transcript_link_menu_items(url, cx))
+                        .unwrap_or_default();
+                    if !items.is_empty() {
+                        items.push(MenuItem::Separator);
+                    }
+                    items
+                })
+            };
+
             // Read before `state` moves into the struct literal below.
             let initial_session = state.selected_session;
 
@@ -6455,6 +6471,7 @@ impl Waku {
                 markdown_link_handler,
                 markdown_file_menu_items,
                 markdown_commit_menu_items,
+                markdown_link_menu_items,
                 transcript_selection,
                 transcript_annotations: HashMap::new(),
                 annotation_session: initial_session,
