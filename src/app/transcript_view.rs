@@ -59,6 +59,12 @@ const NEW_CONTENT_DOT_SIZE: f32 = 7.0;
 const NEW_CONTENT_DOT_GAP: f32 = 12.0;
 /// The first scroll gesture dismisses the marker over this long.
 const NEW_CONTENT_DOT_FADE: Duration = Duration::from_millis(150);
+/// Space kept below the last transcript row so the suggestion chip floating
+/// above the composer lane — an 8px lift plus its 24px height — clears the
+/// response footer instead of overlapping it. Reserved whether or not a
+/// suggestion is showing: a conditional inset would shift the transcript
+/// every time a chip lands or clears.
+const TRANSCRIPT_SUGGESTION_CLEARANCE: f32 = 40.0;
 
 #[derive(Clone, Debug)]
 struct ConversationNavigationRailSnapshot {
@@ -266,6 +272,7 @@ impl Waku {
             dot.fade_started = Some(Instant::now());
         }
         let anchor_end_space = self.update_transcript_anchor_end_space(window);
+        let end_space = anchor_end_space + px(TRANSCRIPT_SUGGESTION_CLEARANCE);
         if self.transcript_anchor_following.get()
             && anchor_end_space <= Pixels::ZERO
             && self
@@ -298,7 +305,7 @@ impl Waku {
         // button to rejoin it.
         if self.transcript_tail_recheck.get()
             && let Some(rests_at_tail) =
-                transcript_rests_at_tail(viewport_bottom, tail_bottom, anchor_end_space)
+                transcript_rests_at_tail(viewport_bottom, tail_bottom, end_space)
         {
             self.transcript_tail_recheck.set(false);
             if rests_at_tail {
@@ -311,7 +318,7 @@ impl Waku {
             transcript_scrollable,
             viewport_bottom,
             tail_bottom,
-            anchor_end_space,
+            end_space,
         )
         .unwrap_or_else(|| self.transcript_scroll_to_bottom_visible.get());
         self.transcript_scroll_to_bottom_visible
@@ -429,7 +436,7 @@ impl Waku {
                         .unwrap_or_else(|| div().into_any_element())
                 })
                 .size_full()
-                .pb(anchor_end_space),
+                .pb(end_space),
             )
             // Rows dissolve into the column surface just above the composer
             // while more content waits below the fold.
