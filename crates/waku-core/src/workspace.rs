@@ -435,6 +435,18 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             let (repo, availability) = crate::github::resolve_repo(&cwd);
             WorkspaceResult::GitHubRepo { repo, availability }
         }
+        WorkspaceOperation::ListGitHubActivity { cwd } => WorkspaceResult::GitHubActivity {
+            releases: crate::github::list_releases(&cwd)?,
+            runs: crate::github::list_workflow_runs(&cwd)?,
+        },
+        WorkspaceOperation::GetGitHubRelease { cwd, tag } => WorkspaceResult::GitHubRelease {
+            detail: crate::github::release(&cwd, &tag)?,
+        },
+        WorkspaceOperation::GetGitHubWorkflowRun { cwd, run_id } => {
+            WorkspaceResult::GitHubWorkflowRun {
+                detail: crate::github::workflow_run(&cwd, run_id)?,
+            }
+        }
         WorkspaceOperation::ListIssues { cwd, state, query } => WorkspaceResult::Issues {
             entries: crate::issues::list(&cwd, state, query.as_deref())?,
         },

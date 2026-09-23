@@ -1,6 +1,6 @@
-//! The Projects page: one surface over a project's issues and pull
-//! requests, with an agent composer docked underneath. The local-repo half
-//! of that surface — worktrees and branches — lives on the Settings → Git
+//! The Projects page: one surface over a project's issues, pull requests,
+//! releases, and workflow runs, with an agent composer docked underneath.
+//! The local-repo half — worktrees and branches — lives on the Settings → Git
 //! page, which shares this file's per-project state, tables, and menus.
 //!
 //! The page is scoped to its own project selection — independent of the
@@ -19,8 +19,8 @@ use waku_client::{
     GitHubAvailability, PullRequestSummary, RepoBranch, RepoWorktree, WorkItemQueryState,
 };
 
-/// The two surfaces' tabs. Issues and Pull Requests read through the `gh`
-/// machinery in `github.rs` and form the Projects page; Worktrees and
+/// The two surfaces' tabs. Issues, Pull Requests, and Activity read through
+/// the daemon's `gh` operations and form the Projects page; Worktrees and
 /// Branches read the local repo and form the Settings → Git page.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ProjectsTab {
@@ -28,6 +28,7 @@ pub(super) enum ProjectsTab {
     Branches,
     Issues,
     PullRequests,
+    Activity,
     /// The `qa` branch's review queue — proposed commits and their
     /// decisions, oldest first, ahead of promotion to the base branch.
     Review,
@@ -35,7 +36,12 @@ pub(super) enum ProjectsTab {
 
 impl ProjectsTab {
     /// The Projects page's tab strip — its ⌘⌥n chords index this list.
-    pub const ALL: [Self; 3] = [Self::Issues, Self::PullRequests, Self::Review];
+    pub const ALL: [Self; 4] = [
+        Self::Issues,
+        Self::PullRequests,
+        Self::Activity,
+        Self::Review,
+    ];
 
     /// The Settings → Git page's sub-tabs.
     pub const GIT_TABS: [Self; 2] = [Self::Worktrees, Self::Branches];
@@ -57,6 +63,7 @@ impl ProjectsTab {
             Self::Branches => tr!("projects.tab_branches"),
             Self::Issues => tr!("github.tab_issues"),
             Self::PullRequests => tr!("github.tab_pull_requests"),
+            Self::Activity => tr!("activity.tab"),
             Self::Review => tr!("projects.tab_review"),
         }
     }
@@ -68,6 +75,10 @@ impl ProjectsTab {
             Self::PullRequests => Some(github::GitHubTab::PullRequests),
             _ => None,
         }
+    }
+
+    fn requires_github(self) -> bool {
+        self.github_tab().is_some() || self == Self::Activity
     }
 }
 
@@ -286,7 +297,7 @@ const PROJECTS_LIST_BOTTOM_PADDING: f32 = 78.0;
 /// `Waku::projects_page_states` by project id so toggling either surface or
 /// switching projects loses nothing.
 pub(super) struct ProjectsPageState {
-    /// The Projects page's tab — always an Issues/Pull Requests variant.
+    /// The Projects page's tab, kept apart from Settings → Git's tab.
     pub tab: ProjectsTab,
     /// The Settings → Git page's sub-tab — always a Worktrees/Branches
     /// variant, kept separate so the two surfaces never fight over `tab`.
@@ -295,7 +306,9 @@ pub(super) struct ProjectsPageState {
     branch_filter: Entity<TextInput>,
     issue_filter: Entity<TextInput>,
     pr_filter: Entity<TextInput>,
+    activity_filter: Entity<TextInput>,
     review_filter: Entity<TextInput>,
+    pub activity: activity::ActivityState,
     pub worktrees: github::GitHubFetch<Rc<Vec<RepoWorktree>>>,
     pub branches: github::GitHubFetch<Rc<Vec<RepoBranch>>>,
     /// The `qa` review queue — `Loaded(None)` outside a git repo or
@@ -360,7 +373,9 @@ impl ProjectsPageState {
             branch_filter: filter_input(tr!("projects.filter_branches"), window, cx),
             issue_filter: filter_input(tr!("projects.filter_issues"), window, cx),
             pr_filter: filter_input(tr!("projects.filter_pull_requests"), window, cx),
+            activity_filter: filter_input(tr!("activity.filter"), window, cx),
             review_filter: filter_input(tr!("projects.filter_review"), window, cx),
+            activity: activity::ActivityState::default(),
             worktrees: github::GitHubFetch::Loading,
             branches: github::GitHubFetch::Loading,
             review: github::GitHubFetch::Loading,
@@ -402,6 +417,7 @@ impl ProjectsPageState {
             ProjectsTab::Branches => &self.branch_filter,
             ProjectsTab::Issues => &self.issue_filter,
             ProjectsTab::PullRequests => &self.pr_filter,
+            ProjectsTab::Activity => &self.activity_filter,
             ProjectsTab::Review => &self.review_filter,
         }
     }
@@ -583,7 +599,7 @@ impl Waku {
         }
     }
 
-    /// ⌘⌥1–3: switch the open page's tab, or open the page straight onto it.
+    /// ⌘⌥1–4: switch the open page's tab, or open the page straight onto it.
     pub(super) fn select_projects_tab_action(
         &mut self,
         action: &SelectProjectsTab,
@@ -802,7 +818,7 @@ impl Waku {
 
     /// Switch the page's tab, focusing its filter — a tab's filter is where
     /// the keyboard lands.
-    fn set_projects_tab(
+    pub(super) fn set_projects_tab(
         &mut self,
         project_id: Uuid,
         tab: ProjectsTab,
@@ -981,6 +997,20 @@ impl Waku {
             self.projects_refresh_review(project_id, cx);
         }
         self.github_refresh(project_id, cx);
+        if self
+            .projects_page_states
+            .get(&project_id)
+            .is_some_and(|state| state.tab == ProjectsTab::Activity)
+        {
+            self.activity_refresh(project_id, cx);
+            if let Some(selection) = self
+                .projects_page_states
+                .get(&project_id)
+                .and_then(|state| state.activity.selected.clone())
+            {
+                self.activity_select(project_id, selection, cx);
+            }
+        }
     }
 
     /// Fetch the `qa` review queue — the daemon walks `origin/qa` and
@@ -1733,6 +1763,7 @@ impl Waku {
                     self.render_projects_table(project_id, tab, window, cx)
                 }
                 ProjectsTab::Review => self.render_projects_review(project_id, cx),
+                ProjectsTab::Activity => self.render_activity(project_id, cx),
                 tab => {
                     let github_tab = tab.github_tab().unwrap_or(github::GitHubTab::PullRequests);
                     let filter = self
@@ -1948,7 +1979,7 @@ impl Waku {
                             .into_iter()
                             .filter(|candidate| candidate.available(review_queue_enabled))
                             .map(|candidate| {
-                                let enabled = github_enabled || candidate.github_tab().is_none();
+                                let enabled = github_enabled || !candidate.requires_github();
                                 self.projects_tab_button(
                                     project_id, candidate, tab, enabled, false, cx,
                                 )

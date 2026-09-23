@@ -1794,7 +1794,7 @@ impl Waku {
         }
 
         if let Some(checks) = checks {
-            section = section.child(github_checks_section(scope, checks, &theme));
+            section = section.child(github_checks_section(scope, project_id, checks, &theme, cx));
         }
         if let Some(commits) = commits {
             let repo_url = self
@@ -2583,9 +2583,15 @@ fn github_section_header(label: String, count: Option<usize>, theme: &Theme) -> 
 }
 
 /// One check run or commit status per row: status glyph, name, state label
-/// and duration, opening the check's details URL on click. An empty list is
-/// the host's answer, not a missing section — it still says so.
-fn github_checks_section(scope: &str, checks: &[PullRequestCheck], theme: &Theme) -> Div {
+/// and duration. Actions checks open their run in Activity; other checks
+/// keep their details URL. An empty list is the host's answer.
+fn github_checks_section(
+    scope: &str,
+    project_id: Uuid,
+    checks: &[PullRequestCheck],
+    theme: &Theme,
+    cx: &mut Context<Waku>,
+) -> Div {
     let section = div()
         .flex()
         .flex_col()
@@ -2642,12 +2648,23 @@ fn github_checks_section(scope: &str, checks: &[PullRequestCheck], theme: &Theme
                             None => sidebar::sidebar_check_status_label(check.status),
                         }),
                 );
-            if let Some(url) = check.url.as_ref().filter(|url| !url.is_empty()) {
-                let url = url.clone();
+            if let Some(run_id) = check.run_id {
                 row = row
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .cursor_pointer()
                     .hover(|style| style.bg(theme.overlay))
-                    .on_click(move |_, _, cx| cx.open_url(&url));
+                    .on_activation(cx, move |this, window, cx| {
+                        this.open_activity_run(project_id, run_id, window, cx);
+                    });
+            } else if let Some(url) = check.url.as_ref().filter(|url| !url.is_empty()) {
+                let url = url.clone();
+                row = row
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(theme.overlay))
+                    .on_activation(cx, move |_, _, cx| cx.open_url(&url));
             }
             section.child(row)
         })

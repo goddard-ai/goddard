@@ -1688,6 +1688,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "projects.tab.4",
+        action: || Box::new(crate::SelectProjectsTab { index: 3 }),
+        title_key: "keybind.command.projects_tab",
+        title_index: Some(3),
+        category: C::Projects,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "automations.tab.1",
         action: || Box::new(crate::SelectAutomationsTab { index: 0 }),
         title_key: "keybind.command.automations_tab",
@@ -2636,6 +2645,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("projects.tab.1", All, "secondary-alt-1", ProjectsPage),
     e("projects.tab.2", All, "secondary-alt-2", ProjectsPage),
     e("projects.tab.3", All, "secondary-alt-3", ProjectsPage),
+    e("projects.tab.4", All, "secondary-alt-4", ProjectsPage),
     e("automations.tab.1", All, "secondary-alt-1", AutomationsPage),
     e("automations.tab.2", All, "secondary-alt-2", AutomationsPage),
     e("model.favorite.1", All, "secondary-alt-1", ComposerScope),

@@ -679,6 +679,21 @@ project.relocated: "%{name} 已跟随重命名后的文件夹"
 project.relocated_to: 已重新定位到 %{path}
 
 projects.title: 项目
+activity.tab: 活动
+activity.filter: 筛选活动
+activity.releases: 发布版本
+activity.runs: 运行记录
+activity.details: 详情
+activity.loading: 正在加载…
+activity.unavailable: 无法从 GitHub 加载。请检查连接和 gh 登录状态，然后刷新。
+activity.no_releases: 没有发布版本
+activity.no_runs: 没有运行记录
+activity.draft: 草稿
+activity.prerelease: 预发布
+activity.failed_log: 失败日志
+activity.assets: 附件
+activity.log_unavailable: 无法获取失败日志
+activity.truncated: 此视图省略了剩余内容。
 projects.tab_worktrees: 工作树
 projects.tab_branches: 分支
 projects.filter_worktrees: 筛选工作树

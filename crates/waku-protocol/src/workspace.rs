@@ -306,6 +306,62 @@ pub struct PullRequestCheck {
     pub duration_seconds: Option<u64>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubRelease {
+    pub tag_name: String,
+    pub name: String,
+    pub is_draft: bool,
+    pub is_prerelease: bool,
+    pub published_at: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub assets: Vec<GitHubReleaseAsset>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubReleaseAsset {
+    pub name: String,
+    pub size: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubWorkflowRun {
+    pub database_id: u64,
+    pub name: String,
+    pub display_title: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub head_branch: Option<String>,
+    pub created_at: Option<String>,
+    pub attempt: u64,
+    #[serde(default)]
+    pub jobs: Vec<GitHubWorkflowJob>,
+    #[serde(default)]
+    pub failed_log: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubWorkflowJob {
+    pub name: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    #[serde(default)]
+    pub steps: Vec<GitHubWorkflowStep>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubWorkflowStep {
+    pub name: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+}
+
 /// An inline review comment on a pull request's diff — the
 /// `pulls/<N>/comments` read `gh pr view --json` does not expose.
 /// `line_label` is the human-facing range ("4", "4-9") resolved from the
@@ -1078,6 +1134,20 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
+    ListGitHubActivity {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    GetGitHubRelease {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        tag: String,
+    },
+    GetGitHubWorkflowRun {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        run_id: u64,
+    },
     /// Repo-wide issue list for the GitHub browser. `query` is passed to
     /// `gh issue list --search`.
     ListIssues {
@@ -1324,6 +1394,16 @@ pub enum WorkspaceResult {
     GitHubRepo {
         repo: Option<GitHubRepoRef>,
         availability: GitHubAvailability,
+    },
+    GitHubActivity {
+        releases: Option<Vec<GitHubRelease>>,
+        runs: Option<Vec<GitHubWorkflowRun>>,
+    },
+    GitHubRelease {
+        detail: Option<GitHubRelease>,
+    },
+    GitHubWorkflowRun {
+        detail: Option<GitHubWorkflowRun>,
     },
     /// `None` when the host could not be read — same "unknown is not empty"
     /// contract as `PullRequests`.

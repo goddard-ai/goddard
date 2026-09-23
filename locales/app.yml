@@ -1935,6 +1935,36 @@ project.relocated_to:
 
 projects.title:
   en: Projects
+activity.tab:
+  en: Activity
+activity.filter:
+  en: Filter activity
+activity.releases:
+  en: Releases
+activity.runs:
+  en: Runs
+activity.details:
+  en: Details
+activity.loading:
+  en: Loading…
+activity.unavailable:
+  en: Could not load from GitHub. Check your connection and gh sign-in, then refresh.
+activity.no_releases:
+  en: No releases found
+activity.no_runs:
+  en: No runs found
+activity.draft:
+  en: Draft
+activity.prerelease:
+  en: Prerelease
+activity.failed_log:
+  en: Failed log
+activity.assets:
+  en: Assets
+activity.log_unavailable:
+  en: Failed log unavailable
+activity.truncated:
+  en: More content was omitted from this view.
 projects.tab_worktrees:
   en: Worktrees
 projects.tab_branches:

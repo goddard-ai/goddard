@@ -689,6 +689,21 @@ project.relocated: "%{name} は名前が変更されたフォルダを追跡し�
 project.relocated_to: "%{path} に移動しました"
 
 projects.title: プロジェクト
+activity.tab: アクティビティ
+activity.filter: アクティビティを絞り込み
+activity.releases: リリース
+activity.runs: 実行
+activity.details: 詳細
+activity.loading: 読み込み中…
+activity.unavailable: GitHub から読み込めません。接続と gh の認証を確認して更新してください。
+activity.no_releases: リリースがありません
+activity.no_runs: 実行がありません
+activity.draft: 下書き
+activity.prerelease: プレリリース
+activity.failed_log: 失敗したログ
+activity.assets: アセット
+activity.log_unavailable: 失敗したログを取得できません
+activity.truncated: この表示では残りの内容を省略しました。
 projects.tab_worktrees: ワークツリー
 projects.tab_branches: ブランチ
 projects.filter_worktrees: ワークツリーを絞り込み

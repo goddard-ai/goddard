@@ -3344,6 +3344,7 @@ pub struct Waku {
 }
 
 mod action_predictions;
+mod activity;
 mod activity_diff;
 mod agy;
 mod annotations;

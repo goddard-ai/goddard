@@ -13,7 +13,9 @@ use std::process::Output;
 use anyhow::Context as _;
 use serde::Deserialize;
 
-use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef, WorkItemQueryState};
+use waku_protocol::workspace::{
+    GitHubAvailability, GitHubRelease, GitHubRepoRef, GitHubWorkflowRun, WorkItemQueryState,
+};
 
 /// Run `gh` in `cwd`, returning its output on success. `None` is the shared
 /// "host could not answer" signal — spawn failure or non-zero exit, whatever
@@ -198,6 +200,101 @@ pub(crate) fn parse_gh_stdout<T: for<'de> Deserialize<'de>>(
 ) -> anyhow::Result<T> {
     serde_json::from_slice(&output.stdout)
         .with_context(|| format!("could not parse `{command}` output"))
+}
+
+/// Bounded project activity reads. A failed `gh` invocation keeps the same
+/// unknown-vs-empty contract as the issue and PR lists.
+pub fn list_releases(cwd: &Path) -> anyhow::Result<Option<Vec<GitHubRelease>>> {
+    let Some(output) = gh_output(
+        cwd,
+        &[
+            OsStr::new("release"),
+            OsStr::new("list"),
+            OsStr::new("--limit"),
+            OsStr::new("10"),
+            OsStr::new("--json"),
+            OsStr::new("tagName,name,isDraft,isPrerelease,publishedAt"),
+        ],
+    ) else {
+        return Ok(None);
+    };
+    parse_gh_stdout(&output, "gh release list").map(Some)
+}
+
+pub fn release(cwd: &Path, tag: &str) -> anyhow::Result<Option<GitHubRelease>> {
+    let Some(output) = gh_output(
+        cwd,
+        &[
+            OsStr::new("release"),
+            OsStr::new("view"),
+            OsStr::new(tag),
+            OsStr::new("--json"),
+            OsStr::new("tagName,name,isDraft,isPrerelease,publishedAt,body,assets"),
+        ],
+    ) else {
+        return Ok(None);
+    };
+    parse_gh_stdout(&output, "gh release view").map(Some)
+}
+
+pub fn list_workflow_runs(cwd: &Path) -> anyhow::Result<Option<Vec<GitHubWorkflowRun>>> {
+    let Some(output) = gh_output(
+        cwd,
+        &[
+            OsStr::new("run"),
+            OsStr::new("list"),
+            OsStr::new("--limit"),
+            OsStr::new("20"),
+            OsStr::new("--json"),
+            OsStr::new(
+                "databaseId,name,displayTitle,status,conclusion,headBranch,createdAt,attempt",
+            ),
+        ],
+    ) else {
+        return Ok(None);
+    };
+    parse_gh_stdout(&output, "gh run list").map(Some)
+}
+
+pub fn workflow_run(cwd: &Path, run_id: u64) -> anyhow::Result<Option<GitHubWorkflowRun>> {
+    let id = run_id.to_string();
+    let Some(output) = gh_output(
+        cwd,
+        &[
+            OsStr::new("run"),
+            OsStr::new("view"),
+            OsStr::new(&id),
+            OsStr::new("--json"),
+            OsStr::new(
+                "databaseId,name,displayTitle,status,conclusion,headBranch,createdAt,attempt,jobs",
+            ),
+        ],
+    ) else {
+        return Ok(None);
+    };
+    let mut run: GitHubWorkflowRun = parse_gh_stdout(&output, "gh run view")?;
+    if run.conclusion.as_deref() == Some("failure") {
+        if let Some(log) = gh_output(
+            cwd,
+            &[
+                OsStr::new("run"),
+                OsStr::new("view"),
+                OsStr::new(&id),
+                OsStr::new("--log-failed"),
+            ],
+        ) {
+            const LOG_LIMIT: usize = 256 * 1024;
+            let start = log.stdout.len().saturating_sub(LOG_LIMIT);
+            let mut text = String::from_utf8_lossy(&log.stdout[start..]).into_owned();
+            if log.stdout.len() > LOG_LIMIT {
+                text.insert_str(0, "… earlier failed-log output omitted in Goddard\n");
+            }
+            if !text.trim().is_empty() {
+                run.failed_log = Some(text);
+            }
+        }
+    }
+    Ok(Some(run))
 }
 
 #[cfg(test)]
