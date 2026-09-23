@@ -1,0 +1,1 @@
+- ⌘⌥T opens “Save as prompt template” for the current draft, or the most recently sent prompt when the composer is empty.

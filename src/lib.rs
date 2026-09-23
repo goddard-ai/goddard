@@ -83,6 +83,7 @@ actions!(
         ToggleRightPanel,
         ToggleGitPanel,
         ToggleCommandPalette,
+        SavePromptAsTemplate,
         ToggleFileFinder,
         ToggleProjectsPage,
         SelectAllProjectsRows,

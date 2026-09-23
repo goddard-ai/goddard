@@ -4267,6 +4267,8 @@ shortcuts.section.menus:
   en: Menus & Popovers
 shortcuts.file_finder:
   en: File Finder
+shortcuts.save_prompt_as_template:
+  en: Save Prompt as Template
 shortcuts.big_picture:
   en: Toggle Big Picture
 shortcuts.jump_to_task:

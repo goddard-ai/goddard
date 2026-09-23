@@ -4694,6 +4694,12 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        if !submission.hidden {
+            let prompt = submission.human_prompt().trim().to_owned();
+            if !prompt.is_empty() {
+                self.command_palette.last_submitted_prompt = Some(prompt);
+            }
+        }
         if self.big_picture.is_open() {
             self.submit_big_picture_submission(submission, cx);
         } else {

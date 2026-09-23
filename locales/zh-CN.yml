@@ -2368,6 +2368,7 @@ shortcuts.doc_start: 移到文档开头
 shortcuts.done: 完成
 shortcuts.exit_fullscreen_panel: 退出全屏面板
 shortcuts.file_finder: 文件查找器
+shortcuts.save_prompt_as_template: 将提示词保存为模板
 shortcuts.find: 在文件中查找
 shortcuts.find_case: 切换区分大小写
 shortcuts.find_next: 下一个匹配项

@@ -1445,6 +1445,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "composer.save_prompt_as_template",
+        action: || Box::new(crate::SavePromptAsTemplate),
+        title_key: "shortcuts.save_prompt_as_template",
+        title_index: None,
+        category: C::Workspace,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "workspace.focus_terminal",
         action: || Box::new(crate::FocusTerminal),
         title_key: "menu.focus_terminal",
@@ -2629,6 +2638,12 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("model.favorite.7", All, "secondary-alt-7", ComposerScope),
     e("model.favorite.8", All, "secondary-alt-8", ComposerScope),
     e("model.favorite.9", All, "secondary-alt-9", ComposerScope),
+    e(
+        "composer.save_prompt_as_template",
+        All,
+        "secondary-alt-t",
+        ComposerScope,
+    ),
     e("model.cycle_effort", All, "secondary-e", ComposerScope),
     e(
         "model.cycle_effort_backward",

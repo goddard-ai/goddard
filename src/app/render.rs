@@ -644,6 +644,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_right_panel_action))
             .on_action(cx.listener(Self::toggle_git_panel_action))
             .on_action(cx.listener(Self::toggle_command_palette_action))
+            .on_action(cx.listener(Self::save_prompt_as_template_action))
             .on_action(cx.listener(Self::toggle_file_finder_action))
             .on_action(cx.listener(Self::toggle_big_picture_action))
             .on_action(cx.listener(Self::open_resume_picker_action))

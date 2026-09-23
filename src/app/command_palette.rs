@@ -567,6 +567,8 @@ pub(super) struct CommandPaletteUi {
     /// captured up front so a composer draft change mid-pick can't alter
     /// what lands in the file.
     save_prompt_body: Option<String>,
+    /// Most recent visible composer prompt, retained after send clears the field.
+    pub(super) last_submitted_prompt: Option<String>,
     selected: usize,
     scroll: ScrollHandle,
     matcher: Matcher,
@@ -610,6 +612,7 @@ impl CommandPaletteUi {
             rebase_base: None,
             rebase_generation: 0,
             save_prompt_body: None,
+            last_submitted_prompt: None,
             selected: 0,
             scroll: ScrollHandle::new(),
             // Plain config: `match_paths` biases toward path basenames, which
@@ -624,6 +627,16 @@ impl CommandPaletteUi {
 }
 
 impl Waku {
+    pub(super) fn save_prompt_as_template_action(
+        &mut self,
+        _: &crate::SavePromptAsTemplate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_command_palette(window, cx);
+        self.open_command_palette_save_prompt_view(cx);
+    }
+
     pub(super) fn open_resume_picker_action(
         &mut self,
         _: &OpenResumePicker,
@@ -1036,7 +1049,17 @@ impl Waku {
     /// "Save as prompt template" parks the composer's text and switches the
     /// field to naming — the query becomes the command's file stem.
     fn open_command_palette_save_prompt_view(&mut self, cx: &mut Context<Self>) {
-        let body = self.composer.read(cx).content(cx).trim().to_owned();
+        let current = self.composer.read(cx).content(cx).trim().to_owned();
+        let body = if current.is_empty() {
+            self.command_palette
+                .last_submitted_prompt
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_owned()
+        } else {
+            current
+        };
         if body.is_empty() {
             self.show_toast(tr!("prompt_templates.nothing_to_save"));
             cx.notify();
