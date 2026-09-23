@@ -3069,30 +3069,23 @@ impl Waku {
         }
         let composer = cx.new(|cx| {
             ComposerInput::new(window, cx)
-                .padding_x(px(10.0), cx)
+                .padding_x(px(14.0), cx)
                 .collapsed_paste(cx)
         });
         composer.update(cx, |composer, cx| {
             composer.set_placeholder(tr!("side_chat.placeholder"), cx);
         });
-        let side_composer = composer.clone();
         cx.subscribe(
             &composer,
             move |this: &mut Self, _, event: &ComposerEvent, cx| match event {
                 ComposerEvent::Submit(prompt) => {
-                    // `/side` is reserved even here: a side chat cannot nest
-                    // one, and the text must not reach the provider as a
-                    // literal prompt.
-                    if crate::composer_complete::parse_side_submission(prompt).is_some() {
-                        side_composer.update(cx, |composer, cx| composer.clear(cx));
-                        this.show_toast(tr!("side_chat.no_nesting"));
-                        return;
+                    if prompt.trim().is_empty() {
+                        // Same affordance as the session column's empty
+                        // Enter over a stopped turn.
+                        this.continue_interrupted_session_to(session_id, cx);
+                    } else {
+                        this.submit_side_chat_prompt(session_id, prompt.clone(), cx);
                     }
-                    this.submit_composer_submission_to(
-                        session_id,
-                        ComposerSubmission::plain(prompt.clone()),
-                        cx,
-                    );
                 }
                 ComposerEvent::SubmitSteer(prompt) => {
                     this.steer_session_submission(
@@ -3248,8 +3241,15 @@ impl Waku {
                     .border_t(hairline())
                     .border_color(theme.separator)
                     .px(px(10.0))
-                    .py(px(6.0))
-                    .child(composer),
+                    .py(px(8.0))
+                    .child(self.render_composer_card(
+                        &composer::ComposerCard::SideChat {
+                            session_id,
+                            composer,
+                        },
+                        window,
+                        cx,
+                    )),
             )
             .into_any_element()
     }

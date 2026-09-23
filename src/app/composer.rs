@@ -260,6 +260,36 @@ pub(super) enum ComposerSubmitAction {
     Continue,
 }
 
+/// Which composer a card wraps — and how its chip row behaves. The
+/// session column's field is fully interactive; a side chat's panel copy
+/// renders the same card bound to the chat's own session with every
+/// picker inert, so the chips read as the posture the chat inherited
+/// rather than controls.
+#[derive(Clone)]
+pub(super) enum ComposerCard {
+    Main,
+    SideChat {
+        session_id: Uuid,
+        composer: Entity<ComposerInput>,
+    },
+}
+
+/// What one card's chip row describes: the session whose posture the
+/// chips report, whether their menus answer (`false` leaves them
+/// disabled but visible), and the element-id prefix that keeps a panel
+/// copy's ids off the session column's.
+pub(super) struct ComposerControls<'a> {
+    pub session: Option<&'a AgentSession>,
+    pub interactive: bool,
+    pub id_prefix: &'static str,
+}
+
+impl ComposerControls<'_> {
+    pub(super) fn chip_id(&self, id: &str) -> SharedString {
+        format!("{}{id}", self.id_prefix).into()
+    }
+}
+
 /// Which session and project the composer workspace controls act on.
 /// Outside Big Picture that's the selection; inside it, the armed card, or —
 /// while nothing is armed — the standing new-task destination project and
@@ -1309,9 +1339,13 @@ impl Waku {
 
     // ── Composer ───────────────────────────────────────────────────────────
 
-    pub(super) fn render_provider_model_control(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_provider_model_control(
+        &self,
+        controls: &ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
-        let session = self.composer_session();
+        let session = controls.session;
         let provider = session.map(|session| session.provider).unwrap_or_default();
         let auto_route = session.is_some_and(|session| session.auto_route);
         let routed = session.is_some_and(|session| session.route_decision.is_some());
@@ -1326,11 +1360,12 @@ impl Waku {
         } else {
             self.model_display_name(provider, selected_model)
         };
-        let picker_enabled = session.is_some_and(|session| session.can_choose_model(provider));
+        let picker_enabled = controls.interactive
+            && session.is_some_and(|session| session.can_choose_model(provider));
 
         // Auto routes through Jev, not the provider the draft would land on —
         // brand the chip with the router's mark instead of that provider's.
-        let chip = MenuChip::new("composer-provider-model");
+        let chip = MenuChip::new(controls.chip_id("composer-provider-model"));
         let chip = if auto_route {
             chip.icon("icons/provider-typesafe.svg", theme.text_tertiary)
                 .label(selected_model_name)
@@ -1423,7 +1458,7 @@ impl Waku {
         // panel behind it is where the fix lives. Icon plus wording carry the
         // state on their own, so the warning tint is never the only signal.
         let trigger = if no_providers {
-            MenuChip::new("composer-provider-model")
+            MenuChip::new(controls.chip_id("composer-provider-model"))
                 .icon("icons/alert.svg", theme.warning)
                 .label(tr!("models.no_providers"))
         } else {
@@ -2087,9 +2122,13 @@ impl Waku {
         }
     }
 
-    pub(super) fn render_model_traits_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_model_traits_control(
+        &self,
+        controls: &ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let theme = Theme::current(cx);
-        let session = self.composer_session()?;
+        let session = controls.session?;
         let model = self.model_metadata_for_session(session)?;
         // Auto (Jev) chooses the effort for each turn, so don't offer a
         // manual effort control while that route is active.
@@ -2246,17 +2285,22 @@ impl Waku {
         };
         let service_tiers = model.service_tiers.clone();
         let context_windows = model.context_windows.clone();
+        let trigger = MenuChip::new(controls.chip_id("model-traits"))
+            .when(fast, |trigger| trigger.icon("icons/zap.svg", theme.accent))
+            .label(trigger_label)
+            .label_color(if fast {
+                theme.accent
+            } else {
+                theme.text_tertiary
+            })
+            .caret(false);
+        if !controls.interactive {
+            return Some(trigger.disabled(true).into_any_element());
+        }
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("model-traits", cx);
         Some(dropdown_menu(
-            MenuChip::new("model-traits")
-                .when(fast, |trigger| trigger.icon("icons/zap.svg", theme.accent))
-                .label(trigger_label)
-                .label_color(if fast {
-                    theme.accent
-                } else {
-                    theme.text_tertiary
-                })
+            trigger
                 .tooltip(tr!("models.options"))
                 // ⌘E only cycles effort — a tier/window-only model has no
                 // ladder for it to step through, so the hint stays off.
@@ -2265,7 +2309,6 @@ impl Waku {
                         direction: EffortCycleDirection::Forward,
                     })
                 })
-                .caret(false)
                 .selected(handle.is_open()),
             "model-traits-menu",
             &handle,
@@ -2363,9 +2406,13 @@ impl Waku {
         ))
     }
 
-    pub(super) fn render_access_control(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_access_control(
+        &self,
+        controls: &ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
-        let session = self.composer_session();
+        let session = controls.session;
         let selected_mode = session
             .map(|session| session.runtime_mode)
             .unwrap_or_default();
@@ -2374,6 +2421,25 @@ impl Waku {
         let provider = session.map(|session| session.provider).unwrap_or_default();
         let provider_sandboxable = provider.supports_sandbox();
         let provider_cloud = provider.supports_cloud();
+        let trigger = MenuChip::new(controls.chip_id("runtime-mode"))
+            // Non-local sessions trade the mode glyph for the
+            // environment's — the same icon the badge wears while the
+            // task runs. The experiment gate keeps a hidden feature
+            // from leaking an icon.
+            .icon(
+                if sandbox_enabled && !environment.is_local() {
+                    environment.icon()
+                } else {
+                    selected_mode.icon()
+                },
+                theme.text_tertiary,
+            )
+            .icon_size(14.0)
+            .label(selected_mode.label())
+            .caret(false);
+        if !controls.interactive {
+            return trigger.disabled(true).into_any_element();
+        }
         // The environment is provisioned when the session boots — a started
         // task's section still shows where it runs, but no longer changes it.
         let started = session.is_some_and(AgentSession::has_started);
@@ -2437,22 +2503,7 @@ impl Waku {
             },
         );
         dropdown_menu(
-            MenuChip::new("runtime-mode")
-                // Non-local sessions trade the mode glyph for the
-                // environment's — the same icon the badge wears while the
-                // task runs. The experiment gate keeps a hidden feature
-                // from leaking an icon.
-                .icon(
-                    if sandbox_enabled && !environment.is_local() {
-                        environment.icon()
-                    } else {
-                        selected_mode.icon()
-                    },
-                    theme.text_tertiary,
-                )
-                .icon_size(14.0)
-                .label(selected_mode.label())
-                .caret(false)
+            trigger
                 .selected(handle.is_open())
                 .tooltip(tr!("mode.choose"))
                 .shortcut_action(&ToggleRuntimeModePicker),
@@ -2556,9 +2607,13 @@ impl Waku {
         )
     }
 
-    pub(super) fn render_agent_preset_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self
-            .composer_session()
+    pub(super) fn render_agent_preset_control(
+        &self,
+        controls: &ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session = controls
+            .session
             .filter(|session| session.provider == ProviderKind::DeepSeek)?;
         if session.has_started() || session.is_busy() {
             return None;
@@ -2573,6 +2628,13 @@ impl Waku {
         let selected_id = self.agent_preset_for_session(session)?;
         let selected_label = self.agent_preset_label_for_session(session)?;
         let theme = Theme::current(cx);
+        let trigger = MenuChip::new(controls.chip_id("agent-preset"))
+            .icon("icons/bot.svg", theme.text_tertiary)
+            .label(selected_label)
+            .caret(false);
+        if !controls.interactive {
+            return Some(trigger.disabled(true).into_any_element());
+        }
         let weak = cx.entity().downgrade();
         let refresh_weak = weak.clone();
         let handle = self.menu_handle_with("agent-preset", cx, move |open, _, cx| {
@@ -2582,11 +2644,7 @@ impl Waku {
                 });
             }
         });
-        let trigger = MenuChip::new("agent-preset")
-            .icon("icons/bot.svg", theme.text_tertiary)
-            .label(selected_label)
-            .caret(false)
-            .selected(handle.is_open());
+        let trigger = trigger.selected(handle.is_open());
 
         Some(dropdown_menu(
             trigger,
@@ -2676,8 +2734,12 @@ impl Waku {
     /// it pairs a target icon with the status phrase (and budget consumption)
     /// and opens the goal dialog. `/goal` is the keyboard route to the same
     /// surface.
-    pub(super) fn render_goal_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.composer_session()?;
+    pub(super) fn render_goal_control(
+        &self,
+        controls: &ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session = controls.session?;
         let goal = session.thread_goal.as_ref()?;
         let session_id = session.id;
         let theme = Theme::current(cx);
@@ -2694,7 +2756,7 @@ impl Waku {
         let weak = cx.entity().downgrade();
         Some(
             div()
-                .id("composer-goal")
+                .id(controls.chip_id("composer-goal"))
                 .h(px(24.0))
                 .px(px(7.0))
                 .rounded(px(8.0))
@@ -2721,8 +2783,12 @@ impl Waku {
     /// The daemon's project-map state for the composer session, as a chip.
     /// Hidden entirely while the experiment emits nothing for the session.
     #[track_caller]
-    pub(super) fn render_project_map_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session_id = self.composer_session()?.id;
+    pub(super) fn render_project_map_control(
+        &self,
+        controls: &ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session_id = controls.session?.id;
         let status = self.runtimes.get(&session_id)?.project_map.as_ref()?;
         let theme = Theme::current(cx);
         let color = theme.text_tertiary;
@@ -2758,7 +2824,7 @@ impl Waku {
         let glyph = icon(icon_path, 10.5, color);
         Some(
             div()
-                .id("composer-project-map")
+                .id(controls.chip_id("composer-project-map"))
                 .h(px(24.0))
                 .px(px(7.0))
                 .rounded(px(8.0))
@@ -3635,9 +3701,31 @@ impl Waku {
         };
         self.open_right_panel_surface(RightPanelSurface::SideChat(side_chat_id), cx);
         if let Some(prompt) = side_prompt {
+            // A prompted `/side` leaves the caret where it was — the chat
+            // runs alongside the task. Only a bare `/side` hands the
+            // panel's composer focus.
+            self.right_panel_pending_side_chat_focus = None;
             self.submit_composer_submission_to(side_chat_id, ComposerSubmission::plain(prompt), cx);
         }
         true
+    }
+
+    /// A side chat prompt's one routing rule — `/side` stays reserved
+    /// even inside a side chat since it cannot nest one, and the text
+    /// must not reach the provider as a literal prompt. Both of the
+    /// composer's submit routes (Enter and the card's send button)
+    /// funnel through here so the reservation holds for each.
+    pub(super) fn submit_side_chat_prompt(
+        &mut self,
+        session_id: Uuid,
+        prompt: String,
+        cx: &mut Context<Self>,
+    ) {
+        if crate::composer_complete::parse_side_submission(&prompt).is_some() {
+            self.show_toast(tr!("side_chat.no_nesting"));
+            return;
+        }
+        self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
     }
 
     /// Start a separate, read-only challenge of the current task. The side
@@ -3677,6 +3765,9 @@ impl Waku {
             self.save();
         }
         self.open_right_panel_surface(RightPanelSurface::SideChat(side_chat_id), cx);
+        // The prompt below is the chat's opening turn — opening it is not
+        // a request to type, so the caret stays where it was.
+        self.right_panel_pending_side_chat_focus = None;
         self.submit_composer_submission_to(
             side_chat_id,
             ComposerSubmission::plain(DOUBLE_CHECK_PROMPT.to_owned()),
@@ -3916,11 +4007,14 @@ impl Waku {
     /// flag is fixed at creation and there is nothing to toggle. It also
     /// shows on Big Picture's untargeted composer while the overlay's
     /// pending new-task destination is flagged.
-    fn render_composer_incognito_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let incognito = self
-            .composer_session()
-            .is_some_and(|session| session.incognito)
-            || (self.big_picture.is_open()
+    fn render_composer_incognito_chip(
+        &self,
+        controls: &ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let incognito = controls.session.is_some_and(|session| session.incognito)
+            || (controls.interactive
+                && self.big_picture.is_open()
                 && self.big_picture.target().is_none()
                 && self.big_picture.new_task_incognito);
         if !incognito {
@@ -3929,7 +4023,7 @@ impl Waku {
         let theme = Theme::current(cx);
         Some(
             div()
-                .id("composer-incognito")
+                .id(controls.chip_id("composer-incognito"))
                 .h(px(22.0))
                 .px(px(6.0))
                 .rounded(px(6.0))
@@ -4907,22 +5001,59 @@ impl Waku {
     }
 
     fn render_composer_field(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex_none()
+            .px(px(20.0 - COMPOSER_OVERHANG))
+            .child(self.render_composer_card(&ComposerCard::Main, window, cx))
+    }
+
+    /// The composer card — rounded field, chip row, send/stop button —
+    /// shared by the session column and a side chat's panel copy.
+    /// `surface` decides which session the card reports and where its
+    /// submit goes: a side chat's copy leaves out the affordances that
+    /// stage into the main draft (attachments, annotations, autocomplete,
+    /// drops) and renders its pickers disabled, so the chips are the
+    /// chat's inherited context rather than controls.
+    pub(super) fn render_composer_card(
+        &self,
+        surface: &ComposerCard,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
-        let session = self.composer_session();
+        let interactive = matches!(surface, ComposerCard::Main);
+        let session = match surface {
+            ComposerCard::Main => self.composer_session(),
+            ComposerCard::SideChat { session_id, .. } => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == *session_id),
+        };
         let session_id = session.map(|session| session.id);
+        let composer = match surface {
+            ComposerCard::Main => self.composer.clone(),
+            ComposerCard::SideChat { composer, .. } => composer.clone(),
+        };
+        let controls = ComposerControls {
+            session,
+            interactive,
+            id_prefix: if interactive { "" } else { "side-chat-" },
+        };
         let preparing = session.is_some_and(|session| {
             self.submission_preparations.contains(&session.id)
                 || self.response_fork_preparations.contains_key(&session.id)
         });
-        let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
-            || !self.composer_attachments.is_empty()
-            || !self.composer_inline_atoms.is_empty()
-            || !self
-                .transcript_selection
-                .annotations
-                .borrow()
-                .items
-                .is_empty();
+        let has_draft = !composer.read(cx).content(cx).trim().is_empty()
+            || (interactive
+                && (!self.composer_attachments.is_empty()
+                    || !self.composer_inline_atoms.is_empty()
+                    || !self
+                        .transcript_selection
+                        .annotations
+                        .borrow()
+                        .items
+                        .is_empty()));
         // A typed draft always means Send — the continue affordance exists
         // only while the composer is completely empty.
         let submit_action = self.composer_submit_action_for(session, preparing, has_draft);
@@ -4938,11 +5069,14 @@ impl Waku {
         // Continue needs no draft — an interrupted session is exactly what
         // makes it available — but it still needs a provider to run.
         let can_continue = !no_providers;
-        let (autocomplete, autocomplete_actionable) =
+        let (autocomplete, autocomplete_actionable) = if interactive {
             match self.render_composer_autocomplete(window, cx) {
                 Some((element, actionable)) => (Some(element), actionable),
                 None => (None, false),
-            };
+            }
+        } else {
+            (None, false)
+        };
         let autocomplete_loading = autocomplete.is_some() && !autocomplete_actionable;
         // Files dragged in from the OS light the card up as a drop target and
         // stage as attachment chips. The wash arrives pre-blended because a
@@ -4950,20 +5084,25 @@ impl Waku {
         // compositing over it.
         let drop_wash = theme.composer.blend(theme.overlay_strong);
         let drop_ring = theme.accent.opacity(0.7);
-        div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
-            div()
-                .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
-                .mx_auto()
-                .rounded(px(18.0))
-                .border(hairline())
-                .border_color(theme.border_subtle)
-                .bg(theme.composer)
-                // Horizontal insets live on each row (and inside the field's
-                // scroll viewport, via `padding_x`) rather than on the card,
-                // so the field's overlay scrollbar can hug the card's edge.
-                .py(px(10.0))
-                .drag_over::<ExternalPaths>(move |style, _, _, _| {
+        let send_route = surface.clone();
+        let queue_route = surface.clone();
+        let continue_route = surface.clone();
+        div()
+            .w_full()
+            .when(interactive, |card| {
+                card.max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                    .mx_auto()
+            })
+            .rounded(px(18.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.composer)
+            // Horizontal insets live on each row (and inside the field's
+            // scroll viewport, via `padding_x`) rather than on the card,
+            // so the field's overlay scrollbar can hug the card's edge.
+            .py(px(10.0))
+            .when(interactive, |card| {
+                card.drag_over::<ExternalPaths>(move |style, _, _, _| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
                 .drag_over::<SidebarSessionDrag>(move |style, _, _, _| {
@@ -4980,95 +5119,141 @@ impl Waku {
                 .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                     this.stage_dropped_files(paths, window, cx);
                 }))
-                .on_drop(cx.listener(|this, drag: &SidebarSessionDrag, window, cx| {
-                    this.stage_session_reference(drag.session_id, &drag.title, window, cx);
-                }))
-                // Anchor for the bounds probe the autocomplete popup aligns to.
-                .relative()
-                .child(super::autocomplete::composer_card_bounds_probe(
+                .on_drop(cx.listener(
+                    |this, drag: &SidebarSessionDrag, window, cx| {
+                        this.stage_session_reference(drag.session_id, &drag.title, window, cx);
+                    },
+                ))
+            })
+            // Anchor for the bounds probe the autocomplete popup aligns to.
+            .relative()
+            .when(interactive, |card| {
+                card.child(super::autocomplete::composer_card_bounds_probe(
                     self.composer_autocomplete.card_bounds_cell(),
                 ))
-                // Only while the popup has selectable rows: the key context
-                // routes arrows, `enter`, `tab` and `escape` here as actions,
-                // out from under the focused field. The loading state takes
-                // only Escape, so it can dismiss without swallowing input.
-                .when(autocomplete_actionable, |card| {
-                    card.key_context("ComposerAutocomplete")
-                        .on_action(cx.listener(|this, _: &SelectNextEntry, window, cx| {
-                            this.move_autocomplete_highlight("down", window, cx);
-                        }))
-                        .on_action(cx.listener(|this, _: &SelectPreviousEntry, window, cx| {
-                            this.move_autocomplete_highlight("up", window, cx);
-                        }))
-                        .on_action(cx.listener(|this, _: &ConfirmEntry, window, cx| {
-                            this.accept_autocomplete(None, window, cx);
-                        }))
-                        .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
-                            this.dismiss_autocomplete(cx);
-                        }))
-                })
-                .when(autocomplete_loading, |card| {
-                    card.key_context("ComposerAutocompleteLoading")
-                        .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
-                            this.dismiss_autocomplete(cx);
-                        }))
-                })
-                .children(autocomplete)
+            })
+            // Only while the popup has selectable rows: the key context
+            // routes arrows, `enter`, `tab` and `escape` here as actions,
+            // out from under the focused field. The loading state takes
+            // only Escape, so it can dismiss without swallowing input.
+            .when(autocomplete_actionable, |card| {
+                card.key_context("ComposerAutocomplete")
+                    .on_action(cx.listener(|this, _: &SelectNextEntry, window, cx| {
+                        this.move_autocomplete_highlight("down", window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &SelectPreviousEntry, window, cx| {
+                        this.move_autocomplete_highlight("up", window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &ConfirmEntry, window, cx| {
+                        this.accept_autocomplete(None, window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
+                        this.dismiss_autocomplete(cx);
+                    }))
+            })
+            .when(autocomplete_loading, |card| {
+                card.key_context("ComposerAutocompleteLoading")
+                    .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
+                        this.dismiss_autocomplete(cx);
+                    }))
+            })
+            .children(autocomplete)
+            .when(interactive, |card| {
                 // Big Picture's "replying to" chip; absent everywhere else.
-                .children(self.render_big_picture_target_chip(cx))
-                .when(!self.composer_attachments.is_empty(), |card| {
-                    card.child(self.render_composer_attachments(cx))
-                })
-                .children(self.render_annotation_chip(cx))
-                .child(div().pt(px(2.0)).child(self.composer.clone()))
-                // The paste chip's floating editor, anchored below the
-                // atom's painted label.
-                .children(self.render_pasted_text_editor(cx))
-                .child(
-                    div()
-                        .mt(px(8.0))
-                        .px(px(10.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(4.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(14.0))
-                        .child(self.render_provider_model_control(cx))
-                        .children(self.render_model_traits_control(cx))
-                        .children(self.render_agent_preset_control(cx))
-                        .child(self.render_access_control(cx))
-                        .children(self.render_composer_incognito_chip(cx))
-                        .children(self.render_drafts_count_button(cx))
-                        .children(self.render_goal_control(cx))
-                        .children(self.render_project_map_control(cx))
-                        .child(div().flex_1())
-                        .child(match submit_action {
-                            ComposerSubmitAction::Preparing => div()
-                                .id("send-or-stop")
-                                .w(px(28.0))
-                                .h(px(28.0))
-                                .flex_none()
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_default()
-                                .bg(theme.overlay_strong)
-                                .child(motion::spin(icon(
-                                    "icons/loader-circle.svg",
-                                    15.0,
-                                    theme.text_secondary,
-                                )))
-                                .tooltip(Tooltip::text(tr!("composer.preparing_task"))),
-                            ComposerSubmitAction::Stop => div()
-                                .id("working-actions")
-                                .flex()
-                                .flex_none()
-                                .items_center()
-                                .gap(px(6.0))
-                                .child(
+                card.children(self.render_big_picture_target_chip(cx))
+                    .when(!self.composer_attachments.is_empty(), |card| {
+                        card.child(self.render_composer_attachments(cx))
+                    })
+                    .children(self.render_annotation_chip(cx))
+            })
+            .child(div().pt(px(2.0)).child(composer))
+            // The paste chip's floating editor, anchored below the
+            // atom's painted label.
+            .when(interactive, |card| {
+                card.children(self.render_pasted_text_editor(cx))
+            })
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(14.0))
+                    .child(self.render_provider_model_control(&controls, cx))
+                    .children(self.render_model_traits_control(&controls, cx))
+                    .children(self.render_agent_preset_control(&controls, cx))
+                    .child(self.render_access_control(&controls, cx))
+                    .children(self.render_composer_incognito_chip(&controls, cx))
+                    .children(self.render_drafts_count_button(&controls, cx))
+                    .children(self.render_goal_control(&controls, cx))
+                    .children(self.render_project_map_control(&controls, cx))
+                    .child(div().flex_1())
+                    .child(match submit_action {
+                        ComposerSubmitAction::Preparing => div()
+                            .id(controls.chip_id("send-or-stop"))
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .flex_none()
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .bg(theme.overlay_strong)
+                            .child(motion::spin(icon(
+                                "icons/loader-circle.svg",
+                                15.0,
+                                theme.text_secondary,
+                            )))
+                            .tooltip(Tooltip::text(tr!("composer.preparing_task"))),
+                        ComposerSubmitAction::Stop => div()
+                            .id(controls.chip_id("working-actions"))
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .id(controls.chip_id("send-or-stop"))
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .flex_none()
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .cursor_default()
+                                    .bg(theme.inverse)
+                                    .hover(|element| element.opacity(0.85))
+                                    .active(|element| element.opacity(0.7))
+                                    .when(escape_stop_armed, |element| {
+                                        element.child(
+                                            div()
+                                                .text_size(sp(12.5))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(theme.on_inverse)
+                                                .child("Esc"),
+                                        )
+                                    })
+                                    .when(!escape_stop_armed, |element| {
+                                        element.child(icon(
+                                            "icons/stop.svg",
+                                            18.0,
+                                            theme.on_inverse,
+                                        ))
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if let Some(session_id) = session_id {
+                                            this.cancel_session_turn(session_id, cx);
+                                        }
+                                    })),
+                            )
+                            .when(can_send, |element| {
+                                element.child(
                                     div()
-                                        .id("send-or-stop")
+                                        .id(controls.chip_id("queue-follow-up"))
                                         .w(px(28.0))
                                         .h(px(28.0))
                                         .flex_none()
@@ -5078,142 +5263,119 @@ impl Waku {
                                         .justify_center()
                                         .cursor_default()
                                         .bg(theme.inverse)
-                                        .hover(|element| element.opacity(0.85))
-                                        .active(|element| element.opacity(0.7))
-                                        .when(escape_stop_armed, |element| {
-                                            element.child(
-                                                div()
-                                                    .text_size(sp(12.5))
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(theme.on_inverse)
-                                                    .child("Esc"),
-                                            )
-                                        })
-                                        .when(!escape_stop_armed, |element| {
-                                            element.child(icon(
-                                                "icons/stop.svg",
-                                                18.0,
-                                                theme.on_inverse,
-                                            ))
-                                        })
+                                        .hover(|element| element.opacity(0.9))
+                                        .active(|element| element.opacity(0.8))
+                                        .child(icon("icons/send.svg", 16.0, theme.on_inverse))
+                                        .tooltip(Tooltip::text(tr!("composer.queue_followup")))
                                         .on_click(cx.listener(move |this, _, _, cx| {
-                                            if let Some(session_id) = session_id {
-                                                this.cancel_session_turn(session_id, cx);
-                                            }
+                                            this.submit_composer_card_draft(&queue_route, cx);
                                         })),
                                 )
-                                .when(can_send, |element| {
-                                    element.child(
-                                        div()
-                                            .id("queue-follow-up")
-                                            .w(px(28.0))
-                                            .h(px(28.0))
-                                            .flex_none()
-                                            .rounded_full()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .cursor_default()
-                                            .bg(theme.inverse)
-                                            .hover(|element| element.opacity(0.9))
-                                            .active(|element| element.opacity(0.8))
-                                            .child(icon("icons/send.svg", 16.0, theme.on_inverse))
-                                            .tooltip(Tooltip::text(tr!("composer.queue_followup")))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                let prompt =
-                                                    this.composer.read(cx).content(cx).to_owned();
-                                                if let Some(submission) =
-                                                    this.submission_with_attachments(&prompt, cx)
-                                                {
-                                                    this.composer
-                                                        .update(cx, |input, cx| input.clear(cx));
-                                                    this.route_composer_submission(submission, cx);
-                                                }
-                                            })),
-                                    )
-                                }),
-                            ComposerSubmitAction::Send => div()
-                                .id("send-or-stop")
-                                .w(px(28.0))
-                                .h(px(28.0))
-                                .flex_none()
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(if can_send {
-                                    theme.inverse
+                            }),
+                        ComposerSubmitAction::Send => div()
+                            .id(controls.chip_id("send-or-stop"))
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .flex_none()
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(if can_send {
+                                theme.inverse
+                            } else {
+                                theme.overlay_strong
+                            })
+                            .when(can_send, |element| {
+                                element
+                                    .cursor_default()
+                                    .hover(|element| element.opacity(0.9))
+                                    .active(|element| element.opacity(0.8))
+                            })
+                            .child(icon(
+                                "icons/send.svg",
+                                16.0,
+                                if can_send {
+                                    theme.on_inverse
                                 } else {
-                                    theme.overlay_strong
-                                })
-                                .when(can_send, |element| {
-                                    element
-                                        .cursor_default()
-                                        .hover(|element| element.opacity(0.9))
-                                        .active(|element| element.opacity(0.8))
-                                })
-                                .child(icon(
-                                    "icons/send.svg",
-                                    16.0,
-                                    if can_send {
-                                        theme.on_inverse
-                                    } else {
-                                        theme.text_ghost
-                                    },
-                                ))
-                                // Says why the button is dead, for the case
-                                // the draft is ready and the machine is not.
-                                .when(no_providers, |element| {
-                                    element.tooltip(Tooltip::text(tr!("composer.no_providers")))
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    let prompt = this.composer.read(cx).content(cx).to_owned();
-                                    if let Some(submission) =
-                                        this.submission_with_attachments(&prompt, cx)
-                                    {
-                                        this.composer.update(cx, |input, cx| input.clear(cx));
-                                        this.route_composer_submission(submission, cx);
-                                    }
-                                })),
-                            ComposerSubmitAction::Continue => div()
-                                .id("send-or-stop")
-                                .w(px(28.0))
-                                .h(px(28.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(if can_continue {
-                                    theme.inverse
+                                    theme.text_ghost
+                                },
+                            ))
+                            // Says why the button is dead, for the case
+                            // the draft is ready and the machine is not.
+                            .when(no_providers, |element| {
+                                element.tooltip(Tooltip::text(tr!("composer.no_providers")))
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.submit_composer_card_draft(&send_route, cx);
+                            })),
+                        ComposerSubmitAction::Continue => div()
+                            .id(controls.chip_id("send-or-stop"))
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(if can_continue {
+                                theme.inverse
+                            } else {
+                                theme.overlay_strong
+                            })
+                            .when(can_continue, |element| {
+                                element
+                                    .cursor_default()
+                                    .hover(|element| element.opacity(0.9))
+                                    .active(|element| element.opacity(0.8))
+                            })
+                            .child(icon(
+                                "icons/play.svg",
+                                13.0,
+                                if can_continue {
+                                    theme.on_inverse
                                 } else {
-                                    theme.overlay_strong
-                                })
-                                .when(can_continue, |element| {
-                                    element
-                                        .cursor_default()
-                                        .hover(|element| element.opacity(0.9))
-                                        .active(|element| element.opacity(0.8))
-                                })
-                                .child(icon(
-                                    "icons/play.svg",
-                                    13.0,
-                                    if can_continue {
-                                        theme.on_inverse
-                                    } else {
-                                        theme.text_ghost
-                                    },
-                                ))
-                                .tooltip(Tooltip::text(if no_providers {
-                                    tr!("composer.no_providers")
-                                } else {
-                                    tr!("composer.continue")
-                                }))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.continue_interrupted_session(cx);
-                                })),
-                        }),
-                ),
-        )
+                                    theme.text_ghost
+                                },
+                            ))
+                            .tooltip(Tooltip::text(if no_providers {
+                                tr!("composer.no_providers")
+                            } else {
+                                tr!("composer.continue")
+                            }))
+                            .on_click(cx.listener(move |this, _, _, cx| match &continue_route {
+                                ComposerCard::Main => this.continue_interrupted_session(cx),
+                                ComposerCard::SideChat { session_id, .. } => {
+                                    this.continue_interrupted_session_to(*session_id, cx)
+                                }
+                            })),
+                    }),
+            )
+    }
+
+    /// Where a card's send button routes its draft. The session column's
+    /// send stages attachments and honors Big Picture's targeting; a side
+    /// chat's is a plain prompt to the chat's own session.
+    fn submit_composer_card_draft(&mut self, surface: &ComposerCard, cx: &mut Context<Self>) {
+        match surface {
+            ComposerCard::Main => {
+                let prompt = self.composer.read(cx).content(cx).to_owned();
+                if let Some(submission) = self.submission_with_attachments(&prompt, cx) {
+                    self.composer.update(cx, |input, cx| input.clear(cx));
+                    self.route_composer_submission(submission, cx);
+                }
+            }
+            ComposerCard::SideChat {
+                session_id,
+                composer,
+            } => {
+                let prompt = composer.read(cx).content(cx).to_owned();
+                if prompt.trim().is_empty() {
+                    return;
+                }
+                composer.update(cx, |input, cx| input.clear(cx));
+                self.submit_side_chat_prompt(*session_id, prompt, cx);
+            }
+        }
     }
 
     /// The paste chip's floating editor — the comment-annotation card's

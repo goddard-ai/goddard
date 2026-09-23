@@ -442,16 +442,20 @@ impl Waku {
 
     /// The circular composer badge beside the access control: the visible
     /// draft count, absent entirely at zero.
-    pub(super) fn render_drafts_count_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_drafts_count_button(
+        &self,
+        controls: &composer::ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let count = self.visible_saved_draft_count();
         if count == 0 {
             return None;
         }
         let theme = Theme::current(cx);
-        let focus = self.transcript_control_focus("drafts-count", cx);
+        let focus = self.transcript_control_focus(controls.chip_id("drafts-count").to_string(), cx);
         Some(
             div()
-                .id("drafts-count")
+                .id(controls.chip_id("drafts-count"))
                 .track_focus(&focus)
                 .tab_index(0)
                 .tab_stop(true)

@@ -5796,12 +5796,52 @@ impl Waku {
             }
             return;
         }
-        if !composer::session_awaits_continue(session) {
-            return;
-        }
         let session_id = session.id;
+        let Some(submission) = self.interrupted_session_continue_submission(session_id) else {
+            return;
+        };
+        if self.big_picture.is_open() {
+            self.submit_composer_submission_to(session_id, submission, cx);
+        } else {
+            self.submit_composer_submission(submission, cx);
+        }
+    }
+
+    /// `continue_interrupted_session` for an explicit session — a side
+    /// chat composer's play button reaches its stopped turn without
+    /// passing through the selection.
+    pub(super) fn continue_interrupted_session_to(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(submission) = self.interrupted_session_continue_submission(session_id) else {
+            return;
+        };
+        self.submit_composer_submission_to(session_id, submission, cx);
+    }
+
+    /// The submission a Continue sends on `session_id`: the dead turn's
+    /// own prompt when it never reached the provider, else the hidden
+    /// continue. `None` when the session is missing, its last turn
+    /// settled, or no provider could run the retry.
+    fn interrupted_session_continue_submission(
+        &mut self,
+        session_id: Uuid,
+    ) -> Option<ComposerSubmission> {
+        if self.model_picker_has_no_providers() {
+            return None;
+        }
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        if !composer::session_awaits_continue(session) {
+            return None;
+        }
         let resend = composer::undelivered_turn_resend(session);
-        let submission = match resend {
+        Some(match resend {
             Some((turn_id, message_id, mut submission)) => {
                 // The dead turn's annotations move to the resend so an
                 // "Annotation N" citation in its reply still resolves; the
@@ -5817,12 +5857,7 @@ impl Waku {
                 submission
             }
             None => ComposerSubmission::hidden_continue(),
-        };
-        if self.big_picture.is_open() {
-            self.submit_composer_submission_to(session_id, submission, cx);
-        } else {
-            self.submit_composer_submission(submission, cx);
-        }
+        })
     }
 
     pub(super) fn submit_composer_submission(
