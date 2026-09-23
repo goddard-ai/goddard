@@ -1,1 +1,0 @@
-- Continue on a task whose turn failed before the agent ever received it — for example when the daemon was too busy to start the provider — now resends your original message instead of a generic "keep going" nudge that reached an empty session.

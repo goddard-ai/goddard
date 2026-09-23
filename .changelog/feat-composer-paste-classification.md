@@ -1,1 +1,0 @@
-- Pasted text chips now use Jev to show labels such as “Bug report” or “Proposal” alongside their line counts. When Jev is configured, classification runs in the background and refreshes after edits; uncertain results keep “Pasted text”. Staged pasted text and session references remain chips as you change a task's project, workspace, or branch.

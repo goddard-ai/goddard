@@ -1,1 +1,0 @@
-- Fixed the floating turn status markers (Settings → Experiments) not appearing while reading a long response: they were waiting for the turn's whole footer row to scroll out of view, so a "N files changed" card holding the row's top edge on screen kept them hidden even after the marker chips themselves had slid below the fold.

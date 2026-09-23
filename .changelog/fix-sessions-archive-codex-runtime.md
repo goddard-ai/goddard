@@ -1,1 +1,0 @@
-- Archiving an idle Codex chat now closes its connection, so restoring it resumes the conversation with a fresh connection.

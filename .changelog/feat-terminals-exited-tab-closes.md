@@ -1,1 +1,0 @@
-- Terminal tabs in the right panel now close automatically when their shell or program exits instead of leaving a dead, dimmed surface behind

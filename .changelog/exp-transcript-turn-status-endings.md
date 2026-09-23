@@ -1,1 +1,0 @@
-- Turn status markers can now show Answered, Nothing to do, or Pushed back when a turn ends without completed work — distinguishing answers to questions, requests that needed no changes, and asks the agent declined or redirected.

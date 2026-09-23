@@ -1,1 +1,0 @@
-- There's a new Diagnostics page in Settings — also reachable from the command palette — listing errors the app reported alongside daemon restarts and panics, newest first. Select any row to copy its record for a bug report.

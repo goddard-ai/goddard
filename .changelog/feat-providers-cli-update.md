@@ -1,1 +1,0 @@
-- The Providers settings page now shows an Update button on each detected agent CLI, which runs the CLI's own update command — or its documented installer when it has none — in an embedded terminal and refreshes the detected version.

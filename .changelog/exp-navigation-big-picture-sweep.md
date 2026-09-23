@@ -1,1 +1,0 @@
-- ⌥← and ⌥→ now sweep sessions backward and forward through Big Picture's card grid — opening it if needed — and ↵ opens the highlighted session while ↓ or ⌘↵ drops into its composer. Big Picture also appears in the command palette.

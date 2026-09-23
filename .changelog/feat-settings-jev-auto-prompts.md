@@ -1,1 +1,0 @@
-- Configure Jev auto prompts that send a follow-up after a completed task turn matches your questions. Ships with an enabled rule that asks the agent to sharpen answers likely to overwhelm you.

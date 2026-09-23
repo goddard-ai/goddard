@@ -1,1 +1,0 @@
-- Session references and pasted text sent from the composer now keep their compact chips in the transcript instead of expanding to the session token or the full pasted text. Clicking a session chip still opens its task.

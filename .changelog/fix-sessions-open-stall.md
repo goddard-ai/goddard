@@ -1,1 +1,0 @@
-- Fixed long waits when opening an older task while other tasks are still streaming or the daemon has just restarted; clicks no longer queue behind in-progress saves, and saves during streaming now send only new transcript entries instead of the whole history.

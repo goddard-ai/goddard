@@ -1,1 +1,0 @@
-- Fixed a busy or briefly unresponsive daemon being restarted by the app, which stopped every task's running turn; the app now reconnects in place and only replaces a daemon that stays unreachable. Recovery events are also logged to `~/.goddard/daemon-recovery.jsonl` so a restart's cause can be checked locally.

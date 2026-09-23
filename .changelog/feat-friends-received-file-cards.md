@@ -1,1 +1,0 @@
-- Files and folders received from friends now appear as a card in the task instead of plain text — folders list their contents, images show a preview you can zoom, and Open unlocks once you trust the files.

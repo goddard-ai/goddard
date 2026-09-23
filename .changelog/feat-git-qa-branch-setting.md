@@ -1,1 +1,0 @@
-- Point the Projects page's Review tab at any branch via the new "QA branch" field in Settings → Daemon — it defaults to `qa`.

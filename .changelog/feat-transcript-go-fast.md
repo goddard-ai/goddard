@@ -1,1 +1,0 @@
-- Right-click a Markdown preview or agent response and choose **Go fast** to read its prose one word at a time, with adjustable speed and pauses for code, equations, and tables.

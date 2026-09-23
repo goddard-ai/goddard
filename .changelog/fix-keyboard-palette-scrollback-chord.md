@@ -1,1 +1,0 @@
-- The command palette ignores an Enter pressed immediately after ⌘K opens it, so the muscle-memory chord for clearing terminal scrollback no longer runs whatever command happens to be highlighted.

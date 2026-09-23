@@ -1,1 +1,0 @@
-- Settings now includes a Keybindings page where you can browse every command's shortcut on a visual keyboard, filter by modifier or key name, rebind keys, and see conflicts before saving.

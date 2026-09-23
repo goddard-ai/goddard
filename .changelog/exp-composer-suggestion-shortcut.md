@@ -1,1 +1,0 @@
-- Suggested-action chips above the composer can now be triggered with ⌘Enter while the composer is completely empty — no text, attachments, or annotations — and show a ⌘↵ hint whenever the shortcut is live. Once a draft is started, ⌘Enter keeps its usual meaning of steering the running turn.

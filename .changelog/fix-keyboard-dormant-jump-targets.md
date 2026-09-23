@@ -1,1 +1,0 @@
-- Keyboard task navigation no longer lands on dormant tasks: ⌘D (next unread), ⌘⇧D (mark unread and move on), the post-archive landing, and the Ctrl-Tab switcher all skip tasks shelved in the Dormant section — a dormant task only opens when you pick it yourself.

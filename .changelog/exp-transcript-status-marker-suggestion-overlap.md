@@ -1,1 +1,0 @@
-- When a turn's status pill and its suggested-action chips would both float above the composer, they now share one row — the pill leads the suggestions instead of overlapping them.

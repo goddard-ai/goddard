@@ -1,1 +1,0 @@
-- Keyboard shortcuts for model, favorite/recent model, reasoning effort, access and environment, workspace, and branch choices now open a centered modal that shows the available options before a selection is applied.

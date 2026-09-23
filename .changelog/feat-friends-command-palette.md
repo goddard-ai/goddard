@@ -1,1 +1,0 @@
-- Find Friends actions in the command palette, including adding a friend, copying your friend code, sharing a file or folder, sharing a project, and opening Friends settings.

@@ -1,1 +1,0 @@
-- Rewinding a Codex task now works when Codex stores its conversation in paginated history.

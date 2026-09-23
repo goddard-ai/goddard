@@ -34,6 +34,89 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.9.0]
+
+### Features
+
+- **Sessions**
+  - `goddard-agent search` accepts an optional `last_turns` count that confines each task's transcript search to its most recent turns, so agents can skip stale early-turn matches when looking for recent sibling work.
+  - Let agents rename their own tasks after a per-task grant in the transcript, and let you rename a task with `/rename <title>` in the composer.
+  - Incognito tasks: a hat-and-glasses task lives entirely in memory — it reads no project memory, writes none, persists no transcript or checkpoints, and vanishes when the app quits. Start one from the command palette ("New incognito task…" variants) or with `/incognito` in a draft composer; side chats inherit the flag.
+  - Confirming Reclaim Disk Space now shows a header toggle with live progress, opens a popover with the space freed when it finishes, and stays until you confirm the result.
+- **Composer**
+  - `/goal <description>` now keeps pursuing a goal with Jev on providers without native goals, pausing when the agent needs your input or the evaluator cannot safely continue.
+  - Pasted text chips now use Jev to show labels such as “Bug report” or “Proposal” alongside their line counts. When Jev is configured, classification runs in the background and refreshes after edits; uncertain results keep “Pasted text”. Staged pasted text and session references remain chips as you change a task's project, workspace, or branch.
+  - ⌘⌥T opens “Save as prompt template” for the current draft, or the most recently sent prompt when the composer is empty.
+- **Providers**
+  - The Providers settings page now shows an Update button on each detected agent CLI, which runs the CLI's own update command — or its documented installer when it has none — in an embedded terminal and refreshes the detected version.
+  - The Jev routing class pickers in Settings → Routing now use the full model picker: search, provider rail, favorites, recents, and effort variants included. "Last used" is now "No override" — the class keeps your normal provider/model while Jev still classifies the task.
+- **Git**
+  - View a project's GitHub releases and Actions runs, including release notes and failed run logs, from its Activity tab.
+  - Point the Projects page's Review tab at any branch via the new "QA branch" field in Settings → Daemon — it defaults to `qa`.
+- **Transcript**
+  - Right-click a Markdown preview or agent response and choose **Go fast** to read its prose one word at a time, with adjustable speed and pauses for code, equations, and tables.
+  - Returning to a task that's still working now lands on the live end of its transcript whenever you left while watching the current turn, even if you had scrolled up within it. Leaving while reading older turns still restores your exact spot, and a task that finished while you were away keeps its usual landing.
+- **Terminals**
+  - Terminal tabs in the right panel now close automatically when their shell or program exits instead of leaving a dead, dimmed surface behind
+  - Run project script… (⌘R) now asks where to run when the repo has more than the local checkout: the current task's worktree leads the list, followed by the local checkout and any worktrees not created by Goddard. Scripts run outside the task's own workspace open in a standalone terminal.
+- **Keyboard**
+  - “Double check...” (⌘⌥C) opens a linked side chat that respectfully challenges the current agent’s reasoning and, when available, asks it one focused question.
+  - Settings now includes a Keybindings page where you can browse every command's shortcut on a visual keyboard, filter by modifier or key name, rebind keys, and see conflicts before saving.
+  - Keyboard shortcuts for model, favorite/recent model, reasoning effort, access and environment, workspace, and branch choices now open a centered modal that shows the available options before a selection is applied.
+  - Press ⌘N on the New Task page to search projects by name or path; press ⌘N or ⌘⇧N again to cycle through recently used projects.
+  - Press Enter or ⌘⏎ to send a drafted prompt even when the composer isn't focused — as long as focus isn't inside another text field or a dialog. Enter sends the way the composer's own Enter does, and ⌘⏎ steers the way its chord does; a control that activates on Enter still wins the key.
+- **Navigation**
+  - Open Archived Chats, Automations, Inbox, or Projects from the command palette, or start adding a remote host there.
+  - When nothing is unread, ⌘D now visits each idle task once before cycling back, so repeated presses keep moving instead of re-opening a task you just saw. The cycle resets after 10 minutes without a press.
+- **Settings**
+  - There's a new Diagnostics page in Settings — also reachable from the command palette — listing errors the app reported alongside daemon restarts and panics, newest first. Select any row to copy its record for a bug report.
+  - Configure Jev auto prompts that send a follow-up after a completed task turn matches your questions. Ships with an enabled rule that asks the agent to sharpen answers likely to overwhelm you.
+  - The Jev settings page's token usage breakdown now says what each spend category is for, and categories such as Action predictions show their names instead of raw log tags.
+  - Settings keeps a back/forward history across panes: ⌘[ and ⌘] — or the new arrow buttons in the titlebar — step through the pages visited this session, restoring each page's scroll position, and back steps out of Settings once the history is spent.
+- **Friends**
+  - Find Friends actions in the command palette, including adding a friend, copying your friend code, sharing a file or folder, sharing a project, and opening Friends settings.
+  - Files and folders received from friends now appear as a card in the task instead of plain text — folders list their contents, images show a preview you can zoom, and Open unlocks once you trust the files.
+- The daemon's per-minute stats log (`daemon-stats.jsonl` in the app data directory) now itemizes each child process — pid, process name, subtree memory, and the owning task and provider when known — and reports per-session resident transcript sizes, so memory questions name the task that holds the RAM.
+- The dock's circular buttons in the sidebar now follow the active theme: their background uses the composer input color and their icons use the body text color instead of fixed white and black.
+
+### Experiments
+
+- **Transcript**
+  - **[Experimental]** Turn status markers suggest a matching next step for go-aheads, decisions, missing details, unfinished work, repairable errors, and untested code. Suggested prompt text can be edited or reset in Jev settings.
+  - **[Experimental]** When a turn's status pill and its suggested-action chips would both float above the composer, they now share one row — the pill leads the suggestions instead of overlapping them.
+  - **[Experimental]** Turn status markers can now show Answered, Nothing to do, or Pushed back when a turn ends without completed work — distinguishing answers to questions, requests that needed no changes, and asks the agent declined or redirected.
+- **[Experimental]** Suggested-action chips above the composer can now be triggered with ⌘Enter while the composer is completely empty — no text, attachments, or annotations — and show a ⌘↵ hint whenever the shortcut is live. Once a draft is started, ⌘Enter keeps its usual meaning of steering the running turn.
+- **[Experimental]** Phase-aware routing (requires Auto model routing): tasks the evaluator judges plan-worthy open on your hardest-class model, downshift one class tier once the tool stream or the evaluator says planning ended, and climb back if implementation stalls — sidebar rows show Planning/Executing while it runs.
+- **[Experimental]** ⌥← and ⌥→ now sweep sessions backward and forward through Big Picture's card grid — opening it if needed — and ↵ opens the highlighted session while ↓ or ⌘↵ drops into its composer. Big Picture also appears in the command palette.
+- **[Experimental]** Project memory distillation no longer inherits a session's model, reasoning effort, or service tier — the Project memory card in Settings → Experiments has a per-provider model picker (each provider's own default unless changed), and the throwaway provider session each background run creates is deleted afterwards instead of lingering in the provider's session list.
+- **[Experimental]** Idle tasks in the sidebar now show how their last turn ended under the turn status markers experiment: a chat icon when the agent is waiting on a reply, a block icon when it hit a wall. The unread dot still takes precedence.
+
+### Fixed
+
+- **Sessions**
+  - Archiving an idle Codex chat now closes its connection, so restoring it resumes the conversation with a fresh connection.
+  - Fixed a busy or briefly unresponsive daemon being restarted by the app, which stopped every task's running turn; the app now reconnects in place and only replaces a daemon that stays unreachable. Recovery events are also logged to `~/.goddard/daemon-recovery.jsonl` so a restart's cause can be checked locally.
+  - Sending a message to a task left idle past the daemon's runtime timeout no longer fails with "the message never reached the agent" — the app now hears that the runtime was retired and resumes the task on a fresh one.
+  - Fixed long waits when opening an older task while other tasks are still streaming or the daemon has just restarted; clicks no longer queue behind in-progress saves, and saves during streaming now send only new transcript entries instead of the whole history.
+- **Composer**
+  - Continue on a task whose turn failed before the agent ever received it — for example when the daemon was too busy to start the provider — now resends your original message instead of a generic "keep going" nudge that reached an empty session.
+  - Session references and pasted text sent from the composer now keep their compact chips in the transcript instead of expanding to the session token or the full pasted text. Clicking a session chip still opens its task.
+  - ⌘↩ while the agent is generating now queues the message as a follow-up instead of injecting it mid-turn — a provider could acknowledge the steer and still drop it when the turn settled. Steering still applies to a task waiting on background work, where the message wakes the open turn directly.
+- **Providers**
+  - Rewinding a Codex task now works when Codex stores its conversation in paginated history.
+  - Release a Codex thread's old writer before resuming it after a task runtime restarts, including when moving the task to a worktree.
+- **Transcript**
+  - Fixed a crash that could quit the app as soon as a transcript showed an activity row whose detail is a file name — the link's context menu was being registered while the transcript was locked for rendering.
+  - When Goddard can't confirm a prompt reached its agent, the transcript now reports unconfirmed delivery instead of claiming the message never arrived.
+  - Fixed the floating turn status markers (Settings → Experiments) not appearing while reading a long response: they were waiting for the turn's whole footer row to scroll out of view, so a "N files changed" card holding the row's top edge on screen kept them hidden even after the marker chips themselves had slid below the fold.
+- **Keyboard**
+  - Keyboard task navigation no longer lands on dormant tasks: ⌘D (next unread), ⌘⇧D (mark unread and move on), the post-archive landing, and the Ctrl-Tab switcher all skip tasks shelved in the Dormant section — a dormant task only opens when you pick it yourself.
+  - The command palette ignores an Enter pressed immediately after ⌘K opens it, so the muscle-memory chord for clearing terminal scrollback no longer runs whatever command happens to be highlighted.
+- Fixed the **Send to friend** flyout on a reply's context menu closing before the pointer could reach a friend, so clicking a name now opens the send confirmation.
+- The new task page's sync strip now disappears promptly once a push or pull it launched finishes, and shows a spinner while it re-checks the branch's upstream instead of flashing away
+- Fixed connected integrations going silent in file-configured providers (Devin, Claude Code, Cursor, and others) after a Goddard restart: the provider's MCP entry now refreshes to the current proxy address on every launch instead of pointing at the previous daemon's dead port.
+- A terminal you ran commands in no longer dies when its task's workspace changes — for example when a draft task's new worktree is created. It moves to the sidebar's Terminals group and keeps running; a terminal that never ran anything still follows the task to the new workspace.
+
 ## [0.8.0]
 
 ### Features

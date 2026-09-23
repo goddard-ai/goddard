@@ -1,1 +1,0 @@
-- A terminal you ran commands in no longer dies when its task's workspace changes — for example when a draft task's new worktree is created. It moves to the sidebar's Terminals group and keeps running; a terminal that never ran anything still follows the task to the new workspace.

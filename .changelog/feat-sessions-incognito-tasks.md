@@ -1,1 +1,0 @@
-- Incognito tasks: a hat-and-glasses task lives entirely in memory — it reads no project memory, writes none, persists no transcript or checkpoints, and vanishes when the app quits. Start one from the command palette ("New incognito task…" variants) or with `/incognito` in a draft composer; side chats inherit the flag.

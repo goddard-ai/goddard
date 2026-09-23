@@ -1,1 +1,0 @@
-- Open Archived Chats, Automations, Inbox, or Projects from the command palette, or start adding a remote host there.

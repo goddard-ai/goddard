@@ -1,1 +1,0 @@
-- “Double check...” (⌘⌥C) opens a linked side chat that respectfully challenges the current agent’s reasoning and, when available, asks it one focused question.

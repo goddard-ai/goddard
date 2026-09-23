@@ -1,1 +1,0 @@
-- View a project's GitHub releases and Actions runs, including release notes and failed run logs, from its Activity tab.
