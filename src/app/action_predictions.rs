@@ -598,9 +598,15 @@ impl Waku {
             candidates: probabilities.keys().cloned().collect(),
             adopted: false,
         };
-        // The newest gated pick owns the chip; an unconfident answer leaves
-        // whatever the previous prediction suggested — the user never sees
-        // a suggestion swap for a weak signal.
+        // A new settled turn supersedes the previous suggestion even when
+        // its prediction is too weak to show a chip.
+        if self
+            .action_suggestion
+            .as_ref()
+            .is_some_and(|suggestion| suggestion.session_id == session_id)
+        {
+            self.action_suggestion = None;
+        }
         if let Some(action) = gated_suggestion(choice, probabilities) {
             self.action_suggestion = Some(ActionSuggestion {
                 prediction_id: prediction.id,
@@ -997,7 +1003,7 @@ impl Waku {
             let _ = window_handle.update(cx, move |_, window, cx| {
                 let _ = waku.update(cx, |this, cx| match &displayed {
                     Displayed::Status(turn_id, action) => {
-                        this.accept_status_suggestion(*turn_id, action, window, cx);
+                        this.accept_status_suggestion(*turn_id, action, cx);
                     }
                     Displayed::Action => this.accept_action_suggestion(window, cx),
                 });
@@ -1165,6 +1171,13 @@ mod tests {
         // Actionable and confident but too close to the runner-up.
         let p = probabilities(&[("run-tests", 0.55), ("commit", 0.45)]);
         assert_eq!(gated_suggestion("run-tests", &p), None);
+    }
+
+    #[test]
+    fn every_renderable_suggestion_has_a_dispatch() {
+        for action in ACTIONABLE_SUGGESTIONS {
+            assert!(suggestion_dispatch(action).is_some(), "{action}");
+        }
     }
 
     #[test]

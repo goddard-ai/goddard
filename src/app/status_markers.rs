@@ -234,8 +234,6 @@ const VERIFICATION_MARKERS: &[StatusMarker] = &[StatusMarker {
 pub(super) enum StatusSuggestedAction {
     Proceed,
     Choose { option: String },
-    AddDetails,
-    ChooseManually,
     KeepGoing,
     FixErrors,
     RunTests,
@@ -305,33 +303,32 @@ fn suggested_actions(evaluation: &Evaluation, response: &str) -> Vec<StatusSugge
     let marker = cleared_markers(evaluation).into_iter().find(|(marker, _)| {
         matches!(
             marker.id,
-            "go-ahead"
-                | "decision"
-                | "details"
-                | "needs-continuation"
-                | "errors-remain"
-                | "not-tested"
+            "go-ahead" | "decision" | "needs-continuation" | "errors-remain" | "not-tested"
         )
     });
     match marker.map(|(marker, _)| marker.id) {
         Some("go-ahead") => vec![StatusSuggestedAction::Proceed],
-        Some("details") => vec![StatusSuggestedAction::AddDetails],
         Some("decision") => {
             let options = explicit_decision_options(response);
-            if options.is_empty() {
-                vec![StatusSuggestedAction::ChooseManually]
-            } else {
-                options
-                    .into_iter()
-                    .map(|option| StatusSuggestedAction::Choose { option })
-                    .collect()
-            }
+            options
+                .into_iter()
+                .map(|option| StatusSuggestedAction::Choose { option })
+                .collect()
         }
         Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
         Some("errors-remain") => vec![StatusSuggestedAction::FixErrors],
         Some("not-tested") => vec![StatusSuggestedAction::RunTests],
         _ => Vec::new(),
     }
+}
+
+fn waiting_for_user_input(evaluation: &Evaluation) -> bool {
+    cleared_markers(evaluation).iter().any(|(marker, _)| {
+        matches!(
+            marker.id,
+            "awaiting-input" | "go-ahead" | "decision" | "details"
+        )
+    })
 }
 
 /// Flags stay independent Nouls — qualities that legitimately co-occur with
@@ -939,12 +936,6 @@ impl Waku {
                                             || tr!("suggestions.chosen_option", option = option),
                                         ),
                                     ),
-                                    StatusSuggestedAction::AddDetails => {
-                                        ("icons/chat.svg", tr!("suggestions.add_details"))
-                                    }
-                                    StatusSuggestedAction::ChooseManually => {
-                                        ("icons/chat.svg", tr!("suggestions.choose_manually"))
-                                    }
                                     StatusSuggestedAction::KeepGoing => (
                                         "icons/sparkle.svg",
                                         action_predictions::suggested_prompt(
@@ -1018,11 +1009,11 @@ impl Waku {
                                         },
                                     )
                                     .tooltip(Tooltip::text(tooltip))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.accept_status_suggestion(turn_id, &action, window, cx);
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.accept_status_suggestion(turn_id, &action, cx);
                                     }))
                                     .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, window, cx| {
+                                        move |this, event: &KeyDownEvent, _, cx| {
                                             if matches!(
                                                 event.keystroke.key.as_str(),
                                                 "enter" | "space"
@@ -1030,7 +1021,6 @@ impl Waku {
                                                 this.accept_status_suggestion(
                                                     turn_id,
                                                     &keyboard_action,
-                                                    window,
                                                     cx,
                                                 );
                                                 cx.stop_propagation();
@@ -1047,7 +1037,6 @@ impl Waku {
         &mut self,
         turn_id: Uuid,
         action: &StatusSuggestedAction,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(session) = self.composer_session() else {
@@ -1091,9 +1080,6 @@ impl Waku {
                     prompt,
                     cx,
                 );
-            }
-            StatusSuggestedAction::AddDetails | StatusSuggestedAction::ChooseManually => {
-                window.focus(&self.composer_focus(cx), cx);
             }
             StatusSuggestedAction::KeepGoing
             | StatusSuggestedAction::FixErrors
@@ -1247,7 +1233,11 @@ impl Waku {
                             .collect::<Vec<_>>()
                             .join("\n\n");
                         let actions = suggested_actions(&evaluation, &response);
-                        if !actions.is_empty() {
+                        // A request for the user's own details or an
+                        // unlisted choice has no one-click reply. Reserve
+                        // the row so a prediction cannot suggest continuing
+                        // past that request.
+                        if !actions.is_empty() || waiting_for_user_input(&evaluation) {
                             self.turn_status_suggestions.insert(turn_id, actions);
                         }
                     }
@@ -1547,10 +1537,8 @@ mod tests {
             suggested_actions(&verdict("go-ahead"), "Want me to proceed?"),
             [StatusSuggestedAction::Proceed]
         );
-        assert_eq!(
-            suggested_actions(&verdict("details"), "Which account?"),
-            [StatusSuggestedAction::AddDetails]
-        );
+        assert_eq!(suggested_actions(&verdict("details"), "Which account?"), []);
+        assert!(waiting_for_user_input(&verdict("details")));
         assert_eq!(
             suggested_actions(
                 &verdict("decision"),
@@ -1567,9 +1555,11 @@ mod tests {
         );
         assert_eq!(
             suggested_actions(&verdict("decision"), "Should we use SQLite or JSON?"),
-            [StatusSuggestedAction::ChooseManually]
+            []
         );
+        assert!(waiting_for_user_input(&verdict("decision")));
         assert!(suggested_actions(&verdict("other"), "Want me to proceed?").is_empty());
+        assert!(waiting_for_user_input(&verdict("other")));
     }
 
     #[test]
