@@ -4271,7 +4271,6 @@ impl Waku {
         }
         session.auto_route = true;
         session.updated_at = unix_time();
-        self.state.last_auto_route = true;
         self.save();
         cx.notify();
     }
