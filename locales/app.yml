@@ -3102,6 +3102,8 @@ sync.push:
   en: Push changes
 sync.command_hint:
   en: "Runs %{command} in a terminal"
+sync.refreshing:
+  en: "Refreshing…"
 sync.on_base:
   en: "%{base} · %{summary}"
 

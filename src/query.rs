@@ -125,6 +125,16 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
         })
     }
 
+    /// Whether `key`'s fetch has been claimed and not yet resolved — either a
+    /// first load or a re-read after invalidation. Lets a caller know a value
+    /// it drew from its own fallback is being refreshed underneath it.
+    pub fn is_loading(&self, key: &K) -> bool {
+        matches!(
+            self.entries.get(key).map(|cached| &cached.slot),
+            Some(Slot::Loading)
+        )
+    }
+
     /// Reads without claiming a fetch, for callers that only want a hit.
     #[cfg(test)]
     pub fn peek(&self, key: &K) -> Option<Arc<V>> {

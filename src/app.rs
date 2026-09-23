@@ -2231,10 +2231,20 @@ pub struct Waku {
     /// transcript row building reads it from `&self` paths.
     base_push_states:
         RefCell<QueryCache<(PathBuf, String), Result<waku_client::git::BasePushState, String>>>,
+    /// The last landed `BasePushState` per (workspace, base) — the
+    /// stale-while-revalidate value `base_push_state_for` serves while a
+    /// re-read is in flight, so readers keep drawing instead of flashing
+    /// hidden. Cleared when a fresh read lands or errors.
+    base_push_state_fallbacks:
+        RefCell<HashMap<(PathBuf, String), waku_client::git::BasePushState>>,
     /// When each (workspace, base) upstream was last auto-fetched — the
     /// throttle behind `maybe_fetch_upstream`, keyed like
     /// `base_push_states`. `RefCell` for the same `&self` readers.
     upstream_fetch_times: RefCell<HashMap<(PathBuf, String), Instant>>,
+    /// (workspace, branch) pairs a `maybe_fetch_upstream` fetch is running
+    /// for — the sync strip draws its refreshing face while one is in
+    /// flight.
+    upstream_fetches: RefCell<HashSet<(PathBuf, String)>>,
     /// Stale-while-revalidate value for the selected path, avoiding label
     /// flicker when app activation invalidates the query.
     visible_branch_snapshot: Option<(PathBuf, BranchSnapshot)>,
@@ -5737,7 +5747,9 @@ impl Waku {
                 branch_snapshots: QueryCache::new(MAX_CACHED_WORKSPACES),
                 remote_files: QueryCache::new(4 * MAX_CACHED_WORKSPACES),
                 base_push_states: RefCell::new(QueryCache::new(MAX_CACHED_WORKSPACES)),
+                base_push_state_fallbacks: RefCell::new(HashMap::new()),
                 upstream_fetch_times: RefCell::new(HashMap::new()),
+                upstream_fetches: RefCell::new(HashSet::new()),
                 visible_branch_snapshot: None,
                 branch_operation_pending: false,
                 commit_dialog: None,

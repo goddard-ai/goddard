@@ -134,7 +134,9 @@ impl Waku {
                 let fetch_path = workspace_path.clone();
                 let Some(workspace) = self.workspace_client_for_path(&fetch_path) else {
                     // Offline remote owner: leave the miss uncached so the
-                    // next read retries once the host reconnects.
+                    // next read retries once the host reconnects — dropping
+                    // the token alone would leave the slot Loading forever.
+                    self.branch_snapshots.abandon(token);
                     return fallback;
                 };
                 cx.spawn(async move |waku, cx| {
@@ -217,7 +219,9 @@ impl Waku {
 
     /// Invalidate the cached snapshot for an explicit workspace — the
     /// composer's branch picker can describe a Big Picture subject whose
-    /// checkout is not the selection's.
+    /// checkout is not the selection's. Base push state derives from the
+    /// same refs, so it goes too — a sync-strip push or pull run in a
+    /// terminal reaches this through `refresh_selected_branch_snapshot`.
     pub(super) fn refresh_workspace_branch_snapshot(
         &mut self,
         path: &std::path::Path,
@@ -225,6 +229,7 @@ impl Waku {
     ) {
         self.branch_snapshots.invalidate(&path.to_path_buf());
         self.invalidate_workspace_remote_files(path);
+        self.invalidate_base_push_state(path);
         cx.notify();
     }
 

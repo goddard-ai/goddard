@@ -5883,14 +5883,20 @@ impl Waku {
         };
         let base_is_head =
             planned_base.is_some() && planned_base.as_deref() == snapshot.current.as_deref();
-        let (label, upstream, ahead, behind) = match (planned_base, base_is_head) {
+        let (label, upstream, ahead, behind, refreshing) = match (planned_base, base_is_head) {
             (Some(base), false) => {
-                let state = self.base_push_state_for(&workspace_path, &base, cx)?;
+                let (state, refreshing) = match self.base_push_state_for(&workspace_path, &base, cx)
+                {
+                    push_base::BasePushRead::Ready(state) => (state, false),
+                    push_base::BasePushRead::Refreshing(state) => (state, true),
+                    push_base::BasePushRead::Unknown => return None,
+                };
                 (
                     Some(base),
                     state.upstream?,
                     state.ahead.unwrap_or(0),
                     state.behind.unwrap_or(0),
+                    refreshing,
                 )
             }
             (planned_base, _) => {
@@ -5905,13 +5911,56 @@ impl Waku {
                         self.maybe_fetch_upstream(&workspace_path, &branch, cx);
                     }
                 }
-                (planned_base, upstream.name, upstream.ahead, upstream.behind)
+                // A `Loading` snapshot means the counts came from the
+                // last-landed fallback while a re-read runs; an in-flight
+                // upstream fetch is mid-refresh for the same reason.
+                let refreshing = self.branch_snapshots.is_loading(&workspace_path)
+                    || snapshot.current.as_deref().is_some_and(|branch| {
+                        self.upstream_fetch_in_flight(&workspace_path, branch)
+                    });
+                (
+                    planned_base,
+                    upstream.name,
+                    upstream.ahead,
+                    upstream.behind,
+                    refreshing,
+                )
             }
         };
         if ahead == 0 && behind == 0 {
             return None;
         }
         let theme = Theme::current(cx);
+        if refreshing {
+            // A re-check is in flight over a drawn divergence — keep the
+            // strip mounted as a spinner so it reads "refreshing" instead
+            // of flashing out and back.
+            return Some(
+                div()
+                    .h(px(26.0))
+                    .mt(px(12.0))
+                    .max_w_full()
+                    .pl(px(10.0))
+                    .pr(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(motion::spin(icon(
+                        "icons/loader-circle.svg",
+                        12.0,
+                        theme.text_tertiary,
+                    )))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("sync.refreshing")),
+                    )
+                    .into_any_element(),
+            );
+        }
         // `-c core.editor/sequence.editor` rather than an env prefix: the
         // script is sourced by the user's shell, and `VAR=x cmd` is not
         // portable to PowerShell, cmd, nushell, or older fish.

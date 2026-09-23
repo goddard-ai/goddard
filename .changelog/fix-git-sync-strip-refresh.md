@@ -1,0 +1,1 @@
+- The new task page's sync strip now disappears promptly once a push or pull it launched finishes, and shows a spinner while it re-checks the branch's upstream instead of flashing away

@@ -35,6 +35,20 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
+/// What `base_push_state_for` resolved to this frame.
+#[derive(Clone, Debug)]
+pub(super) enum BasePushRead {
+    /// The cached read is current.
+    Ready(BasePushState),
+    /// The read is being re-run — a tracking-ref fetch is in flight or the
+    /// invalidated value has not landed yet. Carries the last landed state
+    /// so callers keep drawing it (marked refreshing) rather than flashing
+    /// hidden.
+    Refreshing(BasePushState),
+    /// Nothing has landed yet, or the last read failed — show nothing.
+    Unknown,
+}
+
 /// What a landed notice's push affordance renders as — derived per frame
 /// from the cached base-push read and the in-flight op, never stored.
 #[derive(Clone, Debug)]
@@ -94,35 +108,39 @@ impl Waku {
             return LandedPush::Pushing;
         }
         match self.base_push_state_for(workspace, base, cx) {
-            Some(BasePushState {
-                upstream: Some(upstream),
-                ahead,
-                ..
-            }) => {
-                if ahead == Some(0) {
-                    LandedPush::Pushed
-                } else {
-                    LandedPush::Pushable {
-                        workspace: workspace.to_path_buf(),
-                        base: base.to_owned(),
-                        upstream,
+            BasePushRead::Ready(state) | BasePushRead::Refreshing(state) => match state {
+                BasePushState {
+                    upstream: Some(upstream),
+                    ahead,
+                    ..
+                } => {
+                    if ahead == Some(0) {
+                        LandedPush::Pushed
+                    } else {
+                        LandedPush::Pushable {
+                            workspace: workspace.to_path_buf(),
+                            base: base.to_owned(),
+                            upstream,
+                        }
                     }
                 }
-            }
-            _ => LandedPush::Hidden,
+                _ => LandedPush::Hidden,
+            },
+            BasePushRead::Unknown => LandedPush::Hidden,
         }
     }
 
     /// The cached `BasePushState` read for `base` in `workspace`, shared by
     /// the landed notice's push button and the draft's sync strip. A miss
-    /// starts the daemon read and reports `None` until it lands — callers
-    /// degrade to showing nothing.
+    /// starts the daemon read; while it is in flight the last landed value
+    /// comes back as `Refreshing` so readers keep drawing rather than
+    /// flashing hidden — only a key that never resolved reports `Unknown`.
     pub(super) fn base_push_state_for(
         &self,
         workspace: &Path,
         base: &str,
         cx: &mut Context<Self>,
-    ) -> Option<BasePushState> {
+    ) -> BasePushRead {
         // Every reader is a surface that advises sync or push — refresh the
         // tracking ref on a TTL so the advice describes the remote as it is
         // now, not as of the last manual fetch.
@@ -132,14 +150,40 @@ impl Waku {
         // through the arms, and `Missing` re-borrows the cache to abandon.
         let query = self.base_push_states.borrow_mut().read(&key);
         match query {
-            Query::Ready(result) => result.as_ref().clone().ok(),
-            Query::Pending => None,
+            Query::Ready(result) => match result.as_ref() {
+                Ok(state) => {
+                    let state = state.clone();
+                    self.base_push_state_fallbacks
+                        .borrow_mut()
+                        .insert(key, state.clone());
+                    if self.upstream_fetch_in_flight(workspace, base) {
+                        BasePushRead::Refreshing(state)
+                    } else {
+                        BasePushRead::Ready(state)
+                    }
+                }
+                // A failed read is an answer too — drop the fallback so a
+                // stale divergence cannot pin itself on screen forever.
+                Err(_) => {
+                    self.base_push_state_fallbacks.borrow_mut().remove(&key);
+                    BasePushRead::Unknown
+                }
+            },
+            Query::Pending => self.base_push_state_fallback(&key),
             Query::Missing(token) => {
                 let Some(client) = self.workspace_client_for_path(workspace) else {
                     // Offline remote owner: abandon so the next read retries
-                    // once the host reconnects instead of pending forever.
+                    // once the host reconnects instead of pending forever,
+                    // and serve the last landed value unmarked — no refresh
+                    // is running for a spinner to announce.
                     self.base_push_states.borrow_mut().abandon(token);
-                    return None;
+                    return self
+                        .base_push_state_fallbacks
+                        .borrow()
+                        .get(&key)
+                        .cloned()
+                        .map(BasePushRead::Ready)
+                        .unwrap_or(BasePushRead::Unknown);
                 };
                 let fetch_workspace = workspace.to_path_buf();
                 let fetch_base = base.to_owned();
@@ -166,9 +210,29 @@ impl Waku {
                     });
                 })
                 .detach();
-                None
+                self.base_push_state_fallback(&key)
             }
         }
+    }
+
+    /// The last landed `BasePushState` for a key, marked refreshing — what a
+    /// reader draws while a re-run is in flight.
+    fn base_push_state_fallback(&self, key: &(PathBuf, String)) -> BasePushRead {
+        self.base_push_state_fallbacks
+            .borrow()
+            .get(key)
+            .cloned()
+            .map(BasePushRead::Refreshing)
+            .unwrap_or(BasePushRead::Unknown)
+    }
+
+    /// Whether a `maybe_fetch_upstream` fetch is running for this
+    /// (workspace, branch) pair — the strip's signal to draw its refreshing
+    /// face even though the cached read itself has not been superseded yet.
+    pub(super) fn upstream_fetch_in_flight(&self, workspace: &Path, base: &str) -> bool {
+        self.upstream_fetches
+            .borrow()
+            .contains(&(workspace.to_path_buf(), base.to_owned()))
     }
 
     /// The push affordance for a landed notice's `base`, resolved against
@@ -197,8 +261,8 @@ impl Waku {
         if !self.state.auto_fetch_remotes {
             return;
         }
+        let key = (workspace.to_path_buf(), base.to_owned());
         {
-            let key = (workspace.to_path_buf(), base.to_owned());
             let mut times = self.upstream_fetch_times.borrow_mut();
             if times
                 .get(&key)
@@ -209,11 +273,16 @@ impl Waku {
             // Aged-out entries are dropped as each insert runs, keeping the
             // map sized to what is actually being asked about.
             times.retain(|_, at| at.elapsed() < UPSTREAM_FETCH_INTERVAL);
-            times.insert(key, Instant::now());
+            times.insert(key.clone(), Instant::now());
         }
         let Some(client) = self.workspace_client_for_path(workspace) else {
             return;
         };
+        // The strip reads this flag to draw its refreshing face for the
+        // fetch's whole span; notify so it appears on the next frame rather
+        // than whenever the UI next happens to redraw.
+        self.upstream_fetches.borrow_mut().insert(key.clone());
+        cx.notify();
         let fetch_workspace = workspace.to_path_buf();
         let fetch_base = base.to_owned();
         let workspace = workspace.to_path_buf();
@@ -231,7 +300,10 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
+                waku.upstream_fetches.borrow_mut().remove(&key);
                 if !fetched {
+                    // The refreshing face still has to come down.
+                    cx.notify();
                     return;
                 }
                 // Tracking refs moved — every divergence read derived from

@@ -1218,6 +1218,7 @@ sync.ahead_many: "领先 %{count} 个提交"
 sync.pull: 拉取更改
 sync.push: 推送更改
 sync.command_hint: "在终端中运行 %{command}"
+sync.refreshing: 正在刷新…
 sync.on_base: "%{base} · %{summary}"
 
 terminal.starting: 正在启动终端…

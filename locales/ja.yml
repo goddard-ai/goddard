@@ -1246,6 +1246,7 @@ sync.ahead_many: "%{count} コミット進んでいます"
 sync.pull: 変更をプル
 sync.push: 変更をプッシュ
 sync.command_hint: "ターミナルで %{command} を実行します"
+sync.refreshing: 更新中…
 sync.on_base: "%{base} · %{summary}"
 
 terminal.starting: ターミナルを起動中…
