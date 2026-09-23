@@ -1186,7 +1186,10 @@ mod tests {
                 .ok()
                 .map(|date| date.timestamp())
         );
-        assert_eq!(reset_credit_expiry(&serde_json::json!({"credits": []})), None);
+        assert_eq!(
+            reset_credit_expiry(&serde_json::json!({"credits": []})),
+            None
+        );
         assert_eq!(reset_credit_expiry(&serde_json::json!({})), None);
     }
 

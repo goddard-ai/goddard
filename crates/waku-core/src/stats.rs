@@ -20,9 +20,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use waku_protocol::model::ProviderKind;
-use waku_protocol::{
-    DaemonChildKind, DaemonChildSample, DaemonSessionSample, DaemonStatsSample,
-};
+use waku_protocol::{DaemonChildKind, DaemonChildSample, DaemonSessionSample, DaemonStatsSample};
 
 /// One sample per minute keeps the process-table walk cheap while catching
 /// growth between turns; eviction leaks move on hour timescales anyway.
@@ -323,7 +321,11 @@ fn memory_rows(probe: &StatsProbe) -> (Option<u64>, Option<u64>, Vec<DaemonChild
         });
     }
     rows.sort_by(|a, b| b.rss_mb.cmp(&a.rss_mb));
-    (own.map(|bytes| bytes / (1 << 20)), Some(total / (1 << 20)), rows)
+    (
+        own.map(|bytes| bytes / (1 << 20)),
+        Some(total / (1 << 20)),
+        rows,
+    )
 }
 
 /// Who owns one subtree: a terminal when its PTY pid sits among the
@@ -346,7 +348,11 @@ fn attribute(
         };
         if let Some(index) = runtime_dirs.iter().position(|dir| dir.cwd == cwd) {
             let dir = runtime_dirs.remove(index);
-            return (DaemonChildKind::Runtime, Some(dir.session_id), Some(dir.provider));
+            return (
+                DaemonChildKind::Runtime,
+                Some(dir.session_id),
+                Some(dir.provider),
+            );
         }
     }
     (DaemonChildKind::Other, None, None)
@@ -520,7 +526,10 @@ mod tests {
             .current_dir(&cwd)
             .spawn()
             .unwrap();
-        let mut unclaimed = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut unclaimed = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
 
         let mut probe = StatsProbe::default();
         probe.runtime_dirs.push(RuntimeDir {
@@ -539,9 +548,10 @@ mod tests {
         assert_eq!(runtime.kind, DaemonChildKind::Runtime);
         assert_eq!(runtime.provider, Some(ProviderKind::Codex));
         assert_eq!(runtime.name, "sleep");
-        assert!(rows.iter().any(|row| {
-            row.pid == unclaimed.id() && row.kind == DaemonChildKind::Other
-        }));
+        assert!(
+            rows.iter()
+                .any(|row| { row.pid == unclaimed.id() && row.kind == DaemonChildKind::Other })
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

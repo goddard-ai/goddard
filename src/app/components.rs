@@ -2363,19 +2363,22 @@ fn message_menu_items(
         let reader_content = copy_content;
         let waku = waku.clone();
         items.push(MenuItem::Separator);
-        items.push(MenuItem::new(tr!("speed_reader.go_fast"), move |window, cx| {
-            let source = selected_text
-                .clone()
-                .unwrap_or_else(|| reader_content.to_string());
-            let _ = waku.update(cx, |this, cx| {
-                this.open_speed_reader(
-                    tr!("speed_reader.agent_response"),
-                    source.clone(),
-                    window,
-                    cx,
-                );
-            });
-        }));
+        items.push(MenuItem::new(
+            tr!("speed_reader.go_fast"),
+            move |window, cx| {
+                let source = selected_text
+                    .clone()
+                    .unwrap_or_else(|| reader_content.to_string());
+                let _ = waku.update(cx, |this, cx| {
+                    this.open_speed_reader(
+                        tr!("speed_reader.agent_response"),
+                        source.clone(),
+                        window,
+                        cx,
+                    );
+                });
+            },
+        ));
     }
 
     // A bot reply can ride the friends channel like a sent file — pick the

@@ -38,10 +38,7 @@ mod imp {
     /// `kIOPMAssertionTypePreventSystemSleep` (all system sleep, lid close
     /// included, AC power only — `caffeinate -s`). User-requested sleep
     /// still wins over both.
-    const ASSERTION_TYPES: [&str; 2] = [
-        "PreventUserIdleSystemSleep",
-        "PreventSystemSleep",
-    ];
+    const ASSERTION_TYPES: [&str; 2] = ["PreventUserIdleSystemSleep", "PreventSystemSleep"];
 
     #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
@@ -66,8 +63,7 @@ mod imp {
             let mut ids = Vec::new();
             for assertion_type in ASSERTION_TYPES {
                 let assertion_type = NSString::from_str(assertion_type);
-                let assertion_type =
-                    (&*assertion_type as *const NSString).cast::<c_void>();
+                let assertion_type = (&*assertion_type as *const NSString).cast::<c_void>();
                 let mut id = 0;
                 // SAFETY: all pointers are valid CFStringRefs for the call's
                 // duration; `id` is written on success only.

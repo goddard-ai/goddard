@@ -2239,9 +2239,7 @@ impl Waku {
         // refetches a missing snapshot.
         let file_editors = std::mem::take(&mut self.right_panel_file_editors)
             .into_iter()
-            .filter(|(_, editor)| {
-                editor.dirty || !editor.annotations.borrow().items.is_empty()
-            })
+            .filter(|(_, editor)| editor.dirty || !editor.annotations.borrow().items.is_empty())
             .collect();
         self.right_panel_ref_editors.clear();
         self.right_panel_diff_snapshot = None;
@@ -3773,9 +3771,7 @@ impl Waku {
                 let has_run = self
                     .right_panel_terminals
                     .get(&terminal_id)
-                    .is_some_and(|terminal| {
-                        terminal.read(cx).last_command_started_at().is_some()
-                    })
+                    .is_some_and(|terminal| terminal.read(cx).last_command_started_at().is_some())
                     || self
                         .right_panel_terminal_programs
                         .contains_key(&terminal_id);
@@ -4126,13 +4122,13 @@ impl Waku {
         }
 
         self.window_drag_region(
-            header
-                .child(self.render_panel_toggles(cx))
-                .children(self.render_client_window_controls(
+            header.child(self.render_panel_toggles(cx)).children(
+                self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Right,
                     window,
                     cx,
-                )),
+                ),
+            ),
             cx,
         )
     }
@@ -5460,10 +5456,7 @@ impl Waku {
                                 div()
                                     .w_full()
                                     .pt(px(CONTENT_PAD_TOP))
-                                    .pb(px(
-                                        CONTENT_PAD_TOP
-                                            + line_height * FILE_SCROLL_PAD_LINES,
-                                    ))
+                                    .pb(px(CONTENT_PAD_TOP + line_height * FILE_SCROLL_PAD_LINES))
                                     .flex()
                                     .items_start()
                                     .child(gutter)
@@ -5800,11 +5793,14 @@ impl Waku {
                 .unwrap_or_else(|| reader_editor_state.read(cx).content().to_owned());
             let waku = reader_waku.clone();
             let title = reader_title.clone();
-            vec![MenuItem::new(tr!("speed_reader.go_fast"), move |window, cx| {
-                let _ = waku.update(cx, |this, cx| {
-                    this.open_speed_reader(title.clone(), source.clone(), window, cx);
-                });
-            })]
+            vec![MenuItem::new(
+                tr!("speed_reader.go_fast"),
+                move |window, cx| {
+                    let _ = waku.update(cx, |this, cx| {
+                        this.open_speed_reader(title.clone(), source.clone(), window, cx);
+                    });
+                },
+            )]
         }))
         .with_link_handler(self.markdown_link_handler.clone());
         let document = md::render::markdown(view, &ctx);
@@ -5870,9 +5866,7 @@ impl Waku {
                                     })
                                     .px(px(16.0))
                                     .pt(px(14.0))
-                                    .pb(px(
-                                        24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES,
-                                    ))
+                                    .pb(px(24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES))
                                     .text_color(theme.text)
                                     .children(document),
                             ),
@@ -7030,9 +7024,7 @@ impl Waku {
             // dirty buffers and annotation pins stay.
             file_editors: std::mem::take(&mut self.right_panel_file_editors)
                 .into_iter()
-                .filter(|(_, editor)| {
-                    editor.dirty || !editor.annotations.borrow().items.is_empty()
-                })
+                .filter(|(_, editor)| editor.dirty || !editor.annotations.borrow().items.is_empty())
                 .collect(),
             file_tree_width: self.right_panel_file_tree_width,
         }

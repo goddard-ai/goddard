@@ -93,7 +93,10 @@ pub enum ComposerDraftInlineAtomKind {
         text: String,
         paste_category: Option<String>,
     },
-    SessionRef { session_id: Uuid, title: String },
+    SessionRef {
+        session_id: Uuid,
+        title: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]

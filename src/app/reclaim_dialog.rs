@@ -320,12 +320,7 @@ impl Waku {
     /// header toggle — the popover closes with the state it renders.
     fn acknowledge_reclaim_result(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reclaim_result = None;
-        if let Some(handle) = self
-            .menus
-            .borrow()
-            .get(RECLAIM_PROGRESS_MENU_ID)
-            .cloned()
-        {
+        if let Some(handle) = self.menus.borrow().get(RECLAIM_PROGRESS_MENU_ID).cloned() {
             handle.close(window, cx);
         }
         cx.notify();
@@ -356,11 +351,7 @@ impl Waku {
                     return;
                 };
                 result.reveal = false;
-                let Some(handle) = this
-                    .menus
-                    .borrow()
-                    .get(RECLAIM_PROGRESS_MENU_ID)
-                    .cloned()
+                let Some(handle) = this.menus.borrow().get(RECLAIM_PROGRESS_MENU_ID).cloned()
                 else {
                     return;
                 };
@@ -371,12 +362,7 @@ impl Waku {
                     // Already open means the user is watching progress;
                     // the card flips to the finished state in place.
                     if !handle.is_open() {
-                        crate::ui::menu::toggle_popover(
-                            &handle,
-                            MenuAlign::BelowRight,
-                            window,
-                            cx,
-                        );
+                        crate::ui::menu::toggle_popover(&handle, MenuAlign::BelowRight, window, cx);
                     }
                 });
             });
@@ -749,15 +735,10 @@ fn render_reclaim_progress_card(
                     .flex()
                     .flex_col()
                     .gap(px(2.0))
-                    .child(
-                        div()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text)
-                            .child(tr!(
-                                "reclaim.completed",
-                                size = format_reclaim_bytes(reclaimed_bytes)
-                            )),
-                    )
+                    .child(div().text_size(sp(12.5)).text_color(theme.text).child(tr!(
+                        "reclaim.completed",
+                        size = format_reclaim_bytes(reclaimed_bytes)
+                    )))
                     .when(failures > 0, |element| {
                         element.child(
                             div()

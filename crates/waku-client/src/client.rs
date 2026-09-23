@@ -536,7 +536,10 @@ fn daemon_url(address: &str) -> anyhow::Result<String> {
 /// The next queued frame to write: interactive traffic first, then bulk.
 /// Checking interactive on every call means a request enqueued mid-burst
 /// waits at most one bulk frame — never a whole drain of queued saves.
-fn next_outgoing(outgoing: &Receiver<Outgoing>, bulk: &Receiver<ClientMessage>) -> Option<Outgoing> {
+fn next_outgoing(
+    outgoing: &Receiver<Outgoing>,
+    bulk: &Receiver<ClientMessage>,
+) -> Option<Outgoing> {
     outgoing
         .try_recv()
         .ok()

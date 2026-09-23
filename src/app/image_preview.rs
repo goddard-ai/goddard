@@ -502,11 +502,7 @@ mod tests {
     fn remote_image_cache_evicts_coldest_over_budget() {
         let mut cache = RemoteImageCache::new();
         for index in 0..MAX_REMOTE_IMAGE_ENTRIES {
-            assert!(
-                cache
-                    .insert(format!("ref-{index}"), image(8))
-                    .is_empty()
-            );
+            assert!(cache.insert(format!("ref-{index}"), image(8)).is_empty());
         }
         // Reading an entry makes it newest — it survives the next eviction.
         assert!(matches!(

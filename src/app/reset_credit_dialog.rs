@@ -68,7 +68,10 @@ impl Waku {
                     )),
                     Err(error) => Err(error),
                 };
-                if tx.send(result.map_err(|error| format!("{error:#}"))).is_ok() {
+                if tx
+                    .send(result.map_err(|error| format!("{error:#}")))
+                    .is_ok()
+                {
                     signal_event_pump(&event_wake);
                 }
             })
@@ -150,12 +153,16 @@ impl Waku {
         let card = div()
             .id("reset-credit-dialog-card")
             .key_context(DIALOG_CONTEXT)
-            .on_action(cx.listener(|waku, _: &ConfirmResetCreditDialog, window, cx| {
-                waku.confirm_reset_credit_dialog(window, cx)
-            }))
-            .on_action(cx.listener(|waku, _: &DismissResetCreditDialog, window, cx| {
-                waku.close_reset_credit_dialog(window, cx)
-            }))
+            .on_action(
+                cx.listener(|waku, _: &ConfirmResetCreditDialog, window, cx| {
+                    waku.confirm_reset_credit_dialog(window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|waku, _: &DismissResetCreditDialog, window, cx| {
+                    waku.close_reset_credit_dialog(window, cx)
+                }),
+            )
             .tab_group()
             .tab_stop(false)
             .w_full()

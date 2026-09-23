@@ -797,9 +797,8 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
         }
     }
     if cleared.len() > 1 {
-        cleared.retain(|(marker, _)| {
-            !matches!(marker.id, "complete" | "answered" | "nothing-to-do")
-        });
+        cleared
+            .retain(|(marker, _)| !matches!(marker.id, "complete" | "answered" | "nothing-to-do"));
     }
     cleared
 }
@@ -920,80 +919,69 @@ impl Waku {
                             .children(marker_pill)
                             .children(actions.iter().enumerate().map(|(index, action)| {
                                 let (icon_path, label) = match action {
-                                    StatusSuggestedAction::Proceed => {
-                                        (
-                                            "icons/chat.svg",
-                                            action_predictions::suggested_prompt(
-                                                "proceed",
-                                                &self.state.suggested_prompts,
-                                                None,
-                                            )
-                                            .unwrap_or_else(|| tr!("suggestions.proceed")),
+                                    StatusSuggestedAction::Proceed => (
+                                        "icons/chat.svg",
+                                        action_predictions::suggested_prompt(
+                                            "proceed",
+                                            &self.state.suggested_prompts,
+                                            None,
                                         )
-                                    }
-                                    StatusSuggestedAction::Choose { option } => {
-                                        (
-                                            "icons/chat.svg",
-                                            action_predictions::suggested_prompt(
-                                                action_predictions::CHOICE_PROMPT_ID,
-                                                &self.state.suggested_prompts,
-                                                Some(option),
-                                            )
-                                            .unwrap_or_else(|| {
-                                                tr!("suggestions.chosen_option", option = option)
-                                            }),
+                                        .unwrap_or_else(|| tr!("suggestions.proceed")),
+                                    ),
+                                    StatusSuggestedAction::Choose { option } => (
+                                        "icons/chat.svg",
+                                        action_predictions::suggested_prompt(
+                                            action_predictions::CHOICE_PROMPT_ID,
+                                            &self.state.suggested_prompts,
+                                            Some(option),
                                         )
-                                    }
+                                        .unwrap_or_else(
+                                            || tr!("suggestions.chosen_option", option = option),
+                                        ),
+                                    ),
                                     StatusSuggestedAction::AddDetails => {
                                         ("icons/chat.svg", tr!("suggestions.add_details"))
                                     }
                                     StatusSuggestedAction::ChooseManually => {
                                         ("icons/chat.svg", tr!("suggestions.choose_manually"))
                                     }
-                                    StatusSuggestedAction::KeepGoing => {
-                                        (
-                                            "icons/sparkle.svg",
-                                            action_predictions::suggested_prompt(
-                                                "keep-going",
-                                                &self.state.suggested_prompts,
-                                                None,
-                                            )
-                                            .unwrap_or_else(|| tr!("suggestions.keep_going")),
+                                    StatusSuggestedAction::KeepGoing => (
+                                        "icons/sparkle.svg",
+                                        action_predictions::suggested_prompt(
+                                            "keep-going",
+                                            &self.state.suggested_prompts,
+                                            None,
                                         )
-                                    }
-                                    StatusSuggestedAction::FixErrors => {
-                                        (
-                                            "icons/sparkle.svg",
-                                            action_predictions::suggested_prompt(
-                                                "fix-errors",
-                                                &self.state.suggested_prompts,
-                                                None,
-                                            )
-                                            .unwrap_or_else(|| tr!("suggestions.fix_errors")),
+                                        .unwrap_or_else(|| tr!("suggestions.keep_going")),
+                                    ),
+                                    StatusSuggestedAction::FixErrors => (
+                                        "icons/sparkle.svg",
+                                        action_predictions::suggested_prompt(
+                                            "fix-errors",
+                                            &self.state.suggested_prompts,
+                                            None,
                                         )
-                                    }
-                                    StatusSuggestedAction::RunTests => {
-                                        (
-                                            "icons/sparkle.svg",
-                                            action_predictions::suggested_prompt(
-                                                "run-tests",
-                                                &self.state.suggested_prompts,
-                                                None,
-                                            )
-                                            .unwrap_or_else(|| tr!("suggestions.run_tests")),
+                                        .unwrap_or_else(|| tr!("suggestions.fix_errors")),
+                                    ),
+                                    StatusSuggestedAction::RunTests => (
+                                        "icons/sparkle.svg",
+                                        action_predictions::suggested_prompt(
+                                            "run-tests",
+                                            &self.state.suggested_prompts,
+                                            None,
                                         )
-                                    }
+                                        .unwrap_or_else(|| tr!("suggestions.run_tests")),
+                                    ),
                                 };
                                 let tooltip = label.clone();
                                 let display_label: String =
                                     label.replace('\n', " ").chars().take(56).collect();
-                                let display_label = if label.chars().count() > 56
-                                    || label.contains('\n')
-                                {
-                                    format!("{display_label}…")
-                                } else {
-                                    display_label
-                                };
+                                let display_label =
+                                    if label.chars().count() > 56 || label.contains('\n') {
+                                        format!("{display_label}…")
+                                    } else {
+                                        display_label
+                                    };
                                 let action = action.clone();
                                 let keyboard_action = action.clone();
                                 div()
@@ -1373,13 +1361,9 @@ impl Waku {
         if cleared.is_empty() {
             return None;
         }
-        let footer_row = self
-            .transcript_row_kinds
-            .borrow()
-            .iter()
-            .rposition(|kind| {
-                matches!(kind, TranscriptRowKind::ResponseFooter(id, _) if *id == turn_id)
-            })?;
+        let footer_row = self.transcript_row_kinds.borrow().iter().rposition(
+            |kind| matches!(kind, TranscriptRowKind::ResponseFooter(id, _) if *id == turn_id),
+        )?;
         // Unmeasured rows report `None`: no float until the footer has been
         // laid out once and the list can say where it sits.
         let footer_bounds = transcript_rows.bounds_for_item(footer_row)?;
@@ -1409,23 +1393,23 @@ impl Waku {
                 .track_focus(&focus)
                 .tab_index(0)
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
-                .children(cleared.into_iter().map(|(marker, probability)| {
-                    status_marker_chip(marker, probability, theme)
-                }))
+                .children(
+                    cleared.into_iter().map(|(marker, probability)| {
+                        status_marker_chip(marker, probability, theme)
+                    }),
+                )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.active_transcript_rows()
                         .scroll_to_reveal_item(footer_row);
                     cx.notify();
                 }))
-                .on_key_down(cx.listener(
-                    move |this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.active_transcript_rows()
-                                .scroll_to_reveal_item(footer_row);
-                            cx.stop_propagation();
-                        }
-                    },
-                ))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.active_transcript_rows()
+                            .scroll_to_reveal_item(footer_row);
+                        cx.stop_propagation();
+                    }
+                }))
                 .into_any_element(),
         )
     }
@@ -1809,10 +1793,7 @@ mod tests {
             [
                 (
                     ENDING_QUESTION.to_owned(),
-                    ending_choice(
-                        "pushed-back",
-                        &[("pushed-back", 0.80), ("complete", 0.20)],
-                    ),
+                    ending_choice("pushed-back", &[("pushed-back", 0.80), ("complete", 0.20)]),
                 ),
                 ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
             ]
@@ -1831,7 +1812,10 @@ mod tests {
         let ending = |choice: &str, probability: f64| {
             evaluation(BTreeMap::from([(
                 ENDING_QUESTION.to_owned(),
-                ending_choice(choice, &[(choice, probability), ("other", 1.0 - probability)]),
+                ending_choice(
+                    choice,
+                    &[(choice, probability), ("other", 1.0 - probability)],
+                ),
             )]))
         };
         // Endings that wait on the user's reply collapse to the chat glyph;

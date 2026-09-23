@@ -124,9 +124,13 @@ fn resident_bytes(session: &AgentSession) -> u64 {
         bytes += std::mem::size_of::<waku_protocol::model::Message>() as u64
             + message.content.capacity() as u64
             + opt_string(&message.display_content)
-            + strings(message.attachments.iter().map(|a| &a.name).chain(
-                message.attachments.iter().map(|a| &a.mention),
-            ));
+            + strings(
+                message
+                    .attachments
+                    .iter()
+                    .map(|a| &a.name)
+                    .chain(message.attachments.iter().map(|a| &a.mention)),
+            );
     }
     for block in &session.transcript_blocks {
         bytes += std::mem::size_of::<waku_protocol::model::TranscriptBlock>() as u64;
@@ -1326,7 +1330,9 @@ impl Backend for WakuBackend {
                 sessions: state
                     .sessions
                     .iter()
-                    .filter_map(|session| session_stats_sample(session, running.contains(&session.id)))
+                    .filter_map(|session| {
+                        session_stats_sample(session, running.contains(&session.id))
+                    })
                     .collect(),
             }
         });
@@ -1344,12 +1350,7 @@ impl Backend for WakuBackend {
                         reap_idle_runtimes(&sessions, &task_state, &settings, &agent)
                     {
                         evict_idle_runtime(
-                            session_id,
-                            runtime_id,
-                            driver,
-                            &agent,
-                            &repo_maps,
-                            &events,
+                            session_id, runtime_id, driver, &agent, &repo_maps, &events,
                         );
                     }
                 }
@@ -2836,7 +2837,8 @@ fn splice_session_tail(
             base.messages.truncate(messages_from);
             base.messages.append(&mut session.messages);
             base.transcript_blocks.truncate(blocks_from);
-            base.transcript_blocks.append(&mut session.transcript_blocks);
+            base.transcript_blocks
+                .append(&mut session.transcript_blocks);
             session.messages = base.messages;
             session.transcript_blocks = base.transcript_blocks;
         }
@@ -3005,7 +3007,9 @@ impl WakuBackend {
                 );
                 self.share.notify_push(
                     origin_url.clone(),
-                    vec![crate::review::qa_branch_name(&self.settings.get().qa_branch)],
+                    vec![crate::review::qa_branch_name(
+                        &self.settings.get().qa_branch,
+                    )],
                 );
             }
             ReviewMove::Promoted => {
@@ -6286,15 +6290,14 @@ mod tests {
     fn tail_wire(base: &AgentSession, full: &AgentSession) -> (AgentSession, SessionDetailTail) {
         let mut wire = full.clone();
         wire.messages = wire.messages.split_off(base.messages.len());
-        wire.transcript_blocks = wire.transcript_blocks.split_off(base.transcript_blocks.len());
+        wire.transcript_blocks = wire
+            .transcript_blocks
+            .split_off(base.transcript_blocks.len());
         let tail = SessionDetailTail {
             session_id: base.id,
             messages_from: base.messages.len() as u32,
             transcript_blocks_from: base.transcript_blocks.len() as u32,
-            prefix_signature: detail_prefix_signature(
-                &base.messages,
-                &base.transcript_blocks,
-            ),
+            prefix_signature: detail_prefix_signature(&base.messages, &base.transcript_blocks),
         };
         (wire, tail)
     }
@@ -6315,7 +6318,10 @@ mod tests {
             full.messages.last().unwrap().content
         );
         assert_eq!(
-            wire.messages[..2].iter().map(|m| m.content.clone()).collect::<Vec<_>>(),
+            wire.messages[..2]
+                .iter()
+                .map(|m| m.content.clone())
+                .collect::<Vec<_>>(),
             vec!["Ask".to_owned(), "an answer".to_owned()]
         );
     }

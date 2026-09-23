@@ -3045,13 +3045,13 @@ impl Waku {
             )
             .child(div().flex_1());
         self.window_drag_region(
-            header
-                .child(self.render_panel_toggles(cx))
-                .children(self.render_client_window_controls(
+            header.child(self.render_panel_toggles(cx)).children(
+                self.render_client_window_controls(
                     super::window_chrome::WindowControlSide::Right,
                     window,
                     cx,
-                )),
+                ),
+            ),
             cx,
         )
         .into_any_element()

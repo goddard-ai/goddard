@@ -3206,9 +3206,10 @@ impl Waku {
             .pending_session_activation
             .map(|pending| pending.session_id);
         let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
-        if self.unread_sweep_at.is_none_or(|at| {
-            unix_time().saturating_sub(at) >= UNREAD_SWEEP_TIMEOUT.as_secs()
-        }) {
+        if self
+            .unread_sweep_at
+            .is_none_or(|at| unix_time().saturating_sub(at) >= UNREAD_SWEEP_TIMEOUT.as_secs())
+        {
             self.unread_sweep_visited.clear();
         }
         self.unread_sweep_at = Some(unix_time());
@@ -3253,7 +3254,7 @@ impl Waku {
                 self.sidebar_jump_flash = (self.sidebar_visible
                     && !self.big_picture.is_open()
                     && sidebar::sidebar_jump_skips_session(&rows, pending.or(selected), target))
-                    .then_some((target, generation));
+                .then_some((target, generation));
                 if self.sidebar_jump_flash.is_some() {
                     cx.spawn(async move |this, cx| {
                         cx.background_executor()
@@ -3604,9 +3605,7 @@ impl Waku {
             || !self.composer_inline_atoms.is_empty()
             || self.has_annotations();
         match self.composer_submit_action_for(session, preparing, has_draft) {
-            composer::ComposerSubmitAction::Send
-                if self.selected_session().is_some() =>
-            {
+            composer::ComposerSubmitAction::Send if self.selected_session().is_some() => {
                 // The focused field clears itself before the owner sees its
                 // event; here the owner is acting on the field's behalf, so
                 // the clear is its job too — including before a fork deferral
@@ -3621,8 +3620,7 @@ impl Waku {
                         .then_some(session.id)
                 }) {
                     self.defer_restore_composer_after_fork(session_id, prompt, cx);
-                } else if let Some(submission) = self.submission_with_attachments(&prompt, cx)
-                {
+                } else if let Some(submission) = self.submission_with_attachments(&prompt, cx) {
                     if steer {
                         self.steer_composer_submission(submission, cx);
                     } else {

@@ -343,17 +343,15 @@ fn reviewer_identity(cwd: &Path) -> anyhow::Result<String> {
 
 /// Record `decision` for `sha` — it must still be on `origin/<branch>` —
 /// then push the notes ref.
-fn record(
-    cwd: &Path,
-    sha: &str,
-    decision: ReviewDecision,
-    branch: &str,
-) -> anyhow::Result<()> {
+fn record(cwd: &Path, sha: &str, decision: ReviewDecision, branch: &str) -> anyhow::Result<()> {
     ensure_repository(cwd)?;
     fetch_notes(cwd);
-    let on_qa = git_capture(cwd, &["merge-base", "--is-ancestor", sha, &qa_remote(branch)])?
-        .status
-        .success();
+    let on_qa = git_capture(
+        cwd,
+        &["merge-base", "--is-ancestor", sha, &qa_remote(branch)],
+    )?
+    .status
+    .success();
     if !on_qa {
         bail!("{sha} is not on origin/{branch} — it may have been promoted or reverted already");
     }

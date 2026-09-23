@@ -3214,11 +3214,7 @@ pub fn hydrate_session(
 /// Serializes to memory and rewrites the file only when the content
 /// actually changed — `save` calls this every stream tick and the app
 /// files are mostly stable.
-fn write_app_file(
-    value: &impl Serialize,
-    path: &Path,
-    written: &Mutex<u64>,
-) -> io::Result<()> {
+fn write_app_file(value: &impl Serialize, path: &Path, written: &Mutex<u64>) -> io::Result<()> {
     let data = serde_json::to_vec_pretty(value).map_err(to_io_error)?;
     let fingerprint = content_fingerprint(&data);
     let mut last = written.lock();
@@ -3296,10 +3292,7 @@ mod tests {
         let cursor = SaveCursor {
             messages: baseline.messages.len(),
             blocks: baseline.transcript_blocks.len(),
-            signature: detail_prefix_signature(
-                &baseline.messages,
-                &baseline.transcript_blocks,
-            ),
+            signature: detail_prefix_signature(&baseline.messages, &baseline.transcript_blocks),
             tail_sends: 0,
         };
         let mut session = baseline.clone();
@@ -3325,10 +3318,7 @@ mod tests {
         let cursor = SaveCursor {
             messages: baseline.messages.len(),
             blocks: baseline.transcript_blocks.len(),
-            signature: detail_prefix_signature(
-                &baseline.messages,
-                &baseline.transcript_blocks,
-            ),
+            signature: detail_prefix_signature(&baseline.messages, &baseline.transcript_blocks),
             tail_sends: 0,
         };
 
@@ -3358,10 +3348,7 @@ mod tests {
         let cursor = SaveCursor {
             messages: baseline.messages.len(),
             blocks: baseline.transcript_blocks.len(),
-            signature: detail_prefix_signature(
-                &baseline.messages,
-                &baseline.transcript_blocks,
-            ),
+            signature: detail_prefix_signature(&baseline.messages, &baseline.transcript_blocks),
             tail_sends: FULL_DETAIL_INTERVAL,
         };
         let mut tails = Vec::new();

@@ -1245,8 +1245,7 @@ mod tests {
             },
             "qa",
         )
-        .unwrap()
-        else {
+        .unwrap() else {
             panic!("unexpected workspace response")
         };
         assert_eq!(restored, content);
@@ -1439,8 +1438,7 @@ mod tests {
             WorkspaceOperation::InspectReclaimable { cwd: root.clone() },
             "qa",
         )
-        .unwrap()
-        else {
+        .unwrap() else {
             panic!("unexpected workspace response")
         };
         let mut names = entries

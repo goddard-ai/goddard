@@ -408,8 +408,7 @@ impl Waku {
         });
         let transcript_focus = self.transcript_focus.clone();
         let theme = Theme::current(cx);
-        let status_marker_float =
-            self.render_floating_status_markers(&transcript_rows, &theme, cx);
+        let status_marker_float = self.render_floating_status_markers(&transcript_rows, &theme, cx);
         div()
             .flex_1()
             .min_h_0()
@@ -1621,8 +1620,9 @@ impl Waku {
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnFold(turn_id) => self.render_turn_fold_row(turn_id, &theme, cx),
-            TranscriptRowKind::ResponseFooter(turn_id, message_index) => self
-                .render_response_footer_row(turn_id, message_index, &theme, window, cx),
+            TranscriptRowKind::ResponseFooter(turn_id, message_index) => {
+                self.render_response_footer_row(turn_id, message_index, &theme, window, cx)
+            }
             TranscriptRowKind::ChangedFiles(turn_id) => self
                 .render_changed_files_row(turn_id, &theme, window, cx)
                 .unwrap_or_else(|| div().into_any_element()),

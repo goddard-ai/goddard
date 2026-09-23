@@ -399,8 +399,7 @@ impl PersistedState {
     /// Drops the given dirty marks, for a save that claimed them into a
     /// snapshot. A session re-dirtied afterwards keeps its flag.
     pub fn unmark_sessions_dirty(&mut self, ids: &HashSet<Uuid>) {
-        self.dirty_sessions
-            .retain(|id| !ids.contains(id));
+        self.dirty_sessions.retain(|id| !ids.contains(id));
     }
 
     pub fn push_session(&mut self, session: AgentSession) {
@@ -1678,17 +1677,15 @@ impl StateStore {
         let storage = guard.as_mut().expect("storage opened above");
 
         if self.desktop_files {
-            let app_settings_fingerprint = fingerprint(
-                &serde_json::to_string(&batch.app_settings).map_err(to_io_error)?,
-            );
+            let app_settings_fingerprint =
+                fingerprint(&serde_json::to_string(&batch.app_settings).map_err(to_io_error)?);
             if app_settings_fingerprint != storage.saved_app_settings {
                 self.write_app_settings(&batch.app_settings)?;
                 storage.saved_app_settings = app_settings_fingerprint;
             }
 
-            let app_state_fingerprint = fingerprint(
-                &serde_json::to_string(&batch.app_state).map_err(to_io_error)?,
-            );
+            let app_state_fingerprint =
+                fingerprint(&serde_json::to_string(&batch.app_state).map_err(to_io_error)?);
             if app_state_fingerprint != storage.saved_app_state {
                 self.write_app_state(&batch.app_state)?;
                 storage.saved_app_state = app_state_fingerprint;

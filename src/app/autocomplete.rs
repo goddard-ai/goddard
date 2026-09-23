@@ -430,8 +430,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| {
-                session_mention_candidate(session, project)
-                    && self.session_atom_allowed(session.id)
+                session_mention_candidate(session, project) && self.session_atom_allowed(session.id)
             })
             .collect();
         sessions.sort_by_key(|session| {

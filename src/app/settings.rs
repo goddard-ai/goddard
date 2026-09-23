@@ -4855,14 +4855,11 @@ impl Waku {
                 .bg(theme.raised)
                 .flex()
                 .items_center()
-                .child(
-                    settings_row_text(title, description, matched, theme).child(
-                        div().mt(px(9.0)).max_w(px(360.0)).child(
-                            TextField::new("qa-branch-field", self.qa_branch_input.clone())
-                                .w_full(),
-                        ),
+                .child(settings_row_text(title, description, matched, theme).child(
+                    div().mt(px(9.0)).max_w(px(360.0)).child(
+                        TextField::new("qa-branch-field", self.qa_branch_input.clone()).w_full(),
                     ),
-                )
+                ))
                 .into_any_element(),
         )
     }
@@ -5897,9 +5894,8 @@ impl Waku {
                         for question in &mut completed.questions {
                             if question.weight.is_none() {
                                 let key = format!("weight:{}", question.id);
-                                question.weight = confident_auto_prompt_suggestion(
-                                    evaluation.answers.get(&key),
-                                );
+                                question.weight =
+                                    confident_auto_prompt_suggestion(evaluation.answers.get(&key));
                             }
                         }
                         if completed.threshold.is_none() {
@@ -6105,14 +6101,18 @@ impl Waku {
         let id = editor.id;
         let prompt = editor.input.read(cx).content().trim().to_owned();
         if !action_predictions::valid_suggested_prompt(id, &prompt) {
-            self.suggested_prompt_editor.as_mut().unwrap().error = Some(if id
-                == action_predictions::CHOICE_PROMPT_ID
-                && prompt.matches("{option}").count() != 1
-            {
-                tr!("suggestions.option_placeholder_required", option = "{option}")
-            } else {
-                tr!("suggestions.prompt_invalid")
-            });
+            self.suggested_prompt_editor.as_mut().unwrap().error = Some(
+                if id == action_predictions::CHOICE_PROMPT_ID
+                    && prompt.matches("{option}").count() != 1
+                {
+                    tr!(
+                        "suggestions.option_placeholder_required",
+                        option = "{option}"
+                    )
+                } else {
+                    tr!("suggestions.prompt_invalid")
+                },
+            );
             cx.notify();
             return;
         }
@@ -6161,13 +6161,10 @@ impl Waku {
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let entries = action_predictions::CANNED_PROMPTS
-            .iter()
-            .copied()
-            .chain([(
-                action_predictions::CHOICE_PROMPT_ID,
-                "suggestions.choice_template",
-            )]);
+        let entries = action_predictions::CANNED_PROMPTS.iter().copied().chain([(
+            action_predictions::CHOICE_PROMPT_ID,
+            "suggestions.choice_template",
+        )]);
         let rows = entries
             .map(|(id, label_key)| {
                 let title = tr!(label_key);
@@ -6194,9 +6191,7 @@ impl Waku {
                         true,
                         theme,
                         cx,
-                        move |this, window, cx| {
-                            this.open_suggested_prompt_editor(id, window, cx)
-                        },
+                        move |this, window, cx| this.open_suggested_prompt_editor(id, window, cx),
                     ))
                     .child(settings_button(
                         format!("reset-suggested-prompt-{id}"),
@@ -6238,7 +6233,10 @@ impl Waku {
                             .text_size(sp(12.0))
                             .text_color(theme.text_tertiary)
                             .child(if editor.id == action_predictions::CHOICE_PROMPT_ID {
-                                tr!("suggestions.choice_template_description", option = "{option}")
+                                tr!(
+                                    "suggestions.choice_template_description",
+                                    option = "{option}"
+                                )
                             } else {
                                 tr!("suggestions.prompt_editor_description")
                             }),
@@ -7262,36 +7260,38 @@ impl Waku {
         // Token usage summed from the daemon's decision log — the all-calls
         // total on top, then one row per feature that recorded calls. `None`
         // until the scan answers, and an empty log renders no card at all.
-        let usage = self
-            .eval_usage_stats
-            .as_ref()
-            .filter(|stats| stats.totals.calls > 0)
-            .and_then(|stats| {
-                let untracked = stats.totals.calls - stats.totals.calls_with_usage;
-                let total_description = if untracked > 0 {
-                    tr!(
-                        "routing.usage_total_description_untracked",
-                        calls = stats.totals.calls,
-                        untracked = untracked
-                    )
-                } else {
-                    tr!(
-                        "routing.usage_total_description",
-                        calls = stats.totals.calls
-                    )
-                };
-                let mut rows: Vec<Option<AnyElement>> = vec![settings_row(
-                    tr!("routing.usage_total"),
-                    total_description,
-                    eval_usage_label(&stats.totals, theme),
-                    theme,
-                    search,
-                )];
-                rows.extend(stats.features.iter().map(|(feature, totals)| {
-                    eval_feature_row(feature, totals, theme, search)
-                }));
-                settings_row_card(rows, theme).map(|card| card.mt(px(15.0)).into_any_element())
-            });
+        let usage =
+            self.eval_usage_stats
+                .as_ref()
+                .filter(|stats| stats.totals.calls > 0)
+                .and_then(|stats| {
+                    let untracked = stats.totals.calls - stats.totals.calls_with_usage;
+                    let total_description = if untracked > 0 {
+                        tr!(
+                            "routing.usage_total_description_untracked",
+                            calls = stats.totals.calls,
+                            untracked = untracked
+                        )
+                    } else {
+                        tr!(
+                            "routing.usage_total_description",
+                            calls = stats.totals.calls
+                        )
+                    };
+                    let mut rows: Vec<Option<AnyElement>> = vec![settings_row(
+                        tr!("routing.usage_total"),
+                        total_description,
+                        eval_usage_label(&stats.totals, theme),
+                        theme,
+                        search,
+                    )];
+                    rows.extend(
+                        stats.features.iter().map(|(feature, totals)| {
+                            eval_feature_row(feature, totals, theme, search)
+                        }),
+                    );
+                    settings_row_card(rows, theme).map(|card| card.mt(px(15.0)).into_any_element())
+                });
 
         div()
             .children(credentials)
@@ -7513,8 +7513,7 @@ impl Waku {
                 {
                     rail_sections.push(picker_section_rail_item(
                         "route-class-rail-recents",
-                        icon("icons/hourglass.svg", 17.0, theme.text_tertiary)
-                            .into_any_element(),
+                        icon("icons/hourglass.svg", 17.0, theme.text_tertiary).into_any_element(),
                         PickerSection::Recents,
                         move |this| this.route_class_picker_rows(""),
                         route_class_picker_state,
@@ -7524,9 +7523,9 @@ impl Waku {
                     .into_iter()
                     .filter(|kind| {
                         picker_lists_provider(&probes, &disabled_providers, None, remote, *kind)
-                            && section_rows
-                            .iter()
-                            .any(|row| picker_row_section(row) == PickerSection::Provider(*kind))
+                            && section_rows.iter().any(|row| {
+                                picker_row_section(row) == PickerSection::Provider(*kind)
+                            })
                     })
                     .map(|kind| {
                         let active = normalized_query.split_whitespace().any(|token| {
@@ -12729,19 +12728,20 @@ fn route_class_target_label(target: Option<&RouteClassTarget>, probes: &[Provide
                 })
                 .unwrap_or_else(|| model_id.clone());
             let effort_label = target.effort.as_deref().and_then(|effort| {
-                model.and_then(|model| {
-                    model
-                        .reasoning_efforts
-                        .iter()
-                        .find(|option| option.id == effort)
-                })
-                .map(|option| {
-                    option
-                        .label_i18n
-                        .as_ref()
-                        .map(waku_client::WireTranslation::render)
-                        .unwrap_or_else(|| option.label.clone())
-                })
+                model
+                    .and_then(|model| {
+                        model
+                            .reasoning_efforts
+                            .iter()
+                            .find(|option| option.id == effort)
+                    })
+                    .map(|option| {
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone())
+                    })
             });
             match effort_label {
                 Some(effort) => format!("{name} {effort} · {}", target.provider.short_name()),

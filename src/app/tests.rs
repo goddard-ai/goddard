@@ -7,8 +7,7 @@ use super::composer::{
     workspace_subject_for,
 };
 use super::model_picker::{
-    PickerRow, PolicyRowId, next_picker_highlight, picker_rows,
-    supports_reasoning_default_reset,
+    PickerRow, PolicyRowId, next_picker_highlight, picker_rows, supports_reasoning_default_reset,
 };
 use super::runtime::{
     merge_remote_session_catalog, session_has_active_provider_turn,
@@ -27,22 +26,21 @@ use super::{
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationLocation, PendingUserInput,
     SessionNavigation, StreamDeltaKind, TranscriptLanding, TranscriptRowKind::*,
     TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
-    active_navigation_turn_index, activity_group_is_live,
-    activity_header_title, append_text_delta_to_session, assistant_response_footer,
-    assistant_response_footer_index, assistant_response_footer_time, compact_driver_error,
-    disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
-    folded_transcript_row_kinds, format_worked_duration, format_working_elapsed,
-    maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
-    navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
-    navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
-    previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
-    response_footer_message_index, response_row_turn_id, retain_fading_working_indicator,
-    row_starts_followup_turn, session_accepts_turn_output, session_is_reapable,
-    settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
-    should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
-    transcript_anchor_end_space, transcript_navigation_turns, transcript_position_landing,
-    transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
-    transcript_rows_fingerprint, update_transcript_activity,
+    active_navigation_turn_index, activity_group_is_live, activity_header_title,
+    append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
+    assistant_response_footer_time, compact_driver_error, disclosure_leading_space, fenced_code,
+    fitted_file_tree_width, fitted_panel_widths, folded_transcript_row_kinds,
+    format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
+    message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
+    navigation_rail_height, navigation_rail_scale, next_navigation_turn_index,
+    paused_toast_duration, pop_stream_batch, previous_navigation_turn_index, push_reasoning_delta,
+    push_transcript_activity, response_footer_message_index, response_row_turn_id,
+    retain_fading_working_indicator, row_starts_followup_turn, session_accepts_turn_output,
+    session_is_reapable, settle_stream_segment, should_refresh_branch_after_activity,
+    should_show_navigation_rail, should_show_scroll_to_bottom, task_id_from_notification_tag,
+    task_notification_tag, transcript_anchor_end_space, transcript_navigation_turns,
+    transcript_position_landing, transcript_rests_at_tail, transcript_row_kinds,
+    transcript_row_splice, transcript_rows_fingerprint, update_transcript_activity,
     widened_panel_width_for_file_editor, widened_panel_width_for_review,
 };
 use crate::git_branch::BranchEntry;
@@ -1456,7 +1454,16 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
     // With no current session — the New task page, or just after an archive —
     // the rotation enters at the topmost non-busy row.
     assert_eq!(
-        next_idle_session(&sessions, &rows, None, None, &HashSet::new(), None, None, None),
+        next_idle_session(
+            &sessions,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            None
+        ),
         Some(top)
     );
     // On an idle session the walk continues below it.
@@ -1566,7 +1573,16 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
     );
     sessions[1].status = SessionStatus::Waiting;
     assert_eq!(
-        next_idle_session(&sessions, &rows, None, None, &HashSet::new(), None, None, None),
+        next_idle_session(
+            &sessions,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            None
+        ),
         Some(bottom)
     );
     assert_eq!(
@@ -1915,7 +1931,17 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
         Some(live)
     );
     assert_eq!(
-        next_attention_target(&sessions, &[], &unseen, &rows, None, None, &dormant, None, None),
+        next_attention_target(
+            &sessions,
+            &[],
+            &unseen,
+            &rows,
+            None,
+            None,
+            &dormant,
+            None,
+            None
+        ),
         Some(live)
     );
     // An all-dormant list has no target — the caller lands on New task.
@@ -4357,7 +4383,10 @@ fn route_class_rows_lead_with_no_override_then_providers_then_models() {
 
     // The unmapped route leads, then the provider's own default and its
     // catalog models.
-    assert_eq!(kinds(""), ["no-override", "claude", "claude:claude-sonnet-5"]);
+    assert_eq!(
+        kinds(""),
+        ["no-override", "claude", "claude:claude-sonnet-5"]
+    );
 
     // The same token rule as the model picker: "claude" keeps the provider's
     // rows and drops the unmapped lead.
@@ -4763,9 +4792,11 @@ fn picker_rows_expand_models_into_effort_and_fast_combos() {
             (None, false),
         ]
     );
-    assert!(rows.iter().any(|row| {
-        combo(row).provider == ProviderKind::Cursor && combo(row).effort.is_none()
-    }));
+    assert!(
+        rows.iter().any(|row| {
+            combo(row).provider == ProviderKind::Cursor && combo(row).effort.is_none()
+        })
+    );
 
     // Effort ids and the fast flag are searchable.
     let fast_rows = visible_picker_rows(
@@ -5080,8 +5111,7 @@ fn picker_rows_park_unstarred_selections_in_their_favorites_slot() {
     );
 
     assert_eq!(
-        rows
-            .iter()
+        rows.iter()
             .take(3)
             .map(|row| combo(row).model.id.as_str())
             .collect::<Vec<_>>(),
@@ -5122,16 +5152,13 @@ fn picker_rows_park_unstarred_selections_in_their_favorites_slot() {
         PickerGranularity::Combos,
     );
     assert_eq!(
-        rows
-            .iter()
+        rows.iter()
             .take(3)
             .map(|row| combo(row).model.id.as_str())
             .collect::<Vec<_>>(),
         ["claude-a", "claude-b", "claude-c"]
     );
-    assert!(
-        combo(&rows[0]).favorite_index.is_none() && combo(&rows[2]).favorite_index.is_none()
-    );
+    assert!(combo(&rows[0]).favorite_index.is_none() && combo(&rows[2]).favorite_index.is_none());
     assert_eq!(combo(&rows[1]).favorite_index, Some(0));
     assert_eq!(combo(&rows[1]).favorite_rank, Some(1));
 }

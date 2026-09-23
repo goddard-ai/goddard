@@ -444,8 +444,7 @@ impl Waku {
         draft: crate::persistence::ComposerDraft,
         cx: &mut Context<Self>,
     ) {
-        let (text, atoms) =
-            super::composer::restore_inline_atoms(&draft.text, &draft.inline_atoms);
+        let (text, atoms) = super::composer::restore_inline_atoms(&draft.text, &draft.inline_atoms);
         self.composer_attachments = draft
             .attachments
             .into_iter()

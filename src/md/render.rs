@@ -450,18 +450,10 @@ pub fn flatten(
                                 .filter_map(|nibble| char::from_u32(0xFE00 + *nibble as u32))
                                 .collect();
                             flat.emit(
-                                &selectors,
-                                &run.style,
-                                &atom_font,
-                                base_color,
-                                palette,
-                                true,
+                                &selectors, &run.style, &atom_font, base_color, palette, true,
                             );
                         }
-                        scan = Scan::Label {
-                            start,
-                            session,
-                        };
+                        scan = Scan::Label { start, session };
                         segment_start = index;
                     }
                 }

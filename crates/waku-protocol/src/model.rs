@@ -7405,8 +7405,7 @@ mod tests {
             )],
         });
 
-        let signature =
-            detail_prefix_signature(&session.messages, &session.transcript_blocks);
+        let signature = detail_prefix_signature(&session.messages, &session.transcript_blocks);
         assert_eq!(
             signature,
             detail_prefix_signature(&session.messages, &session.transcript_blocks)

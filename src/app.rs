@@ -11,13 +11,12 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
     Animation, AnimationExt, AnyElement, App, BackgroundExecutor, Bounds, ClickEvent,
     ClipboardEntry, ClipboardItem, Context, Div, Entity, EntityId, ExternalPaths, FocusHandle,
-    Focusable, FontWeight,
-    HitboxBehavior, Hsla, IntoElement, KeyDownEvent, ListAlignment, ListOffset, ListState,
-    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection,
-    ObjectFit, PathPromptOptions, Pixels, Render, ScrollAnchor, ScrollHandle, SharedString,
-    Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas, deferred, div,
-    ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list, point, prelude::*,
-    pulsating_between, px, rgb, size,
+    Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement, KeyDownEvent, ListAlignment,
+    ListOffset, ListState, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    NavigationDirection, ObjectFit, PathPromptOptions, Pixels, Render, ScrollAnchor, ScrollHandle,
+    SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas,
+    deferred, div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list,
+    point, prelude::*, pulsating_between, px, rgb, size,
 };
 use uuid::Uuid;
 
@@ -41,9 +40,8 @@ use crate::model::{
     PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe, ProviderResumeCursor,
     ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
     ReasoningBlock, RuntimeEventCursor, RuntimeMode, SessionEnvironment, SessionStatus,
-    SessionWorkspace,
-    TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputAnswer,
-    UserInputQuestion, compact_path, unix_time, unix_time_millis,
+    SessionWorkspace, TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus,
+    UserInputAnswer, UserInputQuestion, compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -2148,10 +2146,22 @@ pub struct Waku {
     reset_credit_dialog: Option<reset_credit_dialog::ResetCreditDialogState>,
     /// One in-flight redemption at a time — the daemon also serializes them.
     reset_credit_tx: Sender<
-        Result<(crate::usage::CodexResetCreditOutcome, Option<crate::usage::PlanUsage>), String>,
+        Result<
+            (
+                crate::usage::CodexResetCreditOutcome,
+                Option<crate::usage::PlanUsage>,
+            ),
+            String,
+        >,
     >,
     reset_credit_events: Receiver<
-        Result<(crate::usage::CodexResetCreditOutcome, Option<crate::usage::PlanUsage>), String>,
+        Result<
+            (
+                crate::usage::CodexResetCreditOutcome,
+                Option<crate::usage::PlanUsage>,
+            ),
+            String,
+        >,
     >,
     /// The settings Usage page's snapshot: historical token/cost usage
     /// scanned from provider transcripts off-thread. Frames read only this.
@@ -2263,8 +2273,7 @@ pub struct Waku {
     /// stale-while-revalidate value `base_push_state_for` serves while a
     /// re-read is in flight, so readers keep drawing instead of flashing
     /// hidden. Cleared when a fresh read lands or errors.
-    base_push_state_fallbacks:
-        RefCell<HashMap<(PathBuf, String), waku_client::git::BasePushState>>,
+    base_push_state_fallbacks: RefCell<HashMap<(PathBuf, String), waku_client::git::BasePushState>>,
     /// When each (workspace, base) upstream was last auto-fetched — the
     /// throttle behind `maybe_fetch_upstream`, keyed like
     /// `base_push_states`. `RefCell` for the same `&self` readers.
@@ -5084,9 +5093,7 @@ impl Waku {
                                 this.steer_big_picture_submission(submission, cx);
                             }
                         } else if empty_draft {
-                            if !this.big_picture.is_open()
-                                && this.accept_displayed_suggestion(cx)
-                            {
+                            if !this.big_picture.is_open() && this.accept_displayed_suggestion(cx) {
                                 // A suggestion chip owns ⌘⏎ while the
                                 // composer is empty — its hint advertises
                                 // the chord.

@@ -460,7 +460,8 @@ impl Waku {
             ScriptRunTarget::SessionWorkspace => project_path,
             ScriptRunTarget::Standalone(path) => path,
         };
-        if let Some(terminal_id) = self.create_terminal(working_directory, None, Some(command), cx) {
+        if let Some(terminal_id) = self.create_terminal(working_directory, None, Some(command), cx)
+        {
             self.select_terminal(terminal_id, window, cx);
         }
     }
@@ -653,8 +654,7 @@ mod tests {
             worktree(&orphaned, false, None),
             worktree(Path::new("/checkouts/feature"), false, Some("feature")),
         ];
-        let locations =
-            script_run_locations(project_id, repo, None, &[], &worktrees, None);
+        let locations = script_run_locations(project_id, repo, None, &[], &worktrees, None);
         assert_eq!(
             targets(&locations),
             [
@@ -699,8 +699,7 @@ mod tests {
             worktree(repo, true, Some("main")),
             worktree(Path::new("/checkouts/feature"), false, Some("feature")),
         ];
-        let locations =
-            script_run_locations(project_id, &project, None, &[], &worktrees, None);
+        let locations = script_run_locations(project_id, &project, None, &[], &worktrees, None);
         assert_eq!(
             targets(&locations),
             [

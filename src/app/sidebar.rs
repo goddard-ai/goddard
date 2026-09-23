@@ -4491,7 +4491,10 @@ impl Waku {
             .pb(px(SIDEBAR_SESSION_ROW_GAP))
             .child(row)
             .when(
-                selected && self.sidebar_jump_flash.is_some_and(|(id, _)| id == session_id),
+                selected
+                    && self
+                        .sidebar_jump_flash
+                        .is_some_and(|(id, _)| id == session_id),
                 |element| {
                     let generation = self.sidebar_jump_flash.unwrap().1;
                     let wash = div()
@@ -4716,22 +4719,18 @@ impl Waku {
                 // An idle, all-seen task can still carry its last turn's
                 // Jev verdict: the marker rides the slot as ambient state
                 // until the next turn is scored.
-                SessionStatus::Idle => self
-                    .session_sidebar_marker(session)
-                    .map(|marker| {
-                        div()
-                            .id(SharedString::from(format!(
-                                "session-marker-{session_id}"
-                            )))
-                            .flex_none()
-                            .size(px(12.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .tooltip(Tooltip::text(tr!(marker.label_key)))
-                            .child(icon(marker.icon, 12.0, marker.tone.color(&theme)))
-                            .into_any_element()
-                    }),
+                SessionStatus::Idle => self.session_sidebar_marker(session).map(|marker| {
+                    div()
+                        .id(SharedString::from(format!("session-marker-{session_id}")))
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .tooltip(Tooltip::text(tr!(marker.label_key)))
+                        .child(icon(marker.icon, 12.0, marker.tone.color(&theme)))
+                        .into_any_element()
+                }),
                 _ => None,
             }
         };

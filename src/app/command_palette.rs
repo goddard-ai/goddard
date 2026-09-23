@@ -4425,9 +4425,7 @@ impl Waku {
                 return;
             }
             PaletteAction::ChooseRunScriptLocation { project, script } => {
-                self.open_command_palette_run_script_worktrees_view(
-                    project, script, window, cx,
-                );
+                self.open_command_palette_run_script_worktrees_view(project, script, window, cx);
                 return;
             }
             PaletteAction::CreateGitHubIssue => {

@@ -1174,7 +1174,10 @@ impl Waku {
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
             &tr!("projects.confirm_reject", commit = commit),
-            Some(&tr!("projects.confirm_reject_detail", branch = review_branch)),
+            Some(&tr!(
+                "projects.confirm_reject_detail",
+                branch = review_branch
+            )),
             &[
                 gpui::PromptButton::cancel(tr!("common.cancel")),
                 gpui::PromptButton::ok(tr!("projects.review_reject")),
@@ -2375,7 +2378,10 @@ impl Waku {
         let Some(queue) = queue else {
             return github::github_centered(
                 icon("icons/git-branch.svg", 16.0, theme.text_tertiary).into_any_element(),
-                tr!("projects.review_no_queue", branch = self.qa_branch_display()),
+                tr!(
+                    "projects.review_no_queue",
+                    branch = self.qa_branch_display()
+                ),
                 &theme,
             );
         };

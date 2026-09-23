@@ -1462,7 +1462,10 @@ mod tests {
 
         let json = serde_json::to_value(&command).unwrap();
         assert_eq!(json["type"], "saveTaskState");
-        assert_eq!(json["sessionTails"][0]["sessionId"], "00000000-0000-0000-0000-000000000007");
+        assert_eq!(
+            json["sessionTails"][0]["sessionId"],
+            "00000000-0000-0000-0000-000000000007"
+        );
         assert_eq!(json["sessionTails"][0]["messagesFrom"], 3);
         assert_eq!(json["sessionTails"][0]["transcriptBlocksFrom"], 2);
         assert_eq!(json["sessionTails"][0]["prefixSignature"], 42);
@@ -1471,8 +1474,7 @@ mod tests {
         // session entry is a complete save, as before.
         let mut legacy = json.clone();
         legacy.as_object_mut().unwrap().remove("sessionTails");
-        let Command::SaveTaskState { session_tails, .. } =
-            serde_json::from_value(legacy).unwrap()
+        let Command::SaveTaskState { session_tails, .. } = serde_json::from_value(legacy).unwrap()
         else {
             panic!("unexpected command variant");
         };
