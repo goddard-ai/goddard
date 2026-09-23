@@ -1164,6 +1164,11 @@ workspace.from_default: デフォルトブランチから
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
 suggestions.tooltip: 次のおすすめアクション
+suggestions.proceed: はい、進めてください。
+suggestions.choose_option: '{option}を選ぶ'
+suggestions.chosen_option: '{option}を選びます。'
+suggestions.add_details: 詳細を入力
+suggestions.choose_manually: 選択を入力
 suggestions.keep_going: 続ける
 suggestions.run_tests: テストを実行
 suggestions.fix_errors: 残りのエラーを修正

@@ -2934,6 +2934,16 @@ workspace.worktree:
   en: Worktree
 suggestions.tooltip:
   en: Suggested next step
+suggestions.proceed:
+  en: Yes, proceed.
+suggestions.choose_option:
+  en: Choose {option}
+suggestions.chosen_option:
+  en: I choose {option}.
+suggestions.add_details:
+  en: Add details
+suggestions.choose_manually:
+  en: Choose an option
 suggestions.keep_going:
   en: Keep going
 suggestions.run_tests:

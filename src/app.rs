@@ -2396,6 +2396,7 @@ pub struct Waku {
     /// Turn-status-marker evaluations answered by the daemon, keyed by turn.
     /// Runtime-only: the decision log is the durable record of these calls.
     turn_status_markers: HashMap<Uuid, waku_protocol::eval::Evaluation>,
+    turn_status_suggestions: HashMap<Uuid, Vec<status_markers::StatusSuggestedAction>>,
     /// Turns that settled while their session was off screen, queued as
     /// (turn, finish-summary) pairs per session until it is next opened.
     pending_status_marker_turns: HashMap<Uuid, Vec<(Uuid, Option<String>)>>,
@@ -2423,6 +2424,7 @@ pub struct Waku {
     /// Focus handle for the suggestion chip — stored so tab focus survives
     /// re-renders instead of resetting every frame.
     action_suggestion_focus: FocusHandle,
+    status_suggestion_focuses: Vec<FocusHandle>,
     /// Turns that settled while their session was off screen, queued as
     /// (turn, finish-summary) pairs per session until it is next opened.
     pending_action_prediction_turns: HashMap<Uuid, Vec<(Uuid, Option<String>)>>,
@@ -5763,6 +5765,7 @@ impl Waku {
                 friend_session_closed_tx,
                 friend_session_closed_events,
                 turn_status_markers: HashMap::new(),
+                turn_status_suggestions: HashMap::new(),
                 pending_status_marker_turns: HashMap::new(),
                 status_marker_in_flight: HashSet::new(),
                 status_marker_tx,
@@ -5774,6 +5777,7 @@ impl Waku {
                 pending_action_predictions: Vec::new(),
                 action_suggestion: None,
                 action_suggestion_focus: cx.focus_handle(),
+                status_suggestion_focuses: (0..3).map(|_| cx.focus_handle()).collect(),
                 pending_action_prediction_turns: HashMap::new(),
                 action_prediction_in_flight: HashSet::new(),
                 action_prediction_tx,

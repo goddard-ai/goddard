@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
-use waku_protocol::model::{ActivityKind, AgentSession, MessageRole};
+use waku_protocol::model::{ActivityKind, AgentSession, MessageRole, TurnStatus};
 
 use super::*;
 
@@ -154,6 +154,98 @@ const INPUT_MARKERS: &[StatusMarker] = &[
             an already specified action is a go-ahead instead.",
     },
 ];
+
+/// A user action justified by the latest settled turn's input marker.
+/// Decision labels come only from short, explicitly enumerated options.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum StatusSuggestedAction {
+    Proceed,
+    Choose { option: String },
+    AddDetails,
+    ChooseManually,
+}
+
+fn explicit_decision_options(response: &str) -> Vec<String> {
+    let mut run: Vec<(char, String)> = Vec::new();
+    let mut latest = Vec::new();
+    for line in response
+        .lines()
+        .rev()
+        .take(40)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        let line = line.trim();
+        let option = line
+            .split_once(". ")
+            .filter(|(index, _)| index.len() == 1)
+            .and_then(|(index, title)| {
+                let index = index.chars().next()?;
+                (index.is_ascii_digit() || ('A'..='D').contains(&index)).then_some((index, title))
+            });
+        if let Some((index, title)) = option {
+            let title = title.trim();
+            let title = title
+                .strip_prefix("**")
+                .and_then(|bold| bold.split_once("**").map(|(title, _)| title))
+                .unwrap_or(title)
+                .trim_matches('`')
+                .trim();
+            if !title.is_empty() && title.chars().count() <= 42 {
+                if run.is_empty() && index != '1' && index != 'A' {
+                    continue;
+                }
+                if run.last().is_some_and(|(last, _)| {
+                    index as u32 != *last as u32 + 1
+                        || index.is_ascii_digit() != last.is_ascii_digit()
+                }) {
+                    if (2..=3).contains(&run.len()) {
+                        latest = std::mem::take(&mut run);
+                    } else {
+                        run.clear();
+                    }
+                }
+                run.push((index, title.to_owned()));
+                continue;
+            }
+        }
+        if (2..=3).contains(&run.len()) {
+            latest = std::mem::take(&mut run);
+        } else {
+            run.clear();
+        }
+    }
+    if (2..=3).contains(&run.len()) {
+        latest = run;
+    }
+    latest
+        .into_iter()
+        .map(|(index, title)| format!("{index}. {title}"))
+        .collect()
+}
+
+fn suggested_actions(evaluation: &Evaluation, response: &str) -> Vec<StatusSuggestedAction> {
+    let marker = cleared_markers(evaluation)
+        .into_iter()
+        .find(|(marker, _)| matches!(marker.id, "go-ahead" | "decision" | "details"));
+    match marker.map(|(marker, _)| marker.id) {
+        Some("go-ahead") => vec![StatusSuggestedAction::Proceed],
+        Some("details") => vec![StatusSuggestedAction::AddDetails],
+        Some("decision") => {
+            let options = explicit_decision_options(response);
+            if options.is_empty() {
+                vec![StatusSuggestedAction::ChooseManually]
+            } else {
+                options
+                    .into_iter()
+                    .map(|option| StatusSuggestedAction::Choose { option })
+                    .collect()
+            }
+        }
+        _ => Vec::new(),
+    }
+}
 
 /// Flags stay independent Nouls — qualities that legitimately co-occur with
 /// any ending (a turn can be `complete` *and* `unverified`, or `blocked`
@@ -577,6 +669,147 @@ fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) ->
 }
 
 impl Waku {
+    /// Status-driven actions take the composer suggestion slot when the
+    /// latest settled turn clearly asks for a response from the user.
+    pub(super) fn render_status_suggestion(&self, cx: &mut Context<Self>) -> Option<Div> {
+        if !self.state.status_markers_enabled {
+            return None;
+        }
+        let session = self.composer_session()?;
+        let turn = session.turns.last()?;
+        if turn.status != TurnStatus::Completed {
+            return None;
+        }
+        let turn_id = turn.id;
+        let actions = self.turn_status_suggestions.get(&turn_id)?;
+        if actions.is_empty() {
+            return None;
+        }
+        let theme = Theme::current(cx);
+        Some(
+            div().w_full().h(px(0.0)).relative().child(
+                div()
+                    .absolute()
+                    .bottom(px(8.0))
+                    .left_0()
+                    .right_0()
+                    .px(px(20.0 - COMPOSER_OVERHANG))
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                            .mx_auto()
+                            .flex()
+                            .gap(px(6.0))
+                            .children(actions.iter().enumerate().map(|(index, action)| {
+                                let (icon_path, label) = match action {
+                                    StatusSuggestedAction::Proceed => {
+                                        ("icons/chat.svg", tr!("suggestions.proceed"))
+                                    }
+                                    StatusSuggestedAction::Choose { option } => (
+                                        "icons/chat.svg",
+                                        tr!("suggestions.choose_option", option = option),
+                                    ),
+                                    StatusSuggestedAction::AddDetails => {
+                                        ("icons/chat.svg", tr!("suggestions.add_details"))
+                                    }
+                                    StatusSuggestedAction::ChooseManually => {
+                                        ("icons/chat.svg", tr!("suggestions.choose_manually"))
+                                    }
+                                };
+                                let action = action.clone();
+                                let keyboard_action = action.clone();
+                                div()
+                                    .id(format!("status-suggestion-{turn_id}-{index}"))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.0))
+                                    .h(px(24.0))
+                                    .px(px(9.0))
+                                    .rounded(px(8.0))
+                                    .border(hairline())
+                                    .border_color(theme.border_subtle)
+                                    .bg(theme.raised)
+                                    .cursor_default()
+                                    .track_focus(&self.status_suggestion_focuses[index])
+                                    .tab_index(0)
+                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                    .hover(|element| element.bg(theme.overlay_strong))
+                                    .child(icon(icon_path, 11.0, theme.text_secondary))
+                                    .child(label)
+                                    .tooltip(Tooltip::text(tr!("suggestions.tooltip")))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.accept_status_suggestion(turn_id, &action, window, cx);
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, window, cx| {
+                                            if matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            ) {
+                                                this.accept_status_suggestion(
+                                                    turn_id,
+                                                    &keyboard_action,
+                                                    window,
+                                                    cx,
+                                                );
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    ))
+                            })),
+                    ),
+            ),
+        )
+    }
+
+    fn accept_status_suggestion(
+        &mut self,
+        turn_id: Uuid,
+        action: &StatusSuggestedAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.composer_session() else {
+            return;
+        };
+        if !self.state.status_markers_enabled
+            || session
+                .turns
+                .last()
+                .is_none_or(|turn| turn.id != turn_id || turn.status != TurnStatus::Completed)
+            || !self
+                .turn_status_suggestions
+                .get(&turn_id)
+                .is_some_and(|actions| actions.contains(action))
+        {
+            return;
+        }
+        let session_id = session.id;
+        match action {
+            StatusSuggestedAction::Proceed => {
+                self.turn_status_suggestions.insert(turn_id, Vec::new());
+                self.submit_composer_submission_to(
+                    session_id,
+                    ComposerSubmission::plain(tr!("suggestions.proceed")),
+                    cx,
+                );
+            }
+            StatusSuggestedAction::Choose { option } => {
+                let prompt = tr!("suggestions.chosen_option", option = option);
+                self.turn_status_suggestions.insert(turn_id, Vec::new());
+                self.submit_composer_submission_to(
+                    session_id,
+                    ComposerSubmission::plain(prompt),
+                    cx,
+                );
+            }
+            StatusSuggestedAction::AddDetails | StatusSuggestedAction::ChooseManually => {
+                window.focus(&self.composer_focus(cx), cx);
+            }
+        }
+    }
+
     /// Route a settled turn into evaluation: score it now when its session is
     /// on screen, queue it behind the session otherwise — the next open
     /// drains the queue. Failed or interrupted turns never reach here; a
@@ -690,6 +923,27 @@ impl Waku {
             self.status_marker_in_flight.remove(&turn_id);
             match result {
                 Ok(evaluation) => {
+                    if let Some(session) = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.turns.iter().any(|turn| turn.id == turn_id))
+                    {
+                        let response = session
+                            .messages
+                            .iter()
+                            .filter(|message| {
+                                message.turn_id == Some(turn_id)
+                                    && message.role == MessageRole::Assistant
+                            })
+                            .map(|message| message.visible_content())
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+                        let actions = suggested_actions(&evaluation, &response);
+                        if !actions.is_empty() {
+                            self.turn_status_suggestions.insert(turn_id, actions);
+                        }
+                    }
                     self.turn_status_markers.insert(turn_id, evaluation);
                     changed = true;
                 }
@@ -821,6 +1075,7 @@ impl Waku {
     /// leaving stale chips on screen.
     pub(super) fn clear_status_markers(&mut self) {
         self.turn_status_markers.clear();
+        self.turn_status_suggestions.clear();
         self.pending_status_marker_turns.clear();
         self.status_marker_in_flight.clear();
     }
@@ -915,6 +1170,49 @@ mod tests {
             cleared_markers(&answers("other", 0.90))[0].0.id,
             "awaiting-input"
         );
+    }
+
+    #[test]
+    fn status_suggestions_match_the_input_needed() {
+        let verdict = |kind: &str| {
+            evaluation(BTreeMap::from([
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice("awaiting-input", &[("awaiting-input", 0.90)]),
+                ),
+                (
+                    INPUT_QUESTION.to_owned(),
+                    ending_choice(kind, &[(kind, 0.90)]),
+                ),
+            ]))
+        };
+        assert_eq!(
+            suggested_actions(&verdict("go-ahead"), "Want me to proceed?"),
+            [StatusSuggestedAction::Proceed]
+        );
+        assert_eq!(
+            suggested_actions(&verdict("details"), "Which account?"),
+            [StatusSuggestedAction::AddDetails]
+        );
+        assert_eq!(
+            suggested_actions(
+                &verdict("decision"),
+                "1. **SQLite** — local\n2. **JSON** — simple\nWhich do you prefer?"
+            ),
+            [
+                StatusSuggestedAction::Choose {
+                    option: "1. SQLite".to_owned()
+                },
+                StatusSuggestedAction::Choose {
+                    option: "2. JSON".to_owned()
+                },
+            ]
+        );
+        assert_eq!(
+            suggested_actions(&verdict("decision"), "Should we use SQLite or JSON?"),
+            [StatusSuggestedAction::ChooseManually]
+        );
+        assert!(suggested_actions(&verdict("other"), "Want me to proceed?").is_empty());
     }
 
     #[test]

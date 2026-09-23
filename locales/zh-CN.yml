@@ -1136,6 +1136,11 @@ workspace.from_default: 从默认分支
 workspace.workspace: 工作区
 workspace.worktree: 工作树
 suggestions.tooltip: 建议的下一步
+suggestions.proceed: 好的，请继续。
+suggestions.choose_option: 选择{option}
+suggestions.chosen_option: 我选择{option}。
+suggestions.add_details: 补充信息
+suggestions.choose_manually: 输入选择
 suggestions.keep_going: 继续
 suggestions.run_tests: 运行测试
 suggestions.fix_errors: 修复剩余错误

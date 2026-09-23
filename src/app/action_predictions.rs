@@ -723,6 +723,13 @@ impl Waku {
     /// the transcript. The chip hangs off its bottom edge, painted over the
     /// transcript's bottom padding.
     pub(super) fn render_action_suggestion(&self, cx: &mut Context<Self>) -> Option<Div> {
+        if self
+            .composer_session()
+            .and_then(|session| session.turns.last())
+            .is_some_and(|turn| self.turn_status_suggestions.contains_key(&turn.id))
+        {
+            return self.render_status_suggestion(cx);
+        }
         let suggestion = self.action_suggestion.as_ref()?;
         if self.composer_session().map(|session| session.id) != Some(suggestion.session_id) {
             return None;
