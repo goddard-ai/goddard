@@ -37,16 +37,20 @@ use gpui::{
 use regex::Regex;
 use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::UnicodeSegmentation;
+use uuid::Uuid;
 
 use super::highlight::{self, Lang, TokenClass};
 use super::mend::PENDING_LINK_URL;
-use super::parser::{Block, IncrementalParser, InlineRun, ListItem, TableAlign, TopBlock};
+use super::parser::{
+    Block, IncrementalParser, InlineRun, InlineStyle, ListItem, TableAlign, TopBlock,
+};
 use super::selection::{
     CopySpec, RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range,
     word_range,
 };
 use super::veil::{RowVeil, apply_veil};
 use crate::fonts::Fonts;
+use crate::input::{ATOM_CHIP_INSET_Y, ATOM_CHIP_PADDING_X, ATOM_CHIP_RADIUS};
 use crate::theme::{Theme, hairline};
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
 use crate::ui::tooltip::Tooltip;
@@ -314,6 +318,11 @@ pub struct FlatText {
     pub runs: Vec<TextRun>,
     pub links: Vec<(Range<usize>, String)>,
     pub code_ranges: Vec<Range<usize>>,
+    /// Submitted inline-atom ranges — a sent chip's label, paired with the
+    /// task a session chip opens. They paint the accent wash, keep the
+    /// label out of commit/file/annotation detection, and a session atom
+    /// also lands its `goddard://task/` link in `links`.
+    pub atom_ranges: Vec<(Range<usize>, Option<Uuid>)>,
     /// `Annotation N` citations that resolve against a submitted annotation
     /// set: byte ranges paired with the label's 1-based index. Painted as a
     /// dotted underline; hovering previews the annotation.
@@ -363,31 +372,24 @@ pub fn flatten(
     base_weight: FontWeight,
     base_color: Hsla,
 ) -> FlatText {
-    let mut text = String::new();
-    let mut out: Vec<TextRun> = Vec::with_capacity(runs.len());
-    let mut links: Vec<(Range<usize>, String)> = Vec::new();
-    let mut code_ranges: Vec<Range<usize>> = Vec::new();
-    let mut math = Vec::new();
-    let mut fragments = Vec::new();
+    let mut flat = FlatAcc::default();
+    // Sentinels wrap a submitted atom's chip label and can straddle run
+    // boundaries — a marker's text is plain to the parser — so the scan
+    // state crosses them: `Id` collects a session reference's nibble
+    // encoding, `Label` is inside the span itself.
+    enum Scan {
+        Text,
+        Id(Vec<u8>),
+        Label { start: usize, session: Option<Uuid> },
+    }
+    let mut scan = Scan::Text;
+    let mut atom_font = font(families.ui.clone());
+    atom_font.weight = base_weight;
 
     for run in runs {
         if run.text.is_empty() {
             continue;
         }
-        let start = text.len();
-        text.push_str(&run.text);
-        let end = text.len();
-        if let Some(fragment) = markdown_fragment(run) {
-            fragments.push((start..end, fragment));
-        }
-        if run.style.math {
-            math.push(math_text::MathSpan {
-                range: start..end,
-                latex: std::sync::Arc::from(run.text.as_str()),
-                display: false,
-            });
-        }
-
         let mut run_font = font(if run.style.code {
             families.code.clone()
         } else {
@@ -404,28 +406,198 @@ pub fn flatten(
             FontStyle::Normal
         };
 
-        if run.style.code {
-            // Merge neighbouring code runs so their washes form one box.
-            match code_ranges.last_mut() {
-                Some(range) if range.end == start => range.end = end,
-                _ => code_ranges.push(start..end),
-            }
-        }
-        if let Some(url) = &run.style.link {
-            // A still-streaming link keeps link styling — so the URL settling
-            // changes nothing visually — but must not become clickable.
-            if url != PENDING_LINK_URL {
-                match links.last_mut() {
-                    Some((range, last)) if range.end == start && last == url => range.end = end,
-                    _ => links.push((start..end, url.clone())),
+        let mut segment_start = 0usize;
+        for (index, ch) in run.text.char_indices() {
+            match &mut scan {
+                Scan::Text => {
+                    if ch == waku_protocol::model::MESSAGE_ATOM_OPEN
+                        || ch == waku_protocol::model::MESSAGE_ATOM_END
+                    {
+                        flat.emit(
+                            &run.text[segment_start..index],
+                            &run.style,
+                            &run_font,
+                            base_color,
+                            palette,
+                            false,
+                        );
+                        segment_start = index + ch.len_utf8();
+                        if ch == waku_protocol::model::MESSAGE_ATOM_OPEN {
+                            scan = Scan::Id(Vec::new());
+                        }
+                    }
+                }
+                Scan::Id(nibbles) => {
+                    if nibbles.len() < 32 && is_atom_id_char(ch) {
+                        nibbles.push((ch as u32 - 0xFE00) as u8);
+                        segment_start = index + ch.len_utf8();
+                    } else {
+                        // An encoding is exactly 32 nibbles ahead of the
+                        // label; anything else was never an id, and its
+                        // characters rejoin the label — the same way
+                        // `atom_visible_text` keeps a longer selector run.
+                        let session = (nibbles.len() == 32 && !is_atom_id_char(ch)).then(|| {
+                            let mut bytes = [0u8; 16];
+                            for (position, pair) in nibbles.chunks_exact(2).enumerate() {
+                                bytes[position] = (pair[0] << 4) | pair[1];
+                            }
+                            Uuid::from_bytes(bytes)
+                        });
+                        let start = flat.text.len();
+                        if session.is_none() && !nibbles.is_empty() {
+                            let selectors: String = nibbles
+                                .iter()
+                                .filter_map(|nibble| char::from_u32(0xFE00 + *nibble as u32))
+                                .collect();
+                            flat.emit(
+                                &selectors,
+                                &run.style,
+                                &atom_font,
+                                base_color,
+                                palette,
+                                true,
+                            );
+                        }
+                        scan = Scan::Label {
+                            start,
+                            session,
+                        };
+                        segment_start = index;
+                    }
+                }
+                Scan::Label { start, session } => {
+                    if ch == waku_protocol::model::MESSAGE_ATOM_END {
+                        flat.emit(
+                            &run.text[segment_start..index],
+                            &run.style,
+                            &atom_font,
+                            base_color,
+                            palette,
+                            true,
+                        );
+                        let range = *start..flat.text.len();
+                        flat.atom_ranges.push((range.clone(), *session));
+                        if let Some(session_id) = session {
+                            flat.links.push((
+                                range,
+                                format!("{}{session_id}", waku_protocol::TASK_LINK_PREFIX),
+                            ));
+                        }
+                        scan = Scan::Text;
+                        segment_start = index + ch.len_utf8();
+                    }
                 }
             }
         }
+        let atom = matches!(scan, Scan::Label { .. });
+        flat.emit(
+            &run.text[segment_start..],
+            &run.style,
+            if atom { &atom_font } else { &run_font },
+            base_color,
+            palette,
+            atom,
+        );
+    }
 
-        out.push(TextRun {
-            len: run.text.len(),
-            font: run_font,
-            color: if run.style.code {
+    FlatText {
+        text: flat.text.into(),
+        runs: flat.runs,
+        links: flat.links,
+        code_ranges: flat.code_ranges,
+        atom_ranges: flat.atom_ranges,
+        annotation_refs: Vec::new(),
+        commit_refs: Vec::new(),
+        file_refs: Vec::new(),
+        math: (!flat.math.is_empty()).then(|| Rc::new(math_text::MathData::new(flat.math))),
+        copy: Rc::new(CopySpec {
+            prefix: Rc::default(),
+            suffix: Rc::default(),
+            fragments: flat.fragments,
+        }),
+    }
+}
+
+/// The character range carrying a session id inside an atom span — one
+/// variation selector per hex nibble, matching
+/// [`waku_protocol::model::encode_atom_session_id`].
+fn is_atom_id_char(ch: char) -> bool {
+    ('\u{FE00}'..='\u{FE0F}').contains(&ch)
+}
+
+/// The flat-text pieces [`flatten`] accumulates while scanning runs.
+#[derive(Default)]
+struct FlatAcc {
+    text: String,
+    runs: Vec<TextRun>,
+    links: Vec<(Range<usize>, String)>,
+    code_ranges: Vec<Range<usize>>,
+    atom_ranges: Vec<(Range<usize>, Option<Uuid>)>,
+    math: Vec<math_text::MathSpan>,
+    fragments: Vec<(Range<usize>, Rc<str>)>,
+}
+
+impl FlatAcc {
+    /// Append one identically styled segment — a whole run or a piece of
+    /// one split at an atom boundary. Atom segments take the chip styling
+    /// only; every other segment keeps its run's markdown meaning.
+    fn emit(
+        &mut self,
+        segment: &str,
+        style: &InlineStyle,
+        run_font: &Font,
+        base_color: Hsla,
+        palette: &Palette,
+        atom: bool,
+    ) {
+        if segment.is_empty() {
+            return;
+        }
+        let start = self.text.len();
+        self.text.push_str(segment);
+        let end = self.text.len();
+        if atom {
+            self.runs.push(TextRun {
+                len: segment.len(),
+                font: run_font.clone(),
+                color: palette.accent,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            return;
+        }
+        if let Some(fragment) = markdown_fragment(segment, style) {
+            self.fragments.push((start..end, fragment));
+        }
+        if style.math {
+            self.math.push(math_text::MathSpan {
+                range: start..end,
+                latex: std::sync::Arc::from(segment),
+                display: false,
+            });
+        }
+        if style.code {
+            // Merge neighbouring code runs so their washes form one box.
+            match self.code_ranges.last_mut() {
+                Some(range) if range.end == start => range.end = end,
+                _ => self.code_ranges.push(start..end),
+            }
+        }
+        if let Some(url) = &style.link {
+            // A still-streaming link keeps link styling — so the URL settling
+            // changes nothing visually — but must not become clickable.
+            if url != PENDING_LINK_URL {
+                match self.links.last_mut() {
+                    Some((range, last)) if range.end == start && last == url => range.end = end,
+                    _ => self.links.push((start..end, url.clone())),
+                }
+            }
+        }
+        self.runs.push(TextRun {
+            len: segment.len(),
+            font: run_font.clone(),
+            color: if style.code {
                 palette.code_text
             } else {
                 base_color
@@ -433,63 +605,42 @@ pub fn flatten(
             // Inline code's wash is painted as *rounded* quads by the canvas
             // underlay; a run background could only ever be a square box.
             background_color: None,
-            underline: run.style.link.is_some().then_some(UnderlineStyle {
+            underline: style.link.is_some().then_some(UnderlineStyle {
                 color: Some(palette.tertiary),
                 thickness: px(1.0),
                 wavy: false,
             }),
-            strikethrough: run.style.strikethrough.then_some(StrikethroughStyle {
+            strikethrough: style.strikethrough.then_some(StrikethroughStyle {
                 thickness: px(1.0),
                 color: Some(palette.tertiary),
             }),
         });
     }
-
-    FlatText {
-        text: text.into(),
-        runs: out,
-        links,
-        code_ranges,
-        annotation_refs: Vec::new(),
-        commit_refs: Vec::new(),
-        file_refs: Vec::new(),
-        math: (!math.is_empty()).then(|| Rc::new(math_text::MathData::new(math))),
-        copy: Rc::new(CopySpec {
-            prefix: Rc::default(),
-            suffix: Rc::default(),
-            fragments,
-        }),
-    }
 }
 
-/// The markdown for one inline run, or `None` when it renders exactly as
-/// written. Styles compose inside-out: code is atomic (its contents carry no
-/// emphasis), then emphasis markers, then the link. Whitespace-only runs stay
-/// plain — `** **` would just decorate the gap.
-fn markdown_fragment(run: &InlineRun) -> Option<Rc<str>> {
-    let style = &run.style;
+/// The markdown for one identically styled segment, or `None` when it
+/// renders exactly as written. Styles compose inside-out: code is atomic
+/// (its contents carry no emphasis), then emphasis markers, then the link.
+/// Whitespace-only segments stay plain — `** **` would just decorate the
+/// gap.
+fn markdown_fragment(text: &str, style: &InlineStyle) -> Option<Rc<str>> {
     let linked = style
         .link
         .as_deref()
         .is_some_and(|url| url != PENDING_LINK_URL);
     let styled =
         style.bold || style.italic || style.code || style.strikethrough || style.math || linked;
-    if !styled || run.text.trim().is_empty() {
+    if !styled || text.trim().is_empty() {
         return None;
     }
-    let mut out = run.text.clone();
+    let mut out = text.to_owned();
     if style.code {
         // One more backtick than the longest interior run keeps `a`b`
         // pasteable; the pad spaces are required when the content touches a
         // tick.
-        let interior = run
-            .text
-            .split(|ch| ch != '`')
-            .map(str::len)
-            .max()
-            .unwrap_or(0);
+        let interior = text.split(|ch| ch != '`').map(str::len).max().unwrap_or(0);
         let fence = "`".repeat(interior + 1);
-        out = if run.text.starts_with('`') || run.text.ends_with('`') {
+        out = if text.starts_with('`') || text.ends_with('`') {
             format!("{fence} {out} {fence}")
         } else {
             format!("{fence}{out}{fence}")
@@ -569,9 +720,12 @@ fn commit_references(flat: &FlatText) -> Vec<(Range<usize>, String)> {
         .filter_map(|found| {
             let range = found.range();
             // Inline code remains a SHA reference; fenced blocks never reach
-            // this pass. Links and rendered math own their own interaction.
-            (!linked_or_math_range(flat, &range) && !in_hyphenated(&range))
-                .then(|| (range, found.as_str().to_ascii_lowercase()))
+            // this pass. Links and rendered math own their own interaction,
+            // and a chip label is chrome — `session:abc1234` cites nothing.
+            (!linked_or_math_range(flat, &range)
+                && !atom_range(flat, &range)
+                && !in_hyphenated(&range))
+            .then(|| (range, found.as_str().to_ascii_lowercase()))
         })
         .collect()
 }
@@ -640,6 +794,15 @@ fn decorated_range(flat: &FlatText, range: &Range<usize>) -> bool {
         .iter()
         .any(|code| code.start < range.end && range.start < code.end)
         || linked_or_math_range(flat, range)
+        || atom_range(flat, range)
+}
+
+/// `range` falls inside an atom chip's label — the label is generated
+/// chrome, so text in it cites nothing on its own.
+fn atom_range(flat: &FlatText, range: &Range<usize>) -> bool {
+    flat.atom_ranges
+        .iter()
+        .any(|(atom, _)| atom.start < range.end && range.start < atom.end)
 }
 
 fn linked_or_math_range(flat: &FlatText, range: &Range<usize>) -> bool {
@@ -680,6 +843,7 @@ pub fn flatten_plain(
         runs,
         links: Vec::new(),
         code_ranges: Vec::new(),
+        atom_ranges: Vec::new(),
         annotation_refs: Vec::new(),
         commit_refs: Vec::new(),
         file_refs: Vec::new(),
@@ -1445,6 +1609,7 @@ fn text_element_with_selection(
     file_menu: Option<(ContextMenuHandle, FileRefMenuItems)>,
     commit_menu: Option<(ContextMenuHandle, CommitRefMenuItems)>,
     code_wash: Hsla,
+    atom_wash: Hsla,
     selection_wash: Hsla,
     search_match_wash: Hsla,
     active_search_match_wash: Hsla,
@@ -1479,6 +1644,7 @@ fn text_element_with_selection(
     let underlay = canvas(|_, _, _| (), {
         let text = flat.text.clone();
         let code_ranges = flat.code_ranges.clone();
+        let atom_ranges = flat.atom_ranges.clone();
         let annotation_refs = flat.annotation_refs.clone();
         let commit_refs = flat.commit_refs.clone();
         let file_refs = flat.file_refs.clone();
@@ -1491,6 +1657,25 @@ fn text_element_with_selection(
                         rect,
                         px(CODE_WASH_RADIUS),
                         code_wash,
+                        px(0.0),
+                        gpui::transparent_black(),
+                        BorderStyle::default(),
+                    ));
+                }
+            }
+            // The composer's chip chrome — the same inset wash a live atom
+            // paints in the field.
+            for (range, _) in &atom_ranges {
+                for rect in range_rects(
+                    &layout,
+                    range,
+                    ATOM_CHIP_PADDING_X.into(),
+                    ATOM_CHIP_INSET_Y.into(),
+                ) {
+                    window.paint_quad(quad(
+                        rect,
+                        ATOM_CHIP_RADIUS,
+                        atom_wash,
                         px(0.0),
                         gpui::transparent_black(),
                         BorderStyle::default(),
@@ -1706,6 +1891,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.context_menu.clone().zip(ctx.file_ref_items.clone()),
         ctx.context_menu.clone().zip(ctx.commit_ref_items.clone()),
         ctx.palette.code_wash,
+        ctx.palette.accent.opacity(0.12),
         ctx.palette.selection,
         ctx.palette.search_match,
         ctx.palette.active_search_match,
@@ -1741,6 +1927,7 @@ pub fn selectable_flat_text(
         None,
         None,
         code_wash,
+        gpui::transparent_black(),
         selection_wash,
         gpui::transparent_black(),
         gpui::transparent_black(),
@@ -2209,7 +2396,11 @@ fn search_block(
 ) -> bool {
     match block {
         Block::Paragraph { runs } | Block::Heading { runs, .. } => {
-            let text = runs.iter().map(|run| run.text.as_str()).collect::<String>();
+            // Atom markup is invisible in the shaped text — match ranges
+            // must index the stripped string the renderer paints.
+            let text = waku_protocol::model::strip_atom_markup(
+                &runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            );
             let current = *ordinal;
             *ordinal += 1;
             search_text(&text, current, regex, cap, matches)
@@ -2238,7 +2429,9 @@ fn search_block(
             .iter()
             .chain(rows.iter().flat_map(|row| row.iter()))
             .any(|cell| {
-                let text = cell.iter().map(|run| run.text.as_str()).collect::<String>();
+                let text = waku_protocol::model::strip_atom_markup(
+                    &cell.iter().map(|run| run.text.as_str()).collect::<String>(),
+                );
                 let current = *ordinal;
                 *ordinal += 1;
                 search_text(&text, current, regex, cap, matches)
@@ -2727,6 +2920,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             runs: code_runs(code, lang, &code_font, ctx.palette),
             links: Vec::new(),
             code_ranges: Vec::new(),
+            atom_ranges: Vec::new(),
             annotation_refs: Vec::new(),
             commit_refs: Vec::new(),
             file_refs: Vec::new(),
@@ -3356,6 +3550,76 @@ mod tests {
                 ("gone".to_owned(), "~~gone~~".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn flatten_turns_atom_spans_into_chip_ranges() {
+        use waku_protocol::model::{MESSAGE_ATOM_END, MESSAGE_ATOM_OPEN, encode_atom_session_id};
+        let session_id = Uuid::new_v4();
+        // What `atom_display_content` writes into a sent message's
+        // display_content: label spans for a session reference and a folded
+        // paste, the session id riding invisibly in variation selectors.
+        let runs = runs_of(&format!(
+            "fix {OPEN}{id}session:Big refactor{END} and {OPEN}Pasted text (2 lines){END} now",
+            OPEN = MESSAGE_ATOM_OPEN,
+            END = MESSAGE_ATOM_END,
+            id = encode_atom_session_id(session_id),
+        ));
+        let flat = flatten(
+            &runs,
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        assert_runs_tile(&flat);
+        assert_eq!(
+            flat.text.as_ref(),
+            "fix session:Big refactor and Pasted text (2 lines) now"
+        );
+        assert_eq!(
+            flat.atom_ranges,
+            vec![(4..24, Some(session_id)), (29..50, None)]
+        );
+        // Only the session chip carries a link — the routed task URL.
+        assert_eq!(
+            flat.links,
+            vec![(
+                4..24,
+                format!("{}{session_id}", waku_protocol::TASK_LINK_PREFIX)
+            )]
+        );
+        // Atom text is chrome: labels can't light up commit or mention
+        // affordances.
+        assert!(commit_references(&flat).is_empty());
+        assert!(flat.runs.iter().any(|run| run.color == palette().accent));
+    }
+
+    #[test]
+    fn flatten_handles_spans_split_across_runs_and_lone_sentinels() {
+        use waku_protocol::model::{MESSAGE_ATOM_END, MESSAGE_ATOM_OPEN};
+        // A span straddling a style boundary still records one atom range,
+        // and a stray sentinel renders nothing.
+        let runs = vec![
+            InlineRun {
+                text: format!("a {OPEN}Pasted", OPEN = MESSAGE_ATOM_OPEN),
+                style: InlineStyle::default(),
+            },
+            InlineRun {
+                text: format!(" text{END} b {END} c", END = MESSAGE_ATOM_END),
+                style: InlineStyle::default(),
+            },
+        ];
+        let flat = flatten(
+            &runs,
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        assert_runs_tile(&flat);
+        assert_eq!(flat.text.as_ref(), "a Pasted text b  c");
+        assert_eq!(flat.atom_ranges, vec![(2..13, None)]);
     }
 
     /// `(slice, weight)` per run, in order — how a fixated flat reads.

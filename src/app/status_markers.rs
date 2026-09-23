@@ -614,7 +614,9 @@ pub(super) fn turn_eval_state(
                 .filter(|message| {
                     message.turn_id == Some(turn_id) && message.role == MessageRole::User
                 })
-                .map(|message| message.visible_content())
+                .map(|message| {
+                    composer::atom_payload_content(message.visible_content(), &message.atoms)
+                })
                 .collect::<Vec<_>>()
                 .join("\n\n"),
             PROMPT_STATE_CHARS,
@@ -629,7 +631,12 @@ pub(super) fn turn_eval_state(
         .rev()
         .take(PRIOR_PROMPT_STATE_MAX)
         .rev()
-        .map(|message| head_chars(message.visible_content(), PRIOR_PROMPT_STATE_CHARS))
+        .map(|message| {
+            head_chars(
+                &composer::atom_payload_content(message.visible_content(), &message.atoms),
+                PRIOR_PROMPT_STATE_CHARS,
+            )
+        })
         .collect();
     let response = tail_chars(
         &session

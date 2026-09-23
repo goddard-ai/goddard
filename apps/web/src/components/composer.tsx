@@ -1,6 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Popover } from '@base-ui/react/popover'
-import { attachmentPromptToken, isAgentQueuedMessage } from '@waku/client'
+import {
+  attachmentPromptToken,
+  atomPayloadContent,
+  atomVisibleText,
+  isAgentQueuedMessage,
+} from '@waku/client'
 import type {
   AgentSession,
   BranchSnapshot,
@@ -762,7 +767,7 @@ export function Composer({
           canSteer={Boolean(canSteer)}
           session={session}
           onEdit={(message) => {
-            setPrompt(message.display_content ?? message.content)
+            setPrompt(atomPayloadContent(message.display_content ?? message.content, message.atoms))
             setAttachments(message.attachments ?? [])
             void removeQueuedMessage(session.id, message.id).catch((error) =>
               toast.error(errorMessage(error)),
@@ -1663,6 +1668,15 @@ function AccessControl({
   )
 }
 
+function queuedMessageLabel(
+  message: NonNullable<AgentSession['queued_messages']>[number],
+) {
+  return (
+    atomVisibleText(message.display_content || message.content) ||
+    message.attachments?.map((item) => item.name).join(', ')
+  )
+}
+
 function QueuedMessages({
   session,
   canSteer,
@@ -1720,7 +1734,7 @@ function QueuedMessages({
                 >
                   <WakuIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name="bot" />
                   <span className="min-w-0 flex-1 truncate">
-                    {message.display_content || message.content || message.attachments?.map((item) => item.name).join(', ')}
+                    {queuedMessageLabel(message)}
                   </span>
                 </div>
               ) : (
@@ -1732,7 +1746,7 @@ function QueuedMessages({
                 >
                   <WakuIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name="queue" />
                   <span className="min-w-0 flex-1 truncate">
-                    {message.display_content || message.content || message.attachments?.map((item) => item.name).join(', ')}
+                    {queuedMessageLabel(message)}
                   </span>
                 </button>
               )}

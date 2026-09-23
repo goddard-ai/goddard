@@ -1,3 +1,4 @@
+import { atomVisibleText } from '@waku/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { MenuView, type MenuAction } from '@expo/ui/community/menu';
@@ -419,7 +420,7 @@ export function SessionView({
     if (!findOpen || needle.length < 2 || !session) return [] as Array<{ key: string; turnId: string | null }>;
     const matches: Array<{ key: string; turnId: string | null }> = [];
     for (const message of session.messages) {
-      const text = (message.display_content ?? message.content).toLowerCase();
+      const text = atomVisibleText(message.display_content ?? message.content).toLowerCase();
       if (message.hidden || !text.includes(needle)) continue;
       if (message.role === 'user') matches.push({ key: `user:${message.id}`, turnId: message.turn_id });
       else if (message.role === 'system') matches.push({ key: `system:${message.id}`, turnId: message.turn_id });

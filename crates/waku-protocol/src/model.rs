@@ -1244,6 +1244,11 @@ pub struct QueuedMessage {
     pub display_content: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
+    /// Inline composer atoms in `display_content` order — see
+    /// [`MESSAGE_ATOM_OPEN`] — so the follow-up still paints its chips when
+    /// it drains into the transcript.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub atoms: Vec<MessageAtom>,
     /// Provider-facing text that renders no queued chip or transcript row —
     /// the internal "continue" nudge parked behind a busy session.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -1268,6 +1273,7 @@ impl QueuedMessage {
             content: content.into(),
             display_content: None,
             attachments: Vec::new(),
+            atoms: Vec::new(),
             hidden: false,
             source: QueuedMessageSource::User,
             created_at: unix_time(),
@@ -1965,7 +1971,8 @@ impl AgentSession {
             if message.hidden || !in_turn(message.turn_id) {
                 continue;
             }
-            let content = message.visible_content().trim();
+            let content = atom_visible_text(message.visible_content());
+            let content = content.trim();
             if content.is_empty() {
                 continue;
             }
@@ -2355,7 +2362,7 @@ impl AgentSession {
 
     #[doc(hidden)]
     pub fn begin_turn(&mut self, prompt: impl Into<String>) -> Uuid {
-        self.begin_turn_with_presentation(prompt, None, Vec::new())
+        self.begin_turn_with_presentation(prompt, None, Vec::new(), Vec::new())
     }
 
     pub fn begin_turn_with_presentation(
@@ -2363,8 +2370,9 @@ impl AgentSession {
         prompt: impl Into<String>,
         display_content: Option<String>,
         attachments: Vec<MessageAttachment>,
+        atoms: Vec<MessageAtom>,
     ) -> Uuid {
-        self.begin_turn_inner(prompt, display_content, attachments, false)
+        self.begin_turn_inner(prompt, display_content, attachments, atoms, false)
     }
 
     /// Begin a turn whose prompt is provider-facing only — the internal
@@ -2372,7 +2380,7 @@ impl AgentSession {
     /// in the record so every client's projection names the same rows, but
     /// no transcript row renders it.
     pub fn begin_hidden_turn(&mut self, prompt: impl Into<String>) -> Uuid {
-        self.begin_turn_inner(prompt, None, Vec::new(), true)
+        self.begin_turn_inner(prompt, None, Vec::new(), Vec::new(), true)
     }
 
     fn begin_turn_inner(
@@ -2380,6 +2388,7 @@ impl AgentSession {
         prompt: impl Into<String>,
         display_content: Option<String>,
         attachments: Vec<MessageAttachment>,
+        atoms: Vec<MessageAtom>,
         hidden: bool,
     ) -> Uuid {
         let id = Uuid::new_v4();
@@ -2394,8 +2403,11 @@ impl AgentSession {
             completed_at: None,
             checkpoint: None,
         });
-        let mut prompt = Message::new_for_turn(MessageRole::User, prompt, id)
-            .with_presentation(display_content, attachments);
+        let mut prompt = Message::new_for_turn(MessageRole::User, prompt, id).with_presentation(
+            display_content,
+            attachments,
+            atoms,
+        );
         prompt.hidden = hidden;
         self.messages.push(prompt);
         self.last_reply_at = Some(now);
@@ -2655,13 +2667,14 @@ impl AgentSession {
         content: impl Into<String>,
         display_content: Option<String>,
         attachments: Vec<MessageAttachment>,
+        atoms: Vec<MessageAtom>,
         sent_by_task: Option<Uuid>,
     ) -> Uuid {
         let mut message = match self.active_turn_id() {
             Some(turn_id) => Message::new_for_turn(MessageRole::User, content, turn_id),
             None => Message::new(MessageRole::User, content),
         }
-        .with_presentation(display_content, attachments);
+        .with_presentation(display_content, attachments, atoms);
         message.sent_by_task = sent_by_task;
         let id = message.id;
         self.messages.push(message);
@@ -2966,6 +2979,158 @@ pub struct SuspendedProviderSession {
     pub boundary: TranscriptBoundary,
 }
 
+/// Sentinels wrapping a submitted inline atom's chip label inside
+/// [`Message::display_content`] — `OPEN <session-id encoding> <label> END`
+/// for a session reference, `OPEN <label> END` for folded pasted text. A
+/// renderer paints the span back as a chip; clients that do not strip the
+/// markup still read the label. A session atom's id is nibble-encoded as
+/// variation selectors (U+FE00–U+FE0F) ahead of the label, so the metadata
+/// stays invisible in clients that show `display_content` raw.
+pub const MESSAGE_ATOM_OPEN: char = '\u{FFF9}';
+pub const MESSAGE_ATOM_END: char = '\u{FFFA}';
+
+/// The character range carrying a session id inside an atom span: one
+/// variation selector per hex nibble, in byte order — 32 chars for the 16
+/// id bytes. Variation selectors are invisible text, so the encoding leaks
+/// nothing where `display_content` renders without atom support.
+fn is_atom_id_char(ch: char) -> bool {
+    ('\u{FE00}'..='\u{FE0F}').contains(&ch)
+}
+
+/// A session id as its 32 variation-selector nibbles, for the head of an
+/// atom span.
+pub fn encode_atom_session_id(id: Uuid) -> String {
+    id.as_bytes()
+        .iter()
+        .flat_map(|byte| [byte >> 4, byte & 0x0F])
+        .map(|nibble| char::from_u32(0xFE00 + u32::from(nibble)).unwrap())
+        .collect()
+}
+
+/// Read a leading variation-selector run back into a session id, returning
+/// the id and the encoding's byte length. `(None, 0)` when the text does
+/// not open with a complete 32-nibble encoding.
+pub fn decode_atom_session_id(text: &str) -> (Option<Uuid>, usize) {
+    let mut nibbles = Vec::with_capacity(32);
+    let mut len = 0;
+    for ch in text.chars() {
+        if !is_atom_id_char(ch) {
+            break;
+        }
+        nibbles.push((ch as u32 - 0xFE00) as u8);
+        len += ch.len_utf8();
+        if nibbles.len() > 32 {
+            return (None, 0);
+        }
+    }
+    if nibbles.len() != 32 {
+        return (None, 0);
+    }
+    let mut bytes = [0u8; 16];
+    for (index, pair) in nibbles.chunks_exact(2).enumerate() {
+        bytes[index] = (pair[0] << 4) | pair[1];
+    }
+    (Some(Uuid::from_bytes(bytes)), len)
+}
+
+/// `display_content` with atom markup removed — sentinels and the
+/// session-id encoding gone, chip labels kept and unescaped — for
+/// consumers that show the text without chip rendering.
+pub fn atom_visible_text(text: &str) -> String {
+    atom_text(text, true)
+}
+
+/// Atom sentinels and session-id encodings removed, span contents kept —
+/// for text whose label escapes markdown already resolved, like the parsed
+/// runs a find-in-page scan indexes.
+pub fn strip_atom_markup(text: &str) -> String {
+    atom_text(text, false)
+}
+
+fn atom_text(text: &str, unescape: bool) -> String {
+    if !text.contains(MESSAGE_ATOM_OPEN) && !text.contains(MESSAGE_ATOM_END) {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_atom = false;
+    while let Some(ch) = chars.next() {
+        match ch {
+            MESSAGE_ATOM_OPEN => {
+                in_atom = true;
+                // A session id encodes as exactly 32 variation selectors;
+                // a shorter run is label text (an emoji's own selector,
+                // for instance) and stays.
+                let mut probe = chars.clone();
+                let mut count = 0;
+                while count < 33 {
+                    match probe.next() {
+                        Some(next) if is_atom_id_char(next) => count += 1,
+                        _ => break,
+                    }
+                }
+                if count == 32 {
+                    for _ in 0..32 {
+                        chars.next();
+                    }
+                }
+            }
+            MESSAGE_ATOM_END => in_atom = false,
+            // Inside a span, `\` escapes the writer added to keep the label
+            // literal under markdown unwrap back to the character.
+            '\\' if unescape && in_atom => match chars.next() {
+                Some(escaped) if is_atom_label_escape(escaped) => out.push(escaped),
+                Some(escaped) => {
+                    out.push('\\');
+                    out.push(escaped);
+                }
+                None => out.push('\\'),
+            },
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// The characters a label writer escapes so markdown-active text in a
+/// session title or paste label stays literal inside `display_content`.
+fn is_atom_label_escape(ch: char) -> bool {
+    matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']')
+}
+
+/// `label` with its markdown-active characters escaped for an atom span.
+/// [`atom_visible_text`] reverses the same escapes inside a span.
+pub fn escape_atom_label(label: &str) -> String {
+    if !label.chars().any(is_atom_label_escape) {
+        return label.to_owned();
+    }
+    let mut out = String::with_capacity(label.len() + 4);
+    for ch in label.chars() {
+        if is_atom_label_escape(ch) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// One composer inline atom a user message carried — a folded pasted text
+/// or a session reference — in `display_content` order. The atom's chip
+/// label sits inside a [`MESSAGE_ATOM_OPEN`]…[`MESSAGE_ATOM_END`] span;
+/// `payload` is the text the atom contributed to `content`, spliced back
+/// when the message is edited.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct MessageAtom {
+    /// What the chip reads — `session:<title>` or the paste's label.
+    pub label: String,
+    /// The atom's provider-facing text: the pasted text verbatim or the
+    /// `session` token.
+    pub payload: String,
+    /// The task the chip opens; set for session references.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct Message {
     pub id: Uuid,
@@ -2981,6 +3146,10 @@ pub struct Message {
     /// appended. Plain and legacy messages omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_content: Option<String>,
+    /// Inline composer atoms in `display_content` order, parallel to its
+    /// atom spans — see [`MESSAGE_ATOM_OPEN`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub atoms: Vec<MessageAtom>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
     /// The task whose agent submitted this message through the daemon's
@@ -3006,6 +3175,7 @@ impl Message {
             content: content.into(),
             notice: None,
             display_content: None,
+            atoms: Vec::new(),
             attachments: Vec::new(),
             sent_by_task: None,
             hidden: false,
@@ -3025,9 +3195,11 @@ impl Message {
         mut self,
         display_content: Option<String>,
         attachments: Vec<MessageAttachment>,
+        atoms: Vec<MessageAtom>,
     ) -> Self {
         self.display_content = display_content;
         self.attachments = attachments;
+        self.atoms = atoms;
         self
     }
 
@@ -5424,12 +5596,53 @@ mod tests {
             "compare this @/tmp/reference.png",
             Some("compare this".to_owned()),
             vec![attachment.clone()],
+            Vec::new(),
         );
 
         let message = &session.messages[0];
         assert_eq!(message.content, "compare this @/tmp/reference.png");
         assert_eq!(message.visible_content(), "compare this");
         assert_eq!(message.attachments, vec![attachment]);
+    }
+
+    #[test]
+    fn atom_presentation_survives_the_wire_round_trip() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        let session_id = Uuid::new_v4();
+        let display = format!(
+            "fix {OPEN}{id}session:Big refactor{END}",
+            OPEN = MESSAGE_ATOM_OPEN,
+            END = MESSAGE_ATOM_END,
+            id = encode_atom_session_id(session_id),
+        );
+        let atoms = vec![MessageAtom {
+            label: "session:Big refactor".to_owned(),
+            payload: format!("[session \"Big refactor\" (task_id: {session_id})]"),
+            session_id: Some(session_id),
+        }];
+
+        session.begin_turn_with_presentation(
+            "fix [session \"Big refactor\" (task_id: id)]",
+            Some(display.clone()),
+            Vec::new(),
+            atoms.clone(),
+        );
+
+        let message = &session.messages[0];
+        assert_eq!(message.visible_content(), display);
+        assert_eq!(message.atoms, atoms);
+        // The wire form stays serde-compatible: atoms ride the JSON.
+        let json = serde_json::to_value(message).unwrap();
+        let restored: Message = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.atoms, atoms);
+        // A pre-atoms row deserializes with none.
+        let legacy: Message = serde_json::from_value(serde_json::json!({
+            "id": Uuid::nil(), "role": "user", "content": "plain",
+            "created_at": 0u64, "streaming": false,
+        }))
+        .unwrap();
+        assert!(legacy.atoms.is_empty());
     }
 
     #[test]
@@ -7223,5 +7436,61 @@ mod tests {
             signature,
             detail_prefix_signature(&completed.messages, &completed.transcript_blocks)
         );
+    }
+
+    #[test]
+    fn atom_session_id_round_trips_through_its_invisible_encoding() {
+        let id = Uuid::new_v4();
+        let encoded = encode_atom_session_id(id);
+        assert_eq!(encoded.chars().count(), 32);
+        assert!(
+            encoded
+                .chars()
+                .all(|ch| ('\u{FE00}'..='\u{FE0F}').contains(&ch))
+        );
+        let (decoded, len) = decode_atom_session_id(&encoded);
+        assert_eq!(decoded, Some(id));
+        assert_eq!(len, encoded.len());
+        assert_eq!(decode_atom_session_id("session:title"), (None, 0));
+        let partial: String = encoded.chars().take(10).collect();
+        assert_eq!(decode_atom_session_id(&partial), (None, 0));
+    }
+
+    #[test]
+    fn atom_visible_text_strips_markup_but_keeps_the_label() {
+        let session_id = Uuid::new_v4();
+        let display = format!(
+            "fix this {OPEN}{id}session:Big refactor{END} and {OPEN}Pasted text (3 lines){END}",
+            OPEN = MESSAGE_ATOM_OPEN,
+            END = MESSAGE_ATOM_END,
+            id = encode_atom_session_id(session_id),
+        );
+        assert_eq!(
+            atom_visible_text(&display),
+            "fix this session:Big refactor and Pasted text (3 lines)"
+        );
+        // Label escapes unwrap inside a span; an emoji's own variation
+        // selector survives because it is not a 32-nibble encoding.
+        let styled = format!(
+            "{OPEN}{id}session:use \\_it\\* ⚠️{END} now",
+            OPEN = MESSAGE_ATOM_OPEN,
+            END = MESSAGE_ATOM_END,
+            id = encode_atom_session_id(session_id),
+        );
+        assert_eq!(atom_visible_text(&styled), "session:use _it* ⚠️ now");
+        assert_eq!(atom_visible_text("plain text"), "plain text");
+    }
+
+    #[test]
+    fn atom_label_escapes_round_trip() {
+        assert_eq!(escape_atom_label("session:plain"), "session:plain");
+        assert_eq!(escape_atom_label("a*b_c`d[e]"), "a\\*b\\_c\\`d\\[e\\]");
+        let span = format!(
+            "{OPEN}{label}{END}",
+            OPEN = MESSAGE_ATOM_OPEN,
+            label = escape_atom_label("a*b_c`d[e]"),
+            END = MESSAGE_ATOM_END,
+        );
+        assert_eq!(atom_visible_text(&span), "a*b_c`d[e]");
     }
 }

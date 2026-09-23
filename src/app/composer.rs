@@ -120,6 +120,16 @@ impl ComposerInlineAtom {
             ComposerAtomKind::PastedText(_) => None,
         }
     }
+
+    /// The wire form the sent message carries: the chip label, the payload
+    /// an edit splices back, and the task a session chip opens.
+    pub(super) fn message_atom(&self) -> waku_protocol::model::MessageAtom {
+        waku_protocol::model::MessageAtom {
+            label: self.label(),
+            payload: self.payload(),
+            session_id: self.session_id(),
+        }
+    }
 }
 
 /// The label an inline session atom paints in the field — `session:` keeps
@@ -322,6 +332,9 @@ pub(super) fn undelivered_turn_resend(
             display_content: message.display_content.clone(),
             human_content: None,
             attachments: message.attachments.clone(),
+            // The stored message's atom spans survive the resend — an edit
+            // of it still splices payloads back.
+            message_atoms: message.atoms.clone(),
             atoms: Vec::new(),
             annotations: Vec::new(),
             hidden: message.hidden,
@@ -3435,12 +3448,20 @@ impl Waku {
                 typed.to_owned()
             }
         });
+        // The bubble keeps the composer's chip presentation: atom markers
+        // become labelled spans in `display_content` while `prompt` keeps
+        // the spliced payloads the provider sees.
         let display_content =
             (!attachments.is_empty() || !annotations.is_empty() || !atoms.is_empty()).then(|| {
-                if annotations.is_empty() {
+                let typed = if atoms.is_empty() {
                     body.clone()
                 } else {
-                    annotation_bubble_content(&annotations, &body)
+                    atom_display_content(prompt, &atoms)
+                };
+                if annotations.is_empty() {
+                    typed
+                } else {
+                    annotation_bubble_content(&annotations, &typed)
                 }
             });
         self.discard_current_composer_draft(cx);
@@ -3449,6 +3470,7 @@ impl Waku {
             display_content,
             human_content,
             attachments,
+            message_atoms: atoms.iter().map(ComposerInlineAtom::message_atom).collect(),
             atoms,
             annotations,
             hidden: false,
@@ -3850,10 +3872,15 @@ impl Waku {
                 }
             }
         }
-        let content = submission
-            .human_content
-            .or(submission.display_content)
-            .unwrap_or(submission.prompt);
+        // A restored draft gets the payloads, never the chip markup: the
+        // bubble's atom spans splice back to pasted text and session tokens
+        // the way a queued message's edit already pulls them inline.
+        let content = submission.human_content.unwrap_or_else(|| {
+            submission
+                .display_content
+                .map(|display| atom_payload_content(&display, &submission.message_atoms))
+                .unwrap_or(submission.prompt)
+        });
         self.composer
             .update(cx, |input, cx| input.set_content(content, cx));
         // Restored atoms fold back in as inline mentions, appended after the
@@ -4345,7 +4372,7 @@ impl Waku {
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
-                message.visible_content().to_owned()
+                waku_protocol::model::atom_visible_text(message.visible_content())
             };
             let steer_control = (steerable && !agent_owned).then(|| {
                 div()
@@ -7062,6 +7089,94 @@ pub(super) fn restore_inline_atoms(
 /// title or a restored draft where the atoms ride along separately.
 pub(super) fn text_without_atom_markers(content: &str) -> String {
     content.replace(INLINE_ATOM_MARKER, "")
+}
+
+/// `prompt` with each [`INLINE_ATOM_MARKER`] replaced by its transcript
+/// atom span — `MESSAGE_ATOM_OPEN <session-id encoding> <label>
+/// MESSAGE_ATOM_END` — so a sent bubble paints the chip instead of the
+/// payload [`splice_inline_atoms`] produces. Like the splice, a marker
+/// without an atom drops and an atom without a marker folds onto the end.
+pub(super) fn atom_display_content(prompt: &str, atoms: &[ComposerInlineAtom]) -> String {
+    let mut display = String::with_capacity(prompt.len());
+    let mut rest = prompt;
+    let mut atoms = atoms.iter();
+    let marker_len = INLINE_ATOM_MARKER.len_utf8();
+    while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
+        display.push_str(&rest[..index]);
+        if let Some(atom) = atoms.next() {
+            display.push_str(&atom_span(atom));
+        }
+        rest = &rest[index + marker_len..];
+    }
+    display.push_str(rest);
+    let mut display = display.trim().to_owned();
+    for span in atoms.map(atom_span) {
+        if !display.is_empty() {
+            display.push_str("\n\n");
+        }
+        display.push_str(&span);
+    }
+    display
+}
+
+/// One atom's transcript span: the open sentinel, a session reference's id
+/// encoded invisibly, the escaped chip label, and the close sentinel.
+fn atom_span(atom: &ComposerInlineAtom) -> String {
+    let mut span = String::new();
+    span.push(waku_protocol::model::MESSAGE_ATOM_OPEN);
+    if let ComposerAtomKind::SessionRef { session_id, .. } = &atom.kind {
+        span.push_str(&waku_protocol::model::encode_atom_session_id(*session_id));
+    }
+    // A label can never legitimately carry the sentinels or the id
+    // alphabet — scrub them so a stray one cannot truncate its own span.
+    let label = atom
+        .label()
+        .chars()
+        .filter(|ch| {
+            *ch != waku_protocol::model::MESSAGE_ATOM_OPEN
+                && *ch != waku_protocol::model::MESSAGE_ATOM_END
+                && !('\u{FE00}'..='\u{FE0F}').contains(ch)
+        })
+        .collect::<String>();
+    span.push_str(&waku_protocol::model::escape_atom_label(&label));
+    span.push(waku_protocol::model::MESSAGE_ATOM_END);
+    span
+}
+
+/// Splice each atom span in `display_content` back to its atom's payload —
+/// the seed a message or queue edit starts from, where the atoms come back
+/// as ordinary text. A span past the atom list keeps its label.
+pub(super) fn atom_payload_content(
+    display_content: &str,
+    atoms: &[waku_protocol::model::MessageAtom],
+) -> String {
+    if !display_content.contains(waku_protocol::model::MESSAGE_ATOM_OPEN) {
+        return display_content.to_owned();
+    }
+    let mut out = String::with_capacity(display_content.len());
+    let mut rest = display_content;
+    let mut atoms = atoms.iter();
+    let open_len = waku_protocol::model::MESSAGE_ATOM_OPEN.len_utf8();
+    let end_len = waku_protocol::model::MESSAGE_ATOM_END.len_utf8();
+    while let Some(start) = rest.find(waku_protocol::model::MESSAGE_ATOM_OPEN) {
+        out.push_str(&rest[..start]);
+        let after_open = &rest[start + open_len..];
+        let Some(end) = after_open.find(waku_protocol::model::MESSAGE_ATOM_END) else {
+            // An unterminated span is not markup — keep the rest verbatim.
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        match atoms.next() {
+            Some(atom) => out.push_str(&atom.payload),
+            // A span without a recorded atom keeps its unescaped label.
+            None => out.push_str(&waku_protocol::model::atom_visible_text(
+                &rest[start..start + open_len + end + end_len],
+            )),
+        }
+        rest = &after_open[end + end_len..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The prompt a submission sends: the typed text plus one token per staged

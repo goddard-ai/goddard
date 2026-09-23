@@ -36,6 +36,8 @@ import {
   activityRowDetail,
   activityTextRows,
   assistantResponseFooters,
+  atomPayloadContent,
+  atomVisibleText,
   fencedCode,
   formatDuration,
   formatMessageTime,
@@ -255,7 +257,7 @@ export function Transcript({
               onBeginMessageEdit={(message, turnCount) => setMessageEdit({
                 messageId: message.id,
                 turnCount,
-                content: message.display_content ?? message.content,
+                content: atomPayloadContent(message.display_content ?? message.content, message.atoms),
                 attachments: message.attachments ?? [],
               })}
               onCancelMessageEdit={() => {
@@ -354,7 +356,7 @@ function transcriptNavigationTurns(session: AgentSession): NavigationTurn[] {
       nextVisibleUser,
       nextAnyUser === -1 ? session.messages.length : nextAnyUser,
     )
-    const visible = message.display_content ?? message.content
+    const visible = atomVisibleText(message.display_content ?? message.content)
     const prompt = visible.trim()
       ? navigationPreviewSnippet(visible, 100)
       : (message.attachments ?? []).map((attachment) => attachment.name).join(', ')
@@ -1054,7 +1056,7 @@ function MessageRow({
   onCancelEdit?: () => void
   onSubmitEdit?: (prompt: string) => Promise<void>
 }) {
-  const visible = message.display_content ?? message.content
+  const visible = atomVisibleText(message.display_content ?? message.content)
   const copyContent = footer?.content ?? visible
   if (message.role === 'user') {
     return (
@@ -1062,7 +1064,9 @@ function MessageRow({
         content={copyContent}
         t={t}
         copyToComposer={!rewindAction && visible && onCopyToComposer
-          ? () => onCopyToComposer(visible)
+          ? () => onCopyToComposer(
+            atomPayloadContent(message.display_content ?? message.content, message.atoms),
+          )
           : undefined}
         rewindAction={rewindAction}
       >

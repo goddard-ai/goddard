@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `atoms` text DEFAULT '[]' NOT NULL;

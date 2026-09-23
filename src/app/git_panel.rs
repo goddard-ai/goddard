@@ -1696,11 +1696,15 @@ impl Waku {
             .find(|session| session.id == session_id)
             .and_then(|session| session.messages.last())
             .is_some_and(|message| {
-                crate::md::render::contains_commit_reference(message.visible_content())
-                    || matches!(
-                        &message.notice,
-                        Some(TranscriptNotice::Landed { commits, .. }) if !commits.is_empty()
-                    )
+                // Judge the text the provider saw — a chip label like
+                // `session:abcdef1` is chrome, not a cited commit.
+                crate::md::render::contains_commit_reference(&composer::atom_payload_content(
+                    message.visible_content(),
+                    &message.atoms,
+                )) || matches!(
+                    &message.notice,
+                    Some(TranscriptNotice::Landed { commits, .. }) if !commits.is_empty()
+                )
             });
         if names_commit {
             return;

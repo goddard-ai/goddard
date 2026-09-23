@@ -709,7 +709,10 @@ pub(super) fn transcript_navigation_turns(
                     .collect::<Vec<_>>()
                     .join(", ")
             } else {
-                navigation_preview_snippet(message.visible_content(), 100)
+                navigation_preview_snippet(
+                    &waku_protocol::model::atom_visible_text(message.visible_content()),
+                    100,
+                )
             },
             response,
         });

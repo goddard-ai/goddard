@@ -30,8 +30,8 @@ use crate::computer_use::ComputerAppGrant;
 use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
-    AgentSession, FavoriteModel, Message, MessageAttachment, MessageRole, Project, ProviderKind,
-    RuntimeEventCursor, RuntimeMode, SessionWorkspace, TranscriptNotice,
+    AgentSession, FavoriteModel, Message, MessageAtom, MessageAttachment, MessageRole, Project,
+    ProviderKind, RuntimeEventCursor, RuntimeMode, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
 use waku_protocol::custom_commands::CustomCommand;
@@ -1552,7 +1552,7 @@ impl StateStore {
 
         let mut statement = connection
             .prepare(
-                "SELECT id, turn_id, role, content, display_content, attachments,
+                "SELECT id, turn_id, role, content, display_content, attachments, atoms,
                         created_at, streaming, sent_by_task, hidden, notice
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
@@ -1566,11 +1566,12 @@ impl StateStore {
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, String>(5)?,
-                    row.get::<_, i64>(6)?,
+                    row.get::<_, String>(6)?,
                     row.get::<_, i64>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, i64>(9)?,
-                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2014,6 +2015,7 @@ type MessageColumns = (
     String,
     Option<String>,
     String,
+    String,
     i64,
     i64,
     Option<String>,
@@ -2029,6 +2031,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         content,
         display_content,
         attachments,
+        atoms,
         created_at,
         streaming,
         sent_by_task,
@@ -2044,6 +2047,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         display_content,
         attachments: serde_json::from_str::<Vec<MessageAttachment>>(&attachments)
             .unwrap_or_default(),
+        atoms: serde_json::from_str::<Vec<MessageAtom>>(&atoms).unwrap_or_default(),
         created_at: created_at as u64,
         streaming: streaming != 0,
         sent_by_task: sent_by_task
@@ -2067,8 +2071,8 @@ fn session_data(session: &AgentSession) -> io::Result<String> {
 
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
-         attachments, created_at, streaming, sent_by_task, hidden, notice
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         attachments, atoms, created_at, streaming, sent_by_task, hidden, notice
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -2077,6 +2081,7 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          content    = excluded.content,
          display_content = excluded.display_content,
          attachments = excluded.attachments,
+         atoms      = excluded.atoms,
          created_at = excluded.created_at,
          streaming  = excluded.streaming,
          sent_by_task = excluded.sent_by_task,
@@ -2118,6 +2123,11 @@ fn write_messages(
         } else {
             serde_json::to_string(&message.attachments).map_err(to_io_error)?
         };
+        let atoms = if message.atoms.is_empty() {
+            "[]".to_owned()
+        } else {
+            serde_json::to_string(&message.atoms).map_err(to_io_error)?
+        };
         let notice = message
             .notice
             .as_ref()
@@ -2141,6 +2151,7 @@ fn write_messages(
                         .clone()
                         .map_or(Value::Null, Value::Text),
                     Value::Text(attachments),
+                    Value::Text(atoms),
                     Value::Integer(message.created_at as i64),
                     Value::Integer(i64::from(message.streaming)),
                     message
@@ -2245,6 +2256,18 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
             fold(fingerprint(reference));
         } else {
             fold(0);
+        }
+    }
+    for atom in &message.atoms {
+        fold(fingerprint(&atom.label));
+        fold(fingerprint(&atom.payload));
+        match atom.session_id {
+            Some(session_id) => {
+                let (high, low) = session_id.as_u64_pair();
+                fold(high);
+                fold(low);
+            }
+            None => fold(u64::MAX),
         }
     }
     hash
@@ -3091,6 +3114,7 @@ mod tests {
             "compare @/tmp/reference.png",
             Some("compare".to_owned()),
             vec![attachment.clone()],
+            Vec::new(),
         );
         store.save(&mut state).unwrap();
 
@@ -3099,6 +3123,46 @@ mod tests {
         assert_eq!(message.content, "compare @/tmp/reference.png");
         assert_eq!(message.visible_content(), "compare");
         assert_eq!(message.attachments, vec![attachment]);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn atom_presentation_round_trips_with_message_rows() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let session_id = Uuid::new_v4();
+        let display = format!(
+            "fix {OPEN}{id}session:Big refactor{END} and {OPEN}Pasted text{END}",
+            OPEN = waku_protocol::model::MESSAGE_ATOM_OPEN,
+            END = waku_protocol::model::MESSAGE_ATOM_END,
+            id = waku_protocol::model::encode_atom_session_id(session_id),
+        );
+        let atoms = vec![
+            MessageAtom {
+                label: "session:Big refactor".to_owned(),
+                payload: format!("[session \"Big refactor\" (task_id: {session_id})]"),
+                session_id: Some(session_id),
+            },
+            MessageAtom {
+                label: "Pasted text".to_owned(),
+                payload: "the pasted body".to_owned(),
+                session_id: None,
+            },
+        ];
+        state.sessions[0].begin_turn_with_presentation(
+            "fix [session \"Big refactor\" (task_id: id)] and the pasted body",
+            Some(display.clone()),
+            Vec::new(),
+            atoms.clone(),
+        );
+        store.save(&mut state).unwrap();
+
+        let restored = load_hydrated(&store);
+        let message = &restored.sessions[0].messages[0];
+        assert_eq!(message.visible_content(), display);
+        assert_eq!(message.atoms, atoms);
 
         fs::remove_dir_all(directory).ok();
     }

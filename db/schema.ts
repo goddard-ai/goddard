@@ -108,6 +108,9 @@ export const messages = sqliteTable(
     notice: text("notice"),
     /** JSON-serialized MessageAttachment array. */
     attachments: text("attachments").notNull().default("[]"),
+    /** JSON-serialized MessageAtom array — inline atom presentation parallel
+     *  to display_content's atom spans. */
+    atoms: text("atoms").notNull().default("[]"),
     createdAt: integer("created_at").notNull(),
     streaming: integer("streaming", { mode: "boolean" }).notNull(),
     /** Goddard task that submitted the message through an agent credential. */

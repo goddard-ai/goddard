@@ -6223,7 +6223,13 @@ fn record_agent_steer(
     if task_store.hydrate(session).is_err() {
         return;
     }
-    session.push_user_message_with_presentation(message, None, Vec::new(), Some(sent_by_task));
+    session.push_user_message_with_presentation(
+        message,
+        None,
+        Vec::new(),
+        Vec::new(),
+        Some(sent_by_task),
+    );
     state.mark_session_dirty(session_id);
     if let Err(error) = task_store.save(&mut state) {
         eprintln!(

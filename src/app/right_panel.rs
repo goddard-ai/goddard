@@ -579,6 +579,7 @@ fn review_diff_flat_text(
         runs,
         links: Vec::new(),
         code_ranges: Vec::new(),
+        atom_ranges: Vec::new(),
         annotation_refs: Vec::new(),
         commit_refs: Vec::new(),
         file_refs: Vec::new(),

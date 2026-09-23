@@ -907,7 +907,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
     // stay out — rather than copying the final part alone.
     let menu_copy_content = assistant_footer_copy_content
         .clone()
-        .unwrap_or_else(|| SharedString::from(content.clone()));
+        .unwrap_or_else(|| SharedString::from(waku_protocol::model::atom_visible_text(&content)));
     let message_id = message.id;
     let role = message.role;
     let offer_speed_reader =

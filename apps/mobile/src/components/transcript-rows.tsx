@@ -1,5 +1,5 @@
 import type { AgentSession, Checkpoint, Message } from '@waku/client';
-import { formatMessageTime } from '@waku/client/transcript-presentation';
+import { atomVisibleText, formatMessageTime } from '@waku/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { memo, useEffect, useState } from 'react';
@@ -65,7 +65,7 @@ export const TranscriptRowView = memo(function TranscriptRowView({
       return (
         <View style={styles.systemFrame}>
           <Text selectable style={[styles.systemMessage, { backgroundColor: theme.overlay, color: theme.textTertiary }]}>
-            {row.message.display_content ?? row.message.content}
+            {atomVisibleText(row.message.display_content ?? row.message.content)}
           </Text>
         </View>
       );
@@ -186,7 +186,7 @@ const UserBubble = memo(
 
 function UserBubbleInner({ message, onRewind }: { message: Message; onRewind?: () => void }) {
   const theme = useTheme();
-  const content = message.display_content ?? message.content;
+  const content = atomVisibleText(message.display_content ?? message.content);
 
   async function copy() {
     await Clipboard.setStringAsync(message.content);

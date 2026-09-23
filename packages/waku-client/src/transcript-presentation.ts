@@ -1,4 +1,4 @@
-import type { ActivityItem, AgentSession, MessageAttachment, WireTranslation } from './generated'
+import type { ActivityItem, AgentSession, MessageAtom, MessageAttachment, WireTranslation } from './generated'
 
 export type AssistantResponseFooter = {
   content: string
@@ -18,6 +18,118 @@ export function wireTranslationText(
   t?: Translator,
 ): string {
   return i18n && t ? t(i18n.key, i18n.args) : fallback
+}
+
+/**
+ * Sentinels wrapping a submitted inline atom's chip label inside
+ * `Message.display_content` — `OPEN <session-id encoding> <label> END`
+ * for a session reference, `OPEN <label> END` for folded pasted text.
+ * Mirrors `MESSAGE_ATOM_OPEN`/`MESSAGE_ATOM_END` in waku-protocol's model.
+ */
+const MESSAGE_ATOM_OPEN = '\uFFF9'
+const MESSAGE_ATOM_END = '\uFFFA'
+
+/** The variation-selector range carrying a session id inside an atom span. */
+function isAtomIdChar(code: number): boolean {
+  return code >= 0xfe00 && code <= 0xfe0f
+}
+
+/** The characters a label writer escapes inside a span. */
+function isAtomLabelEscape(ch: string): boolean {
+  return '\\`*_[]'.includes(ch)
+}
+
+function atomText(text: string, unescape: boolean): string {
+  if (!text.includes(MESSAGE_ATOM_OPEN) && !text.includes(MESSAGE_ATOM_END)) return text
+  let out = ''
+  let inAtom = false
+  const chars = [...text]
+  let index = 0
+  while (index < chars.length) {
+    const ch = chars[index]!
+    if (ch === MESSAGE_ATOM_OPEN) {
+      inAtom = true
+      // A session id encodes as exactly 32 variation selectors; a shorter
+      // run is label text (an emoji's own selector, for instance) and stays.
+      let count = 0
+      while (count < 33 && index + 1 + count < chars.length && isAtomIdChar(chars[index + 1 + count]!.codePointAt(0)!)) {
+        count += 1
+      }
+      index += count === 32 ? 33 : 1
+      continue
+    }
+    if (ch === MESSAGE_ATOM_END) {
+      inAtom = false
+      index += 1
+      continue
+    }
+    // Inside a span, `\` escapes the writer added to keep the label literal
+    // under markdown unwrap back to the character.
+    if (unescape && inAtom && ch === '\\') {
+      const next = chars[index + 1]
+      if (next !== undefined && isAtomLabelEscape(next)) {
+        out += next
+        index += 2
+      } else {
+        out += ch
+        index += 1
+      }
+      continue
+    }
+    out += ch
+    index += 1
+  }
+  return out
+}
+
+/**
+ * `display_content` with atom markup removed — sentinels and the
+ * session-id encoding gone, chip labels kept and unescaped — for consumers
+ * that show the text without chip rendering.
+ */
+export function atomVisibleText(text: string): string {
+  return atomText(text, true)
+}
+
+/**
+ * Atom sentinels and session-id encodings removed, span contents kept —
+ * for text whose label escapes markdown already resolved.
+ */
+export function stripAtomMarkup(text: string): string {
+  return atomText(text, false)
+}
+
+/**
+ * Splice each atom span in `display_content` back to its atom's payload —
+ * the seed a message or queue edit starts from, where the atoms come back
+ * as ordinary text. A span past the atom list keeps its label.
+ */
+export function atomPayloadContent(displayContent: string, atoms: MessageAtom[] | undefined): string {
+  if (!displayContent.includes(MESSAGE_ATOM_OPEN)) return displayContent
+  let out = ''
+  let rest = displayContent
+  const queue = [...(atoms ?? [])]
+  for (;;) {
+    const start = rest.indexOf(MESSAGE_ATOM_OPEN)
+    if (start === -1) break
+    out += rest.slice(0, start)
+    const afterOpen = rest.slice(start + 1)
+    const end = afterOpen.indexOf(MESSAGE_ATOM_END)
+    if (end === -1) {
+      // An unterminated span is not markup — keep the rest verbatim.
+      out += rest.slice(start)
+      return out
+    }
+    const atom = queue.shift()
+    if (atom) {
+      out += atom.payload
+    } else {
+      // A span without a recorded atom keeps its unescaped label.
+      out += atomVisibleText(rest.slice(start, start + 1 + end + 1))
+    }
+    rest = afterOpen.slice(end + 1)
+  }
+  return out + rest
 }
 
 export function userMessageRewindTurnCount(

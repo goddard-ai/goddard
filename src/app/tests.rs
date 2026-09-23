@@ -1,9 +1,10 @@
 use super::autocomplete::session_mention_candidate;
 use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
-    ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, composer_submit_action,
-    dropped_file_mention, merged_submission, pasted_text_preview, remap_marker_seats,
-    splice_inline_atoms, visible_branch_entries, workspace_subject_for,
+    ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, atom_display_content,
+    atom_payload_content, composer_submit_action, dropped_file_mention, merged_submission,
+    pasted_text_preview, remap_marker_seats, splice_inline_atoms, visible_branch_entries,
+    workspace_subject_for,
 };
 use super::model_picker::{
     PickerRow, PolicyRowId, next_picker_highlight, picker_rows,
@@ -616,6 +617,63 @@ fn inline_atoms_splice_back_at_their_markers() {
         "fix this\n\na\nb\n\n[session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)]"
     );
     assert_eq!(splice_inline_atoms("fix this", &[]), "fix this");
+}
+
+#[test]
+fn atom_display_content_keeps_chips_and_payloads_round_trip() {
+    use crate::input::INLINE_ATOM_MARKER as M;
+    use waku_protocol::model::{
+        MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN, atom_visible_text,
+        encode_atom_session_id,
+    };
+    // What a send paints: the chip labels, not the provider payloads.
+    let content = format!("fix {M} and {M} done");
+    let atoms = vec![pasted_atom(0, "first\nblock"), session_atom(0)];
+    let display = atom_display_content(&content, &atoms);
+    let session_id = Uuid::nil();
+    assert_eq!(
+        display,
+        format!(
+            "fix {OPEN}Pasted text (2 lines){END} and {OPEN}{id}session:Big refactor{END} done",
+            id = encode_atom_session_id(session_id),
+        )
+    );
+    assert_eq!(
+        atom_visible_text(&display),
+        "fix Pasted text (2 lines) and session:Big refactor done"
+    );
+
+    // The wire atoms carry the payload an edit splices back inline.
+    let wire: Vec<_> = atoms.iter().map(ComposerInlineAtom::message_atom).collect();
+    assert_eq!(wire[0].label, "Pasted text (2 lines)");
+    assert_eq!(wire[0].payload, "first\nblock");
+    assert_eq!(wire[0].session_id, None);
+    assert_eq!(wire[1].label, "session:Big refactor");
+    assert_eq!(wire[1].session_id, Some(session_id));
+    assert_eq!(
+        atom_payload_content(&display, &wire),
+        "fix first\nblock and [session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] done"
+    );
+}
+
+#[test]
+fn atom_display_content_escapes_markdown_in_labels() {
+    use crate::input::INLINE_ATOM_MARKER as M;
+    use waku_protocol::model::atom_visible_text;
+    let mut atom = session_atom(0);
+    atom.kind = ComposerAtomKind::SessionRef {
+        session_id: Uuid::nil(),
+        title: "use `x` *now*".into(),
+    };
+    let display = atom_display_content(&format!("{M}"), &[atom]);
+    // The title's markdown-active characters stay literal inside the span.
+    assert!(display.contains("session:use \\`x\\` \\*now\\*"));
+    assert_eq!(atom_visible_text(&display), "session:use `x` *now*");
+    // A paste category rides the label the composer showed.
+    let mut bug = pasted_atom(0, "stack trace\nmore");
+    bug.paste_category = Some("Bug report".to_owned());
+    let display = atom_display_content(&format!("{M}"), &[bug]);
+    assert!(display.contains("Bug report (2 lines)"));
 }
 
 #[test]
@@ -2290,7 +2348,13 @@ fn a_prompt_directly_behind_another_skips_the_followup_gap() {
     session.begin_turn("first prompt");
     // A steer the provider folded into the live turn lands directly behind
     // the prompt that opened it.
-    session.push_user_message_with_presentation("actually, also this", None, Vec::new(), None);
+    session.push_user_message_with_presentation(
+        "actually, also this",
+        None,
+        Vec::new(),
+        Vec::new(),
+        None,
+    );
     session.push_message(MessageRole::Assistant, "answer");
     session.finish_active_turn(TurnStatus::Completed);
     session.begin_turn("second prompt");
@@ -2319,7 +2383,13 @@ fn only_the_turn_opening_prompt_is_a_rewind_boundary() {
     session.begin_turn("first prompt");
     session.push_message(MessageRole::Assistant, "working on it");
     // A steer the provider folded into the live turn.
-    session.push_user_message_with_presentation("actually, also this", None, Vec::new(), None);
+    session.push_user_message_with_presentation(
+        "actually, also this",
+        None,
+        Vec::new(),
+        Vec::new(),
+        None,
+    );
     session.push_message(MessageRole::Assistant, "answer");
     session.finish_active_turn(TurnStatus::Interrupted);
     session.begin_turn("second prompt");
@@ -2372,7 +2442,13 @@ fn an_accepted_steer_settles_the_stream_segment_its_message_cuts_off() {
     // `SteerAccepted` settles the segment, then appends the folded-in
     // message to the running turn.
     settle_stream_segment(&mut session);
-    session.push_user_message_with_presentation("actually, also this", None, Vec::new(), None);
+    session.push_user_message_with_presentation(
+        "actually, also this",
+        None,
+        Vec::new(),
+        Vec::new(),
+        None,
+    );
 
     let block = &session.transcript_blocks[0];
     assert!(block.activities.iter().all(|activity| activity.complete));

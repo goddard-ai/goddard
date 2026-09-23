@@ -3067,10 +3067,16 @@ impl Waku {
             if submission.hidden {
                 continue;
             }
-            let source = submission
-                .human_content
-                .or(submission.display_content)
-                .unwrap_or(submission.prompt);
+            // A saved draft holds payloads like an edit does: atom spans
+            // splice back, never the chip markup.
+            let source = submission.human_content.unwrap_or_else(|| {
+                submission
+                    .display_content
+                    .map(|display| {
+                        super::composer::atom_payload_content(&display, &submission.message_atoms)
+                    })
+                    .unwrap_or(submission.prompt)
+            });
             let (text, inline_atoms) =
                 super::composer::composer_draft_content(&source, &submission.atoms);
             let draft = crate::persistence::ComposerDraft {
@@ -4802,7 +4808,13 @@ impl Waku {
                             .then(|| {
                                 (
                                     index,
-                                    message.visible_content().to_owned(),
+                                    // Editing pulls each atom's payload back
+                                    // inline — the same text a sent draft
+                                    // carries, never the chip markup.
+                                    composer::atom_payload_content(
+                                        message.visible_content(),
+                                        &message.atoms,
+                                    ),
                                     message.attachments.clone(),
                                 )
                             })
@@ -4909,6 +4921,9 @@ impl Waku {
                 display_content,
                 human_content: None,
                 attachments: edit.attachments,
+                // The edit input held payloads, not chips — the rewritten
+                // message carries no atom spans.
+                message_atoms: Vec::new(),
                 atoms: Vec::new(),
                 annotations: Vec::new(),
                 hidden: false,
@@ -5101,6 +5116,7 @@ impl Waku {
             message.content = submission.prompt.clone();
             message.display_content = submission.display_content.clone();
             message.attachments = submission.attachments.clone();
+            message.atoms = submission.message_atoms.clone();
             session.status = SessionStatus::Connecting;
             session.updated_at = unix_time();
             Some(original)
@@ -6477,6 +6493,7 @@ impl Waku {
                         &prompt,
                         submission.display_content.clone(),
                         submission.attachments.clone(),
+                        submission.message_atoms.clone(),
                     )
                 };
                 session.status = SessionStatus::Connecting;

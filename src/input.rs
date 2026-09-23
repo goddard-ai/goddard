@@ -3000,10 +3000,11 @@ fn visual_row_count(layout: &TextLayout) -> usize {
 
 /// The chip chrome an atom's label paints: the wash extends this far past
 /// the text horizontally and insets this far vertically, so it reads as a
-/// chip rather than a full-height highlight.
-const ATOM_CHIP_PADDING_X: Pixels = px(2.0);
-const ATOM_CHIP_INSET_Y: Pixels = px(2.0);
-const ATOM_CHIP_RADIUS: Pixels = px(4.0);
+/// chip rather than a full-height highlight. The transcript paints a sent
+/// atom's label with the same chrome — see `md::render`'s atom ranges.
+pub(crate) const ATOM_CHIP_PADDING_X: Pixels = px(2.0);
+pub(crate) const ATOM_CHIP_INSET_Y: Pixels = px(2.0);
+pub(crate) const ATOM_CHIP_RADIUS: Pixels = px(4.0);
 
 /// The chip rect a display-coordinate `range` paints behind an atom's
 /// label — one per visual row the label spans — in the window coordinates

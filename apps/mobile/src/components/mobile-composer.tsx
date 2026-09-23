@@ -6,6 +6,7 @@ import type {
   UserInputAnswer,
 } from '@waku/client';
 import { annotationBubbleContent, annotationPromptPrefix, attachmentPromptToken, isAgentQueuedMessage } from '@waku/client';
+import { atomVisibleText } from '@waku/client/transcript-presentation';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -518,7 +519,7 @@ export function MobileComposer({
             tintColor={theme.textTertiary}
           />
           <Text numberOfLines={1} style={[styles.queuedText, { color: theme.textSecondary }]}>
-            {message.display_content?.trim()
+            {atomVisibleText(message.display_content ?? '').trim()
               || message.attachments?.map((attachment) => attachment.name).join(', ')
               || message.content}
           </Text>

@@ -165,7 +165,12 @@ fn context_items(session: &AgentSession) -> Vec<ContextItem> {
             position: ItemPosition::Message(position),
             always: message.role == MessageRole::User,
             turn: message_turn,
-            text: format!("{role}: {}", message.visible_content().trim()),
+            // Compaction replays what the provider saw — the atoms' pasted
+            // text and session tokens, not the bubble's chip labels.
+            text: format!(
+                "{role}: {}",
+                composer::atom_payload_content(message.visible_content(), &message.atoms).trim()
+            ),
         });
     }
     items

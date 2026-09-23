@@ -524,6 +524,11 @@ struct ComposerSubmission {
     /// `display_content` when annotations put quote blocks in the bubble.
     human_content: Option<String>,
     attachments: Vec<MessageAttachment>,
+    /// The atom presentation `display_content` carries — one entry per atom
+    /// span, holding the payload an edit splices back. Distinct from
+    /// `atoms`, which keeps the composer's own representation for
+    /// restoring a failed submission.
+    message_atoms: Vec<waku_protocol::model::MessageAtom>,
     /// Inline atoms already folded into `prompt`, kept so a failed
     /// submission can restore them as atoms rather than spliced text.
     atoms: Vec<composer::ComposerInlineAtom>,
@@ -546,6 +551,7 @@ impl ComposerSubmission {
             display_content: None,
             human_content: None,
             attachments: Vec::new(),
+            message_atoms: Vec::new(),
             atoms: Vec::new(),
             annotations: Vec::new(),
             hidden: false,
@@ -562,6 +568,7 @@ impl ComposerSubmission {
     fn into_queued_message(self) -> QueuedMessage {
         let mut message =
             QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments);
+        message.atoms = self.message_atoms;
         message.hidden = self.hidden;
         message
     }
@@ -572,9 +579,13 @@ impl ComposerSubmission {
             display_content: message.display_content,
             human_content: None,
             attachments: message.attachments,
-            // A queued message carries no atom split — the pasted text and
-            // session tokens are already inside `content`, so editing pulls
-            // them back inline.
+            // The chip presentation rides through the queue: the message
+            // that eventually sends keeps its spans, and an edit splices
+            // the payloads back as ordinary text.
+            message_atoms: message.atoms,
+            // A queued message carries no composer atom split — the pasted
+            // text and session tokens are already inside `content`, so
+            // editing pulls them back inline.
             atoms: Vec::new(),
             // The annotation header already lives inside `content`; the
             // structured set rides `queued_annotations` and the caller
@@ -596,7 +607,9 @@ impl ComposerSubmission {
             .unwrap_or(&self.prompt)
             .trim();
         if !visible.is_empty() {
-            return visible.to_owned();
+            // Atom spans read as their chip labels — `session:title`,
+            // `Pasted text (N lines)` — the same words the bubble shows.
+            return waku_protocol::model::atom_visible_text(visible);
         }
         if !self.attachments.is_empty() {
             return self

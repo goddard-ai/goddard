@@ -560,6 +560,7 @@ impl Waku {
                         message,
                         submission.display_content,
                         submission.attachments,
+                        submission.message_atoms,
                         sent_by_task,
                     );
                     session.updated_at = unix_time();
