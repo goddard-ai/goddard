@@ -1273,6 +1273,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
             1,
             &HashSet::new(),
             None,
+            None,
             None
         ),
         Some(middle)
@@ -1288,6 +1289,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
             4,
             &HashSet::new(),
             None,
+            None,
             None
         ),
         Some(top)
@@ -1300,6 +1302,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
             None,
             4,
             &HashSet::new(),
+            None,
             None,
             None
         ),
@@ -1314,6 +1317,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
             Some(middle),
             1,
             &HashSet::new(),
+            None,
             None,
             None
         ),
@@ -1332,6 +1336,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
             4,
             &HashSet::new(),
             Some(&seen),
+            None,
             None
         ),
         None
@@ -1345,6 +1350,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
             4,
             &HashSet::new(),
             Some(&HashSet::from([top])),
+            None,
             None,
         ),
         Some(middle)
@@ -1362,6 +1368,7 @@ fn next_non_busy_session_walks_down_from_the_start_row_and_wraps() {
             None,
             1,
             &HashSet::new(),
+            None,
             None,
             None
         ),
@@ -1388,7 +1395,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
     // With no current session — the New task page, or just after an archive —
     // the rotation enters at the topmost non-busy row.
     assert_eq!(
-        next_idle_session(&sessions, &rows, None, None, &HashSet::new(), None, None),
+        next_idle_session(&sessions, &rows, None, None, &HashSet::new(), None, None, None),
         Some(top)
     );
     // On an idle session the walk continues below it.
@@ -1399,6 +1406,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             Some(top),
             None,
             &HashSet::new(),
+            None,
             None,
             None
         ),
@@ -1412,6 +1420,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             Some(bottom),
             None,
             &HashSet::new(),
+            None,
             None,
             None
         ),
@@ -1427,6 +1436,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             None,
             &HashSet::new(),
             Some(&seen),
+            None,
             None
         ),
         Some(middle)
@@ -1440,6 +1450,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             None,
             &HashSet::new(),
             Some(&seen),
+            None,
             None
         ),
         None
@@ -1457,6 +1468,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             None,
             &HashSet::new(),
             None,
+            None,
             None
         ),
         Some(middle)
@@ -1470,6 +1482,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             Some(bottom),
             None,
             &HashSet::new(),
+            None,
             None,
             None
         ),
@@ -1485,13 +1498,14 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             Some(middle),
             &HashSet::new(),
             None,
+            None,
             None
         ),
         None
     );
     sessions[1].status = SessionStatus::Waiting;
     assert_eq!(
-        next_idle_session(&sessions, &rows, None, None, &HashSet::new(), None, None),
+        next_idle_session(&sessions, &rows, None, None, &HashSet::new(), None, None, None),
         Some(bottom)
     );
     assert_eq!(
@@ -1501,6 +1515,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             Some(bottom),
             None,
             &HashSet::new(),
+            None,
             None,
             None
         ),
@@ -1526,6 +1541,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             None,
             &HashSet::new(),
             None,
+            None,
             None
         ),
         Some(unpinned)
@@ -1537,6 +1553,7 @@ fn next_idle_session_enters_at_the_top_and_walks_down_positionally() {
             Some(unpinned),
             None,
             &HashSet::new(),
+            None,
             None,
             None
         ),
@@ -1595,6 +1612,7 @@ fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
             None,
             None,
             &HashSet::new(),
+            None,
             None
         ),
         Some(starred_unseen)
@@ -1609,6 +1627,7 @@ fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
             None,
             None,
             &HashSet::new(),
+            None,
             None
         ),
         Some(starred_idle)
@@ -1625,6 +1644,7 @@ fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
             None,
             None,
             &HashSet::new(),
+            None,
             None
         ),
         Some(plain_unseen)
@@ -1643,9 +1663,114 @@ fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
             None,
             None,
             &HashSet::new(),
+            None,
             None
         ),
         Some(plain_unseen)
+    );
+}
+
+#[test]
+fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
+    let busy = Uuid::new_v4();
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    let mut busy_session = started_session(busy);
+    busy_session.status = SessionStatus::Working;
+    let mut sessions = vec![
+        busy_session,
+        started_session(first),
+        started_session(second),
+    ];
+    let rows = vec![
+        SidebarRow::Session(busy),
+        SidebarRow::Session(first),
+        SidebarRow::Session(second),
+    ];
+    let unseen = HashMap::new();
+
+    // A busy current session enters the rotation at the top, but the ⌘D
+    // sweep's seen set carries the walk past the row it just showed —
+    // repeated presses visit each non-busy task once.
+    let visited = HashSet::from([first]);
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &[],
+            &unseen,
+            &rows,
+            Some(busy),
+            None,
+            &HashSet::new(),
+            None,
+            Some(&visited)
+        ),
+        Some(second)
+    );
+    // The whole rotation shown: no target, so the caller restarts the
+    // sweep clean and lets the plain rotation answer.
+    let visited = HashSet::from([first, second]);
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &[],
+            &unseen,
+            &rows,
+            Some(busy),
+            None,
+            &HashSet::new(),
+            None,
+            Some(&visited)
+        ),
+        None
+    );
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &[],
+            &unseen,
+            &rows,
+            Some(busy),
+            None,
+            &HashSet::new(),
+            None,
+            None
+        ),
+        Some(first)
+    );
+    // A session the sweep already showed still leads the moment it carries
+    // fresh attention — the seen set only filters the idle rotation.
+    let unseen = HashMap::from([(first, 100)]);
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &[],
+            &unseen,
+            &rows,
+            Some(busy),
+            None,
+            &HashSet::new(),
+            None,
+            Some(&visited)
+        ),
+        Some(first)
+    );
+    // A task blocked on its user likewise outranks the filter — it is still
+    // waiting for an answer.
+    sessions[1].status = SessionStatus::Waiting;
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &[],
+            &HashMap::new(),
+            &rows,
+            Some(busy),
+            None,
+            &HashSet::new(),
+            None,
+            Some(&visited)
+        ),
+        Some(first)
     );
 }
 
@@ -1725,11 +1850,11 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
         None
     );
     assert_eq!(
-        next_idle_session(&sessions, &rows, None, None, &dormant, None, None),
+        next_idle_session(&sessions, &rows, None, None, &dormant, None, None, None),
         Some(live)
     );
     assert_eq!(
-        next_attention_target(&sessions, &[], &unseen, &rows, None, None, &dormant, None),
+        next_attention_target(&sessions, &[], &unseen, &rows, None, None, &dormant, None, None),
         Some(live)
     );
     // An all-dormant list has no target — the caller lands on New task.
@@ -1743,6 +1868,7 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
             None,
             None,
             &all_dormant,
+            None,
             None
         ),
         None

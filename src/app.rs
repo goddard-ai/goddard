@@ -180,6 +180,10 @@ const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(120);
 /// abandoned tasks is an afternoon of idle agent processes.
 const IDLE_SESSION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const IDLE_SESSION_SWEEP_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// How long a ⌘D press may follow the previous one and still continue the
+/// running sweep — its idle rotation skips the sessions the sweep already
+/// showed. A longer gap retires the seen set; the next press sweeps fresh.
+const UNREAD_SWEEP_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const BACKGROUND_WORK_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const BACKGROUND_WORK_TICK_INTERVAL: Duration = Duration::from_secs(1);
 const PLAN_USAGE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(30);
@@ -1961,6 +1965,17 @@ pub struct Waku {
     /// The session ⌘⇧D is flying to — lets `activate_session` tell the
     /// chain's own landing from an outside selection change.
     sweep_target: Option<Uuid>,
+    /// Every session the current ⌘D sweep has shown — the session each
+    /// press departed plus each landing. While the sweep is live the idle
+    /// rotation skips them, so a drained unread queue walks each non-busy
+    /// task once instead of re-landing on one it just showed; unread
+    /// candidates are never filtered — fresh attention always leads. A
+    /// sweep that has shown everything restarts clean.
+    unread_sweep_visited: HashSet<Uuid>,
+    /// The last ⌘D press as `unix_time()`. A press more than
+    /// `UNREAD_SWEEP_TIMEOUT` after it retires the seen set — the next
+    /// press starts a fresh sweep.
+    unread_sweep_at: Option<u64>,
     /// The selected session carried an unseen-completion stamp when its
     /// activation landed — one half of ⌘⇧D's "parked without reading"
     /// signal, consumed when the press decides whether to re-stamp it.
@@ -5691,6 +5706,8 @@ impl Waku {
                 pending_session_activation: None,
                 sweep_visited: HashSet::new(),
                 sweep_target: None,
+                unread_sweep_visited: HashSet::new(),
+                unread_sweep_at: None,
                 unread_when_selected: None,
                 turn_settled_while_visible: None,
                 analytics,

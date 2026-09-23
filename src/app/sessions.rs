@@ -187,6 +187,11 @@ pub(super) fn next_unread_completion(
 /// then even already-seen idle sessions in starred projects, then unstarred
 /// unseen completions, then the unstarred idle rotation. With nothing
 /// starred the tiers collapse to today's unread-then-idle order.
+///
+/// `excluded` filters both scans — the ⌘⇧D chain and the session-departure
+/// fallback pass the sessions the chain has already shown. `idle_excluded`
+/// filters only the idle rotation: ⌘D's sweep tracks what it has shown,
+/// but a session carrying fresh attention must still lead.
 pub(super) fn next_attention_target(
     sessions: &[AgentSession],
     projects: &[Project],
@@ -196,6 +201,7 @@ pub(super) fn next_attention_target(
     pending_activation: Option<Uuid>,
     dormant: &HashSet<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
+    idle_excluded: Option<&HashSet<Uuid>>,
 ) -> Option<Uuid> {
     let starred = starred_project_ids(projects);
     for want in [true, false] {
@@ -218,6 +224,7 @@ pub(super) fn next_attention_target(
                 pending_activation,
                 dormant,
                 excluded,
+                idle_excluded,
                 tier,
             )
         }) {
@@ -231,8 +238,9 @@ pub(super) fn next_attention_target(
 /// displayed order, wrapping to the top — the shared walk behind the idle
 /// rotation and ⌘⇧D's park-and-jump chain. The selected or
 /// pending-activation session is never a candidate, `dormant` sessions are
-/// never candidates either, and `excluded` lets the chain skip the sessions
-/// it has already shown.
+/// never candidates either, and `excluded`/`also_excluded` are both
+/// honored — the ⌘⇧D chain skips the sessions it has shown and ⌘D's sweep
+/// skips the ones it has.
 pub(super) fn next_non_busy_session(
     sessions: &[AgentSession],
     rows: &[sidebar::SidebarRow],
@@ -241,6 +249,7 @@ pub(super) fn next_non_busy_session(
     start_row: usize,
     dormant: &HashSet<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
+    also_excluded: Option<&HashSet<Uuid>>,
     starred_tier: Option<(&HashSet<Uuid>, bool)>,
 ) -> Option<Uuid> {
     let by_id = sessions
@@ -252,6 +261,7 @@ pub(super) fn next_non_busy_session(
             && Some(session_id) != pending_activation
             && !dormant.contains(&session_id)
             && excluded.map_or(true, |excluded| !excluded.contains(&session_id))
+            && also_excluded.map_or(true, |also_excluded| !also_excluded.contains(&session_id))
             && by_id.get(&session_id).is_some_and(|session| {
                 !session.is_busy()
                     && starred_tier
@@ -273,6 +283,7 @@ pub(super) fn next_idle_session(
     pending_activation: Option<Uuid>,
     dormant: &HashSet<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
+    also_excluded: Option<&HashSet<Uuid>>,
     starred_tier: Option<(&HashSet<Uuid>, bool)>,
 ) -> Option<Uuid> {
     let start = selected_session
@@ -291,6 +302,7 @@ pub(super) fn next_idle_session(
         start,
         dormant,
         excluded,
+        also_excluded,
         starred_tier,
     )
 }
@@ -1785,6 +1797,7 @@ impl Waku {
             pending,
             &dormant,
             Some(&self.sweep_visited),
+            None,
         ) {
             self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         } else {
@@ -3174,6 +3187,13 @@ impl Waku {
     /// the importance order — then a drained queue cycles into the idle
     /// rotation, and only a list with nothing navigable lands on New task.
     /// Stamps clear on activation, so repeated presses drain top-down.
+    ///
+    /// While a sweep is live — presses within `UNREAD_SWEEP_TIMEOUT` of each
+    /// other — the idle rotation skips the sessions the sweep has already
+    /// shown, so a drained queue visits each non-busy task once instead of
+    /// re-landing on one it just showed; a sweep that has shown everything
+    /// restarts clean. Unread candidates are never skipped: fresh
+    /// attention always leads.
     pub(super) fn go_to_next_unread_completion_action(
         &mut self,
         _: &GoToNextUnreadCompletion,
@@ -3186,7 +3206,19 @@ impl Waku {
             .pending_session_activation
             .map(|pending| pending.session_id);
         let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
-        let target = next_attention_target(
+        if self.unread_sweep_at.is_none_or(|at| {
+            unix_time().saturating_sub(at) >= UNREAD_SWEEP_TIMEOUT.as_secs()
+        }) {
+            self.unread_sweep_visited.clear();
+        }
+        self.unread_sweep_at = Some(unix_time());
+        // The sessions this press departs count as shown — the on-screen
+        // task and any landing still in flight — so the rotation cannot
+        // turn straight back onto either.
+        self.unread_sweep_visited
+            .extend([selected, pending].into_iter().flatten());
+        let sweep = self.live_unread_sweep();
+        let mut target = next_attention_target(
             &self.state.sessions,
             &self.state.projects,
             &self.state.unseen_completions,
@@ -3195,9 +3227,26 @@ impl Waku {
             pending,
             &dormant,
             None,
+            sweep,
         );
+        if target.is_none() && sweep.is_some() {
+            // The sweep has shown everything navigable — restart it clean.
+            self.unread_sweep_visited.clear();
+            target = next_attention_target(
+                &self.state.sessions,
+                &self.state.projects,
+                &self.state.unseen_completions,
+                &rows,
+                selected,
+                pending,
+                &dormant,
+                None,
+                None,
+            );
+        }
         match target {
             Some(target) => {
+                self.unread_sweep_visited.insert(target);
                 self.sidebar_jump_flash_generation =
                     self.sidebar_jump_flash_generation.wrapping_add(1);
                 let generation = self.sidebar_jump_flash_generation;
@@ -3241,6 +3290,17 @@ impl Waku {
         }
         self.settings_page = None;
         self.request_session_activation(target, SessionActivationTransition::Visit, cx);
+    }
+
+    /// The ⌘D sweep's seen set while the sweep is live — `None` once the
+    /// last press ages past `UNREAD_SWEEP_TIMEOUT`, when the next press
+    /// retires the set and sweeps fresh. The unread-completion bell reads
+    /// it to preview the press's real landing.
+    pub(super) fn live_unread_sweep(&self) -> Option<&HashSet<Uuid>> {
+        let live = self
+            .unread_sweep_at
+            .is_some_and(|at| unix_time().saturating_sub(at) < UNREAD_SWEEP_TIMEOUT.as_secs());
+        (live && !self.unread_sweep_visited.is_empty()).then_some(&self.unread_sweep_visited)
     }
 
     /// Context-menu "Mark as unread": the task rejoins the unseen-completion
@@ -3329,6 +3389,7 @@ impl Waku {
             pending,
             &dormant,
             Some(&self.sweep_visited),
+            None,
         );
         match target {
             Some(target) => {

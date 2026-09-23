@@ -1,0 +1,1 @@
+- When nothing is unread, ⌘D now visits each idle task once before cycling back, so repeated presses keep moving instead of re-opening a task you just saw. The cycle resets after 10 minutes without a press.

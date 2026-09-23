@@ -1022,7 +1022,11 @@ impl Waku {
         );
         // The badge describes where ⌘D actually lands — which may be a
         // starred project's seen-but-idle task ahead of an unstarred unread.
-        let target = sessions::next_attention_target(
+        // A live sweep skips its shown sessions in the idle rotation, and an
+        // exhausted sweep previews the fresh-sweep landing a press would
+        // restart onto.
+        let sweep = self.live_unread_sweep();
+        let mut target = sessions::next_attention_target(
             &self.state.sessions,
             &self.state.projects,
             &self.state.unseen_completions,
@@ -1031,7 +1035,21 @@ impl Waku {
             pending,
             &dormant,
             None,
+            sweep,
         );
+        if target.is_none() && sweep.is_some() {
+            target = sessions::next_attention_target(
+                &self.state.sessions,
+                &self.state.projects,
+                &self.state.unseen_completions,
+                &rows,
+                selected,
+                pending,
+                &dormant,
+                None,
+                None,
+            );
+        }
         let enabled = unread_target.is_some();
         // A blocked or failed task outranks plain completions, so the
         // target being one is what the badge warns about.

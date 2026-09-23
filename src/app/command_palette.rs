@@ -2308,6 +2308,7 @@ impl Waku {
             pending,
             &dormant,
             None,
+            None,
         )
         .is_some()
         {
