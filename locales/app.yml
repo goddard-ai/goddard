@@ -983,6 +983,38 @@ routing.feature_memory_triage:
   en: Memory triage
 routing.feature_permission_review:
   en: Permission review
+routing.feature_paste_classification:
+  en: Paste classification
+routing.feature_evaluate_description:
+  en: Calls logged without a feature tag
+routing.feature_turn_status_description:
+  en: Scores each settled turn's ending and flags issues like unverified work or drift
+routing.feature_route_description:
+  en: Classifies a new task's first prompt into a routing class
+routing.feature_route_effort_description:
+  en: Picks a reasoning effort each turn while routing owns the session
+routing.feature_route_phase_description:
+  en: Judges whether a phased session is still planning or stuck
+routing.feature_route_class_suggest_description:
+  en: The Suggest button's proposed class-map defaults
+routing.feature_next_action_description:
+  en: Predicts the action you'll likely take after a settled turn
+routing.feature_paste_classification_description:
+  en: Labels pasted composer text, e.g. bug report or code
+routing.feature_provider_switch_description:
+  en: Decides which transcript items carry over verbatim to the new provider
+routing.feature_memory_rank_description:
+  en: Ranks transcript segments for the memory distiller
+routing.feature_memory_triage_description:
+  en: Decides which transcript segments are worth distilling into memory
+routing.feature_permission_review_description:
+  en: Pre-reviews auto-mode permission requests as clear or caution
+routing.feature_auto_prompt_description:
+  en: Decides whether a completed turn sends an automatic follow-up
+routing.feature_auto_prompt_suggest_description:
+  en: Suggests question weights and a threshold for the auto-prompt editor
+routing.feature_auto_prompt_preview_description:
+  en: Test-runs an auto-prompt rule against this task
 auto_prompts.title:
   en: Auto prompts
 auto_prompts.description:

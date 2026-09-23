@@ -1,0 +1,1 @@
+- The Jev settings page's token usage breakdown now says what each spend category is for, and categories such as Action predictions show their names instead of raw log tags.

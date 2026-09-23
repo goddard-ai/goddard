@@ -44,7 +44,8 @@ carry the information the judgment actually needs.
   appends an `EvalDecisionRecord` to `eval-decisions.jsonl` beside the
   daemon's `settings.json` — that log is the calibration dataset for every
   eval feature, so always set a distinct `feature` tag and add its label
-  to `eval_feature_label` in settings.rs (unknown tags render raw).
+  and description to `eval_feature_label` / `eval_feature_description`
+  in settings.rs (unknown tags render raw).
 - `DaemonSettings.eval` is per-daemon and BYOK; the Jev settings page
   edits the local daemon only, so remote sessions evaluate on their own
   daemon's backend. Check `daemon.settings().eval` and
@@ -65,6 +66,7 @@ carry the information the judgment actually needs.
 | `route-class-suggest` | `src/app/settings.rs` | Jev page "suggest defaults" for the class map |
 | `turn-status` | `src/app/status_markers.rs` | Settled turn → ending Choice + flag Nouls (unverified, drifted, needs-review, thrash, assumed) |
 | `next-action` | `src/app/action_predictions.rs` | Settled turn → `taskType` + `nextAction` over a feasibility-gated candidate set |
+| `paste-classification` | `src/app/composer/paste_classification.rs` | Pasted composer text → content-category Choice for the block's label |
 | `provider-switch` | `src/app/provider_switch.rs` | One Noul per transcript item/span: keep verbatim for the new provider? |
 | `permission-review` | `crates/waku-core/src/permission_review.rs` | Auto-mode permission requests → clear/caution Choice |
 | `memory-triage`, `memory-rank` | `crates/waku-core/src/memory.rs` | Transcript segments worth feeding the distiller |

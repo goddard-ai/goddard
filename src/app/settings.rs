@@ -7119,13 +7119,7 @@ impl Waku {
                     search,
                 )];
                 rows.extend(stats.features.iter().map(|(feature, totals)| {
-                    settings_row(
-                        eval_feature_label(feature),
-                        tr!("routing.usage_feature_calls", calls = totals.calls),
-                        eval_usage_label(totals, theme),
-                        theme,
-                        search,
-                    )
+                    eval_feature_row(feature, totals, theme, search)
                 }));
                 settings_row_card(rows, theme).map(|card| card.mt(px(15.0)).into_any_element())
             });
@@ -12316,7 +12310,10 @@ fn eval_feature_label(feature: &str) -> String {
         "turn-status" => tr!("routing.feature_turn_status"),
         "route" => tr!("routing.feature_route"),
         "route-effort" => tr!("routing.feature_route_effort"),
+        "route-phase" => tr!("routing.feature_route_phase"),
         "route-class-suggest" => tr!("routing.feature_route_class_suggest"),
+        "next-action" => tr!("experiments.action_predictions_title"),
+        "paste-classification" => tr!("routing.feature_paste_classification"),
         "provider-switch" => tr!("routing.feature_provider_switch"),
         "memory-rank" => tr!("routing.feature_memory_rank"),
         "memory-triage" => tr!("routing.feature_memory_triage"),
@@ -12326,6 +12323,69 @@ fn eval_feature_label(feature: &str) -> String {
         "auto-prompt-preview" => tr!("auto_prompts.try_task"),
         _ => return feature.to_owned(),
     }
+}
+
+/// What one usage-card spend category judges, in a line — rendered under
+/// the feature's label ahead of its call count. `None` for unknown tags:
+/// the row keeps the bare call count rather than inventing a meaning.
+fn eval_feature_description(feature: &str) -> Option<String> {
+    Some(match feature {
+        "evaluate" => tr!("routing.feature_evaluate_description"),
+        "turn-status" => tr!("routing.feature_turn_status_description"),
+        "route" => tr!("routing.feature_route_description"),
+        "route-effort" => tr!("routing.feature_route_effort_description"),
+        "route-phase" => tr!("routing.feature_route_phase_description"),
+        "route-class-suggest" => tr!("routing.feature_route_class_suggest_description"),
+        "next-action" => tr!("routing.feature_next_action_description"),
+        "paste-classification" => tr!("routing.feature_paste_classification_description"),
+        "provider-switch" => tr!("routing.feature_provider_switch_description"),
+        "memory-rank" => tr!("routing.feature_memory_rank_description"),
+        "memory-triage" => tr!("routing.feature_memory_triage_description"),
+        "permission-review" => tr!("routing.feature_permission_review_description"),
+        "auto-prompt" => tr!("routing.feature_auto_prompt_description"),
+        "auto-prompt-suggest" => tr!("routing.feature_auto_prompt_suggest_description"),
+        "auto-prompt-preview" => tr!("routing.feature_auto_prompt_preview_description"),
+        _ => return None,
+    })
+}
+
+/// One feature row in the Jev usage card — `settings_row`'s shell with the
+/// call count stacked on its own line under the category's description.
+/// Unknown tags get no description and fall back to the plain one-line row.
+#[track_caller]
+fn eval_feature_row(
+    feature: &str,
+    totals: &waku_protocol::eval::EvalUsageTotals,
+    theme: Theme,
+    search: &SettingSearch,
+) -> Option<AnyElement> {
+    let title = eval_feature_label(feature);
+    let calls = tr!("routing.usage_feature_calls", calls = totals.calls);
+    let Some(detail) = eval_feature_description(feature) else {
+        return settings_row(title, calls, eval_usage_label(totals, theme), theme, search);
+    };
+    let matched = search.matched(&title, &detail)?;
+    Some(
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                settings_row_text(title, detail, matched, theme).child(
+                    div()
+                        .mt(px(2.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(calls),
+                ),
+            )
+            .child(eval_usage_label(totals, theme))
+            .into_any_element(),
+    )
 }
 
 /// The right-side readout on a Jev usage row: compact "in · out" token
