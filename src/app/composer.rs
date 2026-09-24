@@ -1396,6 +1396,11 @@ impl Waku {
                 let mut empty = false;
                 let _ = reset_weak.update(cx, |this, cx| {
                     if open {
+                        // The menu shares its search field with the ⌘/
+                        // modal — one surface owns it at a time.
+                        if this.keyboard_options_is_open() {
+                            this.dismiss_keyboard_options(false, window, cx);
+                        }
                         this.model_picker_target = ModelPickerTarget::Composer;
                         empty = this.model_picker_has_no_providers();
                         let locked_provider = this.model_picker_locked_provider();

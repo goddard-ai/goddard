@@ -5427,6 +5427,15 @@ impl Waku {
                 &model_picker.search,
                 |this: &mut Self, _search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
+                        // The ⌘/ modal borrows this field — an edit there
+                        // rebuilds the modal's rows instead of the anchored
+                        // panel's cursor and scroll.
+                        if this.open_keyboard_options_chord()
+                            == Some(keyboard_options::KeyboardOptionsChord::Model)
+                        {
+                            this.refilter_model_keyboard_options(None, cx);
+                            return;
+                        }
                         // Wash the recognized values in structured tokens —
                         // `provider:pi`'s `pi` — so a working filter reads
                         // differently from a mistyped one.

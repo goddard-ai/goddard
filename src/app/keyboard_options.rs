@@ -3,6 +3,7 @@
 //! the available choices are visible before one is applied.
 
 use super::*;
+use crate::ui::ActivationExt;
 use std::sync::Arc;
 
 const MODAL_WIDTH: f32 = 480.0;
@@ -64,6 +65,40 @@ impl KeyboardOptionChoice {
 pub(super) enum KeyboardOptionItem {
     Section(String),
     Choice(KeyboardOptionChoice),
+    /// A row straight from the shared model picker's list — carries the
+    /// full [`PickerRow`] so the ⌘/ modal can draw the same row chrome the
+    /// anchored panel does instead of flattening it to label/description.
+    Model {
+        row: model_picker::PickerRow,
+        selected: bool,
+        enabled: bool,
+    },
+}
+
+impl KeyboardOptionItem {
+    /// Whether the highlight or a pick can land on this item — sections
+    /// are labels, not choices.
+    pub(super) fn selectable(&self) -> bool {
+        !matches!(self, KeyboardOptionItem::Section(_))
+    }
+
+    /// Whether this item marks the current selection.
+    pub(super) fn selected(&self) -> bool {
+        match self {
+            KeyboardOptionItem::Section(_) => false,
+            KeyboardOptionItem::Choice(choice) => choice.selected,
+            KeyboardOptionItem::Model { selected, .. } => *selected,
+        }
+    }
+
+    /// The item's height in the modal's content-height sum.
+    fn height(&self) -> f32 {
+        match self {
+            KeyboardOptionItem::Section(_) => SECTION_HEIGHT,
+            KeyboardOptionItem::Choice(_) => ITEM_HEIGHT,
+            KeyboardOptionItem::Model { .. } => model_picker::MODEL_PICKER_ROW_HEIGHT.into(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -84,6 +119,21 @@ pub(super) enum KeyboardOptionsChord {
     /// ⌘⌥⇧N — has a branch filter; a release before the first step leaves
     /// the picker open with the search field focused instead of committing.
     Branch,
+    /// ⌘/ — has a model filter; like the branch picker, a release before
+    /// the first step leaves the picker open with the search focused.
+    Model,
+}
+
+impl KeyboardOptionsChord {
+    /// The modifiers whose release ends the hold. ⇧ is direction in the
+    /// branch chord, not part of the hold — that gesture ends when ⌘ or ⌥
+    /// comes up. The model chord's hold is ⌘ alone.
+    fn hold_down(self, secondary: bool, alt: bool) -> bool {
+        match self {
+            KeyboardOptionsChord::Workspace | KeyboardOptionsChord::Branch => secondary && alt,
+            KeyboardOptionsChord::Model => secondary,
+        }
+    }
 }
 
 pub(super) struct KeyboardOptionsUi {
@@ -264,18 +314,14 @@ impl Waku {
             self.toggle_command_palette_action(&ToggleCommandPalette, window, cx);
         }
 
-        let content_height = items
-            .iter()
-            .map(|item| match item {
-                KeyboardOptionItem::Section(_) => SECTION_HEIGHT,
-                KeyboardOptionItem::Choice(_) => ITEM_HEIGHT,
-            })
-            .sum();
-        let first_choice = items
-            .iter()
-            .position(|item| matches!(item, KeyboardOptionItem::Choice(_)));
+        let content_height = items.iter().map(KeyboardOptionItem::height).sum();
+        let first_choice = items.iter().position(KeyboardOptionItem::selectable);
         let highlighted = highlighted
-            .filter(|index| matches!(items.get(*index), Some(KeyboardOptionItem::Choice(_))))
+            .filter(|index| {
+                items
+                    .get(*index)
+                    .is_some_and(KeyboardOptionItem::selectable)
+            })
             .or(first_choice);
         self.keyboard_options.open = true;
         self.keyboard_options.title = title;
@@ -287,11 +333,13 @@ impl Waku {
         // The hold counts only if the chord's modifiers are actually down —
         // a menu dispatch arrives with none held and must not commit on the
         // next stray release.
-        self.keyboard_options.armed =
-            chord.is_some() && window.modifiers().secondary() && window.modifiers().alt;
+        self.keyboard_options.armed = chord.is_some_and(|chord| {
+            chord.hold_down(window.modifiers().secondary(), window.modifiers().alt)
+        });
         self.keyboard_options.cycled = false;
         self.keyboard_options.search = match chord {
             Some(KeyboardOptionsChord::Branch) => Some(self.branch_search.clone()),
+            Some(KeyboardOptionsChord::Model) => Some(self.model_picker.search.clone()),
             _ => None,
         };
         self.keyboard_options.previous_focus = previous_focus;
@@ -362,6 +410,7 @@ impl Waku {
         let list_state = self.keyboard_options.list.clone();
         let weak = cx.entity().downgrade();
         let row_theme = theme.clone();
+        let jev_credential_missing = self.jev_credential_missing();
 
         let content = if creating_branch {
             div()
@@ -409,7 +458,7 @@ impl Waku {
                     .child(tr!("branches.none_found"))
                     .into_any_element()
             } else {
-                list(list_state, move |index, _window, _cx| {
+                list(list_state, move |index, window, cx| {
                     let Some(item) = items.get(index).cloned() else {
                         return div().into_any_element();
                     };
@@ -510,6 +559,21 @@ impl Waku {
                                 })
                                 .into_any_element()
                         }
+                        KeyboardOptionItem::Model {
+                            row,
+                            selected,
+                            enabled,
+                        } => model_option_row(
+                            index,
+                            &row,
+                            selected,
+                            enabled,
+                            highlighted == Some(index),
+                            jev_credential_missing,
+                            &weak,
+                            window,
+                            cx,
+                        ),
                     }
                 })
                 // A `list()` lays out as a childless node — without an explicit
@@ -686,13 +750,7 @@ impl Waku {
         if !self.keyboard_options.open {
             return;
         }
-        self.keyboard_options.content_height = items
-            .iter()
-            .map(|item| match item {
-                KeyboardOptionItem::Section(_) => SECTION_HEIGHT,
-                KeyboardOptionItem::Choice(_) => ITEM_HEIGHT,
-            })
-            .sum();
+        self.keyboard_options.content_height = items.iter().map(KeyboardOptionItem::height).sum();
         self.keyboard_options.list =
             ListState::new(items.len(), ListAlignment::Top, px(ITEM_HEIGHT));
         self.keyboard_options.items = Arc::new(items);
@@ -736,7 +794,8 @@ impl Waku {
         self.keyboard_options.cycled = true;
         // A chord tap while the modal is open starts the hold even when a
         // menu click opened it — the release that follows commits.
-        self.keyboard_options.armed = window.modifiers().secondary() && window.modifiers().alt;
+        self.keyboard_options.armed =
+            chord.hold_down(window.modifiers().secondary(), window.modifiers().alt);
         self.move_keyboard_option_highlight(1, cx);
         true
     }
@@ -760,13 +819,16 @@ impl Waku {
         let Some(chord) = self.keyboard_options.chord else {
             return;
         };
-        // ⇧ is direction in the branch chord, not part of the hold — the
-        // gesture ends when ⌘ or ⌥ comes up.
-        if event.secondary() && event.alt {
+        if chord.hold_down(event.secondary(), event.alt) {
             return;
         }
         match chord {
-            KeyboardOptionsChord::Branch if !self.keyboard_options.cycled => {
+            // A searchable picker that was never stepped stays open — the
+            // release parks focus in its filter field for typing instead
+            // of committing the highlighted row.
+            KeyboardOptionsChord::Branch | KeyboardOptionsChord::Model
+                if !self.keyboard_options.cycled =>
+            {
                 let focus = self.keyboard_options_modal_focus(cx);
                 window.focus(&focus, cx);
             }
@@ -788,9 +850,7 @@ impl Waku {
             .items
             .iter()
             .enumerate()
-            .filter_map(|(index, item)| {
-                matches!(item, KeyboardOptionItem::Choice(_)).then_some(index)
-            })
+            .filter_map(|(index, item)| item.selectable().then_some(index))
             .collect::<Vec<_>>();
         if choices.is_empty() {
             return;
@@ -817,15 +877,33 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(KeyboardOptionItem::Choice(choice)) =
-            self.keyboard_options.items.get(index).cloned()
-        else {
+        let Some(item) = self.keyboard_options.items.get(index).cloned() else {
             return;
         };
-        if !choice.enabled {
+        let (action, enabled) = match item {
+            KeyboardOptionItem::Section(_) => return,
+            KeyboardOptionItem::Choice(choice) => (choice.action, choice.enabled),
+            KeyboardOptionItem::Model { row, enabled, .. } => {
+                let action = match row {
+                    model_picker::PickerRow::Policy(model_picker::PolicyRowId::Auto) => {
+                        KeyboardOptionAction::AutoRoute
+                    }
+                    model_picker::PickerRow::Combo(row) => KeyboardOptionAction::Model {
+                        provider: row.provider,
+                        model: row.model.id,
+                        effort: row.effort,
+                        fast: row.fast,
+                    },
+                    // The composer spec produces neither of these rows.
+                    _ => return,
+                };
+                (action, enabled)
+            }
+        };
+        if !enabled {
             return;
         }
-        if matches!(&choice.action, KeyboardOptionAction::CreateBranch) {
+        if matches!(&action, KeyboardOptionAction::CreateBranch) {
             self.keyboard_options.creating_branch = true;
             self.begin_branch_creation(window, cx);
             self.focus_keyboard_options_target(KeyboardOptionFocus::BranchCreate, window, cx);
@@ -834,11 +912,11 @@ impl Waku {
         }
 
         let preserve_next_dialog_focus = matches!(
-            &choice.action,
+            &action,
             KeyboardOptionAction::RuntimeMode(RuntimeMode::FullAccess)
         ) && !self.state.full_access_acknowledged;
         self.dismiss_keyboard_options(!preserve_next_dialog_focus, window, cx);
-        match choice.action {
+        match action {
             KeyboardOptionAction::Model {
                 provider,
                 model,
@@ -898,6 +976,7 @@ impl Waku {
         if !self.keyboard_options.open {
             return;
         }
+        let chord = self.keyboard_options.chord;
         self.keyboard_options.open = false;
         self.keyboard_options.creating_branch = false;
         self.keyboard_options.chord = None;
@@ -910,10 +989,280 @@ impl Waku {
         if self.branch_picker_mode == BranchPickerMode::Create {
             self.branch_picker_mode = BranchPickerMode::Browse;
         }
+        // Parked unstars hold their favorites-block slots only while a model
+        // picker is open — the modal closing releases them like the anchored
+        // panel hiding does.
+        if chord == Some(KeyboardOptionsChord::Model) {
+            self.pinned_unfavorites.clear();
+        }
         let previous_focus = self.keyboard_options.previous_focus.take();
         if restore_focus && let Some(focus) = previous_focus {
             window.focus(&focus, cx);
         }
         cx.notify();
     }
+}
+
+/// A model row in the ⌘/ modal, drawn with the anchored picker's own
+/// chrome: the same shell, two-line body, star, and favorite chord hint —
+/// only the rail, the drag-reorder, and the popover's own close are absent.
+fn model_option_row(
+    index: usize,
+    row: &model_picker::PickerRow,
+    selected: bool,
+    enabled: bool,
+    is_highlighted: bool,
+    jev_credential_missing: bool,
+    weak: &WeakEntity<Waku>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let theme = Theme::current(cx);
+    let move_weak = weak.clone();
+    let select_weak = weak.clone();
+    let shell = |id: SharedString| {
+        model_picker::model_picker_row_shell(id, selected, is_highlighted, &theme)
+            .when(!enabled, |row| row.opacity(0.45))
+            .on_mouse_move(move |_, _, cx| {
+                let _ = move_weak.update(cx, |this, cx| {
+                    if this.keyboard_options.highlighted != Some(index) {
+                        this.keyboard_options.highlighted = Some(index);
+                        this.keyboard_options.list.scroll_to_reveal_item(index);
+                        cx.notify();
+                    }
+                });
+            })
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_click(move |_, window, cx| {
+                let _ = select_weak.update(cx, |this, cx| {
+                    this.select_keyboard_option(index, window, cx);
+                });
+                cx.stop_propagation();
+            })
+    };
+    if let model_picker::PickerRow::Policy(policy) = row {
+        // The router row carries no star — the settings shortcut that
+        // configures the backend sits where a model row's star would.
+        let auto = matches!(policy, model_picker::PolicyRowId::Auto);
+        let (mark, title, subtitle) = model_picker::policy_row_parts(*policy, &theme);
+        let settings_weak = weak.clone();
+        return shell(SharedString::from(format!("model-row-policy-{policy:?}")))
+            .child(model_picker::model_picker_row_body(
+                title,
+                auto.then(|| {
+                    div()
+                        .flex_none()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_tertiary)
+                        .child(SharedString::from(tr!("models.auto_hint")))
+                        .into_any_element()
+                }),
+                mark,
+                subtitle,
+                &theme,
+            ))
+            .when(jev_credential_missing && auto, |element| {
+                element.child(
+                    div()
+                        .id("jev-credential-warning")
+                        .tab_index(0)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .tooltip(Tooltip::text(tr!("models.auto_missing_credential")))
+                        .child(icon("icons/alert.svg", 13.0, theme.warning)),
+                )
+            })
+            .child(
+                div()
+                    .id("jev-settings")
+                    .tab_index(0)
+                    .w(px(28.0))
+                    .h(px(28.0))
+                    .rounded(px(8.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .hover(|element| element.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .tooltip(Tooltip::text(tr!("settings.jev")))
+                    .child(icon("icons/settings.svg", 14.0, theme.text_ghost))
+                    .on_activation_app(move |window, cx| {
+                        let _ = settings_weak.update(cx, |this, cx| {
+                            this.dismiss_keyboard_options(true, window, cx);
+                            this.open_settings_action(&OpenSettings, window, cx);
+                            this.open_settings_page(SettingsPage::Jev, window, cx);
+                        });
+                    }),
+            )
+            .into_any_element();
+    }
+    let model_picker::PickerRow::Combo(row) = row else {
+        // The composer spec produces no provider-default rows.
+        return div().into_any_element();
+    };
+    let kind = row.provider;
+    let model = &row.model;
+    let effort_label = row.effort.as_deref().and_then(|effort| {
+        model
+            .reasoning_efforts
+            .iter()
+            .find(|option| option.id == effort)
+            .map(|option| {
+                option
+                    .label_i18n
+                    .as_ref()
+                    .map(waku_client::WireTranslation::render)
+                    .unwrap_or_else(|| option.label.clone())
+            })
+    });
+    let sub_provider = model
+        .sub_provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+    let detail = model_picker::model_picker_subtitle(kind, sub_provider);
+    // ⌘⌥1 is reserved for Auto; ⌘⌥2–⌘⌥9 ride on the first eight starred
+    // rows — the same hint the anchored panel draws.
+    let shortcut_hint = row
+        .favorite_index
+        .filter(|index| (1..=8).contains(index))
+        .map(|index| {
+            crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
+                .resolve(window, cx)
+                .unwrap_or_else(|| {
+                    crate::ui::shortcut::sequence_label(&format!("secondary-alt-{}", index + 1))
+                })
+        });
+    let is_favorite = row.favorite_index.is_some();
+    let model_id = model.id.clone();
+    let effort = row.effort.clone();
+    let fast = row.fast;
+    let favorite_weak = weak.clone();
+    let favorite_model_id = model.id.clone();
+    let favorite_effort = row.effort.clone();
+    shell(SharedString::from(format!(
+        "model-row-{}-{}-{}-{}",
+        kind.id(),
+        model.id,
+        row.effort.as_deref().unwrap_or("base"),
+        row.fast
+    )))
+    .child(
+        div()
+            .min_w_0()
+            .flex_1()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(13.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text)
+                            .child(SharedString::from(
+                                model
+                                    .name_i18n
+                                    .as_ref()
+                                    .map(waku_client::WireTranslation::render)
+                                    .unwrap_or_else(|| model.name.clone()),
+                            )),
+                    )
+                    .when_some(effort_label, |element, label| {
+                        element.child(
+                            div()
+                                .flex_none()
+                                .truncate()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(SharedString::from(label)),
+                        )
+                    })
+                    .when(row.fast, |element| {
+                        element.child(icon("icons/zap.svg", 11.5, theme.text_tertiary))
+                    }),
+            )
+            .child(
+                div()
+                    .mt(px(4.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(provider_mark(&theme, kind, 12.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(detail)),
+                    ),
+            ),
+    )
+    .when_some(shortcut_hint, |element, hint| {
+        element.child(
+            div()
+                .flex_none()
+                .text_size(sp(11.0))
+                .text_color(theme.text_ghost)
+                .child(SharedString::from(hint)),
+        )
+    })
+    .child(
+        div()
+            .id(SharedString::from(format!(
+                "favorite-model-{}-{}-{}-{}",
+                kind.id(),
+                model.id,
+                row.effort.as_deref().unwrap_or("base"),
+                row.fast
+            )))
+            .w(px(28.0))
+            .h(px(28.0))
+            .rounded(px(8.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .hover(|element| element.bg(theme.overlay_strong))
+            .child(icon(
+                if is_favorite {
+                    "icons/star-filled.svg"
+                } else {
+                    "icons/star.svg"
+                },
+                14.0,
+                if is_favorite {
+                    theme.favorite
+                } else {
+                    theme.text_ghost
+                },
+            ))
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let _ = favorite_weak.update(cx, |this, cx| {
+                    this.toggle_favorite_model(
+                        kind,
+                        favorite_model_id.clone(),
+                        favorite_effort.clone(),
+                        fast,
+                        cx,
+                    );
+                    // Rebuild so stars and block order catch up; the
+                    // highlight lands back on this combo's new slot.
+                    this.refilter_model_keyboard_options(
+                        Some((kind, model_id.clone(), effort.clone(), fast)),
+                        cx,
+                    );
+                });
+            }),
+    )
+    .into_any_element()
 }

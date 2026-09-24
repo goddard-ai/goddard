@@ -4357,13 +4357,25 @@ impl Waku {
     }
 
     /// Primary modifier + / opens the composer's complete model choices in a
-    /// centered modal. Mouse clicks continue to use the anchored model menu.
+    /// centered modal — the same rows the anchored model menu draws, minus
+    /// the provider rail. Holding ⌘ and tapping / again steps the highlight;
+    /// releasing ⌘ commits, or parks focus in the filter field when the hold
+    /// never stepped. Mouse clicks continue to use the anchored model menu.
     pub(super) fn toggle_model_picker_action(
         &mut self,
         _: &ToggleModelPicker,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A second ⌘/ during the hold steps the open picker rather than
+        // reopening it; the release that ends the hold commits the pick.
+        if self.cycle_keyboard_options_chord(
+            keyboard_options::KeyboardOptionsChord::Model,
+            window,
+            cx,
+        ) {
+            return;
+        }
         if self.settings_page.is_some() {
             return;
         }
@@ -4383,82 +4395,121 @@ impl Waku {
             return;
         }
         self.model_picker_target = model_picker::ModelPickerTarget::Composer;
-        let selection = self.model_picker_selection(cx);
-        let auto_route = session.auto_route;
-        let enabled = !session.is_busy();
-        let rows = self.composer_picker_rows("");
-        let items = rows
-            .into_iter()
-            .filter_map(|row| {
-                if let model_picker::PickerRow::Policy(model_picker::PolicyRowId::Auto) = row {
-                    return Some(keyboard_options::KeyboardOptionItem::Choice(
-                        keyboard_options::KeyboardOptionChoice::new(
-                            tr!("keyboard_options.automatic_routing"),
-                            Some(tr!("keyboard_options.automatic_routing_description").to_string()),
-                            None,
-                            auto_route,
-                            enabled,
-                            keyboard_options::KeyboardOptionAction::AutoRoute,
-                        ),
-                    ));
-                }
-                let model_picker::PickerRow::Combo(row) = row else {
-                    return None;
-                };
-                let selected = selection
-                    .as_ref()
-                    .is_some_and(|(provider, model, effort, fast)| {
-                        *provider == row.provider
-                            && model == &row.model.id
-                            && effort == &row.effort
-                            && *fast == row.fast
-                    });
-                let mut details = vec![row.provider.display_name().to_string()];
-                if let Some(effort) = &row.effort {
-                    details.push(
-                        row.model
-                            .reasoning_efforts
-                            .iter()
-                            .find(|option| option.id == *effort)
-                            .map(|option| option.label.clone())
-                            .unwrap_or_else(|| effort.clone()),
-                    );
-                }
-                if row.fast {
-                    details.push(tr!("keyboard_options.fast").to_string());
-                }
-                Some(keyboard_options::KeyboardOptionItem::Choice(
-                    keyboard_options::KeyboardOptionChoice::new(
-                        row.model.name.clone(),
-                        Some(details.join(" · ")),
-                        None,
-                        selected,
-                        enabled && session.can_choose_model(row.provider),
-                        keyboard_options::KeyboardOptionAction::Model {
-                            provider: row.provider,
-                            model: row.model.id,
-                            effort: row.effort,
-                            fast: row.fast,
-                        },
-                    ),
-                ))
-            })
-            .collect::<Vec<_>>();
-        let highlighted = items.iter().position(|item| {
-            matches!(
-                item,
-                keyboard_options::KeyboardOptionItem::Choice(choice) if choice.selected
-            )
-        });
+        self.model_picker
+            .search
+            .update(cx, |input, cx| input.clear(cx));
+        let items = self.model_keyboard_option_items("", cx);
+        let highlighted = items
+            .iter()
+            .position(keyboard_options::KeyboardOptionItem::selected);
         self.open_keyboard_options(
             tr!("keyboard_options.choose_model").to_string(),
             items,
             highlighted,
             keyboard_options::KeyboardOptionFocus::Modal,
-            None,
+            Some(keyboard_options::KeyboardOptionsChord::Model),
             window,
             cx,
         );
+    }
+
+    /// The ⌘/ modal's rows: the composer picker's merged list carried as
+    /// model items, so the modal lists exactly what the anchored panel
+    /// draws — Auto stance, favorites, recents, provider blocks — and keeps
+    /// each row's favorite/recent marks for the shared row chrome.
+    fn model_keyboard_option_items(
+        &self,
+        normalized_query: &str,
+        cx: &App,
+    ) -> Vec<keyboard_options::KeyboardOptionItem> {
+        let Some(session) = self.composer_session() else {
+            return Vec::new();
+        };
+        let selection = self.model_picker_selection(cx);
+        let auto_route = session.auto_route;
+        let enabled = !session.is_busy();
+        self.composer_picker_rows(normalized_query)
+            .into_iter()
+            .filter_map(|row| {
+                let (selected, row_enabled) = match &row {
+                    model_picker::PickerRow::Policy(model_picker::PolicyRowId::Auto) => {
+                        (auto_route, enabled)
+                    }
+                    model_picker::PickerRow::Combo(combo) => {
+                        let selected =
+                            selection
+                                .as_ref()
+                                .is_some_and(|(provider, model, effort, fast)| {
+                                    *provider == combo.provider
+                                        && model == &combo.model.id
+                                        && effort == &combo.effort
+                                        && *fast == combo.fast
+                                });
+                        (
+                            selected,
+                            enabled && session.can_choose_model(combo.provider),
+                        )
+                    }
+                    _ => return None,
+                };
+                Some(keyboard_options::KeyboardOptionItem::Model {
+                    row,
+                    selected,
+                    enabled: row_enabled,
+                })
+            })
+            .collect()
+    }
+
+    /// A search edit — or a star toggle — in the open ⌘/ modal rebuilds its
+    /// rows in place, the same contract the anchored picker's filter holds:
+    /// a live query pins the highlight on the first hit, clearing returns it
+    /// to the current selection. `keep` lands the highlight back on a combo
+    /// after a rebuild, so toggling a star under the pointer does not jump
+    /// the cursor off the row.
+    pub(super) fn refilter_model_keyboard_options(
+        &mut self,
+        keep: Option<(ProviderKind, String, Option<String>, bool)>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.open_keyboard_options_chord() != Some(keyboard_options::KeyboardOptionsChord::Model)
+        {
+            return;
+        }
+        let content = self.model_picker.search.read(cx).content().to_owned();
+        // Wash the recognized values in structured tokens — `provider:pi`'s
+        // `pi` — so a working filter reads differently from a mistyped one.
+        let annotations = model_picker::picker_query_annotations(&content, &self.probes);
+        self.model_picker.search.update(cx, |search, cx| {
+            search.set_annotation_ranges(annotations, cx);
+        });
+        let query = content.trim().to_lowercase();
+        let items = self.model_keyboard_option_items(&query, cx);
+        let highlighted = keep
+            .and_then(|(provider, model, effort, fast)| {
+                items.iter().position(|item| match item {
+                    keyboard_options::KeyboardOptionItem::Model {
+                        row: model_picker::PickerRow::Combo(row),
+                        ..
+                    } => {
+                        row.provider == provider
+                            && row.model.id == model
+                            && row.effort == effort
+                            && row.fast == fast
+                    }
+                    _ => false,
+                })
+            })
+            .or(if query.is_empty() {
+                items
+                    .iter()
+                    .position(keyboard_options::KeyboardOptionItem::selected)
+            } else {
+                items
+                    .iter()
+                    .position(keyboard_options::KeyboardOptionItem::selectable)
+            });
+        self.replace_keyboard_options_items(items, highlighted, cx);
     }
 
     /// Primary modifier + Shift + B opens branch choices in a centered modal.
@@ -4685,12 +4736,15 @@ impl Waku {
     pub(super) fn select_favorite_model_action(
         &mut self,
         action: &SelectFavoriteModel,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.settings_page.is_some() {
             return;
         }
+        // A pick from the chord dismisses an open options modal rather than
+        // leaving it stacked over the choice it just applied.
+        self.dismiss_keyboard_options(false, window, cx);
         // ⌘⌥1 is the stable shortcut for Auto routing. Favorites begin at
         // ⌘⌥2 so this chord never depends on the user's starred models.
         if action.index == 0 {
