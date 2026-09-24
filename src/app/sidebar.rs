@@ -417,6 +417,14 @@ fn recent_planning_session(session: &AgentSession, now: u64) -> bool {
         && now.saturating_sub(session.updated_at) < 30 * 60
 }
 
+fn sidebar_phase_marker_visible(
+    phase_classification_enabled: bool,
+    hide_phase_labels: bool,
+    grouped_recent_planning: bool,
+) -> bool {
+    phase_classification_enabled && !(hide_phase_labels || grouped_recent_planning)
+}
+
 fn project_sidebar_groups(
     sessions: &[&AgentSession],
     projectless_project_ids: &HashSet<Uuid>,
@@ -4898,13 +4906,25 @@ impl Waku {
         // The status line is shared: an unsent draft outranks the phase
         // marker — it is user-owned text — while the marker still shows on
         // the selected row, which never carries a draft preview.
+        // A recent, unpinned Planning task in Date view already inherits its
+        // phase from the Planning group header, so do not repeat the chip on
+        // that row. Older or otherwise ungrouped Planning tasks still follow
+        // the explicit hide-label setting.
+        let dormant = self.session_dormant_now(session);
+        let grouped_recent_planning = self.state.sidebar_phase_groups
+            && self.state.sidebar_grouping == SidebarGrouping::Date
+            && session.pinned_at.is_none()
+            && !dormant
+            && recent_planning_session(session, unix_time());
         let phase_marker = draft_preview
             .is_none()
             .then(|| {
                 phases::sidebar_phase_marker(
-                    self.phase_classification_enabled()
-                        && !(self.state.sidebar_phase_groups
-                            && self.state.sidebar_hide_phase_labels),
+                    sidebar_phase_marker_visible(
+                        self.phase_classification_enabled(),
+                        self.state.sidebar_hide_phase_labels,
+                        grouped_recent_planning,
+                    ),
                     session,
                 )
             })
@@ -4976,7 +4996,6 @@ impl Waku {
             .entry(session_id)
             .or_insert_with(|| cx.focus_handle())
             .clone();
-        let dormant = self.session_dormant_now(session);
         // The pin control shares the archive control's reveal: zero-width
         // until the row is hovered or the button takes keyboard focus.
         // Holding Option retasks the pin control: on an ordinary row it
@@ -6008,6 +6027,14 @@ mod tests {
         session.phase = Some(waku_protocol::routing::SessionPhase::Executing);
         session.updated_at = 200;
         assert!(!recent_planning_session(&session, 200));
+    }
+
+    #[test]
+    fn recent_planning_group_hides_redundant_sidebar_marker() {
+        assert!(!sidebar_phase_marker_visible(true, false, true));
+        assert!(!sidebar_phase_marker_visible(true, true, false));
+        assert!(sidebar_phase_marker_visible(true, false, false));
+        assert!(!sidebar_phase_marker_visible(false, false, false));
     }
 
     #[test]
