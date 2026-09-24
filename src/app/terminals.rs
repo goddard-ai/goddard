@@ -1065,6 +1065,23 @@ impl Waku {
     /// strip, a background session's stored surfaces, or the global list.
     pub(super) fn close_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
         let filled_main_area = self.selected_terminal == Some(terminal_id);
+        // A main-area terminal opened from another surface is a temporary
+        // visit. Consume its back entry before dropping the terminal, so
+        // closing the tab or exiting the shell returns to where it came from.
+        let history_target = if filled_main_area {
+            Self::prune_navigation_stack(
+                &self.state.projects,
+                self.state.projects_page_enabled,
+                self.state.automations_enabled,
+                &mut self.session_navigation.back,
+            );
+            let current = NavigationLocation::Terminal(terminal_id);
+            self.session_navigation
+                .back_target()
+                .and_then(|target| self.session_navigation.go_back(current).map(|_| target))
+        } else {
+            None
+        };
         let terminal_focus = filled_main_area
             .then(|| {
                 self.right_panel_terminals
@@ -1108,6 +1125,7 @@ impl Waku {
         // owner, which swaps `right_panel_surfaces` out from under any
         // caller still holding an index into it.
         if filled_main_area
+            && history_target.is_none()
             && self.selected_terminal.is_none()
             && self.state.selected_session.is_none()
         {
@@ -1145,6 +1163,31 @@ impl Waku {
                     }
                 });
             }
+        }
+        if let Some(target) = history_target {
+            let window_handle = self.window_handle;
+            let waku = cx.entity();
+            cx.defer(move |cx| {
+                let _ = window_handle.update(cx, move |_, window, cx| {
+                    let _ = waku.update(cx, |this, cx| match target {
+                        NavigationLocation::Task(session_id) => this.request_session_activation(
+                            session_id,
+                            SessionActivationTransition::Visit,
+                            cx,
+                        ),
+                        NavigationLocation::Terminal(terminal_id) => {
+                            this.activate_terminal(terminal_id, false, window, cx);
+                        }
+                        NavigationLocation::ProjectsPage(project_id) => {
+                            this.show_projects_page(project_id, window, cx);
+                        }
+                        NavigationLocation::DraftsPage => this.show_drafts_page(window, cx),
+                        NavigationLocation::AutomationsPage => {
+                            this.show_automations_page(window, cx);
+                        }
+                    });
+                });
+            });
         }
         cx.notify();
     }
