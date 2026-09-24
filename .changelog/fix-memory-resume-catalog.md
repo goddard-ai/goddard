@@ -1,1 +1,0 @@
-- Sessions spawned by the project-memory experiment's background distillation no longer appear in the `/resume` picker, including on providers that cannot delete them.

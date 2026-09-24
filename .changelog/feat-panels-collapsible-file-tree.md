@@ -1,1 +1,0 @@
-- Collapse or expand the file tree while viewing a file in the right panel. Files opened from transcript links start with the tree collapsed.

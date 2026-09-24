@@ -1,1 +1,0 @@
-- The Window menu now carries the standard window commands — Minimize (⌘M), Zoom, and Toggle Full Screen (⌃⌘F) — all rebindable from the Keybindings settings page.

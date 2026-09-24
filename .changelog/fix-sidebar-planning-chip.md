@@ -1,1 +1,0 @@
-- Planning tasks shown in the recent Planning group no longer repeat the Planning chip on each sidebar row; older Planning rows still follow the explicit label setting.

@@ -1,1 +1,0 @@
-- Add ClickUp to Settings > Integrations. Connect your workspace with ClickUp's OAuth flow to search and manage tasks, Docs, and Chat.

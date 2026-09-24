@@ -1,1 +1,0 @@
-- Enable Settings → Experiments → Subagents to delegate bounded work through the session's provider-native helpers; Claude Code, OpenCode, GitHub Copilot, and Pi support the full roster with enforced read-only explorer tiers, while Codex and OpenCode 2 are advisory and unsupported providers explain that helpers are unavailable.

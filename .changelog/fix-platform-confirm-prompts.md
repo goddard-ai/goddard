@@ -1,1 +1,0 @@
-- Fixed confirmation dialogs ignoring your answer — clicking the action button in a confirm now runs it instead of doing nothing. Affected sending a transcript message to a friend, removing a friend, rejecting a review commit, switching a task's project, and deleting an automation.

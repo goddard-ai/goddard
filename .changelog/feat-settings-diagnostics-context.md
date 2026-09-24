@@ -1,1 +1,0 @@
-- Diagnostics rows now show the exact time each error happened, and app errors record the task, working directory, provider, and daemon they surfaced in — everything a copied record needs for a bug report.

@@ -1,1 +1,0 @@
-- Holding Alt in the sidebar temporarily shows each session's model and reasoning effort in place of its project and Git details.

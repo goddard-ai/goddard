@@ -1,1 +1,0 @@
-- Star a project from a project picker to surface its tasks first: starred projects lead the sidebar's Project grouping, ⌘D reaches their unread tasks before anyone else's and their idle tasks ahead of other projects' idle ones, and the top-bar bell shows a star — accent while that task holds something unread, subdued once it only leads the queue.

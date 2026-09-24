@@ -1,1 +1,0 @@
-- The ⌘⌥N workspace picker and ⌘⌥⇧N branch picker now work like the ⌘N project switcher: hold the chord, tap it again to step through the options, and release the modifiers to pick — Escape cancels. The branch picker also gained a search field, which takes focus when you let go without stepping so you can filter by name.

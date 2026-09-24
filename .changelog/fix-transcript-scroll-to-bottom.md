@@ -1,1 +1,0 @@
-- Scrolling to the bottom of a task's transcript while it is working no longer snaps the view back up to the message that started the turn.

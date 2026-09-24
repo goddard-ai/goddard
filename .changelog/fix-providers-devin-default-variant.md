@@ -1,1 +1,0 @@
-- Fixed Devin selection failures for saved base models with no reasoning effort; Goddard now uses an advertised variant of that model.

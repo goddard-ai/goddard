@@ -1,1 +1,0 @@
-- Settings → Jev now groups its sections behind Suggestions, Automation, and Usage tabs instead of one long page. The Suggestions tab can switch off individual suggested actions so Jev never offers them; the Automation tab lists only the actions still enabled, each with its own automatic-run probability.

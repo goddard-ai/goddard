@@ -34,6 +34,59 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.11.0]
+
+### Features
+
+- **Composer**
+  - With the Composer drafts experiment on, pressing Escape on the new task page with text in the composer saves it as a draft — the draft parks on the Drafts page and the field clears.
+  - A side chat opened with a bare `/side` can now pick its own provider, model, reasoning effort, and agent preset before its first prompt — the composer chips stay editable until the chat starts, then lock as before. `/side <prompt>` keeps the inherited posture locked from the start.
+- **Git**
+  - When a task's worktree sits on a detached HEAD, the branch toggle below the composer now names its base branch in parentheses — for example, `a1b2c3d (main)` — instead of showing the commit alone.
+  - The "Sync branch…" picker (⌘S) now pushes after it pulls: commits the branch has that its upstream lacks are published too, so a synced branch ends up even with its remote in both directions.
+- **Keyboard**
+  - The ⌘⌥N workspace picker and ⌘⌥⇧N branch picker now work like the ⌘N project switcher: hold the chord, tap it again to step through the options, and release the modifiers to pick — Escape cancels. The branch picker also gained a search field, which takes focus when you let go without stepping so you can filter by name.
+  - The ⌘/ model picker now draws the same rows as the composer's model menu — provider icon, effort and fast-tier marks, favorite stars and their ⌘⌥2–9 hints — and gains a search field. Hold ⌘ and tap / to step forward, or ⌘⇧/ to step backward; letting go picks the highlighted model, and releasing without stepping leaves the search field focused so you can filter.
+- **Settings**
+  - Add ClickUp to Settings > Integrations. Connect your workspace with ClickUp's OAuth flow to search and manage tasks, Docs, and Chat.
+  - Click a setting title in search results to copy its name while opening that setting.
+  - Diagnostics rows now show the exact time each error happened, and app errors record the task, working directory, provider, and daemon they surfaced in — everything a copied record needs for a bug report.
+  - Settings → Jev now groups its sections behind Suggestions, Automation, and Usage tabs instead of one long page. The Suggestions tab can switch off individual suggested actions so Jev never offers them; the Automation tab lists only the actions still enabled, each with its own automatic-run probability.
+  - Settings → Memory now renders the project's MEMORY.md as formatted Markdown — headings, lists, links, and code — instead of raw text. The section headers also show the summary's line count, the change log's note count and latest date, and a new button reveals the `.goddard/memory` folder in the file manager.
+  - The Jev page's routing section now offers Easy, Medium, and Hard model picks per provider — the set of models an Auto-routed task may move between mid-task. Classes left unmapped keep the provider's default model.
+  - Settings navigation now scrolls independently while the search field stays visible at the top, with breathing room after the final section.
+  - Choose the voice briefing's summary and speech models from the Experiments settings, with current gateway options and custom-model entries.
+- Star a project from a project picker to surface its tasks first: starred projects lead the sidebar's Project grouping, ⌘D reaches their unread tasks before anyone else's and their idle tasks ahead of other projects' idle ones, and the top-bar bell shows a star — accent while that task holds something unread, subdued once it only leads the queue.
+- Collapse or expand the file tree while viewing a file in the right panel. Files opened from transcript links start with the tree collapsed.
+- Submit `/rename` in a task composer to let the agent choose and apply a concise title immediately.
+- Holding Alt in the sidebar temporarily shows each session's model and reasoning effort in place of its project and Git details.
+- Hover over a transcript link whose label differs from its destination to see the full URL.
+- The Window menu now carries the standard window commands — Minimize (⌘M), Zoom, and Toggle Full Screen (⌃⌘F) — all rebindable from the Keybindings settings page.
+
+### Experiments
+
+- **[Experimental]** Composer drafts — saving unfinished composer text and attachments across sessions and devices — moved behind Settings → Experiments → Composer drafts and now default off. Turn the experiment on to keep the Drafts page and pick up parked drafts where you left them.
+- **[Experimental]** Enable Settings → Experiments → Subagents to delegate bounded work through the session's provider-native helpers; Claude Code, OpenCode, GitHub Copilot, and Pi support the full roster with enforced read-only explorer tiers, while Codex and OpenCode 2 are advisory and unsupported providers explain that helpers are unavailable.
+
+### Fixed
+
+- **Sidebar**
+  - The collapsed sidebar's peek panel no longer stays stuck open when the pointer leaves the window over the quick-action dock or its hover strip.
+  - Planning tasks shown in the recent Planning group no longer repeat the Planning chip on each sidebar row; older Planning rows still follow the explicit label setting.
+- **Providers**
+  - Keep Goddard Computer Use guidance out of the first message so it does not interfere with generated task titles.
+  - Fixed Devin selection failures for saved base models with no reasoning effort; Goddard now uses an advertised variant of that model.
+- **Terminals**
+  - Terminal Option chords on macOS now reach the shell the way it expects: ⌥←/⌥→ move by word and ⌥⌫ deletes one, instead of inserting the composed glyph or dropping the key.
+  - Closing the last main-area terminal (e.g. ctrl+d) now lands on a working New task page — previously its model picker stayed disabled and keyboard focus was lost until pressing ⌘N.
+- **Settings**
+  - Auto routing can no longer move a running task to a model you didn't configure. Mid-task model moves now resolve through your Easy/Medium/Hard picks — per provider first, then the shared class map — and the evaluation model's own suggestions are limited to models you approved.
+  - Settings → Daemon now shows only connection settings — the listener, credentials, remote hosts, keep-awake, and build info. Agent tools and Agent settings moved to a new Agents group in Settings → General, and New task environment and QA branch joined the Sessions and Git groups there.
+- Side chats now show the inherited project, workspace, branch, and context-usage indicator below their composer, and bare side-chat opens focus the side-chat composer.
+- Sessions spawned by the project-memory experiment's background distillation no longer appear in the `/resume` picker, including on providers that cannot delete them.
+- Fixed confirmation dialogs ignoring your answer — clicking the action button in a confirm now runs it instead of doing nothing. Affected sending a transcript message to a friend, removing a friend, rejecting a review commit, switching a task's project, and deleting an automation.
+- Scrolling to the bottom of a task's transcript while it is working no longer snaps the view back up to the message that started the turn.
+
 ## [0.10.0]
 
 ### Features

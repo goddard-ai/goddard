@@ -1,1 +1,0 @@
-- Settings → Memory now renders the project's MEMORY.md as formatted Markdown — headings, lists, links, and code — instead of raw text. The section headers also show the summary's line count, the change log's note count and latest date, and a new button reveals the `.goddard/memory` folder in the file manager.

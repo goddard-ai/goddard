@@ -1,1 +1,0 @@
-- Settings navigation now scrolls independently while the search field stays visible at the top, with breathing room after the final section.
