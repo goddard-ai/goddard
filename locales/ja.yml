@@ -1260,9 +1260,17 @@ workspace.from_default: デフォルトブランチから
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
 suggestions.tooltip: 次のおすすめアクション
+jev.tab_suggestions: 提案
+jev.tab_automation: 自動化
+jev.tab_usage: 使用状況
+jev.group_prompts: プロンプト
+jev.group_actions: アクション
+jev.group_suggested_actions: 提案アクション
+jev.no_enabled_actions: すべての提案アクションがオフになっています。Jev に自動実行させるには、「提案」タブでアクションを有効にしてください。
 suggestions.settings_title: 提案するプロンプト
 suggestions.automatic_actions_title: 自動で実行する提案
 suggestions.automatic_action_description: 有効にすると、Jev の確率が設定値（最低 80%）に達したときに自動で実行します。
+suggestions.action_description: ターン終了後の次のステップとして Jev が提案できます。
 suggestions.choice_template: 選択への返信
 suggestions.edit_prompt: 編集
 suggestions.reset_prompt: リセット

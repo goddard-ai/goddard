@@ -159,7 +159,7 @@ pub(super) fn canned_prompt_id(
 /// vocabulary resolves predictions but never renders — `new-prompt` and
 /// `other` are outcomes, session lifecycle picks are better left to the
 /// sidebar, and `revert`/`terminal-command` stay manual in v1.
-const ACTIONABLE_SUGGESTIONS: &[&str] = &[
+pub(super) const ACTIONABLE_SUGGESTIONS: &[&str] = &[
     "keep-going",
     "run-tests",
     "fix-errors",
@@ -172,6 +172,22 @@ const ACTIONABLE_SUGGESTIONS: &[&str] = &[
     "sync",
     "land",
 ];
+
+/// The settings row's title for an actionable id — the same label the
+/// chip would carry, so the list reads like the suggestions it gates.
+/// `None` for ids outside the actionable vocabulary.
+pub(super) fn suggested_action_title(action: &str) -> Option<String> {
+    match action {
+        "commit" => Some(tr!("suggestions.commit")),
+        "push" => Some(tr!("suggestions.push")),
+        "sync" => Some(tr!("suggestions.sync")),
+        "land" => Some(tr!("suggestions.land")),
+        _ => CANNED_PROMPTS
+            .iter()
+            .find(|(id, _)| *id == action)
+            .map(|(_, key)| tr!(key)),
+    }
+}
 
 /// Commit remains review-gated because its dispatcher opens the commit dialog.
 pub(super) const AUTOMATIC_ACTIONS: &[&str] = &[
@@ -637,7 +653,11 @@ impl Waku {
         {
             self.action_suggestion = None;
         }
-        let suggestion = gated_suggestion(choice, probabilities);
+        // A switched-off action never surfaces: no chip, no automatic run.
+        // The prediction itself still logs — the shadow record feeds
+        // calibration regardless of the display preference.
+        let suggestion = gated_suggestion(choice, probabilities)
+            .filter(|action| !self.state.disabled_suggested_actions.contains(*action));
         if let Some(action) = suggestion {
             self.action_suggestion = Some(ActionSuggestion {
                 prediction_id: prediction.id,

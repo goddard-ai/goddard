@@ -1131,6 +1131,20 @@ routing.feature_auto_prompt_suggest_description:
   en: Suggests question weights and a threshold for the auto-prompt editor
 routing.feature_auto_prompt_preview_description:
   en: Test-runs an auto-prompt rule against this task
+jev.tab_suggestions:
+  en: Suggestions
+jev.tab_automation:
+  en: Automation
+jev.tab_usage:
+  en: Usage
+jev.group_prompts:
+  en: Prompts
+jev.group_actions:
+  en: Actions
+jev.group_suggested_actions:
+  en: Suggested actions
+jev.no_enabled_actions:
+  en: Every suggested action is off. Enable actions in the Suggestions tab to let Jev run them automatically.
 auto_prompts.title:
   en: Auto prompts
 auto_prompts.description:
@@ -3266,6 +3280,8 @@ suggestions.automatic_actions_title:
   en: Automatic suggested actions
 suggestions.automatic_action_description:
   en: Opt in to run this suggestion automatically when Jev reaches the required probability (80% minimum).
+suggestions.action_description:
+  en: Jev may offer this as the next step after a turn settles.
 suggestions.choice_template:
   en: Decision reply
 suggestions.edit_prompt:

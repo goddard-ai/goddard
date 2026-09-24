@@ -323,6 +323,32 @@ const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 10] = [
     SettingsPage::Experiments,
 ];
 
+/// The Jev page's tabs — the section groups each one shows. The backend
+/// credentials and routing classes sit above the strip and stay visible on
+/// every tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum JevSettingsTab {
+    /// Suggested prompts plus the per-action switches for which suggestions
+    /// Jev may offer at all.
+    Suggestions,
+    /// Auto prompts and Jev-invoked suggested actions.
+    Automation,
+    /// Token spend summed from the daemon's decision log.
+    Usage,
+}
+
+impl JevSettingsTab {
+    pub(super) const ALL: [Self; 3] = [Self::Suggestions, Self::Automation, Self::Usage];
+
+    fn label(self) -> String {
+        match self {
+            Self::Suggestions => tr!("jev.tab_suggestions"),
+            Self::Automation => tr!("jev.tab_automation"),
+            Self::Usage => tr!("jev.tab_usage"),
+        }
+    }
+}
+
 /// The Experiments page's groups, in display order — the taxonomy the
 /// changelog's topic groups already use.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -456,6 +482,12 @@ impl SettingSearch {
 
     pub(super) fn hits(&self) -> usize {
         self.hits.get()
+    }
+
+    /// The ordinal the next row consumes — where the (page, ordinal)
+    /// anchor space currently stands in this pass.
+    fn ordinal(&self) -> usize {
+        self.rows.get()
     }
 
     /// The title and description match ranges when the row stays visible —
@@ -1091,6 +1123,18 @@ impl Waku {
                 .get(&(page, ordinal))
                 .cloned()
         });
+        // The Jev page only paints one tab's rows; a row jump must land on
+        // the tab that owns the ordinal or its anchor never re-binds.
+        if page == SettingsPage::Jev
+            && let Some(ordinal) = ordinal
+            && let Some((_, tab)) = self
+                .jev_tab_rows
+                .iter()
+                .take_while(|(start, _)| ordinal >= *start)
+                .last()
+        {
+            self.jev_settings_tab = *tab;
+        }
         self.settings_search.update(cx, |input, cx| input.clear(cx));
         self.open_settings_page(page, window, cx);
         if let Some(anchor) = anchor {
@@ -5583,21 +5627,112 @@ impl Waku {
     }
 
     /// The Jev page — the eval backend every eval-backed feature shares:
-    /// backend and credentials first, then the Auto routing experiment's
-    /// class-level targets. The page only exists in navigation while at
-    /// least one eval-backed experiment is on.
-    fn render_jev_settings(&self, search: &SettingSearch, cx: &mut Context<Self>) -> AnyElement {
+    /// backend credentials and the Auto routing experiment's class-level
+    /// targets up top, then a tab strip splitting the rest into
+    /// Suggestions, Automation, and Usage. The page only exists in
+    /// navigation while at least one eval-backed experiment is on.
+    fn render_jev_settings(
+        &mut self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let connection = self.render_model_routing_settings(theme, search, cx);
+
+        // Every section builds its rows even when its tab is not showing:
+        // the search anchors count row ordinals, and they only line up with
+        // the results column — which renders them all — if nothing skips.
+        let mut tab_rows = vec![(search.ordinal(), JevSettingsTab::Suggestions)];
+        let prompts = self.render_suggested_prompts_settings(theme, search, cx);
+        let actions = self.render_suggested_actions_settings(theme, search, cx);
+        tab_rows.push((search.ordinal(), JevSettingsTab::Automation));
+        let auto_prompts = self.render_auto_prompt_settings(search, cx);
+        let automatic = self.render_automatic_suggested_actions_settings(theme, search, cx);
+        tab_rows.push((search.ordinal(), JevSettingsTab::Usage));
+        let usage = self.render_jev_usage_settings(theme, search);
+        self.jev_tab_rows = tab_rows;
+
+        if search.active() {
+            return div()
+                .child(connection)
+                .children(prompts)
+                .children(actions)
+                .children(auto_prompts)
+                .children(automatic)
+                .children(usage)
+                .into_any_element();
+        }
+
+        let content = match self.jev_settings_tab {
+            JevSettingsTab::Suggestions => div().children(prompts).children(actions),
+            JevSettingsTab::Automation => div().children(auto_prompts).children(automatic),
+            JevSettingsTab::Usage => div().children(usage),
+        };
+
         div()
-            .child(self.render_model_routing_settings(Theme::current(cx), search, cx))
-            .child(self.render_auto_prompt_settings(search, cx))
+            .child(connection)
+            .child(self.render_jev_tab_strip(theme, cx))
+            .child(content)
             .into_any_element()
+    }
+
+    /// The Jev page's Suggestions/Automation/Usage switch — the same
+    /// segmented control the Git page uses for Worktrees/Branches.
+    fn render_jev_tab_strip(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+        div().mt(px(15.0)).flex().child(
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .rounded(px(6.0))
+                .p(px(2.0))
+                .bg(theme.inset)
+                .children(
+                    JevSettingsTab::ALL
+                        .into_iter()
+                        .map(|candidate| self.jev_tab_button(candidate, theme, cx)),
+                ),
+        )
+    }
+
+    fn jev_tab_button(
+        &self,
+        candidate: JevSettingsTab,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let selected = candidate == self.jev_settings_tab;
+        div()
+            .id(SharedString::from(format!("jev-tab-{candidate:?}")))
+            .h(px(20.0))
+            .px(px(10.0))
+            .rounded(px(5.0))
+            .flex()
+            .items_center()
+            .cursor_default()
+            .tab_index(0)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .text_size(sp(15.0))
+            .when(selected, |element| {
+                element.bg(theme.surface).text_color(theme.text)
+            })
+            .when(!selected, |element| {
+                element
+                    .text_color(theme.text_secondary)
+                    .hover(|style| style.text_color(theme.text))
+            })
+            .child(candidate.label())
+            .on_activation(cx, move |this, _, cx| {
+                this.jev_settings_tab = candidate;
+                cx.notify();
+            })
     }
 
     fn render_auto_prompt_settings(
         &self,
         search: &SettingSearch,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
         let theme = Theme::current(cx);
         let mut rows = Vec::new();
         for rule in &self.state.auto_prompts {
@@ -5661,7 +5796,7 @@ impl Waku {
             ));
         }
         let list = settings_row_card(rows, theme).map(|card| {
-            card.mt(px(15.0)).child(
+            card.child(
                 div()
                     .p(px(12.0))
                     .flex()
@@ -5678,12 +5813,13 @@ impl Waku {
                     )),
             )
         });
-        div()
-            .children(list)
-            .when(!search.active(), |element| {
-                element.children(self.render_auto_prompt_editor(cx))
-            })
-            .into_any_element()
+        let mut cards = Vec::new();
+        cards.extend(list.map(|card| card.into_any_element()));
+        if !search.active() {
+            cards.extend(self.render_auto_prompt_editor(cx));
+        }
+        settings_group(tr!("jev.group_prompts"), cards, theme)
+            .map(|group| div().mt(px(15.0)).child(group).into_any_element())
     }
 
     fn render_auto_prompt_editor(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -6683,8 +6819,79 @@ impl Waku {
                 cards.push(form.into_any_element());
             }
         }
-        settings_group(tr!("suggestions.settings_title"), cards, theme)
+        settings_group(tr!("jev.group_prompts"), cards, theme)
             .map(|group| div().mt(px(15.0)).child(group).into_any_element())
+    }
+
+    /// Flip one suggested action's visibility. Disabled actions stop
+    /// surfacing as chips and cannot be invoked by Jev, whatever automatic
+    /// threshold they carry; a live chip for the action clears with it.
+    fn set_suggested_action_enabled(
+        &mut self,
+        id: &'static str,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if enabled {
+            self.state.disabled_suggested_actions.remove(id);
+        } else {
+            self.state.disabled_suggested_actions.insert(id.to_owned());
+            if self
+                .action_suggestion
+                .as_ref()
+                .is_some_and(|suggestion| suggestion.action == id)
+            {
+                self.action_suggestion = None;
+            }
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// The Suggestions tab's Actions group — every action Jev can put
+    /// forward as a chip, each with a switch that takes it out of the
+    /// suggestion vocabulary entirely.
+    fn render_suggested_actions_settings(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let rows = action_predictions::ACTIONABLE_SUGGESTIONS
+            .iter()
+            .map(|&id| {
+                let enabled = !self.state.disabled_suggested_actions.contains(id);
+                let controls = settings_button(
+                    format!("suggested-action-toggle-{id}"),
+                    if enabled {
+                        tr!("auto_prompts.disable")
+                    } else {
+                        tr!("auto_prompts.enable")
+                    },
+                    true,
+                    false,
+                    true,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_suggested_action_enabled(id, !enabled, cx),
+                );
+                settings_row(
+                    "icons/zap.svg",
+                    action_predictions::suggested_action_title(id)?,
+                    tr!("suggestions.action_description"),
+                    controls,
+                    theme,
+                    search,
+                )
+            })
+            .collect();
+        let card = settings_row_card(rows, theme)?;
+        settings_group(
+            tr!("jev.group_actions"),
+            vec![card.into_any_element()],
+            theme,
+        )
+        .map(|group| div().mt(px(15.0)).child(group).into_any_element())
     }
 
     fn set_automatic_suggested_action(
@@ -6704,6 +6911,9 @@ impl Waku {
         cx.notify();
     }
 
+    /// The Automation tab's Suggested Actions group — only the actions
+    /// still enabled in the Suggestions tab, each carrying the opt-in and
+    /// probability floor for Jev to run it on its own.
     fn render_automatic_suggested_actions_settings(
         &self,
         theme: Theme,
@@ -6712,13 +6922,9 @@ impl Waku {
     ) -> Option<AnyElement> {
         let rows = action_predictions::AUTOMATIC_ACTIONS
             .iter()
-            .filter_map(|&id| {
-                let title = match id {
-                    "push" => tr!("suggestions.push"),
-                    "sync" => tr!("suggestions.sync"),
-                    "land" => tr!("suggestions.land"),
-                    _ => action_predictions::default_suggested_prompt(id)?,
-                };
+            .filter(|id| !self.state.disabled_suggested_actions.contains(**id))
+            .map(|&id| {
+                let title = action_predictions::suggested_action_title(id)?;
                 let threshold = self.state.automatic_suggested_actions.get(id).copied();
                 let controls = div()
                     .flex()
@@ -6786,15 +6992,26 @@ impl Waku {
                     search,
                 )
             })
-            .map(Some)
             .collect();
-        let card = settings_row_card(rows, theme)?;
-        settings_group(
-            tr!("suggestions.automatic_actions_title"),
-            vec![card.into_any_element()],
-            theme,
-        )
-        .map(|group| div().mt(px(15.0)).child(group).into_any_element())
+        let mut cards = Vec::new();
+        if let Some(card) = settings_row_card(rows, theme) {
+            cards.push(card.into_any_element());
+        } else if !search.active() {
+            cards.push(
+                div()
+                    .w_full()
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .px(px(20.0))
+                    .py(px(15.0))
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("jev.no_enabled_actions"))
+                    .into_any_element(),
+            );
+        }
+        settings_group(tr!("jev.group_suggested_actions"), cards, theme)
+            .map(|group| div().mt(px(15.0)).child(group).into_any_element())
     }
 
     fn experiment_card(
@@ -7997,50 +8214,54 @@ impl Waku {
             })
         });
 
-        // Token usage summed from the daemon's decision log — the all-calls
-        // total on top, then one row per feature that recorded calls. `None`
-        // until the scan answers, and an empty log renders no card at all.
-        let usage =
-            self.eval_usage_stats
-                .as_ref()
-                .filter(|stats| stats.totals.calls > 0)
-                .and_then(|stats| {
-                    let untracked = stats.totals.calls - stats.totals.calls_with_usage;
-                    let total_description = if untracked > 0 {
-                        tr!(
-                            "routing.usage_total_description_untracked",
-                            calls = stats.totals.calls,
-                            untracked = untracked
-                        )
-                    } else {
-                        tr!(
-                            "routing.usage_total_description",
-                            calls = stats.totals.calls
-                        )
-                    };
-                    let mut rows: Vec<Option<AnyElement>> = vec![settings_row(
-                        "icons/chart-column.svg",
-                        tr!("routing.usage_total"),
-                        total_description,
-                        eval_usage_label(&stats.totals, theme),
-                        theme,
-                        search,
-                    )];
-                    rows.extend(
-                        stats.features.iter().map(|(feature, totals)| {
-                            eval_feature_row(feature, totals, theme, search)
-                        }),
-                    );
-                    settings_row_card(rows, theme).map(|card| card.mt(px(15.0)).into_any_element())
-                });
-
         div()
             .children(credentials)
             .children(classes)
-            .children(self.render_suggested_prompts_settings(theme, search, cx))
-            .children(self.render_automatic_suggested_actions_settings(theme, search, cx))
-            .children(usage)
             .into_any_element()
+    }
+
+    /// The Usage tab's card — token spend summed from the daemon's decision
+    /// log, the all-calls total on top then one row per feature that
+    /// recorded calls. `None` until the scan answers, and an empty log
+    /// renders no card at all.
+    fn render_jev_usage_settings(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+    ) -> Option<AnyElement> {
+        self.eval_usage_stats
+            .as_ref()
+            .filter(|stats| stats.totals.calls > 0)
+            .and_then(|stats| {
+                let untracked = stats.totals.calls - stats.totals.calls_with_usage;
+                let total_description = if untracked > 0 {
+                    tr!(
+                        "routing.usage_total_description_untracked",
+                        calls = stats.totals.calls,
+                        untracked = untracked
+                    )
+                } else {
+                    tr!(
+                        "routing.usage_total_description",
+                        calls = stats.totals.calls
+                    )
+                };
+                let mut rows: Vec<Option<AnyElement>> = vec![settings_row(
+                    "icons/chart-column.svg",
+                    tr!("routing.usage_total"),
+                    total_description,
+                    eval_usage_label(&stats.totals, theme),
+                    theme,
+                    search,
+                )];
+                rows.extend(
+                    stats
+                        .features
+                        .iter()
+                        .map(|(feature, totals)| eval_feature_row(feature, totals, theme, search)),
+                );
+                settings_row_card(rows, theme).map(|card| card.mt(px(15.0)).into_any_element())
+            })
     }
 
     /// The class row's control: the shared model picker — a searchable

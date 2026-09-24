@@ -1232,9 +1232,17 @@ workspace.from_default: 从默认分支
 workspace.workspace: 工作区
 workspace.worktree: 工作树
 suggestions.tooltip: 建议的下一步
+jev.tab_suggestions: 建议
+jev.tab_automation: 自动化
+jev.tab_usage: 用量
+jev.group_prompts: 提示词
+jev.group_actions: 操作
+jev.group_suggested_actions: 建议操作
+jev.no_enabled_actions: 所有建议操作均已关闭。在“建议”标签页中启用后，Jev 才能自动执行。
 suggestions.settings_title: 建议提示词
 suggestions.automatic_actions_title: 自动执行的建议操作
 suggestions.automatic_action_description: 启用后，Jev 的概率达到设定阈值（最低 80%）时自动执行。
+suggestions.action_description: Jev 可在回合结束后将其建议为下一步。
 suggestions.choice_template: 选项回复
 suggestions.edit_prompt: 编辑
 suggestions.reset_prompt: 重置

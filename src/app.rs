@@ -3116,6 +3116,11 @@ pub struct Waku {
     /// The Commands settings page's open editor; `None` shows the list.
     custom_command_editor: Option<settings::CustomCommandEditor>,
     suggested_prompt_editor: Option<settings::SuggestedPromptEditor>,
+    /// The Jev settings page's active tab.
+    jev_settings_tab: settings::JevSettingsTab,
+    /// Each Jev tab's first settings-row ordinal, refreshed on every render
+    /// so a search-result jump can open the tab its target row lives on.
+    jev_tab_rows: Vec<(usize, settings::JevSettingsTab)>,
     /// The Daemon page's open remote-host editor; `None` shows the list.
     remote_host_editor: Option<settings::RemoteHostEditor>,
     /// The Skills page's library snapshot, scanned off-thread. Frames read
@@ -6376,6 +6381,8 @@ impl Waku {
                 keybindings: None,
                 custom_command_editor: None,
                 suggested_prompt_editor: None,
+                jev_settings_tab: settings::JevSettingsTab::Suggestions,
+                jev_tab_rows: Vec::new(),
                 remote_host_editor: None,
                 skills_catalog: None,
                 skills_catalogs: HashMap::new(),
