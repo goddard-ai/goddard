@@ -2124,6 +2124,8 @@ experiments.big_picture_description: 按 ⌘0 打开全窗口的会话卡片网�
 experiments.big_picture_title: 概览
 experiments.computer_use_description: 显示“电脑操作”设置页，并让会话通过内置助手驱动 Cua Driver 的截屏与输入。关闭此项会同时关闭电脑操作本身。
 experiments.computer_use_title: 电脑操作
+experiments.composer_drafts_description: 跨会话和设备保存并恢复未完成的输入框文本和附件。
+experiments.composer_drafts_title: 输入框草稿
 experiments.friends_description: 新增“设置 → 好友”页面，用于好友间文件传输 — 分享你的好友码、接受传入请求，并从侧边栏底部的圆环查看实时传输进度。
 experiments.friends_title: 好友
 experiments.gate_body: 这些是未完成功能。它们可能有缺陷、随时变更或移除，最坏情况下可能损坏你的数据。除非你知道自己在做什么，否则最好保持关闭。

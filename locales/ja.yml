@@ -2173,6 +2173,8 @@ experiments.big_picture_description: ⌘0 で全ウインドウのセッショ�
 experiments.big_picture_title: 全体表示
 experiments.computer_use_description: コンピュータ操作の設定ページを表示し、同梱のヘルパーを通じてセッションが Cua Driver のキャプチャと入力を操作できるようにします。オフにするとコンピュータ操作自体もオフになります。
 experiments.computer_use_title: コンピュータ操作
+experiments.composer_drafts_description: 未完成の入力欄テキストと添付ファイルを、セッションやデバイスをまたいで保存して復元します。
+experiments.composer_drafts_title: 入力欄の下書き
 experiments.friends_description: 設定 → フレンドのページです — フレンド間のファイル転送。フレンドコードを共有し、受信リクエストを承認し、サイドバーのフッターのリングで転送の進行を確認できます。
 experiments.friends_title: フレンド
 experiments.gate_body: これらは未完成の機能です。バグがあり、予告なく変更または削除される可能性があり、最悪の場合データを破損する可能性があります。内容を理解している場合を除き、オフのままにしておくのがおすすめです。
