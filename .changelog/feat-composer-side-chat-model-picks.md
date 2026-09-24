@@ -1,0 +1,1 @@
+- A side chat opened with a bare `/side` can now pick its own provider, model, reasoning effort, and agent preset before its first prompt — the composer chips stay editable until the chat starts, then lock as before. `/side <prompt>` keeps the inherited posture locked from the start.

@@ -1,0 +1,1 @@
+- Composer drafts — saving unfinished composer text and attachments across sessions and devices — moved behind Settings → Experiments → Composer drafts and now default off. Turn the experiment on to keep the Drafts page and pick up parked drafts where you left them.

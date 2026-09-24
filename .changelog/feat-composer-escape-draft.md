@@ -1,1 +1,1 @@
-- On the new task page, pressing Escape with text in the composer saves it as a draft — the payload parks on the Drafts page and the field clears.
+- With the Composer drafts experiment on, pressing Escape on the new task page with text in the composer saves it as a draft — the payload parks on the Drafts page and the field clears.

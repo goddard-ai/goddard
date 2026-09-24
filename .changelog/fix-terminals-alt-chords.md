@@ -1,0 +1,1 @@
+- Terminal Option chords on macOS now reach the shell the way it expects: ⌥←/⌥→ move by word and ⌥⌫ deletes one, instead of inserting the composed glyph or dropping the key.
