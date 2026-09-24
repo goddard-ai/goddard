@@ -3906,7 +3906,11 @@ impl Waku {
 
     /// Records a failed submission that is about to be unwound and therefore
     /// will not remain as a persisted turn.
-    fn track_active_turn_outcome(&self, session_id: Uuid, outcome: crate::analytics::TurnOutcome) {
+    pub(super) fn track_active_turn_outcome(
+        &self,
+        session_id: Uuid,
+        outcome: crate::analytics::TurnOutcome,
+    ) {
         if let Some(event) = self.active_turn_finished_event(session_id, outcome) {
             self.analytics.track(event);
         }
@@ -6597,7 +6601,7 @@ impl Waku {
             .then(|| self.session_model_combo(session))
             .flatten()
             .map(|(model_id, effort, fast)| (session.provider, model_id, effort, fast));
-        let (transcript_anchor, sent_message_id) =
+        let (transcript_anchor, sent_message_id, preparation_turn) =
             if let Some(session) = self.state.session_mut(session_id) {
                 // A hidden prompt is not user input: no title, no anchor, and no
                 // transcript row — the turn's work lands on the tail instead.
@@ -6622,9 +6626,10 @@ impl Waku {
                         turn_id,
                     }),
                     session.messages.last().map(|message| message.id),
+                    Some(turn_id),
                 )
             } else {
-                (None, None)
+                (None, None, None)
             };
         if let Some((provider, model_id, effort, fast)) = first_model_use {
             self.state
@@ -6710,7 +6715,13 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_submission_preparation(session_id, submission, prepared, cx);
+                waku.finish_submission_preparation(
+                    session_id,
+                    submission,
+                    prepared,
+                    preparation_turn,
+                    cx,
+                );
             });
         })
         .detach();
@@ -6721,9 +6732,27 @@ impl Waku {
         session_id: Uuid,
         submission: ComposerSubmission,
         prepared: anyhow::Result<PreparedSubmission>,
+        expected_turn: Option<Uuid>,
         cx: &mut Context<Self>,
     ) {
-        if !self.submission_preparations.contains(&session_id) {
+        // The marker alone cannot distinguish this preparation from a newer
+        // one a resubmission started after an abandon — the active turn's id
+        // can. A stale result carries a dead turn's workspace and provider;
+        // discard it and close the runtime it spawned.
+        let turn_matches = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| session.active_turn_id() == expected_turn);
+        if !self.submission_preparations.contains(&session_id) || !turn_matches {
+            if let Ok(PreparedSubmission {
+                driver: Some(Ok(prepared)),
+                ..
+            }) = prepared
+            {
+                prepared.handle.close();
+            }
             return;
         }
         let selected = self.state.selected_session == Some(session_id);
@@ -6782,9 +6811,10 @@ impl Waku {
             turn_effort,
         } = prepared;
         // The turn began at accept time; it must still be the untouched one
-        // this preparation belongs to. Cancellation is blocked while the
-        // preparation set holds the session, so a mismatch means the session
-        // was replaced under the preparation rather than a user action.
+        // this preparation belongs to. The guard above already discarded
+        // abandoned and superseded preparations, so a mismatch here means
+        // the session moved on under it — the provider reported the turn
+        // started, or another client settled it.
         let can_start = self
             .state
             .sessions
@@ -6793,7 +6823,9 @@ impl Waku {
             .is_some_and(|session| {
                 session.status == SessionStatus::Connecting
                     && session.turns.last().is_some_and(|turn| {
-                        turn.status == TurnStatus::Running && !turn.provider_turn_started
+                        Some(turn.id) == expected_turn
+                            && turn.status == TurnStatus::Running
+                            && !turn.provider_turn_started
                     })
             });
         if !can_start {

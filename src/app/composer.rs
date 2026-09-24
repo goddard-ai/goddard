@@ -5326,10 +5326,10 @@ impl Waku {
             focus_restore: composer.read(cx).focus(),
             id_prefix: if interactive { "" } else { "side-chat-" },
         };
-        let preparing = session.is_some_and(|session| {
-            self.submission_preparations.contains(&session.id)
-                || self.response_fork_preparations.contains_key(&session.id)
-        });
+        // A submission still preparing is stoppable — the busy session shows
+        // Stop — while a response fork has no abandon path at all.
+        let preparing = session
+            .is_some_and(|session| self.response_fork_preparations.contains_key(&session.id));
         let has_draft = !composer.read(cx).content(cx).trim().is_empty()
             || (interactive
                 && (!self.composer_attachments.is_empty()

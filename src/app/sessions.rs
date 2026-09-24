@@ -3914,7 +3914,9 @@ impl Waku {
 
     fn selected_escape_stop_target(&self) -> Option<EscapeStopTarget> {
         let session = self.selected_session()?;
-        (!self.submission_preparations.contains(&session.id) && session.status.is_busy())
+        // A session still preparing has no runtime to interrupt, but the
+        // wait itself is stoppable — Escape arms the same confirmation.
+        (self.submission_preparations.contains(&session.id) || session.status.is_busy())
             .then(|| EscapeStopTarget::for_session(session))
     }
 
@@ -5320,13 +5322,71 @@ impl Waku {
             .is_some_and(|since| since.elapsed() < CANCEL_DRAIN_TIMEOUT)
     }
 
+    /// A submission whose preparation the user stopped never reached a
+    /// provider. Its background work still runs to completion on the daemon —
+    /// `finish_submission_preparation` discards the result and closes a
+    /// provider that already spawned — but the eagerly-begun turn unwinds
+    /// now and the prompt returns to the composer for a resend with
+    /// different settings.
+    fn abandon_submission_preparation(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        // Goal operations accepted during preparation would otherwise start
+        // pursuing the moment a runtime installs; the user stopped the task.
+        self.pending_goal_operations.remove(&session_id);
+        let selected = self.state.selected_session == Some(session_id);
+        if selected {
+            self.sync_transcript_rows();
+        }
+        let previous_kinds = if selected {
+            self.transcript_row_kinds.borrow().clone()
+        } else {
+            Vec::new()
+        };
+        // The original submission is parked inside the discarded background
+        // task, so the unstarted turn's own message rebuilds the draft.
+        let resend = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(composer::undelivered_turn_resend);
+        self.track_active_turn_outcome(session_id, crate::analytics::TurnOutcome::Cancelled);
+        if let Some(session) = self.state.session_mut(session_id)
+            && session.status == SessionStatus::Connecting
+        {
+            if let Some(turn_id) = session.active_turn_id() {
+                session.unwind_unstarted_turn(turn_id);
+            }
+            session.status = SessionStatus::Idle;
+            session.updated_at = unix_time();
+        }
+        if selected {
+            if self
+                .transcript_anchor
+                .get()
+                .is_some_and(|anchor| anchor.session_id == session_id)
+            {
+                self.transcript_anchor.set(None);
+                self.transcript_anchor_following.set(false);
+            }
+            self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+            if let Some((_, _, submission)) = resend {
+                self.restore_composer_submission(submission, cx);
+            }
+        }
+        self.drain_pending_workspace_cleanups(cx);
+        self.state.mark_session_dirty(session_id);
+        self.save();
+        cx.notify();
+    }
+
     pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.escape_stop_confirmation.clear();
-        // Worktree/checkpoint preparation has no safe interrupt contract. The
-        // composer deliberately shows a spinner rather than Stop until the
-        // provider runtime exists, and the keyboard action follows the same
-        // boundary.
-        if self.submission_preparations.contains(&session_id) {
+        // Preparation's worktree, checkpoint, routing, and spawn work has no
+        // mid-flight interrupt, so Stop abandons the wait: the background
+        // result is discarded when it lands and the unstarted turn unwinds
+        // with its prompt back in the composer.
+        if self.submission_preparations.remove(&session_id) {
+            self.abandon_submission_preparation(session_id, cx);
             return;
         }
         let retain_runtime = self
