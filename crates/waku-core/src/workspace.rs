@@ -217,12 +217,16 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         WorkspaceOperation::InspectCommit { cwd } => WorkspaceResult::CommitSnapshot {
             snapshot: crate::git_commit::inspect(&cwd)?,
         },
-        WorkspaceOperation::InspectCheckoutStatus { cwd } => WorkspaceResult::CheckoutStatus {
-            status: crate::git_commit::checkout_status(&cwd)?,
-        },
-        WorkspaceOperation::InspectArchivePreview { cwd } => WorkspaceResult::ArchivePreview {
-            preview: crate::git_commit::archive_preview(&cwd)?,
-        },
+        WorkspaceOperation::InspectCheckoutStatus { cwd, base } => {
+            WorkspaceResult::CheckoutStatus {
+                status: crate::git_commit::checkout_status(&cwd, base.as_deref())?,
+            }
+        }
+        WorkspaceOperation::InspectArchivePreview { cwd, base } => {
+            WorkspaceResult::ArchivePreview {
+                preview: crate::git_commit::archive_preview(&cwd, base.as_deref())?,
+            }
+        }
         WorkspaceOperation::InspectReclaimable { cwd } => WorkspaceResult::Reclaimable {
             entries: inspect_reclaimable(&cwd),
         },

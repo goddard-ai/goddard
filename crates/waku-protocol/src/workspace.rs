@@ -807,16 +807,23 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
     },
     /// Lightweight dirty/unpushed status for sidebar badges; cheaper than
-    /// `InspectCommit`, which also computes diff numstats.
+    /// `InspectCommit`, which also computes diff numstats. `base` is the
+    /// worktree's recorded base branch: commits whose patch reached it under
+    /// a rewritten SHA — the base was rebased — don't count as unpushed.
     InspectCheckoutStatus {
         #[ts(type = "string")]
         cwd: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
     },
     /// The dirty-file list and unpushed commit subjects an archive
-    /// confirmation shows; `None` outside a work tree.
+    /// confirmation shows; `None` outside a work tree. `base` matches
+    /// `InspectCheckoutStatus`.
     InspectArchivePreview {
         #[ts(type = "string")]
         cwd: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
     },
     /// Reproducible-output directories (dependency installs, build
     /// artifacts) under `cwd` — git-ignored and on the daemon's

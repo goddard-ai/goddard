@@ -976,12 +976,15 @@ impl Waku {
             {
                 continue;
             }
-            let SessionWorkspace::Worktree { path, .. } = &session.workspace else {
+            let SessionWorkspace::Worktree {
+                path, base_branch, ..
+            } = &session.workspace
+            else {
                 continue;
             };
-            candidates.push((session.id, path.clone()));
+            candidates.push((session.id, path.clone(), base_branch.clone()));
         }
-        for (session_id, path) in candidates {
+        for (session_id, path, base) in candidates {
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
                 continue;
             };
@@ -1002,6 +1005,7 @@ impl Waku {
                             workspace.request(
                                 waku_client::WorkspaceOperation::InspectArchivePreview {
                                     cwd: path.clone(),
+                                    base,
                                 },
                             ),
                             Ok(waku_client::WorkspaceResult::ArchivePreview {

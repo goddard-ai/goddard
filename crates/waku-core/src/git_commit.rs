@@ -83,15 +83,17 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Snapshot> {
 }
 
 /// Dirty flag plus unpushed-commit count for sidebar badges — two cheap Git
-/// invocations, no diff numstats. `Ok(None)` outside a work tree.
-pub fn checkout_status(cwd: &Path) -> anyhow::Result<Option<CheckoutStatus>> {
+/// invocations, no diff numstats. `Ok(None)` outside a work tree. `base` is
+/// the worktree's recorded base branch; [`checkout_only_subjects`] uses it to
+/// excuse commits whose patch already landed there under a rewritten SHA.
+pub fn checkout_status(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<CheckoutStatus>> {
     if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
         .is_some_and(|answer| answer == "true")
     {
         return Ok(None);
     }
     let status = git_stdout(cwd, &["status", "--porcelain=v1", "--untracked-files=all"])?;
-    let unpushed_commits = checkout_only_subjects(cwd)?.len() as u64;
+    let unpushed_commits = checkout_only_subjects(cwd, base)?.len() as u64;
     Ok(Some(CheckoutStatus {
         uncommitted_changes: !status.is_empty(),
         unpushed_commits,
@@ -100,8 +102,8 @@ pub fn checkout_status(cwd: &Path) -> anyhow::Result<Option<CheckoutStatus>> {
 
 /// What archiving a checkout would stash: every dirty working-tree file and
 /// the subjects of commits on HEAD no other ref has. `Ok(None)` outside a
-/// work tree.
-pub fn archive_preview(cwd: &Path) -> anyhow::Result<Option<ArchivePreview>> {
+/// work tree. `base` is the worktree's recorded base branch.
+pub fn archive_preview(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<ArchivePreview>> {
     if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
         .is_some_and(|answer| answer == "true")
     {
@@ -121,7 +123,7 @@ pub fn archive_preview(cwd: &Path) -> anyhow::Result<Option<ArchivePreview>> {
         .collect();
     // Match `checkout_status`: commits only this checkout holds, and none at
     // all when the repository has no remote to push to.
-    let unpushed_commits = checkout_only_subjects(cwd)?;
+    let unpushed_commits = checkout_only_subjects(cwd, base)?;
     Ok(Some(ArchivePreview {
         files,
         unpushed_commits,
@@ -133,11 +135,17 @@ pub fn archive_preview(cwd: &Path) -> anyhow::Result<Option<ArchivePreview>> {
 /// checkout sits on is session-owned and excluded — it cannot vouch for
 /// safety — while commits merged into a base branch are already kept. Empty
 /// when the repository has no remote: there is nothing to push to.
-fn checkout_only_subjects(cwd: &Path) -> anyhow::Result<Vec<String>> {
+///
+/// Reachability cannot see through a rewrite: when the base branch is
+/// rebased, the pre-rewrite chain the checkout still carries is reachable
+/// from no ref and every one of its commits would be listed. `git cherry`
+/// against the resolved base marks each such commit `-` — its patch already
+/// landed under a new SHA — and those are dropped.
+fn checkout_only_subjects(cwd: &Path, base: Option<&str>) -> anyhow::Result<Vec<String>> {
     if git_stdout(cwd, &["remote"])?.is_empty() {
         return Ok(Vec::new());
     }
-    let mut args = vec!["log", "--format=%s", "HEAD", "--not"];
+    let mut args = vec!["log", "--format=%H%x00%s", "HEAD", "--not"];
     let exclude = git_optional_stdout(cwd, &["symbolic-ref", "-q", "--short", "HEAD"])?
         .map(|branch| format!("--exclude={branch}"));
     if let Some(exclude) = &exclude {
@@ -145,11 +153,23 @@ fn checkout_only_subjects(cwd: &Path) -> anyhow::Result<Vec<String>> {
     }
     args.extend(["--branches", "--tags", "--remotes"]);
     let log = git_optional_stdout(cwd, &args)?.unwrap_or_default();
-    Ok(log
+    let mut commits: Vec<(String, String)> = log
         .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(str::to_owned)
-        .collect())
+        .filter_map(|line| line.split_once('\0'))
+        .filter(|(_, subject)| !subject.trim().is_empty())
+        .map(|(sha, subject)| (sha.to_owned(), subject.to_owned()))
+        .collect();
+    if !commits.is_empty()
+        && let Some(base) = crate::git_panel::land_base(cwd, base)?
+        && let Some(cherry) = git_optional_stdout(cwd, &["cherry", &base, "HEAD"])?
+    {
+        let landed: std::collections::HashSet<&str> = cherry
+            .lines()
+            .filter_map(|line| line.strip_prefix("- "))
+            .collect();
+        commits.retain(|(sha, _)| !landed.contains(sha.as_str()));
+    }
+    Ok(commits.into_iter().map(|(_, subject)| subject).collect())
 }
 
 pub fn generate_message(
@@ -960,13 +980,18 @@ mod tests {
     #[test]
     fn checkout_status_reports_dirt_and_unpushed_commits() {
         let root = repository();
-        let status = checkout_status(&root).unwrap().unwrap();
+        let status = checkout_status(&root, None).unwrap().unwrap();
         assert!(!status.uncommitted_changes);
         // No remote configured: nothing can be pushed, so no count.
         assert_eq!(status.unpushed_commits, 0);
 
         fs::write(root.join("new.txt"), "untracked\n").unwrap();
-        assert!(checkout_status(&root).unwrap().unwrap().uncommitted_changes);
+        assert!(
+            checkout_status(&root, None)
+                .unwrap()
+                .unwrap()
+                .uncommitted_changes
+        );
 
         run_git(
             &root,
@@ -975,7 +1000,7 @@ mod tests {
         run_git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
         run_git(&root, &["add", "."]);
         run_git(&root, &["commit", "-m", "second"]);
-        let status = checkout_status(&root).unwrap().unwrap();
+        let status = checkout_status(&root, None).unwrap().unwrap();
         assert!(!status.uncommitted_changes);
         assert_eq!(status.unpushed_commits, 1);
     }
@@ -983,7 +1008,7 @@ mod tests {
     #[test]
     fn archive_preview_lists_dirty_files_and_unpushed_subjects() {
         let root = repository();
-        let preview = archive_preview(&root).unwrap().unwrap();
+        let preview = archive_preview(&root, None).unwrap().unwrap();
         assert!(preview.files.is_empty());
         assert!(preview.unpushed_commits.is_empty());
 
@@ -998,7 +1023,7 @@ mod tests {
         run_git(&root, &["commit", "-m", "add new.txt"]);
         fs::write(root.join("scratch.txt"), "scratch\n").unwrap();
 
-        let preview = archive_preview(&root).unwrap().unwrap();
+        let preview = archive_preview(&root, None).unwrap().unwrap();
         assert!(
             preview
                 .files
@@ -1029,9 +1054,15 @@ mod tests {
         run_git(&root, &["checkout", "-b", "session-branch"]);
         run_git(&root, &["commit", "--allow-empty", "-m", "session work"]);
 
-        let preview = archive_preview(&root).unwrap().unwrap();
+        let preview = archive_preview(&root, None).unwrap().unwrap();
         assert_eq!(preview.unpushed_commits, ["session work"]);
-        assert_eq!(checkout_status(&root).unwrap().unwrap().unpushed_commits, 1);
+        assert_eq!(
+            checkout_status(&root, None)
+                .unwrap()
+                .unwrap()
+                .unpushed_commits,
+            1
+        );
 
         run_git(&root, &["checkout", "main"]);
         run_git(
@@ -1040,13 +1071,19 @@ mod tests {
         );
         run_git(&root, &["checkout", "session-branch"]);
 
-        let preview = archive_preview(&root).unwrap().unwrap();
+        let preview = archive_preview(&root, None).unwrap().unwrap();
         assert!(preview.unpushed_commits.is_empty());
-        assert_eq!(checkout_status(&root).unwrap().unwrap().unpushed_commits, 0);
+        assert_eq!(
+            checkout_status(&root, None)
+                .unwrap()
+                .unwrap()
+                .unpushed_commits,
+            0
+        );
 
         run_git(&root, &["checkout", "--detach", "HEAD"]);
         assert!(
-            archive_preview(&root)
+            archive_preview(&root, None)
                 .unwrap()
                 .unwrap()
                 .unpushed_commits
@@ -1055,17 +1092,57 @@ mod tests {
     }
 
     #[test]
+    fn a_rebased_base_does_not_list_its_rewritten_commits() {
+        let root = repository();
+        run_git(
+            &root,
+            &["remote", "add", "origin", "https://example.com/repo.git"],
+        );
+        run_git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        run_git(&root, &["checkout", "-b", "dev"]);
+        fs::write(root.join("a.txt"), "a\n").unwrap();
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-m", "base one"]);
+        fs::write(root.join("b.txt"), "b\n").unwrap();
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-m", "base two"]);
+        run_git(&root, &["checkout", "-b", "session-branch"]);
+        run_git(&root, &["commit", "--allow-empty", "-m", "session work"]);
+
+        // Rewrite the base the way a rebase leaves it: same patches, new
+        // SHAs. The checkout still carries the old chain, so reachability
+        // alone reports it as unpushed.
+        run_git(&root, &["checkout", "dev"]);
+        run_git(&root, &["commit", "--amend", "-m", "base two (rebased)"]);
+        run_git(&root, &["checkout", "session-branch"]);
+
+        // A base that never received the patches keeps the warning.
+        let preview = archive_preview(&root, None).unwrap().unwrap();
+        assert_eq!(preview.unpushed_commits, ["session work", "base two"]);
+
+        let preview = archive_preview(&root, Some("dev")).unwrap().unwrap();
+        assert_eq!(preview.unpushed_commits, ["session work"]);
+        assert_eq!(
+            checkout_status(&root, Some("dev"))
+                .unwrap()
+                .unwrap()
+                .unpushed_commits,
+            1
+        );
+    }
+
+    #[test]
     fn archive_preview_is_none_outside_a_repository() {
         let root = std::env::temp_dir().join(format!("waku-preview-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
-        assert!(archive_preview(&root).unwrap().is_none());
+        assert!(archive_preview(&root, None).unwrap().is_none());
     }
 
     #[test]
     fn checkout_status_is_none_outside_a_repository() {
         let root = std::env::temp_dir().join(format!("waku-status-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
-        assert!(checkout_status(&root).unwrap().is_none());
+        assert!(checkout_status(&root, None).unwrap().is_none());
     }
 
     #[test]

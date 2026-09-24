@@ -647,7 +647,7 @@ pub fn rebase_onto(
 /// (`origin/HEAD`), then the branch the primary checkout holds, then
 /// `main`/`master`. The checkout's own branch never qualifies — being on the
 /// base means there is nothing to land.
-fn land_base(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<String>> {
+pub(crate) fn land_base(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<String>> {
     let current = git_optional_stdout(cwd, &["branch", "--show-current"])?
         .filter(|branch| !branch.is_empty());
     let usable = |candidate: Option<String>| -> anyhow::Result<Option<String>> {

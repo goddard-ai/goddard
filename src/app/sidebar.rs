@@ -2347,7 +2347,11 @@ impl Waku {
     /// Rows read only `sidebar_checkout_statuses`.
     fn ensure_sidebar_checkout_statuses(&self, cx: &mut Context<Self>) {
         // Group by owning daemon so remote checkouts resolve on their host.
-        let mut by_owner: HashMap<waku_client::DaemonKey, Vec<PathBuf>> = HashMap::new();
+        // Each path carries the session's recorded base branch: a commit
+        // whose patch reached the base under a rewritten SHA — the base was
+        // rebased — is not unpushed.
+        let mut by_owner: HashMap<waku_client::DaemonKey, Vec<(PathBuf, Option<String>)>> =
+            HashMap::new();
         for session in &self.state.sessions {
             if !session.has_started() {
                 continue;
@@ -2355,18 +2359,23 @@ impl Waku {
             let Some(path) = self.workspace_path_for_session(session) else {
                 continue;
             };
+            let base = match &session.workspace {
+                SessionWorkspace::Worktree { base_branch, .. } => base_branch.clone(),
+                _ => None,
+            };
             by_owner
                 .entry(self.session_host(session.id))
                 .or_default()
-                .push(path.to_path_buf());
+                .push((path.to_path_buf(), base));
         }
         for paths in by_owner.values_mut() {
-            paths.sort();
-            paths.dedup();
+            // A shared path keeps whichever session recorded a base.
+            paths.sort_by(|left, right| left.0.cmp(&right.0).then(right.1.cmp(&left.1)));
+            paths.dedup_by(|candidate, kept| candidate.0 == kept.0);
         }
 
         // Sort by owner so the fingerprint is independent of map order.
-        let mut owned_paths: Vec<(waku_client::DaemonKey, Vec<PathBuf>)> =
+        let mut owned_paths: Vec<(waku_client::DaemonKey, Vec<(PathBuf, Option<String>)>)> =
             by_owner.into_iter().collect();
         owned_paths.sort_by_key(|(owner, _)| *owner);
         let mut fingerprint = 0xc8ec_07a7_5a7a_5ca1;
@@ -2378,9 +2387,14 @@ impl Waku {
                     fingerprint = mix_uuid(fingerprint, *host);
                 }
             }
-            for path in paths {
+            for (path, base) in paths {
                 for byte in path.as_os_str().as_encoded_bytes() {
                     fingerprint = mix(fingerprint, u64::from(*byte));
+                }
+                if let Some(base) = base {
+                    for byte in base.as_bytes() {
+                        fingerprint = mix(fingerprint, u64::from(*byte));
+                    }
                 }
                 fingerprint = mix(fingerprint, 0xff);
             }
@@ -2408,7 +2422,7 @@ impl Waku {
         for (owner, paths) in owned_paths {
             match self.daemons.supervisor(owner) {
                 Some(supervisor) => scans.push((supervisor, paths)),
-                None => offline.extend(paths),
+                None => offline.extend(paths.into_iter().map(|(path, _)| path)),
             }
         }
         cx.spawn(async move |waku, cx| {
@@ -2418,12 +2432,13 @@ impl Waku {
                     let mut statuses = HashMap::new();
                     for (supervisor, paths) in scans {
                         let workspace = waku_client::WorkspaceClient::new(supervisor.client());
-                        for path in paths {
+                        for (path, base) in paths {
                             if let Ok(waku_client::WorkspaceResult::CheckoutStatus {
                                 status: Some(status),
                             }) = workspace.request(
                                 waku_client::WorkspaceOperation::InspectCheckoutStatus {
                                     cwd: path.clone(),
+                                    base,
                                 },
                             ) {
                                 statuses.insert(path, status);

@@ -1916,8 +1916,10 @@ impl Waku {
         // is the user's own git state — archive never touches it, so dirty
         // files and unpushed commits are nothing to warn about. An active
         // turn is still worth confirming: archiving stops it.
-        let Some(workspace) = (match &session.workspace {
-            SessionWorkspace::Worktree { path, .. } => Some(path.clone()),
+        let Some((workspace, base)) = (match &session.workspace {
+            SessionWorkspace::Worktree {
+                path, base_branch, ..
+            } => Some((path.clone(), base_branch.clone())),
             _ => None,
         }) else {
             if busy && self.archive_dialog.is_none() {
@@ -1952,7 +1954,10 @@ impl Waku {
                 .background_executor()
                 .spawn(async move {
                     match workspace_client.request(
-                        waku_client::WorkspaceOperation::InspectArchivePreview { cwd: workspace },
+                        waku_client::WorkspaceOperation::InspectArchivePreview {
+                            cwd: workspace,
+                            base,
+                        },
                     ) {
                         Ok(waku_client::WorkspaceResult::ArchivePreview { preview }) => preview,
                         _ => None,
@@ -2222,8 +2227,10 @@ impl Waku {
         let busy = session.is_busy();
         // Same split as archive: only a worktree gets a preview. A local
         // checkout is the user's own git state — sweeping never touches it.
-        let Some(workspace) = (match &session.workspace {
-            SessionWorkspace::Worktree { path, .. } => Some(path.clone()),
+        let Some((workspace, base)) = (match &session.workspace {
+            SessionWorkspace::Worktree {
+                path, base_branch, ..
+            } => Some((path.clone(), base_branch.clone())),
             _ => None,
         }) else {
             if busy && self.archive_dialog.is_none() {
@@ -2257,7 +2264,10 @@ impl Waku {
                 .background_executor()
                 .spawn(async move {
                     match workspace_client.request(
-                        waku_client::WorkspaceOperation::InspectArchivePreview { cwd: workspace },
+                        waku_client::WorkspaceOperation::InspectArchivePreview {
+                            cwd: workspace,
+                            base,
+                        },
                     ) {
                         Ok(waku_client::WorkspaceResult::ArchivePreview { preview }) => preview,
                         _ => None,
