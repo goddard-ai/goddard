@@ -1,0 +1,1 @@
+- Toggle incognito on an unstarted task with `/incognito`, remove the incognito chip with its close control, and see “New incognito task” in the header.

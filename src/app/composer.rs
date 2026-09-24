@@ -3778,11 +3778,8 @@ impl Waku {
         );
     }
 
-    /// `/incognito [prompt]` — flag the current draft so the task it starts
-    /// stays in memory only. A bare invocation just flags the draft; a
-    /// prompt submits as the draft's first turn. Incognito is fixed at
-    /// creation, so on a started session the command is consumed with an
-    /// explanation rather than reaching the provider.
+    /// `/incognito [prompt]` toggles the current draft's incognito state.
+    /// A prompt submits as its first turn; started sessions cannot change it.
     fn execute_incognito_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
         let Some(incognito_prompt) = crate::composer_complete::parse_incognito_submission(prompt)
         else {
@@ -3793,7 +3790,7 @@ impl Waku {
             // the flag rides the overlay's pending new-task destination and
             // lands on whatever session the submit creates.
             if self.big_picture.is_open() {
-                self.big_picture.new_task_incognito = true;
+                self.big_picture.new_task_incognito = !self.big_picture.new_task_incognito;
                 self.composer.update(cx, |input, cx| input.clear(cx));
                 if let Some(prompt) = incognito_prompt {
                     self.submit_composer_submission(ComposerSubmission::plain(prompt), cx);
@@ -3808,31 +3805,42 @@ impl Waku {
             self.show_toast(tr!("commands.incognito_too_late"));
             return true;
         }
-        if session.incognito {
-            self.composer.update(cx, |input, cx| input.clear(cx));
-            if let Some(prompt) = incognito_prompt {
-                self.submit_composer_submission_to(
-                    session.id,
-                    ComposerSubmission::plain(prompt),
-                    cx,
-                );
-            }
-            return true;
-        }
         let session_id = session.id;
+        let was_incognito = session.incognito;
         let draft_key = crate::persistence::ComposerDraftKey::for_session(session);
         self.state
             .session_mut(session_id)
-            .map(|session| session.incognito = true);
-        // Flagging purges the persisted draft row — unsent incognito text
-        // lives only in the mounted composer.
-        self.remove_composer_draft(draft_key, cx);
+            .map(|session| session.incognito = !was_incognito);
+        if was_incognito {
+            self.schedule_composer_draft_save(cx);
+        } else {
+            // Incognito drafts never leave a persisted composer row.
+            self.remove_composer_draft(draft_key, cx);
+        }
         self.composer.update(cx, |input, cx| input.clear(cx));
         if let Some(prompt) = incognito_prompt {
             self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
         }
         cx.notify();
         true
+    }
+
+    fn disable_composer_incognito(&mut self, cx: &mut Context<Self>) {
+        if self.big_picture.is_open() && self.big_picture.target().is_none() {
+            self.big_picture.new_task_incognito = false;
+        } else if let Some(session) = self
+            .composer_session()
+            .filter(|session| session.incognito && !session.has_started())
+        {
+            let session_id = session.id;
+            self.state
+                .session_mut(session_id)
+                .map(|session| session.incognito = false);
+            self.schedule_composer_draft_save(cx);
+        } else {
+            return;
+        }
+        cx.notify();
     }
 
     /// Bridge Codex's native `/goal` command without starting a turn. Reads run
@@ -4006,10 +4014,9 @@ impl Waku {
         cx.notify();
     }
 
-    /// The composer's incognito marker: a non-interactive chip, since the
-    /// flag is fixed at creation and there is nothing to toggle. It also
-    /// shows on Big Picture's untargeted composer while the overlay's
-    /// pending new-task destination is flagged.
+    /// Incognito status for the current draft, with a close control while it
+    /// can still be changed. Big Picture's untargeted composer uses its
+    /// pending new-task destination flag.
     fn render_composer_incognito_chip(
         &self,
         controls: &ComposerControls,
@@ -4024,12 +4031,21 @@ impl Waku {
             return None;
         }
         let theme = Theme::current(cx);
+        let can_disable = controls.interactive
+            && (controls
+                .session
+                .is_some_and(|session| session.incognito && !session.has_started())
+                || (self.big_picture.is_open()
+                    && self.big_picture.target().is_none()
+                    && self.big_picture.new_task_incognito));
+        let weak = cx.entity().downgrade();
         Some(
             div()
                 .id(controls.chip_id("composer-incognito"))
                 .h(px(22.0))
                 .px(px(6.0))
                 .rounded(px(6.0))
+                .group("composer-incognito-chip")
                 .flex_none()
                 .flex()
                 .items_center()
@@ -4039,6 +4055,37 @@ impl Waku {
                 .text_color(theme.text_secondary)
                 .child(icon("icons/hat-glasses.svg", 11.0, theme.text_secondary))
                 .child(tr!("session.incognito"))
+                .when(can_disable, |chip| {
+                    chip.child(
+                        div()
+                            .id(controls.chip_id("composer-incognito-disable"))
+                            .ml(px(1.0))
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .rounded(px(4.0))
+                            .opacity(0.0)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .tab_index(0)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()).opacity(1.0))
+                            .hover(|element| element.bg(theme.overlay_strong))
+                            .group_hover("composer-incognito-chip", |element| element.opacity(1.0))
+                            .child(icon("icons/x.svg", 9.0, theme.text_secondary))
+                            .tooltip(Tooltip::text(tr!("common.close")))
+                            .on_click(move |_, _, cx| {
+                                let _ =
+                                    weak.update(cx, |this, cx| this.disable_composer_incognito(cx));
+                            })
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.disable_composer_incognito(cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    )
+                })
                 .tooltip(Tooltip::text(tr!("session.incognito_hint")))
                 .into_any_element(),
         )

@@ -5296,7 +5296,13 @@ impl Waku {
             tr!("projects.title")
         } else {
             session
-                .map(localized_session_title)
+                .map(|session| {
+                    if session.display_title() == AgentSession::DEFAULT_TITLE && session.incognito {
+                        tr!("session.new_incognito_task")
+                    } else {
+                        localized_session_title(session)
+                    }
+                })
                 .unwrap_or_else(|| tr!("session.new_task"))
         };
         let agent_preset_label = session

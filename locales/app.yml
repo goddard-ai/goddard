@@ -1829,6 +1829,8 @@ common.rename:
 
 session.new_task:
   en: New task
+session.new_incognito_task:
+  en: New incognito task
 session.incognito:
   en: Incognito
 session.incognito_hint:
