@@ -1,0 +1,1 @@
+- The task drawer now shows a GitHub inbox bell at its top-right — badged when unread notifications exist — that opens the notifications inbox on tap.
