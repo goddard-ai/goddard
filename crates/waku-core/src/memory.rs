@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 use waku_protocol::eval::EvalQuestion;
-use waku_protocol::model::{DriverEvent, MessageRole, ProviderKind};
+use waku_protocol::model::{DriverEvent, MessageRole, ProviderKind, ProviderResumeCursor};
 
 use crate::driver::{self, DriverStartOptions, event_channel};
 use crate::eval::EvalDecisionRecord;
@@ -69,6 +69,19 @@ const MAX_COMMIT_REFS: usize = 16;
 /// History depth searched per side when matching an orphaned SHA to its
 /// rewritten successor by subject.
 const SUCCESSOR_SCAN_DEPTH: usize = 300;
+/// Provider sessions the daemon itself created for background work are
+/// recorded in this file — beside the daemon's `settings.json`, like
+/// `eval-decisions.jsonl` — so the resume catalog can hide them even where
+/// the transport has no session delete, or the delete fails.
+const HIDDEN_SESSIONS_FILE: &str = "hidden-provider-sessions.json";
+/// One tombstone lands per distillation pass; the bound keeps the file small
+/// while staying years deep. Provider-side deletes are the primary cleanup —
+/// an evicted entry only resurfaces if its delete had also failed.
+const MAX_HIDDEN_SESSIONS: usize = 2048;
+/// Serializes tombstone updates: workers for different projects can finish
+/// headless runs at the same time, and a lost update would resurface a
+/// session that should stay hidden.
+static HIDDEN_SESSIONS_LOCK: Mutex<()> = Mutex::new(());
 
 /// What the distiller sees per session: messages already considered stay
 /// below `position`; only the tail is new.
@@ -1106,6 +1119,59 @@ fn save_state(store: &Path, state: &MemoryState) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The daemon-owned tombstone file's home.
+fn hidden_sessions_path() -> PathBuf {
+    waku_protocol::settings::DaemonSettings::default_path()
+        .parent()
+        .map(|dir| dir.join(HIDDEN_SESSIONS_FILE))
+        .unwrap_or_else(|| PathBuf::from(HIDDEN_SESSIONS_FILE))
+}
+
+fn read_hidden_sessions(path: &Path) -> Vec<ProviderResumeCursor> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Every provider session the daemon has hidden from the resume catalog.
+/// The catalog reads this fresh per request — the file is small and the
+/// listing already walks provider directories.
+pub(crate) fn hidden_provider_sessions() -> Vec<ProviderResumeCursor> {
+    read_hidden_sessions(&hidden_sessions_path())
+}
+
+/// Record a headless run's provider session so `/resume` never offers it,
+/// no matter whether the transport's own delete works. Best-effort: a failed
+/// write just leaves the provider-side delete as the cleanup.
+fn hide_provider_session(cursor: ProviderResumeCursor) {
+    let _guard = HIDDEN_SESSIONS_LOCK.lock();
+    let _ = hide_provider_session_at(&hidden_sessions_path(), cursor);
+}
+
+fn hide_provider_session_at(path: &Path, cursor: ProviderResumeCursor) -> anyhow::Result<()> {
+    let mut hidden = read_hidden_sessions(path);
+    // Cursors for one provider session can differ in secondary fields
+    // (Claude re-emits `Connected` once `resume_at` resolves); the resume
+    // catalog matches on provider plus native id, so dedupe the same way.
+    if hidden.iter().any(|entry| {
+        entry.provider() == cursor.provider() && entry.native_id() == cursor.native_id()
+    }) {
+        return Ok(());
+    }
+    hidden.push(cursor);
+    if hidden.len() > MAX_HIDDEN_SESSIONS {
+        hidden.drain(..hidden.len() - MAX_HIDDEN_SESSIONS);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("tmp");
+    std::fs::write(&temporary, serde_json::to_vec_pretty(&hidden)?)?;
+    std::fs::rename(temporary, path)?;
+    Ok(())
+}
+
 /// Resolve a provider binary the way the daemon does, including user
 /// overrides, without holding the backend handle.
 fn provider_binary(
@@ -1185,6 +1251,14 @@ fn collect_distill_text(
             );
         }
         match receiver.recv_timeout(remaining.min(Duration::from_secs(30))) {
+            Ok(DriverEvent::Connected { provider_cursor }) => {
+                // Tombstone the provider session the moment it exists: the
+                // resume catalog must never offer a headless run, including
+                // one still in flight or one whose transport cannot delete.
+                if let Some(cursor) = provider_cursor {
+                    hide_provider_session(cursor);
+                }
+            }
             Ok(DriverEvent::TextDelta(delta)) => text.push_str(&delta),
             Ok(DriverEvent::TurnFinished { .. }) | Ok(DriverEvent::ProcessExited) => break,
             Ok(DriverEvent::Error(error))
@@ -1290,6 +1364,34 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].ends_with("uses bun for scripts"));
         std::fs::remove_dir_all(&store).ok();
+    }
+
+    #[test]
+    fn hidden_sessions_dedupe_and_round_trip() {
+        let dir = std::env::temp_dir().join(format!("waku-memory-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hidden.json");
+        let cursor =
+            ProviderResumeCursor::from_session_id(ProviderKind::Claude, Uuid::new_v4().to_string());
+        hide_provider_session_at(&path, cursor.clone()).unwrap();
+        // A re-emitted cursor with resolved secondary fields is one session.
+        hide_provider_session_at(
+            &path,
+            ProviderResumeCursor::Claude {
+                session_id: cursor.native_id().to_owned(),
+                resume_at: Some("msg-1".into()),
+            },
+        )
+        .unwrap();
+        hide_provider_session_at(
+            &path,
+            ProviderResumeCursor::from_session_id(ProviderKind::Codex, "thread-1".into()),
+        )
+        .unwrap();
+        let hidden = read_hidden_sessions(&path);
+        assert_eq!(hidden.len(), 2);
+        assert!(hidden.contains(&cursor));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

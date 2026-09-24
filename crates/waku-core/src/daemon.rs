@@ -2250,7 +2250,7 @@ impl Backend for WakuBackend {
                         .cmp(&a.updated_at)
                         .then_with(|| a.title.cmp(&b.title))
                 });
-                let imported = {
+                let mut imported = {
                     let state = self.task_state.lock();
                     state
                         .sessions
@@ -2259,6 +2259,14 @@ impl Backend for WakuBackend {
                         .map(|cursor| (cursor.provider(), cursor.native_id().to_owned()))
                         .collect::<HashSet<_>>()
                 };
+                // Daemon-spawned background sessions (memory distillation) are
+                // tombstoned so a missing or failed provider-side delete can
+                // never make one resumable.
+                imported.extend(
+                    crate::memory::hidden_provider_sessions()
+                        .iter()
+                        .map(|cursor| (cursor.provider(), cursor.native_id().to_owned())),
+                );
                 catalog.sessions.retain(|session| {
                     !imported.contains(&(session.provider(), session.cursor.native_id().to_owned()))
                 });
