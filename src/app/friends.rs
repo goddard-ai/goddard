@@ -121,7 +121,7 @@ impl Waku {
             return;
         };
         cx.spawn(async move |this, cx| {
-            if answer.await.ok() != Some(1) {
+            if answer.await.ok().map(prompt_answer_index) != Some(1) {
                 return;
             }
             let _ = this.update(cx, |this, cx| this.friends_command(command, cx));

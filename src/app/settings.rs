@@ -11950,7 +11950,7 @@ impl Waku {
                                 );
                                 let key = key.clone();
                                 cx.spawn(async move |this, cx| {
-                                    if answer.await.ok() != Some(1) {
+                                    if answer.await.ok().map(prompt_answer_index) != Some(1) {
                                         return;
                                     }
                                     let _ = this.update(cx, |this, cx| {
@@ -13000,7 +13000,7 @@ impl Waku {
                     );
                     let id = id.clone();
                     cx.spawn(async move |this, cx| {
-                        if answer.await.ok() != Some(1) {
+                        if answer.await.ok().map(prompt_answer_index) != Some(1) {
                             return;
                         }
                         let _ = this.update(cx, |this, cx| {

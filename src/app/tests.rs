@@ -33,7 +33,8 @@ use super::{
     maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
     navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
     navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
-    previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
+    previous_navigation_turn_index, prompt_answer_index, push_reasoning_delta,
+    push_transcript_activity,
     response_footer_message_index, response_row_turn_id, retain_fading_working_indicator,
     row_starts_followup_turn, session_accepts_turn_output, session_is_reapable,
     settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
@@ -2059,6 +2060,15 @@ fn task_notification_tags_route_to_the_corresponding_task() {
     assert_eq!(task_id_from_notification_tag(&tag), Some(session_id));
     assert_eq!(task_id_from_notification_tag("waku-task:not-a-uuid"), None);
     assert_eq!(task_id_from_notification_tag(&session_id.to_string()), None);
+}
+
+#[test]
+fn prompt_answers_normalize_to_the_button_index() {
+    assert_eq!(prompt_answer_index(0), 0);
+    assert_eq!(prompt_answer_index(1), 1);
+    // macOS resolves with `NSAlertFirstButtonReturn + index`.
+    assert_eq!(prompt_answer_index(1000), 0);
+    assert_eq!(prompt_answer_index(1001), 1);
 }
 
 #[test]

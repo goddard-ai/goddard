@@ -542,7 +542,7 @@ impl Waku {
             return;
         };
         cx.spawn(async move |waku, cx| {
-            if answer.await.ok() != Some(1) {
+            if answer.await.ok().map(prompt_answer_index) != Some(1) {
                 return;
             }
             let _ = waku.update(cx, |waku, cx| {

@@ -1215,7 +1215,7 @@ impl Waku {
         );
         let operation = waku_client::WorkspaceOperation::ReviewReject { cwd, sha };
         cx.spawn(async move |waku, cx| {
-            if answer.await.ok() != Some(1) {
+            if answer.await.ok().map(prompt_answer_index) != Some(1) {
                 return;
             }
             let _ = waku.update(cx, |waku, cx| {
@@ -1301,7 +1301,7 @@ impl Waku {
         let base = base.to_owned();
         let review_branch = review_branch.to_owned();
         cx.spawn(async move |waku, cx| {
-            if answer.await.ok() != Some(1) {
+            if answer.await.ok().map(prompt_answer_index) != Some(1) {
                 return;
             }
             let _ = waku.update(cx, |waku, cx| {
@@ -1663,7 +1663,7 @@ impl Waku {
             cx,
         );
         cx.spawn(async move |waku, cx| {
-            if answer.await.ok() != Some(1) {
+            if answer.await.ok().map(prompt_answer_index) != Some(1) {
                 return;
             }
             let _ = waku.update(cx, |waku, cx| {
@@ -1768,7 +1768,7 @@ impl Waku {
             cx,
         );
         cx.spawn(async move |waku, cx| {
-            if answer.await.ok() != Some(1) {
+            if answer.await.ok().map(prompt_answer_index) != Some(1) {
                 return;
             }
             let _ = waku.update(cx, |waku, cx| {
