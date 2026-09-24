@@ -5495,9 +5495,15 @@ impl Waku {
             cx.subscribe(
                 &branch_search,
                 |this: &mut Self, search, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Edited)
-                        && this.branch_picker_mode == BranchPickerMode::Browse
+                    if !matches!(event, InputEvent::Edited) {
+                        return;
+                    }
+                    if this.open_keyboard_options_chord()
+                        == Some(keyboard_options::KeyboardOptionsChord::Branch)
                     {
+                        this.refilter_branch_keyboard_options(cx);
+                    }
+                    if this.branch_picker_mode == BranchPickerMode::Browse {
                         if search.read(cx).content().trim().is_empty() {
                             this.branch_picker_highlight = None;
                         } else {

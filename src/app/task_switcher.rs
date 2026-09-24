@@ -307,6 +307,7 @@ impl Waku {
         if self.command_palette.is_open() {
             self.toggle_command_palette_action(&ToggleCommandPalette, window, cx);
         }
+        let keyboard_options_open = self.keyboard_options_is_open();
         let open_menus = self
             .menus
             .borrow()
@@ -314,13 +315,16 @@ impl Waku {
             .filter(|menu| menu.is_open())
             .cloned()
             .collect::<Vec<_>>();
-        self.task_switcher.previous_focus = if open_menus.is_empty() {
+        self.task_switcher.previous_focus = if open_menus.is_empty() && !keyboard_options_open {
             window.focused(cx)
         } else if self.settings_page.is_some() {
             Some(self.settings_focus.clone())
         } else {
             Some(self.composer_focus(cx))
         };
+        if keyboard_options_open {
+            self.dismiss_keyboard_options(false, window, cx);
+        }
 
         self.task_switcher.open = true;
         self.task_switcher.ordered_session_ids = ordered;

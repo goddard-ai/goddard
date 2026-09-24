@@ -865,6 +865,27 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-t", NewTerminal, None),
         KeyBinding::new("secondary-/", ToggleModelPicker, None),
         KeyBinding::new("secondary-alt-shift-n", ToggleBranchPicker, None),
+        // With an option modal's search field focused, the list keys reach
+        // it as the field's own bound actions before any listener above can
+        // see the keystroke. Rebinding them under the modal's context hands
+        // them back to the list — same trick the menu's panel-field
+        // bindings use, and likewise registered after input::init so the
+        // tie goes here.
+        KeyBinding::new(
+            "down",
+            crate::ui::menu::SelectNextEntry,
+            Some("KeyboardOptions > TextInput"),
+        ),
+        KeyBinding::new(
+            "up",
+            crate::ui::menu::SelectPreviousEntry,
+            Some("KeyboardOptions > TextInput"),
+        ),
+        KeyBinding::new(
+            "enter",
+            crate::ui::menu::ConfirmEntry,
+            Some("KeyboardOptions > TextInput"),
+        ),
         KeyBinding::new("secondary-.", ToggleRuntimeModePicker, None),
         // ⌘⇧. flips the draft between this Mac and the sandbox VM — the
         // Environment section of the same menu, without opening it.

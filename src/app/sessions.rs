@@ -1406,6 +1406,15 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A second ⌘⌥N during the hold steps the open picker rather than
+        // reopening it; the release that ends the hold commits the pick.
+        if self.cycle_keyboard_options_chord(
+            keyboard_options::KeyboardOptionsChord::Workspace,
+            window,
+            cx,
+        ) {
+            return;
+        }
         if self.settings_page.is_some() {
             return;
         }
@@ -1489,6 +1498,7 @@ impl Waku {
             items,
             highlighted,
             keyboard_options::KeyboardOptionFocus::Modal,
+            Some(keyboard_options::KeyboardOptionsChord::Workspace),
             window,
             cx,
         );
@@ -4428,6 +4438,7 @@ impl Waku {
             items,
             highlighted,
             keyboard_options::KeyboardOptionFocus::Modal,
+            None,
             window,
             cx,
         );
@@ -4441,9 +4452,51 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A second ⌘⌥⇧N during the hold steps the open picker rather than
+        // reopening it; the release that ends the hold commits the pick.
+        if self.cycle_keyboard_options_chord(
+            keyboard_options::KeyboardOptionsChord::Branch,
+            window,
+            cx,
+        ) {
+            return;
+        }
         if self.settings_page.is_some() {
             return;
         }
+        let Some((items, highlighted, workspace_path)) = self.branch_keyboard_option_items("", cx)
+        else {
+            return;
+        };
+        self.refresh_workspace_branch_snapshot(&workspace_path, cx);
+        self.branch_picker_mode = BranchPickerMode::Browse;
+        self.branch_search.update(cx, |input, cx| input.clear(cx));
+        self.branch_create_input
+            .update(cx, |input, cx| input.clear(cx));
+        self.open_keyboard_options(
+            tr!("keyboard_options.choose_branch").to_string(),
+            items,
+            highlighted,
+            keyboard_options::KeyboardOptionFocus::Modal,
+            Some(keyboard_options::KeyboardOptionsChord::Branch),
+            window,
+            cx,
+        );
+    }
+
+    /// The workspace subject's branch rows for the ⌘⌥⇧N modal: the checkout
+    /// candidates plus the create row, filtered and ranked by `query`. Also
+    /// returns the workspace path (for the opener's snapshot refresh) and
+    /// the index of the currently selected branch's row.
+    fn branch_keyboard_option_items(
+        &mut self,
+        query: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<(
+        Vec<keyboard_options::KeyboardOptionItem>,
+        Option<usize>,
+        std::path::PathBuf,
+    )> {
         let (subject_session_id, subject_project_id) = self.workspace_subject();
         let session = subject_session_id.and_then(|session_id| {
             self.state
@@ -4453,14 +4506,11 @@ impl Waku {
                 .cloned()
         });
         if session.as_ref().is_some_and(AgentSession::is_busy) || self.branch_operation_pending {
-            return;
+            return None;
         }
-        let Some(project) = subject_project_id
+        let project = subject_project_id
             .and_then(|project_id| self.state.projects.iter().find(|p| p.id == project_id))
-            .filter(|project| !project.is_projectless())
-        else {
-            return;
-        };
+            .filter(|project| !project.is_projectless())?;
         let workspace = session
             .as_ref()
             .map(|session| session.workspace.clone())
@@ -4470,10 +4520,7 @@ impl Waku {
             .and_then(|session| session.workspace.path())
             .unwrap_or(&project.path)
             .to_path_buf();
-        let Some(snapshot) = self.branch_snapshot_for_workspace(&workspace_path, cx) else {
-            return;
-        };
-        self.refresh_workspace_branch_snapshot(&workspace_path, cx);
+        let snapshot = self.branch_snapshot_for_workspace(&workspace_path, cx)?;
         let picks_base = worktrees::workspace_picks_base(&workspace, session.as_ref());
         let selected_branch = match &workspace {
             SessionWorkspace::Local => snapshot.display_branch().map(str::to_owned),
@@ -4501,7 +4548,7 @@ impl Waku {
         let branches = composer::visible_branch_entries(
             &snapshot.branches,
             &selected_branch,
-            "",
+            query,
             now_unix_secs,
         );
         let mut items = branches
@@ -4539,18 +4586,23 @@ impl Waku {
                     if choice.selected
             )
         });
-        self.branch_picker_mode = BranchPickerMode::Browse;
-        self.branch_search.update(cx, |input, cx| input.clear(cx));
-        self.branch_create_input
-            .update(cx, |input, cx| input.clear(cx));
-        self.open_keyboard_options(
-            tr!("keyboard_options.choose_branch").to_string(),
-            items,
-            highlighted,
-            keyboard_options::KeyboardOptionFocus::Modal,
-            window,
-            cx,
-        );
+        Some((items, highlighted, workspace_path))
+    }
+
+    /// A search edit in the open ⌘⌥⇧N modal rebuilds its rows in place.
+    pub(super) fn refilter_branch_keyboard_options(&mut self, cx: &mut Context<Self>) {
+        let query = self.branch_search.read(cx).content().trim().to_owned();
+        let Some((items, highlighted, _)) = self.branch_keyboard_option_items(&query, cx) else {
+            return;
+        };
+        let highlighted = if query.is_empty() {
+            highlighted
+        } else {
+            items
+                .iter()
+                .position(|item| matches!(item, keyboard_options::KeyboardOptionItem::Choice(_)))
+        };
+        self.replace_keyboard_options_items(items, highlighted, cx);
     }
 
     /// Primary modifier + . opens access and environment choices in a
@@ -4809,6 +4861,7 @@ impl Waku {
             items,
             highlighted,
             keyboard_options::KeyboardOptionFocus::Modal,
+            None,
             window,
             cx,
         );
@@ -4895,6 +4948,7 @@ impl Waku {
             items,
             highlighted,
             keyboard_options::KeyboardOptionFocus::Modal,
+            None,
             window,
             cx,
         );

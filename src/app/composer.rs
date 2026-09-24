@@ -5538,6 +5538,11 @@ impl Waku {
             self.menu_handle_with(BRANCH_PICKER_MENU_ID, cx, move |open, window, cx| {
                 let _ = toggle_weak.update(cx, |this, cx| {
                     if open {
+                        // The menu shares its search field with the ⌘⌥⇧N
+                        // modal — one surface owns it at a time.
+                        if this.keyboard_options_is_open() {
+                            this.dismiss_keyboard_options(false, window, cx);
+                        }
                         this.branch_picker_mode = BranchPickerMode::Browse;
                         this.branch_picker_highlight = None;
                         let project_name = {

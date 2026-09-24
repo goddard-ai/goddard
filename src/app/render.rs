@@ -562,6 +562,7 @@ impl Render for Waku {
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
+                .on_modifiers_changed(cx.listener(Self::keyboard_options_modifiers_changed))
                 .capture_key_down(cx.listener(Self::sidebar_shortcuts_key_down))
                 .child(self.render_settings(window, cx))
                 .children(toast)
@@ -738,6 +739,7 @@ impl Render for Waku {
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
+            .on_modifiers_changed(cx.listener(Self::keyboard_options_modifiers_changed))
             .capture_key_down(cx.listener(Self::sidebar_shortcuts_key_down))
             // Enter-outside-the-composer and type-to-focus are the last
             // listeners on every dispatch path through the workspace: an
