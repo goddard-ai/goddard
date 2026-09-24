@@ -1809,15 +1809,72 @@ impl Waku {
                 {
                     return None;
                 }
-                // Centered on the first text line: the reply column pads 4px,
-                // then half a body line reaches the middle of the first word.
-                let line_height = self
-                    .scaled_markdown_metrics(MarkdownMetrics::BODY)
-                    .line_height;
+                // Follow the first rendered line, which may be a heading or
+                // compact status notice rather than body-sized Markdown.
+                let (top_inset, line_height) = self
+                    .selected_session()
+                    .and_then(|session| {
+                        let message = session
+                            .messages
+                            .iter()
+                            .find(|message| message.id == dot.message_id)?;
+                        let content = message.visible_content();
+                        if matches!(
+                            message.notice.as_ref(),
+                            Some(TranscriptNotice::Status { .. })
+                        ) {
+                            Some((8.0, 16.0)) // notice row padding + centered text line
+                        } else if message.role == MessageRole::Assistant {
+                            let heading_level = content
+                                .lines()
+                                .find(|line| !line.trim().is_empty())
+                                .and_then(|line| {
+                                    let hashes = line.chars().take_while(|ch| *ch == '#').count();
+                                    (1..=6)
+                                        .contains(&hashes)
+                                        .then(|| {
+                                            line[hashes..].starts_with(' ').then_some(hashes as u8)
+                                        })
+                                        .flatten()
+                                });
+                            heading_level.map_or_else(
+                                || {
+                                    Some((
+                                        4.0,
+                                        self.scaled_markdown_metrics(MarkdownMetrics::BODY)
+                                            .line_height,
+                                    ))
+                                },
+                                |level| {
+                                    let metrics =
+                                        self.scaled_markdown_metrics(MarkdownMetrics::BODY);
+                                    let scale = match level {
+                                        1 => 1.45,
+                                        2 => 1.28,
+                                        3 => 1.14,
+                                        4 => 1.05,
+                                        _ => 1.0,
+                                    };
+                                    let size = (metrics.text_size * scale).round();
+                                    let line_height = (size * 1.42).round();
+                                    Some((4.0 + if level <= 2 { 4.0 } else { 0.0 }, line_height))
+                                },
+                            )
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            4.0,
+                            self.scaled_markdown_metrics(MarkdownMetrics::BODY)
+                                .line_height,
+                        )
+                    });
                 let element = div()
                     .absolute()
                     .left(px(-(NEW_CONTENT_DOT_GAP + NEW_CONTENT_DOT_SIZE)))
-                    .top(px(4.0 + (line_height - NEW_CONTENT_DOT_SIZE) / 2.0))
+                    .top(px(top_inset + (line_height - NEW_CONTENT_DOT_SIZE) / 2.0))
                     .size(px(NEW_CONTENT_DOT_SIZE))
                     .rounded_full()
                     .bg(theme.info);
