@@ -514,7 +514,7 @@ settings.commands:
 settings.terminal:
   en: Terminal
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme agents agent tools permissions environment sandbox qa review train
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel preview math latex formula expression markdown file rendered source transcript content token speed tokens per second rate footer
 settings.terminal_keywords:
@@ -528,7 +528,7 @@ settings.skills_keywords:
 settings.usage_keywords:
   en: usage tokens cost spend cache daily chart model breakdown history claude codex
 settings.daemon_keywords:
-  en: daemon server remote web network expose origin token port websocket qa branch review train
+  en: daemon server remote web network expose origin token port websocket
 settings.computer_use_keywords:
   en: computer use screen recording accessibility apps control codex
 settings.commands_keywords:
@@ -627,6 +627,8 @@ diagnostics.copy_record:
   en: Copy record
 settings.group_sessions:
   en: Sessions
+settings.group_agents:
+  en: Agents
 settings.group_git:
   en: Git
 settings.group_notifications:

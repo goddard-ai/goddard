@@ -1868,6 +1868,7 @@ impl Waku {
                     search,
                 )
             },
+            self.sandbox_default_card(theme, search, cx),
             {
                 let navigation = self.state.archive_navigation;
                 let weak = cx.entity().downgrade();
@@ -2074,6 +2075,16 @@ impl Waku {
             ));
         }
 
+        // What agents running inside tasks may do — daemon-owned so every
+        // attached client honors the same switches.
+        let agent_cards: Vec<AnyElement> = [
+            self.agent_tools_card(theme, search, cx),
+            self.agent_settings_card(theme, search, cx),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
         let git_cards: Vec<AnyElement> = [
             setting_card(
                 "icons/git-branch.svg",
@@ -2226,6 +2237,7 @@ impl Waku {
                 theme,
                 search,
             ),
+            self.qa_branch_card(theme, search),
         ]
         .into_iter()
         .flatten()
@@ -2460,6 +2472,7 @@ impl Waku {
             .children(
                 [
                     settings_group(tr!("settings.group_sessions"), session_cards, theme),
+                    settings_group(tr!("settings.group_agents"), agent_cards, theme),
                     settings_group(tr!("settings.group_git"), git_cards, theme),
                     settings_group(
                         tr!("settings.group_notifications"),
@@ -3514,11 +3527,7 @@ impl Waku {
 
     fn render_daemon_settings(&self, search: &SettingSearch, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let agent_tools_card = self.agent_tools_card(theme, search, cx);
         let keep_awake_card = self.keep_awake_card(theme, search, cx);
-        let qa_branch_card = self.qa_branch_card(theme, search);
-        let agent_settings_card = self.agent_settings_card(theme, search, cx);
-        let sandbox_default_card = self.sandbox_default_card(theme, search, cx);
         let remote_hosts_card = self.render_remote_hosts_card(theme, search, cx);
         let build_card = self.render_build_card(theme, search, cx);
         if self.daemon.is_externally_managed() {
@@ -3550,10 +3559,6 @@ impl Waku {
                 .children(remote_hosts_card)
                 .children(external_card)
                 .children(keep_awake_card)
-                .children(qa_branch_card)
-                .children(agent_tools_card)
-                .children(agent_settings_card)
-                .children(sandbox_default_card)
                 .children(build_card)
                 .into_any_element();
         }
@@ -4219,10 +4224,6 @@ impl Waku {
             .children(credentials_card)
             .children(remote_hosts_card)
             .children(keep_awake_card)
-            .children(qa_branch_card)
-            .children(agent_tools_card)
-            .children(agent_settings_card)
-            .children(sandbox_default_card)
             .children(build_card)
             .into_any_element()
     }

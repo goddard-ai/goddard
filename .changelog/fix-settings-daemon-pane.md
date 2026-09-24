@@ -1,0 +1,1 @@
+- Settings → Daemon now shows only connection settings — the listener, credentials, remote hosts, keep-awake, and build info. Agent tools and Agent settings moved to a new Agents group in Settings → General, and New task environment and QA branch joined the Sessions and Git groups there.

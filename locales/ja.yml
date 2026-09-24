@@ -249,7 +249,7 @@ settings.computer_use: コンピュータ操作
 settings.commands: コマンド
 settings.terminal: ターミナル
 settings.diagnostics: 診断
-settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン サウンド 音 音量 通知 完了 ターン sound audio notification volume トラックパッド スワイプ 3本指 ジェスチャー ナビゲーション 戻る 進む trackpad swipe gesture サイドバー ショートカット タグ 数字 sidebar shortcut tags 下書き ドラフト 未送信 プレビュー preview 休眠 ドーマント アーカイブ ワークスペース デフォルト ワークツリー ブランチ マージ 同期 コンフリクト 解決 worktree merge sync conflict resolve archive dormant
+settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン サウンド 音 音量 通知 完了 ターン sound audio notification volume トラックパッド スワイプ 3本指 ジェスチャー ナビゲーション 戻る 進む trackpad swipe gesture サイドバー ショートカット タグ 数字 sidebar shortcut tags 下書き ドラフト 未送信 プレビュー preview 休眠 ドーマント アーカイブ ワークスペース デフォルト ワークツリー ブランチ マージ 同期 コンフリクト 解決 worktree merge sync conflict resolve archive dormant エージェント 環境 サンドボックス qa レビュー
 settings.appearance_keywords: 外観 テーマ システム ライト ダーク 言語 英語 中国語 簡体字 日本語 フォント 等幅 サイズ 文字 エディタ サイドバー 透明 境界線 区切り線 太い 細い プレビュー preview 数学 数式 math latex markdown ファイル レンダリング ソース トランスクリプト トークン 速度 token speed footer
 settings.terminal_keywords: ターミナル 端末 シェル コンソール フォント サイズ 文字 等幅 リンク 修飾キー クリック 開く マウス プログラム vim htop コピー 選択 クリップボード 貼り付け terminal shell font size link modifier click open mouse copy select clipboard paste
 settings.diagnostics_keywords: 診断 エラー ログ クラッシュ パニック 再起動 復旧 デーモン レポート トラブルシューティング 問題 diagnostics errors error log logs crash panic restart recovery daemon report troubleshooting problem
@@ -267,6 +267,7 @@ diagnostics.sessions_resumed_many: "%{count} 件のセッションを再開し�
 diagnostics.panic_unnamed: デーモンのパニック
 diagnostics.copy_record: 記録をコピー
 settings.group_sessions: セッション
+settings.group_agents: エージェント
 settings.group_git: Git
 settings.group_notifications: 通知
 settings.group_transcript: トランスクリプト
@@ -274,7 +275,7 @@ settings.providers_keywords: プロバイダー エージェント モデル CLI
 settings.skills: スキル
 settings.skills_keywords: スキル ライブラリ エージェント 無効 有効 削除 claude codex cursor opencode pi amp 共有 fx devin
 settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシュ 日別 グラフ モデル 内訳 履歴 claude codex
-settings.daemon_keywords: デーモン サーバー リモート ウェブ ネットワーク 公開 オリジン トークン ポート websocket qa ブランチ レビュー
+settings.daemon_keywords: デーモン サーバー リモート ウェブ ネットワーク 公開 オリジン トークン ポート websocket
 settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセシビリティ アプリ 制御 codex
 settings.jev: Jev
 settings.jev_keywords: jev typesafe 評価 モデル 自動 ルーティング ルーター バックエンド APIキー 認証情報 vercel cloudflare ポリシー eval routing
