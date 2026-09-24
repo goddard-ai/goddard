@@ -4608,8 +4608,9 @@ impl WakuBackend {
     }
 
     /// The session's first prompt already went out clean; its context
-    /// blocks — the project map, then project memory — follow as a hidden
-    /// steer so provider title generation never sees them. Delivery
+    /// blocks — the project map, project memory, and enabled tool guidance —
+    /// follow as a hidden steer so provider title generation never sees them.
+    /// Delivery
     /// confirms on the `steerAccepted` echo: memory's injected flag is set
     /// there, and a rejected steer leaves the session eligible so the next
     /// prompt retries.
@@ -4631,10 +4632,19 @@ impl WakuBackend {
         }
         let memory = self.memory.context_block(session_id, task);
         let parent_index = self.side_chat_parent_block(session_id);
+        let computer_use = self.settings.get().computer_use_enabled.then(|| {
+            crate::computer_use::skill_root_path().ok().map(|root| {
+                format!(
+                    "When the user asks you to interact with a local app, use `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
+                    root.join("goddard-computer-use/SKILL.md").display()
+                )
+            })
+        }).flatten();
         let block = [
             map,
             memory.clone(),
             parent_index.clone(),
+            computer_use,
             self.agent_surface_block(session_id, driver),
         ]
         .into_iter()

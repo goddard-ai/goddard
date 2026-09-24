@@ -228,7 +228,6 @@ impl AmpDriver {
                 // A branch replays its retained history in the first prompt,
                 // because Amp has no way to seed a thread otherwise.
                 let mut fork_context = fork_context;
-                let mut computer_use_announced = false;
                 while let Ok(message) = command_rx.recv() {
                     match message {
                         CommandMessage::Prompt(text) => {
@@ -238,17 +237,6 @@ impl AmpDriver {
                                     crate::amp_session::prompt_with_fork_context(&context, &text)
                                 })
                                 .unwrap_or(text);
-                            let text = if let Some(config) = computer_use_config.as_ref()
-                                && !computer_use_announced
-                            {
-                                computer_use_announced = true;
-                                format!(
-                                    "[Goddard Computer Use: When I ask you to interact with a local app, use goddard_js_repl. Read the skill at {} for its API.]\n\n{text}",
-                                    config.skill_path.display()
-                                )
-                            } else {
-                                text
-                            };
                             *writer_turn.lock() = true;
                             let _ = writer_events.send(DriverEvent::TurnStarted);
                             let written = write_line(

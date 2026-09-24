@@ -590,21 +590,9 @@ impl PiDriver {
                 // an RPC on the live session rather than a restart.
                 let mut current_model = model;
                 let mut current_effort = reasoning_effort;
-                let mut computer_use_announced = false;
                 while let Ok(message) = command_rx.recv() {
                     match message {
                         CommandMessage::Prompt(prompt) => {
-                            let prompt = if let Some(skill) = omp_computer_use_skill.as_ref()
-                                && !computer_use_announced
-                            {
-                                computer_use_announced = true;
-                                format!(
-                                    "[Goddard Computer Use: When I ask you to interact with a local app, use goddard_js_repl. Read the skill at {} for its API.]\n\n{prompt}",
-                                    skill.display()
-                                )
-                            } else {
-                                prompt
-                            };
                             let result = send_prompt(
                                 &mut stdin,
                                 &writer_pending,

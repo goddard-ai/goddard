@@ -929,8 +929,6 @@ async fn run_sdk_connection(
             )
             .await;
             let mut fork_context = fork_context;
-            let mut computer_use_announced = false;
-
             while let Ok(command) = commands.recv().await {
                 match command {
                     CommandMessage::Prompt(text) => {
@@ -954,17 +952,6 @@ async fn run_sdk_connection(
                             first.clone()
                         } else {
                             None
-                        };
-                        let text = if let Some(config) = native_computer_use.as_ref()
-                            && !computer_use_announced
-                        {
-                            computer_use_announced = true;
-                            format!(
-                                "[Goddard Computer Use: When I ask you to interact with a local app, use the goddard_js_repl MCP tool. Read the skill at {} for its API.]\n\n{text}",
-                                config.skill_path.display()
-                            )
-                        } else {
-                            text
                         };
                         let _ = events.send(DriverEvent::TurnStarted);
                         if let Err(error) = send_prompt(

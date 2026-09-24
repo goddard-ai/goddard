@@ -1,0 +1,1 @@
+- Keep Goddard Computer Use guidance out of the first message so it does not interfere with generated task titles.
