@@ -5560,6 +5560,25 @@ impl Waku {
         let selected_branch = workspace_selected_branch(&snapshot, &workspace, picks_base);
         let branch_label = format_workspace_branch_label(&snapshot, &workspace, picks_base);
 
+        // A detached HEAD reads as a bare SHA; name the base it sits on.
+        let branch_label = if snapshot.current.is_none() {
+            let base = match &workspace {
+                SessionWorkspace::NewWorktree { base_branch }
+                | SessionWorkspace::Worktree { base_branch, .. } => base_branch
+                    .clone()
+                    .or_else(|| snapshot.default_branch.clone()),
+                SessionWorkspace::Local => snapshot.default_branch.clone(),
+            };
+            match base {
+                Some(base) if base != selected_branch => {
+                    format!("{selected_branch} ({base})")
+                }
+                _ => selected_branch.clone(),
+            }
+        } else {
+            selected_branch.clone()
+        };
+
         let weak = cx.entity().downgrade();
         let search = self.branch_search.clone();
         let create_input = self.branch_create_input.clone();
