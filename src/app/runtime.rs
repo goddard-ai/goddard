@@ -12,6 +12,17 @@ const MAX_RUNTIME_AUTO_RESUMES: u8 = 3;
 /// mailbox) otherwise leaves the persisted turn `Running` forever.
 const UNSTARTED_TURN_TIMEOUT: Duration = Duration::from_secs(60);
 
+fn interrupted_planning_turn_has_no_file_changes(session: &AgentSession, turn_id: Uuid) -> bool {
+    session.phase == Some(waku_protocol::routing::SessionPhase::Planning)
+        && !session.transcript_blocks.iter().any(|block| {
+            block.turn_id == Some(turn_id)
+                && block
+                    .activities
+                    .iter()
+                    .any(|activity| !activity.file_changes.is_empty())
+        })
+}
+
 /// Whether a daemon-restart loss can auto-resume this session: a live
 /// provider turn was in flight and the provider session can be reloaded
 /// from its persisted cursor. A `Connecting` turn the provider never
@@ -3621,17 +3632,22 @@ impl Waku {
                     turn.turn_count
                 });
             if let Some(turn_count) = interrupted_turn_count {
-                let project_path = session
-                    .workspace
-                    .path()
-                    .map(Path::to_path_buf)
-                    .or_else(|| project_paths.get(&session.project_id).cloned());
-                checkpoint = project_path.map(|project_path| PendingCheckpointCapture {
-                    session_id,
-                    turn_count,
-                    project_path,
-                    untouched: false,
+                let skip_checkpoint = session.turns.last().is_some_and(|turn| {
+                    interrupted_planning_turn_has_no_file_changes(session, turn.id)
                 });
+                if !skip_checkpoint {
+                    let project_path = session
+                        .workspace
+                        .path()
+                        .map(Path::to_path_buf)
+                        .or_else(|| project_paths.get(&session.project_id).cloned());
+                    checkpoint = project_path.map(|project_path| PendingCheckpointCapture {
+                        session_id,
+                        turn_count,
+                        project_path,
+                        untouched: false,
+                    });
+                }
             }
             for message in &mut session.messages {
                 message.streaming = false;
@@ -4419,6 +4435,12 @@ impl Waku {
             return;
         };
         let turn_count = turn.turn_count;
+        // Read-only planning turns have nothing for Git to capture.
+        if turn.status == TurnStatus::Interrupted
+            && interrupted_planning_turn_has_no_file_changes(session, turn.id)
+        {
+            return;
+        }
         // Incognito sessions leave no artifacts behind — a checkpoint is a
         // git ref that outlives the session.
         if session.incognito {
