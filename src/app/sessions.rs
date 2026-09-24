@@ -4114,7 +4114,7 @@ impl Waku {
 
     fn remember_selected_model_traits(&mut self) {
         let Some((provider, model, reasoning_effort, service_tier, context_window)) =
-            self.composer_session().and_then(|session| {
+            self.model_picker_session().and_then(|session| {
                 Some((
                     session.provider,
                     self.model_for_session(session)?.to_owned(),
@@ -4243,7 +4243,7 @@ impl Waku {
         // A switch in flight owns the session's provider row until the
         // compaction lands; a second pick must not race its mutation.
         if self
-            .composer_session()
+            .model_picker_session()
             .is_some_and(|session| self.provider_switch_in_flight.contains(&session.id))
         {
             return;
@@ -4251,8 +4251,11 @@ impl Waku {
         // A different provider on a started session is a provider switch, not
         // a model change: the pick waits on the compaction warning dialog,
         // which applies the whole row if confirmed.
-        if self.model_picker_target == model_picker::ModelPickerTarget::Composer
-            && let Some(session) = self.composer_session()
+        if matches!(
+            self.model_picker_target,
+            model_picker::ModelPickerTarget::Composer
+                | model_picker::ModelPickerTarget::SideChat(_)
+        ) && let Some(session) = self.model_picker_session()
             && session.provider != provider
             && session.provider_locked()
             && session.detail_loaded
@@ -4273,7 +4276,7 @@ impl Waku {
         // Picking a concrete model exits an Auto draft even when provider and
         // model happen to match the draft's last-used carryover.
         let Some((session_id, provider_changed, was_routed)) = self
-            .composer_session()
+            .model_picker_session()
             .filter(|session| {
                 session.can_choose_model(provider)
                     && (session.auto_route
@@ -4297,7 +4300,7 @@ impl Waku {
         // Effort and tier come from the row; the context window stays a
         // per-model memory like before.
         let (_, _, context_window) = self.state.model_traits_for(provider, &model);
-        if let Some(session) = self.composer_session_mut() {
+        if let Some(session) = self.model_picker_session_mut() {
             session.provider = provider;
             session.model = Some(model.clone());
             session.auto_route = false;
@@ -4343,12 +4346,12 @@ impl Waku {
     /// runs. Only drafts reach here — a started session's picker does not
     /// offer the row.
     pub(super) fn choose_auto_route(&mut self, cx: &mut Context<Self>) {
-        if self.model_picker_target != model_picker::ModelPickerTarget::Composer
+        if self.model_picker_target == model_picker::ModelPickerTarget::AutomationEditor
             || !self.auto_route_available()
         {
             return;
         }
-        let Some(session) = self.composer_session_mut() else {
+        let Some(session) = self.model_picker_session_mut() else {
             return;
         };
         if session.auto_route {
@@ -4763,6 +4766,9 @@ impl Waku {
         // A pick from the chord dismisses an open options modal rather than
         // leaving it stacked over the choice it just applied.
         self.dismiss_keyboard_options(false, window, cx);
+        // The chords belong to the session column's composer — a side chat's
+        // open model menu must not redirect them onto its own session.
+        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
         // ⌘⌥1 is the stable shortcut for Auto routing. Favorites begin at
         // ⌘⌥2 so this chord never depends on the user's starred models.
         if action.index == 0 {
@@ -4836,6 +4842,9 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
+        // Composer-scoped like the favorite chords it mixes: a side chat's
+        // open model menu must not redirect the cycle onto its session.
+        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
         let Some(session) = self.composer_session() else {
             return;
         };
@@ -5209,7 +5218,7 @@ impl Waku {
     }
 
     pub(super) fn set_reasoning_effort(&mut self, effort: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.composer_session_mut()
+        if let Some(session) = self.model_picker_session_mut()
             && session.reasoning_effort.as_deref() != Some(effort.as_str())
         {
             let session_id = session.id;
@@ -5225,7 +5234,7 @@ impl Waku {
     /// Clears an explicitly chosen OpenCode variant back to the base model's
     /// `default` selection.
     pub(super) fn clear_reasoning_effort(&mut self, cx: &mut Context<Self>) {
-        if let Some(session) = self.composer_session_mut()
+        if let Some(session) = self.model_picker_session_mut()
             && super::model_picker::supports_reasoning_default_reset(session.provider)
             && session.reasoning_effort.is_some()
         {
@@ -5240,7 +5249,7 @@ impl Waku {
     }
 
     pub(super) fn set_service_tier(&mut self, tier: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.composer_session_mut()
+        if let Some(session) = self.model_picker_session_mut()
             && session.service_tier.as_deref() != Some(tier.as_str())
         {
             let session_id = session.id;
@@ -5254,7 +5263,7 @@ impl Waku {
     }
 
     pub(super) fn set_context_window(&mut self, window: String, cx: &mut Context<Self>) {
-        if let Some(session) = self.composer_session_mut()
+        if let Some(session) = self.model_picker_session_mut()
             && session.context_window.as_deref() != Some(window.as_str())
         {
             let session_id = session.id;
@@ -5279,7 +5288,7 @@ impl Waku {
         if !selectable {
             return;
         }
-        if let Some(session) = self.composer_session_mut()
+        if let Some(session) = self.model_picker_session_mut()
             && session.provider == ProviderKind::DeepSeek
             && !session.has_started()
             && !session.is_busy()

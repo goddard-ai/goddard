@@ -262,9 +262,11 @@ pub(super) enum ComposerSubmitAction {
 
 /// Which composer a card wraps — and how its chip row behaves. The
 /// session column's field is fully interactive; a side chat's panel copy
-/// renders the same card bound to the chat's own session with every
-/// picker inert, so the chips read as the posture the chat inherited
-/// rather than controls.
+/// renders the same card bound to the chat's own session, inert except
+/// for the model pickers while the chat has not started — there is no
+/// provider conversation to preserve yet, so provider, model, effort,
+/// and preset stay pickable until the first prompt locks the posture the
+/// chat launches with.
 #[derive(Clone)]
 pub(super) enum ComposerCard {
     Main,
@@ -281,12 +283,43 @@ pub(super) enum ComposerCard {
 pub(super) struct ComposerControls<'a> {
     pub session: Option<&'a AgentSession>,
     pub interactive: bool,
+    /// The model family of pickers — provider/model, traits, agent
+    /// preset — answers while true: the main card always, a side chat
+    /// only until its first prompt locks the posture it launched with.
+    /// Environment and incognito stay on `interactive`: they describe
+    /// the workspace the chat inherited, not its model.
+    pub model_pickers: bool,
+    /// The session a model menu's picks land on: `None` is the composer
+    /// session, a side chat's own session otherwise.
+    pub model_edit_session: Option<Uuid>,
+    /// The composer input a model menu hands focus back to when it
+    /// closes — the card's own field, so a panel copy restores its side
+    /// chat rather than the session column's.
+    pub focus_restore: FocusHandle,
     pub id_prefix: &'static str,
 }
 
 impl ComposerControls<'_> {
     pub(super) fn chip_id(&self, id: &str) -> SharedString {
         format!("{}{id}", self.id_prefix).into()
+    }
+
+    /// A model menu's handle id: the shared composer menu, or a per-side-
+    /// chat id so each panel's open/close drives its own session's
+    /// [`ModelPickerTarget`].
+    fn model_menu_id(&self, base: &str) -> SharedString {
+        match self.model_edit_session {
+            Some(session_id) => format!("side-chat-{session_id}-{base}").into(),
+            None => base.into(),
+        }
+    }
+
+    /// The [`ModelPickerTarget`] this card's model menus write to while
+    /// open — a side chat's own session, or the composer session.
+    fn model_pick_target(&self) -> ModelPickerTarget {
+        self.model_edit_session
+            .map(ModelPickerTarget::SideChat)
+            .unwrap_or(ModelPickerTarget::Composer)
     }
 }
 
@@ -1360,7 +1393,7 @@ impl Waku {
         } else {
             self.model_display_name(provider, selected_model)
         };
-        let picker_enabled = controls.interactive
+        let picker_enabled = controls.model_pickers
             && session.is_some_and(|session| session.can_choose_model(provider));
 
         // Auto routes through Jev, not the provider the draft would land on —
@@ -1385,12 +1418,15 @@ impl Waku {
         let empty_focus = self.model_picker.empty_focus.clone();
         let no_providers = self.model_picker_has_no_providers();
 
+        let menu_id = controls.model_menu_id(MODEL_PICKER_MENU_ID);
+        let pick_target = controls.model_pick_target();
+        let focus_restore = controls.focus_restore.clone();
         let handle = {
             let reset_weak = weak.clone();
             let reset_search = search.clone();
             let picker_focus = search_focus.clone();
             let empty_picker_focus = empty_focus.clone();
-            self.menu_handle_with(MODEL_PICKER_MENU_ID, cx, move |open, window, cx| {
+            self.menu_handle_with(menu_id, cx, move |open, window, cx| {
                 // The empty state draws no filter field, so the handle the
                 // deferred focus below targets depends on which body opened.
                 let mut empty = false;
@@ -1401,7 +1437,7 @@ impl Waku {
                         if this.keyboard_options_is_open() {
                             this.dismiss_keyboard_options(false, window, cx);
                         }
-                        this.model_picker_target = ModelPickerTarget::Composer;
+                        this.model_picker_target = pick_target;
                         empty = this.model_picker_has_no_providers();
                         let locked_provider = this.model_picker_locked_provider();
                         // Opening re-runs catalog discovery for every provider
@@ -1426,8 +1462,8 @@ impl Waku {
                         // while it's open — hiding the panel lets them fall
                         // to their natural position.
                         this.pinned_unfavorites.clear();
-                        let focus_handle = this.composer.read(cx).focus();
-                        window.focus(&focus_handle, cx);
+                        this.model_picker_target = ModelPickerTarget::Composer;
+                        window.focus(&focus_restore, cx);
                     }
                     cx.notify();
                 });
@@ -1468,7 +1504,11 @@ impl Waku {
                 .label(tr!("models.no_providers"))
         } else {
             chip.tooltip(tr!("command_palette.choose_model"))
-                .shortcut_action(&ToggleModelPicker)
+                // ⌘/ opens the session column's modal picker — a side
+                // chat's chip answers clicks, not the global chord.
+                .when(controls.interactive, |trigger| {
+                    trigger.shortcut_action(&ToggleModelPicker)
+                })
         };
 
         popover(
@@ -1976,8 +2016,8 @@ impl Waku {
     /// automation editor never locks one.
     pub(super) fn model_picker_locked_provider(&self) -> Option<ProviderKind> {
         match self.model_picker_target {
-            ModelPickerTarget::Composer => self
-                .composer_session()
+            ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_) => self
+                .model_picker_session()
                 .filter(|session| session.provider_locked() && !session.detail_loaded)
                 .map(|session| session.provider),
             ModelPickerTarget::AutomationEditor => None,
@@ -1991,10 +2031,13 @@ impl Waku {
         cx: &App,
     ) -> Option<(ProviderKind, String, Option<String>, bool)> {
         match self.model_picker_target {
-            ModelPickerTarget::Composer => self.composer_session().and_then(|session| {
-                self.session_model_combo(session)
-                    .map(|(model, effort, fast)| (session.provider, model, effort, fast))
-            }),
+            ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_) => {
+                self.model_picker_session().and_then(|session| {
+                    self.session_model_combo(session).map(|(model, effort, fast)| {
+                        (session.provider, model, effort, fast)
+                    })
+                })
+            }
             ModelPickerTarget::AutomationEditor => {
                 let editor = self.automations_editor.as_ref()?;
                 let model = editor.model.read(cx).content().trim().to_owned();
@@ -2006,13 +2049,18 @@ impl Waku {
     /// The Auto row only exists for the composer — the editor stores a bare
     /// `provider:model` pair, so it cannot express routing.
     pub(super) fn model_picker_offers_auto_route(&self) -> bool {
-        self.model_picker_target == ModelPickerTarget::Composer && self.auto_route_available()
+        matches!(
+            self.model_picker_target,
+            ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_)
+        ) && self.auto_route_available()
     }
 
     /// Composer picks carry effort and tier; the editor's bare pair cannot.
     fn model_picker_granularity(&self) -> PickerGranularity {
         match self.model_picker_target {
-            ModelPickerTarget::Composer => PickerGranularity::Combos,
+            ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_) => {
+                PickerGranularity::Combos
+            }
             ModelPickerTarget::AutomationEditor => PickerGranularity::Models,
         }
     }
@@ -2045,10 +2093,12 @@ impl Waku {
     /// Whether the composer session is routed — the picker's selection and
     /// cursor seed sit on the Auto row while it is.
     pub(super) fn composer_picker_auto_route(&self) -> bool {
-        self.model_picker_target == ModelPickerTarget::Composer
-            && self
-                .composer_session()
-                .is_some_and(|session| session.auto_route)
+        matches!(
+            self.model_picker_target,
+            ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_)
+        ) && self
+            .model_picker_session()
+            .is_some_and(|session| session.auto_route)
     }
 
     /// Move the picker's drawn selection. Nothing is focused: the filter field
@@ -2302,21 +2352,40 @@ impl Waku {
                 theme.text_tertiary
             })
             .caret(false);
-        if !controls.interactive {
+        if !controls.model_pickers {
             return Some(trigger.disabled(true).into_any_element());
         }
         let weak = cx.entity().downgrade();
-        let handle = self.menu_handle("model-traits", cx);
+        let target_weak = weak.clone();
+        let pick_target = controls.model_pick_target();
+        let handle = self.menu_handle_with(
+            controls.model_menu_id("model-traits"),
+            cx,
+            move |open, _, cx| {
+                let _ = target_weak.update(cx, |this, cx| {
+                    this.model_picker_target = if open {
+                        pick_target
+                    } else {
+                        ModelPickerTarget::Composer
+                    };
+                    cx.notify();
+                });
+            },
+        );
         Some(dropdown_menu(
             trigger
                 .tooltip(tr!("models.options"))
                 // ⌘E only cycles effort — a tier/window-only model has no
                 // ladder for it to step through, so the hint stays off.
-                .when(!model.reasoning_efforts.is_empty(), |trigger| {
-                    trigger.shortcut_action(&CycleReasoningEffort {
-                        direction: EffortCycleDirection::Forward,
-                    })
-                })
+                // The chord belongs to the session column's composer.
+                .when(
+                    !model.reasoning_efforts.is_empty() && controls.interactive,
+                    |trigger| {
+                        trigger.shortcut_action(&CycleReasoningEffort {
+                            direction: EffortCycleDirection::Forward,
+                        })
+                    },
+                )
                 .selected(handle.is_open()),
             "model-traits-menu",
             &handle,
@@ -2640,18 +2709,29 @@ impl Waku {
             .icon("icons/bot.svg", theme.text_tertiary)
             .label(selected_label)
             .caret(false);
-        if !controls.interactive {
+        if !controls.model_pickers {
             return Some(trigger.disabled(true).into_any_element());
         }
         let weak = cx.entity().downgrade();
         let refresh_weak = weak.clone();
-        let handle = self.menu_handle_with("agent-preset", cx, move |open, _, cx| {
-            if open {
-                let _ = refresh_weak.update(cx, |this, _| {
-                    this.refresh_provider_model_discovery(ProviderKind::DeepSeek);
+        let pick_target = controls.model_pick_target();
+        let handle = self.menu_handle_with(
+            controls.model_menu_id("agent-preset"),
+            cx,
+            move |open, _, cx| {
+                let _ = refresh_weak.update(cx, |this, cx| {
+                    this.model_picker_target = if open {
+                        pick_target
+                    } else {
+                        ModelPickerTarget::Composer
+                    };
+                    cx.notify();
+                    if open {
+                        this.refresh_provider_model_discovery(ProviderKind::DeepSeek);
+                    }
                 });
-            }
-        });
+            },
+        );
         let trigger = trigger.selected(handle.is_open());
 
         Some(dropdown_menu(
@@ -4830,6 +4910,31 @@ impl Waku {
         self.state.session_mut(id)
     }
 
+    /// The session a model picker's reads and writes act on: a side chat's
+    /// own session while its chip owns the picker, the composer session
+    /// otherwise. The automation editor owns no session.
+    pub(super) fn model_picker_session(&self) -> Option<&AgentSession> {
+        match self.model_picker_target {
+            ModelPickerTarget::Composer => self.composer_session(),
+            ModelPickerTarget::SideChat(session_id) => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id),
+            ModelPickerTarget::AutomationEditor => None,
+        }
+    }
+
+    /// The mutable counterpart of [`Self::model_picker_session`].
+    pub(super) fn model_picker_session_mut(&mut self) -> Option<&mut AgentSession> {
+        let session_id = match self.model_picker_target {
+            ModelPickerTarget::Composer => return self.composer_session_mut(),
+            ModelPickerTarget::SideChat(session_id) => session_id,
+            ModelPickerTarget::AutomationEditor => return None,
+        };
+        self.state.session_mut(session_id)
+    }
+
     /// The session and project the workspace footer's chips describe and its
     /// pickers configure. Outside Big Picture both come from the selection;
     /// while the overlay is open they follow the composer — the armed card's
@@ -5127,6 +5232,14 @@ impl Waku {
         let controls = ComposerControls {
             session,
             interactive,
+            model_pickers: interactive
+                || session.is_some_and(|session| !session.has_started()),
+            model_edit_session: if interactive {
+                None
+            } else {
+                session.map(|session| session.id)
+            },
+            focus_restore: composer.read(cx).focus(),
             id_prefix: if interactive { "" } else { "side-chat-" },
         };
         let preparing = session.is_some_and(|session| {

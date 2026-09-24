@@ -4238,6 +4238,13 @@ impl Waku {
                 .selected_session()
                 .filter(|session| session.provider_locked())
                 .map(|session| session.provider),
+            model_picker::ModelPickerTarget::SideChat(session_id) => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .filter(|session| session.provider_locked())
+                .map(|session| session.provider),
             model_picker::ModelPickerTarget::AutomationEditor => None,
         };
         super::model_picker::picker_has_no_providers(

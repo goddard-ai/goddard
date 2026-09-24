@@ -452,11 +452,13 @@ pub(super) enum PickerGranularity {
 }
 
 /// Where a model picker's selection lands: the composer session (provider,
-/// model, effort, tier) or the automation editor's bare provider/model pair.
+/// model, effort, tier), a side chat's own session while its chip opened
+/// the picker, or the automation editor's bare provider/model pair.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum ModelPickerTarget {
     #[default]
     Composer,
+    SideChat(Uuid),
     AutomationEditor,
 }
 

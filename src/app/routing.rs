@@ -281,7 +281,7 @@ impl Waku {
     pub(super) fn auto_route_available(&self) -> bool {
         self.state.model_router_enabled
             && self
-                .composer_session()
+                .model_picker_session()
                 .is_some_and(|session| !session.provider_locked())
             && !self.route_candidates().is_empty()
     }
@@ -292,13 +292,13 @@ impl Waku {
         true
     }
 
-    /// Whether the eval backend on the composer session's daemon is missing
+    /// Whether the eval backend on the picked session's daemon is missing
     /// the credential its Jev call requires — the picker's Auto row warns
     /// rather than failing at submit. A daemon that can't be inspected (a
     /// remote host offline) is not a warning: the backend's state is simply
     /// unknown.
     pub(super) fn jev_credential_missing(&self) -> bool {
-        let Some(session) = self.composer_session() else {
+        let Some(session) = self.model_picker_session() else {
             return false;
         };
         let Some(daemon) = self.daemons.daemon_for_session(session.id) else {
