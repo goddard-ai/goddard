@@ -6716,6 +6716,7 @@ impl Waku {
             }
         }
         settings_group(tr!("suggestions.settings_title"), cards, theme)
+            .map(|group| div().mt(px(15.0)).child(group).into_any_element())
     }
 
     fn set_automatic_suggested_action(
@@ -6825,6 +6826,7 @@ impl Waku {
             vec![card.into_any_element()],
             theme,
         )
+        .map(|group| div().mt(px(15.0)).child(group).into_any_element())
     }
 
     fn experiment_card(
