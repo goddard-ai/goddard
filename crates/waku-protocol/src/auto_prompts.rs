@@ -36,7 +36,7 @@ pub fn default_rules() -> Vec<AutoPromptRule> {
     vec![AutoPromptRule {
         id: Uuid::from_u128(0x161bb5c7_f758_410c_9d39_a93483d1ad38),
         name: "Sharpen complex answers".into(),
-        prompt: "Rewrite your answer only if it is materially too long, dense, or broad for the user's request. If it is already concise and sufficient, do not add or send anything.".into(),
+        prompt: "Rewrite the answer to be more concise, direct, and focused on the user's request. Preserve the information needed to answer fully, and remove unnecessary detail or tangents.".into(),
         questions: vec![
             AutoPromptQuestion {
                 id: Uuid::from_u128(0x07cb3e33_a1f5_4c8c_a4d7_a2d3dac7ac6f),
@@ -82,7 +82,9 @@ pub fn refresh_untouched_shipped_rules(rules: &mut [AutoPromptRule]) -> bool {
         threshold: Some(0.65),
         enabled: true,
     };
-    if *rule != original {
+    let mut previous = default_rules().remove(0);
+    previous.prompt = "Rewrite your answer only if it is materially too long, dense, or broad for the user's request. If it is already concise and sufficient, do not add or send anything.".into();
+    if *rule != original && *rule != previous {
         return false;
     }
     *rule = default_rules().remove(0);

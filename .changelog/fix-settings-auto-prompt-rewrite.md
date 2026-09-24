@@ -1,0 +1,1 @@
+- The automatic answer sharpening prompt now focuses on rewriting; Jev decides whether an answer needs it.
