@@ -22,6 +22,9 @@ const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 /// makes `git add` incremental: entries whose stat is unchanged skip hashing,
 /// so the per-capture cost tracks changed files instead of worktree size.
 const CHECKPOINT_INDEX_NAME: &str = "waku-checkpoint-index";
+/// Ref tips pinned as parents of a turn-start snapshot. Past this bound the
+/// commit object would grow with the repository's ref count on every turn.
+const MAX_TURN_START_PARENTS: usize = 512;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct TurnStartMetadata {
@@ -88,6 +91,11 @@ pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> an
         "Goddard turn start snapshot\n\n{TURN_START_METADATA_PREFIX}{}",
         serde_json::to_string(&metadata)?
     );
+    // HEAD is always a parent — a recreated worktree comes up on the real
+    // commit — and ref tips ride along so a force-push or prune cannot drop a
+    // commit a later diff base still names. The list is capped: attribution
+    // no longer depends on it (`rev-list` names its exclusions directly), so
+    // a capped tip only loses the reachability pin.
     let mut parents = Vec::new();
     let mut seen = HashSet::new();
     if let Some(head) = head.as_ref()
@@ -97,6 +105,9 @@ pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> an
     }
     for commit in metadata.refs.values() {
         if seen.insert(commit.clone()) {
+            if parents.len() >= MAX_TURN_START_PARENTS {
+                break;
+            }
             parents.push(commit.clone());
         }
     }
@@ -568,16 +579,26 @@ fn target_branch_start(
     let Some(end_head) = end_head else {
         return empty_tree_commit(cwd);
     };
-    let new_commits = git_output(
+    // Everything the turn started from is excluded by name — the snapshot's
+    // own capped parent list cannot carry the whole set on its own. The revs
+    // go over stdin so a very ref-heavy repository stays inside the spawn
+    // limit.
+    let mut input = end_head.to_owned().into_bytes();
+    input.extend_from_slice(b"\n--not\n");
+    input.extend_from_slice(start_ref.as_bytes());
+    input.push(b'\n');
+    if let Some(head) = metadata.head.as_ref() {
+        input.extend_from_slice(head.as_bytes());
+        input.push(b'\n');
+    }
+    for commit in metadata.refs.values() {
+        input.extend_from_slice(commit.as_bytes());
+        input.push(b'\n');
+    }
+    let new_commits = git_stdin(
         cwd,
-        [
-            "rev-list",
-            "--first-parent",
-            "--reverse",
-            end_head,
-            "--not",
-            start_ref,
-        ],
+        ["rev-list", "--first-parent", "--reverse", "--stdin"],
+        &input,
     )?;
     let Some(first_new_commit) = new_commits.lines().find(|line| !line.trim().is_empty()) else {
         return Ok(end_head.to_owned());
@@ -1062,9 +1083,30 @@ where
     }
 }
 
+fn git_stdin<I, S>(cwd: &Path, args: I, input: &[u8]) -> anyhow::Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    git_with_optional_index_input(cwd, None, args, input)
+}
+
 fn git_with_index_input<I, S>(
     cwd: &Path,
     index: &Path,
+    args: I,
+    input: &[u8],
+) -> anyhow::Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    git_with_optional_index_input(cwd, Some(index), args, input)
+}
+
+fn git_with_optional_index_input<I, S>(
+    cwd: &Path,
+    index: Option<&Path>,
     args: I,
     input: &[u8],
 ) -> anyhow::Result<String>
@@ -1076,18 +1118,20 @@ where
     command
         .args(args)
         .current_dir(cwd)
-        .env("GIT_INDEX_FILE", index)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(index) = index {
+        command.env("GIT_INDEX_FILE", index);
+    }
     let started = std::time::Instant::now();
     let mut child = command.spawn().context("failed to execute git")?;
     child
         .stdin
         .take()
-        .ok_or_else(|| anyhow!("git pathspec input was unavailable"))?
+        .ok_or_else(|| anyhow!("git stdin is unavailable"))?
         .write_all(input)
-        .context("failed to send git pathspecs")?;
+        .context("failed to write git stdin")?;
     let output = child.wait_with_output().context("failed to wait for git")?;
     log_git_timing(&command, started);
     if output.status.success() {
