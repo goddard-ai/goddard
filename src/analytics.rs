@@ -1,33 +1,38 @@
 //! Privacy-conscious product analytics for release builds.
 //!
 //! Event creation is a bounded `try_send` on the UI thread. A dedicated
-//! worker owns both the Tokio runtime required by `rust-umami`/Reqwest and a
-//! single Umami session, so networking, TLS, and response-cache bookkeeping
-//! never enter a frame path. Events deliberately contain no prompts, project
-//! names or paths, provider output, or provider-account identity. A random
-//! installation-scoped ID keeps aggregate sessions coherent across launches.
+//! worker owns the Tokio runtime required by `posthog-rs`, so networking,
+//! TLS, and response-cache bookkeeping never enter a frame path. Events
+//! deliberately contain no prompts, project names or paths, provider output,
+//! or provider-account identity. A random installation-scoped ID keeps
+//! aggregate sessions coherent across launches.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::time::Duration;
 
-use rust_umami::{Client, Context};
+use posthog_rs::{ClientOptionsBuilder, Event as PostHogEvent};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(not(debug_assertions))]
+const DEFAULT_POSTHOG_HOST: &str = "https://eu.i.posthog.com";
 
 #[cfg(not(debug_assertions))]
-const ENDPOINT: Option<&str> = option_env!("GODDARD_ANALYTICS_ENDPOINT");
+const POSTHOG_API_KEY: Option<&str> = option_env!("GODDARD_POSTHOG_API_KEY");
 #[cfg(debug_assertions)]
-const ENDPOINT: Option<&str> = None;
+const POSTHOG_API_KEY: Option<&str> = None;
 
 #[cfg(not(debug_assertions))]
-const WEBSITE_ID: Option<&str> = option_env!("GODDARD_ANALYTICS_WEBSITE_ID");
+const POSTHOG_HOST: Option<&str> = Some(match option_env!("GODDARD_POSTHOG_HOST") {
+    Some("") | None => DEFAULT_POSTHOG_HOST,
+    Some(host) => host,
+});
 #[cfg(debug_assertions)]
-const WEBSITE_ID: Option<&str> = None;
+const POSTHOG_HOST: Option<&str> = None;
 
 /// A cheap handle to the background analytics worker.
 #[derive(Clone)]
@@ -79,7 +84,7 @@ impl Analytics {
     }
 }
 
-/// The deliberately small product vocabulary sent to Umami.
+/// The deliberately small product vocabulary sent to PostHog.
 pub enum Event {
     AppLaunched {
         task_count: usize,
@@ -509,6 +514,28 @@ impl Event {
         );
         (name, data)
     }
+
+    fn into_posthog(self, language: &'static str, distinct_id: Uuid) -> PostHogEvent {
+        let (name, data) = self.into_track();
+        let mut event = PostHogEvent::new(name.to_owned(), distinct_id.to_string());
+        if let Some(properties) = data.as_object() {
+            for (key, value) in properties {
+                event
+                    .insert_prop(key.as_str(), value)
+                    .expect("analytics properties are valid JSON");
+            }
+        }
+        event
+            .insert_prop("language", language)
+            .expect("analytics language is valid JSON");
+        // This is an installation-scoped product signal, not a user profile.
+        // Set it after event properties so a future event cannot opt into
+        // person processing accidentally.
+        event
+            .insert_prop("$process_person_profile", false)
+            .expect("analytics privacy property is valid JSON");
+        event
+    }
 }
 
 /// Well-known signal names — the number alone reads like noise on a
@@ -532,8 +559,8 @@ fn signal_name(signal: i32) -> Option<&'static str> {
 fn analytics_available() -> bool {
     !cfg!(debug_assertions)
         && !env_flag("GODDARD_DISABLE_ANALYTICS")
-        && ENDPOINT.is_some_and(|value| !value.trim().is_empty())
-        && WEBSITE_ID.is_some_and(|value| !value.trim().is_empty())
+        && POSTHOG_API_KEY.is_some_and(|value| !value.trim().is_empty())
+        && POSTHOG_HOST.is_some_and(|value| !value.trim().is_empty())
 }
 
 fn env_flag(name: &str) -> bool {
@@ -551,7 +578,7 @@ fn run(
     distinct_id: Uuid,
     enabled: Arc<AtomicBool>,
 ) {
-    let (Some(endpoint), Some(website_id)) = (ENDPOINT, WEBSITE_ID) else {
+    let (Some(api_key), Some(host)) = (POSTHOG_API_KEY, POSTHOG_HOST) else {
         return;
     };
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
@@ -561,43 +588,32 @@ fn run(
         return;
     };
 
-    // Client construction may initialize runtime-aware networking helpers,
-    // so enter the worker's runtime even though the builder itself is sync.
-    let client = {
-        let _runtime = runtime.enter();
-        Client::builder(endpoint, website_id)
-            .default_context(
-                Context::new()
-                    .hostname("goddardai.org")
-                    .url("/desktop")
-                    .title("Goddard")
-                    .language(language)
-                    .os(std::env::consts::OS)
-                    .device("desktop"),
-            )
-            .user_agent(format!(
-                "Goddard/{} ({}; {})",
-                env!("CARGO_PKG_VERSION"),
-                std::env::consts::OS,
-                std::env::consts::ARCH
-            ))
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-    };
-    let Ok(client) = client else {
+    let worker_enabled = Arc::clone(&enabled);
+    let mut options = ClientOptionsBuilder::default();
+    options.api_key(api_key.to_owned());
+    options.host(host.to_owned());
+    options.request_timeout_seconds(REQUEST_TIMEOUT.as_secs());
+    options.disable_geoip(true);
+    options.before_send(move |event| posthog_event_if_enabled(&worker_enabled, event));
+    let Ok(options) = options.build() else {
         return;
     };
-    let session = client.session().distinct_id(distinct_id.to_string());
+    let client = runtime.block_on(posthog_rs::client(options));
 
     while let Ok(event) = receiver.recv() {
         if !enabled.load(Ordering::Acquire) {
             continue;
         }
-        let (name, data) = event.into_track();
-        // A failed analytics request is intentionally terminal only for this
-        // event. The next product action gets an independent best-effort send.
-        let _ = runtime.block_on(session.event(name).data(data).send());
+        client.capture(event.into_posthog(language, distinct_id));
     }
+
+    // `shutdown` drains the SDK queue and joins its transport worker. This is
+    // intentionally best-effort and remains off the UI thread.
+    runtime.block_on(client.shutdown());
+}
+
+fn posthog_event_if_enabled(enabled: &AtomicBool, event: PostHogEvent) -> Option<PostHogEvent> {
+    enabled.load(Ordering::Acquire).then_some(event)
 }
 
 #[cfg(test)]

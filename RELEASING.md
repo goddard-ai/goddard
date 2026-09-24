@@ -357,8 +357,8 @@ secrets before running that bridge:
 
 | Secret | Purpose |
 | --- | --- |
-| `GODDARD_ANALYTICS_ENDPOINT` | embedded in every desktop CI build |
-| `GODDARD_ANALYTICS_WEBSITE_ID` | embedded in every desktop CI build |
+| `WAKU_POSTHOG_API_KEY` | PostHog project token embedded in every desktop CI build |
+| `WAKU_POSTHOG_HOST` | Optional PostHog regional ingestion host override; defaults to EU Cloud |
 | `GODDARD_SIGNING_IDENTITY` | Developer ID identity selector |
 | `APPLE_CERTIFICATE` | base64-encoded Developer ID Application `.p12` |
 | `APPLE_CERTIFICATE_PASSWORD` | password for that `.p12` |
@@ -383,7 +383,8 @@ secrets before running that bridge:
 | `--build-number <n>` / `GODDARD_BUILD_NUMBER` | derived | `CFBundleVersion` override |
 | `GODDARD_DOWNLOAD_URL_PREFIX` | the current version's GitHub release URL | base URL in the appcast |
 | `SPARKLE_BIN` | the `~/Library/Caches/goddard-build` copy | Sparkle tools directory |
-| `GODDARD_ANALYTICS_ENDPOINT`, `GODDARD_ANALYTICS_WEBSITE_ID` | — | embedded at build time; builds without them compile analytics out |
+| `GODDARD_POSTHOG_API_KEY` | — | PostHog project token embedded at build time; without it, analytics is disabled |
+| `GODDARD_POSTHOG_HOST` | `https://eu.i.posthog.com` | regional ingestion host override |
 | `SPARKLE_PRIVATE_KEY` | login keychain | EdDSA key for `generate_appcast`; local builds skip the appcast when no usable key is found |
 
 ---

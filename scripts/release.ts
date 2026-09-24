@@ -56,9 +56,9 @@ Options:
 
 Environment:
   GODDARD_SIGNING_IDENTITY         Developer ID Application identity selector
-  GODDARD_ANALYTICS_ENDPOINT       analytics endpoint embedded at build time
-  GODDARD_ANALYTICS_WEBSITE_ID     analytics website ID embedded at build time
-                                (unset builds compile analytics out)
+  GODDARD_POSTHOG_API_KEY          PostHog project token embedded at build time
+  GODDARD_POSTHOG_HOST             PostHog ingestion host override
+                                (default: https://eu.i.posthog.com)
   GODDARD_DOWNLOAD_URL_PREFIX      base URL the appcast links to
                                 (default: versioned GitHub release URL)
   SPARKLE_BIN                   Sparkle tools dir (default: the bundle.sh cache
@@ -118,8 +118,9 @@ const notaryProfile =
   defaultNotaryProfile;
 const explicitBuildNumber =
   values["build-number"] ?? process.env.GODDARD_BUILD_NUMBER;
-const analyticsEndpoint = process.env.GODDARD_ANALYTICS_ENDPOINT?.trim();
-const analyticsWebsiteId = process.env.GODDARD_ANALYTICS_WEBSITE_ID?.trim();
+const posthogApiKey = process.env.GODDARD_POSTHOG_API_KEY?.trim();
+const posthogHost =
+  process.env.GODDARD_POSTHOG_HOST?.trim() || "https://eu.i.posthog.com";
 if (adhoc && values["signing-identity"]) {
   throw new Error("Use either --adhoc or --signing-identity, not both.");
 }
@@ -133,9 +134,9 @@ if (explicitBuildNumber && !/^\d+(?:\.\d+){0,2}$/.test(explicitBuildNumber)) {
     "--build-number must contain one to three period-separated integers.",
   );
 }
-if (!values["skip-build"] && (!analyticsEndpoint || !analyticsWebsiteId)) {
+if (!values["skip-build"] && !posthogApiKey) {
   console.warn(
-    "GODDARD_ANALYTICS_ENDPOINT/GODDARD_ANALYTICS_WEBSITE_ID unset — " +
+    "GODDARD_POSTHOG_API_KEY unset — " +
       "building with analytics disabled.",
   );
 }
@@ -342,7 +343,7 @@ try {
       ? "Assembling the app bundle"
       : "Building and assembling the app bundle",
   );
-  await $`env GODDARD_CODESIGN_IDENTITY=${identity} GODDARD_ANALYTICS_ENDPOINT=${analyticsEndpoint ?? ""} GODDARD_ANALYTICS_WEBSITE_ID=${analyticsWebsiteId ?? ""} GODDARD_SKIP_CARGO_BUILD=${values["skip-build"] ? "1" : "0"} ${join(projectRoot, "scripts", "bundle.sh")} release`;
+  await $`env GODDARD_CODESIGN_IDENTITY=${identity} GODDARD_POSTHOG_API_KEY=${posthogApiKey ?? ""} GODDARD_POSTHOG_HOST=${posthogHost} GODDARD_SKIP_CARGO_BUILD=${values["skip-build"] ? "1" : "0"} ${join(projectRoot, "scripts", "bundle.sh")} release`;
   for (const artifact of [
     join(contentsDirectory, "MacOS", executableName),
     bundledDaemonExecutable,

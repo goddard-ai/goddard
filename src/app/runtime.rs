@@ -1767,7 +1767,7 @@ impl Waku {
                 let children_rss_mb = sample.and_then(|sample| sample.children_rss_mb);
                 let exit_code = episode.exit.and_then(|exit| exit.code);
                 let exit_signal = episode.exit.and_then(|exit| exit.signal);
-                // The same record lands on disk — Umami is remote-only, so
+                // The same record lands on disk — PostHog is remote-only, so
                 // without the local copy a restart's cause leaves no trace.
                 let at = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

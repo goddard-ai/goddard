@@ -92,8 +92,8 @@ The static Umami context (`goddardai.org`, `/desktop`, title, and device label) 
 Replace the Umami-specific build inputs with:
 
 ```text
-GODDARD_POSTHOG_API_KEY   PostHog project token for capture
-GODDARD_POSTHOG_HOST      Regional ingestion host, e.g. https://eu.i.posthog.com
+GODDARD_POSTHOG_API_KEY   PostHog project token for capture (required)
+GODDARD_POSTHOG_HOST      Regional ingestion host override (default: https://eu.i.posthog.com)
 ```
 
 The project token is used only for the public capture API; no personal or project-secret API key belongs in the desktop binary. Pass these values through [`scripts/release.ts`](../scripts/release.ts) and each release job in [`.github/workflows/release.yml`](../.github/workflows/release.yml). Remove `GODDARD_ANALYTICS_ENDPOINT`, `GODDARD_ANALYTICS_WEBSITE_ID`, and the old Umami dependency after the first PostHog-backed release is verified.
@@ -112,7 +112,7 @@ Roll out in this order:
 - A captured event has the expected PostHog name, stable `distinct_id`, existing product properties, and the common version/platform fields.
 - A captured event has `$process_person_profile: false`; no person profile, GeoIP property, prompt, path, project name, provider output, or account identity is sent.
 - Toggling analytics off prevents both new events and events waiting in either queue from reaching the network.
-- Debug builds make no PostHog requests. Release builds with missing configuration remain analytics-disabled and still start normally.
+- Debug builds make no PostHog requests. Release builds without a project token remain analytics-disabled and still start normally; the ingestion host defaults to EU Cloud.
 - Queue-full, timeout, rejected-request, SDK initialization, and shutdown failures cannot block or fail app startup, rendering, or user actions.
 - The release pipeline embeds the selected region and project token without exposing any personal or project-secret API key.
 - `docs/daemon-diagnostics.md` refers to PostHog rather than Umami, and the Umami crate and release variables are gone after cutover.
@@ -127,9 +127,9 @@ Roll out in this order:
 - [ ] Recreate dashboards and record the cutover date in the PostHog project.
 - [ ] Update [`docs/daemon-diagnostics.md`](daemon-diagnostics.md), remove Umami references, and run the repository's normal Rust checks.
 
-## Decision needed before implementation
+## Decision
 
-Approve PostHog Cloud as the managed backend and choose the production region. The proposal defaults to EU Cloud because the product already promises privacy-conscious anonymous analytics; use US Cloud instead if the product's data-controller or operational requirements call for it. The code should keep this choice in `GODDARD_POSTHOG_HOST`, so changing regions does not require another analytics implementation.
+PostHog Cloud is the managed backend. EU Cloud is the default region, as approved in Annotation 1; set `GODDARD_POSTHOG_HOST` to the US endpoint if product data-controller or operational requirements call for it.
 
 ### Sources
 

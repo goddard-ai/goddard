@@ -133,8 +133,8 @@ jobs:
 
       - name: Bundle
         env:
-          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_POSTHOG_API_KEY: ${{ secrets.WAKU_POSTHOG_API_KEY }}
+          GODDARD_POSTHOG_HOST: ${{ secrets.WAKU_POSTHOG_HOST }}
         run: ./scripts/bundle-linux.sh
 
       # SSH remotes install the daemon alone; the app fetches this
@@ -207,8 +207,8 @@ jobs:
 
       - name: Bundle
         env:
-          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_POSTHOG_API_KEY: ${{ secrets.WAKU_POSTHOG_API_KEY }}
+          GODDARD_POSTHOG_HOST: ${{ secrets.WAKU_POSTHOG_HOST }}
         run: ./scripts/bundle-linux.sh
 
       - name: Package goddard-daemon
@@ -262,8 +262,8 @@ jobs:
 
       - name: Bundle
         env:
-          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_POSTHOG_API_KEY: ${{ secrets.WAKU_POSTHOG_API_KEY }}
+          GODDARD_POSTHOG_HOST: ${{ secrets.WAKU_POSTHOG_HOST }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: bun scripts/bundle-windows.ts
@@ -313,8 +313,8 @@ jobs:
 
       - name: Bundle
         env:
-          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_POSTHOG_API_KEY: ${{ secrets.WAKU_POSTHOG_API_KEY }}
+          GODDARD_POSTHOG_HOST: ${{ secrets.WAKU_POSTHOG_HOST }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: bun scripts/bundle-windows.ts
@@ -389,8 +389,8 @@ jobs:
       - name: Release
         env:
           GODDARD_SIGNING_IDENTITY: ${{ secrets.WAKU_SIGNING_IDENTITY }}
-          GODDARD_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          GODDARD_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
+          GODDARD_POSTHOG_API_KEY: ${{ secrets.WAKU_POSTHOG_API_KEY }}
+          GODDARD_POSTHOG_HOST: ${{ secrets.WAKU_POSTHOG_HOST }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: bun run release --local
 

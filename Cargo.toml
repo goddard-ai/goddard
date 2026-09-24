@@ -71,7 +71,7 @@ ratex-svg = { version = "=0.1.14", features = ["embed-fonts"] }
 regex = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 rust-i18n = "4"
-rust-umami = "0.1.1"
+posthog-rs = { version = "0.27.0", default-features = false, features = ["async-client"] }
 smol = "2"
 ropey = "=2.0.0-beta.1"
 futures-lite = "2"
