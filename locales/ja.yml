@@ -80,6 +80,9 @@ menu.toggle_environment: 環境を切り替える
 menu.toggle_workspace: 作業場所を切り替える
 menu.toggle_usage_panel: 使用状況パネルの表示を切り替える
 menu.window: ウインドウ
+menu.minimize: 最小化
+menu.zoom: ズーム
+menu.toggle_full_screen: フルスクリーンの切り替え
 menu.toggle_fps_counter: FPS カウンターの表示を切り替える
 menu.close_window: ウインドウを閉じる
 window.minimize: 最小化

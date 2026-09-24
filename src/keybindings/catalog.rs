@@ -1103,6 +1103,33 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "app.minimize",
+        action: || Box::new(crate::Minimize),
+        title_key: "menu.minimize",
+        title_index: None,
+        category: C::Global,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "app.zoom",
+        action: || Box::new(crate::Zoom),
+        title_key: "menu.zoom",
+        title_index: None,
+        category: C::Global,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "app.toggle_full_screen",
+        action: || Box::new(crate::ToggleFullScreen),
+        title_key: "menu.toggle_full_screen",
+        title_index: None,
+        category: C::Global,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "app.new_task",
         action: || Box::new(crate::NewSession),
         title_key: "menu.new_task",
@@ -2932,6 +2959,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === crate::bind_keys — macOS only ==========================================
     e("app.hide", MacOS, "cmd-h", ""),
     e("app.hide_others", MacOS, "alt-cmd-h", ""),
+    e("app.minimize", MacOS, "cmd-m", ""),
+    e("app.toggle_full_screen", MacOS, "ctrl-cmd-f", ""),
 ];
 
 use PlatformSet::*;

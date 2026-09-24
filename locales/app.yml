@@ -66,6 +66,12 @@ menu.toggle_usage_panel:
   en: Toggle Usage Panel
 menu.window:
   en: Window
+menu.minimize:
+  en: Minimize
+menu.zoom:
+  en: Zoom
+menu.toggle_full_screen:
+  en: Toggle Full Screen
 menu.toggle_fps_counter:
   en: Toggle FPS Counter
 menu.close_window:

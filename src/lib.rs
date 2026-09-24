@@ -75,6 +75,9 @@ actions!(
         HideOthers,
         ShowAll,
         CloseWindow,
+        Minimize,
+        Zoom,
+        ToggleFullScreen,
         NewSession,
         NewTaskIn,
         NewProject,
@@ -1079,6 +1082,8 @@ pub(crate) fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("alt-cmd-h", HideOthers, None),
+        KeyBinding::new("cmd-m", Minimize, None),
+        KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
     ]);
 }
 
@@ -1162,6 +1167,11 @@ pub(crate) fn set_app_menus(cx: &mut App, updater_available: bool) {
             name: tr!("menu.window").into(),
             disabled: false,
             items: vec![
+                MenuItem::action(tr!("menu.minimize"), Minimize),
+                MenuItem::action(tr!("menu.zoom"), Zoom),
+                MenuItem::separator(),
+                MenuItem::action(tr!("menu.toggle_full_screen"), ToggleFullScreen),
+                MenuItem::separator(),
                 MenuItem::action(tr!("menu.toggle_fps_counter"), ToggleFpsCounter),
                 MenuItem::action(tr!("menu.close_window"), CloseWindow),
             ],

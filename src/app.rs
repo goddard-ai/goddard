@@ -87,7 +87,7 @@ use crate::{
     DismissInbox, DismissProjectsLayer, EffortCycleDirection, ExitPanelFullscreen, FindNext,
     FindPrevious, FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn,
     GoToNextUnreadCompletion, GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle,
-    NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind,
+    Minimize, NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind,
     OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, PushBaseBranch, Quit,
     ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows, SelectAutomationsTab,
     SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
@@ -95,9 +95,9 @@ use crate::{
     SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleAutomationsPage, ToggleBigPicture,
     ToggleBranchPicker, ToggleCommandPalette, ToggleEnvironment, ToggleFileFinder,
     ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel,
-    ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals, ToggleUsagePanel,
-    ToggleWorkspace,
+    ToggleFullScreen, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker, ToggleProjectsPage,
+    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals,
+    ToggleUsagePanel, ToggleWorkspace, Zoom,
 };
 
 #[cfg(target_os = "macos")]

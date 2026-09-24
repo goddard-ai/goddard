@@ -80,6 +80,9 @@ menu.toggle_environment: 切换环境
 menu.toggle_workspace: 切换工作位置
 menu.toggle_usage_panel: 打开或关闭用量面板
 menu.window: 窗口
+menu.minimize: 最小化
+menu.zoom: 缩放
+menu.toggle_full_screen: 切换全屏
 menu.toggle_fps_counter: 显示或隐藏帧率
 menu.close_window: 关闭窗口
 window.minimize: 最小化
