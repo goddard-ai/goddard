@@ -1751,11 +1751,14 @@ impl Waku {
                 let exit_signal = episode.exit.and_then(|exit| exit.signal);
                 // The same record lands on disk — Umami is remote-only, so
                 // without the local copy a restart's cause leaves no trace.
+                let at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_secs())
+                    .unwrap_or_default();
                 crate::daemon::log_daemon_recovery(&serde_json::json!({
-                    "at": std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|duration| duration.as_secs())
-                        .unwrap_or_default(),
+                    "at": at,
+                    "atLocal": crate::diagnostics::local_iso(at),
+                    "app": crate::diagnostics::app_build(),
                     "daemon": match episode.key {
                         waku_client::DaemonKey::Local => "local".to_owned(),
                         waku_client::DaemonKey::Remote(id) => id.to_string(),

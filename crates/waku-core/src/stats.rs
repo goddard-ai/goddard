@@ -220,10 +220,19 @@ pub fn install_panic_log(data_dir: &Path) {
                 )
             })
             .unwrap_or_default();
+        let at = crate::model::unix_time();
         let _ = append_json_line(
             &path,
             &serde_json::json!({
-                "at": crate::model::unix_time(),
+                "at": at,
+                "atLocal": chrono::DateTime::from_timestamp(at as i64, 0)
+                    .map(|utc| utc.with_timezone(&chrono::Local)
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
+                    .unwrap_or_default(),
+                "version": env!("CARGO_PKG_VERSION"),
+                "cwd": std::env::current_dir()
+                    .map(|dir| dir.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
                 "thread": std::thread::current().name().unwrap_or_default(),
                 "location": location,
                 "message": message,

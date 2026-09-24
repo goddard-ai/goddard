@@ -164,8 +164,10 @@ impl Waku {
         .into_any_element()
     }
 
-    /// One feed row: age, source chip, one-line record. Activating it —
-    /// click or Enter — copies the raw record for a bug report.
+    /// One feed row: age, source chip, summary over a meta line carrying
+    /// the absolute timestamp and whatever context the record captured —
+    /// working directory, session, daemon thread. Activating it — click or
+    /// Enter — copies the raw record for a bug report.
     fn render_diagnostics_row(
         &self,
         index: usize,
@@ -182,6 +184,11 @@ impl Waku {
         let copied = self.control_was_copied(&copy_id);
         let detail = entry.detail.clone();
         let age = super::sidebar::format_time_ago(unix_time().saturating_sub(entry.at));
+        let mut meta = crate::diagnostics::format_timestamp(entry.at);
+        for fragment in &entry.context {
+            meta.push_str(" · ");
+            meta.push_str(fragment);
+        }
         div()
             .id(SharedString::from(format!("diagnostics-row-{index}")))
             .tab_index(0)
@@ -222,10 +229,25 @@ impl Waku {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .text_size(sp(12.5))
-                    .text_color(theme.text)
-                    .child(entry.summary.clone()),
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .line_height(sp(16.0))
+                            .text_color(theme.text)
+                            .child(entry.summary.clone()),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(sp(10.5))
+                            .line_height(sp(13.0))
+                            .text_color(theme.text_tertiary)
+                            .child(meta),
+                    ),
             )
             .child(icon(
                 if copied {

@@ -19,7 +19,28 @@ pub(crate) struct DiagnosticEntry {
     pub(crate) source: DiagnosticSource,
     /// The one-line summary a row shows.
     pub(crate) summary: String,
+    /// Short debugging fragments under the summary — working directory,
+    /// session, daemon thread — joined with "·" on the row's meta line.
+    pub(crate) context: Vec<String>,
     pub(crate) detail: String,
+}
+
+/// The debugging context an error toast surfaces with — which task was on
+/// screen and where it ran. Every field is optional: plenty of errors have
+/// no task to blame, and incognito tasks contribute nothing since their
+/// data stays off disk.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct AppErrorContext {
+    /// The task the toast named, or the one selected when it fired.
+    pub(crate) session_id: Option<uuid::Uuid>,
+    /// The task's display title; untitled tasks leave this out.
+    pub(crate) session_title: Option<String>,
+    /// Provider id, e.g. `codex`.
+    pub(crate) provider: Option<&'static str>,
+    /// The directory the task's agent runs in.
+    pub(crate) working_dir: Option<PathBuf>,
+    /// `local`, or the owning remote host's id.
+    pub(crate) daemon: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,16 +88,75 @@ fn daemon_data_dir() -> Option<PathBuf> {
 /// on a background executor — every error toast funnels here, so the write
 /// must never reach a frame. The file self-caps by keeping the newest half
 /// at a line boundary, the scheme `daemon-stats.jsonl` uses.
-pub(crate) fn record_app_error(kind: &'static str, message: &str) {
+pub(crate) fn record_app_error(kind: &'static str, message: &str, context: AppErrorContext) {
     let Some(path) = errors_log_path() else {
         return;
     };
-    let record = serde_json::json!({
-        "at": crate::model::unix_time(),
+    let at = crate::model::unix_time();
+    let mut record = serde_json::json!({
+        "at": at,
+        "atLocal": local_iso(at),
+        "app": app_build(),
         "kind": kind,
         "message": message,
     });
+    let mut context_fields = serde_json::Map::new();
+    if let Some(id) = context.session_id {
+        context_fields.insert("sessionId".to_owned(), id.to_string().into());
+    }
+    if let Some(title) = context.session_title {
+        context_fields.insert("session".to_owned(), title.into());
+    }
+    if let Some(provider) = context.provider {
+        context_fields.insert("provider".to_owned(), provider.into());
+    }
+    if let Some(dir) = context.working_dir {
+        context_fields.insert(
+            "workingDir".to_owned(),
+            dir.to_string_lossy().into_owned().into(),
+        );
+    }
+    if let Some(daemon) = context.daemon {
+        context_fields.insert("daemon".to_owned(), daemon.into());
+    }
+    if !context_fields.is_empty()
+        && let Some(object) = record.as_object_mut()
+    {
+        object.insert("context".to_owned(), context_fields.into());
+    }
     let _ = append_capped_line(&path, &record.to_string());
+}
+
+/// `0.11.0`, or `0.11.0 · abc1234-dirty` when the build host had a checkout —
+/// the same string Settings reports, so a record says which build wrote it.
+pub(crate) fn app_build() -> String {
+    match option_env!("GODDARD_COMMIT_SHA") {
+        Some(commit) => format!("{} · {commit}", env!("CARGO_PKG_VERSION")),
+        None => env!("CARGO_PKG_VERSION").to_owned(),
+    }
+}
+
+/// RFC 3339 with the local offset — the human-readable twin of `at`, so a
+/// record pasted into a bug report needs no epoch conversion.
+pub(crate) fn local_iso(at: u64) -> String {
+    chrono::DateTime::from_timestamp(at as i64, 0)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+        })
+        .unwrap_or_default()
+}
+
+/// `1700000000` → `2023-11-14 22:13:20` in local time — second precision so
+/// a row lines up with the log files the page links to.
+pub(crate) fn format_timestamp(at: u64) -> String {
+    chrono::DateTime::from_timestamp(at as i64, 0)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| at.to_string())
 }
 
 /// Read every source into one newest-first feed capped at `MAX_ENTRIES`.
@@ -121,10 +201,35 @@ fn read_jsonl(
 }
 
 fn app_error_entry(value: &serde_json::Value, raw: &str) -> Option<DiagnosticEntry> {
+    let mut context = Vec::new();
+    let recorded = &value["context"];
+    if let Some(dir) = recorded["workingDir"]
+        .as_str()
+        .filter(|dir| !dir.is_empty())
+    {
+        context.push(abbreviate_home(dir));
+    }
+    if let Some(title) = recorded["session"]
+        .as_str()
+        .filter(|title| !title.is_empty())
+    {
+        context.push(title.to_owned());
+    }
+    if let Some(provider) = recorded["provider"]
+        .as_str()
+        .filter(|provider| !provider.is_empty())
+    {
+        context.push(provider.to_owned());
+    }
+    // The local daemon goes unmarked — nearly every record is local.
+    if let Some(daemon) = recorded["daemon"].as_str().filter(|name| *name != "local") {
+        context.push(daemon.to_owned());
+    }
     Some(DiagnosticEntry {
         at: value["at"].as_u64()?,
         source: DiagnosticSource::AppError,
         summary: value["message"].as_str()?.to_owned(),
+        context,
         detail: pretty(raw),
     })
 }
@@ -160,6 +265,7 @@ fn recovery_entry(value: &serde_json::Value, raw: &str) -> Option<DiagnosticEntr
         at: value["at"].as_u64()?,
         source: DiagnosticSource::DaemonRecovery,
         summary,
+        context: Vec::new(),
         detail: pretty(raw),
     })
 }
@@ -173,12 +279,31 @@ fn panic_entry(value: &serde_json::Value, raw: &str) -> Option<DiagnosticEntry> 
         (true, false) => location.to_owned(),
         (true, true) => tr!("diagnostics.panic_unnamed"),
     };
+    let mut context = Vec::new();
+    if let Some(thread) = value["thread"].as_str().filter(|thread| !thread.is_empty()) {
+        context.push(thread.to_owned());
+    }
+    if let Some(cwd) = value["cwd"].as_str().filter(|cwd| !cwd.is_empty()) {
+        context.push(abbreviate_home(cwd));
+    }
     Some(DiagnosticEntry {
         at: value["at"].as_u64()?,
         source: DiagnosticSource::DaemonPanic,
         summary,
+        context,
         detail: pretty(raw),
     })
+}
+
+/// Keep the full path, abbreviating only the user's home directory — the
+/// same rendering `abbreviate_home_path` gives settings rows.
+fn abbreviate_home(path: &str) -> String {
+    let path = Path::new(path);
+    match dirs::home_dir().and_then(|home| path.strip_prefix(home).ok()) {
+        Some(relative) if relative.as_os_str().is_empty() => "~".to_owned(),
+        Some(relative) => format!("~/{}", relative.display()),
+        None => path.display().to_string(),
+    }
 }
 
 /// The raw line re-wrapped for a clipboard paste — parseable stays JSON,
@@ -264,6 +389,49 @@ mod tests {
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].summary, "first");
+    }
+
+    #[test]
+    fn app_error_records_surface_their_session_context() {
+        let value = serde_json::json!({
+            "at": 3_u64,
+            "kind": "alert",
+            "message": "Couldn't send prompt",
+            "context": {
+                "sessionId": uuid::Uuid::nil(),
+                "session": "Fix login",
+                "provider": "codex",
+                "workingDir": "/var/tmp/project",
+                "daemon": "local",
+            },
+        });
+        let entry = app_error_entry(&value, "{}").unwrap();
+        // The local daemon stays unmarked; everything else lands on the
+        // meta line in record order.
+        assert_eq!(
+            entry.context,
+            vec![
+                "/var/tmp/project".to_owned(),
+                "Fix login".to_owned(),
+                "codex".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn panic_records_surface_thread_and_working_directory() {
+        let value = serde_json::json!({
+            "at": 4_u64,
+            "thread": "request-7",
+            "cwd": "/var/tmp/daemon-home",
+            "location": "src/server.rs:42:9",
+            "message": "index out of bounds",
+        });
+        let entry = panic_entry(&value, "{}").unwrap();
+        assert_eq!(
+            entry.context,
+            vec!["request-7".to_owned(), "/var/tmp/daemon-home".to_owned()]
+        );
     }
 
     #[test]

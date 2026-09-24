@@ -4037,14 +4037,45 @@ impl Waku {
 
     /// Every reported error the app shows also lands in
     /// `~/.goddard/errors.jsonl` — the Diagnostics page's app-side source.
-    /// The toast itself is transient; the journal keeps the record. The
-    /// append runs on the background executor so the write never touches
-    /// a frame.
-    fn journal_toast_error(&self, kind: &'static str, message: &str) {
+    /// The toast itself is transient; the journal keeps the record, plus
+    /// the context a debugger needs: which task was on screen, its working
+    /// directory, provider, and owning daemon. The append runs on the
+    /// background executor so the write never touches a frame.
+    fn journal_toast_error(&self, kind: &'static str, message: &str, action: Option<&ToastAction>) {
+        // The toast's own target wins; otherwise the task on screen is the
+        // best available context for what the error was about.
+        let session_id = match action.map(|action| &action.kind) {
+            Some(ToastActionKind::Session(session_id)) => Some(*session_id),
+            _ => self.state.selected_session,
+        };
+        let session =
+            session_id.and_then(|id| self.state.sessions.iter().find(|session| session.id == id));
+        let context = match session {
+            // Incognito tasks never reach disk — the journal honors the
+            // same rule and records only their provider.
+            Some(session) if session.incognito => crate::diagnostics::AppErrorContext {
+                provider: Some(session.provider.id()),
+                ..Default::default()
+            },
+            Some(session) => crate::diagnostics::AppErrorContext {
+                session_id: Some(session.id),
+                session_title: (session.display_title() != AgentSession::DEFAULT_TITLE)
+                    .then(|| session.display_title().to_owned()),
+                provider: Some(session.provider.id()),
+                working_dir: self
+                    .workspace_path_for_session(session)
+                    .map(|path| path.to_path_buf()),
+                daemon: Some(match self.daemons.session_owner(session.id) {
+                    waku_client::DaemonKey::Local => "local".to_owned(),
+                    waku_client::DaemonKey::Remote(host) => host.to_string(),
+                }),
+            },
+            None => crate::diagnostics::AppErrorContext::default(),
+        };
         let message = message.to_owned();
         self.background_executor
             .spawn(async move {
-                crate::diagnostics::record_app_error(kind, &message);
+                crate::diagnostics::record_app_error(kind, &message, context);
             })
             .detach();
     }
@@ -4058,8 +4089,8 @@ impl Waku {
     ) {
         let message = message.into();
         match tone {
-            ToastTone::Alert => self.journal_toast_error("alert", &message),
-            ToastTone::Failure => self.journal_toast_error("failure", &message),
+            ToastTone::Alert => self.journal_toast_error("alert", &message, action.as_ref()),
+            ToastTone::Failure => self.journal_toast_error("failure", &message, action.as_ref()),
             _ => {}
         }
         // A displaced localhost toast re-queues ahead of other pending
@@ -4103,9 +4134,10 @@ impl Waku {
         toast.timer_generation = self.toast_generation;
         // A running operation's failure resolves through here rather than
         // a fresh toast — it is still a reported error.
+        let action = toast.action.clone();
         match tone {
-            ToastTone::Alert => self.journal_toast_error("alert", &message),
-            ToastTone::Failure => self.journal_toast_error("failure", &message),
+            ToastTone::Alert => self.journal_toast_error("alert", &message, action.as_ref()),
+            ToastTone::Failure => self.journal_toast_error("failure", &message, action.as_ref()),
             _ => {}
         }
     }
