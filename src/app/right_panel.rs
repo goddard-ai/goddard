@@ -3244,7 +3244,7 @@ impl Waku {
                     .border_t(hairline())
                     .border_color(theme.separator)
                     .px(px(10.0))
-                    .py(px(8.0))
+                    .pt(px(8.0))
                     .child(self.render_composer_card(
                         &composer::ComposerCard::SideChat {
                             session_id,
