@@ -1,0 +1,1 @@
+- The model picker's Auto (Jev) selection now carries to the next new task like a concrete model does — the draft re-routes its own first prompt instead of inheriting the previous task's resolved model.

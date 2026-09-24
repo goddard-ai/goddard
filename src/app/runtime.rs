@@ -6831,6 +6831,9 @@ impl Waku {
                 })
                 .unwrap_or(false);
             self.state.last_provider = target.provider;
+            // The pick that ran was Auto — record it as last-used so the
+            // next draft re-arms routing instead of the resolved model.
+            self.state.last_auto_route = true;
             self.state.last_model.clone_from(&target.model);
             self.state.last_reasoning_effort.clone_from(&effort);
             self.state.last_service_tier.clone_from(&tier);

@@ -2136,8 +2136,9 @@ impl PersistedState {
                 remembered => remembered,
             }
         };
-        // Auto is a per-task choice. Carry forward the provider/model as a
-        // hint, but start every new draft with automatic routing disabled.
+        // An Auto pick carries to the next draft like the provider/model do;
+        // the seeded provider/model stay as the route's last-used hint.
+        session.auto_route = self.last_auto_route && self.model_router_enabled;
         if provider == self.last_provider {
             session.model.clone_from(&self.last_model);
             session
@@ -4638,7 +4639,7 @@ mod tests {
     }
 
     #[test]
-    fn new_drafts_do_not_inherit_auto_route() {
+    fn auto_route_pick_seeds_the_next_draft() {
         let mut state = PersistedState::empty();
         state.model_router_enabled = true;
         state.last_auto_route = true;
@@ -4649,11 +4650,16 @@ mod tests {
         restored.apply_app_state(serde_json::from_value(app_state).unwrap());
         assert!(restored.last_auto_route);
 
-        // Keep the routed provider/model as hints, but ignore a previously
-        // saved Auto choice when creating a new draft.
+        // The routed provider/model stay the draft's carryover hint; the
+        // Auto flag is what the picker selection restores.
+        let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
+        assert!(session.auto_route);
+        assert_eq!(session.provider, ProviderKind::Claude);
+
+        // Without the experiment the remembered flag cannot arm a draft.
+        restored.model_router_enabled = false;
         let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
         assert!(!session.auto_route);
-        assert_eq!(session.provider, ProviderKind::Claude);
     }
 
     #[test]

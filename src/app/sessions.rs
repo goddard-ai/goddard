@@ -662,7 +662,10 @@ impl Waku {
             (
                 session.project_id,
                 session.provider,
-                session.auto_route,
+                // A started session that came through Auto clears its draft
+                // flag when the decision lands; its route record still
+                // counts as the last-used Auto pick.
+                session.auto_route || session.route_decision.is_some(),
                 session.runtime_mode,
                 session.environment(),
                 session.model.clone(),
@@ -4332,6 +4335,7 @@ impl Waku {
         }
         session.auto_route = true;
         session.updated_at = unix_time();
+        self.state.last_auto_route = true;
         self.save();
         cx.notify();
     }
