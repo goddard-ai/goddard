@@ -3131,14 +3131,15 @@ impl Waku {
         };
         self.ensure_session_loaded(session_id, cx);
         let composer = self.ensure_side_chat_composer(session_id, window, cx);
-        if self
+        let pending_side_chat_focus = if self
             .right_panel_pending_side_chat_focus
             .take_if(|pending| *pending == session_id)
             .is_some()
         {
-            let focus = composer.read(cx).focus();
-            window.focus(&focus, cx);
-        }
+            Some(composer.read(cx).focus())
+        } else {
+            None
+        };
 
         // The row kinds are fingerprinted and spliced exactly like a card's:
         // appends keep position, a refold re-measures, and the tail re-measures
@@ -3201,7 +3202,7 @@ impl Waku {
         let entity = cx.entity().downgrade();
         let workspace_footer =
             self.render_side_chat_workspace_footer(session_id, composer.clone(), cx);
-        div()
+        let panel = div()
             .flex_1()
             .min_h_0()
             .flex()
@@ -3253,8 +3254,15 @@ impl Waku {
                         cx,
                     )),
             )
-            .child(workspace_footer)
-            .into_any_element()
+            .child(workspace_footer);
+        if let Some(focus) = pending_side_chat_focus {
+            // The composer card joins the dispatch tree with the panel. Wait
+            // for that deferred mount before handing it keyboard focus.
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+            });
+        }
+        panel.into_any_element()
     }
 
     /// One row of a side chat's transcript. `index` is a position in the
