@@ -263,6 +263,12 @@ fn capture_worktree_commit_with_base(
 
     let git_dir = worktree_git_dir(cwd)?;
     let index = git_dir.join(CHECKPOINT_INDEX_NAME);
+    // `status -z` and `diff-files` report repository-relative paths while
+    // `git add` resolves pathspecs against its working directory, so the
+    // capture plumbing runs at the worktree root — the one place both
+    // conventions agree. `scope` keeps the capture inside the caller's
+    // subtree when it sits below the root.
+    let (root, scope) = worktree_root_and_scope(cwd)?;
     // Every snapshot writes through the same side index, so two captures on
     // one worktree must not overlap. Captures on different worktrees keep
     // their own indexes and stay independent.
@@ -272,20 +278,21 @@ fn capture_worktree_commit_with_base(
     // above makes any leftover dead.
     let _ = fs::remove_file(index.with_extension("lock"));
 
-    match capture_with_index(cwd, &index, head, message, parents, start_ref) {
+    match capture_with_index(&root, &scope, &index, head, message, parents, start_ref) {
         Err(_) => {
             // A stale or corrupt side index fails plumbing the caller cannot
             // fix — rebuild it once from scratch before giving up.
             let _ = fs::remove_file(&index);
             let _ = fs::remove_file(index.with_extension("lock"));
-            capture_with_index(cwd, &index, head, message, parents, start_ref)
+            capture_with_index(&root, &scope, &index, head, message, parents, start_ref)
         }
         ok => ok,
     }
 }
 
 fn capture_with_index(
-    cwd: &Path,
+    root: &Path,
+    scope: &str,
     index: &Path,
     head: Option<&str>,
     message: &str,
@@ -293,33 +300,33 @@ fn capture_with_index(
     start_ref: Option<&str>,
 ) -> anyhow::Result<String> {
     if let Some(start_ref) = start_ref {
-        return capture_with_turn_start_index(cwd, index, start_ref, message, parents);
+        return capture_with_turn_start_index(root, scope, index, start_ref, message, parents);
     }
 
     // A clean worktree commits HEAD's tree outright — no index writes and no
     // hashing at all. Status runs against the side index, which keeps it off
     // the user's index while still giving it a warm stat cache.
-    let changed_paths = worktree_status(cwd, index)?;
+    let changed_paths = worktree_status(root, index, scope)?;
     if let Some(head) = head
         && changed_paths.is_empty()
     {
-        let tree = git_output(cwd, ["rev-parse", &format!("{head}^{{tree}}")])?
+        let tree = git_output(root, ["rev-parse", &format!("{head}^{{tree}}")])?
             .trim()
             .to_owned();
         if tree.is_empty() {
             bail!("git rev-parse returned no tree id");
         }
-        return commit_tree(cwd, &tree, message, parents);
+        return commit_tree(root, &tree, message, parents);
     }
     if let Some(head) = head {
-        git_with_index(cwd, index, ["read-tree", head])?;
+        git_with_index(root, index, ["read-tree", head])?;
     }
     if head.is_some() {
         if let Some(pathspecs) = status_pathspecs(&changed_paths)
             && !pathspecs.is_empty()
         {
             git_with_index_input(
-                cwd,
+                root,
                 index,
                 ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
                 &pathspecs,
@@ -327,28 +334,29 @@ fn capture_with_index(
         } else {
             // An unfamiliar or empty status record must never omit files from
             // a checkpoint. Keep the full capture as the safe fallback.
-            git_with_index(cwd, index, ["add", "-A", "--", "."])?;
+            git_with_index(root, index, ["add", "-A", "--", scope])?;
         }
     } else {
-        git_with_index(cwd, index, ["add", "-A", "--", "."])?;
+        git_with_index(root, index, ["add", "-A", "--", scope])?;
     }
-    let tree = git_with_index(cwd, index, ["write-tree"])?
+    let tree = git_with_index(root, index, ["write-tree"])?
         .trim()
         .to_owned();
     if tree.is_empty() {
         bail!("git write-tree returned no object id");
     }
-    commit_tree(cwd, &tree, message, parents)
+    commit_tree(root, &tree, message, parents)
 }
 
 fn capture_with_turn_start_index(
-    cwd: &Path,
+    root: &Path,
+    scope: &str,
     index: &Path,
     start_ref: &str,
     message: &str,
     parents: &[String],
 ) -> anyhow::Result<String> {
-    git_with_index(cwd, index, ["read-tree", start_ref])?;
+    git_with_index(root, index, ["read-tree", start_ref])?;
     let mut pathspecs = Vec::new();
     for args in [
         &[
@@ -357,7 +365,7 @@ fn capture_with_turn_start_index(
             "-z",
             "--ignore-submodules=none",
             "--",
-            ".",
+            scope,
         ][..],
         &[
             "ls-files",
@@ -366,10 +374,10 @@ fn capture_with_turn_start_index(
             "--directory",
             "-z",
             "--",
-            ".",
+            scope,
         ][..],
     ] {
-        let paths = git_with_index_output(cwd, index, args)?.stdout;
+        let paths = git_with_index_output(root, index, args)?.stdout;
         for path in paths
             .split(|byte| *byte == 0)
             .filter(|path| !path.is_empty())
@@ -379,32 +387,54 @@ fn capture_with_turn_start_index(
     }
 
     if pathspecs.is_empty() {
-        return resolve_ref(cwd, start_ref)
+        return resolve_ref(root, start_ref)
             .ok_or_else(|| anyhow!("turn starting checkpoint `{start_ref}` is unavailable"));
     }
 
     git_with_index_input(
-        cwd,
+        root,
         index,
         ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
         &pathspecs,
     )?;
-    let tree = git_with_index(cwd, index, ["write-tree"])?
+    let tree = git_with_index(root, index, ["write-tree"])?
         .trim()
         .to_owned();
     if tree.is_empty() {
         bail!("git write-tree returned no object id");
     }
-    commit_tree(cwd, &tree, message, parents)
+    commit_tree(root, &tree, message, parents)
+}
+
+/// The worktree root plus the caller's path within it as a pathspec. Both
+/// come from `rev-parse`, which answers them relative to `cwd` regardless of
+/// how deep inside the checkout the session's working directory sits.
+fn worktree_root_and_scope(cwd: &Path) -> anyhow::Result<(PathBuf, String)> {
+    let root = git_output(cwd, ["rev-parse", "--show-toplevel"])?
+        .trim()
+        .to_owned();
+    if root.is_empty() {
+        bail!("git rev-parse returned no worktree root");
+    }
+    let prefix = git_output(cwd, ["rev-parse", "--show-prefix"])?;
+    let prefix = prefix.trim();
+    Ok((
+        PathBuf::from(root),
+        if prefix.is_empty() {
+            ".".to_owned()
+        } else {
+            prefix.to_owned()
+        },
+    ))
 }
 
 /// Changes relative to the side index, including staged, unstaged, and
 /// non-ignored untracked paths. `-z` preserves arbitrary path bytes for the
 /// pathspec file. `--untracked-files=all` keeps `status.showUntrackedFiles`
 /// from hiding files the snapshot must see.
-fn worktree_status(cwd: &Path, index: &Path) -> anyhow::Result<Vec<u8>> {
+fn worktree_status(root: &Path, index: &Path, scope: &str) -> anyhow::Result<Vec<u8>> {
     Ok(git_with_index_output(
-        cwd,
+        root,
         index,
         [
             "status",
@@ -412,7 +442,7 @@ fn worktree_status(cwd: &Path, index: &Path) -> anyhow::Result<Vec<u8>> {
             "-z",
             "--untracked-files=all",
             "--",
-            ".",
+            scope,
         ],
     )?
     .stdout)
