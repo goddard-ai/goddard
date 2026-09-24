@@ -1020,6 +1020,18 @@ pub(super) fn maintain_transcript_anchor(
     true
 }
 
+/// Whether landing on the tail should re-engage turn following.
+///
+/// While the anchor still reserves end space, following means holding the
+/// sent prompt at the viewport top — re-arming it there snaps a reader who
+/// just scrolled to the bottom back up the transcript. Once the end space
+/// has collapsed the flag only drives the tail pin, so rejoining can re-arm
+/// it. The tail itself is held either way by the past-the-end offset
+/// `scroll_to_end` parks.
+pub(super) fn tail_rejoin_follows_anchor(anchored: bool, end_space: Pixels) -> bool {
+    anchored && end_space <= Pixels::ZERO
+}
+
 pub(super) const ACTIVITY_IMAGE_WIDTH: f32 = 300.0;
 pub(super) const ACTIVITY_IMAGE_HEIGHT: f32 = 200.0;
 

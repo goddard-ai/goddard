@@ -631,10 +631,16 @@ impl Waku {
     /// not the follow flag: `scroll_to_end` parks the list on `item_count`, and
     /// the layout walks backwards from there, so the last row's bottom stays
     /// against the viewport as that row grows. The flag alone only re-pins in
-    /// the phase where the anchor's end space has already collapsed to zero.
+    /// the phase where the anchor's end space has already collapsed to zero —
+    /// while that space remains, re-arming it would hold the sent prompt at
+    /// the viewport top and yank a reader who just scrolled to the bottom
+    /// back up the transcript.
     pub(super) fn pin_transcript_to_tail(&self) {
         self.transcript_anchor_following
-            .set(self.transcript_anchor.get().is_some());
+            .set(tail_rejoin_follows_anchor(
+                self.transcript_anchor.get().is_some(),
+                self.transcript_anchor_end_space.get(),
+            ));
         self.active_transcript_rows().scroll_to_end();
         self.transcript_is_scrolled.set(false);
     }
