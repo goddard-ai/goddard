@@ -1959,6 +1959,8 @@ impl Waku {
                 let location = file_link_location(target);
                 self.open_right_panel_surface(RightPanelSurface::Files, cx);
                 self.open_right_panel_file(relative_path.clone(), cx);
+                self.right_panel_file_tree_visible = false;
+                cx.notify();
                 if let Some((line, column)) = location {
                     self.right_panel_pending_file_focus = Some(PendingFileFocus {
                         path: relative_path,
@@ -2305,6 +2307,7 @@ impl Waku {
             expanded_paths: std::mem::take(&mut self.right_panel_expanded_paths),
             files_selected_path: self.right_panel_files_selected_path.take(),
             file_tree_width: self.right_panel_file_tree_width,
+            file_tree_visible: self.right_panel_file_tree_visible,
             file_editors,
             ref_editors: HashMap::new(),
             files_root: self.right_panel_files_root.take(),
@@ -2333,6 +2336,7 @@ impl Waku {
         self.right_panel_expanded_paths = state.expanded_paths;
         self.right_panel_files_selected_path = state.files_selected_path;
         self.right_panel_file_tree_width = state.file_tree_width;
+        self.right_panel_file_tree_visible = state.file_tree_visible;
         self.right_panel_file_editors = state.file_editors;
         self.right_panel_ref_editors = state.ref_editors;
         self.right_panel_files_root = state.files_root;
@@ -4705,6 +4709,8 @@ impl Waku {
         let fullscreen = self.panel_fullscreen_active();
         let file_tree_width = if fullscreen {
             0.0
+        } else if !self.right_panel_file_tree_visible {
+            0.0
         } else {
             fitted_file_tree_width(panel_width, self.right_panel_file_tree_width)
         };
@@ -4787,6 +4793,40 @@ impl Waku {
                         cx.stop_propagation();
                     }
                 })
+        });
+        let tree_toggle = (!fullscreen).then(|| {
+            let focus = self.transcript_control_focus("file-tree-toggle", cx);
+            let label = if self.right_panel_file_tree_visible {
+                tr!("files.hide_tree")
+            } else {
+                tr!("files.show_tree")
+            };
+            div()
+                .id("file-tree-toggle")
+                .track_focus(&focus)
+                .tab_index(0)
+                .size(px(26.0))
+                .rounded(px(9.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .hover(|style| style.bg(theme.overlay))
+                .child(icon("icons/panel-right.svg", 12.0, theme.text_tertiary))
+                .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.right_panel_file_tree_visible = !this.right_panel_file_tree_visible;
+                    cx.notify();
+                }))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.right_panel_file_tree_visible = !this.right_panel_file_tree_visible;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }))
         });
         let preview_toggle = (is_markdown || is_svg).then(|| {
             let focus = self.transcript_control_focus("file-preview-toggle", cx);
@@ -4875,6 +4915,7 @@ impl Waku {
                         cx,
                     ))
                     .children(github_button)
+                    .children(tree_toggle)
                     .children(preview_toggle),
             )
             .child(body);
@@ -4887,26 +4928,29 @@ impl Waku {
             .child(editor)
             // Fullscreen drops the file tree entirely; its resize handle
             // would fight a surface that owns the window's width.
-            .when(!fullscreen, |element| {
-                element.child(
-                    div()
-                        .w(px(file_tree_width))
-                        .min_w(px(FILE_TREE_MIN_WIDTH))
-                        .h_full()
-                        .flex_none()
-                        .flex()
-                        .flex_col()
-                        .relative()
-                        .border_l(hairline())
-                        .border_color(theme.separator)
-                        .child(self.render_right_panel_working_tree(Some(&relative_path), cx))
-                        .child(self.render_panel_resize_handle(
-                            "right-panel-file-tree-resize-handle",
-                            PanelResizeTarget::FileTree,
-                            cx,
-                        )),
-                )
-            })
+            .when(
+                !fullscreen && self.right_panel_file_tree_visible,
+                |element| {
+                    element.child(
+                        div()
+                            .w(px(file_tree_width))
+                            .min_w(px(FILE_TREE_MIN_WIDTH))
+                            .h_full()
+                            .flex_none()
+                            .flex()
+                            .flex_col()
+                            .relative()
+                            .border_l(hairline())
+                            .border_color(theme.separator)
+                            .child(self.render_right_panel_working_tree(Some(&relative_path), cx))
+                            .child(self.render_panel_resize_handle(
+                                "right-panel-file-tree-resize-handle",
+                                PanelResizeTarget::FileTree,
+                                cx,
+                            )),
+                    )
+                },
+            )
     }
 
     /// The `FileAtRef` surface: a file's blob at a git ref, read-only — the
@@ -7044,6 +7088,7 @@ impl Waku {
                 expanded_paths: HashSet::new(),
                 file_editors: HashMap::new(),
                 file_tree_width: DEFAULT_FILE_TREE_WIDTH,
+                file_tree_visible: true,
             });
         self.restore_right_panel_files_slice(slice);
         self.right_panel_files_root = resolved;
@@ -7093,6 +7138,7 @@ impl Waku {
                 .filter(|(_, editor)| editor.dirty || !editor.annotations.borrow().items.is_empty())
                 .collect(),
             file_tree_width: self.right_panel_file_tree_width,
+            file_tree_visible: self.right_panel_file_tree_visible,
         }
     }
 
@@ -7105,6 +7151,7 @@ impl Waku {
         self.right_panel_expanded_paths = parked.expanded_paths;
         self.right_panel_file_editors = parked.file_editors;
         self.right_panel_file_tree_width = parked.file_tree_width;
+        self.right_panel_file_tree_visible = parked.file_tree_visible;
         let mut restored_active = None;
         for (position, (index, surface)) in parked.surfaces.into_iter().enumerate() {
             let index = index.min(self.right_panel_surfaces.len());

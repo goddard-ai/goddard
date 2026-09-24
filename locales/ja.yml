@@ -1547,6 +1547,8 @@ files.preview_markdown: Markdown をプレビュー
 files.preview_image: 画像をプレビュー
 files.edit_markdown_source: ソースを編集
 files.open_on_github: GitHub で開く
+files.show_tree: ファイルツリーを表示
+files.hide_tree: ファイルツリーを隠す
 files.resize_tree: ファイルツリーの幅を変更
 files.refresh: ファイルを更新
 files.loading: ファイルを読み込み中…

@@ -3874,6 +3874,10 @@ files.edit_markdown_source:
   en: Edit source
 files.open_on_github:
   en: Open on GitHub
+files.show_tree:
+  en: Show file tree
+files.hide_tree:
+  en: Hide file tree
 files.resize_tree:
   en: Resize file tree
 files.refresh:

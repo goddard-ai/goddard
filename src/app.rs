@@ -1188,6 +1188,7 @@ struct RightPanelSessionState {
     expanded_paths: HashSet<PathBuf>,
     files_selected_path: Option<String>,
     file_tree_width: f32,
+    file_tree_visible: bool,
     file_editors: HashMap<String, RightPanelFileEditor>,
     ref_editors: HashMap<String, RightPanelRefEditor>,
     /// The directory this state's file surfaces and editors are rooted at —
@@ -1215,6 +1216,7 @@ struct ParkedPanelFiles {
     expanded_paths: HashSet<PathBuf>,
     file_editors: HashMap<String, RightPanelFileEditor>,
     file_tree_width: f32,
+    file_tree_visible: bool,
 }
 
 impl RightPanelSessionState {
@@ -1229,6 +1231,7 @@ impl RightPanelSessionState {
             expanded_paths: HashSet::new(),
             files_selected_path: None,
             file_tree_width: DEFAULT_FILE_TREE_WIDTH,
+            file_tree_visible: true,
             file_editors: HashMap::new(),
             ref_editors: HashMap::new(),
             files_root: None,
@@ -2965,6 +2968,7 @@ pub struct Waku {
     right_panel_expanded_paths: HashSet<PathBuf>,
     right_panel_files_selected_path: Option<String>,
     right_panel_file_tree_width: f32,
+    right_panel_file_tree_visible: bool,
     right_panel_file_editors: HashMap<String, RightPanelFileEditor>,
     /// Read-only editors behind `FileAtRef` surfaces, keyed `"{git_ref}:{path}"`.
     right_panel_ref_editors: HashMap<String, RightPanelRefEditor>,
@@ -6292,6 +6296,7 @@ impl Waku {
                 right_panel_expanded_paths: HashSet::new(),
                 right_panel_files_selected_path: None,
                 right_panel_file_tree_width: DEFAULT_FILE_TREE_WIDTH,
+                right_panel_file_tree_visible: true,
                 right_panel_file_editors: HashMap::new(),
                 right_panel_ref_editors: HashMap::new(),
                 right_panel_files_root: None,

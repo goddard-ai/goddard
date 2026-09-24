@@ -1509,6 +1509,8 @@ files.preview_markdown: 预览 Markdown
 files.preview_image: 预览图片
 files.edit_markdown_source: 编辑源码
 files.open_on_github: 在 GitHub 上打开
+files.show_tree: 显示文件树
+files.hide_tree: 隐藏文件树
 files.resize_tree: 调整文件树宽度
 files.refresh: 刷新文件
 files.loading: 正在加载文件…
