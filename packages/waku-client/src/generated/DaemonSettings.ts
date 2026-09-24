@@ -83,7 +83,10 @@ auto_prompts: Array<AutoPromptRule>,
  * Defaults on in development builds, opt-in in release builds.
  */
 memory_experiment_enabled: boolean,
-/** Experimental opt-in for cross-session composer drafts. Defaults on in development builds and off in release builds. */
+/**
+ * Experimental opt-in for cross-session composer drafts. Defaults on in
+ * development builds and off in release builds.
+ */
 composer_drafts_experiment_enabled: boolean,
 /**
  * Per-provider model override for memory distillation runs. A provider
