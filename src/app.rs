@@ -68,7 +68,7 @@ use crate::persistence::{
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
     PersistedTranscriptScrollPosition, PersistedWindowState, RecentModelUse,
     SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
-    UpdateChannel, VoiceBriefingTtsModel,
+    UpdateChannel, VoiceBriefingSummaryModel, VoiceBriefingTtsModel,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -2139,6 +2139,7 @@ pub struct Waku {
     /// startup — the gateway key stays masked like every secret field.
     voice_briefing_key_input: Entity<TextInput>,
     voice_briefing_model_input: Entity<TextInput>,
+    voice_briefing_tts_model_input: Entity<TextInput>,
     /// Replies already briefed this run, keyed by message id — landing on
     /// the same task twice replays nothing.
     briefed_messages: HashSet<Uuid>,
@@ -4693,9 +4694,18 @@ impl Waku {
             let mut input = TextInput::new(window, cx)
                 .tab_index(0)
                 .select_all_on_focus_click()
-                .accessibility_label(tr!("experiments.voice_briefing_model"))
+                .accessibility_label(tr!("experiments.voice_briefing_custom_model"))
                 .placeholder(tr!("experiments.voice_briefing_model_placeholder"));
             input.set_content(state.voice_briefing_summary_model.clone(), cx);
+            input
+        });
+        let voice_briefing_tts_model_input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("experiments.voice_briefing_custom_model"))
+                .placeholder(tr!("experiments.voice_briefing_custom_model_placeholder"));
+            input.set_content(state.voice_briefing_tts_custom_model.clone(), cx);
             input
         });
         let skills_search = cx.new(|cx| {
@@ -5648,7 +5658,11 @@ impl Waku {
             }
             // The briefing fields write straight through — they edit app
             // state, not a staged daemon document like the eval keys.
-            for input in [&voice_briefing_key_input, &voice_briefing_model_input] {
+            for input in [
+                &voice_briefing_key_input,
+                &voice_briefing_model_input,
+                &voice_briefing_tts_model_input,
+            ] {
                 cx.subscribe(input, |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
                         this.save_voice_briefing_fields(cx);
@@ -5961,6 +5975,7 @@ impl Waku {
                 eval_inputs_seeded: false,
                 voice_briefing_key_input,
                 voice_briefing_model_input,
+                voice_briefing_tts_model_input,
                 briefed_messages: HashSet::new(),
                 briefing_clips: HashMap::new(),
                 briefing_clip_order: VecDeque::new(),

@@ -2211,6 +2211,8 @@ experiments.voice_briefing_key: AI Gateway キー
 experiments.voice_briefing_key_placeholder: AI Gateway API キー
 experiments.voice_briefing_model: 要約モデル
 experiments.voice_briefing_model_placeholder: プロバイダー/モデル — 例 google/gemini-3-flash
+experiments.voice_briefing_custom_model: カスタムモデル
+experiments.voice_briefing_custom_model_placeholder: プロバイダー/モデル — 例 openai/tts-1
 experiments.voice_briefing_tts: 音声モデル
 friends.a_friend: フレンド
 friends.abort_sync: 中止

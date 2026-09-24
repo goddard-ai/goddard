@@ -33,11 +33,10 @@ const TRANSCRIPT_WORD_CAP: usize = 110;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CHAT_COMPLETIONS_URL: &str = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const SPEECH_URL: &str = "https://ai-gateway.vercel.sh/v4/ai/speech-model";
-/// A Gemini prebuilt voice — the experiment ships one until a picker earns
-/// its own settings row.
-const VOICE: &str = "Kore";
-/// Ready clips are a small cache, not a library — a ~45s WAV is ~2 MB, so
-/// eight covers an unread sweep without holding the heap.
+/// The example voice ID used by the Fish Audio gateway models.
+const FISH_AUDIO_VOICE: &str = "933563129e564b19a115bedd57b7406a";
+/// Ready clips are a small cache, not a library — a ~45s audio clip is a few
+/// MB, so eight covers an unread sweep without holding the heap.
 const BRIEFING_CLIPS_CAP: usize = 8;
 /// Pipelines in flight at once; past this a settle simply misses its
 /// prefetch and generates on arrival instead.
@@ -98,6 +97,8 @@ impl Waku {
         }
         if self.state.voice_briefing_gateway_key.trim().is_empty()
             || self.state.voice_briefing_summary_model.trim().is_empty()
+            || (self.state.voice_briefing_tts_model == VoiceBriefingTtsModel::Custom
+                && self.state.voice_briefing_tts_custom_model.trim().is_empty())
         {
             return None;
         }
@@ -155,14 +156,23 @@ impl Waku {
         let key = self.state.voice_briefing_gateway_key.trim().to_owned();
         let summary_model = self.state.voice_briefing_summary_model.trim().to_owned();
         let tts_model = self.state.voice_briefing_tts_model;
+        let tts_model_id = match tts_model {
+            VoiceBriefingTtsModel::Custom => {
+                self.state.voice_briefing_tts_custom_model.trim().to_owned()
+            }
+            _ => tts_model.model_id().unwrap_or_default().to_owned(),
+        };
         let http = cx.http_client();
         let executor = cx.background_executor().clone();
         let work = executor.spawn({
             let executor = executor.clone();
             async move {
-                let transcript =
-                    summarize(&http, &executor, &key, &summary_model, &response).await?;
-                synthesize(&http, &executor, &key, tts_model.model_id(), &transcript).await
+                let transcript = summarize(&http, &executor, &key, &summary_model, &response)
+                    .await
+                    .context("summary generation")?;
+                synthesize(&http, &executor, &key, &tts_model_id, &transcript)
+                    .await
+                    .context("speech generation")
             }
         });
         cx.spawn(async move |this, cx| {
@@ -232,7 +242,9 @@ async fn summarize(
             {"role": "user", "content": response},
         ],
     });
-    let parsed = post_json(http, executor, CHAT_COMPLETIONS_URL, key, None, &body).await?;
+    let parsed = post_json(http, executor, CHAT_COMPLETIONS_URL, key, None, &body)
+        .await
+        .with_context(|| format!("summary gateway request for model {model}"))?;
     let transcript = parsed
         .pointer("/choices/0/message/content")
         .and_then(Value::as_str)
@@ -247,7 +259,7 @@ async fn summarize(
 }
 
 /// Voice the transcript through the gateway's speech endpoint, which
-/// answers a JSON envelope whose `audio` field is base64 WAV.
+/// answers a JSON envelope whose `audio` field is base64 audio.
 async fn synthesize(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
@@ -255,12 +267,15 @@ async fn synthesize(
     model_id: &str,
     text: &str,
 ) -> anyhow::Result<Vec<u8>> {
+    let (voice, output_format) = speech_parameters(model_id);
     let body = json!({
         "text": text,
-        "voice": VOICE,
-        "outputFormat": "wav",
+        "voice": voice,
+        "outputFormat": output_format,
     });
-    let parsed = post_json(http, executor, SPEECH_URL, key, Some(model_id), &body).await?;
+    let parsed = post_json(http, executor, SPEECH_URL, key, Some(model_id), &body)
+        .await
+        .with_context(|| format!("speech gateway request for model {model_id}"))?;
     let audio = parsed
         .get("audio")
         .and_then(Value::as_str)
@@ -270,6 +285,15 @@ async fn synthesize(
     base64::engine::general_purpose::STANDARD
         .decode(audio)
         .context("the speech model returned invalid audio")
+}
+
+fn speech_parameters(model_id: &str) -> (&'static str, &'static str) {
+    match model_id {
+        "openai/tts-1" | "openai/tts-1-hd" => ("alloy", "mp3"),
+        "spacexai/grok-tts" => ("eve", "wav"),
+        "fish-audio/s1" | "fish-audio/s2-pro" | "fish-audio/s2.1-pro" => (FISH_AUDIO_VOICE, "mp3"),
+        _ => ("Kore", "wav"),
+    }
 }
 
 /// POST a JSON body with the gateway bearer and parse the JSON answer.
@@ -306,7 +330,7 @@ async fn post_json(
         Either::Right(_) => bail!("the gateway request timed out"),
     };
     if !status.is_success() {
-        bail!("the gateway answered HTTP {status}");
+        bail!("the gateway answered HTTP {status} for {url}");
     }
     serde_json::from_slice(&bytes).context("the gateway returned invalid JSON")
 }

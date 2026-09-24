@@ -7277,8 +7277,8 @@ impl Waku {
     }
 
     /// The voice briefing card's tuning block: the shared AI Gateway
-    /// credential, the chat model that writes the transcript, and which
-    /// Gemini TTS tier speaks it.
+    /// credential, the summary model that writes the transcript, and which
+    /// TTS tier speaks it.
     fn voice_briefing_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let row = |label: String, control: AnyElement| {
             div()
@@ -7296,9 +7296,42 @@ impl Waku {
                 .child(control)
         };
 
+        let summary = if self.state.voice_briefing_summary_custom {
+            VoiceBriefingSummaryModel::Custom
+        } else {
+            VoiceBriefingSummaryModel::from_model_id(self.state.voice_briefing_summary_model.trim())
+        };
+        let summary_handle = self.menu_handle("voice-briefing-summary-model".to_owned(), cx);
+        let summary_weak = cx.entity().downgrade();
+        let summary_selector = dropdown_menu(
+            MenuChip::new("voice-briefing-summary-model")
+                .label(summary.label())
+                .outlined()
+                .selected(summary_handle.is_open())
+                .w(px(280.0))
+                .justify_between(),
+            "voice-briefing-summary-model-menu",
+            &summary_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                VoiceBriefingSummaryModel::ALL
+                    .into_iter()
+                    .map(|option| {
+                        let weak = summary_weak.clone();
+                        MenuItem::new(option.label(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_voice_briefing_summary_model(option, cx)
+                            });
+                        })
+                        .selected(option == summary)
+                    })
+                    .collect()
+            },
+        );
+
         let tts = self.state.voice_briefing_tts_model;
         let handle = self.menu_handle("voice-briefing-tts-model".to_owned(), cx);
-        let weak = cx.entity().downgrade();
+        let tts_weak = cx.entity().downgrade();
         let tts_selector = dropdown_menu(
             MenuChip::new("voice-briefing-tts-model")
                 .label(tts.label())
@@ -7313,7 +7346,7 @@ impl Waku {
                 VoiceBriefingTtsModel::ALL
                     .into_iter()
                     .map(|option| {
-                        let weak = weak.clone();
+                        let weak = tts_weak.clone();
                         MenuItem::new(option.label(), move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {
                                 this.set_voice_briefing_tts_model(option, cx)
@@ -7345,22 +7378,65 @@ impl Waku {
             ))
             .child(row(
                 tr!("experiments.voice_briefing_model"),
-                TextField::new(
-                    "voice-briefing-model",
-                    self.voice_briefing_model_input.clone(),
-                )
-                .w(px(280.0))
-                .into_any_element(),
+                summary_selector.into_any_element(),
             ))
+            .when(summary.is_custom(), |card| {
+                card.child(row(
+                    tr!("experiments.voice_briefing_custom_model"),
+                    TextField::new(
+                        "voice-briefing-custom-model",
+                        self.voice_briefing_model_input.clone(),
+                    )
+                    .w(px(280.0))
+                    .into_any_element(),
+                ))
+            })
             .child(row(
                 tr!("experiments.voice_briefing_tts"),
                 tts_selector.into_any_element(),
             ))
+            .when(tts == VoiceBriefingTtsModel::Custom, |card| {
+                card.child(row(
+                    tr!("experiments.voice_briefing_custom_model"),
+                    TextField::new(
+                        "voice-briefing-custom-tts-model",
+                        self.voice_briefing_tts_model_input.clone(),
+                    )
+                    .w(px(280.0))
+                    .into_any_element(),
+                ))
+            })
             .into_any_element()
     }
 
     fn set_voice_briefing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.voice_briefing_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_summary_model(
+        &mut self,
+        model: VoiceBriefingSummaryModel,
+        cx: &mut Context<Self>,
+    ) {
+        if model.is_custom() {
+            self.state.voice_briefing_summary_custom = true;
+            if !VoiceBriefingSummaryModel::from_model_id(
+                self.state.voice_briefing_summary_model.trim(),
+            )
+            .is_custom()
+            {
+                self.state.voice_briefing_summary_model.clear();
+                self.voice_briefing_model_input
+                    .update(cx, |input, cx| input.set_content("", cx));
+            }
+        } else if let Some(model_id) = model.model_id() {
+            self.state.voice_briefing_summary_custom = false;
+            self.state.voice_briefing_summary_model = model_id.to_owned();
+            self.voice_briefing_model_input
+                .update(cx, |input, cx| input.set_content(model_id, cx));
+        }
         self.save();
         cx.notify();
     }
@@ -7378,9 +7454,10 @@ impl Waku {
         cx.notify();
     }
 
-    /// The card's two text fields write straight into app state on each
-    /// edit — a cleared model restores the default rather than storing a
-    /// blank the pipeline's gate then reads as unconfigured.
+    /// The briefing fields write straight through — they edit app state, not
+    /// a staged daemon document like the eval keys. A cleared built-in summary
+    /// restores the default, while a deliberately selected custom model may
+    /// stay empty until the user finishes entering its ID.
     pub(super) fn save_voice_briefing_fields(&mut self, cx: &mut Context<Self>) {
         self.state.voice_briefing_gateway_key = self
             .voice_briefing_key_input
@@ -7394,11 +7471,26 @@ impl Waku {
             .content()
             .trim()
             .to_owned();
-        self.state.voice_briefing_summary_model = if model.is_empty() {
-            crate::persistence::default_voice_briefing_summary_model()
-        } else {
-            model
-        };
+        let selection = VoiceBriefingSummaryModel::from_model_id(&model);
+        if selection.is_custom() {
+            if model.is_empty() && !self.state.voice_briefing_summary_custom {
+                self.state.voice_briefing_summary_model =
+                    crate::persistence::default_voice_briefing_summary_model();
+                self.state.voice_briefing_summary_custom = false;
+            } else {
+                self.state.voice_briefing_summary_model = model;
+                self.state.voice_briefing_summary_custom = true;
+            }
+        } else if let Some(model_id) = selection.model_id() {
+            self.state.voice_briefing_summary_model = model_id.to_owned();
+            self.state.voice_briefing_summary_custom = false;
+        }
+        self.state.voice_briefing_tts_custom_model = self
+            .voice_briefing_tts_model_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
         self.save();
     }
 

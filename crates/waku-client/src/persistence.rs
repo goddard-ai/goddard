@@ -237,26 +237,109 @@ impl CompletionSound {
     }
 }
 
-/// The Gemini TTS tier the voice briefing speaks through. Both answer
-/// through the AI Gateway's speech endpoint; Flash Lite trades voice
-/// fidelity for a cheaper, faster clip.
+/// The summary models offered by the voice briefing selector. The string in
+/// app settings remains the source of truth so custom gateway model IDs keep
+/// working across releases.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VoiceBriefingSummaryModel {
+    Gemini38Flash,
+    Gemini37Flash,
+    Gemini35FlashLite,
+    Gemini31FlashLite,
+    Gemini3Flash,
+    Gemini25FlashLite,
+    Custom,
+}
+
+impl VoiceBriefingSummaryModel {
+    pub const ALL: [Self; 7] = [
+        Self::Gemini38Flash,
+        Self::Gemini37Flash,
+        Self::Gemini35FlashLite,
+        Self::Gemini31FlashLite,
+        Self::Gemini3Flash,
+        Self::Gemini25FlashLite,
+        Self::Custom,
+    ];
+
+    pub fn from_model_id(model: &str) -> Self {
+        match model {
+            "google/gemini-3.8-flash" => Self::Gemini38Flash,
+            "google/gemini-3.7-flash" => Self::Gemini37Flash,
+            "google/gemini-3.5-flash-lite" => Self::Gemini35FlashLite,
+            "google/gemini-3.1-flash-lite" => Self::Gemini31FlashLite,
+            "google/gemini-3-flash" => Self::Gemini3Flash,
+            "google/gemini-2.5-flash-lite" => Self::Gemini25FlashLite,
+            _ => Self::Custom,
+        }
+    }
+
+    pub fn model_id(self) -> Option<&'static str> {
+        match self {
+            Self::Gemini38Flash => Some("google/gemini-3.8-flash"),
+            Self::Gemini37Flash => Some("google/gemini-3.7-flash"),
+            Self::Gemini35FlashLite => Some("google/gemini-3.5-flash-lite"),
+            Self::Gemini31FlashLite => Some("google/gemini-3.1-flash-lite"),
+            Self::Gemini3Flash => Some("google/gemini-3-flash"),
+            Self::Gemini25FlashLite => Some("google/gemini-2.5-flash-lite"),
+            Self::Custom => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Gemini38Flash => "Gemini 3.8 Flash",
+            Self::Gemini37Flash => "Gemini 3.7 Flash",
+            Self::Gemini35FlashLite => "Gemini 3.5 Flash-Lite",
+            Self::Gemini31FlashLite => "Gemini 3.1 Flash-Lite",
+            Self::Gemini3Flash => "Gemini 3 Flash",
+            Self::Gemini25FlashLite => "Gemini 2.5 Flash-Lite",
+            Self::Custom => "Custom model",
+        }
+    }
+
+    pub fn is_custom(self) -> bool {
+        matches!(self, Self::Custom)
+    }
+}
+
+/// The speech models offered by the voice briefing selector. The custom
+/// entry keeps arbitrary gateway speech model IDs available across releases.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VoiceBriefingTtsModel {
     #[default]
     Flash,
     FlashLite,
+    OpenAi,
+    OpenAiHd,
+    Grok,
+    FishAudio,
+    Custom,
 }
 
 impl VoiceBriefingTtsModel {
-    pub const ALL: [Self; 2] = [Self::Flash, Self::FlashLite];
+    pub const ALL: [Self; 7] = [
+        Self::Flash,
+        Self::FlashLite,
+        Self::OpenAi,
+        Self::OpenAiHd,
+        Self::Grok,
+        Self::FishAudio,
+        Self::Custom,
+    ];
 
     /// The gateway slug carried in the speech endpoint's `ai-model-id`
     /// header.
-    pub fn model_id(self) -> &'static str {
+    pub fn model_id(self) -> Option<&'static str> {
         match self {
-            Self::Flash => "google/gemini-3.8-flash-tts",
-            Self::FlashLite => "google/gemini-3.8-flash-lite-tts",
+            Self::Flash => Some("google/gemini-3.8-flash-tts"),
+            Self::FlashLite => Some("google/gemini-3.8-flash-lite-tts"),
+            Self::OpenAi => Some("openai/tts-1"),
+            Self::OpenAiHd => Some("openai/tts-1-hd"),
+            Self::Grok => Some("spacexai/grok-tts"),
+            Self::FishAudio => Some("fish-audio/s2.1-pro"),
+            Self::Custom => None,
         }
     }
 
@@ -265,6 +348,11 @@ impl VoiceBriefingTtsModel {
         match self {
             Self::Flash => "Gemini 3.8 Flash TTS",
             Self::FlashLite => "Gemini 3.8 Flash-Lite TTS",
+            Self::OpenAi => "OpenAI TTS-1",
+            Self::OpenAiHd => "OpenAI TTS-1 HD",
+            Self::Grok => "Grok TTS",
+            Self::FishAudio => "Fish Audio S2.1 Pro",
+            Self::Custom => "Custom model",
         }
     }
 }
@@ -1090,8 +1178,16 @@ pub struct AppSettings {
     pub voice_briefing_gateway_key: String,
     /// Gateway chat model that writes the spoken transcript.
     pub voice_briefing_summary_model: String,
-    /// Which Gemini TTS tier voices the transcript.
+    /// True when the summary selector is on its custom-model entry. Kept
+    /// separately so an empty custom field is still distinguishable from the
+    /// built-in default while the user is editing it.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub voice_briefing_summary_custom: bool,
+    /// Which gateway speech model voices the transcript.
     pub voice_briefing_tts_model: VoiceBriefingTtsModel,
+    /// Gateway model ID used when the TTS selector is set to Custom.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_briefing_tts_custom_model: String,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -1170,7 +1266,9 @@ impl Default for AppSettings {
             voice_briefing_enabled: default_experiment_enabled(),
             voice_briefing_gateway_key: String::new(),
             voice_briefing_summary_model: default_voice_briefing_summary_model(),
+            voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
+            voice_briefing_tts_custom_model: String::new(),
             remote_hosts: Vec::new(),
         }
     }
@@ -1635,8 +1733,12 @@ pub struct PersistedState {
     /// Gateway chat model that writes the spoken transcript.
     #[serde(default = "default_voice_briefing_summary_model")]
     pub voice_briefing_summary_model: String,
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub voice_briefing_summary_custom: bool,
     #[serde(default)]
     pub voice_briefing_tts_model: VoiceBriefingTtsModel,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_briefing_tts_custom_model: String,
     /// Whether the user has confirmed the Experiments page's warning
     /// interstitial. Gates the page's toggles, not the flags themselves —
     /// an experiment already on stays on.
@@ -1975,7 +2077,9 @@ impl PersistedState {
             voice_briefing_enabled: default_experiment_enabled(),
             voice_briefing_gateway_key: String::new(),
             voice_briefing_summary_model: default_voice_briefing_summary_model(),
+            voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
+            voice_briefing_tts_custom_model: String::new(),
             experiments_warning_acknowledged: false,
             remote_hosts: Vec::new(),
             sidebar_visible: true,
@@ -2364,7 +2468,9 @@ impl PersistedState {
             voice_briefing_enabled: self.voice_briefing_enabled,
             voice_briefing_gateway_key: self.voice_briefing_gateway_key.clone(),
             voice_briefing_summary_model: self.voice_briefing_summary_model.clone(),
+            voice_briefing_summary_custom: self.voice_briefing_summary_custom,
             voice_briefing_tts_model: self.voice_briefing_tts_model,
+            voice_briefing_tts_custom_model: self.voice_briefing_tts_custom_model.clone(),
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -2497,7 +2603,9 @@ impl PersistedState {
         self.voice_briefing_enabled = settings.voice_briefing_enabled;
         self.voice_briefing_gateway_key = settings.voice_briefing_gateway_key;
         self.voice_briefing_summary_model = settings.voice_briefing_summary_model;
+        self.voice_briefing_summary_custom = settings.voice_briefing_summary_custom;
         self.voice_briefing_tts_model = settings.voice_briefing_tts_model;
+        self.voice_briefing_tts_custom_model = settings.voice_briefing_tts_custom_model;
         self.remote_hosts = settings.remote_hosts;
     }
 
@@ -4128,6 +4236,54 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(legacy.icon, CustomCommandIcon::Terminal);
+    }
+
+    #[test]
+    fn voice_briefing_models_round_trip_and_keep_custom_ids() {
+        assert_eq!(
+            VoiceBriefingSummaryModel::from_model_id("google/gemini-3-flash"),
+            VoiceBriefingSummaryModel::Gemini3Flash
+        );
+        assert_eq!(
+            VoiceBriefingSummaryModel::from_model_id("acme/briefing-model"),
+            VoiceBriefingSummaryModel::Custom
+        );
+        assert_eq!(
+            VoiceBriefingTtsModel::Custom.model_id(),
+            None,
+            "custom TTS IDs are stored separately from the built-in enum"
+        );
+
+        let mut state = PersistedState::empty();
+        state.voice_briefing_summary_model = "acme/briefing-model".to_owned();
+        state.voice_briefing_summary_custom = true;
+        state.voice_briefing_tts_model = VoiceBriefingTtsModel::Custom;
+        state.voice_briefing_tts_custom_model = "acme/voice-model".to_owned();
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.voice_briefing_summary_model, "acme/briefing-model");
+        assert!(restored.voice_briefing_summary_custom);
+        assert_eq!(
+            restored.voice_briefing_tts_model,
+            VoiceBriefingTtsModel::Custom
+        );
+        assert_eq!(restored.voice_briefing_tts_custom_model, "acme/voice-model");
+
+        let legacy: AppSettings = serde_json::from_str(
+            r#"{
+                "voice_briefing_summary_model": "acme/legacy-model",
+                "voice_briefing_tts_model": "flash_lite"
+            }"#,
+        )
+        .unwrap();
+        assert!(!legacy.voice_briefing_summary_custom);
+        assert_eq!(
+            legacy.voice_briefing_tts_model,
+            VoiceBriefingTtsModel::FlashLite
+        );
+        assert!(legacy.voice_briefing_tts_custom_model.is_empty());
     }
 
     #[test]

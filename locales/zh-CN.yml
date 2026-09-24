@@ -2162,6 +2162,8 @@ experiments.voice_briefing_key: AI Gateway 密钥
 experiments.voice_briefing_key_placeholder: AI Gateway API 密钥
 experiments.voice_briefing_model: 摘要模型
 experiments.voice_briefing_model_placeholder: 服务商/模型 — 例如 google/gemini-3-flash
+experiments.voice_briefing_custom_model: 自定义模型
+experiments.voice_briefing_custom_model_placeholder: 服务商/模型 — 例如 openai/tts-1
 experiments.voice_briefing_tts: 语音模型
 friends.a_friend: 一位好友
 friends.abort_sync: 中止

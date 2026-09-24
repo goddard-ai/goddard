@@ -903,6 +903,10 @@ experiments.voice_briefing_model:
   en: Summary model
 experiments.voice_briefing_model_placeholder:
   en: provider/model — e.g. google/gemini-3-flash
+experiments.voice_briefing_custom_model:
+  en: Custom model
+experiments.voice_briefing_custom_model_placeholder:
+  en: provider/model — e.g. openai/tts-1
 experiments.voice_briefing_tts:
   en: Voice model
 experiments.memory_title:
