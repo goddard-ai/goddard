@@ -2335,6 +2335,7 @@ keybind.command.cycle_effort_backward: 反向循环切换推理强度
 keybind.command.cycle_favorite: 循环切换收藏模型
 keybind.command.cycle_favorite_backward: 反向循环切换收藏模型
 keybind.command.favorite_model: "选择收藏模型 %{n}"
+keybind.command.step_model_picker_backward: 反向切换模型选择器
 keybind.conflict.banner: 与 %{other} 冲突
 keybind.conflict.confirm: 按 Enter 仍然保存
 keybind.conflicts: "%{n} 个冲突"

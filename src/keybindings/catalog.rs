@@ -1535,6 +1535,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "workspace.step_model_picker_backward",
+        action: || Box::new(crate::StepModelPickerBackward),
+        title_key: "keybind.command.step_model_picker_backward",
+        title_index: None,
+        category: C::Workspace,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "workspace.toggle_branch_picker",
         action: || Box::new(crate::ToggleBranchPicker),
         title_key: "menu.toggle_branch_picker",
@@ -2864,11 +2873,20 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("terminal.new", All, "secondary-t", ""),
     e("workspace.toggle_model_picker", All, "secondary-/", ""),
     e(
+        "workspace.step_model_picker_backward",
+        All,
+        "secondary-shift-/",
+        "",
+    ),
+    e(
         "workspace.toggle_branch_picker",
         All,
         "secondary-alt-shift-n",
         "",
     ),
+    e("menu.select_next", All, "down", KeyboardOptionsSearch),
+    e("menu.select_previous", All, "up", KeyboardOptionsSearch),
+    e("menu.confirm", All, "enter", KeyboardOptionsSearch),
     e(
         "workspace.toggle_runtime_mode_picker",
         All,
@@ -2972,6 +2990,7 @@ mod ctx {
     pub const TextInput: &str = "TextInput";
     pub const Menu: &str = "Menu";
     pub const MenuPanelField: &str = "Menu > TextInput";
+    pub const KeyboardOptionsSearch: &str = "KeyboardOptions > TextInput";
     pub const Autocomplete: &str = "ComposerAutocomplete > TextInput";
     pub const AutocompleteLoading: &str = "ComposerAutocompleteLoading > TextInput";
     pub const SettingsSearch: &str = "SettingsSidebar > TextInput";

@@ -5274,6 +5274,8 @@ keybind.command.cycle_favorite:
   en: Cycle Favorite Models
 keybind.command.cycle_favorite_backward:
   en: Cycle Favorite Models Backward
+keybind.command.step_model_picker_backward:
+  en: Step the Model Picker Backward
 keybind.command.bigpicture_card:
   en: Select Big Picture Card %{n}
 keybind.command.run_command:

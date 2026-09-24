@@ -2384,6 +2384,7 @@ keybind.command.cycle_effort_backward: 推論レベルを逆方向に切り替�
 keybind.command.cycle_favorite: お気に入りモデルを切り替える
 keybind.command.cycle_favorite_backward: お気に入りモデルを逆方向に切り替える
 keybind.command.favorite_model: "お気に入りモデル %{n} を選択"
+keybind.command.step_model_picker_backward: モデル選択を逆方向に切り替える
 keybind.conflict.banner: "%{other} と競合しています"
 keybind.conflict.confirm: Enter でそのまま保存
 keybind.conflicts: "%{n} 件の競合"
