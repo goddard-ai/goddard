@@ -3457,6 +3457,32 @@ mod tests {
     }
 
     #[test]
+    fn devin_without_saved_effort_uses_the_advertised_default() {
+        let option = select_config_option(
+            "model",
+            SessionConfigOptionCategory::Model,
+            "swe-2-medium",
+            &["swe-2-medium", "swe-2-high", "swe-2-high-fast", "swe-2-max"],
+        );
+        // A session with no saved effort resolves the folded ladder's default
+        // rung — high, else medium — instead of failing on the bare base id.
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-2", None, None, false).as_deref(),
+            Some("swe-2-high")
+        );
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-2", None, Some("fast"), false).as_deref(),
+            Some("swe-2-high-fast")
+        );
+        // A base the provider never advertised still misses rather than
+        // guessing a rung.
+        assert_eq!(
+            resolve_devin_model(Some(&option), "swe-9", None, None, false),
+            None
+        );
+    }
+
+    #[test]
     fn devin_model_fallback_uses_the_advertised_current_model() {
         let option = select_config_option(
             "model",
