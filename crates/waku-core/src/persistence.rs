@@ -375,6 +375,10 @@ pub struct PersistedState {
     /// class), mirrored from the settings document.
     #[serde(skip)]
     pub route_classes: waku_protocol::routing::RouteClassMap,
+    /// Per-provider class maps bounding mid-session model moves, mirrored
+    /// from the settings document.
+    #[serde(skip)]
+    pub provider_route_classes: waku_protocol::routing::ProviderRouteClassMap,
     /// Unknown daemon settings survive edits made by this desktop version.
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
@@ -502,6 +506,7 @@ impl PersistedState {
             project_map_enabled: default_experiment_enabled(),
             eval: None,
             route_classes: Default::default(),
+            provider_route_classes: Default::default(),
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -658,6 +663,7 @@ impl PersistedState {
             project_map_enabled: self.project_map_enabled,
             eval: self.eval.clone(),
             route_classes: self.route_classes.clone(),
+            provider_route_classes: self.provider_route_classes.clone(),
             auto_prompts: Vec::new(),
             // Integrations postdate the legacy combined document; defaults
             // are the correct migration (on in dev builds, opt-in in release).
@@ -721,6 +727,7 @@ impl PersistedState {
         self.project_map_enabled = settings.project_map_enabled;
         self.eval = settings.eval;
         self.route_classes = settings.route_classes;
+        self.provider_route_classes = settings.provider_route_classes;
         self.daemon_settings_extra = settings.extra;
     }
 

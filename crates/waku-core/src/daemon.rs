@@ -4156,6 +4156,7 @@ impl WakuBackend {
                 | crate::subagents::SupportLevel::Advisory => {
                     options.subagents = Some(crate::subagents::spec_for(
                         provider,
+                        daemon_settings.provider_route_classes.get(&provider),
                         &daemon_settings.route_classes,
                     ));
                 }

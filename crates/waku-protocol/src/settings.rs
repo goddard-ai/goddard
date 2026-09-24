@@ -10,7 +10,7 @@ use crate::computer_use::ComputerAppGrant;
 use crate::custom_commands::CustomCommand;
 use crate::eval::EvalSettings;
 use crate::model::ProviderKind;
-use crate::routing::RouteClassMap;
+use crate::routing::{ProviderRouteClassMap, RouteClassMap};
 
 /// The default shared proposed-work branch the Projects page's Review tab
 /// reads — `origin/qa` out of the box.
@@ -63,6 +63,13 @@ pub struct DaemonSettings {
     /// `last_used` default.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub route_classes: RouteClassMap,
+    /// Per-provider routing preferences: which model/effort each task class
+    /// resolves to inside that provider. These bound every mid-session model
+    /// move — phase downshifts and the evaluator's own picks — so an Auto
+    /// session can only land on a model the user approved here or in the
+    /// class map.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub provider_route_classes: ProviderRouteClassMap,
     /// User-authorized Jev rules that may send a follow-up after a task turn.
     /// An absent key seeds the shipped defaults; an explicit empty list
     /// means the user removed them, so the field always serializes.
@@ -156,6 +163,7 @@ impl Default for DaemonSettings {
             provider_binary_overrides: HashMap::new(),
             eval: None,
             route_classes: RouteClassMap::new(),
+            provider_route_classes: ProviderRouteClassMap::new(),
             auto_prompts: crate::auto_prompts::default_rules(),
             memory_experiment_enabled: default_experiment_enabled(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),

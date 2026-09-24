@@ -18,14 +18,14 @@
 //! sessions too. Manual model picks clear `route_decision` and end
 //! routing ownership; the internal phase keeps tracking the work either way.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::json;
 use uuid::Uuid;
 
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
-use waku_protocol::model::{ActivityItem, AgentSession, ProviderModel};
-use waku_protocol::routing::{PhaseSignal, SessionPhase};
+use waku_protocol::model::{ActivityItem, AgentSession, ProviderKind, ProviderModel};
+use waku_protocol::routing::{PhaseSignal, RouteClassMap, RouteClassTarget, SessionPhase};
 
 use super::*;
 
@@ -109,29 +109,20 @@ fn scan_turn_phase(session: &AgentSession, turn_id: Uuid) -> TurnPhaseScan {
     scan
 }
 
-/// The eval's `implementation_model` question offers the session
-/// provider's catalog plus this keep-what-it-has escape.
+/// The eval's `implementation_model` question offers the models the user
+/// approved for the session's provider plus this keep-what-it-has escape.
 const CURRENT_MODEL_OPTION: &str = "current";
 
 /// The three judgments one phase evaluation carries — independent
 /// questions on one shared state, asked together so a settle costs one
 /// call. `still_planning` answers both directions of the boundary;
 /// `stuck` only matters while executing; `implementation_model` only
-/// pays off when the phase actually commits.
+/// pays off when the phase actually commits. `models` is the user's
+/// pre-approved set for the session's provider, not the whole catalog —
+/// the evaluator may never name a model the user did not configure, and
+/// with no approved models the question is not asked at all.
 fn phase_eval_questions(models: &[ProviderModel]) -> BTreeMap<String, EvalQuestion> {
-    let mut criteria: BTreeMap<String, Option<String>> = models
-        .iter()
-        .map(|model| (model.id.clone(), Some(model.name.clone())))
-        .collect();
-    criteria.insert(
-        CURRENT_MODEL_OPTION.to_owned(),
-        Some(
-            "keep the model the session already runs — pick it when no cheaper listed model can \
-             plausibly execute the plan"
-                .to_owned(),
-        ),
-    );
-    BTreeMap::from([
+    let mut questions = BTreeMap::from([
         (
             "still_planning".to_owned(),
             EvalQuestion::Noul {
@@ -153,7 +144,21 @@ fn phase_eval_questions(models: &[ProviderModel]) -> BTreeMap<String, EvalQuesti
                 criteria: None,
             },
         ),
-        (
+    ]);
+    if !models.is_empty() {
+        let mut criteria: BTreeMap<String, Option<String>> = models
+            .iter()
+            .map(|model| (model.id.clone(), Some(model.name.clone())))
+            .collect();
+        criteria.insert(
+            CURRENT_MODEL_OPTION.to_owned(),
+            Some(
+                "keep the model the session already runs — pick it when no cheaper listed model can \
+                 plausibly execute the plan"
+                    .to_owned(),
+            ),
+        );
+        questions.insert(
             "implementation_model".to_owned(),
             EvalQuestion::Choice {
                 instructions: "The task is leaving its planning phase. Which listed model is the \
@@ -163,8 +168,26 @@ fn phase_eval_questions(models: &[ProviderModel]) -> BTreeMap<String, EvalQuesti
                     .to_owned(),
                 criteria,
             },
-        ),
-    ])
+        );
+    }
+    questions
+}
+
+/// The models the user pre-approved inside one provider: every named model
+/// in its per-provider class map plus the models its entries in the global
+/// class map point at. Catalog membership alone never authorizes a model —
+/// a mid-session move may only land on one of these.
+fn approved_route_models(
+    provider: ProviderKind,
+    provider_map: Option<&RouteClassMap>,
+    classes: &RouteClassMap,
+) -> BTreeSet<String> {
+    provider_map
+        .into_iter()
+        .flat_map(|map| map.values())
+        .chain(classes.values().filter(|entry| entry.provider == provider))
+        .filter_map(|entry| entry.model.clone())
+        .collect()
 }
 
 fn noul_answer(evaluation: &Evaluation, key: &str) -> Option<f64> {
@@ -227,6 +250,26 @@ struct PhaseTarget {
     effort: Option<String>,
 }
 
+/// One class entry resolved the way the route's `resolve_entry` does: a
+/// configured model missing from the catalog drops to the provider default
+/// and cannot carry its effort.
+fn class_entry_target(entry: &RouteClassTarget, catalog_has: impl Fn(&str) -> bool) -> PhaseTarget {
+    match entry.model.as_deref() {
+        Some(model) if catalog_has(model) => PhaseTarget {
+            model: Some(model.to_owned()),
+            effort: entry.effort.clone(),
+        },
+        Some(_) => PhaseTarget {
+            model: None,
+            effort: None,
+        },
+        None => PhaseTarget {
+            model: None,
+            effort: entry.effort.clone(),
+        },
+    }
+}
+
 impl Waku {
     pub(super) fn phase_classification_enabled(&self) -> bool {
         self.state.sidebar_phase_groups || self.state.phase_routing_enabled
@@ -271,10 +314,10 @@ impl Waku {
         if !committed || !self.state.phase_routing_enabled {
             return;
         }
-        // The class map supplies the implementation model when it can;
-        // when its tier entry points at another provider the evaluator
-        // picks inside this provider's catalog instead — asked now so the
-        // swap lands before the next turn.
+        // The class maps supply the implementation model when they can;
+        // when neither names this provider's tier the evaluator picks from
+        // the user's approved models instead — asked now so the swap lands
+        // before the next turn.
         if !self.apply_phase_downshift(session_id, None, cx) {
             let turn_id = self
                 .state
@@ -378,13 +421,33 @@ impl Waku {
         {
             return;
         }
-        let models = self
+        // The implementation pick may only name a model the user approved
+        // inside this provider — its per-provider class map plus any global
+        // class entry pointing here. The question's options are those
+        // approved models; an approved id missing from the live catalog is
+        // still offered under its own id.
+        let approved = approved_route_models(
+            session.provider,
+            self.state.provider_route_classes.get(&session.provider),
+            &self.state.route_classes,
+        );
+        let catalog = self
             .provider_probe(session.provider)
             .map(|probe| probe.models.clone())
             .unwrap_or_default();
+        let models: Vec<ProviderModel> = approved
+            .iter()
+            .map(|id| {
+                catalog
+                    .iter()
+                    .find(|model| &model.id == id)
+                    .cloned()
+                    .unwrap_or_else(|| ProviderModel::new(id.clone(), id.clone()))
+            })
+            .collect();
         // The marker's turn state plus the phase context the questions
         // judge against: where the session stands, what it runs, and the
-        // catalog the implementation pick chooses from.
+        // approved models the implementation pick chooses from.
         let mut state = status_markers::turn_eval_state(session, turn_id, summary.as_deref());
         state["phase"] = json!(match session.phase {
             Some(SessionPhase::Planning) => "planning",
@@ -564,11 +627,12 @@ impl Waku {
         true
     }
 
-    /// The implementation target for a downshift: the class entry one tier
-    /// below the task's difficulty when it names this provider, else the
-    /// evaluator's pick from the session's own catalog. A class entry
-    /// pointing elsewhere would mean a provider switch mid-session — phase
-    /// routing never does that — so the eval covers that gap.
+    /// The implementation target for a downshift: the provider's own class
+    /// entry one tier below the task's difficulty, else the global class
+    /// entry when it names this provider, else the evaluator's pick — which
+    /// only applies when it names a model the user approved inside this
+    /// provider. A class entry pointing elsewhere would mean a provider
+    /// switch mid-session — phase routing never does that.
     fn phase_implementation_target(
         &self,
         session: &AgentSession,
@@ -584,32 +648,21 @@ impl Waku {
             .as_ref()
             .filter(|decision| decision.phased)?;
         let implementation_class = decision.class.unwrap_or_default().implementation_class();
+        let provider_map = self.state.provider_route_classes.get(&provider);
+        if let Some(entry) = provider_map.and_then(|map| map.get(&implementation_class)) {
+            return Some(class_entry_target(entry, &catalog_has));
+        }
         if let Some(entry) = self
             .state
             .route_classes
             .get(&implementation_class)
             .filter(|entry| entry.provider == provider)
         {
-            // Mirror the route's resolve_entry: a configured model missing
-            // from the catalog drops to the provider default and cannot
-            // carry its effort.
-            return match entry.model.as_deref() {
-                Some(model) if catalog_has(model) => Some(PhaseTarget {
-                    model: Some(model.to_owned()),
-                    effort: entry.effort.clone(),
-                }),
-                Some(_) => Some(PhaseTarget {
-                    model: None,
-                    effort: None,
-                }),
-                None => Some(PhaseTarget {
-                    model: None,
-                    effort: entry.effort.clone(),
-                }),
-            };
+            return Some(class_entry_target(entry, &catalog_has));
         }
+        let approved = approved_route_models(provider, provider_map, &self.state.route_classes);
         eval_pick
-            .filter(|pick| catalog_has(pick))
+            .filter(|pick| approved.contains(*pick) && catalog_has(pick))
             .map(|pick| PhaseTarget {
                 model: Some(pick.to_owned()),
                 effort: waku_client::persistence::remembered_model_traits_for(
@@ -682,6 +735,7 @@ impl Waku {
 mod tests {
     use super::*;
     use waku_protocol::model::{ActivityFileChange, ActivityKind, MessageRole, TranscriptBlock};
+    use waku_protocol::routing::TaskClass;
 
     fn activity(kind: ActivityKind, target: Option<&str>, failed: bool) -> ActivityItem {
         let mut item = ActivityItem::new(None, kind, "Edit", target.map(str::to_owned), true);
@@ -869,6 +923,82 @@ mod tests {
             implementation_model_answer(&evaluation("current", 0.9)),
             None
         );
+    }
+
+    #[test]
+    fn phase_questions_offer_only_the_approved_models() {
+        let models = vec![
+            ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
+            ProviderModel::new("claude-sonnet-5", "Claude Sonnet 5"),
+        ];
+        let questions = phase_eval_questions(&models);
+        let Some(EvalQuestion::Choice { criteria, .. }) = questions.get("implementation_model")
+        else {
+            panic!("approved models produce the implementation pick question");
+        };
+        let mut options: Vec<&str> = criteria.keys().map(String::as_str).collect();
+        options.sort();
+        assert_eq!(options, ["claude-haiku-4-5", "claude-sonnet-5", "current"]);
+
+        // Nothing approved — the pick question is not asked at all, so the
+        // evaluator cannot name a model the user never configured.
+        let questions = phase_eval_questions(&[]);
+        assert!(!questions.contains_key("implementation_model"));
+        assert!(questions.contains_key("still_planning"));
+        assert!(questions.contains_key("stuck"));
+    }
+
+    #[test]
+    fn approved_models_come_from_both_class_maps() {
+        let entry = |provider: ProviderKind, model: Option<&str>| RouteClassTarget {
+            provider,
+            model: model.map(str::to_owned),
+            effort: None,
+        };
+        let provider_map: RouteClassMap = [
+            (
+                TaskClass::Routine,
+                entry(ProviderKind::Claude, Some("claude-haiku-4-5")),
+            ),
+            // A provider-default entry approves no concrete model.
+            (TaskClass::General, entry(ProviderKind::Claude, None)),
+        ]
+        .into_iter()
+        .collect();
+        let global: RouteClassMap = [
+            (
+                TaskClass::General,
+                entry(ProviderKind::Claude, Some("claude-sonnet-5")),
+            ),
+            (
+                TaskClass::Demanding,
+                entry(ProviderKind::Codex, Some("gpt-5.5")),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let approved = approved_route_models(ProviderKind::Claude, Some(&provider_map), &global);
+        assert_eq!(
+            approved.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["claude-haiku-4-5", "claude-sonnet-5"],
+            "the provider's own entries and matching global entries approve; \
+             entries naming another provider do not"
+        );
+    }
+
+    #[test]
+    fn class_entry_target_drops_a_missing_model_to_the_default() {
+        let entry = RouteClassTarget {
+            provider: ProviderKind::Claude,
+            model: Some("gone".to_owned()),
+            effort: Some("high".to_owned()),
+        };
+        let target = class_entry_target(&entry, |model| model != "gone");
+        assert_eq!(target.model, None);
+        assert_eq!(target.effort, None);
+        let target = class_entry_target(&entry, |_| true);
+        assert_eq!(target.model.as_deref(), Some("gone"));
+        assert_eq!(target.effort.as_deref(), Some("high"));
     }
 
     #[test]

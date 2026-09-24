@@ -2340,9 +2340,10 @@ pub struct Waku {
     /// The class-target picker's UI state — same shape as the model
     /// picker's, shared by the three class menus.
     route_class_picker: model_picker::PickerState,
-    /// The class whose target picker is open — routes `enter` and the
-    /// empty-query reveal to the right class slot.
-    route_class_open: Option<waku_protocol::routing::TaskClass>,
+    /// The class whose target picker is open, and whether it edits the
+    /// global map or one provider's — routes `enter` and the empty-query
+    /// reveal to the right class slot.
+    route_class_open: Option<(waku_protocol::routing::TaskClass, Option<ProviderKind>)>,
     /// A "suggest defaults" evaluation is in flight on the Jev page.
     route_suggest_pending: bool,
     /// The last suggestion's outcome, rendered as the card's status line.
@@ -5480,11 +5481,11 @@ impl Waku {
                             .content()
                             .trim()
                             .to_lowercase();
-                        let Some(class) = this.route_class_open else {
+                        let Some((class, provider)) = this.route_class_open else {
                             return;
                         };
-                        let rows = this.route_class_picker_rows(&query);
-                        let seed = this.route_class_selected_index(class, &rows);
+                        let rows = this.route_class_picker_rows(&query, provider);
+                        let seed = this.route_class_selected_index(class, provider, &rows);
                         model_picker::picker_search_edited(
                             &mut this.route_class_picker,
                             &this.probes,

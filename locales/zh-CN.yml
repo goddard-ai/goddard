@@ -2493,6 +2493,7 @@ routing.in_progress: 正在路由任务…
 routing.no_override: 不覆盖
 routing.no_override_description: 沿用常用的服务商和模型 — Jev 仍会判断任务类型
 routing.optional: 可选
+routing.provider_classes: 各服务商模型
 routing.provider_default: 默认
 routing.providers: 服务商
 routing.suggest_defaults: 根据近期使用情况生成建议

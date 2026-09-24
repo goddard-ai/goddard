@@ -1055,6 +1055,8 @@ routing.class_hard:
   en: Hard
 routing.class_hard_description:
   en: Subtle, high-stakes, or long-horizon work — routed to the strongest combo.
+routing.provider_classes:
+  en: Per-provider models
 routing.providers:
   en: Providers
 routing.provider_default:

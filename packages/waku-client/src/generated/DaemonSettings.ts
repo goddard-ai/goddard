@@ -63,6 +63,14 @@ eval?: EvalSettings | null,
  */
 route_classes?: { [key in TaskClass]?: RouteClassTarget },
 /**
+ * Per-provider routing preferences: which model/effort each task class
+ * resolves to inside that provider. These bound every mid-session model
+ * move — phase downshifts and the evaluator's own picks — so an Auto
+ * session can only land on a model the user approved here or in the
+ * class map.
+ */
+provider_route_classes?: { [key in ProviderKind]?: { [key in TaskClass]?: RouteClassTarget } },
+/**
  * User-authorized Jev rules that may send a follow-up after a task turn.
  * An absent key seeds the shipped defaults; an explicit empty list
  * means the user removed them, so the field always serializes.

@@ -1,0 +1,1 @@
+- The Jev page's routing section now offers Easy, Medium, and Hard model picks per provider — the set of models an Auto-routed task may move between mid-task. Classes left unmapped keep the provider's default model.

@@ -1869,6 +1869,10 @@ pub struct PersistedState {
     /// class). Daemon-owned; mirrored so the Jev page can read and edit it.
     #[serde(skip)]
     pub route_classes: waku_protocol::routing::RouteClassMap,
+    /// Per-provider class maps bounding mid-session model moves.
+    /// Daemon-owned; mirrored so the Jev page can read and edit it.
+    #[serde(skip)]
+    pub provider_route_classes: waku_protocol::routing::ProviderRouteClassMap,
     /// Daemon-owned auto prompt rules, mirrored for the Jev settings editor.
     #[serde(skip)]
     pub auto_prompts: Vec<waku_protocol::auto_prompts::AutoPromptRule>,
@@ -2133,6 +2137,7 @@ impl PersistedState {
             project_map_enabled: default_experiment_enabled(),
             eval: None,
             route_classes: Default::default(),
+            provider_route_classes: Default::default(),
             auto_prompts: Vec::new(),
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),
@@ -2369,6 +2374,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             eval: self.eval.clone(),
             route_classes: self.route_classes.clone(),
+            provider_route_classes: self.provider_route_classes.clone(),
             auto_prompts: self.auto_prompts.clone(),
             integrations_enabled: self.integrations_enabled,
             integrations: self.integrations.clone(),
@@ -2403,6 +2409,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.eval = settings.eval;
         self.route_classes = settings.route_classes;
+        self.provider_route_classes = settings.provider_route_classes;
         self.auto_prompts = settings.auto_prompts;
         self.integrations_enabled = settings.integrations_enabled;
         self.integrations = settings.integrations;

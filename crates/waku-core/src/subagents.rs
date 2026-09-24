@@ -127,10 +127,15 @@ fn class_baseline(class: TaskClass) -> (String, String, bool) {
 
 /// The agent set for one session launch: the built-in `goddard-explore` plus
 /// `goddard-fast`, `goddard-default`, and `goddard-heavy`. Each class agent
-/// resolves its model and effort through the user's routing class map — an
-/// entry applies only when it names this session's provider, so a class
-/// mapped elsewhere keeps the provider's default model.
-pub(crate) fn spec_for(provider: ProviderKind, classes: &RouteClassMap) -> SubagentSpec {
+/// resolves its model and effort through the session provider's own class
+/// map first, then the global routing class map — an entry applies only
+/// when it names this session's provider, so a class mapped elsewhere keeps
+/// the provider's default model.
+pub(crate) fn spec_for(
+    provider: ProviderKind,
+    provider_classes: Option<&RouteClassMap>,
+    classes: &RouteClassMap,
+) -> SubagentSpec {
     let mut agents = vec![default_explore()];
     for (class, slug) in [
         (TaskClass::Routine, "fast"),
@@ -138,9 +143,13 @@ pub(crate) fn spec_for(provider: ProviderKind, classes: &RouteClassMap) -> Subag
         (TaskClass::Demanding, "heavy"),
     ] {
         let (description, prompt, read_only) = class_baseline(class);
-        let target = classes
-            .get(&class)
-            .filter(|entry| entry.provider == provider);
+        let target = provider_classes
+            .and_then(|map| map.get(&class))
+            .or_else(|| {
+                classes
+                    .get(&class)
+                    .filter(|entry| entry.provider == provider)
+            });
         agents.push(SubagentDef {
             name: format!("{NAME_PREFIX}{slug}"),
             description,
@@ -466,7 +475,7 @@ mod tests {
 
     #[test]
     fn default_agents_carry_the_attribution_prefix() {
-        let spec = spec_for(ProviderKind::Claude, &RouteClassMap::new());
+        let spec = spec_for(ProviderKind::Claude, None, &RouteClassMap::new());
         assert!(!spec.agents.is_empty());
         assert!(
             spec.agents
@@ -477,7 +486,7 @@ mod tests {
 
     #[test]
     fn routing_hint_names_every_agent() {
-        let spec = spec_for(ProviderKind::Claude, &RouteClassMap::new());
+        let spec = spec_for(ProviderKind::Claude, None, &RouteClassMap::new());
         let hint = routing_hint(&spec).expect("a populated spec yields a hint");
         for agent in &spec.agents {
             assert!(hint.contains(&agent.name));
@@ -487,7 +496,7 @@ mod tests {
 
     #[test]
     fn claude_definitions_mark_read_only_agents() {
-        let json = claude_agents_json(&spec_for(ProviderKind::Claude, &RouteClassMap::new()))
+        let json = claude_agents_json(&spec_for(ProviderKind::Claude, None, &RouteClassMap::new()))
             .expect("agents serialize");
         let value: Value = serde_json::from_str(&json).unwrap();
         let explore = &value["goddard-explore"];
@@ -507,7 +516,7 @@ mod tests {
             TaskClass::Routine,
             entry(ProviderKind::OpenCode, Some("openai/gpt-5"), Some("high")),
         )]);
-        let json = opencode_config_json(&spec_for(ProviderKind::OpenCode, &classes))
+        let json = opencode_config_json(&spec_for(ProviderKind::OpenCode, None, &classes))
             .expect("config serializes");
         let value: Value = serde_json::from_str(&json).unwrap();
         let explore = &value["agent"]["goddard-explore"];
@@ -531,7 +540,7 @@ mod tests {
                 entry(ProviderKind::Claude, Some("claude-opus-5"), None),
             ),
         ]);
-        let spec = spec_for(ProviderKind::Claude, &classes);
+        let spec = spec_for(ProviderKind::Claude, None, &classes);
         let names: Vec<&str> = spec
             .agents
             .iter()
@@ -557,8 +566,38 @@ mod tests {
         assert!(!spec.agents[3].read_only);
 
         // A class entry naming another provider applies nowhere on this one.
-        let codex = spec_for(ProviderKind::Codex, &classes);
+        let codex = spec_for(ProviderKind::Codex, None, &classes);
         assert!(codex.agents.iter().all(|agent| agent.model.is_none()));
+    }
+
+    #[test]
+    fn per_provider_class_map_wins_over_the_global_map() {
+        let provider_classes = classes(&[
+            (
+                TaskClass::Routine,
+                entry(ProviderKind::Claude, Some("claude-haiku-4-5"), Some("low")),
+            ),
+            (
+                TaskClass::General,
+                entry(ProviderKind::Claude, Some("claude-sonnet-5"), None),
+            ),
+        ]);
+        let global = classes(&[
+            (
+                TaskClass::Routine,
+                entry(ProviderKind::Claude, Some("claude-opus-5"), None),
+            ),
+            (
+                TaskClass::Demanding,
+                entry(ProviderKind::Codex, Some("gpt-5.5"), None),
+            ),
+        ]);
+        let spec = spec_for(ProviderKind::Claude, Some(&provider_classes), &global);
+        assert_eq!(spec.agents[1].model.as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(spec.agents[2].model.as_deref(), Some("claude-sonnet-5"));
+        // No per-provider hard entry and the global one names another
+        // provider — the provider default stands.
+        assert_eq!(spec.agents[3].model, None);
     }
 
     #[test]
@@ -575,7 +614,7 @@ mod tests {
             TaskClass::Routine,
             entry(ProviderKind::Copilot, Some("gpt-5"), Some("medium")),
         )]);
-        let agents = copilot_custom_agents(&spec_for(ProviderKind::Copilot, &classes))
+        let agents = copilot_custom_agents(&spec_for(ProviderKind::Copilot, None, &classes))
             .expect("agents serialize");
         let explore = agents
             .iter()
@@ -607,7 +646,8 @@ mod tests {
             TaskClass::Demanding,
             entry(ProviderKind::Codex, Some("gpt-5.6"), Some("high")),
         )]);
-        let hint = codex_hint(&spec_for(ProviderKind::Codex, &classes)).expect("hint exists");
+        let hint =
+            codex_hint(&spec_for(ProviderKind::Codex, None, &classes)).expect("hint exists");
         assert!(hint.contains("`goddard-heavy`"));
         assert!(hint.contains("agent_type: `worker`"));
         assert!(hint.contains("model: `gpt-5.6`"));

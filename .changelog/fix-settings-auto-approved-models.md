@@ -1,0 +1,1 @@
+- Auto routing can no longer move a running task to a model you didn't configure. Mid-task model moves now resolve through your Easy/Medium/Hard picks — per provider first, then the shared class map — and the evaluation model's own suggestions are limited to models you approved.

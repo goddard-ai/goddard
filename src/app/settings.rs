@@ -8155,13 +8155,13 @@ impl Waku {
             ),
         ];
         let class_row_elements: Vec<Option<AnyElement>> = class_rows
-            .into_iter()
+            .iter()
             .map(|(class, title, description)| {
                 settings_row(
                     "icons/gauge.svg",
-                    title,
-                    description,
-                    self.route_class_controls(class, cx),
+                    title.clone(),
+                    description.clone(),
+                    self.route_class_controls(*class, None, cx),
                     theme,
                     search,
                 )
@@ -8214,9 +8214,44 @@ impl Waku {
             })
         });
 
+        // Per-provider overrides: the Easy/Medium/Hard picks a session may
+        // move between mid-task, since phase routing never crosses
+        // providers. Each provider gets its own card led by its mark and
+        // name; an entirely unmapped provider leaves its sessions on the
+        // provider default.
+        let provider_class_cards: Vec<AnyElement> = self
+            .route_class_probes()
+            .into_iter()
+            .filter_map(|probe| {
+                let provider = probe.provider;
+                let mut rows: Vec<Option<AnyElement>> = class_rows
+                    .iter()
+                    .map(|(class, title, description)| {
+                        settings_row(
+                            "icons/gauge.svg",
+                            title.clone(),
+                            description.clone(),
+                            self.route_class_controls(*class, Some(provider), cx),
+                            theme,
+                            search,
+                        )
+                    })
+                    .collect();
+                if rows.iter().all(Option::is_none) {
+                    return None;
+                }
+                rows.insert(0, Some(provider_class_header(provider, theme)));
+                settings_row_card(rows, theme).map(|card| card.into_any_element())
+            })
+            .collect();
+        let provider_classes =
+            settings_group(tr!("routing.provider_classes"), provider_class_cards, theme)
+                .map(|group| div().mt(px(15.0)).child(group).into_any_element());
+
         div()
             .children(credentials)
             .children(classes)
+            .children(provider_classes)
             .into_any_element()
     }
 
@@ -8264,21 +8299,50 @@ impl Waku {
             })
     }
 
+    /// The class entry one picker edits: the global class map when
+    /// `provider` is `None`, else that provider's own class map — the map
+    /// mid-session model moves resolve through.
+    fn route_class_entry(
+        &self,
+        class: TaskClass,
+        provider: Option<ProviderKind>,
+    ) -> Option<&RouteClassTarget> {
+        match provider {
+            Some(provider) => self
+                .state
+                .provider_route_classes
+                .get(&provider)
+                .and_then(|map| map.get(&class)),
+            None => self.state.route_classes.get(&class),
+        }
+    }
+
     /// The class row's control: the shared model picker — a searchable
     /// catalog of effort-granularity combos led by a "No override" stance
     /// row. The effort rides each combo now, so there is no separate
-    /// effort dropdown.
-    fn route_class_controls(&self, class: TaskClass, cx: &mut Context<Self>) -> AnyElement {
-        let entry = self.state.route_classes.get(&class).cloned();
-        self.route_class_selector(class, entry.as_ref(), cx)
+    /// effort dropdown. A provider-scoped picker is locked to that
+    /// provider's models.
+    fn route_class_controls(
+        &self,
+        class: TaskClass,
+        provider: Option<ProviderKind>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let entry = self.route_class_entry(class, provider).cloned();
+        self.route_class_selector(class, provider, entry.as_ref(), cx)
     }
 
     /// The class picker's row list: the unmapped "No override" stance
     /// first, then favorites, recents, and provider blocks — each
     /// provider's own default heading its effort-granularity combos. The
     /// class map stores an effort but no service tier, so combos name
-    /// model + effort only.
-    pub(super) fn route_class_picker_rows(&self, normalized_query: &str) -> Vec<PickerRow> {
+    /// model + effort only. `locked_provider` scopes the whole list to one
+    /// provider's models — the per-provider pickers' only inventory.
+    pub(super) fn route_class_picker_rows(
+        &self,
+        normalized_query: &str,
+        locked_provider: Option<ProviderKind>,
+    ) -> Vec<PickerRow> {
         picker_rows(
             &self.probes,
             &PickerRowSpec {
@@ -8289,7 +8353,7 @@ impl Waku {
                 pinned: &self.pinned_unfavorites,
                 recents: &self.state.recent_model_uses,
                 disabled_providers: &self.state.disabled_providers,
-                locked_provider: None,
+                locked_provider,
                 normalized_query,
             },
         )
@@ -8301,9 +8365,10 @@ impl Waku {
     pub(super) fn route_class_selected_index(
         &self,
         class: TaskClass,
+        provider: Option<ProviderKind>,
         rows: &[PickerRow],
     ) -> Option<usize> {
-        let current = self.state.route_classes.get(&class);
+        let current = self.route_class_entry(class, provider);
         rows.iter()
             .position(|row| route_class_row_matches(row, current))
     }
@@ -8312,16 +8377,18 @@ impl Waku {
     /// override" stance leading favorites, recents, and provider blocks of
     /// effort-granularity combos, drawn through the same panel the
     /// composer uses. Selecting writes a `RouteClassTarget` into the class
-    /// map.
+    /// map — the global map when `provider` is `None`, that provider's own
+    /// map otherwise.
     fn route_class_selector(
         &self,
         class: TaskClass,
+        provider: Option<ProviderKind>,
         current: Option<&RouteClassTarget>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let weak = cx.entity().downgrade();
-        let menu_id = format!("route-class-{}", class.id());
+        let menu_id = format!("route-class-{}", route_class_menu_slug(class, provider));
         let search = self.route_class_picker.search.clone();
         let search_focus = search.read(cx).focus_handle(cx);
         let empty_focus = self.route_class_picker.empty_focus.clone();
@@ -8339,7 +8406,7 @@ impl Waku {
                 let mut empty = false;
                 let _ = reset_weak.update(cx, |this, cx| {
                     if open {
-                        this.route_class_open = Some(class);
+                        this.route_class_open = Some((class, provider));
                         empty = this.route_class_probes().is_empty();
                         // Opening re-runs catalog discovery for every provider
                         // the merged list can draw, so models authored since
@@ -8357,7 +8424,7 @@ impl Waku {
                         }
                         this.route_class_picker.highlight = None;
                         reset_search.update(cx, |search, cx| search.clear(cx));
-                        this.reveal_route_class_target(class);
+                        this.reveal_route_class_target(class, provider);
                     } else {
                         this.route_class_open = None;
                         let focus = this.settings_focus.clone();
@@ -8382,7 +8449,7 @@ impl Waku {
                         window.on_next_frame(move |window, cx| {
                             window.focus(&picker_focus, cx);
                             let _ = focus_weak.update(cx, |this, _cx| {
-                                this.reveal_route_class_target(class);
+                                this.reveal_route_class_target(class, provider);
                             });
                         });
                     });
@@ -8407,14 +8474,14 @@ impl Waku {
         // the same rule the composer documents for its own list. Only built
         // while the panel is open: it clones every provider's model list.
         let available_rows = Rc::new(if handle.is_open() {
-            self.route_class_picker_rows(&normalized_query)
+            self.route_class_picker_rows(&normalized_query, provider)
         } else {
             Vec::new()
         });
         // Which sections the rail offers comes from the unfiltered list —
         // a rail button's jump clears the query before scrolling.
         let section_rows = if searching && handle.is_open() {
-            Rc::new(self.route_class_picker_rows(""))
+            Rc::new(self.route_class_picker_rows("", provider))
         } else {
             available_rows.clone()
         };
@@ -8427,12 +8494,15 @@ impl Waku {
         let render_empty_focus = empty_focus.clone();
 
         popover(
-            MenuChip::new(format!("route-class-selector-{}", class.id()))
-                .label(label)
-                .outlined()
-                .selected(handle.is_open())
-                .w(px(240.0))
-                .justify_between(),
+            MenuChip::new(format!(
+                "route-class-selector-{}",
+                route_class_menu_slug(class, provider)
+            ))
+            .label(label)
+            .outlined()
+            .selected(handle.is_open())
+            .w(px(240.0))
+            .justify_between(),
             &handle,
             MenuAlign::BelowRight,
             move |popover, _window, _cx| {
@@ -8455,7 +8525,7 @@ impl Waku {
                     "route-class-rail-unmapped",
                     icon("icons/sparkle.svg", 17.0, theme.text_tertiary).into_any_element(),
                     PickerSection::Policies,
-                    move |this| this.route_class_picker_rows(""),
+                    move |this| this.route_class_picker_rows("", provider),
                     route_class_picker_state,
                 )];
                 if section_rows
@@ -8466,7 +8536,7 @@ impl Waku {
                         "route-class-rail-favorites",
                         icon("icons/star.svg", 17.0, theme.text_tertiary).into_any_element(),
                         PickerSection::Favorites,
-                        move |this| this.route_class_picker_rows(""),
+                        move |this| this.route_class_picker_rows("", provider),
                         route_class_picker_state,
                     ));
                 }
@@ -8478,7 +8548,7 @@ impl Waku {
                         "route-class-rail-recents",
                         icon("icons/hourglass.svg", 17.0, theme.text_tertiary).into_any_element(),
                         PickerSection::Recents,
-                        move |this| this.route_class_picker_rows(""),
+                        move |this| this.route_class_picker_rows("", provider),
                         route_class_picker_state,
                     ));
                 }
@@ -8585,7 +8655,7 @@ impl Waku {
                         })
                         .on_click(move |_, window, cx| {
                             let _ = select_weak.update(cx, |this, cx| {
-                                this.apply_route_class_row(class, &row, cx);
+                                this.apply_route_class_row(class, provider, &row, cx);
                             });
                             select_popover.close(window, cx);
                         })
@@ -8608,7 +8678,7 @@ impl Waku {
                         on_move: Rc::new(move |this, key, rows, cx| {
                             // The first arrow walks from the class's current
                             // target row, the way the reveal landed.
-                            let seed = this.route_class_selected_index(class, rows);
+                            let seed = this.route_class_selected_index(class, provider, rows);
                             if this
                                 .route_class_picker
                                 .move_highlight(seed, rows.len(), key)
@@ -8622,7 +8692,7 @@ impl Waku {
                                 .get(this.route_class_picker.highlight.unwrap_or(0))
                                 .cloned()
                             {
-                                this.apply_route_class_row(class, &row, cx);
+                                this.apply_route_class_row(class, provider, &row, cx);
                             }
                         }),
                         on_cycle_section: Some(Rc::new(|this, key, cx| {
@@ -8653,31 +8723,72 @@ impl Waku {
 
     /// Apply a picked row: "No override" clears the class's mapping, a
     /// provider default stores the bare provider, and a combo stores its
-    /// exact model + effort — the rows name the whole target now.
-    fn apply_route_class_row(&mut self, class: TaskClass, row: &PickerRow, cx: &mut Context<Self>) {
+    /// exact model + effort — the rows name the whole target now. Writes
+    /// land in the provider's own class map when the picker is
+    /// provider-scoped; emptying that map drops the provider's key.
+    fn apply_route_class_row(
+        &mut self,
+        class: TaskClass,
+        provider: Option<ProviderKind>,
+        row: &PickerRow,
+        cx: &mut Context<Self>,
+    ) {
         match row {
-            PickerRow::Policy(PolicyRowId::NoOverride) => {
-                self.state.route_classes.remove(&class);
-            }
-            PickerRow::ProviderDefault(provider) => {
-                self.state.route_classes.insert(
-                    class,
-                    RouteClassTarget {
-                        provider: *provider,
-                        model: None,
-                        effort: None,
-                    },
-                );
+            PickerRow::Policy(PolicyRowId::NoOverride) => match provider {
+                Some(provider) => {
+                    let emptied = self
+                        .state
+                        .provider_route_classes
+                        .get_mut(&provider)
+                        .is_some_and(|map| {
+                            map.remove(&class);
+                            map.is_empty()
+                        });
+                    if emptied {
+                        self.state.provider_route_classes.remove(&provider);
+                    }
+                }
+                None => {
+                    self.state.route_classes.remove(&class);
+                }
+            },
+            PickerRow::ProviderDefault(row_provider) => {
+                let target = RouteClassTarget {
+                    provider: *row_provider,
+                    model: None,
+                    effort: None,
+                };
+                match provider {
+                    Some(provider) => {
+                        self.state
+                            .provider_route_classes
+                            .entry(provider)
+                            .or_default()
+                            .insert(class, target);
+                    }
+                    None => {
+                        self.state.route_classes.insert(class, target);
+                    }
+                }
             }
             PickerRow::Combo(row) => {
-                self.state.route_classes.insert(
-                    class,
-                    RouteClassTarget {
-                        provider: row.provider,
-                        model: Some(row.model.id.clone()),
-                        effort: row.effort.clone(),
-                    },
-                );
+                let target = RouteClassTarget {
+                    provider: row.provider,
+                    model: Some(row.model.id.clone()),
+                    effort: row.effort.clone(),
+                };
+                match provider {
+                    Some(provider) => {
+                        self.state
+                            .provider_route_classes
+                            .entry(provider)
+                            .or_default()
+                            .insert(class, target);
+                    }
+                    None => {
+                        self.state.route_classes.insert(class, target);
+                    }
+                }
             }
             // The class spec never lists the route row.
             PickerRow::Policy(PolicyRowId::Auto) => {}
@@ -8688,9 +8799,15 @@ impl Waku {
 
     /// Bring the class's current target row into view — the same reveal the
     /// model picker does for the session's combo.
-    pub(super) fn reveal_route_class_target(&self, class: TaskClass) {
-        let rows = self.route_class_picker_rows("");
-        let index = self.route_class_selected_index(class, &rows).unwrap_or(0);
+    pub(super) fn reveal_route_class_target(
+        &self,
+        class: TaskClass,
+        provider: Option<ProviderKind>,
+    ) {
+        let rows = self.route_class_picker_rows("", provider);
+        let index = self
+            .route_class_selected_index(class, provider, &rows)
+            .unwrap_or(0);
         self.route_class_picker.reveal(index, rows.len());
     }
 
@@ -8699,13 +8816,15 @@ impl Waku {
     /// same route the arrows take. A live query filters across all
     /// sections, so cycling waits until the field is cleared.
     fn cycle_route_class_section(&mut self, key: &str, cx: &mut Context<Self>) {
-        let rows = self.route_class_picker_rows("");
+        let Some((class, provider)) = self.route_class_open else {
+            return;
+        };
+        let rows = self.route_class_picker_rows("", provider);
         // The section the keyboard cursor sits in — seeded from the class's
         // target row the way the reveal lands, so the first tab steps
         // relative to the selection rather than an end.
         let seed = self
-            .route_class_open
-            .and_then(|class| self.route_class_selected_index(class, &rows))
+            .route_class_selected_index(class, provider, &rows)
             .unwrap_or(0);
         self.route_class_picker.cycle_section(&rows, seed, key, cx);
     }
@@ -13908,6 +14027,38 @@ fn confident_auto_prompt_suggestion(
 
 /// How many recent combos Jev sees when suggesting class defaults.
 const ROUTE_SUGGEST_COMBOS: usize = 10;
+
+/// The menu-id slug one class picker owns: the bare class id for the
+/// global pickers, `<provider>-<class>` for the per-provider ones — every
+/// open menu id must be unique across the page.
+fn route_class_menu_slug(class: TaskClass, provider: Option<ProviderKind>) -> String {
+    match provider {
+        Some(provider) => format!("{}-{}", provider.id(), class.id()),
+        None => class.id().to_owned(),
+    }
+}
+
+/// The heading row atop a provider's class-map card — mark and name only,
+/// so the three identical class rows underneath stay attributable. Not a
+/// `settings_row`: it has no control and skips search matching.
+fn provider_class_header(provider: ProviderKind, theme: Theme) -> AnyElement {
+    div()
+        .w_full()
+        .px(px(20.0))
+        .pt(px(12.0))
+        .pb(px(4.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .child(provider_mark(&theme, provider, 15.0, theme.text_secondary))
+        .child(
+            div()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .child(provider.display_name()),
+        )
+        .into_any_element()
+}
 
 /// A friendly label for a class's mapped target, resolving provider and
 /// model ids against the probe catalog — the effort's label trailing the

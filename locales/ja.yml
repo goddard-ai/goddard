@@ -2542,6 +2542,7 @@ routing.in_progress: タスクを振り分け中…
 routing.no_override: オーバーライドなし
 routing.no_override_description: いつものプロバイダーとモデルを使います — タスクの分類は Jev が行います
 routing.optional: 任意
+routing.provider_classes: プロバイダー別モデル
 routing.provider_default: デフォルト
 routing.providers: プロバイダー
 routing.suggest_defaults: 最近の使用状況から提案

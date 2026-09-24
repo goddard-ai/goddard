@@ -62,7 +62,7 @@ carry the information the judgment actually needs.
 | --- | --- | --- |
 | `route` | `crates/waku-core/src/routing.rs` | First prompt → task `class` (Choice) + `needs_planning` (Noul), resolved through the user's class map |
 | `route-effort` | `src/app/routing.rs` | Each turn → effort ladder pick (Choice), only while routing owns the session |
-| `route-phase` | `src/app/phases.rs` | Settled turns on `phased` sessions → `still_planning`/`stuck` Nouls + `implementation_model` Choice |
+| `route-phase` | `src/app/phases.rs` | Settled turns on `phased` sessions → `still_planning`/`stuck` Nouls + `implementation_model` Choice over the user's approved models only |
 | `route-class-suggest` | `src/app/settings.rs` | Jev page "suggest defaults" for the class map |
 | `turn-status` | `src/app/status_markers.rs` | Settled turn → ending Choice + flag Nouls (unverified, drifted, needs-review, thrash, assumed) |
 | `title-quality` | `src/app/title_quality.rs` | Settled turn → Noul judging whether its automatic title needs a rewrite |

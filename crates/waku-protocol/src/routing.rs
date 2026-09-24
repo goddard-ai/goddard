@@ -124,6 +124,12 @@ pub struct RouteClassTarget {
 /// The class map: `TaskClass` → the user's configured target.
 pub type RouteClassMap = BTreeMap<TaskClass, RouteClassTarget>;
 
+/// Per-provider class maps: `ProviderKind` → that provider's own Easy/
+/// Medium/Hard targets. Mid-session model moves never cross providers, so
+/// a session resolves them inside its own provider's map. An inner entry's
+/// `provider` mirrors the outer key — the key is authoritative.
+pub type ProviderRouteClassMap = BTreeMap<ProviderKind, RouteClassMap>;
+
 /// The outcome of one routing decision — what the session starts on and why.
 /// Kept on the session so the UI can explain the route after the fact.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
