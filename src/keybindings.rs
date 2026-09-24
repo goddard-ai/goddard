@@ -362,6 +362,62 @@ mod tests {
             .collect()
     }
 
+    /// The option modal's Escape is a real binding, not an `on_key_down`
+    /// fallback: under the picker's stack it must resolve behind the
+    /// field's own `Clear` (so a filled filter clears first) and ahead of
+    /// the root `CancelTurn` (so a propagated `Clear` dismisses the modal
+    /// instead of stopping the turn underneath it).
+    #[gpui::test]
+    fn option_modal_escape_resolves_to_dismiss(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::input::init(cx);
+            crate::ui::menu::init(cx);
+            crate::bind_keys(cx);
+        });
+
+        let stack = [
+            gpui::KeyContext::parse("Workspace").unwrap(),
+            gpui::KeyContext::parse("KeyboardOptions").unwrap(),
+            gpui::KeyContext::parse("TextInput").unwrap(),
+        ];
+        let (bindings, _) = cx.update(|cx| {
+            cx.key_bindings().borrow().bindings_for_input(
+                &[gpui::Keystroke::parse("escape").unwrap()],
+                &stack,
+            )
+        });
+        let position = |action: &dyn gpui::Action| {
+            bindings
+                .iter()
+                .position(|binding| binding.action().partial_eq(action))
+        };
+        let clear = position(&crate::input::Clear).expect("field Clear must match escape");
+        let dismiss =
+            position(&crate::ui::menu::DismissMenu).expect("modal DismissMenu must match escape");
+        let cancel =
+            position(&crate::CancelTurn { immediate: false }).expect("root CancelTurn still matches");
+        assert!(
+            clear < dismiss && dismiss < cancel,
+            "escape must resolve Clear → DismissMenu → CancelTurn"
+        );
+
+        // ⌘-held Escape during the picker's hold gesture must reach the
+        // modal's dismiss — otherwise Workspace's `CancelProjectSwitch`
+        // eats the keystroke as a no-op and the hold's Escape is dead.
+        let (bindings, _) = cx.update(|cx| {
+            cx.key_bindings().borrow().bindings_for_input(
+                &[gpui::Keystroke::parse("secondary-escape").unwrap()],
+                &stack,
+            )
+        });
+        assert!(
+            bindings.first().is_some_and(|binding| {
+                binding.action().partial_eq(&crate::ui::menu::DismissMenu)
+            }),
+            "secondary-escape under KeyboardOptions must resolve to DismissMenu"
+        );
+    }
+
     /// Parity gate: the generated keymap must be identical — action,
     /// sequence, platform, predicate, and precedence order — to the
     /// hand-written registrations it replaces. This must pass on every

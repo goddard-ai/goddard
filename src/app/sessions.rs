@@ -3811,10 +3811,11 @@ impl Waku {
             self.cancel_project_switcher(window, cx);
             return;
         }
-        // The options modal's card focus still sits under the root
-        // Workspace context, so its Escape arrives here as CancelTurn —
-        // dismiss the modal rather than arming the stop confirmation or
-        // filing the draft underneath it.
+        // The search-less pickers' card focus sits under the root Workspace
+        // context, and the search pickers' focus lands on a two-frame defer
+        // — either way an Escape arrives here as CancelTurn. Dismiss the
+        // modal rather than arming the stop confirmation or filing the
+        // draft underneath it.
         if self.keyboard_options_is_open() {
             self.dismiss_keyboard_options(true, window, cx);
             return;

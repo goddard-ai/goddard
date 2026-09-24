@@ -2887,6 +2887,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("menu.select_next", All, "down", KeyboardOptionsSearch),
     e("menu.select_previous", All, "up", KeyboardOptionsSearch),
     e("menu.confirm", All, "enter", KeyboardOptionsSearch),
+    e("menu.dismiss", All, "escape", KeyboardOptions),
+    e("menu.dismiss", All, "secondary-escape", KeyboardOptions),
     e(
         "workspace.toggle_runtime_mode_picker",
         All,
@@ -3045,6 +3047,7 @@ mod ctx {
     pub const TaskSwitcher: &str = "TaskSwitcher";
     pub const ProjectSwitcher: &str = "ProjectSwitcher";
     pub const ProjectSwitcherInput: &str = "ProjectSwitcher > TextInput";
+    pub const KeyboardOptions: &str = "KeyboardOptions";
     pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";
     pub const Terminal: &str = "Terminal";
     pub const ReviewDiffOrEditor: &str = "ReviewDiff || FileEditorPane";

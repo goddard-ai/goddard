@@ -891,6 +891,22 @@ pub(crate) fn bind_keys(cx: &mut App) {
             crate::ui::menu::ConfirmEntry,
             Some("KeyboardOptions > TextInput"),
         ),
+        // Escape needs a binding for the same reason as the list keys: the
+        // card's `on_key_down` never sees a keystroke a binding claims, and
+        // the next escape binding up the stack is the root's `CancelTurn`.
+        // The ⌘-held spelling covers a press mid-hold, where the field's
+        // `Clear` doesn't match and Workspace's `CancelProjectSwitch` would
+        // eat the keystroke as a no-op.
+        KeyBinding::new(
+            "escape",
+            crate::ui::menu::DismissMenu,
+            Some("KeyboardOptions"),
+        ),
+        KeyBinding::new(
+            "secondary-escape",
+            crate::ui::menu::DismissMenu,
+            Some("KeyboardOptions"),
+        ),
         KeyBinding::new("secondary-.", ToggleRuntimeModePicker, None),
         // ⌘⇧. flips the draft between this Mac and the sandbox VM — the
         // Environment section of the same menu, without opening it.

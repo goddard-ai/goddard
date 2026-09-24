@@ -651,6 +651,13 @@ impl Waku {
                     this.select_keyboard_option(index, window, cx);
                 }
             }))
+            // The field's escape arrives as a propagated `Clear` — then the
+            // next binding up is this context's `DismissMenu`. Without it the
+            // keystroke falls through to the root's `CancelTurn` and the
+            // modal stays up while the turn stops underneath.
+            .on_action(cx.listener(|this, _: &DismissMenu, window, cx| {
+                this.keyboard_options_escape(window, cx);
+            }))
             .w(px(MODAL_WIDTH))
             .max_w(px(MODAL_WIDTH))
             .p(px(MODAL_INSET))
@@ -726,21 +733,26 @@ impl Waku {
                     self.select_keyboard_option(index, window, cx);
                 }
             }
-            "escape" => {
-                if self.keyboard_options.creating_branch {
-                    self.keyboard_options.creating_branch = false;
-                    self.branch_picker_mode = BranchPickerMode::Browse;
-                    let focus = self.keyboard_options_modal_focus(cx);
-                    window.focus(&focus, cx);
-                    cx.notify();
-                } else {
-                    self.dismiss_keyboard_options(true, window, cx);
-                }
-            }
+            "escape" => self.keyboard_options_escape(window, cx),
             _ => return,
         }
         window.prevent_default();
         cx.stop_propagation();
+    }
+
+    /// Escape's single behavior whether it arrives as the card's
+    /// `DismissMenu` action or an unbound `on_key_down`: branch creation
+    /// backs out to the list, anything else dismisses the modal.
+    fn keyboard_options_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.keyboard_options.creating_branch {
+            self.keyboard_options.creating_branch = false;
+            self.branch_picker_mode = BranchPickerMode::Browse;
+            let focus = self.keyboard_options_modal_focus(cx);
+            window.focus(&focus, cx);
+            cx.notify();
+        } else {
+            self.dismiss_keyboard_options(true, window, cx);
+        }
     }
 
     /// Swap the open modal's rows after a search edit: a non-empty query
