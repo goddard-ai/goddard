@@ -1789,24 +1789,6 @@ impl Waku {
                     search,
                 )
             },
-            setting_card(
-                "icons/appearance.svg",
-                tr!("settings.local_workspace_accent"),
-                tr!("settings.local_workspace_accent_description"),
-                toggle_switch(
-                    "local-workspace-accent-toggle",
-                    self.state.local_workspace_accent,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.local_workspace_accent;
-                        move |this, _, cx| this.set_local_workspace_accent(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ),
             {
                 let navigation = self.state.archive_navigation;
                 let weak = cx.entity().downgrade();
@@ -1979,31 +1961,6 @@ impl Waku {
                                 let enabled = self.state.sidebar_hide_phase_labels;
                                 move |this, _, cx| this.set_sidebar_hide_phase_labels(!enabled, cx)
                             },
-                        ),
-                        theme,
-                        search,
-                    )
-                })
-                .flatten(),
-            // The color row only exists while previews do — same gating as
-            // the transparency amount and completion volume rows.
-            self.state
-                .sidebar_composer_drafts
-                .then(|| {
-                    setting_card(
-                        "icons/appearance.svg",
-                        tr!("settings.sidebar_draft_preview_color"),
-                        tr!("settings.sidebar_draft_preview_color_description"),
-                        self.setting_selector(
-                            "sidebar-draft-preview-color-selector",
-                            SidebarDraftPreviewColor::ALL
-                                .into_iter()
-                                .map(|option| (option, tr!(option.label_key())))
-                                .collect(),
-                            self.state.sidebar_draft_preview_color,
-                            160.0,
-                            cx,
-                            |this, value, _, cx| this.set_sidebar_draft_preview_color(value, cx),
                         ),
                         theme,
                         search,
@@ -9731,6 +9688,47 @@ impl Waku {
                 search,
             ),
             preview_row,
+            settings_row(
+                "icons/appearance.svg",
+                tr!("settings.local_workspace_accent"),
+                tr!("settings.local_workspace_accent_description"),
+                toggle_switch(
+                    "local-workspace-accent-toggle",
+                    self.state.local_workspace_accent,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.local_workspace_accent;
+                        move |this, _, cx| this.set_local_workspace_accent(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
+            self.state
+                .sidebar_composer_drafts
+                .then(|| {
+                    settings_row(
+                        "icons/appearance.svg",
+                        tr!("settings.sidebar_draft_preview_color"),
+                        tr!("settings.sidebar_draft_preview_color_description"),
+                        self.setting_selector(
+                            "sidebar-draft-preview-color-selector",
+                            SidebarDraftPreviewColor::ALL
+                                .into_iter()
+                                .map(|option| (option, tr!(option.label_key())))
+                                .collect(),
+                            self.state.sidebar_draft_preview_color,
+                            160.0,
+                            cx,
+                            |this, value, _, cx| this.set_sidebar_draft_preview_color(value, cx),
+                        ),
+                        theme,
+                        search,
+                    )
+                })
+                .flatten(),
         ];
         rows.extend(transparency_rows);
         rows.extend([
