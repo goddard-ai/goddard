@@ -1,1 +1,0 @@
-- Archiving a task you reached with ⌘D now jumps to the task ⌘D would have opened next — the same landing as pressing it again — instead of the "After archiving a task" destination. On by default; turn it off in Settings → General → "Continue ⌘D when archiving".

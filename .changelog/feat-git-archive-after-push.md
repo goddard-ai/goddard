@@ -1,1 +1,0 @@
-- After landing a worktree, the transcript offers to push its base branch, then offers Archive once the branch is pushed.

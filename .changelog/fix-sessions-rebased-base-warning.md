@@ -1,1 +1,0 @@
-- Fix the archive and dormant-sweep warnings listing "unpushed" commits after the session's base branch is rebased: commits whose patch already reached the base under a rewritten SHA no longer count, so the dialog and the sidebar badge only report the session's own work

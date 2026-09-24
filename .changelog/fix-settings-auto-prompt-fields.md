@@ -1,1 +1,0 @@
-- The Auto Prompt editor fields in Settings → Jev now grow with their content, so long prompts and trigger questions stay readable while editing.

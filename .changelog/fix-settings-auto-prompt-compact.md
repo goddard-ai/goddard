@@ -1,1 +1,0 @@
-- The built-in “Sharpen complex answers” auto prompt no longer fires on answers that are already concise — it now requires a response that is materially too long, dense, or broad for the request. Rules you have customized are left untouched.

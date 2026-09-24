@@ -34,6 +34,66 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.10.0]
+
+### Features
+
+- **Sessions**
+  - `goddard-agent ask` lets an agent render a structured question card mid-turn and block until the user answers, clarifies, or dismisses — bringing agent-to-user elicitation to providers with no native question mechanism
+  - Pick "No project" at the top of the "New task in…" picker to start a task that isn't attached to a project.
+  - A task's project can be changed from the project picker at any time — even mid-turn. The agent is told its new working directory immediately, a marker in the transcript records the move, and switching to a different repository asks for confirmation first.
+  - Finished tasks can get a clearer title when Jev finds their automatic title confusing or noisy. Choose an inexpensive title cleanup model for supported providers in Providers settings.
+- **Composer**
+  - Toggle incognito on an unstarted task with `/incognito`, remove the incognito chip with its close control, and see “New incognito task” in the header.
+  - A side chat's composer now matches the main composer's card: the model, access, and option chips stay visible but disabled so the chat's inherited settings still show, while send, stop, and continue all work. A bare `/side` also focuses the side chat's composer on open; `/side <prompt>` leaves focus where it was.
+- **Transcript**
+  - Clicking a Pasted text chip in a user prompt expands the full pasted content inline; click it again to collapse.
+  - Right-click a link in a response or a Markdown file preview to open it, copy it, open it in a built-in browser tab, or open it in a private window of your default browser (when the browser supports it).
+- **Settings**
+  - Adjust an auto prompt’s sensitivity to make its follow-up trigger more or less often.
+  - In Jev settings, opt in to automatic suggested actions one by one and set each action's required probability from 80% to 100%. Direct Commit suggestions still require review in the commit dialog.
+  - On macOS, General settings can now switch the update channel between Stable and Dev. Dev checks dev.goddardai.org — the feed a dev worktree publishes with `bun run dev --serve` — instead of released versions.
+  - Open Settings → Memory to read a project's saved memory and browse its dated change log. New entries require Project memory to be enabled under Experiments.
+  - Settings rows now lead with an icon matching the option they control, making it easier to scan a page and spot the setting you want.
+- After landing a worktree, the transcript offers to push its base branch, then offers Archive once the branch is pushed.
+- Archiving a task you reached with ⌘D now jumps to the task ⌘D would have opened next — the same landing as pressing it again — instead of the "After archiving a task" destination. On by default; turn it off in Settings → General → "Continue ⌘D when archiving".
+- Renaming a task no longer needs the preemptive top-bar toggle — the agent's rename now asks in the transcript as a permission card that stays pinned at the top until you answer, with Rename, Always allow, and Deny.
+- In Settings → General, turn on "Group recent Planning tasks" to move tasks still planning and active within 30 minutes between Pinned and Today. The Planning marker is off by default unless Phase-aware routing is enabled; you can hide it on task rows while keeping it in the selected task's title bar.
+
+### Experiments
+
+- **[Experimental]** Computer Use now asks before an agent accesses an app, browser tabs, the clipboard, or the whole desktop, including in Full access. The Goddard JavaScript REPL is available to more local providers, and app approvals can be saved and revoked in Settings.
+- **[Experimental]** The Projects Review tab lists dev commits ahead of main and starts a release task for the confirmed approved range.
+- **[Experimental]** Added an experimental Voice briefing opt-in: opening a task whose latest reply is longer than 300 characters speaks a ~45-second summary — what the agent did, then any decision or action it needs from you. Configure your AI Gateway key, summary model, and Gemini 3.8 TTS tier under the card in Settings → Experiments.
+
+### Fixed
+
+- **Sessions**
+  - Incognito actions now show their hat-and-glasses icon in the command palette.
+  - Fix the archive and dormant-sweep warnings listing "unpushed" commits after the session's base branch is rebased: commits whose patch already reached the base under a rewritten SHA no longer count, so the dialog and the sidebar badge only report the session's own work
+- **Composer**
+  - Suggested actions above the composer now perform a concrete step; requests to supply details or choose without listed options no longer show a misleading action or ⌘Enter shortcut.
+  - Hide the manual reasoning effort control in the composer while Auto (Jev) is selected, since Jev chooses the effort for each turn.
+  - Steering now reaches an agent immediately while it thinks or uses tools; messages sent during reply text remain queued for the next turn.
+- **Providers**
+  - Picking Auto routing no longer carries over to the next task — a new task starts on the provider and model Auto last routed to, with routing off until you choose Auto again.
+  - Fixed model picker rows painting their selected and hovered fill flush against the panel edge — rows now keep a visible side gutter.
+- **Git**
+  - Turn checkpoints stage only files changed during that turn. A follow-up after stopping an untouched turn also skips the worktree scan, while preserving work present when the turn began.
+  - The "Sync branch…" picker (⌘S) and the Git panel's sync button skip the pull when the branch's upstream has nothing new — a toast reports the branch is already up to date, and uncommitted changes no longer make a no-op sync fail.
+- **Keyboard**
+  - Press ⌘⌥1 to select Auto routing in the composer; ⌘⌥2–⌘⌥9 select the first eight starred models. Auto routing is also available in the ⌥Tab model cycle.
+  - Use ⌘⌥← and ⌘⌥→ to sweep through Big Picture tasks while keeping ⌥← and ⌥→ available for moving through words in text fields.
+  - Fixed the option modals shown by selection shortcuts (access mode, model, workspace, branch) opening with an empty list — the choices render again.
+  - Fixed the “New task in…” project picker hiding its search field while ⌘N cycled recent projects — the field stays visible, and releasing ⌘ commits the highlighted project.
+- **Settings**
+  - The built-in “Sharpen complex answers” auto prompt no longer fires on answers that are already concise — it now requires a response that is materially too long, dense, or broad for the request. Rules you have customized are left untouched.
+  - The Auto Prompt editor fields in Settings → Jev now grow with their content, so long prompts and trigger questions stay readable while editing.
+- Menu and dialog drop shadows no longer pop in a beat after the card appears — the shadow fades in with the entrance instead of being held back until the card turns opaque.
+- The experimental sidebar dock is no longer cut off at the sidebar's edge — it draws above the rest of the window, and the hover strip that raises it reaches a little higher above the bottom bar.
+- Context-menu flyouts like **Send to friend** now open centered on the row you hovered, so the submenu sits next to your pointer instead of aligned to the top of the menu.
+- Fixed a crash that could quit the app as soon as a transcript showed an activity row whose detail is a file name — the link's context menu was being registered while the transcript was locked for rendering.
+
 ## [0.9.0]
 
 ### Features

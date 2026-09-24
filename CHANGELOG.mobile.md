@@ -2,6 +2,12 @@
 
 All notable changes to the Goddard mobile app. Fragments live under `.changelog/mobile/` with the same naming rules as [CHANGELOG.md](CHANGELOG.md) and fold here per release.
 
+## [0.10.0]
+
+### Features
+
+- The task drawer now shows a GitHub inbox bell at its top-right — badged when unread notifications exist — that opens the notifications inbox on tap.
+
 ## [0.8.0]
 
 ### Fixed

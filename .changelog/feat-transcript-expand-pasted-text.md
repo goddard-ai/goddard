@@ -1,1 +1,0 @@
-- Clicking a Pasted text chip in a user prompt expands the full pasted content inline; click it again to collapse.

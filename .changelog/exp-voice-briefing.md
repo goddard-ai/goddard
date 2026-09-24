@@ -1,1 +1,0 @@
-- Added an experimental Voice briefing opt-in: opening a task whose latest reply is longer than 300 characters speaks a ~45-second summary — what the agent did, then any decision or action it needs from you. Configure your AI Gateway key, summary model, and Gemini 3.8 TTS tier under the card in Settings → Experiments.

@@ -1,1 +1,0 @@
-- Renaming a task no longer needs the preemptive top-bar toggle — the agent's rename now asks in the transcript as a permission card that stays pinned at the top until you answer, with Rename, Always allow, and Deny.

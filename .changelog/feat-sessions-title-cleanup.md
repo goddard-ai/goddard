@@ -1,1 +1,0 @@
-- Finished tasks can get a clearer title when Jev finds their automatic title confusing or noisy. Choose an inexpensive title cleanup model for supported providers in Providers settings.

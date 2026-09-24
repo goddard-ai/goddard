@@ -1,1 +1,0 @@
-- The "Sync branch…" picker (⌘S) and the Git panel's sync button skip the pull when the branch's upstream has nothing new — a toast reports the branch is already up to date, and uncommitted changes no longer make a no-op sync fail.

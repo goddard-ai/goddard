@@ -1,1 +1,0 @@
-- Incognito actions now show their hat-and-glasses icon in the command palette.

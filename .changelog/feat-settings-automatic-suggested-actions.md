@@ -1,1 +1,0 @@
-- In Jev settings, opt in to automatic suggested actions one by one and set each action's required probability from 80% to 100%. Direct Commit suggestions still require review in the commit dialog.

@@ -1,1 +1,0 @@
-- Picking Auto routing no longer carries over to the next task — a new task starts on the provider and model Auto last routed to, with routing off until you choose Auto again.

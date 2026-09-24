@@ -1,1 +1,0 @@
-- In Settings → General, turn on "Group recent Planning tasks" to move tasks still planning and active within 30 minutes between Pinned and Today. The Planning marker is off by default unless Phase-aware routing is enabled; you can hide it on task rows while keeping it in the selected task's title bar.

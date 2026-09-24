@@ -1,1 +1,0 @@
-- Fixed model picker rows painting their selected and hovered fill flush against the panel edge — rows now keep a visible side gutter.

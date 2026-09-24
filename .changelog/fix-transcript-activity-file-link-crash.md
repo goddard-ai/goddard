@@ -1,1 +1,0 @@
-- Fixed a crash that could quit the app as soon as a transcript showed an activity row whose detail is a file name — the link's context menu was being registered while the transcript was locked for rendering.

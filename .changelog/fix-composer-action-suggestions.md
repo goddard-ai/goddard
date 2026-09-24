@@ -1,1 +1,0 @@
-- Suggested actions above the composer now perform a concrete step; requests to supply details or choose without listed options no longer show a misleading action or ⌘Enter shortcut.

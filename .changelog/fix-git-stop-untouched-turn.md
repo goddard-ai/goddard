@@ -1,1 +1,0 @@
-- Turn checkpoints stage only files changed during that turn. A follow-up after stopping an untouched turn also skips the worktree scan, while preserving work present when the turn began.

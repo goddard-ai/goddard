@@ -1,1 +1,0 @@
-- Fixed the “New task in…” project picker hiding its search field while ⌘N cycled recent projects — the field stays visible, and releasing ⌘ commits the highlighted project.

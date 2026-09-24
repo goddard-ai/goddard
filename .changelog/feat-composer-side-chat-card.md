@@ -1,1 +1,0 @@
-- A side chat's composer now matches the main composer's card: the model, access, and option chips stay visible but disabled so the chat's inherited settings still show, while send, stop, and continue all work. A bare `/side` also focuses the side chat's composer on open; `/side <prompt>` leaves focus where it was.

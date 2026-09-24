@@ -1,1 +1,0 @@
-- Steering now reaches an agent immediately while it thinks or uses tools; messages sent during reply text remain queued for the next turn.

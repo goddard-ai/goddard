@@ -1,1 +1,0 @@
-- Press ⌘⌥1 to select Auto routing in the composer; ⌘⌥2–⌘⌥9 select the first eight starred models. Auto routing is also available in the ⌥Tab model cycle.
