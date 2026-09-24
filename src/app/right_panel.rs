@@ -3216,7 +3216,6 @@ impl Waku {
                     .flex_1()
                     .min_h_0()
                     .relative()
-                    .px(px(4.0))
                     .child(
                         list(rows_state.clone(), move |index, window, cx| {
                             entity
@@ -3442,6 +3441,7 @@ impl Waku {
                 "side-chat-row-{session_id}-{index}"
             )))
             .w_full()
+            .px(px(20.0))
             .py(px(4.0))
             .when(index == 0, |element| element.pt(px(6.0)))
             .when(starts_followup_turn, |element| {
