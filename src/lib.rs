@@ -123,6 +123,7 @@ actions!(
         FocusComposer,
         FocusTerminal,
         ToggleModelPicker,
+        StepModelPickerBackward,
         ToggleBranchPicker,
         ToggleRuntimeModePicker,
         ToggleEnvironment,
@@ -867,6 +868,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // selected session's workspace, or ~.
         KeyBinding::new("secondary-t", NewTerminal, None),
         KeyBinding::new("secondary-/", ToggleModelPicker, None),
+        KeyBinding::new("secondary-shift-/", StepModelPickerBackward, None),
         KeyBinding::new("secondary-alt-shift-n", ToggleBranchPicker, None),
         // With an option modal's search field focused, the list keys reach
         // it as the field's own bound actions before any listener above can

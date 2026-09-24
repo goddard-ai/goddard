@@ -702,6 +702,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::focus_composer_action))
             .on_action(cx.listener(Self::focus_terminal_action))
             .on_action(cx.listener(Self::toggle_model_picker_action))
+            .on_action(cx.listener(Self::step_model_picker_backward_action))
             .on_action(cx.listener(Self::select_favorite_model_action))
             .on_action(cx.listener(Self::cycle_reasoning_effort_action))
             .on_action(cx.listener(Self::cycle_favorite_model_action))

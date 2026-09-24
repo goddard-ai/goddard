@@ -785,6 +785,16 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.cycle_keyboard_options_chord_direction(chord, 1, window, cx)
+    }
+
+    pub(super) fn cycle_keyboard_options_chord_direction(
+        &mut self,
+        chord: KeyboardOptionsChord,
+        direction: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.keyboard_options.open
             || self.keyboard_options.chord != Some(chord)
             || self.keyboard_options.creating_branch
@@ -796,7 +806,7 @@ impl Waku {
         // menu click opened it — the release that follows commits.
         self.keyboard_options.armed =
             chord.hold_down(window.modifiers().secondary(), window.modifiers().alt);
-        self.move_keyboard_option_highlight(1, cx);
+        self.move_keyboard_option_highlight(direction, cx);
         true
     }
 

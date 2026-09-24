@@ -4413,6 +4413,20 @@ impl Waku {
         );
     }
 
+    pub(super) fn step_model_picker_backward_action(
+        &mut self,
+        _: &StepModelPickerBackward,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cycle_keyboard_options_chord_direction(
+            keyboard_options::KeyboardOptionsChord::Model,
+            -1,
+            window,
+            cx,
+        );
+    }
+
     /// The ⌘/ modal's rows: the composer picker's merged list carried as
     /// model items, so the modal lists exactly what the anchored panel
     /// draws — Auto stance, favorites, recents, provider blocks — and keeps
