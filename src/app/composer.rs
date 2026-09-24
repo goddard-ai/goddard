@@ -7025,6 +7025,11 @@ impl Waku {
 
         div()
             .flex_none()
+            // The composer wrapper's px puts the card edge 10px in; matching
+            // it here keeps the row's own 10px inset — the same one the main
+            // footer's row uses — landing the chips under the card's
+            // controls and the meter under its send button.
+            .px(px(10.0))
             .pt(px(4.0))
             .pb(px(8.0))
             .text_size(sp(12.5))
@@ -7032,7 +7037,7 @@ impl Waku {
             .child(
                 div()
                     .h(px(28.0))
-                    .px(px(4.0))
+                    .px(px(10.0))
                     .flex()
                     .items_center()
                     .gap(px(2.0))
