@@ -4768,6 +4768,22 @@ impl Waku {
         self.composer_session().map(|session| session.id)
     }
 
+    /// The composer exists only on the session surface: the tabbed pages,
+    /// a main-area terminal, the AGY TUI, and a friend watch all replace
+    /// it (Big Picture remounts the same entity, so it stays mounted).
+    pub(super) fn composer_mounted(&self) -> bool {
+        self.selected_project().is_some()
+            && self.selected_terminal.is_none()
+            && self.projects_page.is_none()
+            && !self.notifications.open
+            && !self.drafts_page
+            && !self.automations_page
+            && !self.selected_session().is_some_and(|session| {
+                session.provider == ProviderKind::Antigravity && session.has_started()
+            })
+            && self.selected_friend_watch().is_none()
+    }
+
     /// Whether the composer holds no draft at all — no text, attachments,
     /// pasted atoms, or staged annotations. ⌘⏎ belongs to the suggestion
     /// chip only while this holds; the `SubmitSteer` handler runs the same

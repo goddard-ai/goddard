@@ -1,0 +1,1 @@
+- On the new task page, pressing Escape with text in the composer saves it as a draft — the payload parks on the Drafts page and the field clears.

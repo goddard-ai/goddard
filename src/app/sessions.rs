@@ -3886,6 +3886,23 @@ impl Waku {
             self.clear_sidebar_multi_selection(cx);
             return;
         }
+        // The new-task page has no turn to stop, so a bare Escape over a
+        // filled composer is "park it" — the payload files as a saved draft
+        // and the field empties. Incognito text is never stored, so it
+        // keeps falling through to the no-op stop.
+        if !action.immediate
+            && self.composer_mounted()
+            && self
+                .selected_session()
+                .is_some_and(|session| !session.has_started())
+            && !self.composer_is_empty(cx)
+            && self
+                .composer_draft_key()
+                .is_some_and(|key| !self.draft_key_incognito(key))
+        {
+            self.create_saved_draft(window, cx);
+            return;
+        }
         // ⌥Escape is a deliberate chord, so it stops on a single press
         // instead of arming the second-press confirmation bare Escape needs.
         if action.immediate {

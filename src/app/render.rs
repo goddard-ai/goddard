@@ -610,19 +610,7 @@ impl Render for Waku {
         let agy_surface = self.selected_session().is_some_and(|session| {
             session.provider == ProviderKind::Antigravity && session.has_started()
         });
-        // A watched friend session is read-only — no composer, no drops.
-        let friend_watch = self.selected_friend_watch().is_some();
-        // The composer exists only on the session surface: the tabbed pages,
-        // a main-area terminal, the AGY TUI, and a friend watch all replace
-        // it (Big Picture remounts the same entity, so it stays mounted).
-        let composer_mounted = self.selected_project().is_some()
-            && self.selected_terminal.is_none()
-            && self.projects_page.is_none()
-            && !self.notifications.open
-            && !self.drafts_page
-            && !self.automations_page
-            && !agy_surface
-            && !friend_watch;
+        let composer_mounted = self.composer_mounted();
         let computer_use = self.render_computer_use_overlay(window, cx);
         let speed_reader = self.render_speed_reader_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
