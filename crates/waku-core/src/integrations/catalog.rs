@@ -86,6 +86,13 @@ static CATALOG: &[CatalogEntry] = &[
         )],
     ),
     entry(
+        "clickup",
+        "ClickUp",
+        "Tasks, Docs, workspace search, and Chat",
+        IntegrationAuthKind::Oauth,
+        &[variant("default", "Default", "https://mcp.clickup.com/mcp")],
+    ),
+    entry(
         "notion",
         "Notion",
         "Search, read, and edit pages and databases",
