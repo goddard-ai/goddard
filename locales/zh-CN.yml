@@ -591,6 +591,7 @@ common.unarchive: 取消归档
 common.undo: 撤销
 common.rename: 重命名
 session.new_task: 新任务
+session.new_incognito_task: 新建无痕任务
 session.incognito: 无痕
 session.incognito_hint: 此任务为无痕模式 — 不会保存，也不会读写项目记忆
 session.copy_working_directory: 复制工作目录

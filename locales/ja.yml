@@ -600,6 +600,7 @@ common.undo: 取り消す
 common.rename: 名前を変更
 
 session.new_task: 新規タスク
+session.new_incognito_task: 新しいシークレットタスク
 session.incognito: シークレット
 session.incognito_hint: このタスクはシークレットです — 保存されず、プロジェクトメモリの読み書きも行いません
 session.copy_working_directory: 作業ディレクトリをコピー
