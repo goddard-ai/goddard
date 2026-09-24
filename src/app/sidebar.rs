@@ -4758,7 +4758,6 @@ impl Waku {
             }
             _ => (detail_label, false),
         };
-        let has_detail_label = detail_label.is_some();
         let checkout_status = if session.has_started() {
             self.workspace_path_for_session(session)
                 .and_then(|path| self.sidebar_checkout_statuses.borrow().get(path).copied())
@@ -4947,6 +4946,36 @@ impl Waku {
                     .iter()
                     .any(|entry| self.notifications.has_unread_pull_request(&entry.url))
             });
+        // Option temporarily trades the project/checkout detail for the
+        // model and reasoning effort this session is configured to use.
+        // `session_options` resolves packed model suffixes and rejects traits
+        // the selected model does not support, matching the driver options.
+        let model_detail = self.sidebar_alt_held.then(|| {
+            let options = self.session_options(session);
+            let model = self.model_display_name(session.provider, options.model.as_deref());
+            let effort = options.reasoning_effort.as_deref().and_then(|effort| {
+                self.model_metadata_for_session(session)
+                    .and_then(|model| {
+                        model
+                            .reasoning_efforts
+                            .iter()
+                            .find(|option| option.id == effort)
+                    })
+                    .map(|option| {
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone())
+                    })
+                    .or_else(|| Some(effort.to_owned()))
+            });
+            match effort {
+                Some(effort) => format!("{model} · {effort}"),
+                None => model,
+            }
+        });
+        let has_detail_label = detail_label.is_some() || model_detail.is_some();
         let group_name = SharedString::from(format!("session-row-{session_id}"));
         let archive_focus = self
             .sidebar_session_archive_focuses
@@ -5178,9 +5207,9 @@ impl Waku {
                     .min_h(sp(15.0))
                     .text_size(sp(if grouped_by_project { 12.5 } else { 13.0 }))
                     .line_height(sp(15.0))
-                    .when_some(detail_label, |element, label| {
+                    .when_some(model_detail, |element, label| {
                         element
-                            .child(icon(detail_icon, 12.5, theme.text_tertiary))
+                            .child(icon("icons/sparkle.svg", 12.5, theme.text_tertiary))
                             .child(
                                 div()
                                     .min_w_0()
@@ -5188,49 +5217,72 @@ impl Waku {
                                     .items_center()
                                     .text_color(theme.text_tertiary)
                                     .child(div().min_w_0().truncate().child(label))
-                                    .when(
-                                        checkout_status
-                                            .is_some_and(|status| status.uncommitted_changes),
-                                        |element| {
-                                            element.child(icon(
-                                                "icons/asterisk.svg",
-                                                12.0,
-                                                theme.text_ghost,
-                                            ))
-                                        },
-                                    ),
+                                    .child(div().flex_1()),
                             )
-                            .when_some(
-                                checkout_status
-                                    .map(|status| status.unpushed_commits)
-                                    .filter(|count| *count > 0),
-                                |element, count| {
-                                    element.child(
-                                        div()
-                                            .flex_none()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(2.0))
-                                            .child(icon(
-                                                "icons/arrow-up.svg",
-                                                12.0,
-                                                theme.text_tertiary,
-                                            ))
-                                            .child(
-                                                div()
-                                                    .text_size(sp(12.5))
-                                                    .text_color(theme.text_tertiary)
-                                                    .child(SharedString::from(count.to_string())),
-                                            ),
-                                    )
-                                },
-                            )
-                            .child(div().flex_1())
                     })
+                    .when_some(
+                        detail_label.filter(|_| !self.sidebar_alt_held),
+                        |element, label| {
+                            element
+                                .child(icon(detail_icon, 12.5, theme.text_tertiary))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex()
+                                        .items_center()
+                                        .text_color(theme.text_tertiary)
+                                        .child(div().min_w_0().truncate().child(label))
+                                        .when(
+                                            !self.sidebar_alt_held
+                                                && checkout_status.is_some_and(|status| {
+                                                    status.uncommitted_changes
+                                                }),
+                                            |element| {
+                                                element.child(icon(
+                                                    "icons/asterisk.svg",
+                                                    12.0,
+                                                    theme.text_ghost,
+                                                ))
+                                            },
+                                        ),
+                                )
+                                .when_some(
+                                    (!self.sidebar_alt_held)
+                                        .then_some(checkout_status)
+                                        .flatten()
+                                        .map(|status| status.unpushed_commits)
+                                        .filter(|count| *count > 0),
+                                    |element, count| {
+                                        element.child(
+                                            div()
+                                                .flex_none()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(2.0))
+                                                .child(icon(
+                                                    "icons/arrow-up.svg",
+                                                    12.0,
+                                                    theme.text_tertiary,
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .text_size(sp(12.5))
+                                                        .text_color(theme.text_tertiary)
+                                                        .child(SharedString::from(
+                                                            count.to_string(),
+                                                        )),
+                                                ),
+                                        )
+                                    },
+                                )
+                                .child(div().flex_1())
+                        },
+                    )
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
-                    .when(session.workspace.is_worktree(), |element| {
-                        element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
-                    })
+                    .when(
+                        !self.sidebar_alt_held && session.workspace.is_worktree(),
+                        |element| element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary)),
+                    )
                     .when_some(pull_request_badge, |element, badge| {
                         let color = sidebar_pull_request_color(&theme, badge.state);
                         element.child(
