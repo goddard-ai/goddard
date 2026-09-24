@@ -126,15 +126,19 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
 
     let end_branch = symbolic_head(cwd);
     let end_head = resolve_ref(cwd, "HEAD");
-    let end_commit =
-        capture_worktree_commit_from(cwd, end_head.as_deref(), "Goddard worktree snapshot", &[])?;
+    let start_ref = turn_start_ref(session_id, turn_count);
+    let has_start_ref = turn_count > 0 && has_ref(cwd, &start_ref);
+    let end_commit = if has_start_ref {
+        capture_worktree_commit_from_turn_start(cwd, &start_ref)?
+    } else {
+        capture_worktree_commit_from(cwd, end_head.as_deref(), "Goddard worktree snapshot", &[])?
+    };
     git_output(cwd, ["update-ref", &git_ref, &end_commit])?;
     let files = if turn_count == 0 {
         Vec::new()
     } else {
-        let start_ref = turn_start_ref(session_id, turn_count);
         let legacy_ref = checkpoint_ref(session_id, turn_count - 1);
-        let diff_base = if has_ref(cwd, &start_ref) {
+        let diff_base = if has_start_ref {
             prepare_turn_diff_base(
                 cwd,
                 session_id,
@@ -239,6 +243,20 @@ fn capture_worktree_commit_from(
     message: &str,
     parents: &[String],
 ) -> anyhow::Result<String> {
+    capture_worktree_commit_with_base(cwd, head, message, parents, None)
+}
+
+fn capture_worktree_commit_from_turn_start(cwd: &Path, start_ref: &str) -> anyhow::Result<String> {
+    capture_worktree_commit_with_base(cwd, None, "Goddard worktree snapshot", &[], Some(start_ref))
+}
+
+fn capture_worktree_commit_with_base(
+    cwd: &Path,
+    head: Option<&str>,
+    message: &str,
+    parents: &[String],
+    start_ref: Option<&str>,
+) -> anyhow::Result<String> {
     if !is_git_repository(cwd) {
         bail!("worktree snapshots require a Git repository");
     }
@@ -254,13 +272,13 @@ fn capture_worktree_commit_from(
     // above makes any leftover dead.
     let _ = fs::remove_file(index.with_extension("lock"));
 
-    match capture_with_index(cwd, &index, head, message, parents) {
+    match capture_with_index(cwd, &index, head, message, parents, start_ref) {
         Err(_) => {
             // A stale or corrupt side index fails plumbing the caller cannot
             // fix — rebuild it once from scratch before giving up.
             let _ = fs::remove_file(&index);
             let _ = fs::remove_file(index.with_extension("lock"));
-            capture_with_index(cwd, &index, head, message, parents)
+            capture_with_index(cwd, &index, head, message, parents, start_ref)
         }
         ok => ok,
     }
@@ -272,12 +290,18 @@ fn capture_with_index(
     head: Option<&str>,
     message: &str,
     parents: &[String],
+    start_ref: Option<&str>,
 ) -> anyhow::Result<String> {
+    if let Some(start_ref) = start_ref {
+        return capture_with_turn_start_index(cwd, index, start_ref, message, parents);
+    }
+
     // A clean worktree commits HEAD's tree outright — no index writes and no
     // hashing at all. Status runs against the side index, which keeps it off
     // the user's index while still giving it a warm stat cache.
+    let changed_paths = worktree_status(cwd, index)?;
     if let Some(head) = head
-        && worktree_is_clean(cwd, index)?
+        && changed_paths.is_empty()
     {
         let tree = git_output(cwd, ["rev-parse", &format!("{head}^{{tree}}")])?
             .trim()
@@ -290,7 +314,24 @@ fn capture_with_index(
     if let Some(head) = head {
         git_with_index(cwd, index, ["read-tree", head])?;
     }
-    git_with_index(cwd, index, ["add", "-A", "--", "."])?;
+    if head.is_some() {
+        if let Some(pathspecs) = status_pathspecs(&changed_paths)
+            && !pathspecs.is_empty()
+        {
+            git_with_index_input(
+                cwd,
+                index,
+                ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                &pathspecs,
+            )?;
+        } else {
+            // An unfamiliar or empty status record must never omit files from
+            // a checkpoint. Keep the full capture as the safe fallback.
+            git_with_index(cwd, index, ["add", "-A", "--", "."])?;
+        }
+    } else {
+        git_with_index(cwd, index, ["add", "-A", "--", "."])?;
+    }
     let tree = git_with_index(cwd, index, ["write-tree"])?
         .trim()
         .to_owned();
@@ -300,18 +341,112 @@ fn capture_with_index(
     commit_tree(cwd, &tree, message, parents)
 }
 
-/// Whether the worktree matches `HEAD` — no staged, unstaged, or untracked
-/// (but non-ignored) differences. Runs against the side index: an absent or
-/// stale index reports everything as changed, which safely falls through to
-/// the full snapshot. `--untracked-files=all` keeps a `status.showUntrackedFiles`
-/// user config from hiding files the snapshot must see.
-fn worktree_is_clean(cwd: &Path, index: &Path) -> anyhow::Result<bool> {
-    let output = git_with_index(
+fn capture_with_turn_start_index(
+    cwd: &Path,
+    index: &Path,
+    start_ref: &str,
+    message: &str,
+    parents: &[String],
+) -> anyhow::Result<String> {
+    git_with_index(cwd, index, ["read-tree", start_ref])?;
+    let mut pathspecs = Vec::new();
+    for args in [
+        &[
+            "diff-files",
+            "--name-only",
+            "-z",
+            "--ignore-submodules=none",
+            "--",
+            ".",
+        ][..],
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--directory",
+            "-z",
+            "--",
+            ".",
+        ][..],
+    ] {
+        let paths = git_with_index_output(cwd, index, args)?.stdout;
+        for path in paths
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+        {
+            push_literal_pathspec(&mut pathspecs, path);
+        }
+    }
+
+    if pathspecs.is_empty() {
+        return resolve_ref(cwd, start_ref)
+            .ok_or_else(|| anyhow!("turn starting checkpoint `{start_ref}` is unavailable"));
+    }
+
+    git_with_index_input(
         cwd,
         index,
-        ["status", "--porcelain", "--untracked-files=all", "--", "."],
+        ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        &pathspecs,
     )?;
-    Ok(output.trim().is_empty())
+    let tree = git_with_index(cwd, index, ["write-tree"])?
+        .trim()
+        .to_owned();
+    if tree.is_empty() {
+        bail!("git write-tree returned no object id");
+    }
+    commit_tree(cwd, &tree, message, parents)
+}
+
+/// Changes relative to the side index, including staged, unstaged, and
+/// non-ignored untracked paths. `-z` preserves arbitrary path bytes for the
+/// pathspec file. `--untracked-files=all` keeps `status.showUntrackedFiles`
+/// from hiding files the snapshot must see.
+fn worktree_status(cwd: &Path, index: &Path) -> anyhow::Result<Vec<u8>> {
+    Ok(git_with_index_output(
+        cwd,
+        index,
+        [
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--",
+            ".",
+        ],
+    )?
+    .stdout)
+}
+
+/// Convert porcelain-v1 NUL records into literal pathspecs suitable for
+/// `git add --pathspec-from-file`. Rename/copy records carry a second path;
+/// including both sides also removes the old name from the new tree.
+fn status_pathspecs(status: &[u8]) -> Option<Vec<u8>> {
+    let mut records = status.split(|byte| *byte == 0);
+    let mut pathspecs = Vec::new();
+    while let Some(record) = records.next() {
+        if record.is_empty() {
+            continue;
+        }
+        if record.len() < 4 || record[2] != b' ' {
+            return None;
+        }
+        push_literal_pathspec(&mut pathspecs, &record[3..]);
+        if matches!(record[0], b'R' | b'C') || matches!(record[1], b'R' | b'C') {
+            let original_path = records.next()?;
+            if original_path.is_empty() {
+                return None;
+            }
+            push_literal_pathspec(&mut pathspecs, original_path);
+        }
+    }
+    Some(pathspecs)
+}
+
+fn push_literal_pathspec(pathspecs: &mut Vec<u8>, path: &[u8]) {
+    pathspecs.extend_from_slice(b":(literal)");
+    pathspecs.extend_from_slice(path);
+    pathspecs.push(0);
 }
 
 /// The worktree's own admin dir — `.git` on a normal checkout, the
@@ -864,7 +999,59 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    git_with_environment(cwd, Some(index), args, false)
+    let output = git_with_index_output(cwd, index, args)?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn git_with_index_output<I, S>(cwd: &Path, index: &Path, args: I) -> anyhow::Result<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = crate::command_env::search_path_command("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_INDEX_FILE", index)
+        .output()
+        .context("failed to execute git")?;
+    if output.status.success() {
+        Ok(output)
+    } else {
+        bail!("{}", command_error(&output))
+    }
+}
+
+fn git_with_index_input<I, S>(
+    cwd: &Path,
+    index: &Path,
+    args: I,
+    input: &[u8],
+) -> anyhow::Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = crate::command_env::search_path_command("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_INDEX_FILE", index)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to execute git")?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("git pathspec input was unavailable"))?
+        .write_all(input)
+        .context("failed to send git pathspecs")?;
+    let output = child.wait_with_output().context("failed to wait for git")?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        bail!("{}", command_error(&output))
+    }
 }
 
 fn git_with_identity<I, S>(cwd: &Path, args: I) -> anyhow::Result<String>

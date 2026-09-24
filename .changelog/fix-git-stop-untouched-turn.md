@@ -1,1 +1,1 @@
-- Stopping a turn before it uses a tool that could change files no longer makes the next message wait for a full worktree check. Files changed in earlier turns remain available in the checkpoint.
+- Turn checkpoints stage only files changed during that turn. A follow-up after stopping an untouched turn also skips the worktree scan, while preserving work present when the turn began.
