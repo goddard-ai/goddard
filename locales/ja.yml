@@ -2149,6 +2149,7 @@ drafts.view_tooltip: 下書きを表示
 errors.provider_terminal_sessions_local_only: "%{provider} のセッションにはローカルデーモンが必要です — このワークスペースはリモートホストにあります"
 errors.remote_connect: "%{name} に接続できませんでした：%{error}"
 errors.store_pasted_text: "ペーストしたテキストを添付できませんでした：%{error}"
+errors.voice_briefing: 音声ブリーフィングを生成できませんでした
 experiments.action_predictions_description: アシスタントのターンが終わると、評価モデルが固定の候補セット（フォローアッププロンプト、Git 操作、セッション管理）から次の行動を予測し、ローカルの行動ジャーナルが各予測を解決します。まだ候補は表示されません — まず正確度を測るため、判定結果は ~/.goddard/action-predictions.jsonl に記録されます。
 experiments.action_predictions_title: 行動予測
 experiments.automations_description: プロンプトをタイマーで実行するオートメーションページです — 毎時、毎日、平日、毎週、cron。それぞれを独立したタスクまたは既存タスクで実行し、実行履歴と手動の単発実行に対応します。
@@ -2200,6 +2201,14 @@ experiments.status_markers_description: アシスタントのターンが終わ�
 experiments.status_markers_title: ターンステータスマーカー
 experiments.subagents_description: セッションが実行を名前付きサブエージェントに委任できるようにします。プロバイダーごとのティアとコスト表示付きのルーティングで、トランスクリプトに分かりやすく表示されます。有効化後に開始したセッションに適用されます。
 experiments.subagents_title: サブエージェント
+experiments.voice_briefing_title: 音声ブリーフィング
+experiments.voice_briefing_description: 最新の返信が長いタスクを開くと、約45秒の要約を読み上げます — エージェントが行ったことと、あなたに必要な判断や対応を伝えます。AI Gateway キーと以下のモデルで実行されます。
+experiments.voice_briefing_caption: どちらの呼び出しも AI Gateway を経由します — 要約モデルが原稿を作成し、音声モデルがそれを読み上げます。キーはこのアプリの設定ファイルに保存されます。
+experiments.voice_briefing_key: AI Gateway キー
+experiments.voice_briefing_key_placeholder: AI Gateway API キー
+experiments.voice_briefing_model: 要約モデル
+experiments.voice_briefing_model_placeholder: プロバイダー/モデル — 例 google/gemini-3-flash
+experiments.voice_briefing_tts: 音声モデル
 friends.a_friend: フレンド
 friends.abort_sync: 中止
 friends.accept: 承認
@@ -2462,6 +2471,11 @@ providers.update: 更新
 providers.update_label: 更新
 providers.update_terminal_title: "%{provider} を更新"
 providers.updating: 更新中…
+providers.title_model: タイトル整理モデル
+providers.title_model_description: Jev を設定すると、完了したタスクの分かりにくいタイトルや冗長なタイトルを検出し、このモデルが書き換えます。Claude と Codex には低コストのデフォルトがあります。他の対応プロバイダーではモデルを選択してください。
+providers.title_model_default: 低コストのデフォルトを使う
+providers.title_model_disabled: モデルを選ぶまでオフ
+providers.title_model_choose: モデルを選択
 right_panel.side_chat: サイドチャット
 right_panel.side_chat_unavailable: サイドチャットを利用できません
 right_panel.side_chat_unavailable_description: チャットは親タスクとともに削除されたか、このタブから閉じられました
@@ -2533,6 +2547,8 @@ routing.vercel_key_description: AI_GATEWAY_API_KEY または VERCEL_OIDC_TOKEN �
 routing.vercel_key_placeholder: vck_… または OIDC トークン
 routing.vercel_team: チーム ID（任意）
 routing.vercel_team_description: ゲートウェイが Vercel チームにスコープされている場合、x-vercel-ai-gateway-team として送信されます。
+routing.feature_title_quality: タスクタイトル
+routing.feature_title_quality_description: 自動生成されたタスクタイトルが分かりにくい、または冗長かどうかを確認します。
 session.agy_ended: Antigravity セッションは終了しました
 session.agy_relaunch: セッションを再起動
 session.marked_unread: タスクを未読にしました
@@ -2542,6 +2558,10 @@ session.pinned_many: "%{count} 件のタスクをピン留めしました"
 session.unpinned: タスクのピン留めを解除しました
 session.unpinned_many: "%{count} 件のタスクのピン留めを解除しました"
 session.worktree_lfs_skipped: ワークツリーは作成されましたが、Git LFS ファイルはポインタスタブです — その中で `git lfs pull` を実行して内容を取得してください
+session.moved_to_project: "プロジェクト %{name} へ移動しました"
+session.project_switch: タスクを移動
+session.project_switch_confirm: "このタスクを %{name} に移動しますか？"
+session.project_switch_confirm_detail: エージェントには作業ディレクトリが別のリポジトリに変わったことが伝えられます。元のチェックアウトで実行中の処理はそのまま続きます。
 settings.experiments: 実験的機能
 settings.experiments_description: 未完成の機能をいち早く試せます。各機能はデフォルトでオフで、変更や削除される可能性があり、いつでもオフにできます。
 settings.experiments_keywords: 実験 実験的 ベータ プレビュー 未完成 早期 全体表示 git パネル github サブエージェント プロジェクトページ コンピュータ操作 自動モデルルーティング ルーター 評価 jev experiments experimental beta preview unfinished opt in early big picture panel subagents projects page computer use auto model routing router evaluation
@@ -2562,6 +2582,23 @@ settings.sidebar_draft_preview_color_description: サイドバーに表示する
 settings.sidebar_draft_preview_color_subtle: 控えめ
 settings.sidebar_draft_preview_color_accent: アクセント
 settings.sidebar_draft_preview_color_loud: 強調
+settings.memory: メモリ
+settings.memory_keywords: プロジェクトメモリ 記憶 変更履歴 履歴 ノート memory
+settings.memory_no_projects: プロジェクトを追加すると、そのメモリと変更履歴を確認できます。
+settings.memory_summary: プロジェクトメモリ
+settings.memory_log: 変更履歴
+settings.memory_empty: このプロジェクトのメモリはまだ記録されていません。
+settings.memory_log_empty: このプロジェクトの変更はまだ記録されていません。
+settings.memory_refresh: 更新
+settings.memory_unavailable: このプロジェクトのメモリを読み込めませんでした。
+settings.memory_loading: プロジェクトメモリを読み込み中…
+settings.memory_disabled: メモリはオフです。新しい項目を記録するには「設定 → 実験的機能」で有効にしてください。
+settings.memory_older: 古い項目
+settings.memory_newer: 新しい項目
+settings.sidebar_phase_groups: 最近の計画中タスクをまとめる
+settings.sidebar_phase_groups_description: 計画中で過去30分以内に動いていたタスクを日付ビューの「今日」の上に表示します
+settings.sidebar_hide_phase_labels: タスク行の計画中チップを隠す
+settings.sidebar_hide_phase_labels_description: 計画中はタイトルバーとグループヘッダーに残し、タスク行には繰り返し表示しません
 shortcuts.add_to_chat: 選択範囲をチャットに追加
 shortcuts.archive_task: タスクをアーカイブ
 shortcuts.big_picture: 全体表示を切り替える
@@ -2742,6 +2779,7 @@ sync_branch.no_results: 追跡ブランチのあるブランチがありませ�
 sync_branch.no_results_hint: 作業ツリーでチェックアウトされているブランチのみ同期できます
 sync_branch.synced: "%{branch} を同期しました"
 sync_branch.syncing: "%{branch} を同期中…"
+sync_branch.up_to_date: "%{branch} はすでに %{upstream} の最新状態です"
 terminal.localhost_detected: "%{url} が稼働しています"
 terminal.localhost_open: 開く
 terminal.localhost_open_in_tab: "%{keys} でブラウザタブに開きます"

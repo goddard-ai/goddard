@@ -2100,6 +2100,7 @@ drafts.view_tooltip: 查看草稿
 errors.provider_terminal_sessions_local_only: "%{provider} 会话需要本地守护进程 — 此工作区位于远程主机"
 errors.remote_connect: "无法连接到 %{name}：%{error}"
 errors.store_pasted_text: "无法附加粘贴的文本：%{error}"
+errors.voice_briefing: 无法生成语音简报
 experiments.action_predictions_description: 助手轮次结束后，评估模型会从固定候选集（后续提示词、Git 操作、会话管理）中预测你的下一步，本地的行为日志会逐条核销每个预测。暂不会显示建议 — 判定结果先记录到 ~/.goddard/action-predictions.jsonl 以衡量准确度。
 experiments.action_predictions_title: 行为预测
 experiments.automations_description: 新增“自动化”页面，可按计划定时运行提示词 — 每小时、每天、工作日、每周或 cron — 每次运行可作为独立任务或进入现有任务，并带有运行历史和单次手动运行。
@@ -2151,6 +2152,14 @@ experiments.status_markers_description: 当助手轮次结束时，评估模型�
 experiments.status_markers_title: 轮次状态标记
 experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。对开启后启动的会话生效。
 experiments.subagents_title: 子智能体
+experiments.voice_briefing_title: 语音简报
+experiments.voice_briefing_description: 打开最新回复较长的任务时，朗读约 45 秒的摘要 — 先讲智能体做了什么，再讲需要你做的决定或处理。使用你的 AI Gateway 密钥和下方模型运行。
+experiments.voice_briefing_caption: 两次调用都经过 AI Gateway — 摘要模型撰写文稿，语音模型负责朗读。密钥保存在本应用的设置文件中。
+experiments.voice_briefing_key: AI Gateway 密钥
+experiments.voice_briefing_key_placeholder: AI Gateway API 密钥
+experiments.voice_briefing_model: 摘要模型
+experiments.voice_briefing_model_placeholder: 服务商/模型 — 例如 google/gemini-3-flash
+experiments.voice_briefing_tts: 语音模型
 friends.a_friend: 一位好友
 friends.abort_sync: 中止
 friends.accept: 接受
@@ -2413,6 +2422,11 @@ providers.update: 更新
 providers.update_label: 更新
 providers.update_terminal_title: 更新 %{provider}
 providers.updating: 更新中…
+providers.title_model: 标题清理模型
+providers.title_model_description: 配置 Jev 后，它会检查已完成任务的标题是否含混或冗杂，由该模型重写。Claude 和 Codex 有低成本默认值；其他支持的服务商请选择模型。
+providers.title_model_default: 使用低成本默认值
+providers.title_model_disabled: 选择模型前保持关闭
+providers.title_model_choose: 选择模型
 right_panel.side_chat: 侧聊
 right_panel.side_chat_unavailable: 侧聊不可用
 right_panel.side_chat_unavailable_description: 该聊天已随其父任务删除，或已在此标签页中关闭
@@ -2484,6 +2498,8 @@ routing.vercel_key_description: AI_GATEWAY_API_KEY 或 VERCEL_OIDC_TOKEN 值，�
 routing.vercel_key_placeholder: vck_… 或 OIDC 令牌
 routing.vercel_team: 团队 ID（可选）
 routing.vercel_team_description: 当你的网关限定在 Vercel 团队时，作为 x-vercel-ai-gateway-team 发送。
+routing.feature_title_quality: 任务标题
+routing.feature_title_quality_description: 检查自动生成的任务标题是否含混或冗杂。
 session.agy_ended: Antigravity 会话已结束
 session.agy_relaunch: 重新启动会话
 session.marked_unread: 任务已标记为未读
@@ -2493,6 +2509,10 @@ session.pinned_many: "已置顶 %{count} 个任务"
 session.unpinned: 任务已取消置顶
 session.unpinned_many: "已取消置顶 %{count} 个任务"
 session.worktree_lfs_skipped: 工作树已创建，但 Git LFS 文件仍是指针存根 — 在其中运行 `git lfs pull` 以获取实际内容
+session.moved_to_project: "已移动到项目 %{name}"
+session.project_switch: 移动任务
+session.project_switch_confirm: "将此任务移动到 %{name}？"
+session.project_switch_confirm_detail: 智能体会获知工作目录已切换到另一个仓库。它在旧检出中正在进行的工作会继续运行。
 settings.experiments: 实验
 settings.experiments_description: 可提前体验的未完成功能。各项默认关闭，可能变更或移除，随时可关闭。
 settings.experiments_keywords: 实验 experiments experimental beta 预览 preview 未完成 unfinished 提前 opt in early big picture 概览 git 面板 panel github 子智能体 subagents 项目 projects 页面 page 电脑操作 computer use auto 自动 模型 model 路由 routing router 评估 evaluation jev
@@ -2513,6 +2533,23 @@ settings.sidebar_draft_preview_color_description: 侧边栏中任务未发送草
 settings.sidebar_draft_preview_color_subtle: 低调
 settings.sidebar_draft_preview_color_accent: 强调色
 settings.sidebar_draft_preview_color_loud: 醒目
+settings.memory: 记忆
+settings.memory_keywords: 项目记忆 变更日志 历史 笔记 memory
+settings.memory_no_projects: 添加项目后即可查看它的记忆和变更日志。
+settings.memory_summary: 项目记忆
+settings.memory_log: 变更日志
+settings.memory_empty: 该项目尚未记录任何记忆。
+settings.memory_log_empty: 该项目尚未记录任何变更。
+settings.memory_refresh: 刷新
+settings.memory_unavailable: 无法加载该项目的记忆。
+settings.memory_loading: 正在加载项目记忆…
+settings.memory_disabled: 记忆功能已关闭。请在“设置 → 实验”中启用以记录新条目。
+settings.memory_older: 更早
+settings.memory_newer: 更近
+settings.sidebar_phase_groups: 将最近的规划中任务分组
+settings.sidebar_phase_groups_description: 将仍在规划中且最近 30 分钟内活跃的任务移到日期视图“今天”上方
+settings.sidebar_hide_phase_labels: 隐藏任务行上的规划中标记
+settings.sidebar_hide_phase_labels_description: 规划中保留在标题栏和分组标题中，不在任务行重复显示
 shortcuts.add_to_chat: 将所选内容添加到对话
 shortcuts.archive_task: 归档任务
 shortcuts.big_picture: 显示或隐藏概览
@@ -2693,6 +2730,7 @@ sync_branch.no_results: 没有带跟踪分支的分支
 sync_branch.no_results_hint: 只有在工作区中检出的分支才能同步
 sync_branch.synced: 已同步 %{branch}
 sync_branch.syncing: 正在同步 %{branch}…
+sync_branch.up_to_date: "%{branch} 已与 %{upstream} 保持最新"
 terminal.localhost_detected: "%{url} 已上线"
 terminal.localhost_open: 打开
 terminal.localhost_open_in_tab: 按 %{keys} 在浏览器标签页中打开
