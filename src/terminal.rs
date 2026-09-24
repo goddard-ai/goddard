@@ -3220,15 +3220,32 @@ fn terminal_key_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u8>> 
         + u8::from(modifiers.alt) * 2
         + u8::from(modifiers.control) * 4;
     let app_cursor = mode.contains(TermMode::APP_CURSOR);
+    // Terminal.app and Alacritty send the readline-friendly ESC b/f for
+    // ⌥←/⌥→ so word movement works without inputrc entries; every other
+    // modifier combination and platform keeps the xterm CSI encoding.
+    let option_word_arrow = cfg!(target_os = "macos")
+        && modifiers.alt
+        && !modifiers.shift
+        && !modifiers.control
+        && !modifiers.function;
+    let meta = |text: &str| {
+        if modifiers.alt {
+            format!("\x1b{text}")
+        } else {
+            text.to_owned()
+        }
+    };
     let special = match key {
-        "enter" | "return" => Some("\r".to_owned()),
+        "enter" | "return" => Some(meta("\r")),
         "tab" if modifiers.shift => Some("\x1b[Z".to_owned()),
-        "tab" => Some("\t".to_owned()),
-        "backspace" => Some("\x7f".to_owned()),
-        "escape" => Some("\x1b".to_owned()),
+        "tab" => Some(meta("\t")),
+        "backspace" => Some(meta("\x7f")),
+        "escape" => Some(meta("\x1b")),
         "up" => Some(cursor_sequence('A', modifier, app_cursor)),
         "down" => Some(cursor_sequence('B', modifier, app_cursor)),
+        "right" if option_word_arrow => Some("\x1bf".to_owned()),
         "right" => Some(cursor_sequence('C', modifier, app_cursor)),
+        "left" if option_word_arrow => Some("\x1bb".to_owned()),
         "left" => Some(cursor_sequence('D', modifier, app_cursor)),
         "home" => Some(csi_sequence('H', modifier)),
         "end" => Some(csi_sequence('F', modifier)),
@@ -3254,12 +3271,24 @@ fn terminal_key_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u8>> 
         return Some(special.into_bytes());
     }
 
-    let text = keystroke
-        .key_char
-        .as_deref()
-        .or_else(|| (key.chars().count() == 1).then_some(key))?;
+    // ⌥ is Meta: send ESC plus the bare key. On macOS key_char is the
+    // Option-composed glyph (∫ for ⌥B), which no shell binds — so with
+    // alt held take the unmodified key, keeping key_char only for named
+    // keys like space.
+    let text = if modifiers.alt {
+        (key.chars().count() == 1)
+            .then_some(key)
+            .or(keystroke.key_char.as_deref())
+    } else {
+        keystroke
+            .key_char
+            .as_deref()
+            .or_else(|| (key.chars().count() == 1).then_some(key))
+    }?;
     let mut bytes = if modifiers.control {
         control_bytes(text)?
+    } else if modifiers.alt && modifiers.shift {
+        text.to_ascii_uppercase().into_bytes()
     } else {
         text.as_bytes().to_vec()
     };
@@ -3543,6 +3572,49 @@ mod tests {
             ),
             Some(b"\x1b[1;5D".to_vec())
         );
+        assert_eq!(
+            terminal_key_bytes(
+                &key(
+                    "backspace",
+                    None,
+                    Modifiers {
+                        alt: true,
+                        ..Default::default()
+                    }
+                ),
+                TermMode::empty()
+            ),
+            Some(b"\x1b\x7f".to_vec())
+        );
+
+        let alt_b = key(
+            "b",
+            Some("∫"),
+            Modifiers {
+                alt: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            terminal_key_bytes(&alt_b, TermMode::empty()),
+            Some(b"\x1bb".to_vec())
+        );
+
+        #[cfg(target_os = "macos")]
+        {
+            let alt_left = key(
+                "left",
+                None,
+                Modifiers {
+                    alt: true,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                terminal_key_bytes(&alt_left, TermMode::empty()),
+                Some(b"\x1bb".to_vec())
+            );
+        }
     }
 
     #[cfg(target_os = "linux")]
