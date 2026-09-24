@@ -179,6 +179,25 @@ impl Waku {
             return None;
         }
         let session = self.selected_session()?;
+        self.render_usage_meter_for(
+            session,
+            USAGE_METER_MENU_ID,
+            self.composer.read(cx).focus(),
+            cx,
+        )
+    }
+
+    /// Render the same meter for a session that is visible outside the main
+    /// selection, such as a side chat. Its menu id and return focus are
+    /// supplied by the surface so multiple session panes do not share a
+    /// trigger or return focus to the wrong composer.
+    pub(super) fn render_usage_meter_for(
+        &self,
+        session: &AgentSession,
+        menu_id: impl Into<SharedString>,
+        composer_focus: FocusHandle,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let provider = session.provider;
         let context = session.context_usage;
         let theme = Theme::current(cx);
@@ -192,27 +211,26 @@ impl Waku {
             && PLAN_USAGE_PROVIDERS.contains(&provider);
 
         let weak = cx.entity().downgrade();
+        let menu_id = menu_id.into();
+        let menu_id_for_lookup = menu_id.clone();
+        let session_provider = provider;
         // The meter's popover closure owns its own clone — `weak` moves
         // into the open/close handler above it.
         let panel_waku = weak.clone();
-        let handle = self.menu_handle_with(USAGE_METER_MENU_ID, cx, move |open, window, cx| {
+        let handle = self.menu_handle_with(menu_id.clone(), cx, move |open, window, cx| {
             if open {
                 let mut card_focus = None;
                 let _ = weak.update(cx, |this, cx| {
                     // An opening panel wants fresh numbers; the pump honors
                     // the stale flag on its next tick once the backoff allows.
-                    if let Some(provider) = this
-                        .selected_session()
-                        .map(|session| session.provider)
-                        .filter(|provider| PLAN_USAGE_PROVIDERS.contains(provider))
-                    {
-                        this.plan_usage_stale.insert(provider);
+                    if PLAN_USAGE_PROVIDERS.contains(&session_provider) {
+                        this.plan_usage_stale.insert(session_provider);
                     }
                     this.maybe_refresh_plan_usage(cx);
                     card_focus = this
                         .menus
                         .borrow()
-                        .get(USAGE_METER_MENU_ID)
+                        .get(&menu_id_for_lookup)
                         .map(|handle| handle.focus_handle().clone());
                     cx.notify();
                 });
@@ -226,14 +244,8 @@ impl Waku {
                     });
                 }
             } else {
-                let mut composer_focus = None;
-                let _ = weak.update(cx, |this, cx| {
-                    composer_focus = Some(this.composer.read(cx).focus());
-                    cx.notify();
-                });
-                if let Some(focus) = composer_focus {
-                    window.focus(&focus, cx);
-                }
+                let _ = weak.update(cx, |_, cx| cx.notify());
+                window.focus(&composer_focus, cx);
             }
         });
 
@@ -262,7 +274,7 @@ impl Waku {
         };
 
         let trigger = div()
-            .id("usage-meter")
+            .id(menu_id.clone())
             .h(px(20.0))
             .px(px(5.0))
             .rounded(px(5.0))

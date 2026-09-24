@@ -1,0 +1,1 @@
+- Side chats now show the inherited project, workspace, branch, and context-usage indicator below their composer.

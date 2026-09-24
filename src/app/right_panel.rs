@@ -3199,6 +3199,8 @@ impl Waku {
         let rows_state = view.rows.clone();
         let scrollbar = view.scrollbar.clone();
         let entity = cx.entity().downgrade();
+        let workspace_footer =
+            self.render_side_chat_workspace_footer(session_id, composer.clone(), cx);
         div()
             .flex_1()
             .min_h_0()
@@ -3251,6 +3253,7 @@ impl Waku {
                         cx,
                     )),
             )
+            .child(workspace_footer)
             .into_any_element()
     }
 

@@ -5523,44 +5523,8 @@ impl Waku {
             !session.is_some_and(|session| session.is_busy()) && !self.branch_operation_pending;
         let picks_base = worktrees::workspace_picks_base(&workspace, session);
         let snapshot = self.branch_snapshot_for_workspace(&workspace_path, cx)?;
-        let selected_branch = match &workspace {
-            SessionWorkspace::Local => snapshot.display_branch().map(str::to_owned),
-            SessionWorkspace::NewWorktree { base_branch } => base_branch
-                .clone()
-                .or_else(|| snapshot.default_branch.clone())
-                .or_else(|| snapshot.display_branch().map(str::to_owned)),
-            SessionWorkspace::Worktree { base_branch, .. } if picks_base => snapshot
-                .current
-                .clone()
-                .or_else(|| base_branch.clone())
-                .or_else(|| snapshot.default_branch.clone())
-                .or_else(|| snapshot.detached_head.clone()),
-            SessionWorkspace::Worktree { branch, .. } => snapshot
-                .current
-                .clone()
-                .or_else(|| branch.clone())
-                .or_else(|| snapshot.detached_head.clone()),
-        }
-        .unwrap_or_else(|| tr!("branches.detached_head"));
-
-        // A detached HEAD reads as a bare SHA; name the base it sits on.
-        let branch_label = if snapshot.current.is_none() {
-            let base = match &workspace {
-                SessionWorkspace::NewWorktree { base_branch }
-                | SessionWorkspace::Worktree { base_branch, .. } => base_branch
-                    .clone()
-                    .or_else(|| snapshot.default_branch.clone()),
-                SessionWorkspace::Local => snapshot.default_branch.clone(),
-            };
-            match base {
-                Some(base) if base != selected_branch => {
-                    format!("{selected_branch} ({base})")
-                }
-                _ => selected_branch.clone(),
-            }
-        } else {
-            selected_branch.clone()
-        };
+        let selected_branch = workspace_selected_branch(&snapshot, &workspace, picks_base);
+        let branch_label = format_workspace_branch_label(&snapshot, &workspace, picks_base);
 
         let weak = cx.entity().downgrade();
         let search = self.branch_search.clone();
@@ -5981,6 +5945,35 @@ impl Waku {
                     .child(body)
                     .into_any_element()
             },
+        ))
+    }
+
+    /// The branch label shared by the interactive workspace picker and the
+    /// read-only footer shown for a side chat. A planned or detached worktree
+    /// names its base alongside the raw checkout ref so the chip describes
+    /// what the session will actually use.
+    fn workspace_branch_label(
+        &mut self,
+        session: &AgentSession,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)
+            .filter(|project| !project.is_projectless())?;
+        let workspace_path = session
+            .workspace
+            .path()
+            .unwrap_or(&project.path)
+            .to_path_buf();
+        let snapshot = self.branch_snapshot_for_workspace(&workspace_path, cx)?;
+        let picks_base = worktrees::workspace_picks_base(&session.workspace, Some(session));
+        Some(format_workspace_branch_label(
+            &snapshot,
+            &session.workspace,
+            picks_base,
         ))
     }
 
@@ -6874,6 +6867,167 @@ impl Waku {
                             .children(usage_meter),
                     ),
             )
+    }
+
+    /// The side chat shares its parent's workspace, so its footer is a
+    /// read-only description rather than another set of workspace pickers.
+    /// Keeping the session explicit is important: side chats are not the
+    /// selected session, but their context meter still belongs to them.
+    pub(super) fn render_side_chat_workspace_footer(
+        &mut self,
+        session_id: Uuid,
+        composer: Entity<ComposerInput>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+        else {
+            return div();
+        };
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)
+            .cloned();
+        let project_name = project
+            .as_ref()
+            .filter(|project| !project.is_projectless())
+            .map(Project::display_name)
+            .unwrap_or_else(|| tr!("project.choose_project"));
+        let project_chip = MenuChip::new(format!("side-chat-{session_id}-workspace-project"))
+            .icon("icons/folder.svg", theme.text_tertiary)
+            .label(project_name)
+            .caret(false)
+            .disabled(true)
+            .max_w(px(190.0));
+
+        let workspace = session.workspace.clone();
+        let workspace_label = match &workspace {
+            SessionWorkspace::Local => SharedString::from(tr!("workspace.local")),
+            SessionWorkspace::NewWorktree { .. } => {
+                SharedString::from(tr!("workspace.new_worktree"))
+            }
+            SessionWorkspace::Worktree { name, .. } => SharedString::from(name.clone()),
+        };
+        let workspace_icon = if workspace.is_local() {
+            "icons/local.svg"
+        } else {
+            "icons/fork.svg"
+        };
+        let workspace_chip = MenuChip::new(format!("side-chat-{session_id}-workspace-worktree"))
+            .icon(workspace_icon, theme.text_tertiary)
+            .label(workspace_label)
+            .caret(false)
+            .disabled(true)
+            .when(
+                workspace.is_local() && self.state.local_workspace_accent,
+                |chip| chip.label_color(theme.accent),
+            )
+            .max_w(px(180.0));
+
+        let branch_label = self
+            .workspace_branch_label(&session, cx)
+            .unwrap_or_else(|| match &workspace {
+                SessionWorkspace::NewWorktree { base_branch } => base_branch
+                    .clone()
+                    .unwrap_or_else(|| tr!("branches.detached_head")),
+                SessionWorkspace::Worktree {
+                    branch,
+                    base_branch,
+                    ..
+                } => branch
+                    .clone()
+                    .or_else(|| base_branch.clone())
+                    .unwrap_or_else(|| tr!("branches.detached_head")),
+                SessionWorkspace::Local => tr!("branches.detached_head"),
+            });
+        let branch_chip = MenuChip::new(format!("side-chat-{session_id}-workspace-branch"))
+            .icon("icons/git-branch.svg", theme.text_tertiary)
+            .label(branch_label)
+            .caret(false)
+            .disabled(true)
+            .max_w(px(210.0));
+        let usage_meter = self.render_usage_meter_for(
+            &session,
+            format!("side-chat-{session_id}-usage-meter"),
+            composer.read(cx).focus(),
+            cx,
+        );
+
+        div()
+            .flex_none()
+            .pt(px(4.0))
+            .pb(px(8.0))
+            .text_size(sp(12.5))
+            .line_height(sp(14.0))
+            .child(
+                div()
+                    .h(px(28.0))
+                    .px(px(4.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(2.0))
+                    .child(project_chip)
+                    .child(workspace_chip)
+                    .child(branch_chip)
+                    .child(div().flex_1())
+                    .children(usage_meter),
+            )
+    }
+}
+
+fn workspace_selected_branch(
+    snapshot: &BranchSnapshot,
+    workspace: &SessionWorkspace,
+    picks_base: bool,
+) -> String {
+    match workspace {
+        SessionWorkspace::Local => snapshot.display_branch().map(str::to_owned),
+        SessionWorkspace::NewWorktree { base_branch } => base_branch
+            .clone()
+            .or_else(|| snapshot.default_branch.clone())
+            .or_else(|| snapshot.display_branch().map(str::to_owned)),
+        SessionWorkspace::Worktree { base_branch, .. } if picks_base => snapshot
+            .current
+            .clone()
+            .or_else(|| base_branch.clone())
+            .or_else(|| snapshot.default_branch.clone())
+            .or_else(|| snapshot.detached_head.clone()),
+        SessionWorkspace::Worktree { branch, .. } => snapshot
+            .current
+            .clone()
+            .or_else(|| branch.clone())
+            .or_else(|| snapshot.detached_head.clone()),
+    }
+    .unwrap_or_else(|| tr!("branches.detached_head"))
+}
+
+fn format_workspace_branch_label(
+    snapshot: &BranchSnapshot,
+    workspace: &SessionWorkspace,
+    picks_base: bool,
+) -> String {
+    let selected_branch = workspace_selected_branch(snapshot, workspace, picks_base);
+    if snapshot.current.is_none() {
+        let base = match workspace {
+            SessionWorkspace::NewWorktree { base_branch }
+            | SessionWorkspace::Worktree { base_branch, .. } => base_branch
+                .clone()
+                .or_else(|| snapshot.default_branch.clone()),
+            SessionWorkspace::Local => snapshot.default_branch.clone(),
+        };
+        match base {
+            Some(base) if base != selected_branch => format!("{selected_branch} ({base})"),
+            _ => selected_branch,
+        }
+    } else {
+        selected_branch
     }
 }
 
