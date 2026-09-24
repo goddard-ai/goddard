@@ -277,6 +277,27 @@ export function RightPanel({
     ))
   }, [onPanelWidthChange])
 
+  // Accordion expand: the tab's work key is the expanded item, so selecting a
+  // collapsed sibling retargets this tab — or activates the item's own tab
+  // when one already hosts it.
+  const selectBackgroundWork = useCallback((tabId: string, key: BackgroundWorkKey, title: string) => {
+    setPanelState((current) => {
+      const existing = current.tabs.find((tab) => (
+        tab.id !== tabId
+        && tab.surface === 'backgroundWork'
+        && tab.backgroundWorkKey
+        && sameBackgroundWorkKey(tab.backgroundWorkKey, key)
+      ))
+      if (existing) return { ...current, activeId: existing.id }
+      return {
+        ...current,
+        tabs: current.tabs.map((tab) => tab.id === tabId
+          ? { ...tab, backgroundWorkKey: key, title }
+          : tab),
+      }
+    })
+  }, [])
+
   const setTabDirty = useCallback((tabId: string, dirty: boolean) => {
     setPanelState((current) => {
       const tab = current.tabs.find((candidate) => candidate.id === tabId)
@@ -426,6 +447,7 @@ export function RightPanel({
             <BackgroundWorkPanel
               session={session}
               workKey={tab.backgroundWorkKey}
+              onSelectWork={(key, title) => selectBackgroundWork(tab.id, key, title)}
               onTitle={(title) => updateTab(tab.id, { title })}
             />
           )}
@@ -1308,17 +1330,20 @@ function BackgroundWorkPanel({
   session,
   workKey,
   onTitle,
+  onSelectWork,
 }: {
   session: AgentSession | null
   workKey: BackgroundWorkKey
   onTitle: (title: string) => void
+  onSelectWork: (key: BackgroundWorkKey, title: string) => void
 }) {
   const { t } = useI18n()
   const { backgroundWork, stopBackgroundWork } = useRuntime()
   const reportedTitle = useRef<string | null>(null)
-  const item = session
-    ? backgroundWork[session.id]?.find((candidate) => sameBackgroundWorkKey(candidate.key, workKey))
-    : undefined
+  const items = session ? [...(backgroundWork[session.id] ?? [])].reverse() : []
+  // The tab's key names the expanded item; if it left the list, the newest
+  // remaining one stands in rather than leaving an empty pane.
+  const item = items.find((candidate) => sameBackgroundWorkKey(candidate.key, workKey)) ?? items[0]
 
   useEffect(() => {
     if (!item?.title) return
@@ -1348,48 +1373,78 @@ function BackgroundWorkPanel({
     [t('background.latest_update'), item.detail],
     [t('background.exit_code'), item.exitCode == null ? null : String(item.exitCode)],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]))
+  const accordion = items.length > 1
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-3">
-      <div className="overflow-hidden rounded-[9px] border bg-card">
-        <div className="flex min-h-[54px] items-center gap-2.5 px-[11px] py-2">
-          <WakuIcon className="size-[15px] text-[var(--text-secondary)]" name={backgroundWorkKindIcon(item.key.kind)} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[12px] font-medium">{item.title}</div>
-            <div className="mt-1 flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
-              <BackgroundStatusIcon status={item.status} />
-              <span>{backgroundStatusLabel(item.status, t)}</span>
-              <span>·</span>
-              <span>{backgroundElapsed(item, t)}</span>
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
+      {items.map((entry) => {
+        if (!sameBackgroundWorkKey(entry.key, item.key)) {
+          return (
+            <button
+              className="flex min-h-[54px] w-full shrink-0 items-center gap-2.5 rounded-[9px] border bg-card px-[11px] py-2 text-left hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+              key={`${entry.key.kind}:${entry.key.providerId}`}
+              type="button"
+              onClick={() => onSelectWork(entry.key, entry.title)}
+            >
+              <WakuIcon className="size-[11px] shrink-0 text-[var(--text-ghost)]" name="chevronRight" />
+              <WakuIcon className="size-[15px] shrink-0 text-[var(--text-secondary)]" name={backgroundWorkKindIcon(entry.key.kind)} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12px] font-medium">{entry.title}</div>
+                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
+                  <BackgroundStatusIcon status={entry.status} />
+                  <span>{backgroundStatusLabel(entry.status, t)}</span>
+                  <span>·</span>
+                  <span>{backgroundElapsed(entry, t)}</span>
+                </div>
+              </div>
+            </button>
+          )
+        }
+        return (
+          <div className="shrink-0 overflow-hidden rounded-[9px] border bg-card" key={`${entry.key.kind}:${entry.key.providerId}`}>
+            <div className="flex min-h-[54px] items-center gap-2.5 px-[11px] py-2">
+              {accordion && (
+                <WakuIcon className="size-[11px] shrink-0 text-[var(--text-ghost)]" name="chevronDown" />
+              )}
+              <WakuIcon className="size-[15px] text-[var(--text-secondary)]" name={backgroundWorkKindIcon(item.key.kind)} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12px] font-medium">{item.title}</div>
+                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
+                  <BackgroundStatusIcon status={item.status} />
+                  <span>{backgroundStatusLabel(item.status, t)}</span>
+                  <span>·</span>
+                  <span>{backgroundElapsed(item, t)}</span>
+                </div>
+              </div>
+              {stoppable && (
+                <Button
+                  className="h-[26px] gap-1.5 px-[9px] text-[10.5px] hover:bg-destructive/10"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void stopBackgroundWork(session.id, item).catch(() => {})}
+                >
+                  <WakuIcon className="size-[11px] text-destructive" name="stopFilled" />
+                  {t('background.stop')}
+                </Button>
+              )}
+            </div>
+            {metadata.map(([label, value]) => (
+              <div className="border-t px-2.5 py-[7px]" key={label}>
+                <div className="text-[9.5px] text-[var(--text-tertiary)]">{label}</div>
+                <div className="mt-[3px] whitespace-pre-wrap break-words font-mono text-[10.5px] text-[var(--text-secondary)]">{value}</div>
+              </div>
+            ))}
+            <div className="border-t p-2.5">
+              <div className="mb-[5px] flex items-center justify-between text-[9.5px] text-[var(--text-tertiary)]">
+                <span>{t('background.output')}</span>
+                {item.outputTruncated && <span>{t('background.output_truncated')}</span>}
+              </div>
+              <pre className="max-h-80 overflow-auto rounded-md bg-[var(--inset)] p-2 font-mono text-[10.5px] leading-[15px] text-[var(--text-secondary)]">
+                {stripAnsi(item.output || t('background.no_output'))}
+              </pre>
             </div>
           </div>
-          {stoppable && (
-            <Button
-              className="h-[26px] gap-1.5 px-[9px] text-[10.5px] hover:bg-destructive/10"
-              size="sm"
-              variant="outline"
-              onClick={() => void stopBackgroundWork(session.id, item).catch(() => {})}
-            >
-              <WakuIcon className="size-[11px] text-destructive" name="stopFilled" />
-              {t('background.stop')}
-            </Button>
-          )}
-        </div>
-        {metadata.map(([label, value]) => (
-          <div className="border-t px-2.5 py-[7px]" key={label}>
-            <div className="text-[9.5px] text-[var(--text-tertiary)]">{label}</div>
-            <div className="mt-[3px] whitespace-pre-wrap break-words font-mono text-[10.5px] text-[var(--text-secondary)]">{value}</div>
-          </div>
-        ))}
-        <div className="border-t p-2.5">
-          <div className="mb-[5px] flex items-center justify-between text-[9.5px] text-[var(--text-tertiary)]">
-            <span>{t('background.output')}</span>
-            {item.outputTruncated && <span>{t('background.output_truncated')}</span>}
-          </div>
-          <pre className="max-h-80 overflow-auto rounded-md bg-[var(--inset)] p-2 font-mono text-[10.5px] leading-[15px] text-[var(--text-secondary)]">
-            {stripAnsi(item.output || t('background.no_output'))}
-          </pre>
-        </div>
-      </div>
+        )
+      })}
     </div>
   )
 }

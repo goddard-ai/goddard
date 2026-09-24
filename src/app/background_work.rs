@@ -829,6 +829,45 @@ impl Waku {
         self.open_right_panel_surface(RightPanelSurface::BackgroundWork { key, title }, cx);
     }
 
+    /// Expand a collapsed accordion row: the background-work surface's key is
+    /// the expanded item, so expanding retargets the active surface in place —
+    /// or activates the item's own tab when one already hosts it, keeping the
+    /// one-tab-per-item rule.
+    fn expand_background_work_item(&mut self, key: BackgroundWorkKey, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(title) = self
+            .background_work
+            .get(&session_id)
+            .and_then(|registry| registry.items.get(&key))
+            .map(|item| item.title.clone())
+        else {
+            return;
+        };
+        let Some(active) = self.right_panel_active_surface else {
+            return;
+        };
+        if !matches!(
+            self.right_panel_surfaces.get(active),
+            Some(RightPanelSurface::BackgroundWork { .. })
+        ) {
+            return;
+        }
+        let requested = RightPanelSurface::BackgroundWork { key, title };
+        match right_panel::reusable_surface_index(&self.right_panel_surfaces, &requested) {
+            Some(existing) if existing != active => {
+                self.right_panel_active_surface = Some(existing);
+                self.reveal_right_panel_tab(existing);
+            }
+            Some(_) => {}
+            None => {
+                self.right_panel_surfaces[active] = requested;
+            }
+        }
+        cx.notify();
+    }
+
     /// Open a session-linked pull request as a right-panel tab — the in-app
     /// detail view, not the external URL.
     pub(super) fn open_session_pull_request(&mut self, number: u64, cx: &mut Context<Self>) {
@@ -1378,6 +1417,10 @@ impl Waku {
             .into_any_element()
     }
 
+    /// The session's background work as an accordion: the tab's key names the
+    /// expanded item and its siblings stay listed in registry order as
+    /// collapsed rows — expanding one retargets this tab rather than stacking
+    /// another.
     pub(super) fn render_background_work_surface(
         &self,
         key: &BackgroundWorkKey,
@@ -1386,8 +1429,16 @@ impl Waku {
         let theme = Theme::current(cx);
         let session_id = self.state.selected_session;
         let registry = session_id.and_then(|session_id| self.background_work.get(&session_id));
-        let item = registry.and_then(|registry| registry.items.get(key));
-        let Some(item) = item else {
+        let items = registry
+            .map(BackgroundWorkRegistry::ordered_items)
+            .unwrap_or_default();
+        // The keyed item expands; if it left the registry, the newest
+        // remaining one stands in rather than leaving an empty pane.
+        let expanded = items
+            .iter()
+            .position(|item| item.key == *key)
+            .unwrap_or(0);
+        let Some(item) = items.get(expanded).copied() else {
             return div()
                 .id("background-work-surface")
                 .tab_group()
@@ -1411,16 +1462,146 @@ impl Waku {
                         ),
                 );
         };
-        let output = registry
-            .and_then(|registry| registry.rendered_output.get(key))
-            .cloned();
-        let output_viewport = registry
-            .and_then(|registry| registry.output_viewports.get(key))
-            .cloned()
-            .unwrap_or_default();
         let selection = registry
             .map(|registry| registry.selection.clone())
             .unwrap_or_default();
+        let accordion = items.len() > 1;
+        let mut stack = div().w_full().flex().flex_col().gap(px(8.0));
+        for entry in items {
+            if entry.key == item.key {
+                let output = registry
+                    .and_then(|registry| registry.rendered_output.get(&entry.key))
+                    .cloned();
+                let output_viewport = registry
+                    .and_then(|registry| registry.output_viewports.get(&entry.key))
+                    .cloned()
+                    .unwrap_or_default();
+                stack = stack.child(self.render_background_work_card(
+                    entry,
+                    output,
+                    output_viewport,
+                    selection.clone(),
+                    accordion,
+                    cx,
+                ));
+            } else {
+                stack = stack.child(self.render_background_work_collapsed_row(entry, cx));
+            }
+        }
+        div()
+            .id("background-work-surface")
+            .tab_group()
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .p(px(12.0))
+            .child(stack)
+    }
+
+    /// A collapsed accordion row: the item's header — kind icon, title,
+    /// status, elapsed — behind a leading chevron, expanding on click or
+    /// Enter/Space.
+    fn render_background_work_collapsed_row(
+        &self,
+        item: &BackgroundWorkItem,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let control_id = format!(
+            "background-accordion-{}-{}",
+            item.key.provider_id, item.key.kind as u8
+        );
+        let focus = self.transcript_control_focus(control_id.clone(), cx);
+        let status_color = work_status_color(item.status, theme);
+        let click_key = item.key.clone();
+        let click_weak = cx.entity().downgrade();
+        let key_key = item.key.clone();
+        let key_weak = cx.entity().downgrade();
+        div()
+            .id(SharedString::from(control_id))
+            .track_focus(&focus)
+            .tab_index(0)
+            .min_h(px(54.0))
+            .w_full()
+            .px(px(11.0))
+            .py(px(8.0))
+            .rounded(px(11.0))
+            .border(hairline())
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .flex()
+            .items_center()
+            .gap(px(9.0))
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .child(icon(
+                "icons/chevron-right.svg",
+                11.0,
+                theme.affordance_icon(),
+            ))
+            .child(icon(
+                work_kind_icon(item.key.kind),
+                15.0,
+                theme.text_secondary,
+            ))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(single_line_label(&item.display_title())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(rendered_work_status_icon(item.status, 9.0, status_color))
+                            .child(work_status_label(item.status))
+                            .child("·")
+                            .child(work_elapsed(item)),
+                    ),
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let _ = click_weak.update(cx, |this, cx| {
+                    this.expand_background_work_item(click_key.clone(), cx);
+                });
+            })
+            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    let _ = key_weak.update(cx, |this, cx| {
+                        this.expand_background_work_item(key_key.clone(), cx);
+                    });
+                    cx.stop_propagation();
+                }
+            })
+    }
+
+    fn render_background_work_card(
+        &self,
+        item: &BackgroundWorkItem,
+        output: Option<SharedString>,
+        output_viewport: BackgroundOutputViewport,
+        selection: TranscriptSelection,
+        accordion: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let session_id = self.state.selected_session;
         let status_color = work_status_color(item.status, theme);
         let stop = session_id.and_then(|session_id| {
             (item.status.is_stoppable() && item.can_stop).then(|| {
@@ -1478,7 +1659,7 @@ impl Waku {
                     })
             })
         });
-        let card = div()
+        div()
             .w_full()
             .flex()
             .flex_col()
@@ -1495,6 +1676,13 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(9.0))
+                    .when(accordion, |header| {
+                        header.child(icon(
+                            "icons/chevron-down.svg",
+                            11.0,
+                            theme.affordance_icon(),
+                        ))
+                    })
                     .child(icon(
                         work_kind_icon(item.key.kind),
                         15.0,
@@ -1540,15 +1728,7 @@ impl Waku {
                 output_viewport,
                 selection,
                 cx,
-            ));
-        div()
-            .id("background-work-surface")
-            .tab_group()
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .p(px(12.0))
-            .child(card)
+            ))
     }
 
     fn render_background_work_detail(
@@ -2316,6 +2496,40 @@ mod tests {
             single_line_label("/bin/zsh -lc 'set -euo pipefail\n  for n in one two'"),
             "/bin/zsh -lc 'set -euo pipefail for n in one two'"
         );
+    }
+
+    #[test]
+    fn collapsed_accordion_rows_stay_on_one_line() {
+        let source = include_str!("background_work.rs");
+        let row = source
+            .split_once("\n    fn render_background_work_collapsed_row(")
+            .expect("collapsed accordion row renderer")
+            .1
+            .split_once("\n    fn render_background_work_card(")
+            .expect("collapsed accordion row renderer end")
+            .0;
+
+        assert!(row.contains(".truncate()"));
+        assert!(row.contains(".child(single_line_label(&item.display_title()))"));
+        assert!(row.contains("icons/chevron-right.svg"));
+        assert!(!row.contains(".line_clamp(1)"));
+    }
+
+    #[test]
+    fn accordion_rows_expand_by_retargeting_the_surface() {
+        let source = include_str!("background_work.rs");
+        let surface = source
+            .split_once("\n    fn expand_background_work_item(")
+            .expect("accordion expand")
+            .1
+            .split_once("\n    /// Open a session-linked pull request")
+            .expect("accordion expand end")
+            .0;
+
+        // Expanding swaps the surface's key rather than pushing a tab, and an
+        // item that already owns a tab activates it instead of duplicating.
+        assert!(surface.contains("self.right_panel_surfaces[active] = requested"));
+        assert!(surface.contains("reusable_surface_index"));
     }
 
     #[test]

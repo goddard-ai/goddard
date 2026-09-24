@@ -1091,7 +1091,7 @@ fn right_panel_tab_icon(
     }
 }
 
-fn reusable_surface_index(
+pub(super) fn reusable_surface_index(
     surfaces: &[RightPanelSurface],
     requested: &RightPanelSurface,
 ) -> Option<usize> {
