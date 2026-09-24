@@ -122,16 +122,21 @@ pub(super) enum KeyboardOptionsChord {
     /// ⌘/ — has a model filter; like the branch picker, a release before
     /// the first step leaves the picker open with the search focused.
     Model,
+    /// ⌥Tab — no search field, so like the workspace picker the armed open
+    /// steps one choice in the chord's direction: a bare press-release
+    /// still changes something.
+    Favorites,
 }
 
 impl KeyboardOptionsChord {
     /// The modifiers whose release ends the hold. ⇧ is direction in the
-    /// branch chord, not part of the hold — that gesture ends when ⌘ or ⌥
-    /// comes up. The model chord's hold is ⌘ alone.
+    /// branch and favorites chords, not part of the hold — those gestures
+    /// end when ⌘ or ⌥ comes up. The model chord's hold is ⌘ alone.
     fn hold_down(self, secondary: bool, alt: bool) -> bool {
         match self {
             KeyboardOptionsChord::Workspace | KeyboardOptionsChord::Branch => secondary && alt,
             KeyboardOptionsChord::Model => secondary,
+            KeyboardOptionsChord::Favorites => alt,
         }
     }
 }
@@ -808,6 +813,16 @@ impl Waku {
             chord.hold_down(window.modifiers().secondary(), window.modifiers().alt);
         self.move_keyboard_option_highlight(direction, cx);
         true
+    }
+
+    /// A chord picker with no search field steps once on its armed open, so
+    /// a bare press-release still changes something — directional chords
+    /// like ⌥⇧Tab pass their direction. An open that wasn't armed (a menu
+    /// dispatch) stays on the current choice.
+    pub(super) fn step_armed_keyboard_options(&mut self, direction: isize, cx: &mut Context<Self>) {
+        if self.keyboard_options.armed {
+            self.move_keyboard_option_highlight(direction, cx);
+        }
     }
 
     /// Releasing the chord's held modifiers ends the gesture. A picker with

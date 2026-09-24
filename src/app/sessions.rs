@@ -3643,6 +3643,7 @@ impl Waku {
         if self.command_palette.is_open()
             || self.task_switcher.is_open()
             || self.project_switcher.is_open()
+            || self.keyboard_options_is_open()
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
             || self.full_access_dialog.is_some()
@@ -3714,6 +3715,7 @@ impl Waku {
         if self.command_palette.is_open()
             || self.task_switcher.is_open()
             || self.project_switcher.is_open()
+            || self.keyboard_options_is_open()
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
             || self.full_access_dialog.is_some()
@@ -3845,6 +3847,14 @@ impl Waku {
         }
         if self.project_switcher.is_open() {
             self.cancel_project_switcher(window, cx);
+            return;
+        }
+        // The options modal's card focus still sits under the root
+        // Workspace context, so its Escape arrives here as CancelTurn —
+        // dismiss the modal rather than arming the stop confirmation or
+        // filing the draft underneath it.
+        if self.keyboard_options_is_open() {
+            self.dismiss_keyboard_options(true, window, cx);
             return;
         }
         // Bare Escape never reaches here — the overlay's Dismiss binding is
@@ -4832,13 +4842,28 @@ impl Waku {
     }
 
     /// ⌥Tab and ⌥⇧Tab open Auto, eligible starred combos, and the most recent
-    /// selection together, so the user can choose directly.
+    /// selection together, so the user can choose directly. Holding ⌥ and
+    /// tapping Tab again steps the highlight; releasing ⌥ commits.
     pub(super) fn cycle_favorite_model_action(
         &mut self,
-        _action: &CycleFavoriteModel,
+        action: &CycleFavoriteModel,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let direction = match action.direction {
+            crate::FavoriteModelCycleDirection::Forward => 1,
+            crate::FavoriteModelCycleDirection::Backward => -1,
+        };
+        // A second ⌥Tab during the hold steps the open picker rather than
+        // reopening it; the release that ends the hold commits the pick.
+        if self.cycle_keyboard_options_chord_direction(
+            keyboard_options::KeyboardOptionsChord::Favorites,
+            direction,
+            window,
+            cx,
+        ) {
+            return;
+        }
         if self.settings_page.is_some() {
             return;
         }
@@ -4959,10 +4984,14 @@ impl Waku {
             items,
             highlighted,
             keyboard_options::KeyboardOptionFocus::Modal,
-            None,
+            Some(keyboard_options::KeyboardOptionsChord::Favorites),
             window,
             cx,
         );
+        // The picker has no search to land in, so a bare press-release
+        // should still change something — open one choice past the current
+        // one in the chord's direction.
+        self.step_armed_keyboard_options(direction, cx);
     }
 
     /// ⌘E and ⌘⇧E show the current model's complete reasoning-effort ladder.
