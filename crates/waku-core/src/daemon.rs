@@ -712,6 +712,7 @@ impl WakuBackend {
             .clone();
         let _capture = capture_lock.lock();
 
+        let dedupe_started = std::time::Instant::now();
         {
             let mut state = self.task_state.lock();
             if let Some(index) = state
@@ -736,6 +737,12 @@ impl WakuBackend {
                 }
             }
         }
+        // Hydrating under the lock is the convoy other commands wait behind —
+        // the hold time is the number that matters, not the git work.
+        eprintln!(
+            "turn checkpoint dedupe for session {session_id} turn {turn_count} held task_state {:?}",
+            dedupe_started.elapsed()
+        );
 
         let capture_started = std::time::Instant::now();
         let checkpoint = if untouched {
@@ -754,6 +761,7 @@ impl WakuBackend {
             "turn checkpoint for session {session_id} turn {turn_count} captured in {:?}",
             capture_started.elapsed()
         );
+        let persist_started = std::time::Instant::now();
         let mut state = self.task_state.lock();
         if let Some(index) = state
             .sessions
@@ -771,6 +779,11 @@ impl WakuBackend {
                 self.task_store.save(&mut state)?;
             }
         }
+        drop(state);
+        eprintln!(
+            "turn checkpoint for session {session_id} turn {turn_count} persisted holding task_state {:?}",
+            persist_started.elapsed()
+        );
         Ok(checkpoint)
     }
 
