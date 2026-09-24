@@ -227,6 +227,7 @@ enum PaletteAction {
     CollapseSidebarGroups,
     GoToNextUnreadCompletion,
     MarkAllSessionsRead,
+    UndoArchive,
     ToggleSidebar,
     ToggleRightPanel,
     ToggleBigPicture,
@@ -2075,6 +2076,36 @@ impl Waku {
                 next(),
             ),
         ];
+
+        // The toast's Undo survives dismissal here: the most recent archive
+        // — a batch counts as one — stays restorable until it's used or the
+        // app restarts.
+        let undoable_archive =
+            still_archived_sessions(&self.state.sessions, &self.undoable_archive);
+        if !undoable_archive.is_empty() {
+            let mut item = CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.undo_archive"),
+                "icons/archive.svg",
+                None,
+                PaletteAction::UndoArchive,
+                "undo last archive restore unarchive task session bring back",
+                next(),
+            );
+            item.detail = match undoable_archive.as_slice() {
+                [session_id] => self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *session_id)
+                    .map(|session| session.display_title().to_owned()),
+                many => Some(tr!(
+                    "command_palette.undo_archive_count",
+                    count = many.len()
+                )),
+            };
+            commands.push(item);
+        }
 
         if self.state.friends_enabled {
             commands.extend([
@@ -4570,6 +4601,7 @@ impl Waku {
                 self.go_to_next_unread_completion_action(&GoToNextUnreadCompletion, window, cx)
             }
             PaletteAction::MarkAllSessionsRead => self.mark_all_sessions_read(cx),
+            PaletteAction::UndoArchive => self.undo_last_archive(cx),
             PaletteAction::CheckForUpdates => {
                 window.dispatch_action(CheckForUpdates.boxed_clone(), cx)
             }

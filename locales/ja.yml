@@ -192,6 +192,8 @@ command_palette.agent_cli_thread_id_copied: エージェント CLI スレッド 
 command_palette.collapse_sidebar_groups: サイドバーのすべてのグループを折りたたむ
 command_palette.go_to_next_unread_completion: 次の未読の完了タスクへ移動
 command_palette.mark_all_tasks_read: すべてのタスクを既読にする
+command_palette.undo_archive: 直前のアーカイブを元に戻す
+command_palette.undo_archive_count: "%{count} 件のタスク"
 command_palette.show_sidebar: サイドバーを表示
 command_palette.hide_sidebar: サイドバーを隠す
 command_palette.show_right_panel: 右パネルを表示
@@ -1437,6 +1439,7 @@ session.archived: タスクをアーカイブしました
 session.archived_many: "%{count} 件のタスクをアーカイブしました"
 session.unarchived: タスクのアーカイブを解除しました
 session.unarchived_many: "%{count} 件のタスクのアーカイブを解除しました"
+session.nothing_to_undo: 復元できるアーカイブ済みタスクはありません
 session.view_now: 今すぐ表示
 session.worktree_recreated: ワークツリーが見つからなかったため再作成しました — コミットされていない変更は失われている可能性があります
 session.moved_to_worktree: "ワークツリー %{name} へ移動しました"

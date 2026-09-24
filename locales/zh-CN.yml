@@ -191,6 +191,8 @@ command_palette.agent_cli_thread_id_copied: 已复制智能体 CLI 线程 ID
 command_palette.collapse_sidebar_groups: 折叠所有侧边栏分组
 command_palette.go_to_next_unread_completion: 前往下一个未读完成的任务
 command_palette.mark_all_tasks_read: 将所有任务标记为已读
+command_palette.undo_archive: 撤销上次归档
+command_palette.undo_archive_count: "%{count} 个任务"
 command_palette.show_sidebar: 显示侧边栏
 command_palette.hide_sidebar: 隐藏侧边栏
 command_palette.show_right_panel: 显示右侧面板
@@ -1405,6 +1407,7 @@ session.archived: 任务已归档
 session.archived_many: "已归档 %{count} 个任务"
 session.unarchived: 任务已取消归档
 session.unarchived_many: "已取消归档 %{count} 个任务"
+session.nothing_to_undo: 没有可恢复的已归档任务
 session.view_now: 立即查看
 session.worktree_recreated: 工作树缺失，已重新创建——未提交的更改可能已丢失
 session.moved_to_worktree: "已移动到工作树 %{name}"

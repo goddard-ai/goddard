@@ -2419,6 +2419,11 @@ pub struct Waku {
     /// background inspection that decides whether it opens.
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
+    /// Session ids of the most recent archive — the set the palette's
+    /// "Undo last archive" restores. In-memory only: a restart drops it.
+    /// Members join while their archive toast is still up, matching the
+    /// toast's own Undo grouping.
+    undoable_archive: Vec<Uuid>,
     /// The "Reclaim Disk Space" listing: idle worktrees and the
     /// regenerable output each still holds. The generation invalidates
     /// scans in flight for a replaced dialog; `reclaim_batch` collects a
@@ -3775,6 +3780,21 @@ pub(super) fn next_time_label_change(sessions: &[AgentSession], now: u64) -> Opt
     next
 }
 
+/// The ids from `session_ids` that still name an archived session — the
+/// set an archive undo can actually restore, in the order they were
+/// recorded (most recent last).
+fn still_archived_sessions(sessions: &[AgentSession], session_ids: &[Uuid]) -> Vec<Uuid> {
+    session_ids
+        .iter()
+        .copied()
+        .filter(|session_id| {
+            sessions
+                .iter()
+                .any(|session| session.id == *session_id && session.archived_at.is_some())
+        })
+        .collect()
+}
+
 fn migrate_legacy_projectless_projects(
     state: &mut PersistedState,
     workspace: &waku_client::WorkspaceClient,
@@ -3930,6 +3950,9 @@ impl Waku {
             _ => None,
         };
         if let Some(count) = joined {
+            if !self.undoable_archive.contains(&session_id) {
+                self.undoable_archive.push(session_id);
+            }
             let toast = self.toast.as_mut().expect("toast checked above");
             toast.message = tr!("session.archived_many", count = count);
             // Restart the dismiss clock for the growing group without
@@ -3940,6 +3963,8 @@ impl Waku {
             toast.timer_generation = self.toast_generation;
             return;
         }
+        self.undoable_archive.clear();
+        self.undoable_archive.push(session_id);
         self.show_toast_with_tone(
             tr!("session.archived"),
             ToastTone::Success,
@@ -3954,16 +3979,7 @@ impl Waku {
     /// directly; a group reports how many came back without touching the
     /// selection.
     pub(super) fn undo_archived_sessions(&mut self, session_ids: &[Uuid], cx: &mut Context<Self>) {
-        let restorable: Vec<Uuid> = session_ids
-            .iter()
-            .copied()
-            .filter(|session_id| {
-                self.state
-                    .sessions
-                    .iter()
-                    .any(|session| session.id == *session_id && session.archived_at.is_some())
-            })
-            .collect();
+        let restorable = still_archived_sessions(&self.state.sessions, session_ids);
         match restorable.as_slice() {
             [] => self.hide_toast(),
             // Selecting unarchives on activation, so this restores and
@@ -3973,6 +3989,27 @@ impl Waku {
                 for session_id in many {
                     self.unarchive_session(*session_id, false, cx);
                 }
+                self.show_success_toast(tr!("session.unarchived_many", count = many.len()));
+            }
+        }
+    }
+
+    /// The palette's "Undo last archive": the same restore as the toast's
+    /// Undo, but it always lands on a restored task — a batch selects its
+    /// most recently archived member. One-shot: the set clears whether the
+    /// restore found anything or not.
+    pub(super) fn undo_last_archive(&mut self, cx: &mut Context<Self>) {
+        let restorable = still_archived_sessions(&self.state.sessions, &self.undoable_archive);
+        self.undoable_archive.clear();
+        match restorable.as_slice() {
+            [] => self.show_toast(tr!("session.nothing_to_undo")),
+            [session_id] => self.open_toast_session(*session_id, cx),
+            many => {
+                let (last, earlier) = many.split_last().expect("many is nonempty");
+                for session_id in earlier {
+                    self.unarchive_session(*session_id, false, cx);
+                }
+                self.open_toast_session(*last, cx);
                 self.show_success_toast(tr!("session.unarchived_many", count = many.len()));
             }
         }
@@ -6145,6 +6182,7 @@ impl Waku {
                 provider_switch_dialog: None,
                 provider_switch_in_flight: HashSet::new(),
                 archive_preview_pending: HashSet::new(),
+                undoable_archive: Vec::new(),
                 full_access_dialog: None,
                 shortcuts_dialog: None,
                 goal_dialog: None,

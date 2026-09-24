@@ -329,6 +329,10 @@ command_palette.go_to_next_unread_completion:
   en: Go to next unread completion
 command_palette.mark_all_tasks_read:
   en: Mark all tasks as read
+command_palette.undo_archive:
+  en: Undo last archive
+command_palette.undo_archive_count:
+  en: "%{count} tasks"
 command_palette.show_sidebar:
   en: Show sidebar
 command_palette.hide_sidebar:
@@ -3631,6 +3635,8 @@ session.unarchived:
   en: Task unarchived.
 session.unarchived_many:
   en: "%{count} tasks unarchived."
+session.nothing_to_undo:
+  en: No archived task left to restore.
 session.pinned:
   en: Task pinned.
 session.unpinned:

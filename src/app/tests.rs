@@ -37,11 +37,11 @@ use super::{
     push_transcript_activity, response_footer_message_index, response_row_turn_id,
     retain_fading_working_indicator, row_starts_followup_turn, session_accepts_turn_output,
     session_is_reapable, settle_stream_segment, should_refresh_branch_after_activity,
-    should_show_navigation_rail, should_show_scroll_to_bottom, tail_rejoin_follows_anchor,
-    task_id_from_notification_tag, task_notification_tag, transcript_anchor_end_space,
-    transcript_navigation_turns, transcript_position_landing, transcript_rests_at_tail,
-    transcript_row_kinds, transcript_row_splice, transcript_rows_fingerprint,
-    update_transcript_activity, widened_panel_width_for_file_editor,
+    should_show_navigation_rail, should_show_scroll_to_bottom, still_archived_sessions,
+    tail_rejoin_follows_anchor, task_id_from_notification_tag, task_notification_tag,
+    transcript_anchor_end_space, transcript_navigation_turns, transcript_position_landing,
+    transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
+    transcript_rows_fingerprint, update_transcript_activity, widened_panel_width_for_file_editor,
     widened_panel_width_for_review,
 };
 use crate::git_branch::BranchEntry;
@@ -4694,6 +4694,27 @@ fn archived_filter_matches_transcript_hits() {
         ),
         Vec::<Uuid>::new()
     );
+}
+
+#[test]
+fn undo_archive_restores_only_sessions_still_archived() {
+    let project = Uuid::new_v4();
+    let mut alpha = AgentSession::new(project, ProviderKind::Codex);
+    alpha.archived_at = Some(1);
+    // Never archived — already restored or never left.
+    let beta = AgentSession::new(project, ProviderKind::Claude);
+    let mut gamma = AgentSession::new(project, ProviderKind::OpenCode);
+    gamma.archived_at = Some(2);
+    let gone = Uuid::new_v4();
+    let sessions = vec![alpha.clone(), beta.clone(), gamma.clone()];
+
+    // Recorded order survives filtering: a batch undo selects the last
+    // entry, the most recently archived member.
+    assert_eq!(
+        still_archived_sessions(&sessions, &[alpha.id, beta.id, gone, gamma.id]),
+        vec![alpha.id, gamma.id]
+    );
+    assert!(still_archived_sessions(&sessions, &[beta.id, gone]).is_empty());
 }
 
 #[test]

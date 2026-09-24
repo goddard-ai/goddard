@@ -1700,6 +1700,7 @@ impl Waku {
         self.pending_goal_operations.remove(&session_id);
         self.goal_observed_at.remove(&session_id);
         self.state.unseen_completions.remove(&session_id);
+        self.undoable_archive.retain(|id| *id != session_id);
         self.pending_workspace_cleanups.remove(&session_id);
         self.project_switch_pending.remove(&session_id);
         self.reset_session_runtime(session_id);
@@ -2150,6 +2151,9 @@ impl Waku {
             session.archived_at = None;
             session.updated_at = now;
         }
+        // Restored by any path, it's no longer the palette's undoable
+        // archive.
+        self.undoable_archive.retain(|id| *id != session_id);
         self.record_action(
             Some(session_id),
             action_predictions::JournalAction::SessionUnarchive,
