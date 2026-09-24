@@ -1372,7 +1372,7 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(12.0))
-                .py(px(5.0))
+                .h(px(24.0))
                 .px(px(9.0))
                 .rounded(px(8.0))
                 .border(hairline())
