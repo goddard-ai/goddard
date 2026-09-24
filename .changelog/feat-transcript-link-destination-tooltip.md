@@ -1,0 +1,1 @@
+- Hover over a transcript link whose label differs from its destination to see the full URL.
