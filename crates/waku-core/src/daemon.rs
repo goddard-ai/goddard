@@ -710,7 +710,9 @@ impl WakuBackend {
             .entry(cwd.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
+        let capture_lock_started = std::time::Instant::now();
         let _capture = capture_lock.lock();
+        let capture_lock_wait = capture_lock_started.elapsed();
 
         let dedupe_started = std::time::Instant::now();
         {
@@ -733,6 +735,10 @@ impl WakuBackend {
                         )
                     })
                 {
+                    eprintln!(
+                        "turn checkpoint session={session_id} turn={turn_count} deduped=true lock_wait={capture_lock_wait:?} lookup_time={:?}",
+                        dedupe_started.elapsed()
+                    );
                     return Ok(checkpoint.clone());
                 }
             }
@@ -740,8 +746,8 @@ impl WakuBackend {
         // Hydrating under the lock is the convoy other commands wait behind —
         // the hold time is the number that matters, not the git work.
         eprintln!(
-            "turn checkpoint dedupe for session {session_id} turn {turn_count} held task_state {:?}",
-            dedupe_started.elapsed()
+            "turn checkpoint session={session_id} turn={turn_count} deduped=false lock_wait={capture_lock_wait:?} lookup_time={:?}",
+            dedupe_started.elapsed(),
         );
 
         let capture_started = std::time::Instant::now();
@@ -758,7 +764,7 @@ impl WakuBackend {
         // round trip — the elapsed line is the only record of how long the
         // worktree snapshot actually took.
         eprintln!(
-            "turn checkpoint for session {session_id} turn {turn_count} captured in {:?}",
+            "turn checkpoint session={session_id} turn={turn_count} git_capture_time={:?}",
             capture_started.elapsed()
         );
         let persist_started = std::time::Instant::now();
@@ -776,12 +782,17 @@ impl WakuBackend {
             {
                 turn.checkpoint = Some(checkpoint.clone());
                 state.mark_session_dirty(session_id);
+                let save_started = std::time::Instant::now();
                 self.task_store.save(&mut state)?;
+                eprintln!(
+                    "turn checkpoint session={session_id} turn={turn_count} persist_time={:?}",
+                    save_started.elapsed()
+                );
             }
         }
         drop(state);
         eprintln!(
-            "turn checkpoint for session {session_id} turn {turn_count} persisted holding task_state {:?}",
+            "turn checkpoint session={session_id} turn={turn_count} persist_total={:?}",
             persist_started.elapsed()
         );
         Ok(checkpoint)

@@ -66,6 +66,8 @@ pub fn archive_ref(session_id: Uuid) -> String {
 /// checkpoint: a branch switch or terminal edit between turns must not be
 /// attributed to either response.
 pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::Result<()> {
+    let capture_started = std::time::Instant::now();
+    let turn_kind = if turn_count <= 1 { "first" } else { "later" };
     if !is_git_repository(cwd) {
         return Ok(());
     }
@@ -81,7 +83,10 @@ pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> an
             format!("update {} {head}\n", turn_base_ref(session_id, turn_count)),
         )?;
     }
+    let refs_started = std::time::Instant::now();
     let refs = repository_refs(cwd)?;
+    let refs_elapsed = refs_started.elapsed();
+    let refs_count = refs.len();
     let metadata = TurnStartMetadata {
         head: head.clone(),
         branch,
@@ -111,17 +116,30 @@ pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> an
             parents.push(commit.clone());
         }
     }
+    let snapshot_started = std::time::Instant::now();
     let commit = capture_worktree_commit_from(cwd, head.as_deref(), &message, &parents)?;
+    let snapshot_elapsed = snapshot_started.elapsed();
     let start_ref = turn_start_ref(session_id, turn_count);
     let baseline_ref = checkpoint_ref(session_id, turn_count.saturating_sub(1));
     let mut commands = format!("update {start_ref} {commit}\n");
     if !has_ref(cwd, &baseline_ref) {
         commands.push_str(&format!("update {baseline_ref} {commit}\n"));
     }
-    update_refs(cwd, commands)
+    let update_started = std::time::Instant::now();
+    update_refs(cwd, commands)?;
+    eprintln!(
+        "checkpoint turn_start session={session_id} turn={turn_count} kind={turn_kind} refs={} parents={} refs_time={refs_elapsed:?} snapshot_time={snapshot_elapsed:?} ref_update_time={:?} total={:?}",
+        refs_count,
+        parents.len(),
+        update_started.elapsed(),
+        capture_started.elapsed(),
+    );
+    Ok(())
 }
 
 pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::Result<Checkpoint> {
+    let capture_started = std::time::Instant::now();
+    let turn_kind = if turn_count <= 1 { "first" } else { "later" };
     let git_ref = checkpoint_ref(session_id, turn_count);
     if !is_git_repository(cwd) {
         return Ok(Checkpoint {
@@ -139,16 +157,24 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
     let end_head = resolve_ref(cwd, "HEAD");
     let start_ref = turn_start_ref(session_id, turn_count);
     let has_start_ref = turn_count > 0 && has_ref(cwd, &start_ref);
+    let snapshot_started = std::time::Instant::now();
     let end_commit = if has_start_ref {
         capture_worktree_commit_from_turn_start(cwd, &start_ref)?
     } else {
         capture_worktree_commit_from(cwd, end_head.as_deref(), "Goddard worktree snapshot", &[])?
     };
+    let snapshot_elapsed = snapshot_started.elapsed();
+    let ref_started = std::time::Instant::now();
     git_output(cwd, ["update-ref", &git_ref, &end_commit])?;
+    let ref_elapsed = ref_started.elapsed();
+    let diff_started = std::time::Instant::now();
+    let mut diff_base_elapsed = std::time::Duration::ZERO;
+    let mut file_diff_elapsed = std::time::Duration::ZERO;
     let files = if turn_count == 0 {
         Vec::new()
     } else {
         let legacy_ref = checkpoint_ref(session_id, turn_count - 1);
+        let diff_base_started = std::time::Instant::now();
         let diff_base = if has_start_ref {
             prepare_turn_diff_base(
                 cwd,
@@ -165,14 +191,24 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
             // the closest remaining base.
             turn_base_ref(session_id, turn_count)
         };
-        if has_ref(cwd, &diff_base) {
+        diff_base_elapsed = diff_base_started.elapsed();
+        let file_diff_started = std::time::Instant::now();
+        let files = if has_ref(cwd, &diff_base) {
             diff_files(cwd, &diff_base, &git_ref)?
         } else {
             Vec::new()
-        }
+        };
+        file_diff_elapsed = file_diff_started.elapsed();
+        files
     };
+    let diff_elapsed = diff_started.elapsed();
     let additions = files.iter().map(|file| file.additions).sum();
     let deletions = files.iter().map(|file| file.deletions).sum();
+    eprintln!(
+        "checkpoint turn_end session={session_id} turn={turn_count} kind={turn_kind} start_snapshot={has_start_ref} files={} additions={additions} deletions={deletions} snapshot_time={snapshot_elapsed:?} ref_update_time={ref_elapsed:?} diff_base_time={diff_base_elapsed:?} file_diff_time={file_diff_elapsed:?} diff_time={diff_elapsed:?} total={:?}",
+        files.len(),
+        capture_started.elapsed(),
+    );
     Ok(Checkpoint {
         turn_count,
         git_ref,
@@ -192,6 +228,7 @@ pub fn capture_untouched_turn(
     session_id: Uuid,
     turn_count: usize,
 ) -> anyhow::Result<Option<Checkpoint>> {
+    let capture_started = std::time::Instant::now();
     let start_ref = turn_start_ref(session_id, turn_count);
     if !has_ref(cwd, &start_ref) {
         return Ok(None);
@@ -204,6 +241,10 @@ pub fn capture_untouched_turn(
     let start_commit = resolve_ref(cwd, &start_ref)
         .ok_or_else(|| anyhow!("turn starting checkpoint `{start_ref}` is unavailable"))?;
     git_output(cwd, ["update-ref", &git_ref, &start_commit])?;
+    eprintln!(
+        "checkpoint untouched_reuse session={session_id} turn={turn_count} total={:?}",
+        capture_started.elapsed(),
+    );
     Ok(Some(Checkpoint {
         turn_count,
         git_ref,
@@ -284,21 +325,32 @@ fn capture_worktree_commit_with_base(
     // one worktree must not overlap. Captures on different worktrees keep
     // their own indexes and stay independent.
     let capture_lock = capture_lock(&git_dir);
+    let lock_started = std::time::Instant::now();
     let _capture = capture_lock.lock();
+    let lock_wait = lock_started.elapsed();
     // A capture killed mid-write leaves its index lock behind; the mutex
     // above makes any leftover dead.
     let _ = fs::remove_file(index.with_extension("lock"));
 
-    match capture_with_index(&root, &scope, &index, head, message, parents, start_ref) {
+    let snapshot_started = std::time::Instant::now();
+    let mut index_retry = false;
+    let result = match capture_with_index(&root, &scope, &index, head, message, parents, start_ref)
+    {
         Err(_) => {
             // A stale or corrupt side index fails plumbing the caller cannot
             // fix — rebuild it once from scratch before giving up.
             let _ = fs::remove_file(&index);
             let _ = fs::remove_file(index.with_extension("lock"));
+            index_retry = true;
             capture_with_index(&root, &scope, &index, head, message, parents, start_ref)
         }
         ok => ok,
-    }
+    };
+    eprintln!(
+        "checkpoint worktree_snapshot lock_wait={lock_wait:?} snapshot_time={:?} index_retry={index_retry}",
+        snapshot_started.elapsed(),
+    );
+    result
 }
 
 fn capture_with_index(
@@ -318,6 +370,10 @@ fn capture_with_index(
     // hashing at all. Status runs against the side index, which keeps it off
     // the user's index while still giving it a warm stat cache.
     let changed_paths = worktree_status(root, index, scope)?;
+    eprintln!(
+        "checkpoint worktree_status changed_paths={}",
+        changed_paths.len()
+    );
     if let Some(head) = head
         && changed_paths.is_empty()
     {
@@ -369,6 +425,7 @@ fn capture_with_turn_start_index(
 ) -> anyhow::Result<String> {
     git_with_index(root, index, ["read-tree", start_ref])?;
     let mut pathspecs = Vec::new();
+    let mut changed_paths = 0;
     for args in [
         &[
             "diff-files",
@@ -393,9 +450,11 @@ fn capture_with_turn_start_index(
             .split(|byte| *byte == 0)
             .filter(|path| !path.is_empty())
         {
+            changed_paths += 1;
             push_literal_pathspec(&mut pathspecs, path);
         }
     }
+    eprintln!("checkpoint turn_start_diff changed_paths={changed_paths}");
 
     if pathspecs.is_empty() {
         return resolve_ref(root, start_ref)
