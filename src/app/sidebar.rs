@@ -1046,8 +1046,9 @@ impl Waku {
     /// Mouse twin of GoToNextUnreadCompletion (⌘D / ctrl-backtick): live
     /// while an off-screen task is unread — blocked on its user, or holding an
     /// unseen finished turn. A blocked target earns a red X; a target in a
-    /// starred project — even an already-seen idle task outranking unread
-    /// work elsewhere — carries a star; anything else carries the same
+    /// starred project carries a star — accent while it holds something
+    /// unread, subdued once the unseen queue is drained and a seen task
+    /// merely leads the idle rotation; anything else carries the same
     /// informational-blue dot the sidebar draws in that row's status slot.
     fn render_unseen_completion_bell(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
@@ -1070,10 +1071,10 @@ impl Waku {
             None,
         );
         // The badge describes where ⌘D actually lands — which may be a
-        // starred project's seen-but-idle task ahead of an unstarred unread.
-        // A live sweep skips its shown sessions in the idle rotation, and an
-        // exhausted sweep previews the fresh-sweep landing a press would
-        // restart onto.
+        // starred project's seen-but-idle task once the unseen queue is
+        // drained. A live sweep skips its shown sessions in the idle
+        // rotation, and an exhausted sweep previews the fresh-sweep landing
+        // a press would restart onto.
         let sweep = self.live_unread_sweep();
         let mut target = sessions::next_attention_target(
             &self.state.sessions,
@@ -1117,6 +1118,9 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == session_id && starred.contains(&session.project_id))
         });
+        let target_unseen = target.is_some_and(|session_id| {
+            self.state.unseen_completions.contains_key(&session_id)
+        });
         div()
             .id("unseen-completion-bell")
             .w(px(26.0))
@@ -1132,7 +1136,6 @@ impl Waku {
                 tr!("command_palette.go_to_next_unread_completion"),
                 &GoToNextUnreadCompletion,
             ))
-            .when(!enabled, |element| element.opacity(0.35))
             .when(enabled, |element| {
                 element
                     .hover(|element| element.bg(theme.overlay))
@@ -1149,8 +1152,11 @@ impl Waku {
                         );
                     }))
             })
-            .child(icon("icons/bell.svg", 14.0, theme.text_tertiary))
-            .when(enabled, |element| {
+            .child(
+                icon("icons/bell.svg", 14.0, theme.text_tertiary)
+                    .when(!enabled, |icon| icon.opacity(0.35)),
+            )
+            .when(enabled || starred_target, |element| {
                 element.child(if blocked {
                     div().absolute().top(px(2.0)).right(px(2.0)).child(icon(
                         "icons/x-bold.svg",
@@ -1161,7 +1167,11 @@ impl Waku {
                     div().absolute().top(px(1.0)).right(px(1.0)).child(icon(
                         "icons/star-filled.svg",
                         9.0,
-                        theme.favorite,
+                        if target_unseen {
+                            theme.favorite
+                        } else {
+                            theme.text_secondary
+                        },
                     ))
                 } else {
                     div()

@@ -295,12 +295,13 @@ fn big_picture_arrow_target(
     order.get(next).copied()
 }
 
-/// The full ranked order the grid and the sweep both walk: sessions in
-/// starred projects lead — the same first tier ⌘D and ⌘⇧D navigate by —
-/// then attention tier, then most recently touched. Waiting sessions rank
-/// by `updated_at` — the moment they parked; everything else ranks by
-/// sidebar recency, with the unseen-completion stamp counting as activity.
-/// The grid mounts a window of the result, so nothing is truncated away.
+/// The full ranked order the grid and the sweep both walk: tasks carrying
+/// attention — parked on their user or holding an unseen completion — lead,
+/// the same first tier ⌘D and ⌘⇧D navigate by, with starred projects ahead
+/// inside each half. Waiting sessions rank by `updated_at` — the moment
+/// they parked; everything else ranks by sidebar recency, with the
+/// unseen-completion stamp counting as activity. The grid mounts a window
+/// of the result, so nothing is truncated away.
 fn big_picture_order(
     sessions: &[AgentSession],
     projects: &[Project],
@@ -320,7 +321,10 @@ fn big_picture_order(
             sidebar::sidebar_session_timestamp(session)
                 .max(unseen.get(&session.id).copied().unwrap_or(0))
         };
+        let attention =
+            session.status == SessionStatus::Waiting || unseen.contains_key(&session.id);
         (
+            !attention,
             !starred.contains(&session.project_id),
             big_picture_tier(session, unseen),
             std::cmp::Reverse(recency),
@@ -2108,21 +2112,35 @@ mod tests {
     }
 
     #[test]
-    fn starred_projects_lead_the_ranking() {
+    fn attention_leads_then_starred_projects() {
         let starred_project = project(true);
         let plain_project = project(false);
-        let mut starred_idle = session(SessionStatus::Idle, 50, 50);
-        starred_idle.project_id = starred_project.id;
+        let mut starred_waiting = session(SessionStatus::Waiting, 10, 80);
+        starred_waiting.project_id = starred_project.id;
         let mut plain_waiting = session(SessionStatus::Waiting, 10, 90);
         plain_waiting.project_id = plain_project.id;
-        let sessions = vec![plain_waiting.clone(), starred_idle.clone()];
+        let mut starred_idle = session(SessionStatus::Idle, 50, 50);
+        starred_idle.project_id = starred_project.id;
+        let mut plain_idle = session(SessionStatus::Idle, 60, 60);
+        plain_idle.project_id = plain_project.id;
+        let sessions = vec![
+            starred_idle.clone(),
+            plain_idle.clone(),
+            plain_waiting.clone(),
+            starred_waiting.clone(),
+        ];
         let projects = vec![starred_project, plain_project];
 
-        // Even an unstarred waiting task falls behind a starred idle one —
-        // the same first tier ⌘D navigates by.
+        // Attention outranks starring — the same tiers ⌘D navigates by —
+        // and inside each half a starred task leads.
         assert_eq!(
             big_picture_order(&sessions, &projects, &HashMap::new()),
-            vec![starred_idle.id, plain_waiting.id]
+            vec![
+                starred_waiting.id,
+                plain_waiting.id,
+                starred_idle.id,
+                plain_idle.id
+            ]
         );
     }
 

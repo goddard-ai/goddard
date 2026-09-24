@@ -106,8 +106,9 @@ const TYPING_OWNED_CONTEXTS: &[&str] = &[
     "FileEditorPane",
 ];
 
-/// The projects the user starred — the set `next_attention_target` and the
-/// sidebar's Project grouping rank ahead of everything else.
+/// The projects the user starred — the set `next_attention_target` leads
+/// inside each attention tier and the sidebar's Project grouping hoists
+/// above the rest.
 pub(super) fn starred_project_ids(projects: &[Project]) -> HashSet<Uuid> {
     projects
         .iter()
@@ -183,10 +184,12 @@ pub(super) fn next_unread_completion(
     })
 }
 
-/// The ⌘D landing, tiered by starred projects: starred unseen completions,
-/// then even already-seen idle sessions in starred projects, then unstarred
-/// unseen completions, then the unstarred idle rotation. With nothing
-/// starred the tiers collapse to today's unread-then-idle order.
+/// The ⌘D landing, tiered by attention then starred projects: unseen
+/// completions and tasks parked on their user — starred projects first —
+/// then the idle rotation, again starred first. A seen task never jumps
+/// ahead of genuinely new activity just because its project is starred.
+/// With nothing starred the tiers collapse to today's unread-then-idle
+/// order.
 ///
 /// `excluded` filters both scans — the ⌘⇧D chain and the session-departure
 /// fallback pass the sessions the chain has already shown. `idle_excluded`
@@ -205,7 +208,6 @@ pub(super) fn next_attention_target(
 ) -> Option<Uuid> {
     let starred = starred_project_ids(projects);
     for want in [true, false] {
-        let tier = Some((&starred, want));
         if let Some(session_id) = next_unread_completion(
             sessions,
             unseen_completions,
@@ -214,20 +216,22 @@ pub(super) fn next_attention_target(
             pending_activation,
             dormant,
             excluded,
-            tier,
-        )
-        .or_else(|| {
-            next_idle_session(
-                sessions,
-                rows,
-                selected_session,
-                pending_activation,
-                dormant,
-                excluded,
-                idle_excluded,
-                tier,
-            )
-        }) {
+            Some((&starred, want)),
+        ) {
+            return Some(session_id);
+        }
+    }
+    for want in [true, false] {
+        if let Some(session_id) = next_idle_session(
+            sessions,
+            rows,
+            selected_session,
+            pending_activation,
+            dormant,
+            excluded,
+            idle_excluded,
+            Some((&starred, want)),
+        ) {
             return Some(session_id);
         }
     }

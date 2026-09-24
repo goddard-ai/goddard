@@ -1078,9 +1078,10 @@ pub struct Project {
     /// existed.
     #[serde(default)]
     pub temporary: bool,
-    /// Starred projects lead the ⌘D next-completion navigation — even an
-    /// already-seen idle task in one outranks an unread completion elsewhere —
-    /// and hoist above unstarred projects in the sidebar's Project grouping.
+    /// Starred projects lead the ⌘D next-completion navigation inside each
+    /// attention tier — an unread task on one outranks unread elsewhere, and
+    /// a seen one leads the drained idle rotation — and hoist above
+    /// unstarred projects in the sidebar's Project grouping.
     #[serde(default)]
     pub starred: bool,
 }

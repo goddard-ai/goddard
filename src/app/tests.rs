@@ -1721,7 +1721,7 @@ fn project(project_id: Uuid, starred: bool) -> Project {
 }
 
 #[test]
-fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
+fn next_attention_target_ranks_unread_above_starred_idle() {
     let starred_project = Uuid::new_v4();
     let plain_project = Uuid::new_v4();
     let projects = vec![
@@ -1745,8 +1745,7 @@ fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
     ];
     let unseen = HashMap::from([(plain_unseen, 100), (starred_unseen, 200)]);
 
-    // Starred unseen beats everything, then the starred project's already-seen
-    // idle task outranks even the unstarred unread.
+    // Starred unseen beats everything.
     assert_eq!(
         next_attention_target(
             &sessions,
@@ -1761,6 +1760,8 @@ fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
         ),
         Some(starred_unseen)
     );
+    // Genuinely new activity outranks the starred project's already-seen
+    // idle task — the star leads inside each attention tier, not above it.
     let only_plain_unseen = HashMap::from([(plain_unseen, 100)]);
     assert_eq!(
         next_attention_target(
@@ -1774,9 +1775,25 @@ fn next_attention_target_prefers_starred_sessions_over_unstarred_unread() {
             None,
             None
         ),
+        Some(plain_unseen)
+    );
+    // Once the unseen queue is drained the starred project leads the idle
+    // rotation.
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &HashMap::new(),
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None
+        ),
         Some(starred_idle)
     );
-    // Unstarred unread only leads once the starred project has nothing.
+    // With the starred project's sessions gone the unstarred unread leads.
     let starred_rows = vec![SidebarRow::Session(plain_unseen)];
     let only_plain = vec![project_session(plain_unseen, plain_project)];
     assert_eq!(
