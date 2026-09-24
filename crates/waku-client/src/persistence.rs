@@ -1844,7 +1844,7 @@ pub struct PersistedState {
     /// owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
     pub memory_experiment_enabled: bool,
-    /// Experimental: whether sessions keep cross-session composer drafts.
+    /// Experimental: whether cross-session composer drafts are enabled.
     /// Daemon-owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
     pub composer_drafts_experiment_enabled: bool,
