@@ -1064,33 +1064,88 @@ impl Waku {
     /// Close a terminal wherever it lives — the active session's tab
     /// strip, a background session's stored surfaces, or the global list.
     pub(super) fn close_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        let filled_main_area = self.selected_terminal == Some(terminal_id);
+        let terminal_focus = filled_main_area
+            .then(|| {
+                self.right_panel_terminals
+                    .get(&terminal_id)
+                    .map(|terminal| terminal.read(cx).focus_handle(cx))
+            })
+            .flatten();
         if let Some(index) = self
             .right_panel_surfaces
             .iter()
             .position(|surface| surface.terminal_id() == Some(terminal_id))
         {
             self.close_right_panel_surface(index, cx);
-            return;
+        } else {
+            for state in self.right_panel_states.values_mut() {
+                let Some(index) = state
+                    .surfaces
+                    .iter()
+                    .position(|surface| surface.terminal_id() == Some(terminal_id))
+                else {
+                    continue;
+                };
+                state.surfaces.remove(index);
+                state.active_surface = state.active_surface.and_then(|active| {
+                    (!state.surfaces.is_empty()).then(|| match active.cmp(&index) {
+                        std::cmp::Ordering::Greater => active - 1,
+                        std::cmp::Ordering::Equal => index.saturating_sub(1),
+                        std::cmp::Ordering::Less => active.min(state.surfaces.len() - 1),
+                    })
+                });
+                break;
+            }
+            self.drop_terminal(terminal_id, cx);
         }
-        for state in self.right_panel_states.values_mut() {
-            let Some(index) = state
-                .surfaces
-                .iter()
-                .position(|surface| surface.terminal_id() == Some(terminal_id))
-            else {
-                continue;
-            };
-            state.surfaces.remove(index);
-            state.active_surface = state.active_surface.and_then(|active| {
-                (!state.surfaces.is_empty()).then(|| match active.cmp(&index) {
-                    std::cmp::Ordering::Greater => active - 1,
-                    std::cmp::Ordering::Equal => index.saturating_sub(1),
-                    std::cmp::Ordering::Less => active.min(state.surfaces.len() - 1),
-                })
-            });
-            break;
+        // A terminal that filled the main area parked the session selection
+        // on its way in, so with no successor taking over the main area
+        // falls to a session-less new task page: the composer mounts but
+        // its pickers stay disabled, and window focus stays on the dead
+        // view. Land on the new-task draft the way ⌘N does. This runs
+        // after the strip settles — selecting a session re-syncs the panel
+        // owner, which swaps `right_panel_surfaces` out from under any
+        // caller still holding an index into it.
+        if filled_main_area
+            && self.selected_terminal.is_none()
+            && self.state.selected_session.is_none()
+        {
+            let current_project = self
+                .state
+                .selected_project
+                .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
+                .map(|project| (project.id, project.is_projectless()));
+            match current_project {
+                Some((_, true)) | None => self.create_projectless_session(cx),
+                Some((project_id, false)) => {
+                    if let Some(session_id) = self
+                        .session_navigation
+                        .remembered_new_task(&self.state.sessions, project_id)
+                    {
+                        self.select_session(session_id, cx);
+                    } else {
+                        self.create_session_for(project_id, self.state.last_provider, cx);
+                    }
+                }
+            }
+            // Settings covers the workspace and owns the keyboard for its
+            // visit; the composer field is not in the dispatch tree there.
+            if self.settings_page.is_none() {
+                let focus = self.composer_focus(cx);
+                let window_handle = self.window_handle;
+                let _ = window_handle.update(cx, move |_, window, cx| {
+                    // Take the keyboard back only from the dead view — a
+                    // field or overlay focused in the meantime keeps it.
+                    if window
+                        .focused(cx)
+                        .is_none_or(|focused| terminal_focus.as_ref() == Some(&focused))
+                    {
+                        window.focus(&focus, cx);
+                    }
+                });
+            }
         }
-        self.drop_terminal(terminal_id, cx);
         cx.notify();
     }
 

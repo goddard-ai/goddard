@@ -1,0 +1,1 @@
+- Closing the last main-area terminal (e.g. ctrl+d) now lands on a working New task page — previously its model picker stayed disabled and keyboard focus was lost until pressing ⌘N.
