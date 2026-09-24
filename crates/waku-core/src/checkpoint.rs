@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Output, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context as _, anyhow, bail};
@@ -687,11 +687,12 @@ pub fn session_turn_refs(cwd: &Path, session_id: Uuid) -> HashSet<usize> {
 }
 
 pub fn delete_ref(cwd: &Path, git_ref: &str) -> anyhow::Result<()> {
-    let output = crate::command_env::search_path_command("git")
-        .args(["update-ref", "-d", git_ref])
-        .current_dir(cwd)
-        .output()
-        .with_context(|| format!("failed to delete checkpoint `{git_ref}`"))?;
+    let output = timed_git_output(
+        crate::command_env::search_path_command("git")
+            .args(["update-ref", "-d", git_ref])
+            .current_dir(cwd),
+    )
+    .with_context(|| format!("failed to delete checkpoint `{git_ref}`"))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -891,14 +892,15 @@ fn update_refs(cwd: &Path, commands: String) -> anyhow::Result<()> {
     if commands.is_empty() {
         return Ok(());
     }
-    let mut child = crate::command_env::search_path_command("git")
+    let mut command = crate::command_env::search_path_command("git");
+    command
         .args(["update-ref", "--stdin"])
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to execute git")?;
+        .stderr(Stdio::piped());
+    let started = std::time::Instant::now();
+    let mut child = command.spawn().context("failed to execute git")?;
     child
         .stdin
         .take()
@@ -906,6 +908,7 @@ fn update_refs(cwd: &Path, commands: String) -> anyhow::Result<()> {
         .write_all(commands.as_bytes())
         .context("failed to send ref updates to git")?;
     let output = child.wait_with_output().context("failed to execute git")?;
+    log_git_timing(&command, started);
     if output.status.success() {
         Ok(())
     } else {
@@ -933,19 +936,21 @@ fn diff_files(cwd: &Path, from_ref: &str, to_ref: &str) -> anyhow::Result<Vec<Ch
 }
 
 fn is_git_repository(cwd: &Path) -> bool {
-    crate::command_env::search_path_command("git")
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .current_dir(cwd)
-        .output()
-        .is_ok_and(|output| output.status.success())
+    timed_git_output(
+        crate::command_env::search_path_command("git")
+            .args(["rev-parse", "--is-inside-work-tree"])
+            .current_dir(cwd),
+    )
+    .is_ok_and(|output| output.status.success())
 }
 
 fn symbolic_head(cwd: &Path) -> Option<String> {
-    let output = crate::command_env::search_path_command("git")
-        .args(["symbolic-ref", "--quiet", "HEAD"])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
+    let output = timed_git_output(
+        crate::command_env::search_path_command("git")
+            .args(["symbolic-ref", "--quiet", "HEAD"])
+            .current_dir(cwd),
+    )
+    .ok()?;
     output
         .status
         .success()
@@ -987,19 +992,21 @@ fn repository_refs(cwd: &Path) -> anyhow::Result<BTreeMap<String, String>> {
 }
 
 fn has_head(cwd: &Path) -> bool {
-    crate::command_env::search_path_command("git")
-        .args(["rev-parse", "--verify", "HEAD"])
-        .current_dir(cwd)
-        .output()
-        .is_ok_and(|output| output.status.success())
+    timed_git_output(
+        crate::command_env::search_path_command("git")
+            .args(["rev-parse", "--verify", "HEAD"])
+            .current_dir(cwd),
+    )
+    .is_ok_and(|output| output.status.success())
 }
 
 fn resolve_ref(cwd: &Path, git_ref: &str) -> Option<String> {
-    let output = crate::command_env::search_path_command("git")
-        .args(["rev-parse", "--verify", &format!("{git_ref}^{{commit}}")])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
+    let output = timed_git_output(
+        crate::command_env::search_path_command("git")
+            .args(["rev-parse", "--verify", &format!("{git_ref}^{{commit}}")])
+            .current_dir(cwd),
+    )
+    .ok()?;
     output
         .status
         .success()
@@ -1012,11 +1019,11 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = crate::command_env::search_path_command("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .context("failed to execute git")?;
+    let output = timed_git_output(
+        crate::command_env::search_path_command("git")
+            .args(args)
+            .current_dir(cwd),
+    )?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
@@ -1038,12 +1045,12 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = crate::command_env::search_path_command("git")
-        .args(args)
-        .current_dir(cwd)
-        .env("GIT_INDEX_FILE", index)
-        .output()
-        .context("failed to execute git")?;
+    let output = timed_git_output(
+        crate::command_env::search_path_command("git")
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_INDEX_FILE", index),
+    )?;
     if output.status.success() {
         Ok(output)
     } else {
@@ -1061,15 +1068,16 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut child = crate::command_env::search_path_command("git")
+    let mut command = crate::command_env::search_path_command("git");
+    command
         .args(args)
         .current_dir(cwd)
         .env("GIT_INDEX_FILE", index)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to execute git")?;
+        .stderr(Stdio::piped());
+    let started = std::time::Instant::now();
+    let mut child = command.spawn().context("failed to execute git")?;
     child
         .stdin
         .take()
@@ -1077,6 +1085,7 @@ where
         .write_all(input)
         .context("failed to send git pathspecs")?;
     let output = child.wait_with_output().context("failed to wait for git")?;
+    log_git_timing(&command, started);
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
@@ -1114,12 +1123,35 @@ where
             .env("GIT_COMMITTER_NAME", "Goddard")
             .env("GIT_COMMITTER_EMAIL", "waku@localhost");
     }
-    let output = command.output().context("failed to execute git")?;
+    let output = timed_git_output(&mut command)?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
         bail!("{}", command_error(&output))
     }
+}
+
+/// Runs a configured `git` command and records its wall-clock time. A
+/// checkpoint is a dozen-plus serial invocations, so the per-command line is
+/// the only way to tell spawn overhead apart from a slow `status` or `add`.
+fn timed_git_output(command: &mut Command) -> anyhow::Result<Output> {
+    let started = std::time::Instant::now();
+    let output = command.output().context("failed to execute git")?;
+    log_git_timing(command, started);
+    Ok(output)
+}
+
+fn log_git_timing(command: &Command, started: std::time::Instant) {
+    let args = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cwd = command
+        .get_current_dir()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_default();
+    eprintln!("checkpoint `git {args}` in {cwd} took {:?}", started.elapsed());
 }
 
 fn command_error(output: &Output) -> String {
