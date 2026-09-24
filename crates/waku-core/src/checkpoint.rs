@@ -430,8 +430,10 @@ fn worktree_root_and_scope(cwd: &Path) -> anyhow::Result<(PathBuf, String)> {
 
 /// Changes relative to the side index, including staged, unstaged, and
 /// non-ignored untracked paths. `-z` preserves arbitrary path bytes for the
-/// pathspec file. `--untracked-files=all` keeps `status.showUntrackedFiles`
-/// from hiding files the snapshot must see.
+/// pathspec file. `--untracked-files=normal` reports a fully untracked
+/// directory once instead of enumerating it; `git add` expands the directory
+/// pathspec, so the snapshot still stores every file while the walk and the
+/// record list stay proportional to what actually changed names.
 fn worktree_status(root: &Path, index: &Path, scope: &str) -> anyhow::Result<Vec<u8>> {
     Ok(git_with_index_output(
         root,
@@ -440,7 +442,7 @@ fn worktree_status(root: &Path, index: &Path, scope: &str) -> anyhow::Result<Vec
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=normal",
             "--",
             scope,
         ],
@@ -475,7 +477,9 @@ fn status_pathspecs(status: &[u8]) -> Option<Vec<u8>> {
 
 fn push_literal_pathspec(pathspecs: &mut Vec<u8>, path: &[u8]) {
     pathspecs.extend_from_slice(b":(literal)");
-    pathspecs.extend_from_slice(path);
+    // Collapsed-directory records end in `/`; a literal pathspec matches the
+    // directory itself only without the slash.
+    pathspecs.extend_from_slice(path.strip_suffix(b"/").unwrap_or(path));
     pathspecs.push(0);
 }
 
@@ -1409,9 +1413,11 @@ mod tests {
         fs::write(directory.join("tracked.txt"), "changed\n").unwrap();
         fs::write(directory.join("new.txt"), "new\n").unwrap();
         fs::write(directory.join("already-staged.txt"), "staged\n").unwrap();
+        fs::create_dir_all(directory.join("nested/deeper")).unwrap();
+        fs::write(directory.join("nested/deeper/inner.txt"), "inner\n").unwrap();
         git_ok(&directory, &["add", "already-staged.txt"]);
         let turn = capture_turn(&directory, session_id, 1).unwrap();
-        assert_eq!(turn.files.len(), 3);
+        assert_eq!(turn.files.len(), 4);
         assert!(turn.totals_are_current());
         assert_eq!(
             turn.additions,
@@ -1439,6 +1445,7 @@ mod tests {
 
         fs::write(directory.join("tracked.txt"), "later\n").unwrap();
         fs::remove_file(directory.join("new.txt")).unwrap();
+        fs::remove_dir_all(directory.join("nested")).unwrap();
         fs::write(directory.join("discard.txt"), "discard\n").unwrap();
         restore_ref(&directory, &turn.git_ref).unwrap();
 
@@ -1449,6 +1456,10 @@ mod tests {
         assert_eq!(
             fs::read_to_string(directory.join("new.txt")).unwrap(),
             "new\n"
+        );
+        assert_eq!(
+            fs::read_to_string(directory.join("nested/deeper/inner.txt")).unwrap(),
+            "inner\n"
         );
         assert!(!directory.join("discard.txt").exists());
 
@@ -1559,9 +1570,11 @@ mod tests {
         let directory = diverged_repository();
         let session_id = Uuid::new_v4();
         capture_turn_start(&directory, session_id, 1).unwrap();
-        fs::write(directory.join("first-turn.txt"), "first\n").unwrap();
+        fs::create_dir_all(directory.join("nested")).unwrap();
+        fs::write(directory.join("nested/first-turn.txt"), "first\n").unwrap();
         let first = capture_turn(&directory, session_id, 1).unwrap();
         assert_eq!(first.files.len(), 1);
+        assert_eq!(first.files[0].path, "nested/first-turn.txt");
 
         fs::write(directory.join("between-turns.txt"), "external\n").unwrap();
         capture_turn_start(&directory, session_id, 2).unwrap();
