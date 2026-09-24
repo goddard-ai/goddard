@@ -1819,6 +1819,13 @@ function BranchPicker({
     : workspace.kind === 'worktree'
       ? snapshot.current ?? workspace.branch ?? snapshot.detached_head
       : snapshot.current ?? snapshot.detached_head
+  // A detached HEAD reads as a bare SHA; name the base it sits on.
+  const base =
+    workspace.kind === 'local'
+      ? snapshot.default_branch
+      : (workspace.baseBranch ?? snapshot.default_branch)
+  const label =
+    !snapshot.current && base && selected && base !== selected ? `${selected} (${base})` : selected
   const normalized = query.trim().toLowerCase()
   const visible = visibleBranches(snapshot.branches, selected ?? undefined, normalized, Date.now() / 1_000)
   const actions = [
@@ -1867,7 +1874,7 @@ function BranchPicker({
         }}
       >
         <WakuIcon className="size-[11px] text-[var(--text-tertiary)]" name="gitBranch" />
-        <span className="truncate">{pending ? t('branches.switching') : selected ?? t('branches.detached_head')}</span>
+        <span className="truncate">{pending ? t('branches.switching') : label ?? t('branches.detached_head')}</span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner

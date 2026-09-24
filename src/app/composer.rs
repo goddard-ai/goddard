@@ -5543,6 +5543,25 @@ impl Waku {
         }
         .unwrap_or_else(|| tr!("branches.detached_head"));
 
+        // A detached HEAD reads as a bare SHA; name the base it sits on.
+        let branch_label = if snapshot.current.is_none() {
+            let base = match &workspace {
+                SessionWorkspace::NewWorktree { base_branch }
+                | SessionWorkspace::Worktree { base_branch, .. } => base_branch
+                    .clone()
+                    .or_else(|| snapshot.default_branch.clone()),
+                SessionWorkspace::Local => snapshot.default_branch.clone(),
+            };
+            match base {
+                Some(base) if base != selected_branch => {
+                    format!("{selected_branch} ({base})")
+                }
+                _ => selected_branch.clone(),
+            }
+        } else {
+            selected_branch.clone()
+        };
+
         let weak = cx.entity().downgrade();
         let search = self.branch_search.clone();
         let create_input = self.branch_create_input.clone();
@@ -5601,7 +5620,7 @@ impl Waku {
             .label(if self.branch_operation_pending {
                 tr!("branches.switching")
             } else {
-                selected_branch.clone()
+                branch_label.clone()
             })
             .caret(false)
             .disabled(!branch_enabled)

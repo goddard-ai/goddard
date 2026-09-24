@@ -1,0 +1,1 @@
+- When a task's worktree sits on a detached HEAD, the branch toggle below the composer now names its base branch in parentheses — for example, `a1b2c3d (main)` — instead of showing the commit alone.
