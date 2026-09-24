@@ -296,8 +296,6 @@ const DOCK_STRIP_HEIGHT: f32 = DOCK_LABEL_HEIGHT + DOCK_ITEM_PEAK + DOCK_BOTTOM_
 /// authored layers. The image id is a content hash, so repeated renders hit
 /// the asset cache.
 fn dock_glyph_image(path: &'static str, color: Hsla, cx: &App) -> Option<Arc<gpui::Image>> {
-    use gpui::AssetSource;
-
     let bytes = cx.asset_source().load(path).ok()??;
     let rgb = color.to_rgb();
     let fill = format!(
