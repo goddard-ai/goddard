@@ -1860,6 +1860,9 @@ usage_error.no_home_directory: ホームディレクトリが見つかりませ�
 usage_error.read_file: "%{path} を読み込めませんでした"
 usage_error.codex_auth_invalid: Codex の auth.json は有効な JSON ではありません
 usage_error.codex_access_token_missing: Codex の auth.json にアクセストークンがありません。`codex login` を実行してください
+usage_error.devin_credentials_missing: Devin の認証情報にローカル API キーがありません
+usage_error.devin_credentials_invalid: Devin の認証情報が有効な TOML ではないか、HTTPS を使用していません
+usage_error.devin_no_quota: Devin のユーザーステータス応答にプラン使用量がありません
 usage_error.opencode_go_key_rejected: OpenCode Go API キーでは使用量を取得できません（HTTP %{status}）。OpenCode Go に再接続してください
 usage_error.opencode_go_not_entitled: OpenCode Go の使用量には有効な OpenCode Go サブスクリプションが必要です
 usage_error.no_rate_limit_windows: 使用量 API からレート制限期間が返されませんでした

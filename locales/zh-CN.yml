@@ -1812,6 +1812,9 @@ usage_error.no_home_directory: 找不到用户主目录
 usage_error.read_file: 无法读取 %{path}
 usage_error.codex_auth_invalid: Codex auth.json 不是有效的 JSON
 usage_error.codex_access_token_missing: Codex auth.json 中没有访问令牌；请运行 `codex login`
+usage_error.devin_credentials_missing: Devin 凭据中没有本地 API 密钥
+usage_error.devin_credentials_invalid: Devin 凭据不是有效的 TOML，或未使用 HTTPS
+usage_error.devin_no_quota: Devin 用户状态响应中没有套餐用量
 usage_error.opencode_go_key_rejected: OpenCode Go API 密钥无法读取用量（HTTP %{status}）；请重新连接 OpenCode Go
 usage_error.opencode_go_not_entitled: OpenCode Go 用量需要有效的 OpenCode Go 订阅
 usage_error.no_rate_limit_windows: 用量接口未返回任何速率限制周期

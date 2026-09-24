@@ -4675,6 +4675,12 @@ usage_error.codex_auth_invalid:
   en: Codex auth.json is not JSON
 usage_error.codex_access_token_missing:
   en: Codex auth.json has no access token; run `codex login`
+usage_error.devin_credentials_missing:
+  en: Devin credentials have no local API key
+usage_error.devin_credentials_invalid:
+  en: Devin credentials are not valid TOML or do not use HTTPS
+usage_error.devin_no_quota:
+  en: Devin's user-status response did not contain plan usage
 usage_error.opencode_go_key_rejected:
   en: OpenCode Go API key can't read usage (HTTP %{status}); reconnect OpenCode Go
 usage_error.opencode_go_not_entitled:

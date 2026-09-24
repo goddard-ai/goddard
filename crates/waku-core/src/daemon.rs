@@ -1755,6 +1755,9 @@ impl Backend for WakuBackend {
                     crate::model::ProviderKind::OpenCode => {
                         crate::usage::fetch_opencode_go_plan_usage()?
                     }
+                    crate::model::ProviderKind::Devin => {
+                        Some(crate::usage::fetch_devin_plan_usage()?)
+                    }
                     crate::model::ProviderKind::Grok => {
                         ensure_shell_environment();
                         let probe = match binary_override.as_deref() {

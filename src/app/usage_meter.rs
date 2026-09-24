@@ -15,9 +15,10 @@ const USAGE_METER_MENU_ID: &str = "usage-meter";
 
 /// Providers with an account-level plan fetcher. Codex additionally refreshes
 /// live from its own stream notifications.
-pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 4] = [
+pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 5] = [
     ProviderKind::Claude,
     ProviderKind::Codex,
+    ProviderKind::Devin,
     ProviderKind::OpenCode,
     ProviderKind::Grok,
 ];

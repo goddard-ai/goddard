@@ -1,0 +1,1 @@
+- Show Devin plan name and daily and weekly quota in the usage meter when Devin's local CLI credentials are available.
