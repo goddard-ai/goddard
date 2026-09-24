@@ -3460,7 +3460,24 @@ impl Waku {
         prompt: &str,
         cx: &mut Context<Self>,
     ) -> Option<ComposerSubmission> {
-        if self.execute_local_composer_command(prompt, cx) {
+        let bare_rename =
+            crate::composer_complete::parse_rename_submission(prompt) == Some(None);
+        let prompt = if bare_rename {
+            let Some(session_id) = self.composer_session().map(|session| session.id) else {
+                self.show_toast(tr!("commands.rename_no_session"));
+                return None;
+            };
+            if let Some(session) = self.state.session_mut(session_id) {
+                session.agent_rename_allowed = true;
+                self.save();
+                cx.notify();
+            }
+            "You have permission to rename this task. Choose a concise title that reflects its current goal, then rename it now using `goddard-agent rename`."
+                .to_owned()
+        } else {
+            prompt.to_owned()
+        };
+        if self.execute_local_composer_command(&prompt, cx) {
             return None;
         }
         // Nothing installed or switched on can run this. Refuse before the
@@ -3494,7 +3511,7 @@ impl Waku {
         // Markers splice back to their atoms in place — pasted text and
         // session tokens — then the attachment tokens `merged_submission`
         // still trails.
-        let body = splice_inline_atoms(prompt, &atoms);
+        let body = splice_inline_atoms(&prompt, &atoms);
         let annotations = self.drain_annotations();
         let submission = match merged_submission(&body, &attachments) {
             Some(body) => {
@@ -3522,10 +3539,12 @@ impl Waku {
         // quote and comment above the typed text, while titles and a restored
         // draft keep the user's own words — the comments when nothing was
         // typed.
-        let typed_content = text_without_atom_markers(prompt);
+        let typed_content = text_without_atom_markers(&prompt);
         let typed = typed_content.trim();
-        let human_content = (!annotations.is_empty() || !atoms.is_empty()).then(|| {
-            if typed.is_empty() {
+        let human_content = (bare_rename || !annotations.is_empty() || !atoms.is_empty()).then(|| {
+            if bare_rename {
+                "/rename".to_owned()
+            } else if typed.is_empty() {
                 annotation_display_content(&annotations)
             } else {
                 typed.to_owned()
@@ -3539,7 +3558,7 @@ impl Waku {
                 let typed = if atoms.is_empty() {
                     body.clone()
                 } else {
-                    atom_display_content(prompt, &atoms)
+                    atom_display_content(&prompt, &atoms)
                 };
                 if annotations.is_empty() {
                     typed
@@ -3594,8 +3613,7 @@ impl Waku {
                 cx.notify();
             }
         } else {
-            self.composer
-                .update(cx, |input, cx| input.set_content("/rename ", cx));
+            return false;
         }
         true
     }

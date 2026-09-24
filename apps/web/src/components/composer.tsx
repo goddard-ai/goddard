@@ -378,6 +378,12 @@ export function Composer({
     submittedPrompt: string,
     submittedAttachments: MessageAttachment[],
   ): string | undefined {
+    if (parseRenameSubmission(submittedPrompt) === null) {
+      return [
+        'You have permission to rename this task. Choose a concise title that reflects its current goal, then rename it now using `goddard-agent rename`.',
+        submittedAttachments.map(attachmentPromptToken).join(' '),
+      ].filter(Boolean).join(' ')
+    }
     const expanded = expandedComposerSubmission(
       session.provider,
       submittedPrompt.trim(),
@@ -402,9 +408,7 @@ export function Composer({
     const title = parseRenameSubmission(submittedPrompt)
     if (title === undefined) return false
     if (title === null) {
-      setPrompt('/rename ')
-      setCursor('/rename '.length)
-      return true
+      return false
     }
     savePatch({ title })
     clearComposerDraft()
@@ -520,13 +524,19 @@ export function Composer({
 
   async function submit() {
     if (submitting || !hasDraft) return
-    if (executeLocalComposerCommand()) return
     const submittedPrompt = prompt
+    const grantRename = parseRenameSubmission(submittedPrompt) === null
+    if (!grantRename && executeLocalComposerCommand()) {
+      return
+    }
     const submittedAttachments = attachments
     const submittedAnnotations = draftAnnotations.current
     let cleared = false
     setSubmitting(true)
     try {
+      if (grantRename) {
+        await saveSession({ ...session, agent_rename_allowed: true })
+      }
       const target = await activateDraft()
       const { displayPrompt, providerPrompt } = submissionPrompts(
         submittedPrompt,
@@ -567,13 +577,19 @@ export function Composer({
 
   async function steer() {
     if (!hasDraft || !canSteer) return
-    if (executeLocalComposerCommand()) return
     const submittedPrompt = prompt
+    const grantRename = parseRenameSubmission(submittedPrompt) === null
+    if (!grantRename && executeLocalComposerCommand()) {
+      return
+    }
     const submittedAttachments = attachments
     const submittedAnnotations = draftAnnotations.current
     let cleared = false
     setSubmitting(true)
     try {
+      if (grantRename) {
+        await saveSession({ ...session, agent_rename_allowed: true })
+      }
       const { displayPrompt, providerPrompt } = submissionPrompts(
         submittedPrompt,
         submittedAttachments,

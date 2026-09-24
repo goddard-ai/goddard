@@ -1,0 +1,1 @@
+- Submit `/rename` in a task composer to let the agent choose and apply a concise title immediately.

@@ -51,6 +51,7 @@ import { useDaemon } from '@/lib/daemon-context';
 import { landWorkspace } from '@/lib/daemon-api';
 import { sessionBusy, sessionCwd } from '@/lib/mobile-runtime';
 import { composerProviderPrompt } from '@/lib/composer-completion';
+import { parseRenameSubmission } from '@waku/client/composer-autocomplete';
 import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { useRuntime } from '@/lib/runtime-context';
 import { isDaemonDisconnectError } from '@/lib/runtime-errors';
@@ -261,8 +262,7 @@ export function MobileComposer({
     onGoal: (operation, managed) => runtime.sendGoalOperation(session, operation, managed),
     onRename: async (title) => {
       if (title === null) {
-        draftSync.markEdited();
-        setDraft('/rename ');
+        await runtime.grantAgentRename(session.id);
         return;
       }
       await runtime.renameSession(session.id, title);
@@ -402,16 +402,29 @@ export function MobileComposer({
     setLocalError(null);
     try {
       const commands = prompt.startsWith('/') ? await contextPicker.getCommands() : [];
-      if (await localCommands.execute(prompt, commands)) return;
+      const bareRename = parseRenameSubmission(prompt) === null;
+      if (bareRename) {
+        await runtime.grantAgentRename(session.id);
+      } else if (await localCommands.execute(prompt, commands)) return;
       const expanded = composerProviderPrompt(session.provider, prompt, commands, submittedAttachments);
       let displayPrompt = prompt;
-      let providerPrompt = expanded;
+      let providerPrompt = bareRename
+        ? [
+            'You have permission to rename this task. Choose a concise title that reflects its current goal, then rename it now using `goddard-agent rename`.',
+            submittedAttachments.map(attachmentPromptToken).join(' '),
+          ].filter(Boolean).join(' ')
+        : expanded;
       if (submittedAnnotations.length) {
         displayPrompt = annotationBubbleContent(submittedAnnotations, prompt);
-        const base = expanded ?? [
-          prompt,
-          submittedAttachments.map(attachmentPromptToken).join(' '),
-        ].filter(Boolean).join(' ');
+        const base = bareRename
+          ? [
+              'You have permission to rename this task. Choose a concise title that reflects its current goal, then rename it now using `goddard-agent rename`.',
+              submittedAttachments.map(attachmentPromptToken).join(' '),
+            ].filter(Boolean).join(' ')
+          : expanded ?? [
+              prompt,
+              submittedAttachments.map(attachmentPromptToken).join(' '),
+            ].filter(Boolean).join(' ');
         providerPrompt = (annotationPromptPrefix(submittedAnnotations) + base).trimEnd();
       }
       onSubmitted?.();

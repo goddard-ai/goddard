@@ -151,6 +151,7 @@ interface RuntimeContextValue {
   clarifyUserInput: (sessionId: string, requestId: string, content: string) => Promise<void>;
   cancelUserInput: (sessionId: string, requestId: string) => Promise<void>;
   updateSessionOptions: (sessionId: string, changes: SessionOptionChanges) => Promise<void>;
+  grantAgentRename: (sessionId: string) => Promise<void>;
   sendGoalOperation: (session: AgentSession, operation: GoalOperation, managed?: boolean) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
@@ -1091,6 +1092,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await persistOrdered(next);
   }, [cacheSession, loadFullSession, persistOrdered]);
 
+  const grantAgentRename = useCallback(async (sessionId: string) => {
+    const current = await loadFullSession(sessionId);
+    if (current.agent_rename_allowed) return;
+    const next = {
+      ...current,
+      agent_rename_allowed: true,
+      updated_at: clock.nowSeconds(),
+    };
+    cacheSession(next);
+    await persistOrdered(next);
+  }, [cacheSession, loadFullSession, persistOrdered]);
+
   /** Pin/unpin — desktop's toggle_session_pin: a plain flag flip plus save,
    * limited to started, unarchived tasks. */
   const setSessionPinned = useCallback(async (sessionId: string, pinned: boolean) => {
@@ -1300,6 +1313,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       clarifyUserInput,
       cancelUserInput,
       updateSessionOptions,
+      grantAgentRename,
       sendGoalOperation,
       renameSession,
       setSessionPinned,

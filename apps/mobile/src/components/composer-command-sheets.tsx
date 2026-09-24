@@ -80,9 +80,9 @@ export function useComposerLocalCommands({
     const rename = parseRenameSubmission(prompt);
     if (rename !== undefined) {
       if (!onRename) throw new Error('Select a task to rename');
-      if (rename === null) onClear();
+      if (rename === null) return false;
       await onRename(rename);
-      if (rename !== null) onClear();
+      onClear();
       return true;
     }
     if (!provider) return false;
