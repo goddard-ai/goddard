@@ -1,0 +1,1 @@
+- The collapsed sidebar's peek panel no longer stays stuck open when the pointer leaves the window over the quick-action dock or its hover strip

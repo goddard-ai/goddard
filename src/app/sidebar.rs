@@ -1953,6 +1953,12 @@ impl Waku {
                         cx.notify();
                     }
                 }))
+                // A cursor leaving the window through the dock leaves the
+                // peek overlay's stale-position footprint check held — the
+                // exit has to come from the dock's own hitbox here.
+                .on_mouse_exit(cx.listener(|this, _, _, cx| {
+                    this.sidebar_peek_window_exit(cx);
+                }))
                 .child(div().flex().items_end().gap(px(DOCK_ITEM_GAP)).children(
                     items.iter().enumerate().map(|(index, item)| {
                         self.render_sidebar_dock_item(*item, diameter_at(index), &theme, cx)

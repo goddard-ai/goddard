@@ -325,6 +325,21 @@ impl Waku {
         cx.notify();
     }
 
+    /// The pointer left the window over the overlay or the dock. A real exit
+    /// always means leave: the dock's footprint check reads the last
+    /// in-window position, which a departure through the dock's strip leaves
+    /// stale inside the footprint — the exit hold would never release and
+    /// the overlay would stay up with no pointer on it.
+    pub(super) fn sidebar_peek_window_exit(&mut self, cx: &mut Context<Self>) {
+        if self.any_menu_open(cx) {
+            self.sidebar_peek_exit_hold = true;
+            return;
+        }
+        self.sidebar_peek_exit_hold = false;
+        self.begin_sidebar_peek_exit(cx);
+        cx.notify();
+    }
+
     /// A row action run from the peek-mounted sidebar (pin, archive) keeps
     /// the overlay after its menu closes; the hold releases the next time
     /// the pointer enters the panel.
@@ -996,7 +1011,10 @@ impl Render for Waku {
                                 .id("sidebar-peek-hover")
                                 .absolute()
                                 .inset_0()
-                                .on_hover(cx.listener(Self::sidebar_peek_overlay_hover)),
+                                .on_hover(cx.listener(Self::sidebar_peek_overlay_hover))
+                                .on_mouse_exit(cx.listener(|this, _, _, cx| {
+                                    this.sidebar_peek_window_exit(cx);
+                                })),
                         ),
                 )
             })
