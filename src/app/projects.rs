@@ -48,6 +48,20 @@ fn read_project_memory_file(
     }
 }
 
+/// A log entry's leading `YYYY-MM-DD` date — every note the distiller writes
+/// is date-stamped, so the newest entry's prefix is the store's freshness.
+fn memory_log_date(entry: &str) -> Option<&str> {
+    let date = entry.get(..10)?;
+    let bytes = date.as_bytes();
+    (bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit()))
+    .then_some(date)
+}
+
 /// The two surfaces' tabs. Issues, Pull Requests, and Activity read through
 /// the daemon's `gh` operations and form the Projects page; Worktrees and
 /// Branches read the local repo and form the Settings → Git page.
@@ -3963,6 +3977,12 @@ impl Waku {
         let generation = self.settings_memory_generation;
         self.settings_memory_page = 0;
         self.settings_memory_content = None;
+        // A project switch or reload can move the text a selection pointed
+        // at; copying stale ranges would hand back the wrong memory.
+        self.settings_memory_selection
+            .selection
+            .borrow_mut()
+            .clear();
         let Some(root) = self
             .state
             .projects
@@ -4078,16 +4098,26 @@ impl Waku {
                 .text_color(theme.text_secondary)
                 .child(tr!("settings.memory_loading"))
                 .into_any_element(),
-            Some(content) => {
-                Self::render_memory_settings_content(content, self.settings_memory_page, cx)
-            }
+            Some(content) => self.render_memory_settings_content(content, cx),
         };
+        let memory_dir = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.join(".goddard/memory"));
         div()
             .mt(px(15.0))
             .w_full()
             .flex()
             .flex_col()
             .gap(px(14.0))
+            // Paints before the document's text registers itself, so the
+            // frame's registry holds exactly what this page put on screen —
+            // the same contract the transcript and skill detail follow.
+            .child(md::render::frame_reset(
+                self.settings_memory_selection.clone(),
+            ))
             .child(
                 div()
                     .flex()
@@ -4103,7 +4133,26 @@ impl Waku {
                         theme,
                         cx,
                         |this, _, cx| this.refresh_memory_settings(cx),
-                    )),
+                    ))
+                    .when_some(memory_dir, |element, dir| {
+                        element.child(super::settings::settings_button(
+                            "memory-settings-reveal",
+                            tr!("common.reveal_in_finder"),
+                            true,
+                            false,
+                            true,
+                            theme,
+                            cx,
+                            move |this, _, cx| {
+                                if this.is_remote_project(project_id) {
+                                    this.show_toast(tr!("errors.remote_host_path"));
+                                    cx.notify();
+                                } else {
+                                    crate::platform::reveal_in_file_manager(&dir, cx);
+                                }
+                            },
+                        ))
+                    }),
             )
             .when(!self.state.memory_experiment_enabled, |element| {
                 element.child(
@@ -4116,9 +4165,41 @@ impl Waku {
             .into_any_element()
     }
 
-    fn render_memory_settings_content(
+    /// MEMORY.md rendered through the transcript's markdown engine. The view
+    /// is cached per project, so a refresh or a repaint reuses the parse
+    /// until the file's text actually changes.
+    fn memory_document(
+        &self,
         content: &ProjectMemoryContent,
-        current_page: usize,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let palette = MarkdownPalette::from_theme(theme);
+        let mut cache = self.settings_memory_markdown.borrow_mut();
+        if !matches!(cache.as_ref(), Some((cached, _)) if *cached == content.project_id) {
+            *cache = Some((content.project_id, MarkdownView::new()));
+        }
+        let (_, view) = cache.as_mut().expect("entry ensured above");
+        view.set_text(&content.memory, false);
+        let ctx = MarkdownCtx::new(
+            format!("settings-memory-{}", content.project_id),
+            &palette,
+            self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
+            self.settings_memory_selection.clone(),
+        )
+        .with_families(crate::fonts::current(cx))
+        .with_math_enabled(self.state.render_math)
+        .with_guided_reading(self.guided_reading())
+        .with_link_handler(self.markdown_link_handler.clone())
+        .with_link_items(self.markdown_link_menu_items.clone())
+        .with_standalone_context_menu(self.menu_handle("settings-memory-document", cx))
+        .with_streaming_animation(false);
+        md::render::markdown(view, &ctx).unwrap_or_else(|| div().into_any_element())
+    }
+
+    fn render_memory_settings_content(
+        &self,
+        content: &ProjectMemoryContent,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -4129,10 +4210,19 @@ impl Waku {
                 .into_any_element();
         }
         let count = content.log.len();
-        let page = current_page.min(count.saturating_sub(1) / 30);
+        let page = self.settings_memory_page.min(count.saturating_sub(1) / 30);
         let start = page * 30;
         let end = (start + 30).min(count);
-        let memory_lines: Vec<String> = content.memory.lines().map(str::to_owned).collect();
+        let memory_lines = content.memory.lines().count();
+        let memory_document = if content.memory.is_empty() {
+            div()
+                .text_color(theme.text_secondary)
+                .child(tr!("settings.memory_empty"))
+                .into_any_element()
+        } else {
+            self.memory_document(content, &theme, cx)
+        };
+        let latest_note = content.log.first().and_then(|entry| memory_log_date(entry));
         div()
             .w_full()
             .flex()
@@ -4145,24 +4235,28 @@ impl Waku {
                     .gap(px(8.0))
                     .child(
                         div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(tr!("settings.memory_summary")),
-                    )
-                    .child(if memory_lines.is_empty() {
-                        div()
-                            .text_color(theme.text_secondary)
-                            .child(tr!("settings.memory_empty"))
-                    } else {
-                        div()
                             .flex()
-                            .flex_col()
-                            .text_color(theme.text_secondary)
-                            .children(
-                                memory_lines.into_iter().map(|line| {
-                                    div().min_h(px(18.0)).whitespace_normal().child(line)
-                                }),
+                            .items_baseline()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(tr!("settings.memory_summary")),
                             )
-                    }),
+                            .when(memory_lines > 0, |element| {
+                                element.child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(if memory_lines == 1 {
+                                            tr!("settings.memory_lines_one")
+                                        } else {
+                                            tr!("settings.memory_lines_many", count = memory_lines)
+                                        }),
+                                )
+                            }),
+                    )
+                    .child(memory_document),
             )
             .child(
                 div()
@@ -4171,8 +4265,34 @@ impl Waku {
                     .gap(px(8.0))
                     .child(
                         div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(tr!("settings.memory_log")),
+                            .flex()
+                            .items_baseline()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(tr!("settings.memory_log")),
+                            )
+                            .when(count > 0, |element| {
+                                element.child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(if count == 1 {
+                                            tr!("settings.memory_notes_one")
+                                        } else {
+                                            tr!("settings.memory_notes_many", count = count)
+                                        }),
+                                )
+                            })
+                            .when_some(latest_note, |element, date| {
+                                element.child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(tr!("settings.memory_last_note", date = date)),
+                                )
+                            }),
                     )
                     .when(count == 0, |element| {
                         element.child(

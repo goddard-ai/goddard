@@ -3369,6 +3369,11 @@ pub struct Waku {
     settings_memory_content: Option<projects::ProjectMemoryContent>,
     settings_memory_generation: u64,
     settings_memory_page: usize,
+    /// The rendered MEMORY.md document — cached per project so a refresh
+    /// reuses the incremental parse until the text actually changes — and
+    /// the page's text selection.
+    settings_memory_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
+    settings_memory_selection: TranscriptSelection,
     /// Set when the Git page's data should be (re)fetched on its next
     /// render — opening the page or switching its project. Cleared once
     /// `projects_refresh` runs with state in place.
@@ -6555,6 +6560,8 @@ impl Waku {
                 settings_memory_content: None,
                 settings_memory_generation: 0,
                 settings_memory_page: 0,
+                settings_memory_markdown: RefCell::new(None),
+                settings_memory_selection: TranscriptSelection::default(),
                 git_page_refresh_pending: false,
                 missing_projects: HashSet::new(),
                 project_location_generation: Cell::new(0),

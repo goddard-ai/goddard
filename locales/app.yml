@@ -577,6 +577,16 @@ settings.memory_older:
   en: Older
 settings.memory_newer:
   en: Newer
+settings.memory_lines_one:
+  en: 1 line
+settings.memory_lines_many:
+  en: "%{count} lines"
+settings.memory_notes_one:
+  en: 1 note
+settings.memory_notes_many:
+  en: "%{count} notes"
+settings.memory_last_note:
+  en: "latest %{date}"
 settings.archived_keywords:
   en: archived chats conversations hidden history restore unarchive remove
 settings.archived_description:

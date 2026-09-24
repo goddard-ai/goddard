@@ -2613,6 +2613,11 @@ settings.memory_loading: プロジェクトメモリを読み込み中…
 settings.memory_disabled: メモリはオフです。新しい項目を記録するには「設定 → 実験的機能」で有効にしてください。
 settings.memory_older: 古い項目
 settings.memory_newer: 新しい項目
+settings.memory_lines_one: 1 行
+settings.memory_lines_many: "%{count} 行"
+settings.memory_notes_one: 1 件の記録
+settings.memory_notes_many: "%{count} 件の記録"
+settings.memory_last_note: "最新 %{date}"
 settings.sidebar_phase_groups: 最近の計画中タスクをまとめる
 settings.sidebar_phase_groups_description: 計画中で過去30分以内に動いていたタスクを日付ビューの「今日」の上に表示します
 settings.sidebar_hide_phase_labels: タスク行の計画中チップを隠す

@@ -1268,6 +1268,14 @@ impl Waku {
         self.settings_search_sections.clear();
         self.settings_search_target = None;
         let page = self.settings_page.unwrap_or(SettingsPage::General);
+        // The Memory page's selection dies with it — a stale range would
+        // otherwise keep winning the ⌘C chain while its text is off screen.
+        if page != SettingsPage::Memory {
+            self.settings_memory_selection
+                .selection
+                .borrow_mut()
+                .clear();
+        }
         let search = SettingSearch::inactive().for_page(
             page,
             &self.settings_scroll,
@@ -1460,7 +1468,30 @@ impl Waku {
                             &self.settings_scrollbar,
                         ))
                     })
-                    .children(git_scrollbar),
+                    .children(git_scrollbar)
+                    // The Memory page's text-selection input covers the
+                    // viewport — outside the scroll container, whose bounds
+                    // mark the scrolled content instead; the contract
+                    // [`md::render::install_selection_input`] documents.
+                    .when(page == SettingsPage::Memory, |element| {
+                        let selection = self.settings_memory_selection.clone();
+                        element.child(
+                            canvas(
+                                |bounds, window, _| {
+                                    window.insert_hitbox(bounds, HitboxBehavior::Normal).id
+                                },
+                                move |_, region, window, _| {
+                                    md::render::install_selection_input(
+                                        region, window, &selection, None,
+                                    )
+                                },
+                            )
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full(),
+                        )
+                    }),
             )
     }
 
