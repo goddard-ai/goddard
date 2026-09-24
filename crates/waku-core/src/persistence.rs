@@ -350,6 +350,10 @@ pub struct PersistedState {
     /// from the settings document.
     #[serde(default = "default_experiment_enabled")]
     pub memory_experiment_enabled: bool,
+    /// Experimental cross-session composer draft setting mirrored from daemon
+    /// settings.
+    #[serde(default = "default_experiment_enabled")]
+    pub composer_drafts_experiment_enabled: bool,
     /// Per-provider memory-distillation model overrides, mirrored from the
     /// settings document.
     #[serde(skip)]
@@ -492,6 +496,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
+            composer_drafts_experiment_enabled: default_experiment_enabled(),
             memory_models: Default::default(),
             title_models: Default::default(),
             project_map_enabled: default_experiment_enabled(),
@@ -647,6 +652,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
+            composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
             memory_models: self.memory_models.clone(),
             title_models: self.title_models.clone(),
             project_map_enabled: self.project_map_enabled,
@@ -709,6 +715,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
+        self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;
         self.memory_models = settings.memory_models;
         self.title_models = settings.title_models;
         self.project_map_enabled = settings.project_map_enabled;

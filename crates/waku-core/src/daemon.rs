@@ -2386,14 +2386,25 @@ impl Backend for WakuBackend {
                     resolved_cwd: Some(cwd),
                 })
             }
-            Command::LoadComposerDrafts => Ok(ResponsePayload::ComposerDrafts {
-                drafts: self.composer_drafts.load()?,
-            }),
+            Command::LoadComposerDrafts => {
+                if !self.settings.get().composer_drafts_experiment_enabled {
+                    anyhow::bail!("composer drafts experiment is disabled");
+                }
+                Ok(ResponsePayload::ComposerDrafts {
+                    drafts: self.composer_drafts.load()?,
+                })
+            }
             Command::SaveComposerDrafts { drafts, generation } => {
+                if !self.settings.get().composer_drafts_experiment_enabled {
+                    anyhow::bail!("composer drafts experiment is disabled");
+                }
                 self.composer_drafts.save(drafts, generation)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::ApplyComposerDraftChanges { changes } => {
+                if !self.settings.get().composer_drafts_experiment_enabled {
+                    anyhow::bail!("composer drafts experiment is disabled");
+                }
                 self.composer_drafts.apply_changes(changes)?;
                 Ok(ResponsePayload::Ack)
             }

@@ -911,6 +911,10 @@ experiments.voice_briefing_tts:
   en: Voice model
 experiments.memory_title:
   en: Project memory
+experiments.composer_drafts_title:
+  en: Composer drafts
+experiments.composer_drafts_description:
+  en: Save and restore unfinished composer text and attachments across sessions and devices.
 experiments.memory_description:
   en: Give each project a persistent memory. Finished sessions are distilled into a .goddard/memory store the next session's first prompt carries — decisions, preferences, and failed approaches included.
 experiments.memory_models_caption:

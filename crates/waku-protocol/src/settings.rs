@@ -73,6 +73,10 @@ pub struct DaemonSettings {
     /// in the background, and injects it into each session's first prompt.
     /// Defaults on in development builds, opt-in in release builds.
     pub memory_experiment_enabled: bool,
+    /// Experimental opt-in for cross-session composer drafts. Defaults on in
+    /// development builds and off in release builds.
+    #[serde(default = "default_experiment_enabled")]
+    pub composer_drafts_experiment_enabled: bool,
     /// Per-provider model override for memory distillation runs. A provider
     /// absent here distills on its advertised default model; the value is a
     /// catalog model id handed to that provider's headless driver.
@@ -154,6 +158,7 @@ impl Default for DaemonSettings {
             route_classes: RouteClassMap::new(),
             auto_prompts: crate::auto_prompts::default_rules(),
             memory_experiment_enabled: default_experiment_enabled(),
+            composer_drafts_experiment_enabled: default_experiment_enabled(),
             memory_models: BTreeMap::new(),
             title_models: BTreeMap::new(),
             integrations_enabled: default_experiment_enabled(),

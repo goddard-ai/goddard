@@ -5277,6 +5277,17 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
+                id: "composer-drafts-experiment-toggle",
+                icon: "icons/file-text.svg",
+                title_key: "experiments.composer_drafts_title",
+                description_key: "experiments.composer_drafts_description",
+                enabled: self.state.composer_drafts_experiment_enabled,
+                set: Self::set_composer_drafts_experiment_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
                 id: "project-map-experiment-toggle",
                 icon: "icons/map.svg",
                 title_key: "experiments.project_map_title",
@@ -7209,6 +7220,12 @@ impl Waku {
 
     fn set_memory_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.memory_experiment_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_composer_drafts_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.composer_drafts_experiment_enabled = enabled;
         self.save();
         cx.notify();
     }
