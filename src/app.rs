@@ -61,11 +61,11 @@ use crate::ui::tooltip::Tooltip;
 
 use crate::browser::BrowserView;
 use crate::persistence::{
-    ArchiveNavigation, CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand,
-    CustomCommandIcon, DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_GIT_PANEL_WIDTH,
-    DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource,
-    PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
-    PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
+    CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand, CustomCommandIcon,
+    DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_GIT_PANEL_WIDTH, DEFAULT_RIGHT_PANEL_WIDTH,
+    DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource, PersistedFullscreenSurface,
+    PersistedListOffset, PersistedNavigationLocation, PersistedRightPanelState,
+    PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
     PersistedTranscriptScrollPosition, PersistedWindowState, RecentModelUse,
     SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
     UpdateChannel, VoiceBriefingSummaryModel, VoiceBriefingTtsModel,
@@ -2074,15 +2074,15 @@ pub struct Waku {
     /// `UNREAD_SWEEP_TIMEOUT` after it retires the seen set — the next
     /// press starts a fresh sweep.
     unread_sweep_at: Option<u64>,
-    /// The session the ⌘D sweep is flying to, kept while it stays the
-    /// selection — the mark that archiving it continues the sweep onto
-    /// the press's own landing instead of the configured archive landing.
-    /// Retired by any activation the sweep did not aim.
-    unread_sweep_arrival: Option<Uuid>,
     /// The selected session carried an unseen-completion stamp when its
     /// activation landed — one half of ⌘⇧D's "parked without reading"
     /// signal, consumed when the press decides whether to re-stamp it.
     unread_when_selected: Option<Uuid>,
+    /// The selected session's activation began on fresh attention — an
+    /// unseen completion or a turn blocked on the reader. Archiving it
+    /// keeps draining the attention queue; without the stamp, selection
+    /// continues down the sidebar from the departed row's slot instead.
+    attention_when_selected: Option<Uuid>,
     /// A turn settled while this session was on screen — selected or
     /// pending activation — the other half of that signal. Kept across the
     /// pending activation's landing, cleared when a different session is
@@ -5975,8 +5975,8 @@ impl Waku {
                 sweep_target: None,
                 unread_sweep_visited: HashSet::new(),
                 unread_sweep_at: None,
-                unread_sweep_arrival: None,
                 unread_when_selected: None,
+                attention_when_selected: None,
                 turn_settled_while_visible: None,
                 analytics,
                 state,

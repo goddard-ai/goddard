@@ -1497,20 +1497,6 @@ settings.markdown_files_preview:
   en: Rendered preview
 settings.markdown_files_source:
   en: Source
-settings.archive_navigation:
-  en: After archiving a task
-settings.archive_navigation_description:
-  en: Choose where to go when the task you are viewing is archived
-settings.archive_navigation_next_unread:
-  en: Go to next unread completion
-settings.archive_navigation_next_session:
-  en: Go to next session in the sidebar
-settings.archive_navigation_new_task:
-  en: Compose a new task
-settings.archive_continues_unread_sweep:
-  en: Continue %{jump} when archiving
-settings.archive_continues_unread_sweep_description:
-  en: Archiving a task you reached with %{jump} goes to the task %{jump} would have opened next, instead of the "After archiving a task" destination
 settings.dormant_after:
   en: Dormant after
 settings.dormant_after_description:
