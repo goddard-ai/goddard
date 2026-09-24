@@ -1312,7 +1312,13 @@ pub(super) fn model_picker_panel(
                 .child(div().flex_1().min_w_0().child(search.clone())),
         );
 
-    let mut list_element = div().id("model-picker-list").size_full();
+    // The horizontal padding is the rows' transparent side gutter — `list`
+    // only honors vertical padding on its items, so it lives on the
+    // container to keep row fills clear of the panel edge.
+    let mut list_element = div()
+        .id("model-picker-list")
+        .size_full()
+        .px(px(4.0));
     if rows.is_empty() {
         list_element = list_element.p(px(9.0)).child(
             div()
@@ -1438,9 +1444,10 @@ pub(super) fn model_picker_row_shell(
 ) -> Stateful<Div> {
     div()
         .id(id)
-        // Let the row size within its list slot so these margins keep its
-        // fill clear of the panel edge.
-        .mx(px(4.0))
+        // A flex item laid out as its list's root shrink-wraps, so the row
+        // must stretch itself; the slot's padding keeps this fill clear of
+        // the panel edge.
+        .w_full()
         .h(MODEL_PICKER_ROW_HEIGHT)
         .px(px(12.0))
         .rounded(px(11.0))
