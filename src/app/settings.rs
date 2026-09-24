@@ -59,6 +59,9 @@ pub(super) const ARCHIVED_MESSAGE_SEARCH_CACHE_CAPACITY: usize = 24;
 /// Key context the settings sidebar declares around its search field.
 const SETTINGS_SIDEBAR_CONTEXT: &str = "SettingsSidebar";
 
+/// Leaves room below the last navigation item when the sidebar is scrolled.
+const SETTINGS_SIDEBAR_BOTTOM_PADDING: f32 = 48.0;
+
 /// The search field while focused inside the sidebar. The field holds real
 /// focus the whole time — the sidebar's selection is only drawn — so `up` and
 /// `down` have to be claimed from under it, and only a binding can do that:
@@ -971,38 +974,51 @@ impl Waku {
             })
             .child(self.render_settings_sidebar_titlebar(window, cx))
             .child(
-                div().px(px(12.0)).child(
-                    div()
-                        .id("settings-back")
-                        .h(px(34.0))
-                        .px(px(9.0))
-                        .rounded(px(10.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(9.0))
-                        .cursor_default()
-                        .text_size(sp(13.0))
-                        .text_color(theme.text_secondary)
-                        .hover(|element| element.bg(theme.overlay))
-                        .active(|element| element.bg(theme.overlay_strong))
-                        .child(icon("icons/arrow-left.svg", 15.0, theme.text_tertiary))
-                        .child(tr!("settings.back"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.settings_page = None;
-                            let focus_handle = this.composer_focus(cx);
-                            window.focus(&focus_handle, cx);
-                            cx.notify();
-                        })),
-                ),
+                div()
+                    .flex_none()
+                    .child(
+                        div().px(px(12.0)).child(
+                            div()
+                                .id("settings-back")
+                                .h(px(34.0))
+                                .px(px(9.0))
+                                .rounded(px(10.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(9.0))
+                                .cursor_default()
+                                .text_size(sp(13.0))
+                                .text_color(theme.text_secondary)
+                                .hover(|element| element.bg(theme.overlay))
+                                .active(|element| element.bg(theme.overlay_strong))
+                                .child(icon("icons/arrow-left.svg", 15.0, theme.text_tertiary))
+                                .child(tr!("settings.back"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.settings_page = None;
+                                    let focus_handle = this.composer_focus(cx);
+                                    window.focus(&focus_handle, cx);
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        div().px(px(12.0)).pt(px(8.0)).child(
+                            TextField::new("settings-search-field", self.settings_search.clone())
+                                .icon("icons/search.svg", 13.0),
+                        ),
+                    )
+                    .child(div().h(px(18.0))),
             )
             .child(
-                div().px(px(12.0)).pt(px(8.0)).child(
-                    TextField::new("settings-search-field", self.settings_search.clone())
-                        .icon("icons/search.svg", 13.0),
-                ),
+                div()
+                    .id("settings-sidebar-navigation")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .px(px(12.0))
+                    .pb(px(SETTINGS_SIDEBAR_BOTTOM_PADDING))
+                    .child(navigation),
             )
-            .child(div().h(px(18.0)))
-            .child(div().px(px(12.0)).child(navigation))
     }
 
     /// Back/forward between the panes visited this settings visit — the
