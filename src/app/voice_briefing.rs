@@ -290,8 +290,9 @@ async fn post_json(
     if let Some(model) = model_header {
         request = request.header("ai-model-id", model);
     }
-    let request =
-        request.body(gpui::http_client::AsyncBody::from(serde_json::to_vec(body)?))?;
+    let request = request.body(gpui::http_client::AsyncBody::from(serde_json::to_vec(
+        body,
+    )?))?;
     let exchange = async {
         let mut response = http.send(request).await?;
         let status = response.status();
@@ -300,8 +301,7 @@ async fn post_json(
         anyhow::Ok((status, bytes))
     };
     pin_mut!(exchange);
-    let (status, bytes) = match select(exchange, executor.timer(REQUEST_TIMEOUT).fuse()).await
-    {
+    let (status, bytes) = match select(exchange, executor.timer(REQUEST_TIMEOUT).fuse()).await {
         Either::Left((result, _)) => result?,
         Either::Right(_) => bail!("the gateway request timed out"),
     };

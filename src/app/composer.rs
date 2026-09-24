@@ -1768,10 +1768,13 @@ impl Waku {
                 // still advertises itself; fall back to the default's
                 // label when the picker's own context path cannot see the
                 // scoped binding.
-                let shortcut_hint = favorite_index
-                    .filter(|index| (1..=8).contains(index))
-                    .map(|index| {
-                        crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
+                let shortcut_hint =
+                    favorite_index
+                        .filter(|index| (1..=8).contains(index))
+                        .map(|index| {
+                            crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel {
+                                index,
+                            })
                             .resolve(window, cx)
                             .unwrap_or_else(|| {
                                 crate::ui::shortcut::sequence_label(&format!(
@@ -1779,7 +1782,7 @@ impl Waku {
                                     index + 1
                                 ))
                             })
-                    });
+                        });
                 let mut row_element = model_picker_row_shell(
                     SharedString::from(format!(
                         "model-row-{}-{}-{}-{}",

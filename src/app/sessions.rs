@@ -4758,22 +4758,21 @@ impl Waku {
                 ),
             ));
         }
-        items.extend(combos
-            .iter()
-            .map(|(provider, model, effort, fast)| {
-                let label = self
-                    .provider_probe(*provider)
-                    .and_then(|probe| probe.model(model))
-                    .map(|model| model.name.clone())
-                    .unwrap_or_else(|| model.clone());
-                let mut details = vec![provider.display_name().to_string()];
-                if let Some(effort) = effort {
-                    details.push(effort.clone());
-                }
-                if *fast {
-                    details.push(tr!("keyboard_options.fast").to_string());
-                }
-                let selected = !session.auto_route && current.as_ref().is_some_and(
+        items.extend(combos.iter().map(|(provider, model, effort, fast)| {
+            let label = self
+                .provider_probe(*provider)
+                .and_then(|probe| probe.model(model))
+                .map(|model| model.name.clone())
+                .unwrap_or_else(|| model.clone());
+            let mut details = vec![provider.display_name().to_string()];
+            if let Some(effort) = effort {
+                details.push(effort.clone());
+            }
+            if *fast {
+                details.push(tr!("keyboard_options.fast").to_string());
+            }
+            let selected = !session.auto_route
+                && current.as_ref().is_some_and(
                     |(current_provider, current_model, current_effort, current_fast)| {
                         current_provider == provider
                             && current_model == model
@@ -4781,22 +4780,22 @@ impl Waku {
                             && current_fast == fast
                     },
                 );
-                keyboard_options::KeyboardOptionItem::Choice(
-                    keyboard_options::KeyboardOptionChoice::new(
-                        label,
-                        Some(details.join(" · ")),
-                        None,
-                        selected,
-                        true,
-                        keyboard_options::KeyboardOptionAction::Model {
-                            provider: *provider,
-                            model: model.clone(),
-                            effort: effort.clone(),
-                            fast: *fast,
-                        },
-                    ),
-                )
-            }));
+            keyboard_options::KeyboardOptionItem::Choice(
+                keyboard_options::KeyboardOptionChoice::new(
+                    label,
+                    Some(details.join(" · ")),
+                    None,
+                    selected,
+                    true,
+                    keyboard_options::KeyboardOptionAction::Model {
+                        provider: *provider,
+                        model: model.clone(),
+                        effort: effort.clone(),
+                        fast: *fast,
+                    },
+                ),
+            )
+        }));
         self.model_picker_target = model_picker::ModelPickerTarget::Composer;
         let highlighted = items.iter().position(|item| {
             matches!(

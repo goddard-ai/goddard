@@ -2744,15 +2744,13 @@ impl Waku {
                                 }
                                 cx.notify();
                             }))
-                            .on_mouse_move(cx.listener(
-                                |this, event: &MouseMoveEvent, _, cx| {
-                                    let mouse_x = f32::from(event.position.x);
-                                    if this.sidebar_dock_mouse_x != Some(mouse_x) {
-                                        this.sidebar_dock_mouse_x = Some(mouse_x);
-                                        cx.notify();
-                                    }
-                                },
-                            )),
+                            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                                let mouse_x = f32::from(event.position.x);
+                                if this.sidebar_dock_mouse_x != Some(mouse_x) {
+                                    this.sidebar_dock_mouse_x = Some(mouse_x);
+                                    cx.notify();
+                                }
+                            })),
                     ),
             )
     }

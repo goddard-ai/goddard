@@ -68,8 +68,7 @@ use crate::persistence::{
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
     PersistedTranscriptScrollPosition, PersistedWindowState, RecentModelUse,
     SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
-    UpdateChannel,
-    VoiceBriefingTtsModel,
+    UpdateChannel, VoiceBriefingTtsModel,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -5632,14 +5631,11 @@ impl Waku {
             // The briefing fields write straight through — they edit app
             // state, not a staged daemon document like the eval keys.
             for input in [&voice_briefing_key_input, &voice_briefing_model_input] {
-                cx.subscribe(
-                    input,
-                    |this: &mut Self, _, event: &InputEvent, cx| {
-                        if matches!(event, InputEvent::Edited) {
-                            this.save_voice_briefing_fields(cx);
-                        }
-                    },
-                )
+                cx.subscribe(input, |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.save_voice_briefing_fields(cx);
+                    }
+                })
                 .detach();
             }
             cx.subscribe(&skills_search, |_: &mut Self, _, event: &InputEvent, cx| {
