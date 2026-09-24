@@ -25,6 +25,43 @@ use waku_protocol::routing::{RouteClassMap, TaskClass};
 /// background-work rows attribute their runs to us with no extra plumbing.
 pub(crate) const NAME_PREFIX: &str = "goddard-";
 
+/// How much of the Goddard subagent contract the provider can enforce at
+/// launch. This stays in the daemon because it describes the provider driver,
+/// not user settings or persisted session state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SupportLevel {
+    /// The provider accepts Goddard's definitions and can deny write tools on
+    /// read-only helpers.
+    Supported,
+    /// The provider can receive routing guidance, but cannot guarantee the
+    /// full model/effort or read-only contract per helper invocation.
+    Advisory,
+    /// The current driver has no Goddard subagent injection path.
+    Unsupported,
+}
+
+pub(crate) fn support_for(provider: ProviderKind) -> SupportLevel {
+    match provider {
+        ProviderKind::Claude
+        | ProviderKind::Copilot
+        | ProviderKind::OpenCode
+        | ProviderKind::Pi => SupportLevel::Supported,
+        ProviderKind::Codex | ProviderKind::OpenCode2 => SupportLevel::Advisory,
+        ProviderKind::Antigravity
+        | ProviderKind::Amp
+        | ProviderKind::Cursor
+        | ProviderKind::DeepSeek
+        | ProviderKind::Devin
+        | ProviderKind::Droid
+        | ProviderKind::Fx
+        | ProviderKind::Goose
+        | ProviderKind::Grok
+        | ProviderKind::Kimi
+        | ProviderKind::Muse
+        | ProviderKind::OhMyPi => SupportLevel::Unsupported,
+    }
+}
+
 fn default_explore() -> SubagentDef {
     SubagentDef {
         name: format!("{NAME_PREFIX}explore"),
@@ -170,8 +207,8 @@ pub(crate) fn claude_agents_json(spec: &SubagentSpec) -> Option<String> {
 }
 
 /// OpenCode's `OPENCODE_CONFIG_CONTENT` payload: `agent.*` entries merged over
-/// the user's config files. Definitions are identical for every session in a
-/// workspace, so carrying them on the pooled server is safe.
+/// the user's config files. The definitions carry the session's resolved
+/// model/variant, so the driver must start a private server for this config.
 pub(crate) fn opencode_config_json(spec: &SubagentSpec) -> Option<String> {
     if spec.agents.is_empty() {
         return None;
@@ -186,11 +223,26 @@ pub(crate) fn opencode_config_json(spec: &SubagentSpec) -> Option<String> {
                 "mode": "subagent",
             });
             if agent.read_only {
-                def["tools"] = json!({"write": false, "edit": false, "patch": false});
-                def["permission"] = json!({"edit": "deny", "patch": "deny"});
+                def["tools"] = json!({
+                    "bash": false,
+                    "write": false,
+                    "edit": false,
+                    "patch": false
+                });
+                def["permission"] = json!({
+                    "bash": "deny",
+                    "edit": "deny",
+                    "patch": "deny"
+                });
             }
             if let Some(model) = &agent.model {
                 def["model"] = json!(model);
+            }
+            if let Some(effort) = &agent.effort {
+                // OpenCode calls the model's reasoning-effort selection a
+                // variant, and accepts it on an agent definition as well as
+                // on an individual task call.
+                def["variant"] = json!(effort);
             }
             (agent.name.clone(), def)
         })
@@ -218,14 +270,17 @@ pub(crate) fn opencode2_hint(available_subagents: &[String]) -> String {
         "This session can delegate focused, self-contained subtasks to helper \
          agents via the `subagent`/`task` tool instead of doing everything \
          inline; the helper's reply returns into this turn. {roster} Trivial \
-         lookups answerable in one or two tool calls are not worth delegating."
+         lookups answerable in one or two tool calls are not worth delegating. \
+         OpenCode 2 cannot receive Goddard's per-tier model, effort, or \
+         read-only policy over its adopted service, so treat these names as \
+         advisory and use the configured provider-native agent when available."
     )
 }
 
 /// Copilot's `custom_agents` session config: one `CustomAgentConfig` per spec
-/// entry. Per-agent model/effort map straight through. `read_only` is not
-/// expressed — the tool allowlist takes exact CLI tool names, and an
-/// unverifiable guess would strip the agent of working tools entirely.
+/// entry. Per-agent model/effort map straight through. Copilot's built-in
+/// read-only tools have stable names, so the allowlist is a hard boundary for
+/// the explorer tiers rather than a prompt-only instruction.
 pub(crate) fn copilot_custom_agents(
     spec: &SubagentSpec,
 ) -> Option<Vec<github_copilot_sdk::types::CustomAgentConfig>> {
@@ -245,6 +300,14 @@ pub(crate) fn copilot_custom_agents(
                 config.infer = Some(true);
                 config.model = agent.model.clone();
                 config.reasoning_effort = agent.effort.clone();
+                if agent.read_only {
+                    config.tools = Some(
+                        ["view", "grep", "glob", "web_search", "web_fetch"]
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect(),
+                    );
+                }
                 config
             })
             .collect(),
@@ -252,13 +315,49 @@ pub(crate) fn copilot_custom_agents(
 }
 
 /// Codex registers no agent definitions — its hint names the built-in
-/// `spawn_agent` roles instead.
-pub(crate) const CODEX_HINT: &str = "This session can delegate focused, \
-     self-contained subtasks to helper agents via `spawn_agent` instead of \
-     doing everything inline — `explorer` for read-only codebase lookups, \
-     `worker` for isolated implementation work. The agent's reply returns \
-     into this turn. Trivial lookups answerable in one or two tool calls are \
-     not worth delegating.";
+/// `spawn_agent` roles and carries the session's resolved tier settings into
+/// each call. The native explorer role is still advisory: Goddard cannot
+/// install a per-spawn tool policy through the app-server API.
+pub(crate) fn codex_hint(spec: &SubagentSpec) -> Option<String> {
+    if spec.agents.is_empty() {
+        return None;
+    }
+    let agents = spec
+        .agents
+        .iter()
+        .map(|agent| {
+            let role = if agent.read_only {
+                "explorer"
+            } else {
+                "worker"
+            };
+            let mut settings = vec![format!("agent_type: `{role}`")];
+            if let Some(model) = &agent.model {
+                settings.push(format!("model: `{model}`"));
+            }
+            if let Some(effort) = &agent.effort {
+                settings.push(format!("reasoning_effort: `{effort}`"));
+            }
+            format!(
+                "- `{}` — {} ({})",
+                agent.name,
+                agent.description,
+                settings.join(", ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!(
+        "This session can delegate focused, self-contained subtasks to helper \
+         agents via `spawn_agent` instead of doing everything inline. Use the \
+         matching built-in role and pass the listed model/reasoning_effort \
+         fields on the call when present:\n{agents}\nThe Codex \
+         `explorer` role is advisory for read-only policy because Goddard \
+         cannot install a per-spawn tool allowlist. The agent's reply returns \
+         into this turn. Trivial lookups answerable in one or two tool calls \
+         are not worth delegating."
+    ))
+}
 
 /// Pi's delegate tool ships as an extension file written into daemon-owned
 /// storage at launch. The tool reads the spec from `GODDARD_SUBAGENTS` so the
@@ -286,7 +385,7 @@ function run(agent: AgentDef, prompt: string): Promise<string> {
     "--no-context-files", "--system-prompt", agent.prompt];
   if (agent.model) args.push("--model", agent.model);
   if (agent.effort) args.push("--thinking", agent.effort);
-  if (agent.read_only) args.push("--exclude-tools", "edit,write");
+  if (agent.read_only) args.push("--exclude-tools", "edit,write,bash");
   args.push("--", prompt);
   return new Promise((resolve, reject) => {
     const child = spawn(piBinary, args, { env: process.env });
@@ -404,12 +503,20 @@ mod tests {
 
     #[test]
     fn opencode_definitions_are_subagent_mode_and_deny_writes() {
-        let json = opencode_config_json(&spec_for(ProviderKind::Claude, &RouteClassMap::new()))
+        let classes = classes(&[(
+            TaskClass::Routine,
+            entry(ProviderKind::OpenCode, Some("openai/gpt-5"), Some("high")),
+        )]);
+        let json = opencode_config_json(&spec_for(ProviderKind::OpenCode, &classes))
             .expect("config serializes");
         let value: Value = serde_json::from_str(&json).unwrap();
         let explore = &value["agent"]["goddard-explore"];
         assert_eq!(explore["mode"], "subagent");
         assert_eq!(explore["permission"]["edit"], "deny");
+        assert_eq!(explore["permission"]["bash"], "deny");
+        assert_eq!(explore["tools"]["bash"], false);
+        assert_eq!(value["agent"]["goddard-fast"]["model"], "openai/gpt-5");
+        assert_eq!(value["agent"]["goddard-fast"]["variant"], "high");
     }
 
     #[test]
@@ -457,7 +564,68 @@ mod tests {
     #[test]
     fn opencode2_hint_lists_only_what_exists() {
         assert!(opencode2_hint(&[]).contains("No subagent agents are currently configured"));
-        assert!(opencode2_hint(&["explore".into()]).contains("`explore`"));
+        let hint = opencode2_hint(&["explore".into()]);
+        assert!(hint.contains("`explore`"));
+        assert!(hint.contains("advisory"));
+    }
+
+    #[test]
+    fn copilot_read_only_agents_use_a_native_tool_allowlist() {
+        let classes = classes(&[(
+            TaskClass::Routine,
+            entry(ProviderKind::Copilot, Some("gpt-5"), Some("medium")),
+        )]);
+        let agents = copilot_custom_agents(&spec_for(ProviderKind::Copilot, &classes))
+            .expect("agents serialize");
+        let explore = agents
+            .iter()
+            .find(|agent| agent.name == "goddard-explore")
+            .unwrap();
+        assert_eq!(
+            explore.tools.as_deref(),
+            Some(
+                &[
+                    "view".to_owned(),
+                    "grep".to_owned(),
+                    "glob".to_owned(),
+                    "web_search".to_owned(),
+                    "web_fetch".to_owned(),
+                ][..]
+            )
+        );
+        let fast = agents
+            .iter()
+            .find(|agent| agent.name == "goddard-fast")
+            .unwrap();
+        assert_eq!(fast.model.as_deref(), Some("gpt-5"));
+        assert_eq!(fast.reasoning_effort.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn codex_hint_carries_per_tier_model_and_effort() {
+        let classes = classes(&[(
+            TaskClass::Demanding,
+            entry(ProviderKind::Codex, Some("gpt-5.6"), Some("high")),
+        )]);
+        let hint = codex_hint(&spec_for(ProviderKind::Codex, &classes)).expect("hint exists");
+        assert!(hint.contains("`goddard-heavy`"));
+        assert!(hint.contains("agent_type: `worker`"));
+        assert!(hint.contains("model: `gpt-5.6`"));
+        assert!(hint.contains("reasoning_effort: `high`"));
+        assert!(hint.contains("advisory for read-only policy"));
+        assert!(codex_hint(&SubagentSpec::default()).is_none());
+    }
+
+    #[test]
+    fn support_level_matches_the_actual_injection_paths() {
+        assert_eq!(support_for(ProviderKind::Claude), SupportLevel::Supported);
+        assert_eq!(support_for(ProviderKind::OpenCode), SupportLevel::Supported);
+        assert_eq!(support_for(ProviderKind::Copilot), SupportLevel::Supported);
+        assert_eq!(support_for(ProviderKind::Pi), SupportLevel::Supported);
+        assert_eq!(support_for(ProviderKind::Codex), SupportLevel::Advisory);
+        assert_eq!(support_for(ProviderKind::OpenCode2), SupportLevel::Advisory);
+        assert_eq!(support_for(ProviderKind::OhMyPi), SupportLevel::Unsupported);
+        assert_eq!(support_for(ProviderKind::Amp), SupportLevel::Unsupported);
     }
 
     #[test]

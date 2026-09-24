@@ -848,7 +848,7 @@ experiments.review_queue_description:
 experiments.subagents_title:
   en: Subagents
 experiments.subagents_description:
-  en: Let a session delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript. Applies to sessions started after turning it on.
+  en: Let a session delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript. Claude Code, OpenCode, GitHub Copilot, and Pi support the full roster; Codex and OpenCode 2 are advisory-only, and other providers remain disabled. Read-only helpers are enforced only where the provider exposes a tool policy. Applies to sessions started after turning it on.
 experiments.computer_use_title:
   en: Computer Use
 experiments.computer_use_description:
@@ -3448,6 +3448,8 @@ errors.provider_not_installed:
   en: "%{provider} is not installed"
 errors.provider_not_found:
   en: "%{provider} is not installed or could not be found"
+errors.subagents_unsupported_provider:
+  en: "Named subagents are unavailable for %{provider}; this session will run without the Goddard helper roster."
 errors.provider_terminal_sessions_local_only:
   en: "%{provider} sessions need the local daemon — this workspace is on a remote host"
 errors.claude_fork_checkpoint_missing:

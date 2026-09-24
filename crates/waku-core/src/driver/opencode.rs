@@ -117,6 +117,15 @@ fn native_command_body(
     Some(body)
 }
 
+fn requires_dedicated_server(
+    has_computer_use: bool,
+    has_agent_environment: bool,
+    has_integrations: bool,
+    has_subagents: bool,
+) -> bool {
+    has_computer_use || has_agent_environment || has_integrations || has_subagents
+}
+
 fn start_native_command(
     port: u16,
     session_id: &str,
@@ -313,10 +322,19 @@ impl OpenCodeDriver {
         // into a server other sessions share. Integrations do force a
         // dedicated server: their proxy bearer is per-daemon and a pooled
         // server started without them would answer without the entries.
-        // Every other session shares the workspace's one resident server —
-        // OpenCode hosts many sessions per process, and a second
-        // `opencode serve` in the same workspace contends with the live one.
-        let server = if computer_use.is_some() || agent_env.is_some() || !integrations.is_empty() {
+        // A subagent roster is also session-specific: a pooled server would
+        // retain the first task's model/variant definitions and silently apply
+        // them to later sessions. Every other session shares the workspace's
+        // one resident server — OpenCode hosts many sessions per process, and
+        // a second `opencode serve` in the same workspace contends with it.
+        let server = if requires_dedicated_server(
+            computer_use.is_some(),
+            agent_env.is_some(),
+            !integrations.is_empty(),
+            subagents
+                .as_ref()
+                .is_some_and(|spec| !spec.agents.is_empty()),
+        ) {
             PooledServer::dedicated(OpenCodeServer::start_with_env(&binary, &cwd, &environment)?)
         } else {
             crate::opencode_pool::acquire_with_env(&binary, &cwd, &environment)?
@@ -1686,6 +1704,13 @@ mod tests {
             let body = prompt_body("hi", Some("opencode/big-pickle"), variant, "build");
             assert_eq!(body["variant"], json!("default"), "{body}");
         }
+    }
+
+    #[test]
+    fn subagent_config_requires_a_private_opencode_server() {
+        assert!(requires_dedicated_server(false, false, false, true));
+        assert!(requires_dedicated_server(false, false, true, false));
+        assert!(!requires_dedicated_server(false, false, false, false));
     }
 
     /// A minimal `opencode serve` stand-in: answers every route the driver

@@ -4139,14 +4139,27 @@ impl WakuBackend {
         }
         // Named subagents ride the launch with the runtime: the fixed roster
         // resolves its models through the same class map routing uses, so
-        // routing and subagents share one user-editable map. Drivers without
-        // an injection channel simply ignore it. Still experimental —
-        // injected only when the opt-in is on.
+        // routing and subagents share one user-editable map. Do not hand a
+        // no-op driver the roster: that makes an enabled experiment look
+        // successful while the provider silently ignores it.
         if !cloud_launch && daemon_settings.subagents_enabled {
-            options.subagents = Some(crate::subagents::spec_for(
-                provider,
-                &daemon_settings.route_classes,
-            ));
+            match crate::subagents::support_for(provider) {
+                crate::subagents::SupportLevel::Unsupported => {
+                    if let Ok(wire) = event_to_wire(DriverEvent::localized_error(localized!(
+                        "errors.subagents_unsupported_provider",
+                        provider = provider.display_name()
+                    ))) {
+                        let _ = events.send(wire);
+                    }
+                }
+                crate::subagents::SupportLevel::Supported
+                | crate::subagents::SupportLevel::Advisory => {
+                    options.subagents = Some(crate::subagents::spec_for(
+                        provider,
+                        &daemon_settings.route_classes,
+                    ));
+                }
+            }
         }
         // Auto-mode permission review rides the same BYOK evaluation backend
         // as routing. Unconfigured leaves each driver's ask-the-user path —

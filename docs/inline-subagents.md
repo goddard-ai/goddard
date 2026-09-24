@@ -19,7 +19,8 @@ document is about.
 
 ## What exists today
 
-- **Observation is solved; dispatch is not.** Subagent work already normalizes
+- **Dispatch is provider-specific; attribution is normalized.** Subagent work
+  normalizes
   into `BackgroundWorkItem` (`BackgroundWorkKind::Subagent`,
   `crates/waku-protocol/src/model.rs:2199`) carried on
   `DriverEvent::BackgroundWork` (`model.rs:2305`). The item already has the
@@ -148,6 +149,22 @@ launch flags on a process we own.
   `agentType`/`role`, `senderThreadId` → `parent_id`, per-agent states
   (`codex.rs:1564-1625`).
 
+### GitHub Copilot (`driver/copilot.rs`)
+
+The official SDK owns one Copilot process per Goddard session. Custom agents
+are supplied through `SessionConfig::custom_agents`/`ResumeSessionConfig`, so
+the fixed roster, model, and reasoning effort stay launch-scoped.
+
+- **Read-only tiers:** Copilot's custom-agent tool names are stable; Goddard
+  gives explorer tiers an allowlist of `view`, `grep`, `glob`, `web_search`,
+  and `web_fetch`, excluding write and shell tools.
+- **Attribution:** `subagent.started`, `subagent.configured`,
+  `subagent.completed`, and `subagent.failed` events become
+  `BackgroundWorkItem`s keyed by the provider's agent id. Helper text and
+  tool activities stay out of the root transcript.
+- **Caps:** the SDK exposes no Goddard-owned stop/cap hook for these helpers in
+  this slice, so there is no stop control.
+
 ### OpenCode 2 (`driver/opencode2.rs`) — the constrained one
 
 The service is *adopted*, not spawned (`opencode2_service.rs:1-30`): one
@@ -184,9 +201,10 @@ injection entirely.
 ### OpenCode v1 (`driver/opencode.rs`)
 
 A pooled `opencode serve` per workspace (`opencode.rs:1-26`,
-`opencode_pool.rs`) whose env Goddard controls at acquire — but the server is
-shared by every session in the workspace (`opencode.rs:230-242`), so injection
-is per-workspace, not per-session. Fine for additive tier definitions.
+`opencode_pool.rs`) is used when a session has no private launch configuration.
+When Goddard injects a roster, the driver starts a dedicated server because
+the resolved model/variant is session-specific; ordinary sessions still share
+the workspace pool.
 
 - **Subagent defs:** `OPENCODE_CONFIG_CONTENT` / `OPENCODE_CONFIG` env on
   server spawn can define `agent.*` entries (`mode: "subagent"`, `model`,
@@ -195,8 +213,9 @@ is per-workspace, not per-session. Fine for additive tier definitions.
   the `model_override` permission, which our injected config can allow).
 - **Caps:** a plugin file in the config dir gets `tool.execute.before/after`
   hooks — can mutate args and append `[cap: N/MAX]` to results.
-- **Observation:** no `Subagent` work emission today; same class of follow-up
-  as opencode2 (child sessions exist on `/session/:id/children`).
+- **Observation:** task calls already emit `BackgroundWorkItem`s from their
+  event parts; mapping provider child sessions that do not surface as task
+  parts remains a follow-up.
 
 ### ACP (`driver/acp.rs`) — Cursor, Devin, Fx, Grok, Kimi
 
@@ -245,9 +264,11 @@ question; keep as "already observable, dispatch TBD".
 |---|---|---|---|
 | Claude | `PostToolUse` → `additionalContext` via `--settings` | `PreToolUse` deny | steer (yes, `claude.rs:541`) |
 | Codex | hooks.json possible but global-scope + partial coverage | same | steer (`codex.rs:1000`) |
+| GitHub Copilot | provider lifecycle events only | custom-agent tool allowlist | no stop control in v1 |
 | OpenCode v1 | `tool.execute.after` plugin | `tool.execute.before` arg/deny | steer (`opencode.rs:714`) |
 | OpenCode 2 | none reachable on adopted service | none | steer (`opencode2.rs:644`) |
-| ACP / Amp / Pi / DeepSeek | none v1 (Pi could do it inside our extension) | none v1 | steer (all but Fx) |
+| Pi | none | Goddard extension excludes `edit`, `write`, and `bash` | steer |
+| ACP / Amp / DeepSeek / Oh My Pi | none v1 | none v1 | provider-specific or unavailable |
 
 A steer nudge ("you have exhausted `goddard-fast`; continue inline or escalate")
 is a uniform degrade because every transport except Fx advertises
@@ -274,7 +295,7 @@ is a uniform degrade because every transport except Fx advertises
 | claude | `--agents` JSON + `--append-system-prompt` (+ `--settings` hooks for caps) | nowhere — flags only |
 | codex | `developerInstructions` on `thread/start`; tier TOMLs only if needed | `~/.codex/agents/goddard-*.toml` (opt-in) |
 | opencode2 | `put_instruction_entry` routing hint | session instruction entry |
-| opencode | `OPENCODE_CONFIG_CONTENT` env on pool acquire | server env |
+| opencode | `OPENCODE_CONFIG_CONTENT` env on a dedicated server | server env |
 | pi | `--extension` goddard-owned task-tool extension | goddard data dir |
 | acp/amp/deepseek | no-op v1 | — |
 

@@ -1323,6 +1323,7 @@ errors.provider_native_thread_cursor_unavailable: "%{provider} 的原生线程�
 errors.provider_waku_task_unavailable: "%{provider} 对应的 Goddard 任务不可用"
 errors.provider_not_installed: "尚未安装 %{provider}"
 errors.provider_not_found: "尚未安装 %{provider}，或无法找到该程序"
+errors.subagents_unsupported_provider: "%{provider} 不支持具名子智能体；此会话将在没有 Goddard 助手列表的情况下运行"
 errors.claude_fork_checkpoint_missing: Claude 未返回派生任务所需的检查点
 errors.claude_turn_checkpoint_unavailable: "Claude 中该轮任务的原生检查点不可用：%{error}"
 errors.provider_session_file_unavailable: "%{provider} 的原生会话文件不可用"
@@ -2164,7 +2165,7 @@ experiments.sidebar_dock_description: 一个悬停时在侧边栏底部升起的
 experiments.sidebar_dock_title: 侧边栏操作坞
 experiments.status_markers_description: 当助手轮次结束时，评估模型会按固定标记集为其打分 — 已完成、等待输入、未验证、部分完成、受阻、失败、已偏离 — 达到阈值的标记会以标签形式显示在回复下方。
 experiments.status_markers_title: 轮次状态标记
-experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。对开启后启动的会话生效。
+experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。Claude Code、OpenCode、GitHub Copilot 和 Pi 完全支持；Codex 和 OpenCode 2 仅提供建议；其他服务商保持禁用。只有提供工具策略的服务商会强制执行只读助手。对开启后启动的会话生效。
 experiments.subagents_title: 子智能体
 experiments.voice_briefing_title: 语音简报
 experiments.voice_briefing_description: 打开最新回复较长的任务时，朗读约 45 秒的摘要 — 先讲智能体做了什么，再讲需要你做的决定或处理。使用你的 AI Gateway 密钥和下方模型运行。

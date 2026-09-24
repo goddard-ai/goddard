@@ -1354,6 +1354,7 @@ errors.provider_native_thread_cursor_unavailable: "%{provider} のネイティ�
 errors.provider_waku_task_unavailable: "%{provider} の Goddard タスクは利用できません"
 errors.provider_not_installed: "%{provider} はインストールされていません"
 errors.provider_not_found: "%{provider} はインストールされていないか、見つかりませんでした"
+errors.subagents_unsupported_provider: "%{provider} では名前付きサブエージェントを利用できません。このセッションでは Goddard のヘルパー一覧なしで実行します"
 errors.claude_fork_checkpoint_missing: Claude からフォーク用チェックポイントが返されませんでした
 errors.claude_turn_checkpoint_unavailable: "そのターンの Claude ネイティブチェックポイントは利用できません：%{error}"
 errors.provider_session_file_unavailable: "%{provider} のネイティブセッションファイルは利用できません"
@@ -2213,7 +2214,7 @@ experiments.sidebar_dock_description: ホバーでサイドバーのフッター
 experiments.sidebar_dock_title: サイドバードック
 experiments.status_markers_description: アシスタントのターンが終わると、評価モデルが固定のマーカーセット（完了、入力待ち、未検証、一部完了、ブロック中、失敗、脱線）で採点し、しきい値を超えたマーカーが応答の下にチップとして表示されます。
 experiments.status_markers_title: ターンステータスマーカー
-experiments.subagents_description: セッションが実行を名前付きサブエージェントに委任できるようにします。プロバイダーごとのティアとコスト表示付きのルーティングで、トランスクリプトに分かりやすく表示されます。有効化後に開始したセッションに適用されます。
+experiments.subagents_description: セッションが実行を名前付きサブエージェントに委任できるようにします。Claude Code、OpenCode、GitHub Copilot、Pi は完全対応、Codex と OpenCode 2 は助言のみ、それ以外のプロバイダーでは無効です。読み取り専用ヘルパーの強制は、ツールポリシーを提供するプロバイダーに限られます。有効化後に開始したセッションに適用されます。
 experiments.subagents_title: サブエージェント
 experiments.voice_briefing_title: 音声ブリーフィング
 experiments.voice_briefing_description: 最新の返信が長いタスクを開くと、約45秒の要約を読み上げます — エージェントが行ったことと、あなたに必要な判断や対応を伝えます。AI Gateway キーと以下のモデルで実行されます。

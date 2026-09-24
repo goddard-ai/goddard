@@ -31,6 +31,7 @@ use github_copilot_sdk::rpc::{
 use github_copilot_sdk::session_events::{
     AssistantMessageData, AssistantMessageDeltaData, AssistantReasoningDeltaData, ContextTier,
     SessionEventType, SessionIdleData, SessionTitleChangedData, SessionUsageInfoData,
+    SubagentCompletedData, SubagentConfiguredData, SubagentFailedData, SubagentStartedData,
     ToolExecutionCompleteData, ToolExecutionStartData,
 };
 use github_copilot_sdk::types::{
@@ -50,7 +51,8 @@ use crate::driver::{
     SessionOptions,
 };
 use crate::model::{
-    ActivityKind, DriverEvent, MessageAttachment, PermissionOption, ProviderResumeCursor,
+    ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKind,
+    BackgroundWorkStatus, DriverEvent, MessageAttachment, PermissionOption, ProviderResumeCursor,
     RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 
@@ -511,13 +513,156 @@ struct CopilotStream {
     streamed_messages: HashSet<String>,
     /// Tool-call start data kept so a completion can reuse its title.
     tools: HashMap<String, (ActivityKind, String)>,
+    /// Copilot gives every subagent event an agent id. Keep the item between
+    /// lifecycle edges so completion/failure preserves its role, parent, and
+    /// original start time.
+    subagents: HashMap<String, BackgroundWorkItem>,
+}
+
+fn subagent_work_id(event: &SessionEvent, tool_call_id: &str) -> String {
+    event
+        .agent_id
+        .clone()
+        .unwrap_or_else(|| tool_call_id.to_owned())
+}
+
+fn subagent_title(display_name: &str, agent_name: &str) -> String {
+    [display_name, agent_name]
+        .into_iter()
+        .map(str::trim)
+        .find(|name| !name.is_empty())
+        .unwrap_or("Subagent")
+        .to_owned()
+}
+
+fn handle_subagent_event(
+    event: &SessionEvent,
+    events: &impl DriverEventSink,
+    stream: &mut CopilotStream,
+) -> bool {
+    match event.parsed_type() {
+        SessionEventType::SubagentStarted => {
+            let Some(data) = event.typed_data::<SubagentStartedData>() else {
+                return true;
+            };
+            let id = subagent_work_id(event, &data.tool_call_id);
+            let mut work = BackgroundWorkItem::new(
+                BackgroundWorkKind::Subagent,
+                id.clone(),
+                subagent_title(&data.agent_display_name, &data.agent_name),
+                BackgroundWorkStatus::Running,
+            );
+            work.detail =
+                (!data.agent_description.trim().is_empty()).then(|| data.agent_description.clone());
+            work.background = data
+                .execution_mode
+                .as_deref()
+                .is_some_and(|mode| mode.eq_ignore_ascii_case("background"));
+            work.origin_activity_id = Some(data.tool_call_id.clone());
+            work.role = Some(data.agent_name.clone());
+            work.model = data.model.clone();
+            work.parent_id = data.parent_id.clone();
+            stream.subagents.insert(id, work.clone());
+            let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+                work,
+            )));
+        }
+        SessionEventType::SubagentConfigured => {
+            let Some(agent_id) = event.agent_id.as_deref() else {
+                return true;
+            };
+            let Some(data) = event.typed_data::<SubagentConfiguredData>() else {
+                return true;
+            };
+            let work = stream.subagents.get_mut(agent_id).map(|work| {
+                work.model = Some(data.model.clone());
+                work.detail = data
+                    .reasoning_effort
+                    .as_ref()
+                    .map(|effort| format!("Reasoning effort: {effort}"));
+                work.updated_at_ms = waku_protocol::model::unix_time_millis();
+                work.clone()
+            });
+            if let Some(work) = work {
+                let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+                    work,
+                )));
+            }
+        }
+        SessionEventType::SubagentCompleted => {
+            let Some(data) = event.typed_data::<SubagentCompletedData>() else {
+                return true;
+            };
+            let id = subagent_work_id(event, &data.tool_call_id);
+            let mut work = stream.subagents.remove(&id).unwrap_or_else(|| {
+                let mut work = BackgroundWorkItem::new(
+                    BackgroundWorkKind::Subagent,
+                    id.clone(),
+                    subagent_title(&data.agent_display_name, &data.agent_name),
+                    BackgroundWorkStatus::Completed,
+                );
+                work.origin_activity_id = Some(data.tool_call_id.clone());
+                work.role = Some(data.agent_name.clone());
+                work
+            });
+            work.status = if data.cancelled == Some(true) {
+                BackgroundWorkStatus::Stopped
+            } else {
+                BackgroundWorkStatus::Completed
+            };
+            work.model = data.model.clone().or(work.model);
+            work.duration_ms = data
+                .duration_ms
+                .and_then(|duration| u64::try_from(duration).ok());
+            work.updated_at_ms = waku_protocol::model::unix_time_millis();
+            let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+                work,
+            )));
+        }
+        SessionEventType::SubagentFailed => {
+            let Some(data) = event.typed_data::<SubagentFailedData>() else {
+                return true;
+            };
+            let id = subagent_work_id(event, &data.tool_call_id);
+            let mut work = stream.subagents.remove(&id).unwrap_or_else(|| {
+                let mut work = BackgroundWorkItem::new(
+                    BackgroundWorkKind::Subagent,
+                    id.clone(),
+                    subagent_title(&data.agent_display_name, &data.agent_name),
+                    BackgroundWorkStatus::Failed,
+                );
+                work.origin_activity_id = Some(data.tool_call_id.clone());
+                work.role = Some(data.agent_name.clone());
+                work
+            });
+            work.status = BackgroundWorkStatus::Failed;
+            work.detail = Some(data.error.clone());
+            work.model = data.model.clone().or(work.model);
+            work.duration_ms = data
+                .duration_ms
+                .and_then(|duration| u64::try_from(duration).ok());
+            work.updated_at_ms = waku_protocol::model::unix_time_millis();
+            let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+                work,
+            )));
+        }
+        _ => return false,
+    }
+    true
 }
 
 fn handle_event(event: &SessionEvent, events: &impl DriverEventSink, stream: &mut CopilotStream) {
-    // Sub-agent events carry `agent_id`; only the root agent's text belongs in
-    // the main transcript. Tool executions stay visible regardless — a helper
-    // running `bash` is real work the user should see.
+    if handle_subagent_event(event, events, stream) {
+        return;
+    }
+    // Sub-agent events carry `agent_id`; only the root agent's text and tool
+    // activities belong in the main transcript. Their lifecycle is rendered
+    // on the background-work surface above, so helper output cannot leak into
+    // the root conversation.
     let root_agent = event.agent_id.is_none();
+    if !root_agent {
+        return;
+    }
     match event.parsed_type() {
         SessionEventType::AssistantTurnStart => {
             stream.turn_open = true;
@@ -1098,6 +1243,160 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    fn copilot_event(event_type: &str, agent_id: Option<&str>, data: Value) -> SessionEvent {
+        SessionEvent {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_owned(),
+            parent_id: None,
+            ephemeral: None,
+            agent_id: agent_id.map(str::to_owned),
+            debug_cli_received_at_ms: None,
+            debug_ws_forwarded_at_ms: None,
+            event_type: event_type.to_owned(),
+            data,
+        }
+    }
+
+    #[test]
+    fn copilot_subagent_lifecycle_is_background_work_not_root_transcript() {
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let mut stream = CopilotStream::default();
+        handle_event(
+            &copilot_event(
+                "subagent.started",
+                Some("agent-1"),
+                serde_json::json!({
+                    "agentDescription": "Searches the codebase",
+                    "agentDisplayName": "Goddard Explore",
+                    "agentName": "goddard-explore",
+                    "agentType": "explorer",
+                    "executionMode": "background",
+                    "model": "gpt-5-mini",
+                    "parentId": "parent-agent",
+                    "toolCallId": "call-1"
+                }),
+            ),
+            &events,
+            &mut stream,
+        );
+        // A helper turn marker must not open or settle the foreground turn.
+        handle_event(
+            &copilot_event(
+                "assistant.turn_start",
+                Some("agent-1"),
+                serde_json::json!({"turnId": "sub-turn"}),
+            ),
+            &events,
+            &mut stream,
+        );
+        handle_event(
+            &copilot_event(
+                "subagent.completed",
+                Some("agent-1"),
+                serde_json::json!({
+                    "agentDisplayName": "Goddard Explore",
+                    "agentName": "goddard-explore",
+                    "cancelled": false,
+                    "durationMs": 42,
+                    "model": "gpt-5-mini",
+                    "toolCallId": "call-1"
+                }),
+            ),
+            &events,
+            &mut stream,
+        );
+        // The root still owns the ordinary turn lifecycle.
+        handle_event(
+            &copilot_event(
+                "assistant.turn_start",
+                None,
+                serde_json::json!({"turnId": "root-turn"}),
+            ),
+            &events,
+            &mut stream,
+        );
+        handle_event(
+            &copilot_event("session.idle", None, serde_json::json!({"aborted": false})),
+            &events,
+            &mut stream,
+        );
+
+        let seen: Vec<DriverEvent> = event_rx.try_iter().collect();
+        let work: Vec<&BackgroundWorkItem> = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => Some(item),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(work.len(), 2);
+        assert_eq!(work[0].status, BackgroundWorkStatus::Running);
+        assert_eq!(work[0].role.as_deref(), Some("goddard-explore"));
+        assert_eq!(work[0].model.as_deref(), Some("gpt-5-mini"));
+        assert_eq!(work[0].parent_id.as_deref(), Some("parent-agent"));
+        assert!(work[0].background);
+        assert_eq!(work[1].status, BackgroundWorkStatus::Completed);
+        assert_eq!(work[1].duration_ms, Some(42));
+        assert_eq!(
+            seen.iter()
+                .filter(|event| matches!(event, DriverEvent::TurnStarted))
+                .count(),
+            1
+        );
+        assert!(
+            seen.iter()
+                .any(|event| matches!(event, DriverEvent::TurnFinished { success: true, .. }))
+        );
+    }
+
+    #[test]
+    fn copilot_subagent_failure_preserves_attribution_and_error() {
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let mut stream = CopilotStream::default();
+        handle_event(
+            &copilot_event(
+                "subagent.started",
+                Some("agent-2"),
+                serde_json::json!({
+                    "agentDescription": "Investigates the issue",
+                    "agentDisplayName": "Goddard Heavy",
+                    "agentName": "goddard-heavy",
+                    "toolCallId": "call-2"
+                }),
+            ),
+            &events,
+            &mut stream,
+        );
+        handle_event(
+            &copilot_event(
+                "subagent.failed",
+                Some("agent-2"),
+                serde_json::json!({
+                    "agentDisplayName": "Goddard Heavy",
+                    "agentName": "goddard-heavy",
+                    "durationMs": 7,
+                    "error": "model unavailable",
+                    "toolCallId": "call-2"
+                }),
+            ),
+            &events,
+            &mut stream,
+        );
+
+        let work: Vec<BackgroundWorkItem> = event_rx
+            .try_iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => Some(item),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(work.len(), 2);
+        assert_eq!(work[1].status, BackgroundWorkStatus::Failed);
+        assert_eq!(work[1].role.as_deref(), Some("goddard-heavy"));
+        assert_eq!(work[1].detail.as_deref(), Some("model unavailable"));
+        assert_eq!(work[1].duration_ms, Some(7));
+    }
 
     /// Drives a real agent through the SDK-backed driver. Ignored by default:
     /// it needs `copilot` installed, credentials, and the network.

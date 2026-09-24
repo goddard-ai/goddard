@@ -588,7 +588,12 @@ impl CodexDriver {
                     .as_ref()
                     .is_some_and(|spec| !spec.agents.is_empty())
                 {
-                    developer_instructions.push(crate::subagents::CODEX_HINT.to_owned());
+                    if let Some(hint) = subagents
+                        .as_ref()
+                        .and_then(crate::subagents::codex_hint)
+                    {
+                        developer_instructions.push(hint);
+                    }
                 }
                 let open_thread = if let Some(thread_id) = provider_session_id {
                     let mut params = json!({
