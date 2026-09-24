@@ -415,6 +415,7 @@ pub(super) struct SettingSearch {
 
 /// One matched row's highlights plus its jump-back context.
 pub(super) struct SettingRowMatch {
+    pub title: SharedString,
     pub title_ranges: Vec<Range<usize>>,
     pub description_ranges: Vec<Range<usize>>,
     /// The row's (page, ordinal) when this pass participates in
@@ -516,6 +517,7 @@ impl SettingSearch {
         });
         let visit = self.visit.clone();
         Some(SettingRowMatch {
+            title: SharedString::from(title),
             title_ranges,
             description_ranges,
             key,
@@ -598,6 +600,7 @@ pub(super) fn settings_title_jump(
     let Some(weak) = matched.visit.clone() else {
         return title.into_any_element();
     };
+    let copy_title = matched.title.clone();
     let key_weak = weak.clone();
     title
         .tab_index(0)
@@ -605,6 +608,7 @@ pub(super) fn settings_title_jump(
         .hover(|element| element.text_color(theme.accent))
         .focus_visible(|element| element.bg(theme.focus_highlight()))
         .on_click(move |_, window, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(copy_title.to_string()));
             let _ = weak.update(cx, |this, cx| {
                 this.visit_setting(page, Some(ordinal), window, cx);
             });

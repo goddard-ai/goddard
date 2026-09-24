@@ -1,0 +1,1 @@
+- Click a setting title in search results to copy its name while opening that setting.
