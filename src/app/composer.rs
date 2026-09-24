@@ -2033,9 +2033,8 @@ impl Waku {
         match self.model_picker_target {
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_) => {
                 self.model_picker_session().and_then(|session| {
-                    self.session_model_combo(session).map(|(model, effort, fast)| {
-                        (session.provider, model, effort, fast)
-                    })
+                    self.session_model_combo(session)
+                        .map(|(model, effort, fast)| (session.provider, model, effort, fast))
                 })
             }
             ModelPickerTarget::AutomationEditor => {
@@ -3545,8 +3544,7 @@ impl Waku {
         prompt: &str,
         cx: &mut Context<Self>,
     ) -> Option<ComposerSubmission> {
-        let bare_rename =
-            crate::composer_complete::parse_rename_submission(prompt) == Some(None);
+        let bare_rename = crate::composer_complete::parse_rename_submission(prompt) == Some(None);
         let prompt = if bare_rename {
             let Some(session_id) = self.composer_session().map(|session| session.id) else {
                 self.show_toast(tr!("commands.rename_no_session"));
@@ -3626,15 +3624,16 @@ impl Waku {
         // typed.
         let typed_content = text_without_atom_markers(&prompt);
         let typed = typed_content.trim();
-        let human_content = (bare_rename || !annotations.is_empty() || !atoms.is_empty()).then(|| {
-            if bare_rename {
-                "/rename".to_owned()
-            } else if typed.is_empty() {
-                annotation_display_content(&annotations)
-            } else {
-                typed.to_owned()
-            }
-        });
+        let human_content =
+            (bare_rename || !annotations.is_empty() || !atoms.is_empty()).then(|| {
+                if bare_rename {
+                    "/rename".to_owned()
+                } else if typed.is_empty() {
+                    annotation_display_content(&annotations)
+                } else {
+                    typed.to_owned()
+                }
+            });
         // The bubble keeps the composer's chip presentation: atom markers
         // become labelled spans in `display_content` while `prompt` keeps
         // the spliced payloads the provider sees.
@@ -5232,8 +5231,7 @@ impl Waku {
         let controls = ComposerControls {
             session,
             interactive,
-            model_pickers: interactive
-                || session.is_some_and(|session| !session.has_started()),
+            model_pickers: interactive || session.is_some_and(|session| !session.has_started()),
             model_edit_session: if interactive {
                 None
             } else {

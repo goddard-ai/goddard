@@ -646,8 +646,7 @@ mod tests {
             TaskClass::Demanding,
             entry(ProviderKind::Codex, Some("gpt-5.6"), Some("high")),
         )]);
-        let hint =
-            codex_hint(&spec_for(ProviderKind::Codex, None, &classes)).expect("hint exists");
+        let hint = codex_hint(&spec_for(ProviderKind::Codex, None, &classes)).expect("hint exists");
         assert!(hint.contains("`goddard-heavy`"));
         assert!(hint.contains("agent_type: `worker`"));
         assert!(hint.contains("model: `gpt-5.6`"));

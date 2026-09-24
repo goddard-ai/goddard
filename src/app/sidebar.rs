@@ -1118,9 +1118,8 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == session_id && starred.contains(&session.project_id))
         });
-        let target_unseen = target.is_some_and(|session_id| {
-            self.state.unseen_completions.contains_key(&session_id)
-        });
+        let target_unseen = target
+            .is_some_and(|session_id| self.state.unseen_completions.contains_key(&session_id));
         div()
             .id("unseen-completion-bell")
             .w(px(26.0))

@@ -1317,10 +1317,7 @@ pub(super) fn model_picker_panel(
     // The horizontal padding is the rows' transparent side gutter — `list`
     // only honors vertical padding on its items, so it lives on the
     // container to keep row fills clear of the panel edge.
-    let mut list_element = div()
-        .id("model-picker-list")
-        .size_full()
-        .px(px(4.0));
+    let mut list_element = div().id("model-picker-list").size_full().px(px(4.0));
     if rows.is_empty() {
         list_element = list_element.p(px(9.0)).child(
             div()

@@ -1199,7 +1199,10 @@ fn log_git_timing(command: &Command, started: std::time::Instant) {
         .get_current_dir()
         .map(|dir| dir.display().to_string())
         .unwrap_or_default();
-    eprintln!("checkpoint `git {args}` in {cwd} took {:?}", started.elapsed());
+    eprintln!(
+        "checkpoint `git {args}` in {cwd} took {:?}",
+        started.elapsed()
+    );
 }
 
 fn command_error(output: &Output) -> String {

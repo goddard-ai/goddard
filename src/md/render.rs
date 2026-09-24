@@ -1651,8 +1651,7 @@ fn text_element_with_selection(
                 let text = flat.text.clone();
                 move |index, window, cx| {
                     let (range, url) = links.iter().find(|(range, _)| range.contains(&index))?;
-                    (text[range.clone()] != *url)
-                        .then(|| Tooltip::text(url.clone())(window, cx))
+                    (text[range.clone()] != *url).then(|| Tooltip::text(url.clone())(window, cx))
                 }
             })
             .into_any_element()
