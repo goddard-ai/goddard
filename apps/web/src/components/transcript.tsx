@@ -9,12 +9,15 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { toast } from 'sonner'
 import { PreviewableImage } from '@/components/image-preview'
+import { Button } from '@/components/ui/button'
 import { FileTypeIcon, WakuIcon, type WakuIconName } from '@/components/waku-icon'
 import { readAttachmentImage } from '@/lib/attachments'
 import { useDaemon } from '@/lib/daemon-context'
 import { activitiesForBlock } from '@/lib/event-reducer'
 import { useI18n, type AppLocale } from '@/lib/i18n'
+import { useRuntime } from '@/lib/runtime-context'
 import {
   advanceMarkdownVeil,
   createMarkdownVeilState,
@@ -115,6 +118,8 @@ export function Transcript({
   rewindingTurnCount?: number
 }) {
   const { locale, t } = useI18n()
+  const { renameRequests, respond } = useRuntime()
+  const renameRequest = renameRequests[session.id]
   const root = useRef<HTMLDivElement>(null)
   const transcript = useRef<VirtuosoHandle>(null)
   const transcriptScroller = useRef<HTMLElement | null>(null)
@@ -211,6 +216,38 @@ export function Transcript({
   return (
     <TranscriptLinkContext.Provider value={onOpenLink ?? (() => false)}>
       <div className="relative min-h-0 flex-1" ref={root}>
+      {/* A daemon-owned rename request pins to the top of the transcript —
+          not a row, so scrolling and turn folds can never hide it — until
+          the user answers or the daemon settles it. */}
+      {renameRequest && (
+        <div className="absolute inset-x-0 top-2 z-20 px-3 sm:px-5">
+          <section className="mx-auto w-full max-w-[720px] rounded-xl border border-[color:var(--warning)]/30 bg-card p-3 shadow-lg">
+            <div className="text-[13px] font-medium">{renameRequest.title}</div>
+            {renameRequest.detail && (
+              <p className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap text-xs leading-5 text-[var(--text-tertiary)]">
+                {renameRequest.detail}
+              </p>
+            )}
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              {renameRequest.options.map((option) => (
+                <Button
+                  key={option.id}
+                  size="sm"
+                  variant={option.allow ? 'default' : 'outline'}
+                  onClick={() => {
+                    void respond(session.id, renameRequest.requestId, option.id).catch((error) =>
+                      toast.error(error instanceof Error ? error.message : String(error)),
+                    )
+                  }}
+                >
+                  {option.allow && <WakuIcon name="check" />}
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
       {empty ? (
         <div className="absolute inset-0 grid place-items-center pb-8">
           <div className="text-center">

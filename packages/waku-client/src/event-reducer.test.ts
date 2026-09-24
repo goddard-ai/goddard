@@ -413,6 +413,74 @@ describe('localized events', () => {
   })
 })
 
+describe('agent rename requests', () => {
+  const renameEvent = () =>
+    event('permission', {
+      requestId: 'agent-rename-1',
+      title: 'Rename this task?',
+      detail: 'The agent wants to rename this task.',
+      options: [
+        { id: 'once', label: 'Rename', allow: true },
+        { id: 'deny', label: 'Deny', allow: false },
+      ],
+    })
+
+  test('a rename request bypasses the turn gate and skips the composer lane', () => {
+    // The request parks on the session, not the turn — it can legitimately
+    // arrive after the turn that raised it already folded.
+    const result = reduceRuntimeEvent(idleSession(), renameEvent(), clock)
+    expect(result.renameRequest).toMatchObject({ requestId: 'agent-rename-1' })
+    expect(result.permission).toBeUndefined()
+    expect(result.session.status).toBe('waiting')
+  })
+
+  test('a finished turn does not settle a rename request', () => {
+    const session = runningSession()
+    const requested = reduceRuntimeEvent(session, renameEvent(), clock)
+    expect(requested.renameRequest?.requestId).toBe('agent-rename-1')
+
+    const finished = reduceRuntimeEvent(
+      requested.session,
+      event('turnFinished', { success: true, summary: null }),
+      clock,
+    )
+    expect(finished.renameRequest).toBeUndefined()
+    expect(finished.permission).toBeNull()
+  })
+
+  test('requestSettled names the resolved request', () => {
+    const result = reduceRuntimeEvent(
+      runningSession(),
+      event('requestSettled', { requestId: 'agent-rename-1' }),
+      clock,
+    )
+    expect(result.settledRequestId).toBe('agent-rename-1')
+  })
+
+  test('requestSettled returns a turnless waiting session to idle', () => {
+    // The rename card was the only thing holding `waiting` — once the daemon
+    // settles it nothing else will move the status back.
+    const requested = reduceRuntimeEvent(idleSession(), renameEvent(), clock)
+    expect(requested.session.status).toBe('waiting')
+    const settled = reduceRuntimeEvent(
+      requested.session,
+      event('requestSettled', { requestId: requested.renameRequest!.requestId }),
+      clock,
+    )
+    expect(settled.session.status).toBe('idle')
+  })
+
+  test('a dead runtime clears a rename request', () => {
+    const requested = reduceRuntimeEvent(runningSession(), renameEvent(), clock)
+    const exited = reduceRuntimeEvent(
+      requested.session,
+      event('processExited', null),
+      clock,
+    )
+    expect(exited.renameRequest).toBeNull()
+  })
+})
+
 test('wireTranslationText renders through the client translator or keeps the fallback', () => {
   const t = (key: string, params?: Record<string, string | number>) =>
     `${key}(${Object.entries(params ?? {}).map(([k, v]) => `${k}=${v}`).join(',')})`

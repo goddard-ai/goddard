@@ -40,7 +40,7 @@ goddard-agent — Goddard's scoped agent surface inside a session
 USAGE
     goddard-agent create '<json>'            Create a task and start its first prompt
     goddard-agent prompt '<json>'            Send a prompt to an existing task
-    goddard-agent rename '<json>'            Rename this task when its transcript grants permission
+    goddard-agent rename '<json>'            Rename this task after the user approves the request
     goddard-agent read '<json>'              Read a task's transcript
     goddard-agent search '<json>'            Search this project's task transcripts
     goddard-agent ask '<json>'               Ask the user a structured question
@@ -66,8 +66,9 @@ USAGE CONTRACT
     `read`ing. Use `create` and `prompt` only when the human you are
     working for has explicitly asked — never for exploration,
     convenience, or self-orchestration.
-    `rename` changes only this task's title and requires a grant from this
-    task's transcript header.
+    `rename` changes only this task's title. Unless the task already granted
+    standing permission, each call asks the user first — it blocks on the
+    request card and fails when the user declines.
     `ask` renders a question card in the user's Goddard client and blocks
     until they answer, clarify, or dismiss it. Use it when the human's
     decision — a choice between options or a confirmation — must come back
@@ -121,7 +122,7 @@ fn schema() -> serde_json::Value {
             "returns": {"ok": true}
         },
         "rename": {
-            "description": "Set this task's title after the user grants rename permission in its transcript. Cannot rename another task.",
+            "description": "Set this task's title. The user approves each request unless the task already granted standing permission. Cannot rename another task.",
             "fields": { "title": {"type": "string", "required": true} },
             "example": "{\"title\":\"Investigate session startup\"}",
             "returns": {"ok": true}
@@ -325,9 +326,10 @@ fn run() -> anyhow::Result<()> {
             }
             let command = build_command(&subcommand, &payload)?;
             let client = connect()?;
-            // `ask` waits on a human — a clock can't bound that, so it
-            // parks until the daemon resolves it or the connection drops.
-            let response = if subcommand == "ask" {
+            // `ask` and an ungranted `rename` wait on a human — a clock
+            // can't bound that, so they park until the daemon resolves them
+            // or the connection drops.
+            let response = if matches!(subcommand.as_str(), "ask" | "rename") {
                 client.request_with_timeout(request_session_id(), Uuid::nil(), command, None)?
             } else {
                 client.request(request_session_id(), Uuid::nil(), command)?

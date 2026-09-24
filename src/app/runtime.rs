@@ -2281,6 +2281,7 @@ impl Waku {
                 pending_reasoning_newlines: 0,
                 stream_remeasure_pending: false,
                 pending_permission: None,
+                pending_rename: None,
                 pending_user_input: None,
                 pending_computer_approval: None,
                 computer_use_previews: Vec::new(),
@@ -5773,6 +5774,7 @@ impl Waku {
                 pending_reasoning_newlines: 0,
                 stream_remeasure_pending: false,
                 pending_permission: None,
+                pending_rename: None,
                 pending_user_input: None,
                 pending_computer_approval: None,
                 computer_use_previews: Vec::new(),
@@ -6843,6 +6845,7 @@ impl Waku {
             runtime.stream_remeasure_pending = false;
             runtime.stream_phase = None;
             runtime.pending_permission = None;
+            runtime.pending_rename = None;
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
             runtime.last_active_at = Instant::now();

@@ -56,6 +56,11 @@ pub const TASK_LINK_PREFIX: &str = "goddard://task/";
 /// even when the session's provider has no user-input actions of its own —
 /// the daemon owns these requests, so the actions always resolve.
 pub const AGENT_ASK_REQUEST_PREFIX: &str = "agent-ask-";
+/// The request-id prefix the daemon mints for `agentRenameSelf` permission
+/// requests. The daemon owns these requests too: they outlive the turn they
+/// were asked under, so clients render them pinned rather than folded away
+/// with it.
+pub const AGENT_RENAME_REQUEST_PREFIX: &str = "agent-rename-";
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

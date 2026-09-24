@@ -1,5 +1,6 @@
 use super::right_panel::{DiffRowStyle, render_diff_code_row};
 use super::*;
+use crate::ui::ActivationExt;
 use base64::Engine as _;
 
 const CHANGED_FILES_PREVIEW_LIMIT: usize = 3;
@@ -236,6 +237,7 @@ impl Waku {
         let annotation_tooltip = self.render_annotation_tooltip(cx);
         let annotation_ref_tooltip = self.render_annotation_ref_tooltip(cx);
         let commit_popover = self.render_transcript_commit_popover(cx);
+        let rename_request = self.render_rename_request(cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
         // bar writes offsets straight into the list rather than through its
@@ -445,6 +447,7 @@ impl Waku {
                 theme.surface,
             ))
             .children(navigation_rail)
+            .children(rename_request)
             .children(scroll_to_bottom)
             .children(status_marker_float)
             .child(scrollbar::vertical(
@@ -464,6 +467,156 @@ impl Waku {
             .children(annotation_ref_tooltip)
             .children(commit_popover)
             .into_any_element()
+    }
+
+    /// The daemon-owned `agentRenameSelf` request, pinned to the top of the
+    /// transcript viewport. It is an overlay, not a row — scrolling and
+    /// turn folds can never hide it — and it stays until the user answers
+    /// or the daemon settles the request, whichever happens first.
+    fn render_rename_request(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let permission = self.selected_runtime()?.pending_rename.as_ref()?.clone();
+        let theme = Theme::current(cx);
+        let request_id = permission.request_id.clone();
+        // Escape answers with the first deny option — a real response, not
+        // a hide, so the parked CLI call settles instead of hanging on a
+        // card that is no longer reachable.
+        let deny_option = permission
+            .options
+            .iter()
+            .find(|option| !option.allow)
+            .map(|option| option.id.clone());
+        let mut buttons = div().flex().items_center().gap(px(8.0)).mt(px(10.0));
+        for option in &permission.options {
+            let request_id = request_id.clone();
+            let option_id = option.id.clone();
+            let allow = option.allow;
+            let focus = self.transcript_control_focus(
+                format!("rename-request-{}-{}", permission.request_id, option.id),
+                cx,
+            );
+            buttons = buttons.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "rename-request-{}-{}",
+                        permission.request_id, option.id
+                    )))
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(28.0))
+                    .px(px(13.0))
+                    .rounded(px(9.0))
+                    .border(hairline())
+                    .border_color(if allow {
+                        theme.inverse
+                    } else {
+                        theme.border_strong
+                    })
+                    .flex()
+                    .items_center()
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .when(allow, |element| {
+                        element
+                            .bg(theme.inverse)
+                            .text_color(theme.on_inverse)
+                            .hover(|element| element.opacity(0.9))
+                    })
+                    .when(!allow, |element| {
+                        element
+                            .text_color(theme.text_secondary)
+                            .hover(|element| element.bg(theme.overlay).text_color(theme.text))
+                    })
+                    .active(|element| element.opacity(0.8))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .child(SharedString::from(
+                        option
+                            .label_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| option.label.clone()),
+                    ))
+                    .on_activation(cx, move |this, _, cx| {
+                        this.respond_rename_request(request_id.clone(), option_id.clone(), cx);
+                    }),
+            );
+        }
+        let deny_request_id = request_id.clone();
+        Some(
+            div()
+                .id("rename-request-layer")
+                .absolute()
+                .top(px(8.0))
+                .left_0()
+                .right_0()
+                .px(px(20.0))
+                .child(
+                    div()
+                        .id("rename-request")
+                        .w_full()
+                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .mx_auto()
+                        .p(px(12.0))
+                        .rounded(px(15.0))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.raised)
+                        .shadow_md()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if event.keystroke.key == "escape"
+                                && let Some(option_id) = deny_option.clone()
+                            {
+                                this.respond_rename_request(deny_request_id.clone(), option_id, cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(icon("icons/alert.svg", 13.0, theme.warning))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(SharedString::from(
+                                            permission
+                                                .title_i18n
+                                                .as_ref()
+                                                .map(waku_client::WireTranslation::render)
+                                                .unwrap_or_else(|| permission.title.clone()),
+                                        )),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id("rename-request-detail")
+                                .mt(px(8.0))
+                                .max_h(px(92.0))
+                                .overflow_y_scroll()
+                                .p(px(8.0))
+                                .rounded(px(9.0))
+                                .bg(theme.inset)
+                                .font_family(crate::fonts::current(cx).code)
+                                .text_size(sp(12.5))
+                                .line_height(sp(16.0))
+                                .text_color(theme.text_secondary)
+                                .whitespace_normal()
+                                .child(SharedString::from(
+                                    permission
+                                        .detail_i18n
+                                        .as_ref()
+                                        .map(waku_client::WireTranslation::render)
+                                        .unwrap_or_else(|| permission.detail.clone()),
+                                )),
+                        )
+                        .child(buttons),
+                )
+                .into_any_element(),
+        )
     }
 
     fn scroll_transcript_to_bottom(&mut self, cx: &mut Context<Self>) {

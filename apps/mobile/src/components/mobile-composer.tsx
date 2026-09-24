@@ -668,7 +668,7 @@ function imagePickerFiles(
   }));
 }
 
-function PermissionPanel({
+export function PermissionPanel({
   permission,
   onRespond,
 }: {

@@ -24,7 +24,7 @@ import { ActivitySheetHost } from '@/components/activity-sheet';
 import { AppSymbol } from '@/components/app-symbol';
 import { GlassSurface } from '@/components/glass-surface';
 import { ConnectionBanner } from '@/components/connection-banner';
-import { MobileComposer } from '@/components/mobile-composer';
+import { MobileComposer, PermissionPanel } from '@/components/mobile-composer';
 import { PROVIDER_MENU_ICONS } from '@/components/provider-menu-icons';
 import { RenameDialog } from '@/components/rename-dialog';
 import { ModelSheet, modelDisplayName, type ModelSelection } from '@/components/session-option-sheets';
@@ -315,12 +315,6 @@ export function SessionView({
         setModelSheetOpen(true);
       } else if (command === 'rename') {
         setRenaming(true);
-      } else if (command === 'agent-rename-grant') {
-        const current = sessionRef.current;
-        if (current) {
-          void runtime.setAgentRenameAllowed(current.id, !current.agent_rename_allowed)
-            .catch((cause) => Alert.alert('Couldn’t change agent rename permission', cause instanceof Error ? cause.message : String(cause)));
-        }
       } else if (command === 'find') {
         setFindOpen(true);
       } else if (command === 'copy-last-response') {
@@ -471,6 +465,7 @@ export function SessionView({
   const subtitle = linkSubtitle ?? (subtitleParts.length ? subtitleParts.join(' · ') : null);
   const hasSession = Boolean(session);
   const unseenReplies = useHasUnseenReplies(sessionId);
+  const renameRequest = session ? runtime.renameRequests[session.id] : undefined;
   const transcriptMounted = Boolean(
     session && mountedTranscriptSessionId === session.id,
   );
@@ -487,11 +482,6 @@ export function SessionView({
         displayInline: true,
         subactions: [
           { id: 'model', title: modelLabel, image: modelIcon, imageColor: theme.text },
-          {
-            id: 'agent-rename-grant',
-            title: session?.agent_rename_allowed ? 'Revoke agent rename' : 'Allow agent rename',
-            image: 'pencil',
-          },
           ...TASK_MENU_COMMANDS.map((item) => ({
             id: item.id,
             title: item.title,
@@ -501,7 +491,7 @@ export function SessionView({
         ],
       },
     ],
-    [modelIcon, modelLabel, session?.agent_rename_allowed, theme.text],
+    [modelIcon, modelLabel, theme.text],
   );
 
   // The chrome lives in the native navigation bar, so it stays put while the
@@ -649,6 +639,19 @@ export function SessionView({
             />
           </View>
         )}
+        {/* A daemon-owned rename request pins above the transcript — it's
+            not a row, so scrolling and turn folds can never hide it — until
+            the user answers or the daemon settles it. */}
+        {session && renameRequest ? (
+          <View style={[styles.renameRequestCard, { top: headerInset + 8 }]}>
+            <PermissionPanel
+              permission={renameRequest}
+              onRespond={(optionId) =>
+                runtime.respond(session.id, renameRequest.requestId, optionId)
+              }
+            />
+          </View>
+        ) : null}
         {findOpen && session && (
           <GlassSurface
             fallbackColor={theme.surface}
@@ -843,6 +846,12 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   body: { flex: 1 },
   placeholder: { alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 32 },
+  renameRequestCard: {
+    left: 12,
+    position: 'absolute',
+    right: 12,
+    zIndex: 5,
+  },
   linkBanner: { left: 12, position: 'absolute', right: 12, zIndex: 10 },
   findBar: {
     borderRadius: Radius.pill,

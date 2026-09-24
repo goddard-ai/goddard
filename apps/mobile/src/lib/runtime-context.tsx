@@ -103,6 +103,10 @@ function deferrableEvent(event: SequencedEvent): boolean {
 interface RuntimeContextValue {
   runtimes: Record<string, MobileRuntime | undefined>;
   permissions: Record<string, PendingPermission | undefined>;
+  /** Daemon-owned `agentRenameSelf` requests: they outlive the turn that
+   * raised them, so they ride their own map — turn settles never clear
+   * them, `requestSettled` events and answers do. */
+  renameRequests: Record<string, PendingPermission | undefined>;
   userInputs: Record<string, PendingUserInput | undefined>;
   errors: Record<string, string | undefined>;
   attachSession: (session: AgentSession) => Promise<boolean>;
@@ -149,7 +153,6 @@ interface RuntimeContextValue {
   updateSessionOptions: (sessionId: string, changes: SessionOptionChanges) => Promise<void>;
   sendGoalOperation: (session: AgentSession, operation: GoalOperation, managed?: boolean) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
-  setAgentRenameAllowed: (sessionId: string, allowed: boolean) => Promise<void>;
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   setSessionArchived: (sessionId: string, archived: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -169,6 +172,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [runtimes, setRuntimes] = useState<Record<string, MobileRuntime | undefined>>({});
   const [permissions, setPermissions] = useState<Record<string, PendingPermission | undefined>>({});
+  const [renameRequests, setRenameRequests] = useState<Record<string, PendingPermission | undefined>>({});
   const [userInputs, setUserInputs] = useState<Record<string, PendingUserInput | undefined>>({});
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   const hasRecoveredDisconnectError = daemon.phase === 'connected'
@@ -442,6 +446,17 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       state.mutated = true;
       if (result.permission !== undefined) {
         setPermissions((values) => ({ ...values, [session.id]: result.permission ?? undefined }));
+      }
+      if (result.renameRequest !== undefined) {
+        setRenameRequests((values) => ({ ...values, [session.id]: result.renameRequest ?? undefined }));
+      }
+      if (result.settledRequestId !== undefined) {
+        const settled = result.settledRequestId;
+        const drop = <T extends { requestId: string }>(values: Record<string, T | undefined>) =>
+          values[session.id]?.requestId === settled ? { ...values, [session.id]: undefined } : values;
+        setPermissions(drop);
+        setRenameRequests(drop);
+        setUserInputs(drop);
       }
       if (result.userInput !== undefined) {
         setUserInputs((values) => ({ ...values, [session.id]: result.userInput ?? undefined }));
@@ -973,6 +988,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (!client || !runtime) throw new Error('This task has no live agent runtime');
     await client.request({ type: 'respond', requestId, optionId }, sessionId, runtime.runtimeId);
     setPermissions((values) => ({ ...values, [sessionId]: undefined }));
+    setRenameRequests((values) => ({ ...values, [sessionId]: undefined }));
     markWorking(sessionId);
   }, [daemon.client, markWorking]);
 
@@ -1075,17 +1091,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await persistOrdered(next);
   }, [cacheSession, loadFullSession, persistOrdered]);
 
-  const setAgentRenameAllowed = useCallback(async (sessionId: string, allowed: boolean) => {
-    const current = await loadFullSession(sessionId);
-    const next = {
-      ...current,
-      agent_rename_allowed: allowed,
-      updated_at: clock.nowSeconds(),
-    };
-    cacheSession(next);
-    await persistOrdered(next);
-  }, [cacheSession, loadFullSession, persistOrdered]);
-
   /** Pin/unpin — desktop's toggle_session_pin: a plain flag flip plus save,
    * limited to started, unarchived tasks. */
   const setSessionPinned = useCallback(async (sessionId: string, pinned: boolean) => {
@@ -1129,6 +1134,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await persistOrdered(next);
     if (archived) {
       setPermissions((values) => removeKey(values, sessionId));
+      setRenameRequests((values) => removeKey(values, sessionId));
       setUserInputs((values) => removeKey(values, sessionId));
     }
   }, [cacheSession, daemon.client, loadFullSession, persistOrdered, removeRuntime]);
@@ -1156,6 +1162,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         : current
     ));
     setPermissions((values) => removeKey(values, sessionId));
+    setRenameRequests((values) => removeKey(values, sessionId));
     setUserInputs((values) => removeKey(values, sessionId));
     setErrors((values) => removeKey(values, sessionId));
   }, [daemon.activeProfile?.id, daemon.client, daemon.phase, queryClient, removeRuntime]);
@@ -1256,6 +1263,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setRuntimes({});
     setPermissions({});
+    setRenameRequests({});
     setUserInputs({});
     setErrors({});
     revalidatedConnections.current = 0;
@@ -1275,6 +1283,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     <RuntimeContext.Provider value={{
       runtimes,
       permissions,
+      renameRequests,
       userInputs,
       errors,
       attachSession,
@@ -1293,7 +1302,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       updateSessionOptions,
       sendGoalOperation,
       renameSession,
-      setAgentRenameAllowed,
       setSessionPinned,
       setSessionArchived,
       deleteSession,

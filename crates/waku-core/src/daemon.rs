@@ -19,7 +19,7 @@ use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     AgentAskOutcome, AgentSession, AgentSessionSearchHit, Checkpoint, CheckpointStatus,
-    DriverEvent, Project, ProjectMapStatus, ProviderKind, ProviderModelOption,
+    DriverEvent, PermissionOption, Project, ProjectMapStatus, ProviderKind, ProviderModelOption,
     ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace,
     TurnStatus, UserInputQuestion, detail_prefix_signature,
 };
@@ -2684,7 +2684,7 @@ impl Backend for WakuBackend {
                     sender, task_id, thread_id, provider, prompt, delivery, events,
                 )
             }
-            Command::AgentRenameSelf { title } => self.agent_rename_self(agent, &title),
+            Command::AgentRenameSelf { title } => self.agent_rename_self(agent, &title, &events),
             Command::AgentReadSession {
                 task_id,
                 thread_id,
@@ -2701,10 +2701,24 @@ impl Backend for WakuBackend {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
             }
             command => {
-                // Daemon-owned `agentAsk` requests resolve here — their
-                // request ids never reached the provider, so the driver has
-                // nothing parked under them.
-                if self.agent.resolve_user_input(session_id, &command) {
+                // Daemon-owned `agentAsk`/`agentRenameSelf` requests resolve
+                // here — their request ids never reached the provider, so
+                // the driver has nothing parked under them. Every attached
+                // client hears the settle so cards answered elsewhere drop.
+                let settled = if self.agent.resolve_user_input(session_id, &command) {
+                    match &command {
+                        Command::RespondUserInput { request_id, .. }
+                        | Command::ClarifyUserInput { request_id, .. }
+                        | Command::CancelUserInput { request_id } => Some(request_id.clone()),
+                        _ => None,
+                    }
+                } else {
+                    self.agent.resolve_rename(session_id, &command)
+                };
+                if let Some(request_id) = settled {
+                    if let Ok(wire) = event_to_wire(DriverEvent::RequestSettled { request_id }) {
+                        let _ = events.send(wire);
+                    }
                     return Ok(ResponsePayload::Ack);
                 }
                 // Quarantined transfer sessions still take interactive
@@ -3830,27 +3844,109 @@ impl WakuBackend {
         Ok(())
     }
 
+    /// A scoped `rename` either applies outright — the task holds a stored
+    /// grant — or parks a permission request on the session until the user
+    /// answers. The request survives the turn that raised it: it is parked
+    /// on the session, not the turn, so a folded turn cannot hide it.
     fn agent_rename_self(
         &self,
         agent: Option<Uuid>,
         title: &str,
+        events: &EventSink,
     ) -> anyhow::Result<ResponsePayload> {
         let caller =
             agent.ok_or_else(|| anyhow!("agent rename requires a scoped task credential"))?;
-        let mut state = self.task_state.lock();
-        let session = state
-            .session_mut(caller)
-            .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
-        if !session.agent_rename_allowed {
-            bail!("this task has not granted its agent permission to rename it");
-        }
         if title.trim().is_empty() {
             bail!("a task title cannot be empty");
         }
-        if session.set_title(title) {
-            self.task_store.save(&mut state)?;
+        {
+            let mut state = self.task_state.lock();
+            let session = state
+                .session_mut(caller)
+                .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
+            if session.agent_rename_allowed {
+                if session.set_title(title) {
+                    self.task_store.save(&mut state)?;
+                }
+                return Ok(ResponsePayload::Ack);
+            }
         }
-        Ok(ResponsePayload::Ack)
+        let runtime_id = self
+            .sessions
+            .lock()
+            .get(&caller)
+            .map(|entry| entry.runtime_id)
+            .ok_or_else(|| anyhow!("task {caller} has no running runtime to show the request"))?;
+        let current = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == caller)
+            .map(|session| session.title.clone())
+            .unwrap_or_default();
+        let request_id = format!(
+            "{}{}",
+            waku_protocol::AGENT_RENAME_REQUEST_PREFIX,
+            Uuid::new_v4()
+        );
+        let (title_text, title_i18n) = localized!("session.agent_rename_request", title = title);
+        let (detail_text, detail_i18n) =
+            localized!("session.agent_rename_request_from", current = current);
+        let wire = event_to_wire(DriverEvent::Permission {
+            request_id: request_id.clone(),
+            title: title_text,
+            title_i18n: Some(title_i18n),
+            detail: detail_text,
+            detail_i18n: Some(detail_i18n),
+            options: vec![
+                PermissionOption::keyed("once", localized!("session.agent_rename_once"), true),
+                PermissionOption::keyed("always", localized!("session.agent_rename_always"), true),
+                PermissionOption::keyed("deny", localized!("common.deny"), false),
+            ],
+        })?;
+        let (settled, settle_rx) = crossbeam_channel::bounded(1);
+        // The card holds one request — a parallel rename would hide the
+        // first behind it and park forever, so the second is refused.
+        if !self
+            .agent
+            .try_park_rename(caller, request_id.clone(), settled)
+        {
+            bail!("task {caller} already has a rename request waiting on the user");
+        }
+        let events = events.for_session(caller, runtime_id);
+        if let Err(error) = events.send(wire) {
+            self.agent.remove_rename(caller, &request_id);
+            return Err(error);
+        }
+        // Parked like a provider request: the user's response resolves it —
+        // from any client — and an exited process or torn-down session
+        // resolves it unanswered. A finished turn does not.
+        let option = settle_rx.recv().unwrap_or_default();
+        self.agent.remove_rename(caller, &request_id);
+        // Clients that never saw the answer still drop the card.
+        let _ = events.send(event_to_wire(DriverEvent::RequestSettled { request_id })?);
+        match option.as_deref() {
+            Some("once") | Some("always") => {
+                let mut state = self.task_state.lock();
+                let session = state
+                    .session_mut(caller)
+                    .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
+                // Set the title first — `granted || set_title` would skip the
+                // rename entirely on an "always" answer.
+                let renamed = session.set_title(title);
+                let granted = option.as_deref() == Some("always") && !session.agent_rename_allowed;
+                if granted {
+                    session.agent_rename_allowed = true;
+                }
+                if renamed || granted {
+                    self.task_store.save(&mut state)?;
+                }
+                Ok(ResponsePayload::Ack)
+            }
+            Some(_) => bail!("the rename to {title:?} was declined"),
+            None => bail!("the rename request went unanswered"),
+        }
     }
 
     /// The settings surface is gated separately from task creation and only
@@ -7640,10 +7736,17 @@ mod tests {
     fn agent_rename_requires_own_task_grant_and_persists_title() {
         let root = std::env::temp_dir().join(format!("waku-agent-rename-{}", Uuid::new_v4()));
         let (backend, session_id, side_id) = read_scope_test_backend(&root);
-        assert!(backend.agent_rename_self(None, "No caller").is_err());
+        let events = EventSink::detached();
         assert!(
             backend
-                .agent_rename_self(Some(session_id), "Denied")
+                .agent_rename_self(None, "No caller", &events)
+                .is_err()
+        );
+        // No grant and no runtime to host the request card — refused
+        // outright rather than parked where nobody can answer it.
+        assert!(
+            backend
+                .agent_rename_self(Some(session_id), "Denied", &events)
                 .is_err()
         );
         {
@@ -7651,9 +7754,13 @@ mod tests {
             state.session_mut(session_id).unwrap().agent_rename_allowed = true;
             backend.task_store.save(&mut state).unwrap();
         }
-        assert!(backend.agent_rename_self(Some(session_id), " ").is_err());
+        assert!(
+            backend
+                .agent_rename_self(Some(session_id), " ", &events)
+                .is_err()
+        );
         backend
-            .agent_rename_self(Some(session_id), "  My title  ")
+            .agent_rename_self(Some(session_id), "  My title  ", &events)
             .unwrap();
         let state = backend.task_state.lock();
         assert_eq!(
@@ -7683,6 +7790,160 @@ mod tests {
             .unwrap();
         assert_eq!(own.title, "My title");
         assert!(own.agent_rename_allowed);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Without a stored grant the rename parks a permission request on the
+    /// session; the answer — here "always" — applies the title and records
+    /// the grant. A finished turn never drains the wait.
+    #[test]
+    fn an_ungranted_agent_rename_parks_a_request_until_answered() {
+        let root = std::env::temp_dir().join(format!("waku-agent-rename-req-{}", Uuid::new_v4()));
+        let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+        backend.sessions.lock().insert(
+            session_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                provider: ProviderKind::Codex,
+                cwd: root.join("repo"),
+            },
+        );
+        let events = EventSink::detached();
+        std::thread::scope(|scope| {
+            let rename =
+                scope.spawn(|| backend.agent_rename_self(Some(session_id), "Fresh title", &events));
+            let request_id = loop {
+                if let Some(request_id) = backend.agent.parked_rename_request(session_id) {
+                    break request_id;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            assert!(request_id.starts_with(waku_protocol::AGENT_RENAME_REQUEST_PREFIX));
+            // A finished turn does not drain the request — the card outlives
+            // the fold so it stays answerable.
+            backend.agent.note_driver_event(
+                session_id,
+                &DriverEvent::TurnFinished {
+                    success: true,
+                    summary: None,
+                    summary_i18n: None,
+                },
+            );
+            assert!(backend.agent.parked_rename_request(session_id).is_some());
+            assert_eq!(
+                backend.agent.resolve_rename(
+                    session_id,
+                    &Command::Respond {
+                        request_id: request_id.clone(),
+                        option_id: "always".into(),
+                    },
+                ),
+                Some(request_id)
+            );
+            assert!(matches!(rename.join().unwrap(), Ok(ResponsePayload::Ack)));
+        });
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert_eq!(session.title, "Fresh title");
+        assert!(session.agent_rename_allowed);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A declined request fails the call and leaves the title — and the
+    /// grant — untouched.
+    #[test]
+    fn a_declined_agent_rename_leaves_the_title_alone() {
+        let root = std::env::temp_dir().join(format!("waku-agent-rename-deny-{}", Uuid::new_v4()));
+        let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+        backend.sessions.lock().insert(
+            session_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                provider: ProviderKind::Codex,
+                cwd: root.join("repo"),
+            },
+        );
+        let events = EventSink::detached();
+        std::thread::scope(|scope| {
+            let rename =
+                scope.spawn(|| backend.agent_rename_self(Some(session_id), "Nope", &events));
+            let request_id = loop {
+                if let Some(request_id) = backend.agent.parked_rename_request(session_id) {
+                    break request_id;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            backend.agent.resolve_rename(
+                session_id,
+                &Command::Respond {
+                    request_id,
+                    option_id: "deny".into(),
+                },
+            );
+            assert!(rename.join().unwrap().is_err());
+        });
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert_eq!(session.title, AgentSession::DEFAULT_TITLE);
+        assert!(!session.agent_rename_allowed);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A request the runtime underneath died for resolves unanswered — the
+    /// parked CLI call errors out instead of waiting on a card nobody can
+    /// answer.
+    #[test]
+    fn an_agent_rename_unparks_when_the_runtime_dies() {
+        let root = std::env::temp_dir().join(format!("waku-agent-rename-drain-{}", Uuid::new_v4()));
+        let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+        backend.sessions.lock().insert(
+            session_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                provider: ProviderKind::Codex,
+                cwd: root.join("repo"),
+            },
+        );
+        let events = EventSink::detached();
+        std::thread::scope(|scope| {
+            let rename =
+                scope.spawn(|| backend.agent_rename_self(Some(session_id), "Too late", &events));
+            loop {
+                if backend.agent.parked_rename_request(session_id).is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            backend
+                .agent
+                .note_driver_event(session_id, &DriverEvent::ProcessExited);
+            assert!(rename.join().unwrap().is_err());
+        });
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert_eq!(session.title, AgentSession::DEFAULT_TITLE);
+        assert!(!session.agent_rename_allowed);
         let _ = std::fs::remove_dir_all(root);
     }
 

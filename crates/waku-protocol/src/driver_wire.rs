@@ -88,6 +88,12 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "questions": questions,
             }),
         ),
+        DriverEvent::RequestSettled { request_id } => (
+            "requestSettled",
+            json!({
+                "requestId": request_id,
+            }),
+        ),
         DriverEvent::ComputerUseUpdated(state) => (
             "computerUseUpdated",
             serde_json::to_value(ComputerUseWire {
@@ -211,6 +217,17 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::UserInputRequested {
                 request_id: request.request_id,
                 questions: request.questions,
+            }
+        }
+        "requestSettled" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SettledWire {
+                request_id: String,
+            }
+            let settled: SettledWire = serde_json::from_value(payload)?;
+            DriverEvent::RequestSettled {
+                request_id: settled.request_id,
             }
         }
         "computerUseUpdated" => {
@@ -471,6 +488,21 @@ mod tests {
             panic!("an empty snapshot failed its wire round trip");
         };
         assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn request_settled_round_trips_through_the_daemon_wire() {
+        let wire = event_to_wire(DriverEvent::RequestSettled {
+            request_id: "agent-rename-abc".into(),
+        })
+        .unwrap();
+        assert_eq!(wire.kind, "requestSettled");
+        assert_eq!(wire.payload["requestId"], "agent-rename-abc");
+
+        let DriverEvent::RequestSettled { request_id } = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(request_id, "agent-rename-abc");
     }
 
     #[test]

@@ -57,10 +57,24 @@ export interface PendingUserInput {
   }>
 }
 
+/** The request-id prefix the daemon mints for `agentRenameSelf` permission
+ * requests. The daemon owns these: they outlive the turn that raised them,
+ * so clients keep them in a dedicated slot rather than the turn-scoped
+ * `permission`. */
+export const AGENT_RENAME_REQUEST_PREFIX = 'agent-rename-'
+
 export interface RuntimeEventResult {
   session: AgentSession
   permission?: PendingPermission | null
+  /** Daemon-owned rename request: set on `permission` events carrying the
+   * `agent-rename-` prefix, cleared on `processExited` — deliberately not on
+   * `turnFinished`, since the request outlives the turn that raised it. */
+  renameRequest?: PendingPermission | null
   userInput?: PendingUserInput | null
+  /** A daemon-owned request (`agent-ask-`/`agent-rename-` id) resolved —
+   * answered on any client or drained with its runtime. Callers drop the
+   * matching pending card whichever map holds it. */
+  settledRequestId?: string
   settled: boolean
   removeRuntime: boolean
   error?: string
@@ -285,8 +299,8 @@ export function reduceRuntimeEvent(
       break
     case 'permission': {
       const value = asRecord(payload)
-      if (!acceptsTurnOutput(session) || !value || typeof value.requestId !== 'string') break
-      result.permission = {
+      if (!value || typeof value.requestId !== 'string') break
+      const parsed: PendingPermission = {
         requestId: value.requestId,
         title: typeof value.title === 'string' ? value.title : 'Permission required',
         detail: typeof value.detail === 'string' ? value.detail : '',
@@ -296,7 +310,31 @@ export function reduceRuntimeEvent(
           ? value.options.map(asPermissionOption).filter((o) => o !== null)
           : [],
       }
+      // A rename request parks on the session, not the turn — it can
+      // legitimately arrive as the turn ends, so the turn gate does not
+      // apply, and it renders pinned rather than folding away with it.
+      if (parsed.requestId.startsWith(AGENT_RENAME_REQUEST_PREFIX)) {
+        result.renameRequest = parsed
+        session.status = 'waiting'
+        break
+      }
+      if (!acceptsTurnOutput(session)) break
+      result.permission = parsed
       session.status = 'waiting'
+      break
+    }
+    case 'requestSettled': {
+      const value = asRecord(payload)
+      if (value && typeof value.requestId === 'string') {
+        result.settledRequestId = value.requestId
+      }
+      // A `waiting` session with no open turn was only held by a daemon
+      // request — provider permissions can't arrive there. The settle means
+      // the blocker is gone, so drop back to idle rather than hanging on a
+      // status nothing else will clear.
+      if (session.status === 'waiting' && !activeTurn(session)) {
+        session.status = 'idle'
+      }
       break
     }
     case 'userInputRequested': {
@@ -372,6 +410,7 @@ export function reduceRuntimeEvent(
         clock,
       )
       result.permission = null
+      result.renameRequest = null
       result.userInput = null
       result.removeRuntime = true
       break

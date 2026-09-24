@@ -3640,6 +3640,13 @@ pub enum DriverEvent {
         request_id: String,
         questions: Vec<UserInputQuestion>,
     },
+    /// A daemon-owned request (`agent-ask-`, `agent-rename-` ids) settled —
+    /// answered on any client or drained with its runtime. Clients drop the
+    /// matching pending card no matter which client answered it, and unlike
+    /// provider requests this clears independently of turn state.
+    RequestSettled {
+        request_id: String,
+    },
     ComputerUseUpdated(crate::computer_use::ComputerUseState),
     /// The provider accepted a steering message into the running turn.
     /// `sent_by_task` carries the same provenance as

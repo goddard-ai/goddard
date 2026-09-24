@@ -3065,12 +3065,14 @@ commands.rename_description:
   en: Rename this task with /rename followed by a title
 commands.rename_no_session:
   en: Select a task to rename
-session.allow_agent_rename:
-  en: Allow agent rename
-session.agent_rename_allowed:
-  en: Agent rename allowed
-session.agent_rename_hint:
-  en: Toggle permission for this task's agent to rename itself
+session.agent_rename_request:
+  en: Rename this task to “{title}”?
+session.agent_rename_request_from:
+  en: The agent wants to rename this task from “{current}”.
+session.agent_rename_once:
+  en: Rename
+session.agent_rename_always:
+  en: Always allow
 commands.compact_description:
   en: Compact the conversation context
 commands.incognito_description:
