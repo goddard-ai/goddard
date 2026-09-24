@@ -1724,6 +1724,22 @@ fn devin_model_candidates(
     candidates
 }
 
+fn devin_default_reasoning_effort(option: &SessionConfigOption, requested: &str) -> Option<String> {
+    crate::model_catalog::fold_packed_aliases(models_from_session_config_options(
+        std::slice::from_ref(option),
+    ))
+    .into_iter()
+    .find(|model| model.id.eq_ignore_ascii_case(requested))
+    .and_then(|model| {
+        model.default_reasoning_effort.or_else(|| {
+            model
+                .reasoning_efforts
+                .first()
+                .map(|option| option.id.clone())
+        })
+    })
+}
+
 fn resolve_devin_model(
     option: Option<&SessionConfigOption>,
     requested: &str,
@@ -1735,6 +1751,12 @@ fn resolve_devin_model(
         return (!is_devin_auto_model(requested)).then(|| requested.to_owned());
     };
     let values = session_config_select_values(option);
+    let default_effort = if reasoning_effort.is_none() {
+        devin_default_reasoning_effort(option, requested)
+    } else {
+        None
+    };
+    let reasoning_effort = reasoning_effort.or(default_effort.as_deref());
     for candidate in devin_model_candidates(requested, reasoning_effort, service_tier) {
         if let Some(value) = values
             .iter()

@@ -886,7 +886,7 @@ fn merge_model_options(target: &mut Vec<ProviderModelOption>, source: &[Provider
 /// listed folds only under a synthesized base its stripped slug shares with a
 /// sibling, or whose slug still looks like a model (a digit or a second word);
 /// anything else — a name part mistaken for a trait — stays its own row.
-fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderModel> {
+pub(crate) fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderModel> {
     let ids: Vec<String> = listings.iter().map(|listing| listing.id.clone()).collect();
     // (base id, effort, fast) — `synthetic` when the base is inferred rather
     // than listed.
