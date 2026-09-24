@@ -3428,7 +3428,7 @@ impl Waku {
             TranscriptRowKind::ChangedFiles(turn_id)
                 if self.blocked_checkpoint_turn(session.id) == Some(turn_id) =>
             {
-                self.render_card_checkpoint_pending_row(&theme)
+                self.render_card_checkpoint_pending_row(turn_id, &theme)
             }
             // Folded out of the kinds list entirely; the fallback renders
             // nothing.

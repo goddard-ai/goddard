@@ -405,6 +405,41 @@ pub(super) fn undelivered_turn_resend(
     ))
 }
 
+/// The parked "continue" nudge `hidden_continue` enqueues — the only hidden
+/// queue entry the client writes. Naming it lets repeat presses dedupe and
+/// lets the queue card label the row instead of dropping it.
+pub(super) fn queued_message_is_continue(message: &QueuedMessage) -> bool {
+    message.hidden && message.content.trim() == CONTINUE_PROMPT
+}
+
+/// What the no-draft submit affordance can do for a stopped turn: send the
+/// nudge, show it already parked behind a gate, or stay quiet because a
+/// queued follow-up resumes the session on its own.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ContinueState {
+    Ready,
+    Armed,
+    Covered,
+}
+
+pub(super) fn continue_state(session: &AgentSession) -> ContinueState {
+    if session
+        .queued_messages
+        .iter()
+        .any(queued_message_is_continue)
+    {
+        ContinueState::Armed
+    } else if session
+        .queued_messages
+        .iter()
+        .any(|message| !message.hidden)
+    {
+        ContinueState::Covered
+    } else {
+        ContinueState::Ready
+    }
+}
+
 pub(super) fn composer_submit_action(
     session: Option<&AgentSession>,
     preparing: bool,
@@ -4604,22 +4639,66 @@ impl Waku {
 
     /// The pending follow-up queue between the transcript and the composer: a
     /// single card tucked against the composer's top edge, one row per queued
-    /// message. A row pulls its text back into the composer on click and
-    /// carries steer/remove/more controls on the right.
+    /// message plus a labelled row for the parked continue nudge. A follow-up
+    /// row pulls its text back into the composer on click and carries
+    /// steer/remove/more controls on the right; the nudge row only removes.
     pub(super) fn render_queued_messages(&self, cx: &mut Context<Self>) -> Option<Div> {
         let session_id = self.state.selected_session?;
         let session = self.selected_session()?;
-        if session.queued_messages.iter().all(|message| message.hidden) {
+        if !session
+            .queued_messages
+            .iter()
+            .any(|message| !message.hidden || queued_message_is_continue(message))
+        {
             return None;
         }
         let theme = Theme::current(cx);
         let steerable = self.session_can_steer(session);
         let mut list = div().flex().flex_col().py(px(4.0));
         for (index, message) in session.queued_messages.iter().enumerate() {
+            let message_id = message.id;
+            // The parked continue nudge is client work too: it renders as a
+            // labelled row with a remove control instead of hiding, so the
+            // armed composer button has a visible record and a cancel path.
+            if queued_message_is_continue(message) {
+                let remove_button =
+                    self.queued_message_remove_button(session_id, message_id, &theme, cx);
+                list = list.child(
+                    div()
+                        .id(SharedString::from(format!("queued-message-{message_id}")))
+                        .min_h(px(30.0))
+                        .overflow_hidden()
+                        .when(index > 0, |row| {
+                            row.border_t(hairline()).border_color(theme.separator)
+                        })
+                        .pl(px(12.0))
+                        .pr(px(6.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(9.0))
+                        .child(div().h(px(30.0)).flex().items_center().child(icon(
+                            "icons/play.svg",
+                            12.0,
+                            theme.text_tertiary,
+                        )))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .py(px(6.0))
+                                .line_height(sp(18.0))
+                                .truncate()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("composer.continue")),
+                        )
+                        .child(div().h(px(30.0)).flex().items_center().child(remove_button)),
+                );
+                continue;
+            }
             if message.hidden {
                 continue;
             }
-            let message_id = message.id;
             // A daemon-owned agent prompt is a parked delivery, not a draft:
             // it renders with the agent badge, and the only local action is
             // cancelling it — edit and steer stay client-owned.
@@ -4774,40 +4853,9 @@ impl Waku {
                             .gap(px(2.0))
                             .children(steer_control)
                             .child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "queued-message-remove-{message_id}"
-                                    )))
-                                    .w(px(24.0))
-                                    .h(px(24.0))
-                                    .rounded(px(8.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .cursor_default()
-                                    .tab_index(0)
-                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                    .hover(|element| element.bg(theme.overlay_strong))
-                                    .active(|element| element.opacity(0.8))
-                                    .child(icon("icons/trash.svg", 12.0, theme.text_secondary))
-                                    .tooltip(Tooltip::text(tr!("composer.remove_followup")))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.remove_queued_message(session_id, message_id, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, _, cx| {
-                                            if matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            ) {
-                                                this.remove_queued_message(
-                                                    session_id, message_id, cx,
-                                                );
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
+                                self.queued_message_remove_button(
+                                    session_id, message_id, &theme, cx,
+                                ),
                             )
                             .child(more_control),
                     )
@@ -4849,6 +4897,44 @@ impl Waku {
                     ),
             ),
         )
+    }
+
+    /// A queued row's remove control — shared by follow-ups and the parked
+    /// continue nudge, which carries no edit or steer affordance.
+    fn queued_message_remove_button(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        div()
+            .id(SharedString::from(format!(
+                "queued-message-remove-{message_id}"
+            )))
+            .w(px(24.0))
+            .h(px(24.0))
+            .rounded(px(8.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .tab_index(0)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|element| element.bg(theme.overlay_strong))
+            .active(|element| element.opacity(0.8))
+            .child(icon("icons/trash.svg", 12.0, theme.text_secondary))
+            .tooltip(Tooltip::text(tr!("composer.remove_followup")))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.remove_queued_message(session_id, message_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.remove_queued_message(session_id, message_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
     }
 
     /// The session the composer's submit affordances answer to: the big-
@@ -5509,45 +5595,80 @@ impl Waku {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.submit_composer_card_draft(&send_route, cx);
                             })),
-                        ComposerSubmitAction::Continue => div()
-                            .id(controls.chip_id("send-or-stop"))
-                            .w(px(28.0))
-                            .h(px(28.0))
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(if can_continue {
-                                theme.inverse
-                            } else {
-                                theme.overlay_strong
-                            })
-                            .when(can_continue, |element| {
-                                element
-                                    .cursor_default()
-                                    .hover(|element| element.opacity(0.9))
-                                    .active(|element| element.opacity(0.8))
-                            })
-                            .child(icon(
-                                "icons/play.svg",
-                                13.0,
-                                if can_continue {
-                                    theme.on_inverse
+                        ComposerSubmitAction::Continue => {
+                            let continue_state =
+                                session.map_or(ContinueState::Ready, continue_state);
+                            let armed = continue_state != ContinueState::Ready;
+                            let live = !armed && can_continue;
+                            let tooltip = match continue_state {
+                                ContinueState::Armed => Some(
+                                    if session_id
+                                        .is_some_and(|id| self.ending_checkpoint_pending(id))
+                                    {
+                                        tr!("composer.continue_after_check")
+                                    } else {
+                                        tr!("composer.continue_queued")
+                                    },
+                                ),
+                                ContinueState::Covered => None,
+                                ContinueState::Ready => Some(if no_providers {
+                                    tr!("composer.no_providers")
                                 } else {
-                                    theme.text_ghost
-                                },
-                            ))
-                            .tooltip(Tooltip::text(if no_providers {
-                                tr!("composer.no_providers")
-                            } else {
-                                tr!("composer.continue")
-                            }))
-                            .on_click(cx.listener(move |this, _, _, cx| match &continue_route {
-                                ComposerCard::Main => this.continue_interrupted_session(cx),
-                                ComposerCard::SideChat { session_id, .. } => {
-                                    this.continue_interrupted_session_to(*session_id, cx)
-                                }
-                            })),
+                                    tr!("composer.continue")
+                                }),
+                            };
+                            div()
+                                .id(controls.chip_id("send-or-stop"))
+                                .w(px(28.0))
+                                .h(px(28.0))
+                                .rounded_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(if armed || can_continue {
+                                    theme.inverse
+                                } else {
+                                    theme.overlay_strong
+                                })
+                                .when(live, |element| {
+                                    element
+                                        .cursor_default()
+                                        .hover(|element| element.opacity(0.9))
+                                        .active(|element| element.opacity(0.8))
+                                })
+                                .child(if armed {
+                                    motion::spin_slow(icon(
+                                        "icons/loader-circle.svg",
+                                        13.0,
+                                        theme.on_inverse,
+                                    ))
+                                } else {
+                                    icon(
+                                        "icons/play.svg",
+                                        13.0,
+                                        if can_continue {
+                                            theme.on_inverse
+                                        } else {
+                                            theme.text_ghost
+                                        },
+                                    )
+                                    .into_any_element()
+                                })
+                                .when_some(tooltip, |element, text| {
+                                    element.tooltip(Tooltip::text(text))
+                                })
+                                .when(live, |element| {
+                                    element.on_click(cx.listener(move |this, _, _, cx| {
+                                        match &continue_route {
+                                            ComposerCard::Main => {
+                                                this.continue_interrupted_session(cx)
+                                            }
+                                            ComposerCard::SideChat { session_id, .. } => this
+                                                .continue_interrupted_session_to(*session_id, cx),
+                                        }
+                                    }))
+                                })
+                        }
                     }),
             )
     }

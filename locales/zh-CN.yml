@@ -1210,6 +1210,8 @@ composer.stop: 停止
 composer.stop_confirm: 再按一次 Escape 停止
 composer.steer_current: 引导当前回合
 composer.continue: 继续
+composer.continue_queued: 已排队继续
+composer.continue_after_check: 更改检查完成后将继续
 composer.starting_agent: 正在启动智能体…
 composer.suggestions: 输入建议
 composer.loading_suggestions: 正在加载建议…
@@ -1646,6 +1648,7 @@ transcript.worked_for: 用时 %{duration}
 transcript.you_stopped_after: 你在工作 %{duration} 后停止了
 transcript.working_for: 工作中 · %{duration}
 transcript.checking_changes: 正在检查更改…
+transcript.checking_changes_detail: 排队的消息将在此完成后发送
 transcript.thinking: 正在思考
 transcript.thought_for: 思考用时 %{duration}
 transcript.changed_file: 更改了 %{count} 个文件

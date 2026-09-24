@@ -3068,11 +3068,25 @@ impl Waku {
                         div()
                             .min_w_0()
                             .flex_1()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_secondary)
-                            .child(SharedString::from(tr!("transcript.checking_changes"))),
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(sp(12.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text_secondary)
+                                    .child(SharedString::from(tr!("transcript.checking_changes"))),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from(tr!(
+                                        "transcript.checking_changes_detail"
+                                    ))),
+                            ),
                     ),
             )
             .into_any_element()

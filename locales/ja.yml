@@ -1236,6 +1236,8 @@ composer.stop: 停止
 composer.stop_confirm: もう一度 Escape を押すと停止します
 composer.steer_current: 現在のターンに指示を追加
 composer.continue: 続行
+composer.continue_queued: 続行をキューに追加しました
+composer.continue_after_check: 変更の確認が終わると再開します
 composer.starting_agent: エージェントを起動中…
 composer.suggestions: 入力候補
 composer.loading_suggestions: 入力候補を読み込み中…
@@ -1691,6 +1693,7 @@ transcript.worked_for: 作業時間 %{duration}
 transcript.you_stopped_after: "%{duration} 後にタスクを停止しました"
 transcript.working_for: 作業中 · %{duration}
 transcript.checking_changes: 変更を確認中…
+transcript.checking_changes_detail: キューに入ったメッセージは完了後に送信されます
 transcript.thinking: 思考中
 transcript.thought_for: 思考時間 %{duration}
 transcript.changed_file: "%{count} 個のファイルを変更"

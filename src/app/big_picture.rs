@@ -1567,7 +1567,7 @@ impl Waku {
             TranscriptRowKind::ChangedFiles(turn_id)
                 if self.blocked_checkpoint_turn(session.id) == Some(turn_id) =>
             {
-                self.render_card_checkpoint_pending_row(&theme)
+                self.render_card_checkpoint_pending_row(turn_id, &theme)
             }
             // Folded out of `card_kinds` entirely; the fallback renders nothing.
             TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {
@@ -1740,9 +1740,17 @@ impl Waku {
 
     /// A card's "Checking for changes…" row while the settled turn's
     /// checkpoint capture holds a queued send — the lane's pending card at
-    /// card scale. Side-chat panels draw the same one.
-    pub(super) fn render_card_checkpoint_pending_row(&self, theme: &Theme) -> AnyElement {
+    /// card scale. Side-chat panels draw the same one. The tooltip carries
+    /// the detail line the full card shows outright.
+    pub(super) fn render_card_checkpoint_pending_row(
+        &self,
+        turn_id: Uuid,
+        theme: &Theme,
+    ) -> AnyElement {
         div()
+            .id(SharedString::from(format!(
+                "card-checkpoint-pending-{turn_id}"
+            )))
             .h(px(22.0))
             .flex()
             .items_center()
@@ -1760,6 +1768,7 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(SharedString::from(tr!("transcript.checking_changes"))),
             )
+            .tooltip(Tooltip::text(tr!("transcript.checking_changes_detail")))
             .into_any_element()
     }
 

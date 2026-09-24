@@ -4367,17 +4367,22 @@ impl Waku {
     }
 
     /// The pending checkpoint turn the transcript surfaces — only once a
-    /// visible queued follow-up is actually waiting on the capture. A
-    /// capture that blocks nothing stays silent: the "Checking for
-    /// changes…" card explains why a send has not started, it is not a
-    /// progress report for background work.
+    /// client-owned queue entry is actually waiting on the capture (the
+    /// hidden continue nudge counts; daemon-owned prompts answer to the
+    /// daemon's own drain). A capture that blocks nothing stays silent: the
+    /// "Checking for changes…" card explains why a send has not started, it
+    /// is not a progress report for background work.
     pub(super) fn blocked_checkpoint_turn(&self, session_id: Uuid) -> Option<Uuid> {
         let session = self
             .state
             .sessions
             .iter()
             .find(|session| session.id == session_id)?;
-        if session.queued_messages.iter().all(|message| message.hidden) {
+        if session
+            .queued_messages
+            .iter()
+            .all(|message| message.is_agent_owned())
+        {
             return None;
         }
         self.pending_checkpoint_turn(session_id)
@@ -5875,6 +5880,13 @@ impl Waku {
             return None;
         }
         let resend = composer::undelivered_turn_resend(session);
+        // A client-owned entry already queued resumes the session on its
+        // own — a hidden nudge behind it would fire a redundant invisible
+        // turn once the queue drains.
+        let nudge_covered = session
+            .queued_messages
+            .iter()
+            .any(|message| !message.is_agent_owned());
         Some(match resend {
             Some((turn_id, message_id, mut submission)) => {
                 // The dead turn's annotations move to the resend so an
@@ -5890,6 +5902,7 @@ impl Waku {
                 }
                 submission
             }
+            None if nudge_covered => return None,
             None => ComposerSubmission::hidden_continue(),
         })
     }
@@ -6116,6 +6129,24 @@ impl Waku {
     ) {
         submission.prompt = submission.prompt.trim().to_owned();
         if submission.prompt.is_empty() {
+            return;
+        }
+        // The continue nudge stacks invisibly — one parked is already armed,
+        // so a repeat press (or the restart-recovery path) adds no second.
+        if submission.hidden
+            && submission.prompt == CONTINUE_PROMPT
+            && self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .is_some_and(|session| {
+                    session
+                        .queued_messages
+                        .iter()
+                        .any(composer::queued_message_is_continue)
+                })
+        {
             return;
         }
         // The annotation header already lives inside `prompt`; the structured

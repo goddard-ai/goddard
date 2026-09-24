@@ -1,10 +1,10 @@
 use super::autocomplete::session_mention_candidate;
 use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
-    ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, atom_display_content,
-    atom_payload_content, composer_submit_action, dropped_file_mention, merged_submission,
-    pasted_text_preview, remap_marker_seats, splice_inline_atoms, visible_branch_entries,
-    workspace_subject_for,
+    ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, ContinueState,
+    atom_display_content, atom_payload_content, composer_submit_action, continue_state,
+    dropped_file_mention, merged_submission, pasted_text_preview, queued_message_is_continue,
+    remap_marker_seats, splice_inline_atoms, visible_branch_entries, workspace_subject_for,
 };
 use super::model_picker::{
     PickerRow, PolicyRowId, next_picker_highlight, picker_rows, supports_reasoning_default_reset,
@@ -21,9 +21,9 @@ use super::sidebar::SidebarRow;
 use super::streaming::session_accepts_steer_result;
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
-    ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
-    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationLocation, PendingUserInput,
-    SessionNavigation, SettingsHistoryEntry, SettingsNavigation, StreamDeltaKind,
+    CONTINUE_PROMPT, ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress,
+    EscapeStopTarget, NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationLocation,
+    PendingUserInput, SessionNavigation, SettingsHistoryEntry, SettingsNavigation, StreamDeltaKind,
     TranscriptLanding, TranscriptRowKind::*, TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT,
     WorkingIndicatorFade, active_navigation_turn_index, activity_group_is_live,
     activity_header_title, append_text_delta_to_session, assistant_response_footer,
@@ -3587,6 +3587,46 @@ fn continue_resends_a_prompt_the_provider_never_saw() {
     session.finish_active_turn(TurnStatus::Interrupted);
     assert!(undelivered_turn_resend(&session).is_none());
     let _ = confirmed;
+}
+
+/// The composer's Continue affordance mirrors the queue: a parked nudge arms
+/// it, a queued follow-up resumes the session on its own, and an empty queue
+/// leaves it ready to send.
+#[test]
+fn continue_state_tracks_the_queued_resume() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("do the thing");
+    session.finish_active_turn(TurnStatus::Interrupted);
+    session.status = SessionStatus::Idle;
+    assert_eq!(continue_state(&session), ContinueState::Ready);
+
+    // A visible follow-up drains into a turn by itself — a hidden nudge
+    // behind it would only stack a redundant invisible turn.
+    session
+        .queued_messages
+        .push(QueuedMessage::new("follow up"));
+    assert_eq!(continue_state(&session), ContinueState::Covered);
+
+    // The parked continue nudge arms the button over everything else.
+    let mut nudge = QueuedMessage::new(CONTINUE_PROMPT);
+    nudge.hidden = true;
+    session.queued_messages.push(nudge);
+    assert_eq!(continue_state(&session), ContinueState::Armed);
+}
+
+/// Only the client's hidden nudge counts as a queued continue — a visible
+/// message with the same text is user input, and other hidden entries are
+/// not the nudge.
+#[test]
+fn queued_message_is_continue_names_only_the_hidden_nudge() {
+    let mut nudge = QueuedMessage::new(CONTINUE_PROMPT);
+    assert!(!queued_message_is_continue(&nudge));
+    nudge.hidden = true;
+    assert!(queued_message_is_continue(&nudge));
+
+    let mut other = QueuedMessage::new(format!("{CONTINUE_PROMPT} please"));
+    other.hidden = true;
+    assert!(!queued_message_is_continue(&other));
 }
 
 /// A daemon restart auto-resumes only a session whose turn the provider
