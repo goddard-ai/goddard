@@ -238,11 +238,12 @@ pub(super) struct GitPanelOperation {
     /// The spinner toast raised on the operation's behalf. `finish_git_panel_op`
     /// settles it to the outcome, or retires it when a modal takes over.
     pub toast_id: Option<u64>,
-    /// This operation came from the "Sync branch…" command, so pull conflicts
-    /// resolve in a fresh chat on the checkout.
+    /// This operation came from the "Sync branch…" command — its pull chains
+    /// a push, and pull conflicts resolve in a fresh chat on the checkout.
     pub sync_branch: bool,
-    /// The branch picked by that command, when this is its initial pull. A
-    /// "Merge instead" retry inherits the origin marker but not this name.
+    /// The branch picked by that command, when this is its initial pull or
+    /// the push a clean one chains. A "Merge instead" retry inherits the
+    /// origin marker but not this name.
     pub sync_branch_name: Option<String>,
     /// The base a `PushingBase`/`SyncingBase` op targets — the failure
     /// modal quotes it back when the run ends badly.
@@ -1245,6 +1246,49 @@ impl Waku {
         .detach();
     }
 
+    /// A "Sync branch…" pull's second half: push the commits the upstream
+    /// still lacks. The push inherits the picker's origin markers — and its
+    /// spinner toast — so the run reports like the pull that started it.
+    fn start_sync_branch_push(
+        &mut self,
+        workspace: PathBuf,
+        branch: Option<String>,
+        toast_id: Option<u64>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((op_id, workspace)) =
+            self.begin_workspace_op(GitPanelPending::Pushing, workspace, cx)
+        else {
+            // Unreachable — the pull's op was just retired — but the spinner
+            // still has to die if the slot is somehow held.
+            self.dismiss_operation_toast(toast_id);
+            return;
+        };
+        if let Some(operation) = self.git_panel_operation.as_mut() {
+            operation.sync_branch = true;
+            operation.sync_branch_name = branch;
+            operation.toast_id = toast_id;
+        }
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            self.finish_git_panel_op(
+                op_id,
+                Err(anyhow::anyhow!(tr!("errors.daemon_disconnected"))),
+                cx,
+            );
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { client.request(WorkspaceOperation::Push { cwd: workspace }) })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                waku.finish_git_panel_op(op_id, result, cx);
+            });
+        })
+        .detach();
+    }
+
     /// `git pull --rebase` — or `--no-rebase` when the conflict modal chose
     /// Merge instead. A clean pull just refreshes; a conflicted one leaves
     /// the integration in progress and opens the modal.
@@ -1933,7 +1977,24 @@ impl Waku {
                             .update(cx, |input, cx| input.set_content("", cx));
                     }
                 }
-                if let Some(branch) = &op.sync_branch_name {
+                // A "Sync branch…" pull is half the sync — chain the push so
+                // commits the upstream lacks get published too. The push
+                // inherits the picker's spinner and settles it when it lands.
+                let sync_push = op.sync_branch
+                    && matches!(
+                        result,
+                        WorkspaceResult::Pull {
+                            outcome: PullOutcome::Clean | PullOutcome::UpToDate { .. },
+                        }
+                    );
+                if sync_push {
+                    self.start_sync_branch_push(
+                        op.workspace.clone(),
+                        op.sync_branch_name.clone(),
+                        op.toast_id,
+                        cx,
+                    );
+                } else if let Some(branch) = &op.sync_branch_name {
                     let (message, tone) = match result {
                         WorkspaceResult::Pull {
                             outcome: PullOutcome::UpToDate { upstream },

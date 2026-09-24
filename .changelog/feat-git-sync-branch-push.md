@@ -1,0 +1,1 @@
+- The "Sync branch…" picker (⌘S) now pushes after it pulls: commits the branch has that its upstream lacks are published too, so a synced branch ends up even with its remote in both directions.

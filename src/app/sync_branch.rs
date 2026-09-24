@@ -1,5 +1,6 @@
-//! The `⌘S` "Sync branch…" modal: pick a tracked branch's checkout and pull
-//! it up to its upstream.
+//! The `⌘S` "Sync branch…" modal: pick a tracked branch's checkout and sync
+//! it with its upstream — pull what the branch lacks, then push what the
+//! upstream lacks.
 //!
 //! The chord still belongs to SaveFile — the save handler falls through to
 //! `open_sync_branch` whenever no file-editor surface is active, so saving an
@@ -9,8 +10,10 @@
 //! checkout leads the list as "Current branch". Confirming runs
 //! `PullUpstream` through the shared panel-operation slot — `pull --rebase`,
 //! or `--no-rebase` when the merge setting is on — then closes the picker and
-//! shows progress in a toast. A conflict hands off to the usual conflict
-//! modal, whose Resolve in chat opens a fresh chat rooted at the syncing folder.
+//! shows progress in a toast. A clean or already-current pull chains a
+//! `Push` that inherits the spinner and settles it when it lands. A conflict
+//! hands off to the usual conflict modal, whose Resolve in chat opens a
+//! fresh chat rooted at the syncing folder.
 
 use gpui::{KeyBinding, deferred};
 
