@@ -616,7 +616,7 @@ impl ComposerSubmission {
             .unwrap_or(&self.prompt)
             .trim();
         if !visible.is_empty() {
-            // Atom spans read as their chip labels — `session:title`,
+            // Atom spans read as their chip labels — the session title,
             // `Pasted text (N lines)` — the same words the bubble shows.
             return waku_protocol::model::atom_visible_text(visible);
         }
@@ -5439,7 +5439,7 @@ impl Waku {
                         if this.composer_inline_atoms.pop().is_some()
                             || this.composer_attachments.pop().is_some()
                         {
-                            this.sync_inline_atom_labels(cx);
+                            this.sync_inline_atoms(cx);
                             this.schedule_composer_draft_save(cx);
                             cx.notify();
                         }

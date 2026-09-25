@@ -553,7 +553,7 @@ fn session_attachments_submit_as_task_references() {
     let attachments = vec![MessageAttachment {
         session_id: Some(session_id),
         name: "Fix flake".to_owned(),
-        ..file_attachment("session:unused")
+        ..file_attachment("unused")
     }];
     assert_eq!(
         merged_submission("ask it", &attachments).as_deref(),
@@ -635,13 +635,13 @@ fn atom_display_content_keeps_chips_and_payloads_round_trip() {
     assert_eq!(
         display,
         format!(
-            "fix {OPEN}Pasted text (2 lines){END} and {OPEN}{id}session:Big refactor{END} done",
+            "fix {OPEN}Pasted text (2 lines){END} and {OPEN}{id}Big refactor{END} done",
             id = encode_atom_session_id(session_id),
         )
     );
     assert_eq!(
         atom_visible_text(&display),
-        "fix Pasted text (2 lines) and session:Big refactor done"
+        "fix Pasted text (2 lines) and Big refactor done"
     );
 
     // The wire atoms carry the payload an edit splices back inline.
@@ -649,7 +649,7 @@ fn atom_display_content_keeps_chips_and_payloads_round_trip() {
     assert_eq!(wire[0].label, "Pasted text (2 lines)");
     assert_eq!(wire[0].payload, "first\nblock");
     assert_eq!(wire[0].session_id, None);
-    assert_eq!(wire[1].label, "session:Big refactor");
+    assert_eq!(wire[1].label, "Big refactor");
     assert_eq!(wire[1].session_id, Some(session_id));
     assert_eq!(
         atom_payload_content(&display, &wire),
@@ -668,8 +668,8 @@ fn atom_display_content_escapes_markdown_in_labels() {
     };
     let display = atom_display_content(&format!("{M}"), &[atom]);
     // The title's markdown-active characters stay literal inside the span.
-    assert!(display.contains("session:use \\`x\\` \\*now\\*"));
-    assert_eq!(atom_visible_text(&display), "session:use `x` *now*");
+    assert!(display.contains("use \\`x\\` \\*now\\*"));
+    assert_eq!(atom_visible_text(&display), "use `x` *now*");
     // A paste category rides the label the composer showed.
     let mut bug = pasted_atom(0, "stack trace\nmore");
     bug.paste_category = Some("Bug report".to_owned());

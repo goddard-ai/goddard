@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -596,13 +597,58 @@ pub struct ContentSplice {
 }
 
 /// The sentinel an inline atom leaves in the field — the interlinear
-/// annotation anchor. The owner pushes one label per marker through
-/// [`TextInput::set_inline_atom_labels`] and the painted text substitutes
-/// the marker for it, styled as a mention. Content indices still hold the
-/// raw three bytes, so the atom deletes atomically — one backspace takes the
-/// whole label — and every layout query translates through
+/// annotation anchor. The owner pushes one [`InlineAtom`] per marker through
+/// [`TextInput::set_inline_atoms`] and the painted text substitutes the
+/// marker for its label, styled as a mention. Content indices still hold
+/// the raw three bytes, so the atom deletes atomically — one backspace
+/// takes the whole chip — and every layout query translates through
 /// [`TextInput::display_index`]/[`TextInput::content_index`].
 pub const INLINE_ATOM_MARKER: char = '\u{FFF9}';
+
+/// The whitespace an atom chip's painted label opens with — the width the
+/// chip reserves for its leading icon. The em space carries the icon; the
+/// thin space keeps it off the label text.
+pub(crate) const ATOM_ICON_SLOT: &str = "\u{2003}\u{2009}";
+
+/// A session reference's chip icon — the same chat glyph the sidebar and
+/// the session attachment chip carry.
+pub(crate) const ATOM_SESSION_ICON: &str = "icons/chat.svg";
+
+/// A collapsed paste's chip icon — the same file glyph the pasted-block
+/// attachment chip carries.
+pub(crate) const ATOM_PASTED_ICON: &str = "icons/file.svg";
+
+/// An atom the owner staged against an [`INLINE_ATOM_MARKER`]: the label
+/// the marker substitutes to in the painted text, and the icon the chip
+/// opens with. An `icon` of `None` paints a plain text chip.
+#[derive(Clone)]
+pub struct InlineAtom {
+    pub label: SharedString,
+    pub icon: Option<&'static str>,
+}
+
+impl InlineAtom {
+    /// The painted substitution — [`ATOM_ICON_SLOT`] ahead of the label
+    /// when the chip leads with an icon.
+    fn display_label(&self) -> Cow<'_, str> {
+        if self.icon.is_some() {
+            Cow::Owned(format!("{ATOM_ICON_SLOT}{}", self.label))
+        } else {
+            Cow::Borrowed(self.label.as_ref())
+        }
+    }
+
+    /// `display_label`'s byte length without building it — the delta every
+    /// display↔content index translation needs.
+    fn display_len(&self) -> usize {
+        self.label.len()
+            + if self.icon.is_some() {
+                ATOM_ICON_SLOT.len()
+            } else {
+                0
+            }
+    }
+}
 
 /// Respect the representation priority chosen by the source application.
 /// Finder puts paths first (and a text fallback second), while screenshots put
@@ -740,10 +786,10 @@ pub struct TextInput {
     /// Large text pastes surface as [`CollapsedPaste`] instead of splicing
     /// into the field.
     accepts_collapsed_paste: bool,
-    /// One label per [`INLINE_ATOM_MARKER`] in content order — what each
+    /// One atom per [`INLINE_ATOM_MARKER`] in content order — what each
     /// marker substitutes to in the painted text. The owner keeps it in step
     /// with its atom list; a marker beyond the list paints as nothing.
-    inline_atom_labels: Vec<SharedString>,
+    inline_atoms: Vec<InlineAtom>,
     /// Escape clears the field when it has content; an empty field lets the
     /// keystroke fall through to the surface's own escape.
     clear_on_escape: bool,
@@ -860,7 +906,7 @@ impl TextInput {
             line_height: 22.0,
             accepts_media_paste: false,
             accepts_collapsed_paste: false,
-            inline_atom_labels: Vec::new(),
+            inline_atoms: Vec::new(),
             clear_on_escape: false,
             select_all_on_focus_click: false,
             focus_click_select_all: false,
@@ -1105,33 +1151,32 @@ impl TextInput {
         self.accepts_collapsed_paste = accepts;
     }
 
-    /// Push the owner's inline-atom labels — one per [`INLINE_ATOM_MARKER`]
-    /// in content order. Each marker paints as its label in the text flow,
-    /// styled as a mention; a marker past the end of the list paints as
-    /// nothing. Sentinel characters and breaks inside a label are stripped
-    /// so a label can never nest or corrupt another atom.
-    pub fn set_inline_atom_labels(&mut self, labels: Vec<SharedString>, cx: &mut Context<Self>) {
-        self.inline_atom_labels = labels
+    /// Push the owner's inline atoms — one per [`INLINE_ATOM_MARKER`] in
+    /// content order. Each marker paints as its atom's label in the text
+    /// flow, styled as a mention; a marker past the end of the list paints
+    /// as nothing. Sentinel characters and breaks inside a label are
+    /// stripped so a label can never nest or corrupt another atom.
+    pub fn set_inline_atoms(&mut self, atoms: Vec<InlineAtom>, cx: &mut Context<Self>) {
+        self.inline_atoms = atoms
             .into_iter()
-            .map(|label| label.replace([INLINE_ATOM_MARKER, '\n', '\r'], " ").into())
+            .map(|mut atom| {
+                atom.label = atom
+                    .label
+                    .replace([INLINE_ATOM_MARKER, '\n', '\r'], " ")
+                    .into();
+                atom
+            })
             .collect();
         cx.notify();
     }
 
-    /// Each [`INLINE_ATOM_MARKER`]'s content position paired with its label
-    /// (empty when the owner has no atom for it), in content order.
-    fn inline_atoms(&self) -> impl Iterator<Item = (usize, &str)> {
+    /// Each [`INLINE_ATOM_MARKER`]'s content position paired with its atom
+    /// (`None` when the owner has none for it), in content order.
+    fn marker_atoms(&self) -> impl Iterator<Item = (usize, Option<&InlineAtom>)> {
         self.content
             .match_indices(INLINE_ATOM_MARKER)
             .enumerate()
-            .map(|(index, (position, _))| {
-                (
-                    position,
-                    self.inline_atom_labels
-                        .get(index)
-                        .map_or("", |label| label.as_str()),
-                )
-            })
+            .map(|(index, (position, _))| (position, self.inline_atoms.get(index)))
     }
 
     /// The painted string's byte length — `content`'s plus every inline
@@ -1152,12 +1197,12 @@ impl TextInput {
         let mut display = String::with_capacity(self.content.len());
         let mut ranges = Vec::new();
         let mut rest = self.content.as_str();
-        let mut labels = self.inline_atom_labels.iter();
+        let mut atoms = self.inline_atoms.iter();
         while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
             display.push_str(&rest[..index]);
             let start = display.len();
-            if let Some(label) = labels.next() {
-                display.push_str(label);
+            if let Some(atom) = atoms.next() {
+                display.push_str(&atom.display_label());
             }
             ranges.push(start..display.len());
             rest = &rest[index + marker_len..];
@@ -1171,12 +1216,13 @@ impl TextInput {
     /// [`Self::display_text_and_atom_ranges`] also builds.
     fn atom_display_ranges(&self) -> Vec<Range<usize>> {
         let marker_len = INLINE_ATOM_MARKER.len_utf8();
-        let mut ranges = Vec::with_capacity(self.inline_atom_labels.len());
+        let mut ranges = Vec::with_capacity(self.inline_atoms.len());
         let mut delta = 0usize;
-        for (position, label) in self.inline_atoms() {
+        for (position, atom) in self.marker_atoms() {
+            let label_len = atom.map_or(0, InlineAtom::display_len);
             let start = position + delta;
-            ranges.push(start..start + label.len());
-            delta += label.len().saturating_sub(marker_len);
+            ranges.push(start..start + label_len);
+            delta += label_len.saturating_sub(marker_len);
         }
         ranges
     }
@@ -1188,7 +1234,7 @@ impl TextInput {
     pub fn inline_atom_label_bounds(&self, marker: usize) -> Option<Bounds<Pixels>> {
         let layout = self.last_layout.as_ref()?;
         let index = self
-            .inline_atoms()
+            .marker_atoms()
             .position(|(position, _)| position == marker)?;
         let range = self.atom_display_ranges().get(index)?.clone();
         atom_chip_bounds(layout, &range)
@@ -1199,12 +1245,12 @@ impl TextInput {
     /// The marker offset of the atom whose painted chip is under
     /// `position`, in window coordinates — the label's padding counts.
     fn atom_at_position(&self, position: Point<Pixels>) -> Option<usize> {
-        if self.inline_atom_labels.is_empty() {
+        if self.inline_atoms.is_empty() {
             return None;
         }
         let layout = self.last_layout.as_ref()?;
         let ranges = self.atom_display_ranges();
-        self.inline_atoms()
+        self.marker_atoms()
             .zip(ranges.iter())
             .find(|(_, range)| {
                 atom_chip_bounds(layout, range)
@@ -1412,12 +1458,14 @@ impl TextInput {
         }
         let marker_len = INLINE_ATOM_MARKER.len_utf8();
         let mut display = content_index;
-        for (position, label) in self.inline_atoms() {
+        for (position, atom) in self.marker_atoms() {
             if position >= content_index {
                 break;
             }
             if position + marker_len <= content_index {
-                display += label.len().saturating_sub(marker_len);
+                display += atom
+                    .map_or(0, InlineAtom::display_len)
+                    .saturating_sub(marker_len);
             } else {
                 // Inside the marker's bytes: snap to the label's leading
                 // edge rather than mapping into its middle.
@@ -1442,20 +1490,21 @@ impl TextInput {
         }
         let marker_len = INLINE_ATOM_MARKER.len_utf8();
         let mut delta = 0usize;
-        for (position, label) in self.inline_atoms() {
+        for (position, atom) in self.marker_atoms() {
+            let label_len = atom.map_or(0, InlineAtom::display_len);
             let label_start = position + delta;
-            let label_end = label_start + label.len();
+            let label_end = label_start + label_len;
             if display_index < label_start {
                 break;
             }
             if display_index < label_end {
-                return if display_index - label_start < label.len() / 2 {
+                return if display_index - label_start < label_len / 2 {
                     position
                 } else {
                     position + marker_len
                 };
             }
-            delta += label.len().saturating_sub(marker_len);
+            delta += label_len.saturating_sub(marker_len);
         }
         (display_index - delta).min(self.content.len())
     }
@@ -2384,11 +2433,13 @@ impl TextInput {
         let marker_len = INLINE_ATOM_MARKER.len_utf8();
         let mut out = String::with_capacity(slice.len());
         let mut rest = slice;
-        let mut labels = self.inline_atom_labels.iter().skip(offset);
+        // The clipboard keeps the atom's label, not its icon slot — the
+        // painted slot only exists to carry the chip's icon.
+        let mut atoms = self.inline_atoms.iter().skip(offset);
         while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
             out.push_str(&rest[..index]);
-            if let Some(label) = labels.next() {
-                out.push_str(label);
+            if let Some(atom) = atoms.next() {
+                out.push_str(&atom.label);
             }
             rest = &rest[index + marker_len..];
         }
@@ -3006,6 +3057,26 @@ pub(crate) const ATOM_CHIP_PADDING_X: Pixels = px(2.0);
 pub(crate) const ATOM_CHIP_INSET_Y: Pixels = px(2.0);
 pub(crate) const ATOM_CHIP_RADIUS: Pixels = px(4.0);
 
+/// A chip's leading icon scales with the chip's height — 0.62 lands ~11px
+/// at the composer's default line height, matching the sibling chips'
+/// 11px glyphs — and sits this far in from the chip's edge.
+pub(crate) const ATOM_ICON_SCALE: f32 = 0.62;
+pub(crate) const ATOM_ICON_INSET_X: Pixels = px(1.0);
+
+/// The painted bounds a chip's leading icon takes inside [`ATOM_ICON_SLOT`]'s
+/// reserved width: a step in from the chip's edge, vertically centered. The
+/// remainder of the slot is the gap between icon and label text.
+pub(crate) fn atom_icon_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
+    let icon = chip.size.height * ATOM_ICON_SCALE;
+    Bounds::new(
+        point(
+            chip.origin.x + ATOM_CHIP_PADDING_X + ATOM_ICON_INSET_X,
+            chip.center().y - icon / 2.0,
+        ),
+        size(icon, icon),
+    )
+}
+
 /// The chip rect a display-coordinate `range` paints behind an atom's
 /// label — one per visual row the label spans — in the window coordinates
 /// `layout` was laid out into.
@@ -3271,12 +3342,17 @@ struct InputLayoutState {
     /// Atom label ranges in display coordinates — prepaint turns them into
     /// the chip quads the wash paints as.
     atom_ranges: Vec<Range<usize>>,
+    /// Each atom's icon, parallel to `atom_ranges` — `None` for a marker
+    /// without an atom or a chip that paints no icon.
+    atom_icons: Vec<Option<&'static str>>,
 }
 
 struct PrepaintState {
     cursor: Option<PaintQuad>,
     /// The chip quads under each atom's label, painted beneath the text.
     atom_chips: Vec<PaintQuad>,
+    /// Each icon's path and painted bounds, inside its chip's leading edge.
+    atom_icons: Vec<(&'static str, Bounds<Pixels>)>,
 }
 
 /// Find-match washes layered into [`input_text_runs`]: every match gets
@@ -3602,6 +3678,11 @@ impl Element for InputElement {
             annotations,
             atoms,
         );
+        let atom_icons = atom_ranges
+            .iter()
+            .enumerate()
+            .map(|(index, _)| input.inline_atoms.get(index).and_then(|atom| atom.icon))
+            .collect();
         let mut text = StyledText::new(display_text).with_runs(runs);
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
         (
@@ -3610,6 +3691,7 @@ impl Element for InputElement {
                 text,
                 text_layout_state,
                 atom_ranges,
+                atom_icons,
             },
         )
     }
@@ -3636,15 +3718,20 @@ impl Element for InputElement {
         );
         let theme = Theme::current(cx);
         let layout = layout_state.text.layout().clone();
-        let atom_chips = layout_state
-            .atom_ranges
-            .iter()
-            .flat_map(|range| atom_chip_bounds(&layout, range))
-            .map(|bounds| {
+        let mut atom_chips = Vec::new();
+        let mut atom_icons = Vec::new();
+        for (index, range) in layout_state.atom_ranges.iter().enumerate() {
+            let bounds = atom_chip_bounds(&layout, range);
+            if let Some(icon) = layout_state.atom_icons.get(index).copied().flatten()
+                && let Some(chip) = bounds.first()
+            {
+                atom_icons.push((icon, atom_icon_bounds(*chip)));
+            }
+            atom_chips.extend(bounds.into_iter().map(|bounds| {
                 fill(bounds, theme.accent.opacity(0.12))
                     .corner_radii(Corners::all(ATOM_CHIP_RADIUS))
-            })
-            .collect();
+            }));
+        }
         let (cursor_position, cursor, follow) = {
             let input = self.input.read(cx);
             let cursor = input.cursor_offset();
@@ -3697,7 +3784,11 @@ impl Element for InputElement {
             self.input
                 .update(cx, |input, _| input.caret_reconciled = Some(follow_state));
         }
-        PrepaintState { cursor, atom_chips }
+        PrepaintState {
+            cursor,
+            atom_chips,
+            atom_icons,
+        }
     }
 
     fn paint(
@@ -3744,6 +3835,19 @@ impl Element for InputElement {
             window,
             cx,
         );
+        // The icons land inside their chip's icon slot — whitespace the
+        // label's own substitution reserved — so they paint over the text.
+        let icon_color = Theme::current(cx).accent;
+        for (path, icon_bounds) in prepaint.atom_icons.drain(..) {
+            let _ = window.paint_svg(
+                icon_bounds,
+                path.into(),
+                None,
+                gpui::TransformationMatrix::default(),
+                icon_color,
+                cx,
+            );
+        }
         if visually_focused && let Some(cursor) = prepaint.cursor.take() {
             window.paint_quad(cursor);
         }
@@ -4143,11 +4247,11 @@ impl ComposerInput {
         marker
     }
 
-    /// Forwarded [`TextInput::set_inline_atom_labels`] — the owner pushes its
-    /// atoms' labels here whenever the atom list changes.
-    pub fn set_inline_atom_labels(&mut self, labels: Vec<SharedString>, cx: &mut Context<Self>) {
+    /// Forwarded [`TextInput::set_inline_atoms`] — the owner pushes its
+    /// atoms here whenever the atom list changes.
+    pub fn set_inline_atoms(&mut self, atoms: Vec<InlineAtom>, cx: &mut Context<Self>) {
         self.input
-            .update(cx, |input, cx| input.set_inline_atom_labels(labels, cx));
+            .update(cx, |input, cx| input.set_inline_atoms(atoms, cx));
     }
 
     /// Forwarded [`TextInput::inline_atom_label_bounds`] — the atom chip's
@@ -4388,14 +4492,20 @@ mod tests {
 
     #[gpui::test]
     fn inline_atoms_translate_layout_indices(cx: &mut TestAppContext) {
-        use super::INLINE_ATOM_MARKER as A;
+        use super::{ATOM_ICON_SLOT, ATOM_SESSION_ICON, INLINE_ATOM_MARKER as A, InlineAtom};
         cx.update(super::init);
         let (harness, cx) = cx.add_window_view(|window, cx| {
             // "see {A} now" — one atom mid-text.
             let input = cx.new(|cx| {
                 let mut input = TextInput::new(window, cx).multi_line();
                 input.set_content(format!("see {A} now"), cx);
-                input.set_inline_atom_labels(vec!["session:Big refactor".into()], cx);
+                input.set_inline_atoms(
+                    vec![InlineAtom {
+                        label: "Big refactor".into(),
+                        icon: Some(ATOM_SESSION_ICON),
+                    }],
+                    cx,
+                );
                 input
             });
             InputHarness {
@@ -4408,7 +4518,9 @@ mod tests {
         input.read_with(cx, |input, _| {
             let marker = input.content.find(A).unwrap();
             let marker_len = A.len_utf8();
-            let label_len = "session:Big refactor".len();
+            // The painted substitution carries the icon slot ahead of the
+            // label.
+            let label_len = ATOM_ICON_SLOT.len() + "Big refactor".len();
             // Before the marker: identity. Past it: shifted by the delta.
             assert_eq!(input.display_index(marker), marker);
             assert_eq!(input.display_index(marker + marker_len), marker + label_len);
@@ -4435,13 +4547,19 @@ mod tests {
 
     #[gpui::test]
     fn a_click_on_an_atom_chip_reports_its_marker(cx: &mut TestAppContext) {
-        use super::INLINE_ATOM_MARKER as A;
+        use super::{ATOM_PASTED_ICON, INLINE_ATOM_MARKER as A, InlineAtom};
         cx.update(super::init);
         let (harness, cx) = cx.add_window_view(|window, cx| {
             let input = cx.new(|cx| {
                 let mut input = TextInput::new(window, cx).multi_line();
                 input.set_content(format!("see {A} now"), cx);
-                input.set_inline_atom_labels(vec!["pasted text".into()], cx);
+                input.set_inline_atoms(
+                    vec![InlineAtom {
+                        label: "pasted text".into(),
+                        icon: Some(ATOM_PASTED_ICON),
+                    }],
+                    cx,
+                );
                 input
             });
             InputHarness {

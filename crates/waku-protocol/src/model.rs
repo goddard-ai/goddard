@@ -7699,7 +7699,7 @@ mod tests {
         let (decoded, len) = decode_atom_session_id(&encoded);
         assert_eq!(decoded, Some(id));
         assert_eq!(len, encoded.len());
-        assert_eq!(decode_atom_session_id("session:title"), (None, 0));
+        assert_eq!(decode_atom_session_id("a title"), (None, 0));
         let partial: String = encoded.chars().take(10).collect();
         assert_eq!(decode_atom_session_id(&partial), (None, 0));
     }
@@ -7708,30 +7708,30 @@ mod tests {
     fn atom_visible_text_strips_markup_but_keeps_the_label() {
         let session_id = Uuid::new_v4();
         let display = format!(
-            "fix this {OPEN}{id}session:Big refactor{END} and {OPEN}Pasted text (3 lines){END}",
+            "fix this {OPEN}{id}Big refactor{END} and {OPEN}Pasted text (3 lines){END}",
             OPEN = MESSAGE_ATOM_OPEN,
             END = MESSAGE_ATOM_END,
             id = encode_atom_session_id(session_id),
         );
         assert_eq!(
             atom_visible_text(&display),
-            "fix this session:Big refactor and Pasted text (3 lines)"
+            "fix this Big refactor and Pasted text (3 lines)"
         );
         // Label escapes unwrap inside a span; an emoji's own variation
         // selector survives because it is not a 32-nibble encoding.
         let styled = format!(
-            "{OPEN}{id}session:use \\_it\\* ⚠️{END} now",
+            "{OPEN}{id}use \\_it\\* ⚠️{END} now",
             OPEN = MESSAGE_ATOM_OPEN,
             END = MESSAGE_ATOM_END,
             id = encode_atom_session_id(session_id),
         );
-        assert_eq!(atom_visible_text(&styled), "session:use _it* ⚠️ now");
+        assert_eq!(atom_visible_text(&styled), "use _it* ⚠️ now");
         assert_eq!(atom_visible_text("plain text"), "plain text");
     }
 
     #[test]
     fn atom_label_escapes_round_trip() {
-        assert_eq!(escape_atom_label("session:plain"), "session:plain");
+        assert_eq!(escape_atom_label("plain"), "plain");
         assert_eq!(escape_atom_label("a*b_c`d[e]"), "a\\*b\\_c\\`d\\[e\\]");
         let span = format!(
             "{OPEN}{label}{END}",
