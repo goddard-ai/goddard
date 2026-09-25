@@ -70,11 +70,13 @@ addCandidate(join(projectRoot, "temp"));
 addCandidate(join(wakuCacheDir(), "computer-use", "debug"));
 addCandidate(join(projectRoot, ".goddard-cache", "computer-use", "debug"));
 addCandidate(join(projectRoot, "target", "debug", "Goddard Debug.app"));
+// The dev watcher keeps the app's two build lanes beside the bundle link.
+addCandidate(join(projectRoot, "target", "debug", "lanes"));
 // Pre-rename builds used the Waku name.
 addCandidate(join(projectRoot, "target", "debug", "Waku Debug.app"));
 
 if (process.env.CARGO_TARGET_DIR) {
-  for (const app of ["Goddard Debug.app", "Waku Debug.app"]) {
+  for (const app of ["Goddard Debug.app", "Waku Debug.app", "lanes"]) {
     addCandidate(
       join(resolve(projectRoot, process.env.CARGO_TARGET_DIR), "debug", app),
     );

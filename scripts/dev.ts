@@ -4,8 +4,14 @@ import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
 import { startDevServe, type DevServe } from "./dev-serve";
 import {
+  existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
   watch,
   writeFileSync,
   type FSWatcher,
@@ -37,6 +43,20 @@ const daemonPath = join(
 const appExecutablePath = isMacOS
   ? join(appPath, "Contents/MacOS", appName)
   : appPath;
+// The debug app builds into two bundle lanes so an eager compile never blocks
+// testing: a build always targets the lane the running app is not using, and
+// 'a' relaunches the newest completed build instead of waiting. appPath is a
+// symlink that only ever resolves to a finished bundle — it flips to the
+// fallback lane when a build starts tearing the newest, then to the new build
+// once bundling succeeds. A lane carries a .complete marker so a watcher
+// killed mid-bundle doesn't leave a half-written app looking launchable.
+type AppLane = "a" | "b";
+const laned = isMacOS && !serveMode;
+const laneRoot = join(targetDir, profile, "lanes");
+const laneAppPath = (lane: AppLane) => join(laneRoot, lane, `${appName}.app`);
+const laneLinkTarget = (lane: AppLane) =>
+  join("lanes", lane, `${appName}.app`);
+const laneMarkerPath = (lane: AppLane) => join(laneRoot, lane, ".complete");
 // The app's "auto-restart" command palette toggle lands here; the app only
 // offers it when the watcher hands it this path.
 const devStatePath = join(targetDir, "debug", "goddard-dev.json");
@@ -151,6 +171,13 @@ let liveBuildLog: { expand(): void } | undefined;
 let lastBuildLog: { label: string; lines: string[] } | undefined;
 let queuedBuild: BuildTarget | undefined;
 let debouncedBuild: BuildTarget | undefined;
+// Lane state is rebuilt from disk on startup; completeLanes lists only lanes
+// whose .complete marker survived, latestLane is the newest of those, and
+// runningLane/appBundlePath describe the live app instance (never torn).
+let completeLanes: AppLane[] = [];
+let latestLane: AppLane | undefined;
+let runningLane: AppLane | undefined;
+let appBundlePath: string | undefined;
 let appChangeRevision = 0;
 let daemonChangeRevision = 0;
 let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
@@ -625,6 +652,107 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
   return true;
 }
 
+function otherLane(lane: AppLane): AppLane {
+  return lane === "a" ? "b" : "a";
+}
+
+// appPath is the stable launch path; keep it aimed at a complete bundle or
+// remove it so nothing can open a half-written app through it.
+function linkAppPath(lane: AppLane | undefined): void {
+  try {
+    rmSync(appPath, { force: true });
+    if (lane !== undefined) symlinkSync(laneLinkTarget(lane), appPath);
+  } catch (error) {
+    console.error("[goddard-dev] Could not repoint the app bundle link:", error);
+  }
+}
+
+// Rebuild lane state from disk after a watcher restart: a pre-lanes bundle is
+// adopted as lane a, the surviving symlink names the newest build, and a lane
+// without its marker was torn mid-bundle so it is reclaimed, not trusted.
+function adoptAppLanes(): void {
+  const metadata = (() => {
+    try {
+      return lstatSync(appPath);
+    } catch {
+      return undefined;
+    }
+  })();
+  if (metadata?.isDirectory() && !metadata.isSymbolicLink()) {
+    try {
+      mkdirSync(join(laneRoot, "a"), { recursive: true });
+      rmSync(laneAppPath("a"), { recursive: true, force: true });
+      renameSync(appPath, laneAppPath("a"));
+      writeFileSync(laneMarkerPath("a"), "adopted\n");
+      console.log(
+        "[goddard-dev] Moved the existing app bundle into lane a.",
+      );
+    } catch (error) {
+      console.error(
+        "[goddard-dev] Could not adopt the existing app bundle:",
+        error,
+      );
+    }
+  }
+  for (const lane of ["a", "b"] as const) {
+    const complete =
+      existsSync(join(laneAppPath(lane), "Contents", "MacOS", appName)) &&
+      existsSync(laneMarkerPath(lane));
+    if (complete) completeLanes.push(lane);
+    else rmSync(join(laneRoot, lane), { recursive: true, force: true });
+  }
+  try {
+    const linked = basename(dirname(readlinkSync(appPath)));
+    if (
+      (linked === "a" || linked === "b") &&
+      completeLanes.includes(linked)
+    ) {
+      latestLane = linked;
+    }
+  } catch {
+    // No link yet; the newest complete lane wins below.
+  }
+  latestLane ??= completeLanes.at(-1);
+  let linkExists = false;
+  try {
+    lstatSync(appPath);
+    linkExists = true;
+  } catch {
+    // Nothing at appPath to fix.
+  }
+  if (latestLane !== undefined || linkExists) linkAppPath(latestLane);
+}
+
+// Builds go into whichever lane preserves a usable app: never the lane the
+// running instance came from, and otherwise never the newest complete build.
+function buildLane(): AppLane {
+  const pinned = runningLane ?? latestLane;
+  return pinned === undefined ? "a" : otherLane(pinned);
+}
+
+// Retire a lane the moment bundling starts tearing it so nothing — including
+// the appPath link — can still reach it.
+function retireLane(lane: AppLane): void {
+  completeLanes = completeLanes.filter((entry) => entry !== lane);
+  rmSync(laneMarkerPath(lane), { force: true });
+  if (latestLane === lane) {
+    latestLane = completeLanes.at(-1);
+    linkAppPath(latestLane);
+  }
+}
+
+function publishLane(lane: AppLane): void {
+  if (!completeLanes.includes(lane)) completeLanes.push(lane);
+  latestLane = lane;
+  try {
+    writeFileSync(laneMarkerPath(lane), `${new Date().toISOString()}\n`);
+  } catch {
+    // The marker only matters after a crashed watcher; the in-memory state
+    // carries correctness until then.
+  }
+  linkAppPath(lane);
+}
+
 async function build(target: BuildTarget): Promise<boolean> {
   if (target === "daemon") {
     return buildDaemon();
@@ -676,16 +804,21 @@ async function build(target: BuildTarget): Promise<boolean> {
     return false;
   }
   if (isMacOS) {
+    const lane = laned ? buildLane() : undefined;
+    if (lane !== undefined) retireLane(lane);
     // The watcher already ran cargo itself so it could draw progress;
     // bundle.sh only packages and signs the binaries it just produced.
+    const laneEnv =
+      lane === undefined ? [] : [`GODDARD_BUNDLE_DIR=${laneAppPath(lane)}`];
     const result =
-      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${join(root, "scripts/bundle.sh")} ${profile}`.nothrow();
+      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${laneEnv} ${join(root, "scripts/bundle.sh")} ${profile}`.nothrow();
     if (result.exitCode !== 0) {
       console.error(
         "[goddard-dev] Bundle failed; keeping the current app open.",
       );
       return false;
     }
+    if (lane !== undefined) publishLane(lane);
     if (serveMode && serve !== undefined && !(await serve.deploy(appPath))) {
       console.error("[goddard-dev] Deploy failed; the update feed is stale.");
     }
@@ -1074,7 +1207,10 @@ function printShortcuts(): void {
     [
       "",
       `  ${dim("Shortcuts")}`,
-      shortcutLine("a", "relaunch the app"),
+      shortcutLine(
+        "a",
+        "relaunch the app — the last completed build if one is compiling",
+      ),
       shortcutLine("b", "restart the daemon, then relaunch the app"),
       shortcutLine("d", "restart the daemon now"),
       shortcutLine("D", "restart the daemon once sessions go idle"),
@@ -1094,7 +1230,7 @@ function printBanner(): void {
       : "external — not restarted by the watcher";
   console.log(
     `\n  ${bold("goddard dev")} ${dim("— watching for changes")}\n\n` +
-      `  ${green("➜")}  ${dim("app")}     ${appName}${isMacOS ? ".app" : ""}\n` +
+      `  ${green("➜")}  ${dim("app")}     ${appName}${isMacOS ? ".app" : ""}${laned ? dim(` · lane ${latestLane ?? "none yet"}`) : ""}\n` +
       `  ${green("➜")}  ${dim("daemon")}  ${daemonAddress} ${dim(`(${daemonDetail})`)}` +
       (serve === undefined
         ? ""
@@ -1148,6 +1284,15 @@ async function handleCommand(command: string): Promise<void> {
         queuedBuild !== undefined ||
         debouncedBuild !== undefined
       ) {
+        if (latestLane !== undefined) {
+          // The other lane holds the previous completed build, so testing
+          // never waits on an in-progress compile.
+          console.log(
+            `[goddard-dev] A build is in progress — relaunching the last completed build (lane ${latestLane}). Press a + enter again once it finishes to pick it up.`,
+          );
+          await relaunchApp();
+          return;
+        }
         relaunchAfterBuild = true;
         console.log(
           "[goddard-dev] Will relaunch the app once the current build finishes.",
@@ -1211,6 +1356,13 @@ function autoRestartEnabled(): boolean {
 async function stopApp(): Promise<void> {
   const waiter = app;
   app = undefined;
+  // The app runs from its lane's real path — appPath is a symlink that may
+  // already point at a different lane — so quit the resolved bundle.
+  const runningBundle = appBundlePath ?? appPath;
+  const runningExecutable =
+    appBundlePath !== undefined && isMacOS
+      ? join(appBundlePath, "Contents/MacOS", appName)
+      : appExecutablePath;
   if (isMacOS) {
     // SIGTERM never reaches the app's quit hooks, and they are what flush UI
     // state to disk for the next launch. Ask for a graceful quit first and
@@ -1218,16 +1370,23 @@ async function stopApp(): Promise<void> {
     // matters: a bare `tell application ... to quit` would launch it. Naming
     // the bundle by path keeps other worktrees' "Goddard Debug" instances
     // from being quit — a bare name hits whichever copy LaunchServices picks.
-    await $`osascript -e 'if application "${appPath}" is running then tell application "${appPath}" to quit'`
-      .quiet()
-      .nothrow();
+    // A leftover app can be running from either lane (e.g. after a crashed
+    // watcher), so quit every lane path, not just the tracked one.
+    const quitBundles = laned
+      ? [...new Set([runningBundle, laneAppPath("a"), laneAppPath("b")])]
+      : [runningBundle];
+    for (const bundle of quitBundles) {
+      await $`osascript -e 'if application "${bundle}" is running then tell application "${bundle}" to quit'`
+        .quiet()
+        .nothrow();
+    }
     if (waiter?.exitCode === null) {
       const exited = await Promise.race([
         waiter.exited.then(() => true),
         Bun.sleep(3_000).then(() => false),
       ]);
       if (!exited) {
-        await $`pkill -TERM -f ${appExecutablePath}`.quiet().nothrow();
+        await $`pkill -TERM -f ${runningExecutable}`.quiet().nothrow();
       }
     }
   } else if (waiter?.exitCode === null) {
@@ -1243,8 +1402,16 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     console.error("[goddard-dev] The daemon is not running; cannot launch the app.");
     return undefined;
   }
-  console.log(`[goddard-dev] Launching ${appPath}`);
-  const command = isMacOS ? ["open", "-n", "-W", appPath] : [appPath];
+  const lane = laned ? latestLane : undefined;
+  if (laned && lane === undefined) {
+    console.error(
+      "[goddard-dev] No completed app build to launch; wait for the build to finish.",
+    );
+    return undefined;
+  }
+  const bundlePath = lane === undefined ? appPath : laneAppPath(lane);
+  console.log(`[goddard-dev] Launching ${bundlePath}`);
+  const command = isMacOS ? ["open", "-n", "-W", bundlePath] : [bundlePath];
   const launchedApp = Bun.spawn(command, {
     cwd: root,
     env: {
@@ -1259,9 +1426,13 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     stdout: "inherit",
     stderr: "inherit",
   });
+  runningLane = lane;
+  appBundlePath = bundlePath;
   void launchedApp.exited.then((exitCode) => {
     if (stopping || app !== launchedApp) return;
     app = undefined;
+    runningLane = undefined;
+    appBundlePath = undefined;
     // The daemon owns session state, so it and the watcher stay up when the
     // app exits; 'a' relaunches, 'q' shuts everything down.
     console.log(
@@ -1515,6 +1686,7 @@ if (serveMode) {
     process.exit(1);
   }
 }
+if (laned) adoptAppLanes();
 building = true;
 const initialAppRevision = appChangeRevision;
 const initialBuildSucceeded = await build("app");

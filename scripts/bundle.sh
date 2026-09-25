@@ -71,7 +71,9 @@ if [ "${GODDARD_SKIP_CARGO_BUILD:-0}" != "1" ]; then
   fi
 fi
 
-bundle="$cargo_target_dir/$profile/$app_name.app"
+# The dev watcher builds each lane under its own directory so an in-progress
+# bundle never tears the app copy a running instance was launched from.
+bundle="${GODDARD_BUNDLE_DIR:-$cargo_target_dir/$profile/$app_name.app}"
 contents="$bundle/Contents"
 helper_bundle="$contents/Helpers/$helper_name.app"
 repl_executable="$contents/Resources/goddard_js_repl"
