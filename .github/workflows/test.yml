@@ -29,10 +29,10 @@ jobs:
       SCCACHE_REGION: auto
       SCCACHE_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
       SCCACHE_S3_USE_SSL: "true"
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
       # Runs without secrets (forked PRs) fall back to the GHA cache backend.
-      SCCACHE_GHA_ENABLED: ${{ secrets.R2_ACCESS_KEY_ID == '' }}
+      SCCACHE_GHA_ENABLED: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID == '' }}
 
     steps:
       - name: Check out repository
