@@ -330,6 +330,33 @@ fn gated_suggestion(
     (top >= min_probability && top - runner_up >= min_margin).then_some(action)
 }
 
+/// What a journaled action does to a pending prediction: an exact
+/// candidate match is a hit, an `other` prediction hits on any action the
+/// question never listed, and a prompt send ends the window — its own
+/// match fulfills, everything else misses. A `land` retires a pending
+/// "push and open a PR" pick: the worktree's commits are on the base, so
+/// there is no longer a head to propose.
+fn prediction_outcome(
+    prediction: &PendingActionPrediction,
+    action_id: &str,
+    window_ended: bool,
+) -> Option<&'static str> {
+    let hit = action_id == prediction.predicted
+        || (prediction.predicted == "other"
+            && !prediction
+                .candidates
+                .iter()
+                .any(|candidate| candidate == action_id));
+    let mooted = action_id == "land" && prediction.predicted == "open-pr";
+    if hit {
+        Some("hit")
+    } else if window_ended || mooted {
+        Some("miss")
+    } else {
+        None
+    }
+}
+
 /// The decision-log feature tag these evaluations record under, so the
 /// daemon's log keeps them distinct from the turn-status calls.
 const EVAL_FEATURE: &str = "next-action";
@@ -399,13 +426,25 @@ pub(super) fn load_action_journal() -> VecDeque<JournalRecord> {
     records
 }
 
+/// The checkout's branch is the remote's own default — a "push and open
+/// a PR" head identical to its base. `remote_default` only ever reports
+/// `origin/HEAD`'s target: `default_branch`'s display fallback to
+/// `current` would make every branch of a remote-less repo read as the
+/// default.
+fn checkout_on_default_branch(snapshot: &BranchSnapshot) -> bool {
+    snapshot.current.is_some() && snapshot.current == snapshot.remote_default
+}
+
 /// The options the `nextAction` question offers: feasibility-gated
 /// candidates plus `new-prompt`, which names the common case — the user
 /// writing their own message — so `other` stays honest about genuinely
-/// unenumerated moves.
+/// unenumerated moves. `open_pr` is the caller's verdict that the
+/// session's branch could still produce one — not on the default branch,
+/// no open PR already standing.
 fn next_action_candidates(
     session: &AgentSession,
     turn_id: Uuid,
+    open_pr: bool,
 ) -> Vec<(&'static str, &'static str)> {
     let turn = session.turns.iter().find(|turn| turn.id == turn_id);
     let files_changed = turn
@@ -433,7 +472,11 @@ fn next_action_candidates(
             ("commit-changes", "Ask the agent to commit the changes"),
             ("add-tests", "Ask the agent to add tests for the change"),
             ("review-changes", "Ask the agent to review the changes"),
-            ("open-pr", "Ask the agent to push and open a PR"),
+        ]);
+        if open_pr {
+            candidates.push(("open-pr", "Ask the agent to push and open a PR"));
+        }
+        candidates.extend([
             ("commit", "Commit the changes through the Git UI"),
             ("push", "Push the work to its remote"),
             ("revert", "Rewind the workspace to before this turn"),
@@ -570,6 +613,23 @@ impl Waku {
         {
             return;
         }
+        // "Push and open a PR" has no head to propose when the checkout
+        // sits on the remote's default branch, and nothing to do once an
+        // open PR already exists for the branch. Unknown branch state
+        // keeps the candidate — the snapshot suppresses only what it can
+        // prove.
+        let workspace_path = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| self.workspace_path_for_session(session))
+            .map(Path::to_path_buf);
+        let open_pr = !self.session_has_open_pr(session_id)
+            && workspace_path
+                .as_deref()
+                .and_then(|path| self.branch_snapshot_for_workspace(path, cx))
+                .is_none_or(|snapshot| !checkout_on_default_branch(&snapshot));
         let Some(session) = self
             .state
             .sessions
@@ -596,7 +656,7 @@ impl Waku {
             );
         }
         let questions = action_prediction_questions(
-            next_action_candidates(session, turn_id),
+            next_action_candidates(session, turn_id, open_pr),
             self.state.move_fast_break_things,
         );
         let tx = self.action_prediction_tx.clone();
@@ -696,7 +756,8 @@ impl Waku {
         // The prediction itself still logs — the shadow record feeds
         // calibration regardless of the display preference.
         let suggestion = gated_suggestion(choice, probabilities, self.state.move_fast_break_things)
-            .filter(|action| !self.state.disabled_suggested_actions.contains(*action));
+            .filter(|action| !self.state.disabled_suggested_actions.contains(*action))
+            .filter(|action| *action != "open-pr" || !self.session_has_open_pr(session_id));
         if let Some(action) = suggestion {
             self.action_suggestion = Some(ActionSuggestion {
                 prediction_id: prediction.id,
@@ -833,20 +894,7 @@ impl Waku {
             if prediction.session_id != session {
                 return true;
             }
-            let hit = action_id == prediction.predicted
-                || (prediction.predicted == "other"
-                    && !prediction
-                        .candidates
-                        .iter()
-                        .any(|candidate| candidate == action_id));
-            let outcome = if hit {
-                Some("hit")
-            } else if window_ended {
-                Some("miss")
-            } else {
-                None
-            };
-            match outcome {
+            match prediction_outcome(prediction, action_id, window_ended) {
                 Some(outcome) => {
                     resolved.push((prediction.id, outcome, prediction.adopted));
                     false
@@ -855,25 +903,79 @@ impl Waku {
             }
         });
         for (prediction_id, outcome, adopted) in resolved {
-            if self
-                .action_suggestion
-                .as_ref()
-                .is_some_and(|suggestion| suggestion.prediction_id == prediction_id)
-            {
-                self.action_suggestion = None;
-            }
-            append_jsonl(
-                &prediction_log_path(),
-                &json!({
-                    "type": "resolution",
-                    "prediction": prediction_id,
-                    "at": unix_time(),
-                    "outcome": outcome,
-                    "action": action_id,
-                    "adopted": adopted,
-                }),
-            );
+            self.note_prediction_resolved(prediction_id, outcome, action_id, adopted);
         }
+    }
+
+    /// Whether the sidebar's pull-request scan knows of an open PR on the
+    /// session's branch — drafts count, merged and closed do not. A
+    /// session absent from the map is "not scanned yet", never proof of
+    /// none.
+    fn session_has_open_pr(&self, session_id: Uuid) -> bool {
+        self.sidebar_pull_requests
+            .borrow()
+            .get(&session_id)
+            .is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry.state == waku_client::PullRequestState::Open)
+            })
+    }
+
+    /// An open pull request on the session's branch fulfills a pending
+    /// "push and open a PR" pick however it was opened — the chip's
+    /// prompt send is only one path there. Runs when the sidebar's PR
+    /// scan lands.
+    pub(super) fn resolve_open_pr_predictions(&mut self) {
+        let entries = self.sidebar_pull_requests.borrow();
+        let mut resolved: Vec<(Uuid, bool)> = Vec::new();
+        self.pending_action_predictions.retain(|prediction| {
+            if prediction.predicted != "open-pr"
+                || !entries.get(&prediction.session_id).is_some_and(|entries| {
+                    entries
+                        .iter()
+                        .any(|entry| entry.state == waku_client::PullRequestState::Open)
+                })
+            {
+                return true;
+            }
+            resolved.push((prediction.id, prediction.adopted));
+            false
+        });
+        drop(entries);
+        for (prediction_id, adopted) in resolved {
+            self.note_prediction_resolved(prediction_id, "hit", "open-pr", adopted);
+        }
+    }
+
+    /// Log a prediction's outcome and drop the suggestion chip standing
+    /// behind it — one record shape whether a journaled action or an
+    /// observed pull request did the resolving.
+    fn note_prediction_resolved(
+        &mut self,
+        prediction_id: Uuid,
+        outcome: &'static str,
+        action: &'static str,
+        adopted: bool,
+    ) {
+        if self
+            .action_suggestion
+            .as_ref()
+            .is_some_and(|suggestion| suggestion.prediction_id == prediction_id)
+        {
+            self.action_suggestion = None;
+        }
+        append_jsonl(
+            &prediction_log_path(),
+            &json!({
+                "type": "resolution",
+                "prediction": prediction_id,
+                "at": unix_time(),
+                "outcome": outcome,
+                "action": action,
+                "adopted": adopted,
+            }),
+        );
     }
 
     /// The session a workspace-bound action belongs to — the selected one
@@ -1191,10 +1293,20 @@ mod tests {
     }
 
     fn candidate_ids(session: &AgentSession, turn_id: Uuid) -> Vec<&'static str> {
-        next_action_candidates(session, turn_id)
+        next_action_candidates(session, turn_id, true)
             .into_iter()
             .map(|(id, _)| id)
             .collect()
+    }
+
+    fn open_pr_prediction(candidates: &[&str]) -> PendingActionPrediction {
+        PendingActionPrediction {
+            id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            predicted: "open-pr".to_owned(),
+            candidates: candidates.iter().map(|id| id.to_string()).collect(),
+            adopted: false,
+        }
     }
 
     #[test]
@@ -1285,9 +1397,81 @@ mod tests {
             created_at: 1,
         }));
         let ids = candidate_ids(&session, turn_id);
-        for expected in ["run-tests", "commit-changes", "commit", "push", "revert"] {
+        for expected in [
+            "run-tests",
+            "commit-changes",
+            "open-pr",
+            "commit",
+            "push",
+            "revert",
+        ] {
             assert!(ids.contains(&expected), "missing candidate: {expected}");
         }
+    }
+
+    #[test]
+    fn an_unviable_open_pr_is_not_offered() {
+        let (session, turn_id) = session_with_turn(Some(Checkpoint {
+            turn_count: 1,
+            git_ref: "refs/waku/checkpoint".to_owned(),
+            status: CheckpointStatus::Ready,
+            files: vec![CheckpointFile {
+                path: "src/lib.rs".to_owned(),
+                additions: 3,
+                deletions: 1,
+            }],
+            additions: 3,
+            deletions: 1,
+            created_at: 1,
+        }));
+        let ids: Vec<&'static str> = next_action_candidates(&session, turn_id, false)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert!(!ids.contains(&"open-pr"));
+        assert!(ids.contains(&"push"));
+    }
+
+    #[test]
+    fn only_a_checkout_on_the_remotes_default_counts_as_default() {
+        let snapshot = |current: Option<&str>, remote_default: Option<&str>| BranchSnapshot {
+            repository: PathBuf::from("/repo"),
+            current: current.map(str::to_owned),
+            detached_head: None,
+            default_branch: None,
+            remote_default: remote_default.map(str::to_owned),
+            origin_url: None,
+            upstream: None,
+            branches: Vec::new(),
+            additions: 0,
+            deletions: 0,
+        };
+        assert!(checkout_on_default_branch(&snapshot(
+            Some("main"),
+            Some("main")
+        )));
+        assert!(!checkout_on_default_branch(&snapshot(
+            Some("feature"),
+            Some("main")
+        )));
+        // A display fallback that set `default_branch` to `current` must
+        // not read as the default — the remote's was never resolved.
+        assert!(!checkout_on_default_branch(&snapshot(Some("main"), None)));
+        // Detached HEAD has no branch to compare.
+        assert!(!checkout_on_default_branch(&snapshot(None, Some("main"))));
+    }
+
+    #[test]
+    fn landing_moots_a_pending_open_pr() {
+        let prediction = open_pr_prediction(&["open-pr", "land", "push"]);
+        assert_eq!(prediction_outcome(&prediction, "land", false), Some("miss"));
+        // Other actions leave the window open; the prompt send still ends it.
+        assert_eq!(prediction_outcome(&prediction, "push", false), None);
+        assert_eq!(prediction_outcome(&prediction, "push", true), Some("miss"));
+        assert_eq!(
+            prediction_outcome(&prediction, "open-pr", false),
+            Some("hit")
+        );
     }
 
     #[test]

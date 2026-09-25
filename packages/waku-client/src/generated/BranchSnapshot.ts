@@ -2,7 +2,20 @@
 import type { BranchEntry } from "./BranchEntry";
 import type { UpstreamStatus } from "./UpstreamStatus";
 
-export type BranchSnapshot = { repository: string, current: string | null, detached_head: string | null, default_branch: string | null,
+export type BranchSnapshot = { repository: string, current: string | null, detached_head: string | null,
+/**
+ * The branch to treat as the repo's default for display: the remote's
+ * `origin/HEAD` target when it resolves to a local branch, else the
+ * checked-out branch.
+ */
+default_branch: string | null,
+/**
+ * `origin/HEAD`'s target — the remote's own default branch, `None`
+ * when no `origin` remote or HEAD symref exists. Unlike
+ * `default_branch` it never falls back to the checked-out branch, so
+ * it can answer "is the checkout sitting on the default branch".
+ */
+remote_default: string | null,
 /**
  * The fetch URL of the `origin` remote, if one is configured.
  */

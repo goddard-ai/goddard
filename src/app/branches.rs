@@ -688,6 +688,7 @@ mod tests {
             current: current.map(str::to_owned),
             detached_head: None,
             default_branch: None,
+            remote_default: None,
             origin_url: origin_url.map(str::to_owned),
             upstream: None,
             branches: Vec::new(),

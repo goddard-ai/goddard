@@ -34,7 +34,16 @@ pub struct BranchSnapshot {
     pub repository: PathBuf,
     pub current: Option<String>,
     pub detached_head: Option<String>,
+    /// The branch to treat as the repo's default for display: the remote's
+    /// `origin/HEAD` target when it resolves to a local branch, else the
+    /// checked-out branch.
     pub default_branch: Option<String>,
+    /// `origin/HEAD`'s target — the remote's own default branch, `None`
+    /// when no `origin` remote or HEAD symref exists. Unlike
+    /// `default_branch` it never falls back to the checked-out branch, so
+    /// it can answer "is the checkout sitting on the default branch".
+    #[serde(default)]
+    pub remote_default: Option<String>,
     /// The fetch URL of the `origin` remote, if one is configured.
     pub origin_url: Option<String>,
     /// `None` for a detached HEAD or a branch with no upstream configured.

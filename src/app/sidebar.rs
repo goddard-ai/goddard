@@ -2635,6 +2635,7 @@ impl Waku {
                         .map(|(session_id, entries)| (session_id, Rc::new(entries))),
                 );
                 *waku.sidebar_pull_requests.borrow_mut() = merged;
+                waku.resolve_open_pr_predictions();
                 cx.notify();
             });
         })

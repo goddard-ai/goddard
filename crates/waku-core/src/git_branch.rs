@@ -102,12 +102,11 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
             "--short",
             "refs/remotes/origin/HEAD",
         ],
-    )?;
+    )?
+    .and_then(|branch| branch.strip_prefix("origin/").map(str::to_owned));
     let default_branch = remote_default
-        .as_deref()
-        .and_then(|branch| branch.strip_prefix("origin/"))
+        .clone()
         .filter(|branch| branches.iter().any(|entry| entry.name == *branch))
-        .map(str::to_owned)
         .or_else(|| current.clone());
     let origin_url = remote_url(cwd, "origin")?;
     let upstream = upstream_status(cwd);
@@ -118,6 +117,7 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
         current,
         detached_head,
         default_branch,
+        remote_default,
         origin_url,
         upstream,
         branches,
