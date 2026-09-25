@@ -820,7 +820,13 @@ impl Render for Waku {
                                 },
                             ))
                     })
-                    .child(self.render_header(window, cx))
+                    .when(
+                        !self.drafts_page
+                            || self.selected_terminal.is_some_and(|id| {
+                                self.right_panel_terminals.contains_key(&id)
+                            }),
+                        |element| element.child(self.render_header(window, cx)),
+                    )
                     .children(self.friend_watch_banner(cx))
                     // A selected terminal takes the column in place of the
                     // transcript, the Projects page, or the new-task prompt.
