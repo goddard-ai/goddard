@@ -1978,6 +1978,9 @@ impl Waku {
             self.finish_archive_session(session_id, landing_row, window, cx);
             return;
         };
+        let preview_toast =
+            self.show_progress_toast(tr!("session.archive_preparing"), PROGRESS_TOAST_DURATION);
+        self.archive_preview_toasts.insert(preview_toast);
         let window_handle = window.window_handle();
         cx.spawn(async move |waku, cx| {
             let preview = cx
@@ -1997,6 +2000,14 @@ impl Waku {
             let finish = waku
                 .update(cx, |waku, cx| {
                     waku.archive_preview_pending.remove(&session_id);
+                    waku.archive_preview_toasts.remove(&preview_toast);
+                    if waku
+                        .toast
+                        .as_ref()
+                        .is_some_and(|toast| toast.id == preview_toast)
+                    {
+                        waku.hide_toast();
+                    }
                     // The turn may have settled while the preview was being
                     // inspected — warn only about what is still true now.
                     let busy = waku

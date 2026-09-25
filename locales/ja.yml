@@ -605,6 +605,7 @@ session.incognito_hint: このタスクはシークレットです — 保存さ
 session.copy_working_directory: 作業ディレクトリをコピー
 session.move_to_worktree: ワークツリーへ移動
 session.archive: アーカイブ
+session.archive_preparing: アーカイブを準備中…
 session.pin: ピン留め
 session.unpin: ピン留めを解除
 session.sweep: 休眠に移動

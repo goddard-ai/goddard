@@ -1905,6 +1905,8 @@ session.move_to_worktree:
   en: Move to Worktree
 session.archive:
   en: Archive
+session.archive_preparing:
+  en: Preparing archive…
 session.pin:
   en: Pin
 session.unpin:

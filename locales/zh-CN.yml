@@ -596,6 +596,7 @@ session.incognito_hint: 此任务为无痕模式 — 不会保存，也不会读
 session.copy_working_directory: 复制工作目录
 session.move_to_worktree: 移动到工作树
 session.archive: 归档
+session.archive_preparing: 正在准备归档…
 session.pin: 置顶
 session.unpin: 取消置顶
 session.sweep: 移至休眠

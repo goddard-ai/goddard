@@ -2490,6 +2490,7 @@ pub struct Waku {
     /// background inspection that decides whether it opens.
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
+    archive_preview_toasts: HashSet<u64>,
     /// Session ids of the most recent archive — the set the palette's
     /// "Undo last archive" restores. In-memory only: a restart drops it.
     /// Members join while their archive toast is still up, matching the
@@ -4519,6 +4520,7 @@ impl Waku {
             .custom_command_runs
             .values()
             .any(|run| run.toast_id == toast.id)
+            || self.archive_preview_toasts.contains(&toast.id)
             || self
                 .git_panel_operation
                 .as_ref()
@@ -6325,6 +6327,7 @@ impl Waku {
                 provider_switch_dialog: None,
                 provider_switch_in_flight: HashSet::new(),
                 archive_preview_pending: HashSet::new(),
+                archive_preview_toasts: HashSet::new(),
                 undoable_archive: Vec::new(),
                 full_access_dialog: None,
                 shortcuts_dialog: None,
