@@ -42,7 +42,7 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = crate::command_env::spawn(command)
+    let mut child = crate::sandbox::spawn(command, None)
         .with_context(|| format!("could not start {} app-server", binary.display()))?;
     let mut stdin = child
         .stdin
@@ -52,6 +52,13 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
         .stdout
         .take()
         .ok_or_else(|| anyhow!("Codex app-server stdout is unavailable"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("Codex app-server stderr is unavailable"))?;
+    let stderr_reader = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut std::io::BufReader::new(stderr), &mut std::io::sink());
+    });
     let (tx, rx) = mpsc::channel();
     let reader = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -128,9 +135,8 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
         let _ = child.kill();
         let _ = child.wait();
     }
-    if reader.is_finished() {
-        let _ = reader.join();
-    }
+    let _ = reader.join();
+    let _ = stderr_reader.join();
     let response = response?;
     shutdown?;
     Ok(response)

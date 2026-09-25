@@ -516,7 +516,7 @@ pub fn fetch_grok_plan_usage(binary: &std::path::Path) -> anyhow::Result<PlanUsa
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let mut child =
-        crate::command_env::spawn(command).context(keyed!("usage_error.start_grok_probe"))?;
+        crate::sandbox::spawn(command, None).context(keyed!("usage_error.start_grok_probe"))?;
     let result = grok_billing_over_stdio(&mut child);
     // The probe has no shutdown request; ending it is the protocol.
     let _ = child.kill();
@@ -524,7 +524,7 @@ pub fn fetch_grok_plan_usage(binary: &std::path::Path) -> anyhow::Result<PlanUsa
     result.and_then(|billing| parse_grok_billing(&billing))
 }
 
-fn grok_billing_over_stdio(child: &mut std::process::Child) -> anyhow::Result<Value> {
+fn grok_billing_over_stdio(child: &mut crate::sandbox::DriverChild) -> anyhow::Result<Value> {
     let mut stdin = child
         .stdin
         .take()
@@ -533,6 +533,16 @@ fn grok_billing_over_stdio(child: &mut std::process::Child) -> anyhow::Result<Va
         .stdout
         .take()
         .ok_or_else(|| anyhow!(keyed!("usage_error.grok_stdout_unavailable")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("Grok stderr is unavailable"))?;
+    std::thread::Builder::new()
+        .name("waku-grok-usage-stderr".into())
+        .spawn(move || {
+            let _ = std::io::copy(&mut BufReader::new(stderr), &mut std::io::sink());
+        })
+        .context(keyed!("usage_error.start_grok_reader"))?;
     let (lines_tx, lines) = crossbeam_channel::unbounded::<Value>();
     std::thread::Builder::new()
         .name("waku-grok-usage-probe".into())

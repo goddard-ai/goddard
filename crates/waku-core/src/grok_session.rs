@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
@@ -343,8 +343,8 @@ fn write_atomic(
 }
 
 struct GrokRpc {
-    child: Child,
-    stdin: ChildStdin,
+    child: crate::sandbox::DriverChild,
+    stdin: Box<dyn Write + Send>,
     responses: Receiver<Value>,
 }
 
@@ -358,7 +358,7 @@ impl GrokRpc {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let mut child =
-            crate::command_env::spawn(command).context("failed to start Grok's ACP server")?;
+            crate::sandbox::spawn(command, None).context("failed to start Grok's ACP server")?;
         let stdin = child
             .stdin
             .take()
@@ -367,6 +367,15 @@ impl GrokRpc {
             .stdout
             .take()
             .ok_or_else(|| anyhow!("Grok ACP stdout is unavailable"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow!("Grok ACP stderr is unavailable"))?;
+        thread::Builder::new()
+            .name("waku-grok-stderr".into())
+            .spawn(move || {
+                let _ = std::io::copy(&mut BufReader::new(stderr), &mut std::io::sink());
+            })?;
         let (tx, responses) = mpsc::channel();
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {

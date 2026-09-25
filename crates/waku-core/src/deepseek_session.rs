@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::Path;
-use std::process::{Child, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -302,9 +302,6 @@ watcher=$!
 while IFS= read -r _; do :; done
 "#;
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt as _;
-
 #[derive(Default)]
 struct EventHub {
     subscribers: Mutex<HashMap<String, Vec<Sender<Value>>>>,
@@ -380,7 +377,7 @@ impl StreamControl {
 }
 
 pub(crate) struct DeepSeekServer {
-    child: Arc<Mutex<Child>>,
+    child: Arc<Mutex<crate::sandbox::DriverChild>>,
     pub(crate) port: u16,
     events: Arc<EventHub>,
     streams: Arc<StreamControl>,
@@ -446,10 +443,7 @@ impl DeepSeekServer {
         if let Some(agent) = agent {
             crate::command_env::apply_agent_environment(&mut command, agent);
         }
-        #[cfg(unix)]
-        command.process_group(0);
-
-        let mut child = crate::command_env::spawn(&mut command)
+        let mut child = crate::sandbox::spawn(&command, None)
             .context("failed to start `dsh web --host 127.0.0.1 --port 0`")?;
         let stdout = child
             .stdout
@@ -720,16 +714,11 @@ fn web_help_supports_no_open(output: &[u8]) -> bool {
         .any(|line| line.contains("--no-open"))
 }
 
-fn terminate_child(child: &mut Child, timeout: Duration) {
+fn terminate_child(child: &mut crate::sandbox::DriverChild, timeout: Duration) {
     if child.try_wait().is_ok_and(|status| status.is_some()) {
         return;
     }
-    #[cfg(unix)]
-    unsafe {
-        let _ = libc::kill(-(child.id() as libc::pid_t), libc::SIGTERM);
-    }
-    #[cfg(not(unix))]
-    let _ = child.kill();
+    let _ = child.terminate();
 
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -738,10 +727,6 @@ fn terminate_child(child: &mut Child, timeout: Duration) {
             Ok(None) => thread::sleep(Duration::from_millis(20)),
             Err(_) => break,
         }
-    }
-    #[cfg(unix)]
-    unsafe {
-        let _ = libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
     }
     let _ = child.kill();
     let _ = child.wait();

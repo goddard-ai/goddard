@@ -16,7 +16,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -30,6 +30,217 @@ use waku_protocol::model::{ProviderKind, SandboxSetupStatus};
 /// The guest path the session's worktree is mounted at — also the provider's
 /// working directory inside the VM.
 const GUEST_WORKSPACE: &str = "/workspace";
+
+#[cfg(unix)]
+const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(750);
+#[cfg(unix)]
+const CHILD_TERM_GRACE: Duration = Duration::from_millis(250);
+#[cfg(unix)]
+const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Shared shutdown signal for host child pipes. Nonblocking reads let a
+/// reader make progress on buffered output, then stop even when an escaped
+/// descendant inherited the write end and never closes it.
+#[cfg(unix)]
+#[derive(Default)]
+struct PipeControl {
+    process_group: Option<libc::pid_t>,
+    shutdown_at: Mutex<Option<Instant>>,
+    last_exit_probe: Mutex<Option<Instant>>,
+    cancelled: AtomicBool,
+    process_group_stopped: AtomicBool,
+}
+
+#[cfg(unix)]
+impl PipeControl {
+    fn for_process_group(process_group: libc::pid_t) -> Self {
+        Self {
+            process_group: Some(process_group),
+            last_exit_probe: Mutex::new(Some(Instant::now())),
+            ..Self::default()
+        }
+    }
+
+    fn begin_shutdown(&self) {
+        let mut shutdown_at = self.shutdown_at.lock();
+        if shutdown_at.is_none() {
+            *shutdown_at = Some(Instant::now());
+        }
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    fn process_exited(&self) {
+        self.begin_shutdown();
+        if !self.process_group_stopped.swap(true, Ordering::AcqRel)
+            && let Some(process_group) = self.process_group
+        {
+            // The leader is gone; immediately retire descendants that could
+            // still own its pipe write ends.
+            let _ = unsafe { libc::kill(-process_group, libc::SIGKILL) };
+        }
+    }
+
+    fn poll_process_exit(&self) {
+        let Some(process_group) = self.process_group else {
+            return;
+        };
+        if self.process_group_stopped.load(Ordering::Acquire) {
+            return;
+        }
+        let should_probe = {
+            let mut last_probe = self.last_exit_probe.lock();
+            if last_probe.is_none_or(|last| last.elapsed() >= PROCESS_EXIT_POLL_INTERVAL) {
+                *last_probe = Some(Instant::now());
+                true
+            } else {
+                false
+            }
+        };
+        if should_probe && host_exit_is_waiting(process_group).unwrap_or(false) {
+            // A reader can be the only waiter while a descendant keeps the
+            // pipe open. Detect leader exit here so that descendant is retired.
+            self.process_exited();
+        }
+    }
+
+    fn drain_expired(&self) -> bool {
+        self.shutdown_at
+            .lock()
+            .is_some_and(|at| at.elapsed() >= PIPE_DRAIN_GRACE)
+    }
+}
+
+#[cfg(unix)]
+fn set_nonblocking<T: std::os::fd::AsRawFd>(pipe: &T) -> std::io::Result<()> {
+    // SAFETY: F_GETFL/F_SETFL operate on the live descriptor owned by `pipe`.
+    let flags = unsafe { libc::fcntl(pipe.as_raw_fd(), libc::F_GETFL) };
+    if flags == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: preserve the existing descriptor flags and add O_NONBLOCK.
+    if unsafe { libc::fcntl(pipe.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn host_try_wait(child: &mut Child, control: &PipeControl) -> std::io::Result<Option<ExitStatus>> {
+    let process_group = child.id() as libc::pid_t;
+    if !control.process_group_stopped.load(Ordering::Acquire)
+        && host_exit_is_waiting(process_group)?
+    {
+        // WNOWAIT keeps the group leader's pid reserved until descendants
+        // have been signaled, avoiding a stale process-group id signal.
+        control.process_exited();
+    }
+    let status = child.try_wait()?;
+    if status.is_some() {
+        control.process_exited();
+    }
+    Ok(status)
+}
+
+#[cfg(unix)]
+fn host_wait(child: &mut Child, control: &PipeControl) -> std::io::Result<ExitStatus> {
+    let process_group = child.id() as libc::pid_t;
+    if !control.process_group_stopped.load(Ordering::Acquire) {
+        loop {
+            if host_exit_is_waiting(process_group)? {
+                control.process_exited();
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    let status = child.wait()?;
+    control.process_exited();
+    Ok(status)
+}
+
+#[cfg(unix)]
+fn host_exit_is_waiting(process_group: libc::pid_t) -> std::io::Result<bool> {
+    // SAFETY: zero is a valid initialization for siginfo_t before waitid fills it.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    // SAFETY: waitid observes only our child; WNOWAIT leaves it waitable for Child.
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            process_group as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if result == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: waitid initializes si_pid when an exited child is available.
+    Ok(unsafe { info.si_pid() } != 0)
+}
+
+#[cfg(unix)]
+struct ManagedPipeReader<R> {
+    pipe: R,
+    control: Arc<PipeControl>,
+}
+
+#[cfg(unix)]
+impl<R: Read> Read for ManagedPipeReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.control.drain_expired() {
+            return Ok(0);
+        }
+        loop {
+            self.control.poll_process_exit();
+            match self.pipe.read(buffer) {
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if self.control.drain_expired() {
+                        return Ok(0);
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                result => return result,
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+struct ManagedPipeWriter<W> {
+    pipe: W,
+    control: Arc<PipeControl>,
+}
+
+#[cfg(unix)]
+impl<W: Write> Write for ManagedPipeWriter<W> {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if self.control.cancelled.load(Ordering::Acquire) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "provider process is shutting down",
+                ));
+            }
+            match self.pipe.write(buffer) {
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.pipe.flush()
+    }
+}
 
 /// Dev-server ports worth forwarding host:guest at boot. `shuru -p` is a
 /// boot-time-only switch, so the set has to be guessed ahead — these cover
@@ -939,12 +1150,20 @@ pub fn spawn(command: &Command, sandbox: Option<&Arc<ShuruVm>>) -> anyhow::Resul
             if let Some(cwd) = command.get_current_dir() {
                 clone.current_dir(cwd);
             }
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt as _;
+                // This runtime owns the whole provider process group. Its
+                // descendants must not keep daemon pipes open after retirement.
+                clone.process_group(0);
+            }
             clone
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
             crate::command_env::spawn(&mut clone)
                 .map(DriverChild::host)
+                .and_then(|child| child)
                 .context("could not spawn the provider process")
         }
         Some(vm) => vm.spawn(command),
@@ -1568,6 +1787,8 @@ pub struct DriverChild {
     pub stdout: Option<Box<dyn Read + Send>>,
     pub stderr: Option<Box<dyn Read + Send>>,
     kind: ChildKind,
+    #[cfg(unix)]
+    pipe_control: Arc<PipeControl>,
 }
 
 enum ChildKind {
@@ -1582,7 +1803,8 @@ impl DriverChild {
         match &mut self.kind {
             #[cfg(unix)]
             ChildKind::Host(child) => {
-                let result = unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+                self.pipe_control.begin_shutdown();
+                let result = unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGTERM) };
                 if result == 0 {
                     Ok(())
                 } else {
@@ -1597,18 +1819,77 @@ impl DriverChild {
 
     pub fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
         match &mut self.kind {
+            #[cfg(unix)]
+            ChildKind::Host(child) => host_try_wait(child, &self.pipe_control),
+            #[cfg(not(unix))]
             ChildKind::Host(child) => child.try_wait(),
             ChildKind::Guest(child) => child.try_wait(),
         }
     }
 
-    fn host(mut child: Child) -> Self {
-        Self {
-            stdin: child.stdin.take().map(|stdin| Box::new(stdin) as _),
-            stdout: child.stdout.take().map(|stdout| Box::new(stdout) as _),
-            stderr: child.stderr.take().map(|stderr| Box::new(stderr) as _),
-            kind: ChildKind::Host(child),
+    fn host(mut child: Child) -> std::io::Result<Self> {
+        #[cfg(unix)]
+        {
+            let result = child
+                .stdin
+                .as_ref()
+                .map(|pipe| set_nonblocking(pipe))
+                .transpose()
+                .and_then(|_| {
+                    child
+                        .stdout
+                        .as_ref()
+                        .map(|pipe| set_nonblocking(pipe))
+                        .transpose()
+                })
+                .and_then(|_| {
+                    child
+                        .stderr
+                        .as_ref()
+                        .map(|pipe| set_nonblocking(pipe))
+                        .transpose()
+                });
+            if let Err(error) = result {
+                let _ = unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
         }
+        #[cfg(unix)]
+        let pipe_control = Arc::new(PipeControl::for_process_group(child.id() as libc::pid_t));
+        Ok(Self {
+            #[cfg(unix)]
+            stdin: child.stdin.take().map(|pipe| {
+                Box::new(ManagedPipeWriter {
+                    pipe,
+                    control: pipe_control.clone(),
+                }) as _
+            }),
+            #[cfg(not(unix))]
+            stdin: child.stdin.take().map(|pipe| Box::new(pipe) as _),
+            #[cfg(unix)]
+            stdout: child.stdout.take().map(|pipe| {
+                Box::new(ManagedPipeReader {
+                    pipe,
+                    control: pipe_control.clone(),
+                }) as _
+            }),
+            #[cfg(not(unix))]
+            stdout: child.stdout.take().map(|pipe| Box::new(pipe) as _),
+            #[cfg(unix)]
+            stderr: child.stderr.take().map(|pipe| {
+                Box::new(ManagedPipeReader {
+                    pipe,
+                    control: pipe_control.clone(),
+                }) as _
+            }),
+            #[cfg(not(unix))]
+            stderr: child.stderr.take().map(|pipe| Box::new(pipe) as _),
+            kind: ChildKind::Host(child),
+            #[cfg(unix)]
+            pipe_control,
+        })
     }
 
     fn guest(mut child: GuestChild) -> Self {
@@ -1617,11 +1898,16 @@ impl DriverChild {
             stdout: child.stdout.take().map(|stdout| Box::new(stdout) as _),
             stderr: child.stderr.take().map(|stderr| Box::new(stderr) as _),
             kind: ChildKind::Guest(child),
+            #[cfg(unix)]
+            pipe_control: Arc::new(PipeControl::default()),
         }
     }
 
     pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
         match &mut self.kind {
+            #[cfg(unix)]
+            ChildKind::Host(child) => host_wait(child, &self.pipe_control),
+            #[cfg(not(unix))]
             ChildKind::Host(child) => child.wait(),
             ChildKind::Guest(child) => child.wait(),
         }
@@ -1629,6 +1915,17 @@ impl DriverChild {
 
     pub fn kill(&mut self) -> std::io::Result<()> {
         match &mut self.kind {
+            #[cfg(unix)]
+            ChildKind::Host(child) => {
+                self.pipe_control.begin_shutdown();
+                let result = unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
+                if result == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            }
+            #[cfg(not(unix))]
             ChildKind::Host(child) => child.kill(),
             ChildKind::Guest(child) => child.kill(),
         }
@@ -1643,6 +1940,45 @@ impl DriverChild {
                 vm: child.vm.clone(),
                 pid: child.pid.clone(),
             },
+        }
+    }
+}
+
+impl Drop for DriverChild {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let ChildKind::Host(child) = &mut self.kind {
+            if self
+                .pipe_control
+                .process_group_stopped
+                .load(Ordering::Acquire)
+            {
+                return;
+            }
+            self.pipe_control.begin_shutdown();
+            let process_group = -(child.id() as libc::pid_t);
+            // Give normal shutdown handlers a brief opportunity to finish,
+            // then ensure owned descendants cannot strand daemon readers.
+            let _ = unsafe { libc::kill(process_group, libc::SIGTERM) };
+            let deadline = Instant::now() + CHILD_TERM_GRACE;
+            loop {
+                match host_try_wait(child, &self.pipe_control) {
+                    Ok(Some(_)) => {
+                        return;
+                    }
+                    Err(_) => break,
+                    Ok(None) if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Ok(None) => break,
+                }
+            }
+            let _ = unsafe { libc::kill(process_group, libc::SIGKILL) };
+            self.pipe_control
+                .process_group_stopped
+                .store(true, Ordering::Release);
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
@@ -1762,6 +2098,92 @@ mod tests {
         assert!(!env_scrubbed("TERM", &secrets));
         // A name that is not a configured secret survives.
         assert!(!env_scrubbed("CODEX_API_KEY", &secrets));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_reader_finishes_when_a_descendant_keeps_stdout_open() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "trap '' TERM; (while :; do sleep 1; done) & exit 0"]);
+        let mut child = spawn(&command, None).expect("provider fixture should start");
+        let mut stdout = child.stdout.take().expect("provider stdout");
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let reader = thread::spawn(move || {
+            let mut output = Vec::new();
+            let result = stdout.read_to_end(&mut output).map(|_| output);
+            let _ = done_tx.send(result);
+        });
+        let output = match done_rx.recv_timeout(Duration::from_secs(2)) {
+            Ok(Ok(output)) => output,
+            result => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = reader.join();
+                panic!("provider reader did not close after leader exit: {result:?}");
+            }
+        };
+        assert!(output.is_empty());
+        let _ = child.wait().expect("provider child should be reaped");
+        let _ = reader.join();
+        drop(child);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_provider_child_terminates_and_reaps_its_process_group() {
+        let marker = std::env::temp_dir().join(format!(
+            "waku-provider-child-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "trap 'printf done > \"$1\"; exit 0' TERM; (trap '' TERM; while :; do sleep 1; done) & printf 'ready\\n'; wait",
+            "provider-cleanup",
+            marker.to_str().expect("temporary path is valid UTF-8"),
+        ]);
+        let mut child = spawn(&command, None).expect("provider fixture should start");
+        let stdout = child.stdout.take().expect("provider stdout");
+        let mut stdout = std::io::BufReader::new(stdout);
+        let mut ready = String::new();
+        stdout
+            .read_line(&mut ready)
+            .expect("provider should announce readiness");
+        assert_eq!(ready, "ready\n");
+
+        let started = Instant::now();
+        drop(child);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "dropping the provider child should reap its process group promptly"
+        );
+        assert!(marker.is_file(), "the provider leader should receive TERM");
+        std::fs::remove_file(marker).expect("remove provider cleanup marker");
+        let mut trailing = Vec::new();
+        stdout
+            .read_to_end(&mut trailing)
+            .expect("provider stdout should close after child cleanup");
+        assert!(trailing.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_reader_stops_after_shutdown_grace_while_writer_is_open() {
+        use std::os::unix::net::UnixStream;
+
+        let (reader, _writer) = UnixStream::pair().expect("pipe fixture should start");
+        set_nonblocking(&reader).expect("reader should be nonblocking");
+        let control = Arc::new(PipeControl::default());
+        control.begin_shutdown();
+        *control.shutdown_at.lock() = Some(Instant::now() - PIPE_DRAIN_GRACE);
+        let mut reader = ManagedPipeReader {
+            pipe: reader,
+            control,
+        };
+
+        let mut buffer = [0; 1];
+        assert_eq!(reader.read(&mut buffer).expect("bounded read"), 0);
     }
 
     #[cfg(unix)]

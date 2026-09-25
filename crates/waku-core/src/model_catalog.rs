@@ -2067,7 +2067,7 @@ fn discover_pi_models(binary: &Path, dialect: PiDialect) -> Vec<ProviderModel> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let Ok(mut child) = crate::command_env::spawn(command) else {
+    let Ok(mut child) = crate::sandbox::spawn(command, None) else {
         return Vec::new();
     };
     let Some(mut stdin) = child.stdin.take() else {
@@ -2078,8 +2078,15 @@ fn discover_pi_models(binary: &Path, dialect: PiDialect) -> Vec<ProviderModel> {
         let _ = child.kill();
         return Vec::new();
     };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.kill();
+        return Vec::new();
+    };
+    let stderr_reader = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut std::io::BufReader::new(stderr), &mut std::io::sink());
+    });
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let reader = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Ok(value) = serde_json::from_str::<Value>(&line) {
                 let _ = tx.send(value);
@@ -2106,6 +2113,8 @@ fn discover_pi_models(binary: &Path, dialect: PiDialect) -> Vec<ProviderModel> {
     };
     let _ = child.kill();
     let _ = child.wait();
+    let _ = reader.join();
+    let _ = stderr_reader.join();
     result
 }
 
@@ -2229,7 +2238,7 @@ fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let Ok(mut child) = crate::command_env::spawn(command) else {
+    let Ok(mut child) = crate::sandbox::spawn(command, None) else {
         return Vec::new();
     };
     let Some(mut stdin) = child.stdin.take() else {
@@ -2240,8 +2249,15 @@ fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
         let _ = child.kill();
         return Vec::new();
     };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.kill();
+        return Vec::new();
+    };
+    let stderr_reader = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut std::io::BufReader::new(stderr), &mut std::io::sink());
+    });
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let reader = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Ok(value) = serde_json::from_str::<Value>(&line) {
                 let _ = tx.send(value);
@@ -2299,6 +2315,8 @@ fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
     }
     let _ = child.kill();
     let _ = child.wait();
+    let _ = reader.join();
+    let _ = stderr_reader.join();
     models
 }
 

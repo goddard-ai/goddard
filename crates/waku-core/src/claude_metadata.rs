@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -55,8 +55,7 @@ pub(crate) fn initialize(
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
-    isolate_process_group(&mut command);
-    let mut child = crate::command_env::spawn(&mut command).ok()?;
+    let mut child = crate::sandbox::spawn(&command, None).ok()?;
     let Some(mut stdin) = child.stdin.take() else {
         terminate_child(&mut child);
         return None;
@@ -65,6 +64,13 @@ pub(crate) fn initialize(
         terminate_child(&mut child);
         return None;
     };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_child(&mut child);
+        return None;
+    };
+    let stderr_reader = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut std::io::BufReader::new(stderr), &mut std::io::sink());
+    });
     let (tx, rx) = mpsc::channel();
     let reader = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -103,24 +109,11 @@ pub(crate) fn initialize(
     };
     terminate_child(&mut child);
     let _ = reader.join();
+    let _ = stderr_reader.join();
     response
 }
 
-fn isolate_process_group(command: &mut Command) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-        command.process_group(0);
-    }
-    #[cfg(not(unix))]
-    let _ = command;
-}
-
-fn terminate_child(child: &mut Child) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGKILL);
-    }
+fn terminate_child(child: &mut crate::sandbox::DriverChild) {
     let _ = child.kill();
     let _ = child.wait();
 }

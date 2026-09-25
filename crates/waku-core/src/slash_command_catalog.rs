@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -82,8 +82,7 @@ fn discover_codex(binary: &Path, project_root: &Path) -> Option<Vec<SlashCommand
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    isolate_process_group(&mut command);
-    let mut child = crate::command_env::spawn(&mut command).ok()?;
+    let mut child = crate::sandbox::spawn(&command, None).ok()?;
     let Some(mut stdin) = child.stdin.take() else {
         terminate_child(&mut child);
         return None;
@@ -92,6 +91,11 @@ fn discover_codex(binary: &Path, project_root: &Path) -> Option<Vec<SlashCommand
         terminate_child(&mut child);
         return None;
     };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_child(&mut child);
+        return None;
+    };
+    let stderr_reader = drain_stderr(stderr);
     let (tx, rx) = mpsc::channel();
     let reader = thread::spawn(move || read_json_lines(stdout, tx));
 
@@ -145,6 +149,7 @@ fn discover_codex(binary: &Path, project_root: &Path) -> Option<Vec<SlashCommand
     terminate_child(&mut child);
     drop(stdin);
     let _ = reader.join();
+    let _ = stderr_reader.join();
     commands
 }
 
@@ -506,15 +511,20 @@ fn capture_json(binary: &Path, args: &[&str], cwd: &Path) -> Option<Value> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    isolate_process_group(&mut command);
-    let mut child = crate::command_env::spawn(&mut command).ok()?;
+    let mut child = crate::sandbox::spawn(&command, None).ok()?;
     let Some(stdout) = child.stdout.take() else {
         terminate_child(&mut child);
         return None;
     };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_child(&mut child);
+        return None;
+    };
+    let stderr_reader = drain_stderr(stderr);
     let reader = thread::spawn(move || read_bounded(stdout, MAX_CAPTURE_BYTES));
     let success = wait_for_child(&mut child, CLI_PROBE_TIMEOUT);
     let output = reader.join().ok().flatten()?;
+    let _ = stderr_reader.join();
     success
         .then(|| serde_json::from_slice(&output).ok())
         .flatten()
@@ -538,8 +548,7 @@ fn probe_json_lines(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    isolate_process_group(&mut command);
-    let mut child = crate::command_env::spawn(&mut command).ok()?;
+    let mut child = crate::sandbox::spawn(&command, None).ok()?;
     let Some(mut stdin) = child.stdin.take() else {
         terminate_child(&mut child);
         return None;
@@ -548,6 +557,11 @@ fn probe_json_lines(
         terminate_child(&mut child);
         return None;
     };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_child(&mut child);
+        return None;
+    };
+    let stderr_reader = drain_stderr(stderr);
     let (tx, rx) = mpsc::channel();
     let reader = thread::spawn(move || read_json_lines(stdout, tx));
     let result = if stdin.write_all(input).is_ok() && stdin.flush().is_ok() {
@@ -558,7 +572,14 @@ fn probe_json_lines(
     };
     terminate_child(&mut child);
     let _ = reader.join();
+    let _ = stderr_reader.join();
     result
+}
+
+fn drain_stderr(stderr: Box<dyn Read + Send>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let _ = std::io::copy(&mut BufReader::new(stderr), &mut std::io::sink());
+    })
 }
 
 fn read_json_lines(reader: impl Read, tx: mpsc::Sender<Value>) {
@@ -617,7 +638,7 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> Option<Vec<u8>> {
     (!exceeded).then_some(output)
 }
 
-fn wait_for_child(child: &mut Child, timeout: Duration) -> bool {
+fn wait_for_child(child: &mut crate::sandbox::DriverChild, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -631,21 +652,7 @@ fn wait_for_child(child: &mut Child, timeout: Duration) -> bool {
     }
 }
 
-fn isolate_process_group(command: &mut Command) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-        command.process_group(0);
-    }
-    #[cfg(not(unix))]
-    let _ = command;
-}
-
-fn terminate_child(child: &mut Child) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGKILL);
-    }
+fn terminate_child(child: &mut crate::sandbox::DriverChild) {
     let _ = child.kill();
     let _ = child.wait();
 }
