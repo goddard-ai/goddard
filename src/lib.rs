@@ -764,10 +764,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
             GoToNextTurn,
             Some("Workspace && !Terminal"),
         ),
-        // Same spelling VS Code gives its terminal toggle; unclaimed
-        // in text fields, so it fires with the composer focused too.
-        // ⌘D reads as "done" and is the left-hand-only alternative.
-        KeyBinding::new("ctrl-`", GoToNextUnreadCompletion, Some("Workspace")),
+        // ⌘D reads as "done" and is the left-hand-only shortcut.
         KeyBinding::new("secondary-d", GoToNextUnreadCompletion, Some("Workspace")),
         // ⌘⇧D keeps the viewed task unread for a later ⌘D, then
         // moves down the sidebar to the next non-busy task.

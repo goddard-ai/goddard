@@ -134,7 +134,7 @@ pub(super) fn dormant_session_ids(
 }
 
 /// The topmost unread target in the sidebar — shared by
-/// GoToNextUnreadCompletion (⌘D / ctrl-backtick), the unseen-completion
+/// GoToNextUnreadCompletion (⌘D), the unseen-completion
 /// bell, and the session-departure fallbacks. "Unread" is the
 /// unseen-completion set plus a task blocked on its user — a pending
 /// permission or question cannot make progress until someone answers.
@@ -3270,7 +3270,7 @@ impl Waku {
         }
     }
 
-    /// ⌘D / ctrl-backtick: the topmost unread completion — sidebar order is
+    /// ⌘D: the topmost unread completion — sidebar order is
     /// the importance order — then a drained queue cycles into the idle
     /// rotation, and only a list with nothing navigable lands on New task.
     /// Stamps clear on activation, so repeated presses drain top-down.

@@ -2793,7 +2793,6 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "secondary-alt-down",
         WorkspaceNotTerminal,
     ),
-    e("workspace.latest_unseen", All, "ctrl-`", Workspace),
     e("workspace.latest_unseen", All, "secondary-d", Workspace),
     e(
         "workspace.mark_unread_next",

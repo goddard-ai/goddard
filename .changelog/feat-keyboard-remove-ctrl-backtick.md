@@ -1,0 +1,1 @@
+- Use ⌘D to jump to the next unread completion; Ctrl+backtick is no longer assigned to that action.

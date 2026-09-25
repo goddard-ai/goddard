@@ -1044,7 +1044,7 @@ impl Waku {
             }))
     }
 
-    /// Mouse twin of GoToNextUnreadCompletion (⌘D / ctrl-backtick): live
+    /// Mouse twin of GoToNextUnreadCompletion (⌘D): live
     /// while an off-screen task is unread — blocked on its user, or holding an
     /// unseen finished turn. A blocked target earns a red X; a target in a
     /// starred project carries a star — accent while it holds something
