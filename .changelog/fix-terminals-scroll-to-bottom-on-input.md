@@ -1,0 +1,1 @@
+- Typing or pasting in a terminal returns its scrollback view to the live bottom.

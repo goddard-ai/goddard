@@ -581,6 +581,11 @@ impl TerminalSession {
         self.dirty.store(true, Ordering::Release);
     }
 
+    fn scroll_to_bottom(&self) {
+        self.term.lock().scroll_display(Scroll::Bottom);
+        self.dirty.store(true, Ordering::Release);
+    }
+
     fn clear_scrollback(&self) {
         clear_scrollback(&mut self.term.lock());
         self.dirty.store(true, Ordering::Release);
@@ -1524,6 +1529,7 @@ impl TerminalView {
             if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                 session.term.lock().selection = None;
                 let bytes = bracketed_paste(text, session.mode());
+                session.scroll_to_bottom();
                 session.write(bytes);
                 session.dirty.store(true, Ordering::Release);
                 window.prevent_default();
@@ -1534,6 +1540,7 @@ impl TerminalView {
 
         if let Some(bytes) = terminal_key_bytes(keystroke, session.mode()) {
             session.term.lock().selection = None;
+            session.scroll_to_bottom();
             session.write(bytes);
             session.dirty.store(true, Ordering::Release);
             window.prevent_default();
@@ -1838,6 +1845,7 @@ impl TerminalView {
             return;
         };
         session.term.lock().selection = None;
+        session.scroll_to_bottom();
         session.write(bracketed_paste(text, session.mode()));
         session.dirty.store(true, Ordering::Release);
         cx.notify();
