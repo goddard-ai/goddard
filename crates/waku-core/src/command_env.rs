@@ -16,7 +16,7 @@ use std::ffi::CStr;
 #[cfg(unix)]
 use std::mem::MaybeUninit;
 #[cfg(unix)]
-use std::os::unix::ffi::OsStringExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(unix)]
@@ -53,7 +53,7 @@ const SHELL_ENV_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 /// this.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     let program = program.as_ref();
-    let mut command = plain_command(program);
+    let mut command = plain_command(resolve_spawn_program(program));
     command.envs(shell_environment());
     apply_search_path(&mut command, program);
     command
@@ -68,7 +68,7 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
 /// operation, which the full [`command`] environment would risk.
 pub fn search_path_command(program: impl AsRef<OsStr>) -> Command {
     let program = program.as_ref();
-    let mut command = plain_command(program);
+    let mut command = plain_command(resolve_spawn_program(program));
     apply_search_path(&mut command, program);
     command
 }
@@ -79,6 +79,30 @@ fn apply_search_path(command: &mut Command, program: &OsStr) {
     if let Some(search_path) = child_search_path(Path::new(program)) {
         command.env("PATH", search_path);
     }
+}
+
+/// `std::process::Command` refuses `posix_spawn` when the child environment
+/// overrides `PATH` and the program is a bare name — every spawn then forks
+/// the whole process, and on macOS each fork stalls every allocator behind
+/// the malloc fork lock while the VM map copies. Resolving the name against
+/// the same directories the child's `PATH` will carry keeps identical lookup
+/// semantics on the `posix_spawn` fast path; the fallback keeps the original
+/// name so an unresolvable one fails exactly as it did before.
+#[cfg(unix)]
+fn resolve_spawn_program(program: &OsStr) -> OsString {
+    if program.as_bytes().contains(&b'/') {
+        return program.to_os_string();
+    }
+    executable_search_paths()
+        .into_iter()
+        .find_map(|directory| resolve_executable_file(&directory.join(program)))
+        .map(PathBuf::into_os_string)
+        .unwrap_or_else(|| program.to_os_string())
+}
+
+#[cfg(not(unix))]
+fn resolve_spawn_program(program: &OsStr) -> OsString {
+    program.to_os_string()
 }
 
 /// Inject the agent surface into a provider launch: the session's scoped
@@ -1373,6 +1397,54 @@ mod tests {
         let directories = command_search_path(&command("git"));
 
         assert_eq!(directories, executable_search_paths());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_spawn_program_leaves_named_paths_alone() {
+        for program in ["/bin/sh", "dir/tool", "./tool"] {
+            assert_eq!(
+                resolve_spawn_program(OsStr::new(program)),
+                OsString::from(program)
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_spawn_program_resolves_a_bare_name_from_the_search_path() {
+        let resolved = PathBuf::from(resolve_spawn_program(OsStr::new("sh")));
+
+        assert!(resolved.is_absolute());
+        assert!(resolved.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_spawn_program_keeps_an_unresolvable_name() {
+        let missing = "goddard-no-such-program-0f3c1b";
+
+        assert_eq!(
+            resolve_spawn_program(OsStr::new(missing)),
+            OsString::from(missing)
+        );
+    }
+
+    /// `std` refuses `posix_spawn` for a bare program name whose environment
+    /// overrides `PATH` — the spawn then forks the whole process, and on
+    /// macOS each fork stalls every allocator behind the malloc fork lock.
+    /// The commands the daemon builds must carry a resolved program path.
+    #[cfg(unix)]
+    #[test]
+    fn provider_commands_carry_a_resolved_program() {
+        for built in [command("sh"), search_path_command("sh")] {
+            let program = built.get_program();
+            assert!(
+                Path::new(program).is_absolute(),
+                "{} must resolve so the spawn can posix_spawn instead of fork",
+                program.to_string_lossy()
+            );
+        }
     }
 
     #[cfg(unix)]

@@ -1,0 +1,1 @@
+- Sessions no longer stutter and disconnect every few minutes under load: every `git` spawn forked the entire multi-gigabyte daemon, stalling it past its health check, and one slow check then dropped the connection. Spawns now avoid the fork, the daemon's file-descriptor cap matches its load, and a health check has to fail twice before the connection resets.
