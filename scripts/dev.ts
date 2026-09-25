@@ -898,8 +898,9 @@ async function spawnDaemon(bind: string): Promise<void> {
         GODDARD_APP_EXECUTABLE: appExecutablePath,
       },
       stdout: "pipe",
-      stderr: "inherit",
+      stderr: "pipe",
     });
+  pumpDaemonStderr(child);
   let ready: DaemonReady;
   try {
     ready = await readDaemonReady(child);
@@ -917,6 +918,45 @@ async function spawnDaemon(bind: string): Promise<void> {
   controlClient = undefined;
   lastDaemonSpawnAt = Date.now();
   void watchDaemonExit(child);
+}
+
+// macOS arms MallocStackLogging inside the daemon on kernel memorystatus
+// events; every fork() child of an armed process (each alacritty PTY spawn
+// before exec, still named `goddard-debug-daemon`) then has libmalloc print
+// "can't turn off malloc stack logging because it was not enabled" to the
+// inherited stderr. The line is benign and cannot be prevented — drop exactly
+// that whole line (only on macOS), forwarding every other byte untouched.
+const mallocStackLoggingNoise = isMacOS
+  ? /\(\d+\) MallocStackLogging: can't turn off malloc stack logging because it was not enabled\.$/
+  : undefined;
+
+function pumpDaemonStderr(child: ReturnType<typeof Bun.spawn>): void {
+  const stderr = child.stderr;
+  if (stderr == null || typeof stderr === "number") return;
+  void (async () => {
+    try {
+      const reader = stderr.getReader();
+      const decoder = new TextDecoder();
+      let tail = "";
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        const text = tail + decoder.decode(chunk.value, { stream: true });
+        const lines = text.split("\n");
+        tail = lines.pop() ?? "";
+        for (const line of lines) {
+          if (mallocStackLoggingNoise?.test(line)) continue;
+          process.stderr.write(`${line}\n`);
+        }
+      }
+      tail += decoder.decode();
+      if (tail && !mallocStackLoggingNoise?.test(tail)) {
+        process.stderr.write(tail);
+      }
+    } catch {
+      // A dead daemon ends its stderr stream; the exit watcher reports it.
+    }
+  })();
 }
 
 // The app connects as a remote client, so nothing else notices a dead daemon.
