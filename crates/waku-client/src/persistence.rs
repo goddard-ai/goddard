@@ -312,17 +312,23 @@ pub enum VoiceBriefingTtsModel {
     OpenAiHd,
     Grok,
     FishAudio,
+    FishAudioS1,
+    FishAudioS2Pro,
+    FishAudioS21ProFree,
     Custom,
 }
 
 impl VoiceBriefingTtsModel {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 10] = [
         Self::Flash,
         Self::FlashLite,
         Self::OpenAi,
         Self::OpenAiHd,
         Self::Grok,
         Self::FishAudio,
+        Self::FishAudioS1,
+        Self::FishAudioS2Pro,
+        Self::FishAudioS21ProFree,
         Self::Custom,
     ];
 
@@ -336,6 +342,9 @@ impl VoiceBriefingTtsModel {
             Self::OpenAiHd => Some("openai/tts-1-hd"),
             Self::Grok => Some("spacexai/grok-tts"),
             Self::FishAudio => Some("fish-audio/s2.1-pro"),
+            Self::FishAudioS1 => Some("fish-audio/s1"),
+            Self::FishAudioS2Pro => Some("fish-audio/s2-pro"),
+            Self::FishAudioS21ProFree => Some("fish-audio/s2.1-pro-free"),
             Self::Custom => None,
         }
     }
@@ -349,6 +358,9 @@ impl VoiceBriefingTtsModel {
             Self::OpenAiHd => "OpenAI TTS-1 HD",
             Self::Grok => "Grok TTS",
             Self::FishAudio => "Fish Audio S2.1 Pro",
+            Self::FishAudioS1 => "Fish Audio S1",
+            Self::FishAudioS2Pro => "Fish Audio S2 Pro",
+            Self::FishAudioS21ProFree => "Fish Audio S2.1 Pro Free",
             Self::Custom => "Custom model",
         }
     }

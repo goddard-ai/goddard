@@ -3440,6 +3440,8 @@ errors.open_session:
   en: "Could not open that session: %{error}"
 errors.voice_briefing:
   en: The voice briefing could not be generated
+errors.voice_briefing_playback:
+  en: The voice briefing was generated, but audio playback could not start
 errors.create_projectless_task:
   en: "Could not create a task beneath ~/.goddard/projects: %{error}"
 errors.save_projectless_migration:

@@ -335,12 +335,13 @@ pub fn play_completion_sound(sound: waku_client::persistence::CompletionSound, v
 pub fn play_completion_sound(_: waku_client::persistence::CompletionSound, _: f32) {}
 
 /// Play a voice-briefing clip — encoded audio bytes in any container
-/// `AVAudioPlayer` decodes (the gateway answers WAV). Reuses the
-/// completion-sound volume so the experiment honors the existing slider.
-/// Like the bundled sounds there is no smaller portable API, so other
-/// platforms stay silent for now.
+/// `AVAudioPlayer` decodes (the gateway returns WAV or MP3 depending on the
+/// model). Reuses the completion-sound volume so the experiment honors the
+/// existing slider.
+/// Returns whether playback actually started. Other platforms have no
+/// playback implementation yet and return `false`.
 #[cfg(target_os = "macos")]
-pub fn play_briefing_audio(bytes: &[u8], volume: f32) {
+pub fn play_briefing_audio(bytes: &[u8], volume: f32) -> bool {
     use objc2::AnyThread;
     use objc2_avf_audio::AVAudioPlayer;
     use objc2_foundation::NSData;
@@ -349,18 +350,23 @@ pub fn play_briefing_audio(bytes: &[u8], volume: f32) {
     let data = NSData::with_bytes(bytes);
     let Ok(player) = (unsafe { AVAudioPlayer::initWithData_error(AVAudioPlayer::alloc(), &data) })
     else {
-        return;
+        return false;
     };
     unsafe {
         player.setVolume(volume);
         if player.play() {
             PLAYING_BRIEFING.with_borrow_mut(|slot| *slot = Some(player));
+            true
+        } else {
+            false
         }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn play_briefing_audio(_: &[u8], _: f32) {}
+pub fn play_briefing_audio(_: &[u8], _: f32) -> bool {
+    false
+}
 
 #[cfg(target_os = "macos")]
 fn app_icon_for_application_path(

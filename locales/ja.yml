@@ -2183,6 +2183,7 @@ errors.provider_terminal_sessions_local_only: "%{provider} のセッションに
 errors.remote_connect: "%{name} に接続できませんでした：%{error}"
 errors.store_pasted_text: "ペーストしたテキストを添付できませんでした：%{error}"
 errors.voice_briefing: 音声ブリーフィングを生成できませんでした
+errors.voice_briefing_playback: 音声ブリーフィングは生成されましたが、再生を開始できませんでした
 experiments.automations_description: プロンプトをタイマーで実行するオートメーションページです — 毎時、毎日、平日、毎週、cron。それぞれを独立したタスクまたは既存タスクで実行し、実行履歴と手動の単発実行に対応します。
 experiments.automations_title: オートメーション
 experiments.big_picture_description: ⌘0 で全ウインドウのセッションカードグリッドを表示します。ライブトランスクリプトとカードごとの入力欄を備え、⌘1–9 で宛先を指定できます。

@@ -74,8 +74,11 @@ impl Waku {
             return;
         }
         if let Some(bytes) = self.briefing_clips.get(&message_id) {
-            crate::platform::play_briefing_audio(bytes, self.state.completion_sound_volume);
-            self.mark_briefed(message_id);
+            if crate::platform::play_briefing_audio(bytes, self.state.completion_sound_volume) {
+                self.mark_briefed(message_id);
+            } else {
+                self.show_toast(tr!("errors.voice_briefing_playback"));
+            }
             return;
         }
         if let Some(play) = self.briefing_pending.get_mut(&message_id) {
@@ -189,15 +192,20 @@ impl Waku {
                             }
                         }
                         if play && !this.briefed_messages.contains(&message_id) {
-                            this.mark_briefed(message_id);
                             // AVAudioPlayer must start on the UI thread, so
                             // the bytes ride the spawn back rather than
                             // playing from the executor.
-                            if let Some(bytes) = this.briefing_clips.get(&message_id) {
-                                crate::platform::play_briefing_audio(
-                                    bytes,
-                                    this.state.completion_sound_volume,
-                                );
+                            let started =
+                                this.briefing_clips.get(&message_id).is_some_and(|bytes| {
+                                    crate::platform::play_briefing_audio(
+                                        bytes,
+                                        this.state.completion_sound_volume,
+                                    )
+                                });
+                            if started {
+                                this.mark_briefed(message_id);
+                            } else {
+                                this.show_toast(tr!("errors.voice_briefing_playback"));
                             }
                         }
                     }
@@ -292,14 +300,15 @@ fn speech_parameters(model_id: &str) -> (&'static str, &'static str) {
         "openai/tts-1" | "openai/tts-1-hd" => ("alloy", "mp3"),
         "spacexai/grok-tts" => ("eve", "wav"),
         "fish-audio/s1" | "fish-audio/s2-pro" | "fish-audio/s2.1-pro" => (FISH_AUDIO_VOICE, "mp3"),
+        "fish-audio/s2.1-pro-free" => (FISH_AUDIO_VOICE, "mp3"),
         _ => ("Kore", "wav"),
     }
 }
 
 /// POST a JSON body with the gateway bearer and parse the JSON answer.
-/// `model_header` carries the speech endpoint's `ai-model-id`; chat
-/// completions names its model in the body instead. Non-2xx statuses fail
-/// with the code alone — error bodies can echo the request.
+/// `model_header` carries the speech endpoint's model and protocol headers;
+/// chat completions names its model in the body instead. Non-2xx statuses
+/// fail with the code alone — error bodies can echo the request.
 async fn post_json(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
@@ -312,7 +321,9 @@ async fn post_json(
         .header("authorization", format!("Bearer {key}"))
         .header("content-type", "application/json");
     if let Some(model) = model_header {
-        request = request.header("ai-model-id", model);
+        request = request
+            .header("ai-speech-model-specification-version", "4")
+            .header("ai-model-id", model);
     }
     let request = request.body(gpui::http_client::AsyncBody::from(serde_json::to_vec(
         body,
