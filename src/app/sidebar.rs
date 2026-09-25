@@ -5221,6 +5221,7 @@ impl Waku {
                             .child(icon("icons/sparkle.svg", 12.5, theme.text_tertiary))
                             .child(
                                 div()
+                                    .flex_1()
                                     .min_w_0()
                                     .flex()
                                     .items_center()
@@ -5288,10 +5289,9 @@ impl Waku {
                         },
                     )
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
-                    .when(
-                        !self.sidebar_alt_held && session.workspace.is_worktree(),
-                        |element| element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary)),
-                    )
+                    .when(session.workspace.is_worktree(), |element| {
+                        element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
+                    })
                     .when_some(pull_request_badge, |element, badge| {
                         let color = sidebar_pull_request_color(&theme, badge.state);
                         element.child(

@@ -1,0 +1,1 @@
+- Keep the worktree icon and timestamp at the far end of sidebar session rows while holding Alt to peek at the configured model.
