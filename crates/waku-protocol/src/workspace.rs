@@ -130,15 +130,16 @@ pub struct GitHubRepoRef {
 }
 
 /// Why a repo's GitHub reads cannot be answered. `Ready` pairs with a
-/// resolved repo; the other variants tell the UI whether to hint at
-/// installing `gh`, at authenticating, or to stay hidden (a repo `gh` knows
-/// but that is not on GitHub).
+/// resolved repo or confirms there is no GitHub remote. The other variants
+/// tell the UI whether to install `gh`, authenticate, or retry an uncertain
+/// lookup.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum GitHubAvailability {
     Ready,
     MissingCli,
     Unauthenticated,
+    Unavailable,
 }
 
 /// Open/closed/all filter shared by issue and pull-request list reads.

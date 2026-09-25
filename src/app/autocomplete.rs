@@ -713,7 +713,10 @@ impl Waku {
     /// executor through the daemon; only the landing touches `self`.
     fn start_work_item_search(&mut self, path: PathBuf, query: String, cx: &mut Context<Self>) {
         let state = self.work_item_mentions.entry(path.clone()).or_default();
-        let need_repo = state.repo.is_none();
+        let need_repo = !matches!(
+            state.repo.as_ref(),
+            Some((Some(_), _)) | Some((None, GitHubAvailability::Ready))
+        );
         state.generation = state.generation.wrapping_add(1);
         let generation = state.generation;
         state.requested_query = Some(query.clone());
@@ -767,7 +770,7 @@ impl Waku {
                         Ok(waku_client::WorkspaceResult::GitHubRepo { repo, availability }) => {
                             (repo, availability)
                         }
-                        _ => (None, GitHubAvailability::Ready),
+                        _ => (None, GitHubAvailability::Unavailable),
                     }
                 })
             });
@@ -895,6 +898,7 @@ impl Waku {
                             GitHubAvailability::MissingCli => tr!("github.install_gh"),
                             GitHubAvailability::Unauthenticated => tr!("github.auth_gh"),
                             GitHubAvailability::Ready => tr!("github.not_a_repo"),
+                            GitHubAvailability::Unavailable => tr!("github.unavailable"),
                         }),
                         _ => None,
                     })

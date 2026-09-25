@@ -1,0 +1,1 @@
+- On the Projects page, a temporary GitHub CLI or network error no longer marks a GitHub repository as non-GitHub; Refresh retries the lookup.

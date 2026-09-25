@@ -232,6 +232,7 @@ impl Waku {
                 waku_client::GitHubAvailability::MissingCli => tr!("github.install_gh"),
                 waku_client::GitHubAvailability::Unauthenticated => tr!("github.auth_gh"),
                 waku_client::GitHubAvailability::Ready => tr!("github.not_a_repo"),
+                waku_client::GitHubAvailability::Unavailable => tr!("github.unavailable"),
             };
             return github::github_centered(
                 icon("icons/github.svg", 16.0, theme.text_tertiary).into_any_element(),

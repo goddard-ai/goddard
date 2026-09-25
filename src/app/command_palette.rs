@@ -1652,7 +1652,7 @@ impl Waku {
                         Ok(waku_client::WorkspaceResult::GitHubRepo { repo, availability }) => {
                             (repo, availability)
                         }
-                        _ => (None, GitHubAvailability::Ready),
+                        _ => (None, GitHubAvailability::Unavailable),
                     };
                     (templates, repo, availability)
                 })
@@ -1669,6 +1669,9 @@ impl Waku {
                     }
                     GitHubAvailability::Unauthenticated => {
                         return Some(IssueTemplateFetch::Toast(tr!("github.auth_gh")));
+                    }
+                    GitHubAvailability::Unavailable => {
+                        return Some(IssueTemplateFetch::Toast(tr!("github.unavailable")));
                     }
                     GitHubAvailability::Ready => {}
                 }

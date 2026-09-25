@@ -73,6 +73,14 @@ fn gh_error_is_auth(stderr: &str) -> bool {
         || lowered.contains("requires authentication")
 }
 
+fn gh_error_is_no_repo(stderr: &str) -> bool {
+    let lowered = stderr.to_lowercase();
+    lowered.contains("not a git repository")
+        || lowered.contains("no git remotes")
+        || lowered.contains("no remotes found")
+        || lowered.contains("none of the git remotes configured for this repository")
+}
+
 pub fn resolve_repo(cwd: &Path) -> (Option<GitHubRepoRef>, GitHubAvailability) {
     let args = [
         OsStr::new("repo"),
@@ -86,23 +94,28 @@ pub fn resolve_repo(cwd: &Path) -> (Option<GitHubRepoRef>, GitHubAvailability) {
         .output();
     let output = match result {
         Ok(output) => output,
-        // The binary itself could not be spawned.
-        Err(_) => return (None, GitHubAvailability::MissingCli),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return (None, GitHubAvailability::MissingCli);
+        }
+        // A spawn failure other than a missing executable may be temporary.
+        Err(_) => return (None, GitHubAvailability::Unavailable),
     };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // gh ran; an auth-shaped failure hints at `gh auth login`, anything
-        // else means the directory is not, or has no, GitHub remote.
-        let availability = if gh_error_is_auth(&stderr) {
+        // Only explicit no-repository/no-remote diagnostics are conclusive;
+        // network, API, and unrecognized failures should remain retryable.
+        let availability = if gh_error_is_no_repo(&stderr) {
+            GitHubAvailability::Ready
+        } else if gh_error_is_auth(&stderr) {
             GitHubAvailability::Unauthenticated
         } else {
-            GitHubAvailability::Ready
+            GitHubAvailability::Unavailable
         };
         return (None, availability);
     }
     match serde_json::from_slice::<GhRepoView>(&output.stdout) {
         Ok(view) => (Some(view.into_ref()), GitHubAvailability::Ready),
-        Err(_) => (None, GitHubAvailability::Ready),
+        Err(_) => (None, GitHubAvailability::Unavailable),
     }
 }
 

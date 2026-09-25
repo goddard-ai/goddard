@@ -253,7 +253,12 @@ impl Waku {
         };
         browser.generation = browser.generation.wrapping_add(1);
         let generation = browser.generation;
-        let needs_repo = browser.repo.is_none();
+        // A repo or an explicit no-GitHub-remote answer is final. CLI,
+        // authentication, and uncertain lookup failures are retried on refresh.
+        let needs_repo = !matches!(
+            browser.repo.as_ref(),
+            Some((Some(_), _)) | Some((None, GitHubAvailability::Ready))
+        );
         let query_state = browser.query_state;
         // Refresh keeps showing the rows it is about to replace; the loader
         // is for the first pass only.
@@ -278,7 +283,7 @@ impl Waku {
                             Ok(waku_client::WorkspaceResult::GitHubRepo { repo, availability }) => {
                                 (repo, availability)
                             }
-                            _ => (None, GitHubAvailability::Ready),
+                            _ => (None, GitHubAvailability::Unavailable),
                         }
                     });
                     let pull_requests = workspace
@@ -1134,6 +1139,7 @@ impl Waku {
                     GitHubAvailability::MissingCli => tr!("github.install_gh"),
                     GitHubAvailability::Unauthenticated => tr!("github.auth_gh"),
                     GitHubAvailability::Ready => tr!("github.not_a_repo"),
+                    GitHubAvailability::Unavailable => tr!("github.unavailable"),
                 };
                 return github_centered(
                     icon("icons/github.svg", 16.0, theme.text_tertiary).into_any_element(),

@@ -2,8 +2,8 @@
 
 /**
  * Why a repo's GitHub reads cannot be answered. `Ready` pairs with a
- * resolved repo; the other variants tell the UI whether to hint at
- * installing `gh`, at authenticating, or to stay hidden (a repo `gh` knows
- * but that is not on GitHub).
+ * resolved repo or confirms there is no GitHub remote. The other variants
+ * tell the UI whether to install `gh`, authenticate, or retry an uncertain
+ * lookup.
  */
-export type GitHubAvailability = "ready" | "missingCli" | "unauthenticated";
+export type GitHubAvailability = "ready" | "missingCli" | "unauthenticated" | "unavailable";
