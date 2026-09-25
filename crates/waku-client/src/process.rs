@@ -652,6 +652,10 @@ fn monitor_daemon(
     // detection — mid-respawn the target reads `Restarting`, which has no
     // process to inspect, so later iterations would report the wrong cause.
     let mut outage: Option<(DaemonRecoveryCause, Option<DaemonExit>)> = None;
+    // The client armed by one dead probe round. A second consecutive dead
+    // round on the same connection severs it; an answer or a replacement
+    // client disarms it.
+    let mut pending_dead: Option<DaemonClient> = None;
     loop {
         std::thread::sleep(REBUILD_POLL_INTERVAL);
         let Some(inner) = weak_inner.upgrade() else {
@@ -845,8 +849,12 @@ fn monitor_daemon(
         }
         // The socket being open only proves the socket is open. Probe the
         // request pipeline so a wedged daemon is declared dead and replaced
-        // instead of hanging every request for the full request timeout.
-        if last_probe.elapsed() >= PROBE_INTERVAL && !client.is_disconnected() {
+        // instead of hanging every request for the full request timeout. An
+        // armed round re-probes on the next poll instead of the interval,
+        // so escalation adds about one poll cycle to a genuine outage.
+        if (pending_dead.is_some() || last_probe.elapsed() >= PROBE_INTERVAL)
+            && !client.is_disconnected()
+        {
             last_probe = Instant::now();
             if !client.probe(PROBE_TIMEOUT) {
                 // A stalled pipeline on the app's busy socket says nothing
@@ -855,10 +863,29 @@ fn monitor_daemon(
                 let daemon_dead = endpoint.as_ref().is_none_or(|(address, token)| {
                     !probe_daemon_endpoint(address, token, PROBE_TIMEOUT)
                 });
-                if daemon_dead {
+                if daemon_dead && dead_probe_escalates(&mut pending_dead, &client) {
                     client.force_disconnect();
+                } else if !daemon_dead {
+                    pending_dead = None;
                 }
+            } else {
+                pending_dead = None;
             }
+        }
+    }
+}
+
+/// One dead probe round arms the next check; a second consecutive dead
+/// round on the same connection severs it. Without the streak a daemon
+/// that stalls for a few seconds — a checkpoint burst, a contested lock —
+/// would flap every session it owns. A replacement client cannot inherit
+/// an armed round: `same_connection` compares connection identity.
+fn dead_probe_escalates(pending: &mut Option<DaemonClient>, client: &DaemonClient) -> bool {
+    match pending.take() {
+        Some(dead) if dead.same_connection(client) => true,
+        _ => {
+            *pending = Some(client.clone());
+            false
         }
     }
 }
@@ -1139,6 +1166,64 @@ mod tests {
             "127.0.0.1:34123"
         );
         assert_eq!(desktop_client_address("[::]:34123").unwrap(), "[::1]:34123");
+    }
+
+    /// Answers the `Hello` handshake on every accepted connection so probe
+    /// clients can be fabricated without a real daemon.
+    fn hello_endpoint() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        std::thread::spawn(move || loop {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            std::thread::spawn(move || {
+                let Ok(mut socket) = tungstenite::accept(stream) else {
+                    return;
+                };
+                while let Ok(message) = socket.read() {
+                    let tungstenite::Message::Text(text) = message else {
+                        continue;
+                    };
+                    let Ok(waku_protocol::ClientMessage::Hello { .. }) =
+                        serde_json::from_str::<waku_protocol::ClientMessage>(text.as_ref())
+                    else {
+                        continue;
+                    };
+                    let reply = serde_json::to_string(&waku_protocol::ServerMessage::Hello {
+                        protocol_version: PROTOCOL_VERSION,
+                        daemon_version: "test".into(),
+                        daemon_commit: None,
+                        agent_cli_available: false,
+                    })
+                    .unwrap();
+                    if socket
+                        .send(tungstenite::Message::Text(reply.into()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+        });
+        address
+    }
+
+    /// Two consecutive dead rounds on the same connection must sever it; a
+    /// single round — or a round on a different connection — only arms the
+    /// next check.
+    #[test]
+    fn dead_probe_escalates_only_on_the_same_connection_twice() {
+        let address = hello_endpoint();
+        let client = DaemonClient::connect(&address, "token".into()).unwrap();
+        let replacement = DaemonClient::connect(&address, "token".into()).unwrap();
+        let mut pending = None;
+
+        assert!(!dead_probe_escalates(&mut pending, &client));
+        assert!(dead_probe_escalates(&mut pending, &client));
+
+        assert!(!dead_probe_escalates(&mut pending, &replacement));
+        assert!(dead_probe_escalates(&mut pending, &replacement));
     }
 
     #[test]
