@@ -44,8 +44,8 @@ jobs:
       SCCACHE_REGION: auto
       SCCACHE_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
       SCCACHE_S3_USE_SSL: "true"
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
       RUSTFLAGS: ${{ startsWith(matrix.runner, 'ubuntu-22.04') && '-C linker=clang -C link-arg=-fuse-ld=mold' || startsWith(matrix.runner, 'windows-') && '-C linker=rust-lld' || '' }}
 
     steps:
