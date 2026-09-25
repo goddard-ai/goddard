@@ -810,11 +810,13 @@ pub(super) fn should_show_navigation_rail(
     turn_count: usize,
     chat_viewport_width: f32,
 ) -> bool {
+    transcript_scrollable && turn_count >= 2 && navigation_rail_fits_width(chat_viewport_width)
+}
+
+pub(super) fn navigation_rail_fits_width(chat_viewport_width: f32) -> bool {
     let content_left = ((chat_viewport_width - CONTENT_MAX_WIDTH) / 2.0).max(20.0);
     let rail_right = NAVIGATION_RAIL_LEFT + NAVIGATION_RAIL_WIDTH;
-    transcript_scrollable
-        && turn_count >= 2
-        && content_left >= rail_right + NAVIGATION_RAIL_CONTENT_GAP
+    content_left >= rail_right + NAVIGATION_RAIL_CONTENT_GAP
 }
 
 /// A provider can split one assistant response into several ordered text

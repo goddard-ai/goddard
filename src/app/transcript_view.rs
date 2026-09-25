@@ -376,6 +376,7 @@ impl Waku {
                 navigation_turns.len(),
                 chat_viewport_width,
             );
+            let navigation_rail_fits = navigation_rail_fits_width(chat_viewport_width);
             let scroll_top_row = transcript_rows.logical_scroll_top().item_ix;
             let turn_rows = navigation_turns
                 .iter()
@@ -432,7 +433,9 @@ impl Waku {
                     entity
                         .upgrade()
                         .map(|entity| {
-                            entity.update(cx, |this, cx| this.transcript_row(index, window, cx))
+                            entity.update(cx, |this, cx| {
+                                this.transcript_row(index, navigation_rail_fits, window, cx)
+                            })
                         })
                         .unwrap_or_else(|| div().into_any_element())
                 })
@@ -1553,6 +1556,7 @@ impl Waku {
     pub(super) fn transcript_row(
         &mut self,
         index: usize,
+        navigation_rail_fits: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1805,7 +1809,7 @@ impl Waku {
         };
         let new_content_dot = self
             .transcript_new_content_dot
-            .filter(|dot| {
+            .filter(|dot| navigation_rail_fits && {
                 matches!(kind, TranscriptRowKind::Message(message_index)
                     if self
                         .selected_session()
