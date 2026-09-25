@@ -463,6 +463,17 @@ pub fn flatten(
                             Uuid::from_bytes(bytes)
                         });
                         let start = flat.text.len();
+                        // The label's icon slot — the same leading
+                        // whitespace the composer field paints its chip
+                        // icon into.
+                        flat.emit(
+                            crate::input::ATOM_ICON_SLOT,
+                            &run.style,
+                            &atom_font,
+                            base_color,
+                            palette,
+                            true,
+                        );
                         if session.is_none() && !nibbles.is_empty() {
                             let selectors: String = nibbles
                                 .iter()
@@ -487,6 +498,15 @@ pub fn flatten(
                             true,
                         );
                         let range = *start..flat.text.len();
+                        // Copy keeps the label, not the icon slot the chip
+                        // paints its glyph into.
+                        flat.fragments.push((
+                            range.clone(),
+                            Rc::from(
+                                &flat.text
+                                    [*start + crate::input::ATOM_ICON_SLOT.len()..flat.text.len()],
+                            ),
+                        ));
                         flat.atom_ranges.push((range.clone(), *session));
                         if let Some(session_id) = session {
                             flat.links.push((
@@ -534,6 +554,22 @@ pub fn flatten(
 /// [`waku_protocol::model::encode_atom_session_id`].
 fn is_atom_id_char(ch: char) -> bool {
     ('\u{FE00}'..='\u{FE0F}').contains(&ch)
+}
+
+/// The color of the run covering `offset` — an atom chip's leading icon
+/// takes its label's accent this way. An offset past the runs keeps the
+/// last run's color.
+fn run_color_at(runs: &[TextRun], offset: usize) -> Hsla {
+    let mut position = 0usize;
+    let mut color = gpui::transparent_black();
+    for run in runs {
+        if offset < position + run.len {
+            return run.color;
+        }
+        position += run.len;
+        color = run.color;
+    }
+    color
 }
 
 /// The flat-text pieces [`flatten`] accumulates while scanning runs.
@@ -1695,13 +1731,27 @@ fn text_element_with_selection(
     let underlay = canvas(|_, _, _| (), {
         let text = flat.text.clone();
         let code_ranges = flat.code_ranges.clone();
-        let atom_ranges = flat.atom_ranges.clone();
+        // Each atom's chip range, its leading icon, and the icon's tint —
+        // the label's own run color, so the glyph reads as part of the
+        // chip's text.
+        let atom_chips: Vec<(Range<usize>, &'static str, Hsla)> = flat
+            .atom_ranges
+            .iter()
+            .map(|(range, session)| {
+                let icon = if session.is_some() {
+                    crate::input::ATOM_SESSION_ICON
+                } else {
+                    crate::input::ATOM_PASTED_ICON
+                };
+                (range.clone(), icon, run_color_at(&flat.runs, range.start))
+            })
+            .collect();
         let annotation_refs = flat.annotation_refs.clone();
         let commit_refs = flat.commit_refs.clone();
         let file_refs = flat.file_refs.clone();
         let layout = layout.clone();
         let key = key.clone();
-        move |_, _, window, _| {
+        move |_, _, window, cx| {
             for range in &code_ranges {
                 for rect in range_rects(&layout, range, CODE_WASH_PAD_X, CODE_WASH_INSET_Y) {
                     window.paint_quad(quad(
@@ -1714,23 +1764,34 @@ fn text_element_with_selection(
                     ));
                 }
             }
-            // The composer's chip chrome — the same inset wash a live atom
-            // paints in the field.
-            for (range, _) in &atom_ranges {
-                for rect in range_rects(
+            // The composer's chip chrome — the same inset wash and leading
+            // icon a live atom paints in the field.
+            for (range, icon, color) in &atom_chips {
+                let rects = range_rects(
                     &layout,
                     range,
                     ATOM_CHIP_PADDING_X.into(),
                     ATOM_CHIP_INSET_Y.into(),
-                ) {
+                );
+                for rect in &rects {
                     window.paint_quad(quad(
-                        rect,
+                        *rect,
                         ATOM_CHIP_RADIUS,
                         atom_wash,
                         px(0.0),
                         gpui::transparent_black(),
                         BorderStyle::default(),
                     ));
+                }
+                if let Some(chip) = rects.first() {
+                    let _ = window.paint_svg(
+                        crate::input::atom_icon_bounds(*chip),
+                        (*icon).into(),
+                        None,
+                        gpui::TransformationMatrix::default(),
+                        *color,
+                        cx,
+                    );
                 }
             }
             if let Some(search) = &search {
@@ -3794,7 +3855,7 @@ mod tests {
         // display_content: label spans for a session reference and a folded
         // paste, the session id riding invisibly in variation selectors.
         let runs = runs_of(&format!(
-            "fix {OPEN}{id}session:Big refactor{END} and {OPEN}Pasted text (2 lines){END} now",
+            "fix {OPEN}{id}Big refactor{END} and {OPEN}Pasted text (2 lines){END} now",
             OPEN = MESSAGE_ATOM_OPEN,
             END = MESSAGE_ATOM_END,
             id = encode_atom_session_id(session_id),
@@ -3809,17 +3870,20 @@ mod tests {
         assert_runs_tile(&flat);
         assert_eq!(
             flat.text.as_ref(),
-            "fix session:Big refactor and Pasted text (2 lines) now"
+            format!(
+                "fix {SLOT}Big refactor and {SLOT}Pasted text (2 lines) now",
+                SLOT = crate::input::ATOM_ICON_SLOT,
+            )
         );
         assert_eq!(
             flat.atom_ranges,
-            vec![(4..24, Some(session_id)), (29..50, None)]
+            vec![(4..22, Some(session_id)), (27..54, None)]
         );
         // Only the session chip carries a link — the routed task URL.
         assert_eq!(
             flat.links,
             vec![(
-                4..24,
+                4..22,
                 format!("{}{session_id}", waku_protocol::TASK_LINK_PREFIX)
             )]
         );
@@ -3852,8 +3916,14 @@ mod tests {
             palette().text,
         );
         assert_runs_tile(&flat);
-        assert_eq!(flat.text.as_ref(), "a Pasted text b  c");
-        assert_eq!(flat.atom_ranges, vec![(2..13, None)]);
+        assert_eq!(
+            flat.text.as_ref(),
+            format!(
+                "a {SLOT}Pasted text b  c",
+                SLOT = crate::input::ATOM_ICON_SLOT
+            )
+        );
+        assert_eq!(flat.atom_ranges, vec![(2..19, None)]);
     }
 
     /// `(slice, weight)` per run, in order — how a fixated flat reads.

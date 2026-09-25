@@ -155,7 +155,7 @@ impl Waku {
             };
             let _ = waku.update(cx, |waku, cx| {
                 if apply_category(&mut waku.composer_inline_atoms, revision, category) {
-                    waku.sync_inline_atom_labels(cx);
+                    waku.sync_inline_atoms(cx);
                     cx.notify();
                 }
             });

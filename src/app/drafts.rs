@@ -469,7 +469,7 @@ impl Waku {
         // An open paste editor's marker offsets belong to the outgoing
         // content — the atoms it edited are gone.
         self.pasted_text_editor = None;
-        self.sync_inline_atom_labels(cx);
+        self.sync_inline_atoms(cx);
         if key == self.selected_composer_draft_key() {
             self.restore_draft_annotations(draft.annotations);
         }

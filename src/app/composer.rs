@@ -121,6 +121,15 @@ impl ComposerInlineAtom {
         }
     }
 
+    /// The icon the atom's chip opens with — the same glyph the matching
+    /// attachment chip carries.
+    pub(super) fn icon(&self) -> &'static str {
+        match &self.kind {
+            ComposerAtomKind::PastedText(_) => crate::input::ATOM_PASTED_ICON,
+            ComposerAtomKind::SessionRef { .. } => crate::input::ATOM_SESSION_ICON,
+        }
+    }
+
     /// The wire form the sent message carries: the chip label, the payload
     /// an edit splices back, and the task a session chip opens.
     pub(super) fn message_atom(&self) -> waku_protocol::model::MessageAtom {
@@ -132,18 +141,19 @@ impl ComposerInlineAtom {
     }
 }
 
-/// The label an inline session atom paints in the field — `session:` keeps
-/// it from reading as plain words when a title resembles them.
+/// The label an inline session atom paints in the field — the title,
+/// trimmed for the chip; the leading chat-bubble icon carries the "this is
+/// a session" affordance the `session:` prefix used to spell out.
 pub(super) fn session_atom_label(title: &str) -> String {
     const MAX_LABEL_CHARS: usize = 48;
     let title = title.trim();
     if title.chars().count() > MAX_LABEL_CHARS {
         format!(
-            "session:{}…",
+            "{}…",
             title.chars().take(MAX_LABEL_CHARS).collect::<String>()
         )
     } else {
-        format!("session:{title}")
+        title.to_owned()
     }
 }
 
@@ -3047,21 +3057,23 @@ impl Waku {
             },
         });
         self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
-        self.sync_inline_atom_labels(cx);
+        self.sync_inline_atoms(cx);
         self.schedule_composer_draft_save(cx);
     }
 
-    /// Push the atoms' labels into the field, in marker order — the painted
-    /// text substitutes each [`INLINE_ATOM_MARKER`] for its label.
-    pub(super) fn sync_inline_atom_labels(&mut self, cx: &mut Context<Self>) {
-        let labels = self
+    /// Push the atoms into the field, in marker order — the painted text
+    /// substitutes each [`INLINE_ATOM_MARKER`] for its atom's chip.
+    pub(super) fn sync_inline_atoms(&mut self, cx: &mut Context<Self>) {
+        let atoms = self
             .composer_inline_atoms
             .iter()
-            .map(|atom| SharedString::from(atom.label()))
+            .map(|atom| crate::input::InlineAtom {
+                label: SharedString::from(atom.label()),
+                icon: Some(atom.icon()),
+            })
             .collect();
-        self.composer.update(cx, |composer, cx| {
-            composer.set_inline_atom_labels(labels, cx)
-        });
+        self.composer
+            .update(cx, |composer, cx| composer.set_inline_atoms(atoms, cx));
     }
 
     fn stage_attachment_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> bool {
@@ -3291,7 +3303,7 @@ impl Waku {
                 kind: ComposerAtomKind::PastedText(text),
             });
             self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
-            self.sync_inline_atom_labels(cx);
+            self.sync_inline_atoms(cx);
             self.classify_pasted_atom(revision, cx);
             self.schedule_composer_draft_save(cx);
             cx.notify();
@@ -3453,7 +3465,7 @@ impl Waku {
                 revision = Some(atom.revision);
             }
             if let Some(revision) = revision {
-                self.sync_inline_atom_labels(cx);
+                self.sync_inline_atoms(cx);
                 self.classify_pasted_atom(revision, cx);
             }
         }
@@ -3568,7 +3580,7 @@ impl Waku {
             .collect();
         atoms.sort_by_key(|atom| atom.marker);
         self.composer_inline_atoms = atoms;
-        self.sync_inline_atom_labels(cx);
+        self.sync_inline_atoms(cx);
     }
 
     /// The text and attachment presentation accepted from the composer. The
@@ -4146,7 +4158,7 @@ impl Waku {
                 .push(ComposerInlineAtom { marker, ..atom });
         }
         self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
-        self.sync_inline_atom_labels(cx);
+        self.sync_inline_atoms(cx);
         self.schedule_composer_draft_save(cx);
         cx.notify();
     }
