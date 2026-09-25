@@ -2580,12 +2580,19 @@ settings.memory_refresh: 刷新
 settings.memory_unavailable: 无法加载该项目的记忆。
 settings.memory_loading: 正在加载项目记忆…
 settings.memory_disabled: 记忆功能已关闭。请在“设置 → 实验”中启用以记录新条目。
-settings.memory_older: 更早
-settings.memory_newer: 更近
-settings.memory_lines_one: 1 行
-settings.memory_lines_many: "%{count} 行"
+settings.memory_filter: 筛选记录
+settings.memory_edit: 编辑
+settings.memory_copy_note: 复制记录
+settings.memory_copy_commit: "复制提交 %{sha}"
+settings.memory_show_older: "显示 %{count} 条更早的记录"
+settings.memory_undated: 未注明日期
+settings.memory_no_match: 没有匹配的记录。
+settings.memory_summary_caption: 包含在此项目新会话的首条提示中。
+settings.memory_injection_caption: 带标记的记录可能会包含在新会话的首条提示中。
+settings.memory_lines_many: "%{count}/%{cap} 行"
 settings.memory_notes_one: 1 条记录
 settings.memory_notes_many: "%{count} 条记录"
+settings.memory_notes_matching: "%{count} 条记录中的 %{shown} 条"
 settings.memory_last_note: "最近 %{date}"
 settings.sidebar_phase_groups: 将最近的规划中任务分组
 settings.sidebar_phase_groups_description: 将仍在规划中且最近 30 分钟内活跃的任务移到日期视图“今天”上方

@@ -2973,7 +2973,7 @@ impl Waku {
     /// it is an editor, otherwise the first installed editor — the catalog
     /// also lists the file manager and terminals, which cannot take a file.
     /// A deliberate non-editor pick is still honored last.
-    fn preferred_file_app(&self) -> Option<&crate::platform::ExternalApp> {
+    pub(super) fn preferred_file_app(&self) -> Option<&crate::platform::ExternalApp> {
         let persisted = self
             .state
             .open_in_app

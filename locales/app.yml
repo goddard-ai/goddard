@@ -577,18 +577,32 @@ settings.memory_loading:
   en: Loading project memory…
 settings.memory_disabled:
   en: Memory is off. Enable it in Settings → Experiments to record new entries.
-settings.memory_older:
-  en: Older
-settings.memory_newer:
-  en: Newer
-settings.memory_lines_one:
-  en: 1 line
+settings.memory_filter:
+  en: Filter notes
+settings.memory_edit:
+  en: Edit
+settings.memory_copy_note:
+  en: Copy note
+settings.memory_copy_commit:
+  en: "Copy commit %{sha}"
+settings.memory_show_older:
+  en: "Show %{count} older notes"
+settings.memory_undated:
+  en: Undated
+settings.memory_no_match:
+  en: No notes match the filter.
+settings.memory_summary_caption:
+  en: Included in the first prompt of new sessions in this project.
+settings.memory_injection_caption:
+  en: Marked notes may be included in a new session's first prompt.
 settings.memory_lines_many:
-  en: "%{count} lines"
+  en: "%{count}/%{cap} lines"
 settings.memory_notes_one:
   en: 1 note
 settings.memory_notes_many:
   en: "%{count} notes"
+settings.memory_notes_matching:
+  en: "%{shown} of %{count} notes"
 settings.memory_last_note:
   en: "latest %{date}"
 settings.archived_keywords:

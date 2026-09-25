@@ -1,0 +1,1 @@
+- The Memory settings page groups a project's change log by day, lets you filter notes, and marks the ones a new session may receive — commit references are styled and copyable, and the summary shows its line budget with an Edit button.

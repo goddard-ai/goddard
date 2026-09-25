@@ -3412,7 +3412,10 @@ pub struct Waku {
     settings_memory_requested_project: Option<Uuid>,
     settings_memory_content: Option<projects::ProjectMemoryContent>,
     settings_memory_generation: u64,
-    settings_memory_page: usize,
+    /// How many log entries the page reveals before its "show older" step.
+    settings_memory_shown: usize,
+    /// Filter query over the Memory page's notes.
+    memory_search: Entity<TextInput>,
     /// The rendered MEMORY.md document — cached per project so a refresh
     /// reuses the incremental parse until the text actually changes — and
     /// the page's text selection.
@@ -4851,6 +4854,13 @@ impl Waku {
                 .accessibility_label(tr!("drafts.search"))
                 .placeholder(tr!("drafts.search"))
         });
+        let memory_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .clear_on_escape()
+                .accessibility_label(tr!("settings.memory_filter"))
+                .placeholder(tr!("settings.memory_filter"))
+        });
         let drafts_edit_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -5821,6 +5831,12 @@ impl Waku {
                 }
             })
             .detach();
+            cx.subscribe(&memory_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
+            .detach();
             cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
@@ -6664,7 +6680,8 @@ impl Waku {
                 settings_memory_requested_project: None,
                 settings_memory_content: None,
                 settings_memory_generation: 0,
-                settings_memory_page: 0,
+                settings_memory_shown: projects::MEMORY_LOG_CHUNK,
+                memory_search,
                 settings_memory_markdown: RefCell::new(None),
                 settings_memory_selection: TranscriptSelection::default(),
                 git_page_refresh_pending: false,
