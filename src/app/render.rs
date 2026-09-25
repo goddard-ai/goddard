@@ -822,9 +822,9 @@ impl Render for Waku {
                     })
                     .when(
                         !self.drafts_page
-                            || self.selected_terminal.is_some_and(|id| {
-                                self.right_panel_terminals.contains_key(&id)
-                            }),
+                            || self
+                                .selected_terminal
+                                .is_some_and(|id| self.right_panel_terminals.contains_key(&id)),
                         |element| element.child(self.render_header(window, cx)),
                     )
                     .children(self.friend_watch_banner(cx))
