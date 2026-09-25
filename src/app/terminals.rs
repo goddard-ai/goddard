@@ -694,6 +694,65 @@ impl Waku {
         Some(terminal_id)
     }
 
+    /// Run a transcript code block in a terminal: the fence tag picks the
+    /// interpreter, the block's own session roots it at its workspace — a
+    /// side chat's strip is its parent's, the surface the user is looking
+    /// at. The run rides the custom-command launch, so the shell stays
+    /// open with the output when the script finishes.
+    pub(super) fn run_markdown_code_block(
+        &mut self,
+        session_id: Option<Uuid>,
+        language: &str,
+        code: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(run) = md::render::code_run_script(language, code) else {
+            return;
+        };
+        let session = session_id
+            .or(self.state.selected_session)
+            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id));
+        // The strip the tab joins: the session itself, or a side chat's
+        // parent — a side-chat surface only renders inside it. Any other
+        // attach point falls through to the full-width terminal.
+        let attach = session.map(|session| session.side_chat_of.unwrap_or(session.id));
+        let working_directory = session
+            .and_then(|session| self.workspace_path_for_session(session))
+            .map(std::path::Path::to_path_buf);
+        let Some(working_directory) =
+            working_directory.filter(|directory| !self.is_remote_path(directory))
+        else {
+            self.show_toast(tr!("code_block.no_local_workspace"));
+            return;
+        };
+        let mut command = CustomCommand::new(run.script);
+        command.name = Some(language.to_owned());
+        command.icon = CustomCommandIcon::Terminal;
+        command.shell = run.shell.map(str::to_owned);
+        let Some(terminal_id) = self.create_terminal(working_directory, attach, Some(command), cx)
+        else {
+            return;
+        };
+        self.record_action(session_id, action_predictions::JournalAction::TerminalRun);
+        if let Some(index) = self
+            .right_panel_surfaces
+            .iter()
+            .rposition(|surface| surface.terminal_id() == Some(terminal_id))
+        {
+            // The tab landed in the live strip — select it, scroll it
+            // into view, and give it the pending focus slot like ⌘T's
+            // fresh terminal.
+            self.right_panel_active_surface = Some(index);
+            self.reveal_right_panel_tab(index);
+            self.request_active_terminal_focus();
+            self.set_right_panel_visible(true, cx);
+        } else {
+            self.select_terminal(terminal_id, window, cx);
+        }
+        cx.notify();
+    }
+
     /// Whether the terminal is the surface on screen — the full-width
     /// selection, or the visible right panel's active tab. An inactive tab
     /// or a background session's surface counts as unseen even when its

@@ -1492,16 +1492,19 @@ impl Waku {
 
     /// The markdown render context for one transcript row. Element keys are
     /// scoped to the row, so a virtualized remount recreates the same keys and
-    /// an in-progress selection survives scrolling.
+    /// an in-progress selection survives scrolling. `session` is the task the
+    /// row belongs to — a side chat's own id, not the selected parent's — so
+    /// the code-block run control lands in the right workspace.
     pub(super) fn markdown_ctx<'a>(
         &self,
         row: String,
         palette: &'a MarkdownPalette,
         metrics: MarkdownMetrics,
         animate_streaming: bool,
+        session: Option<Uuid>,
         cx: &App,
     ) -> MarkdownCtx<'a> {
-        MarkdownCtx::new(row, palette, metrics, self.transcript_selection.clone())
+        let ctx = MarkdownCtx::new(row, palette, metrics, self.transcript_selection.clone())
             .with_families(crate::fonts::current(cx))
             .with_math_enabled(self.state.render_math)
             .with_guided_reading(self.guided_reading())
@@ -1509,7 +1512,23 @@ impl Waku {
             .with_file_ref_items(self.markdown_file_menu_items.clone())
             .with_commit_ref_items(self.markdown_commit_menu_items.clone())
             .with_link_items(self.markdown_link_menu_items.clone())
-            .with_streaming_animation(animate_streaming)
+            .with_streaming_animation(animate_streaming);
+        // A desktop PTY only opens on a local workspace — a remote
+        // session's blocks keep the copy control alone.
+        if session
+            .and_then(|id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == id)
+            })
+            .and_then(|session| self.workspace_path_for_session(session))
+            .is_some_and(|workspace| !self.is_remote_path(workspace))
+        {
+            ctx.with_code_run(session, self.markdown_code_run_handler.clone())
+        } else {
+            ctx
+        }
     }
 
     /// The menu handle for `id`, created on first use.
@@ -1664,6 +1683,7 @@ impl Waku {
                             &palette,
                             metrics,
                             animate_streaming,
+                            self.state.selected_session,
                             cx,
                         )
                         .with_context_menu(menu.clone())
@@ -3520,6 +3540,7 @@ impl Waku {
                         &palette,
                         self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
                         reasoning_live && !cx.reduce_motion(),
+                        self.state.selected_session,
                         cx,
                     )
                     .with_standalone_context_menu(
@@ -3626,6 +3647,7 @@ impl Waku {
                     &palette,
                     self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
                     false,
+                    self.state.selected_session,
                     cx,
                 );
                 let (mono_size, mono_line) = self.activity_mono_text();

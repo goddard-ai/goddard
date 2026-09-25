@@ -2456,6 +2456,10 @@ common.copy_to_composer:
   en: Copy to Composer
 common.copy_code:
   en: Copy Code
+code_block.run_in_terminal:
+  en: Run in terminal
+code_block.no_local_workspace:
+  en: This task has no local folder for a terminal
 common.copy_expression:
   en: Copy Expression
 common.copy_link:

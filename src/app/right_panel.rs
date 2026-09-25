@@ -3348,6 +3348,7 @@ impl Waku {
                             &palette,
                             metrics,
                             animate_streaming,
+                            Some(session.id),
                             cx,
                         )
                         .with_context_menu(menu.clone());

@@ -3552,6 +3552,9 @@ pub struct Waku {
     /// callback knows about the active workspace; the renderer deliberately
     /// does not.
     markdown_link_handler: md::render::LinkHandler,
+    /// Runs a transcript code block in a terminal — installed on markdown
+    /// contexts whose rows belong to a session with a local workspace.
+    markdown_code_run_handler: md::render::CodeRunHandler,
     /// The rows a right-clicked `@`-mention contributes to a prompt's menu.
     /// Built once for the same reason as the link handler — remote-path
     /// checks need the app, and the renderer does not have it.
@@ -6018,6 +6021,21 @@ impl Waku {
                 })
             };
 
+            let markdown_code_run_handler: md::render::CodeRunHandler = {
+                let waku = cx.entity().downgrade();
+                Rc::new(move |request, window, cx| {
+                    let _ = waku.update(cx, |waku, cx| {
+                        waku.run_markdown_code_block(
+                            request.session,
+                            request.language,
+                            request.code,
+                            window,
+                            cx,
+                        );
+                    });
+                })
+            };
+
             // Read before `state` moves into the struct literal below.
             let initial_session = state.selected_session;
 
@@ -6680,6 +6698,7 @@ impl Waku {
                 activity_diffs: RefCell::new(HashMap::new()),
                 activity_diff_viewports: RefCell::new(HashMap::new()),
                 markdown_link_handler,
+                markdown_code_run_handler,
                 markdown_file_menu_items,
                 markdown_commit_menu_items,
                 markdown_link_menu_items,

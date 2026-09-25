@@ -115,6 +115,20 @@ pub type LinkMenuItems = Rc<dyn Fn(&str, &mut gpui::App) -> Vec<MenuItem>>;
 /// Additional actions for a standalone Markdown surface's context menu.
 pub type ContextMenuItems = Rc<dyn Fn(&mut gpui::App) -> Vec<MenuItem>>;
 
+/// A click on a runnable code block's run control. `session` is the task
+/// the block's row belongs to — a side chat's own id, not its parent's —
+/// `language` the fence tag, `code` the block's source. The renderer stays
+/// unaware of sessions and terminals; the host owns what "run" means.
+pub struct CodeRunRequest<'a> {
+    pub session: Option<Uuid>,
+    pub language: &'a str,
+    pub code: &'a str,
+}
+
+/// The handler a host installs for [`CodeRunRequest`]s — see
+/// [`Ctx::with_code_run`].
+pub type CodeRunHandler = Rc<dyn Fn(CodeRunRequest<'_>, &mut Window, &mut gpui::App)>;
+
 // ── Layout metrics ─────────────────────────────────────────────────────────
 //
 // Everything in this block participates in measurement, so these are the only
@@ -1320,6 +1334,13 @@ pub struct Ctx<'a> {
     link_items: Option<LinkMenuItems>,
     /// Extra actions for a standalone Markdown surface's context menu.
     context_menu_items: Option<ContextMenuItems>,
+    /// The session a runnable code block's run control reports back to the
+    /// `code_run` handler — the row's own task, which a side-chat view can
+    /// differ from the selected one.
+    code_run_session: Option<Uuid>,
+    /// Host handler that makes fenced code blocks runnable — `None` keeps
+    /// the run control hidden everywhere.
+    code_run: Option<CodeRunHandler>,
     now: Instant,
 }
 
@@ -1357,6 +1378,8 @@ impl<'a> Ctx<'a> {
             commit_ref_items: None,
             link_items: None,
             context_menu_items: None,
+            code_run_session: None,
+            code_run: None,
             now: Instant::now(),
         }
     }
@@ -1476,6 +1499,16 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// Offer a run control on fenced code blocks whose language tag maps
+    /// to an interpreter — `session` is reported back in the request so a
+    /// side-chat row runs in its own workspace rather than the selected
+    /// task's.
+    pub fn with_code_run(mut self, session: Option<Uuid>, handler: CodeRunHandler) -> Self {
+        self.code_run_session = session;
+        self.code_run = Some(handler);
+        self
+    }
+
     fn with_cache(&self, view: &'a MarkdownView) -> Self {
         Self {
             row: self.row.clone(),
@@ -1504,6 +1537,8 @@ impl<'a> Ctx<'a> {
             commit_ref_items: self.commit_ref_items.clone(),
             link_items: self.link_items.clone(),
             context_menu_items: self.context_menu_items.clone(),
+            code_run_session: self.code_run_session,
+            code_run: self.code_run.clone(),
             now: Instant::now(),
         }
     }
@@ -2986,6 +3021,68 @@ pub fn decode_data_url(url: &str) -> Option<std::sync::Arc<gpui::Image>> {
     (!bytes.is_empty()).then(|| std::sync::Arc::new(gpui::Image::from_bytes(format, bytes)))
 }
 
+/// How a fenced code block's language tag executes. `Shell` runs the
+/// block's text in that interactive shell — `None` is the user's default;
+/// `Interpret` pipes it to the interpreter over a quoted heredoc.
+#[derive(Clone, Copy)]
+enum CodeRunKind {
+    Shell(Option<&'static str>),
+    Interpret(&'static str),
+}
+
+/// The run a fenced code block's tag maps to, if one is supported. Tags
+/// like `console` mark captured transcripts rather than source, and tags
+/// with no interpreter get no control rather than a broken one.
+fn code_run_kind(language: &str) -> Option<CodeRunKind> {
+    let kind = match language.trim().to_ascii_lowercase().as_str() {
+        "bash" => CodeRunKind::Shell(Some("/bin/bash")),
+        "sh" => CodeRunKind::Shell(Some("/bin/sh")),
+        "zsh" => CodeRunKind::Shell(Some("/bin/zsh")),
+        "shell" | "shellscript" => CodeRunKind::Shell(None),
+        "python" | "python3" | "py" => CodeRunKind::Interpret("python3 -"),
+        "ruby" | "rb" => CodeRunKind::Interpret("ruby -"),
+        "javascript" | "js" | "node" => CodeRunKind::Interpret("node -"),
+        "perl" | "pl" => CodeRunKind::Interpret("perl -"),
+        "php" => CodeRunKind::Interpret("php"),
+        "lua" => CodeRunKind::Interpret("lua -"),
+        "r" => CodeRunKind::Interpret("Rscript -"),
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// The launch a runnable code block executes — the shell to spawn and the
+/// script fed to it. `shell` overrides the interactive shell so a `bash`
+/// block really runs under bash; interpreted blocks keep the default
+/// shell and get a heredoc whose quoted delimiter keeps the body literal.
+pub struct CodeRunScript {
+    pub shell: Option<&'static str>,
+    pub script: String,
+}
+
+pub fn code_run_script(language: &str, code: &str) -> Option<CodeRunScript> {
+    match code_run_kind(language)? {
+        CodeRunKind::Shell(shell) => Some(CodeRunScript {
+            shell,
+            script: code.to_owned(),
+        }),
+        CodeRunKind::Interpret(interpreter) => {
+            // The delimiter must never collide with a line of the body.
+            let mut delimiter = String::from("GODDARD_RUN_EOF");
+            while code.lines().any(|line| line.trim() == delimiter) {
+                delimiter.push('X');
+            }
+            Some(CodeRunScript {
+                shell: None,
+                script: format!(
+                    "{interpreter} <<'{delimiter}'\n{}\n{delimiter}",
+                    code.trim_end()
+                ),
+            })
+        }
+    }
+}
+
 fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElement {
     let key = ctx.next_key();
     // Tokenizing is the most expensive flatten in the document, so a settled
@@ -3072,6 +3169,63 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             }
         });
 
+    let run_button = ctx.code_run.as_ref().and_then(|handler| {
+        // Build nothing until invoked — the SharedString clone is an Rc,
+        // the script only allocates inside the click path.
+        language
+            .filter(|language| code_run_kind(language).is_some())
+            .map(|language| (Rc::<str>::from(language), handler.clone()))
+    });
+    let run_button = run_button.map(|(language, handler)| {
+        let session = ctx.code_run_session;
+        let run_code = flat.text.clone();
+        let keyboard_code = run_code.clone();
+        let keyboard_language = language.clone();
+        let keyboard_handler = handler.clone();
+        div()
+            .id(SharedString::from(format!(
+                "run-code-{}-{}",
+                key.row, key.index
+            )))
+            .tab_index(0)
+            .size(px(24.0))
+            .flex_none()
+            .rounded(px(5.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .focus_visible(|style| style.bg(ctx.palette.focus))
+            .hover(|style| style.bg(ctx.palette.overlay))
+            .child(crate::ui::icon("icons/play.svg", 11.0, ctx.palette.ghost))
+            .tooltip(Tooltip::text(tr!("code_block.run_in_terminal")))
+            .on_click(move |_, window, cx| {
+                handler(
+                    CodeRunRequest {
+                        session,
+                        language: &language,
+                        code: &run_code,
+                    },
+                    window,
+                    cx,
+                );
+            })
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    keyboard_handler(
+                        CodeRunRequest {
+                            session,
+                            language: &keyboard_language,
+                            code: &keyboard_code,
+                        },
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }
+            })
+    });
+
     div()
         .id(SharedString::from(format!(
             "code-block-{}-{}",
@@ -3109,6 +3263,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                             element.child(SharedString::from(label))
                         }),
                 )
+                .when_some(run_button, |element, button| element.child(button))
                 .child(copy_button),
         )
         .child(
@@ -4043,6 +4198,62 @@ mod tests {
         assert!(body.contains("show_code_copied"));
         assert!(body.contains(".tab_index(0)"));
         assert!(body.contains(".on_key_down"));
+    }
+
+    #[test]
+    fn code_block_rendering_exposes_a_keyboard_run_control() {
+        let source = include_str!("render.rs");
+        let start = source
+            .find("\nfn render_code_block(")
+            .expect("code block renderer");
+        let body = &source[start + 1..];
+        let end = body
+            .find("\nfn code_runs(")
+            .expect("code block renderer end");
+        let body = &body[..end];
+
+        assert!(body.contains("code_run_kind(language).is_some()"));
+        assert!(body.contains("\"icons/play.svg\""));
+        assert!(body.contains("\"run-code-"));
+        assert!(body.contains("CodeRunRequest"));
+        assert!(body.contains(".on_key_down"));
+    }
+
+    #[test]
+    fn code_run_script_maps_shells_and_interpreters() {
+        // Shell tags run the block verbatim, in the tagged shell when it
+        // names one — a `bash` block must not land in a zsh interpreter.
+        let bash = code_run_script("bash", "echo hi").expect("bash runs");
+        assert_eq!(bash.shell, Some("/bin/bash"));
+        assert_eq!(bash.script, "echo hi");
+        let shell = code_run_script("shell", "ls").expect("shell runs");
+        assert_eq!(shell.shell, None);
+        assert_eq!(shell.script, "ls");
+
+        // Interpreted tags pipe the body over a quoted heredoc, which
+        // keeps quotes and expansions literal in every POSIX shell.
+        let python = code_run_script("Python", "print(\"hi\")\nx = $HOME").expect("python runs");
+        assert_eq!(python.shell, None);
+        assert_eq!(
+            python.script,
+            "python3 - <<'GODDARD_RUN_EOF'\nprint(\"hi\")\nx = $HOME\nGODDARD_RUN_EOF"
+        );
+        assert_eq!(
+            code_run_script("javascript", "x()").unwrap().script,
+            "node - <<'GODDARD_RUN_EOF'\nx()\nGODDARD_RUN_EOF"
+        );
+
+        // A body line equal to the delimiter gets a fresh one rather
+        // than terminating the heredoc early.
+        let collision = code_run_script("python", "GODDARD_RUN_EOF").unwrap();
+        assert_eq!(
+            collision.script,
+            "python3 - <<'GODDARD_RUN_EOFX'\nGODDARD_RUN_EOF\nGODDARD_RUN_EOFX"
+        );
+
+        // Transcript tags and unknown languages offer no run.
+        assert!(code_run_script("console", "$ ls").is_none());
+        assert!(code_run_script("rust", "fn main() {}").is_none());
     }
 
     #[test]

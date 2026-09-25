@@ -840,6 +840,8 @@ common.copy_message_title: メッセージをコピー
 common.copy_selection: 選択範囲をコピー
 common.copy_to_composer: 入力欄にコピー
 common.copy_code: コードをコピー
+code_block.run_in_terminal: ターミナルで実行
+code_block.no_local_workspace: このタスクにはターミナルを開けるローカルフォルダがありません
 common.copy_expression: 数式をコピー
 common.copy_link: リンクをコピー
 common.open_link: リンクを開く
