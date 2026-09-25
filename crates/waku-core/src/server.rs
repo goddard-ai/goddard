@@ -39,6 +39,48 @@ const MAX_HANDSHAKE_MESSAGE_BYTES: usize = 64 * 1024;
 /// WebSocket handshake to reject.
 const MAX_REQUEST_LINE_BYTES: usize = 1024;
 const MAX_CONNECTIONS: usize = 64;
+const HEAVY_REQUEST_WORKERS: usize = 4;
+const HEAVY_REQUEST_QUEUE: usize = 16;
+const CONTROL_REQUEST_WORKERS: usize = 4;
+const CONTROL_REQUEST_QUEUE: usize = 64;
+const HEALTH_REQUEST_WORKERS: usize = 2;
+const HEALTH_REQUEST_QUEUE: usize = 16;
+type IndependentJob = Box<dyn FnOnce() + Send + 'static>;
+
+/// Fixed execution and queue bounds for independent daemon requests.
+struct IndependentRequestPool {
+    jobs: Sender<IndependentJob>,
+}
+
+impl IndependentRequestPool {
+    fn new(name: &str, workers: usize, queue_capacity: usize) -> Self {
+        let (jobs, receiver) = bounded::<IndependentJob>(queue_capacity);
+        for index in 0..workers {
+            let receiver = receiver.clone();
+            let worker_name = name.to_owned();
+            if let Err(error) = std::thread::Builder::new()
+                .name(format!("goddard-daemon-{name}-{index}"))
+                .spawn(move || {
+                    while let Ok(job) = receiver.recv() {
+                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err() {
+                            eprintln!("daemon {worker_name} request worker recovered from a panic");
+                        }
+                    }
+                })
+            {
+                eprintln!("could not start daemon request worker: {error}");
+            }
+        }
+        Self { jobs }
+    }
+
+    fn try_submit(
+        &self,
+        job: IndependentJob,
+    ) -> Result<(), crossbeam_channel::TrySendError<IndependentJob>> {
+        self.jobs.try_send(job)
+    }
+}
 const MAX_REPLAY_EVENTS_PER_SESSION: usize = 2048;
 /// Per-subscriber cap on queued daemon messages. A subscriber that falls this
 /// far behind live events is dropped instead of buffered for, so a stalled
@@ -442,6 +484,9 @@ struct RequestDispatcher {
     /// lifecycle order across desktop and web clients without serializing
     /// unrelated sessions or read-only requests.
     runtime_mailboxes: Arc<Mutex<HashMap<Uuid, RuntimeMailbox>>>,
+    heavy_requests: IndependentRequestPool,
+    control_requests: IndependentRequestPool,
+    health_requests: IndependentRequestPool,
     /// The runtime-controlled non-loopback listener, installed by `serve`
     /// once this dispatcher is shared so an exposure request arriving on
     /// any listener can rebind it.
@@ -809,6 +854,21 @@ impl RequestDispatcher {
             backend,
             hub,
             runtime_mailboxes: Arc::new(Mutex::new(HashMap::new())),
+            heavy_requests: IndependentRequestPool::new(
+                "heavy",
+                HEAVY_REQUEST_WORKERS,
+                HEAVY_REQUEST_QUEUE,
+            ),
+            control_requests: IndependentRequestPool::new(
+                "control",
+                CONTROL_REQUEST_WORKERS,
+                CONTROL_REQUEST_QUEUE,
+            ),
+            health_requests: IndependentRequestPool::new(
+                "health",
+                HEALTH_REQUEST_WORKERS,
+                HEALTH_REQUEST_QUEUE,
+            ),
             exposure: OnceLock::new(),
         }
     }
@@ -872,18 +932,40 @@ impl RequestDispatcher {
         let failed_request_id = request.request_id;
         let failed_session_id = request.session_id;
         let failed_outgoing = outgoing.clone();
-        if let Err(error) = std::thread::Builder::new()
-            .name("goddard-daemon-request".into())
-            .spawn(move || {
-                handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
-            })
+        let heavy = is_subprocess_heavy(&request.command);
+        let health = is_health_check(&request.command);
+        let pool = if heavy {
+            &self.heavy_requests
+        } else if health {
+            &self.health_requests
+        } else {
+            &self.control_requests
+        };
+        let job = Box::new(move || {
+            handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
+        });
+        let error = match pool.try_submit(job) {
+            Ok(()) => return,
+            Err(crossbeam_channel::TrySendError::Full(_)) if heavy => {
+                "daemon is busy with subprocess-heavy work; retry shortly".to_owned()
+            }
+            Err(crossbeam_channel::TrySendError::Full(_)) => {
+                "daemon is busy processing requests; retry shortly".to_owned()
+            }
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) if heavy => {
+                "daemon subprocess request workers are unavailable".to_owned()
+            }
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                "daemon request workers are unavailable".to_owned()
+            }
+        };
         {
             send_dispatch_error(
                 failed_request_id,
                 failed_session_id,
                 failed_outgoing,
                 &self.hub,
-                format!("could not start daemon request worker: {error}"),
+                error,
             );
         }
     }
@@ -1656,6 +1738,28 @@ fn command_targets_runtime(command: &Command) -> bool {
     )
 }
 
+fn is_subprocess_heavy(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::ProbeProvider { .. }
+            | Command::FetchPlanUsage { .. }
+            | Command::LoadUsageHistory { .. }
+            | Command::ListProviderSessions { .. }
+            | Command::LoadProviderSession { .. }
+            | Command::ForkProviderSession { .. }
+            | Command::Workspace { .. }
+            | Command::AgentCreateSession { .. }
+            | Command::AgentPrompt { .. }
+            | Command::AgentAsk { .. }
+            | Command::StartIntegrationAuth { .. }
+            | Command::ConnectIntegration { .. }
+    )
+}
+
+fn is_health_check(command: &Command) -> bool {
+    matches!(command, Command::GetSettings | Command::GetDaemonStats)
+}
+
 fn run_runtime_mailbox(
     session_id: Uuid,
     mailbox_id: Uuid,
@@ -1989,6 +2093,51 @@ fn write_json<S: io::Read + io::Write, T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn independent_request_pool_rejects_work_after_its_queue_fills() {
+        let pool = IndependentRequestPool::new("test", 1, 1);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (queued_tx, queued_rx) = std::sync::mpsc::channel();
+        pool.try_submit(Box::new(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        }))
+        .unwrap();
+        started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the worker should start the first request");
+        pool.try_submit(Box::new(move || queued_tx.send(()).unwrap()))
+            .unwrap();
+
+        assert!(matches!(
+            pool.try_submit(Box::new(|| {})),
+            Err(crossbeam_channel::TrySendError::Full(_))
+        ));
+        let health_pool = IndependentRequestPool::new("health-test", 1, 1);
+        let (health_tx, health_rx) = std::sync::mpsc::channel();
+        health_pool
+            .try_submit(Box::new(move || health_tx.send(()).unwrap()))
+            .unwrap();
+        health_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("health work has workers independent of the heavy pool");
+        release_tx.send(()).unwrap();
+        queued_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the queued request should run after capacity frees");
+    }
+
+    #[test]
+    fn subprocess_heavy_classifier_keeps_health_checks_separate() {
+        assert!(is_subprocess_heavy(&Command::ListProviderSessions {
+            provider: ProviderKind::Codex,
+            limit: 10,
+        }));
+        assert!(!is_subprocess_heavy(&Command::GetSettings));
+        assert!(is_health_check(&Command::GetSettings));
+        assert!(!is_health_check(&Command::LoadTaskState));
+    }
     #[cfg(unix)]
     use crate::daemon::WakuBackend;
     #[cfg(unix)]
