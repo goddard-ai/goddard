@@ -137,6 +137,7 @@ impl Waku {
                         sync_default_branch,
                         sync_branches,
                         incognito,
+                        None,
                     )
                 })
                 .await;
@@ -162,6 +163,7 @@ impl Waku {
         if !self.submission_preparations.remove(&session_id) {
             return;
         }
+        self.submission_stages.remove(&session_id);
         let selected = self.state.selected_session == Some(session_id);
         let prepared = match prepared {
             Ok(prepared) => prepared,

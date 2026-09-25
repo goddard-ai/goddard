@@ -1699,6 +1699,7 @@ impl Waku {
         };
         let was_selected = self.state.selected_session == Some(session_id);
         self.submission_preparations.remove(&session_id);
+        self.submission_stages.remove(&session_id);
         self.goal_runtime_starts.remove(&session_id);
         self.pending_goal_operations.remove(&session_id);
         self.goal_observed_at.remove(&session_id);
@@ -5332,6 +5333,7 @@ impl Waku {
         // Goal operations accepted during preparation would otherwise start
         // pursuing the moment a runtime installs; the user stopped the task.
         self.pending_goal_operations.remove(&session_id);
+        self.submission_stages.remove(&session_id);
         let selected = self.state.selected_session == Some(session_id);
         if selected {
             self.sync_transcript_rows();

@@ -1091,8 +1091,12 @@ routing.suggest_no_history:
   en: Not enough recent model usage to suggest from
 routing.suggest_empty:
   en: Jev returned no usable suggestions
+routing.checkpoint:
+  en: Capturing checkpoint…
 routing.in_progress:
   en: Routing task…
+routing.workspace:
+  en: Preparing workspace…
 routing.usage_total:
   en: Token usage
 routing.usage_total_description:

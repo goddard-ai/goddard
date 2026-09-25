@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local, Utc};
@@ -900,6 +901,40 @@ struct PreparedSubmission {
     /// session off its current effort with enough confidence. Applied ahead
     /// of the prompt so the live driver retunes first.
     turn_effort: Option<String>,
+}
+
+/// Which stage of `prepare_submission` an in-flight submission is in. The
+/// background task writes it through the shared cell; the transcript's
+/// waiting label reads it so a stall names the work actually running
+/// instead of showing "Routing task…" for the whole window.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum SubmissionStage {
+    Workspace = 0,
+    Checkpoint = 1,
+    Routing = 2,
+    Starting = 3,
+}
+
+/// The cell a `prepare_submission` task reports its stage through — `None`
+/// for callers whose progress has no label consumer.
+type StageReporter = Option<Arc<AtomicU8>>;
+
+impl SubmissionStage {
+    fn report(self, reporter: &StageReporter) {
+        if let Some(slot) = reporter {
+            slot.store(self as u8, Ordering::Relaxed);
+        }
+    }
+
+    fn current(slot: &AtomicU8) -> Self {
+        match slot.load(Ordering::Relaxed) {
+            1 => Self::Checkpoint,
+            2 => Self::Routing,
+            3 => Self::Starting,
+            _ => Self::Workspace,
+        }
+    }
 }
 
 /// Everything needed to start a provider process, captured while the session
@@ -2665,6 +2700,9 @@ pub struct Waku {
     /// session is busy immediately, while the composer draws a spinner until
     /// the non-cancellable preparation is complete.
     submission_preparations: HashSet<Uuid>,
+    /// Stage cells for submissions whose preparation can outlive a frame —
+    /// keyed by session, populated alongside `submission_preparations`.
+    submission_stages: HashMap<Uuid, Arc<AtomicU8>>,
     /// First Escape press for the current turn. A matching second press stops
     /// the response; otherwise this returns to the ordinary Stop icon after a
     /// short timeout.
@@ -6263,6 +6301,7 @@ impl Waku {
                 background_work: HashMap::new(),
                 last_background_work_tick: Instant::now(),
                 submission_preparations: HashSet::new(),
+                submission_stages: HashMap::new(),
                 escape_stop_confirmation: EscapeStopConfirmation::default(),
                 response_fork_preparations: HashMap::new(),
                 pending_queue_drains: Vec::new(),

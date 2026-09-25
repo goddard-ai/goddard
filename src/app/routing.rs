@@ -81,7 +81,9 @@ impl RouteStartPlan {
     pub(super) fn route_and_start(
         self,
         cwd: PathBuf,
+        stage: &StageReporter,
     ) -> anyhow::Result<(Option<RouteDecision>, PreparedDriver)> {
+        SubmissionStage::Routing.report(stage);
         let routed = self.route().map(|decision| {
             self.start_request(&decision.target)
                 .map(|request| (decision, request))
@@ -93,6 +95,7 @@ impl RouteStartPlan {
             // provider stands in, the way an unrouted submission would start.
             Ok(Err(_)) | Err(_) => (None, self.fallback?),
         };
+        SubmissionStage::Starting.report(stage);
         start_driver(request, cwd).map(|driver| (decision, driver))
     }
 

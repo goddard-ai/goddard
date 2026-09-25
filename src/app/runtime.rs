@@ -370,6 +370,7 @@ pub(super) fn prepare_submission(
     sync_default_branch: bool,
     sync_branches: Vec<String>,
     incognito: bool,
+    stage: StageReporter,
 ) -> anyhow::Result<PreparedSubmission> {
     let mut worktree_restored = false;
     let mut lfs_warning = None;
@@ -480,6 +481,7 @@ pub(super) fn prepare_submission(
     };
     let project_path = workspace.path().unwrap_or(&project.path);
 
+    SubmissionStage::Checkpoint.report(&stage);
     // Every turn gets its own immutable starting snapshot. Reusing the prior
     // response's ending ref would attribute branch switches or terminal edits
     // made between turns to the next response. Incognito sessions skip the
@@ -502,6 +504,9 @@ pub(super) fn prepare_submission(
     // A routed session's turn-level effort check rides the same boundary as
     // the first turn's full route: one bounded daemon round trip, answered
     // before the prompt goes out so the driver can retune first.
+    if turn_route.is_some() {
+        SubmissionStage::Routing.report(&stage);
+    }
     let turn_effort = turn_route.and_then(routing::TurnRoutePlan::evaluate);
 
     // Process startup can synchronously resolve executables, bind sockets,
@@ -513,10 +518,12 @@ pub(super) fn prepare_submission(
     let driver = driver_start.map(|start| -> anyhow::Result<PreparedDriver> {
         match start {
             routing::SessionStartPlan::Direct(request) => {
+                SubmissionStage::Starting.report(&stage);
                 request.and_then(|request| start_driver(request, project_path.to_path_buf()))
             }
             routing::SessionStartPlan::Routed(plan) => {
-                let (decision, driver) = plan.route_and_start(project_path.to_path_buf())?;
+                let (decision, driver) =
+                    plan.route_and_start(project_path.to_path_buf(), &stage)?;
                 route_decision = decision;
                 Ok(driver)
             }
@@ -5231,6 +5238,7 @@ impl Waku {
         if !self.submission_preparations.remove(&session_id) {
             return;
         }
+        self.submission_stages.remove(&session_id);
         self.drain_pending_workspace_cleanups(cx);
         let selected = self.state.selected_session == Some(session_id);
         let prepared = match result {
@@ -5698,6 +5706,7 @@ impl Waku {
                         sync_default_branch,
                         sync_branches,
                         incognito,
+                        None,
                     )
                 })
                 .await;
@@ -6649,6 +6658,9 @@ impl Waku {
                 has_input,
             });
         self.submission_preparations.insert(session_id);
+        let stage_slot = Arc::new(AtomicU8::new(SubmissionStage::Workspace as u8));
+        self.submission_stages
+            .insert(session_id, stage_slot.clone());
         if selected {
             self.activities_expanded.clear();
             self.expanded_activity_items.clear();
@@ -6711,6 +6723,7 @@ impl Waku {
                         sync_default_branch,
                         sync_branches,
                         incognito,
+                        Some(stage_slot),
                     )
                 })
                 .await;
@@ -6760,6 +6773,7 @@ impl Waku {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.submission_preparations.remove(&session_id);
+                self.submission_stages.remove(&session_id);
                 self.drain_pending_workspace_cleanups(cx);
                 self.track_active_turn_outcome(
                     session_id,
@@ -6830,6 +6844,7 @@ impl Waku {
             });
         if !can_start {
             self.submission_preparations.remove(&session_id);
+            self.submission_stages.remove(&session_id);
             // The turn this preparation belonged to may still read running —
             // a session replaced under it never sends the prompt. Settle the
             // orphaned turn rather than leaving a spinner nobody owns.
@@ -7134,6 +7149,7 @@ impl Waku {
                         .insert(session_id, submission);
                     self.open_sandbox_sign_in(session_id, cx);
                     self.submission_preparations.remove(&session_id);
+                    self.submission_stages.remove(&session_id);
                     self.drain_pending_workspace_cleanups(cx);
                     cx.notify();
                     return;
@@ -7161,6 +7177,7 @@ impl Waku {
         // cancel or a settled startup failure. The next frame must therefore
         // show Stop (or Send after failure), never the preparation spinner.
         self.submission_preparations.remove(&session_id);
+        self.submission_stages.remove(&session_id);
         self.drain_pending_workspace_cleanups(cx);
         if failed_to_start {
             self.capture_latest_turn_checkpoint_for(session_id);

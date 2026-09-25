@@ -2544,7 +2544,9 @@ routing.feature_route_phase: フェーズ判定
 routing.feature_route_phase_description: フェーズ分けされたセッションがまだ計画中か停滞しているかを判定します
 routing.feature_turn_status: ターン状態マーカー
 routing.feature_turn_status_description: 確定した各ターンの終了状態を採点し、未検証や逸脱などの問題にフラグを立てます
+routing.checkpoint: チェックポイントを保存中…
 routing.in_progress: タスクを振り分け中…
+routing.workspace: ワークスペースを準備中…
 routing.no_override: オーバーライドなし
 routing.no_override_description: いつものプロバイダーとモデルを使います — タスクの分類は Jev が行います
 routing.optional: 任意

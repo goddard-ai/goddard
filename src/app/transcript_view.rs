@@ -2974,8 +2974,8 @@ impl Waku {
             .and_then(|session| self.runtimes.get(&session.id))
             .and_then(|runtime| runtime.sandbox_setup.as_ref());
         // A parked turn is waiting on detached work, not working; a
-        // first-turn route call that has not answered yet reads as routing,
-        // not connecting.
+        // submission still preparing reads as its live stage — workspace,
+        // checkpoint, routing, or provider start — not connecting.
         let label = if let Some(status) = setup {
             match status {
                 crate::model::SandboxSetupStatus::DownloadingImage => {
@@ -3000,7 +3000,15 @@ impl Waku {
                 && session.auto_route
                 && session.route_decision.is_none()
         }) {
-            tr!("routing.in_progress")
+            match session
+                .and_then(|session| self.submission_stages.get(&session.id))
+                .map(|slot| SubmissionStage::current(slot))
+            {
+                Some(SubmissionStage::Checkpoint) => tr!("routing.checkpoint"),
+                Some(SubmissionStage::Routing) => tr!("routing.in_progress"),
+                Some(SubmissionStage::Starting) => tr!("composer.starting_agent"),
+                _ => tr!("routing.workspace"),
+            }
         } else {
             tr!(
                 "transcript.working_for",
