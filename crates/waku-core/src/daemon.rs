@@ -18,10 +18,10 @@ use crate::auto_prompts::AutoPromptService;
 use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
-    AgentAskOutcome, AgentSession, AgentSessionSearchHit, Checkpoint, CheckpointStatus,
-    DriverEvent, PermissionOption, Project, ProjectMapStatus, ProviderKind, ProviderModelOption,
-    ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace,
-    TurnStatus, UserInputQuestion, detail_prefix_signature,
+    AgentAskOutcome, AgentModelOption, AgentSession, AgentSessionSearchHit, Checkpoint,
+    CheckpointStatus, DriverEvent, PermissionOption, Project, ProjectMapStatus, ProviderKind,
+    ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus,
+    SessionWorkspace, TurnStatus, UserInputQuestion, detail_prefix_signature,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -35,6 +35,7 @@ use waku_protocol::persistence::{
     resolve_named_search_project,
 };
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
+use waku_protocol::routing::{RouteCandidate, RouteTarget};
 use waku_protocol::{decode_enum, event_to_wire};
 
 /// How many fully hydrated transcripts the daemon keeps resident.
@@ -2743,6 +2744,7 @@ impl Backend for WakuBackend {
             Command::AgentAsk { questions } => {
                 self.agent_ask(session_id, agent, questions, &events)
             }
+            Command::AgentListModels => self.agent_model_options(),
             Command::CancelQueuedPrompt { queued_message_id } => {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
             }
@@ -4503,6 +4505,15 @@ impl WakuBackend {
         if !project.is_absolute() {
             bail!("the project path must be absolute");
         }
+        if matches!(workspace, AgentWorkspace::Worktree)
+            && base_branch
+                .as_deref()
+                .is_none_or(|branch| branch.trim().is_empty())
+        {
+            bail!("worktree sessions require a base branch");
+        }
+        let project = dunce::canonicalize(&project)
+            .with_context(|| format!("project path {} does not exist", project.display()))?;
         // Fields the payload omits inherit the sending task's configuration,
         // but only while it runs the resolved provider — a different
         // provider's model and trait vocabularies may not carry over.
@@ -4523,8 +4534,23 @@ impl WakuBackend {
                     )
                 })
         });
-        let provider = selection
-            .provider
+        // `"auto"` hands provider and model selection to the same routing
+        // pass `RouteTask` serves an Auto draft; when the eval backend
+        // cannot answer it lands on the last-used target instead of
+        // failing, so it never blocks a create.
+        let routed = match selection.model.as_deref().map(str::trim) {
+            Some("auto") => {
+                if selection.provider.is_some() {
+                    bail!("`model: \"auto\"` routes the provider too; omit `provider`");
+                }
+                Some(self.route_agent_task(&project, &prompt))
+            }
+            _ => None,
+        };
+        let provider = routed
+            .as_ref()
+            .map(|run| run.decision.target.provider)
+            .or(selection.provider)
             .or(sender_config.as_ref().map(|config| config.0))
             .ok_or_else(|| {
                 anyhow!("`provider` is required when no sending task is known to inherit from")
@@ -4537,10 +4563,11 @@ impl WakuBackend {
             .map(|config| config.5)
             .unwrap_or_default();
         let sender_config = sender_config.filter(|config| config.0 == provider);
-        let model = match selection.model.as_deref().map(str::trim) {
-            Some("" | "default") => None,
-            Some(model) => Some(model.to_owned()),
-            None => sender_config.as_ref().and_then(|config| config.1.clone()),
+        let model = match (&routed, selection.model.as_deref().map(str::trim)) {
+            (Some(run), _) => run.decision.target.model.clone(),
+            (None, Some("" | "default")) => None,
+            (None, Some(model)) => Some(model.to_owned()),
+            (None, None) => sender_config.as_ref().and_then(|config| config.1.clone()),
         };
         let (inherited_effort, inherited_tier, inherited_window) = sender_config
             .map(|config| (config.2, config.3, config.4))
@@ -4560,7 +4587,11 @@ impl WakuBackend {
                 .or_else(|| catalog.first()),
         };
         let reasoning_effort = resolve_agent_trait(
-            selection.reasoning_effort,
+            selection.reasoning_effort.or_else(|| {
+                routed
+                    .as_ref()
+                    .and_then(|run| run.decision.target.effort.clone())
+            }),
             inherited_effort
                 .map(|value| waku_protocol::model_catalog::normalize_reasoning_effort(&value)),
             catalog_model.map(|model| model.reasoning_efforts.as_slice()),
@@ -4578,15 +4609,6 @@ impl WakuBackend {
             catalog_model.map(|model| model.context_windows.as_slice()),
             catalog_model.and_then(|model| model.default_context_window.as_deref()),
         );
-        if matches!(workspace, AgentWorkspace::Worktree)
-            && base_branch
-                .as_deref()
-                .is_none_or(|branch| branch.trim().is_empty())
-        {
-            bail!("worktree sessions require a base branch");
-        }
-        let project = dunce::canonicalize(&project)
-            .with_context(|| format!("project path {} does not exist", project.display()))?;
         let (project_id, project_path) = {
             let mut state = self.task_state.lock();
             match state
@@ -4620,6 +4642,9 @@ impl WakuBackend {
         session.runtime_mode = sender_mode;
         session.environment = sender_environment;
         session.model = model;
+        if let Some(run) = routed {
+            session.route_decision = Some(run.decision);
+        }
         session.reasoning_effort = reasoning_effort;
         session.service_tier = service_tier;
         session.context_window = context_window;
@@ -5283,6 +5308,143 @@ impl WakuBackend {
         Ok(ResponsePayload::AgentSessionSearch { hits })
     }
 
+    /// `agent models`: the provider/model vocabulary `agent create`
+    /// accepts, built from tasks the user actually ran — never the bare
+    /// catalog, so a guessing agent cannot invent ids. Ordering is the
+    /// advice: the Auto routing entry first when the eval backend is
+    /// configured, then each model's first-party harness ahead of
+    /// third-party harnesses, then most recently used.
+    fn agent_model_options(&self) -> anyhow::Result<ResponsePayload> {
+        self.require_agent_tools()?;
+        let settings = self.settings.get();
+        let disabled = &settings.disabled_providers;
+        let auto_available = settings
+            .eval
+            .as_ref()
+            .is_some_and(|eval| !eval.credential_missing());
+        let mut options = {
+            let state = self.task_state.lock();
+            // Newest mutation per (provider, model), carrying the trait
+            // triple the newest task that recorded one used — skeletons
+            // only know provider/model; hydrated tasks know their traits.
+            let mut entries: HashMap<(ProviderKind, String), (AgentModelOption, Option<u64>)> =
+                HashMap::new();
+            for session in &state.sessions {
+                if session.incognito || disabled.contains(&session.provider) {
+                    continue;
+                }
+                let model = session
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| "default".to_owned());
+                let (entry, traits_at) = entries
+                    .entry((session.provider, model.clone()))
+                    .or_insert_with(|| {
+                        (
+                            AgentModelOption {
+                                provider: Some(session.provider),
+                                model,
+                                reasoning_effort: None,
+                                service_tier: None,
+                                context_window: None,
+                                last_used_at: 0,
+                            },
+                            None,
+                        )
+                    });
+                entry.last_used_at = entry.last_used_at.max(session.updated_at);
+                let carries_traits = session.reasoning_effort.is_some()
+                    || session.service_tier.is_some()
+                    || session.context_window.is_some();
+                if carries_traits && traits_at.is_none_or(|at| session.updated_at >= at) {
+                    entry.reasoning_effort.clone_from(&session.reasoning_effort);
+                    entry.service_tier.clone_from(&session.service_tier);
+                    entry.context_window.clone_from(&session.context_window);
+                    *traits_at = Some(session.updated_at);
+                }
+            }
+            let mut options: Vec<AgentModelOption> =
+                entries.into_values().map(|(entry, _)| entry).collect();
+            options.sort_by(|a, b| {
+                let native = |option: &AgentModelOption| {
+                    ProviderKind::native_for_model(&option.model) == option.provider
+                };
+                native(b)
+                    .cmp(&native(a))
+                    .then(b.last_used_at.cmp(&a.last_used_at))
+                    .then(a.provider.cmp(&b.provider))
+                    .then_with(|| a.model.cmp(&b.model))
+            });
+            options
+        };
+        if auto_available {
+            options.insert(
+                0,
+                AgentModelOption {
+                    provider: None,
+                    model: "auto".to_owned(),
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                    last_used_at: 0,
+                },
+            );
+        }
+        Ok(ResponsePayload::AgentModelOptions { options })
+    }
+
+    /// The `RouteTask` pass behind `agent create`'s `model: "auto"`. The
+    /// candidates mirror the app's Auto set — installed, enabled providers
+    /// — and the most recently mutated task stands in for the app-side
+    /// `last_used` the daemon does not track.
+    fn route_agent_task(&self, project: &Path, prompt: &str) -> crate::routing::RouteRun {
+        ensure_shell_environment();
+        let settings = self.settings.get();
+        let disabled = &settings.disabled_providers;
+        let overrides = &settings.provider_binary_overrides;
+        let candidates: Vec<RouteCandidate> = ProviderKind::ALL
+            .iter()
+            .copied()
+            .filter(|provider| !disabled.contains(provider))
+            .filter(|provider| {
+                crate::model::provider_probe(*provider, overrides.get(provider).map(String::as_str))
+                    .path
+                    .is_some()
+            })
+            .map(|provider| RouteCandidate {
+                provider,
+                models: crate::model_catalog::cached_models(provider)
+                    .unwrap_or_else(|| crate::model_catalog::fallback_models(provider))
+                    .into_iter()
+                    .map(|model| model.id)
+                    .collect(),
+            })
+            .collect();
+        let last_used = {
+            let state = self.task_state.lock();
+            state
+                .sessions
+                .iter()
+                .filter(|session| !session.incognito && !disabled.contains(&session.provider))
+                .max_by_key(|session| session.updated_at)
+                .map(|session| RouteTarget {
+                    provider: session.provider,
+                    model: session.model.clone(),
+                    effort: session.reasoning_effort.clone(),
+                })
+        };
+        let run = crate::routing::route_task(
+            settings.eval.as_ref(),
+            &settings.route_classes,
+            prompt,
+            project.file_name().and_then(|name| name.to_str()),
+            &candidates,
+            last_used.as_ref(),
+        );
+        crate::eval::append_decision_log(&crate::eval::default_log_path(), &run.record);
+        run
+    }
+
     /// Run a transcript search after lifting `field:value` filters out of
     /// `query` — the shared implementation behind the palette-facing
     /// `SearchSessionMessages` and the agent-scoped `AgentSearchSessions`.
@@ -5802,6 +5964,7 @@ fn handle_driver_command(
         | Command::AgentReadSession { .. }
         | Command::AgentSearchSessions { .. }
         | Command::AgentAsk { .. }
+        | Command::AgentListModels
         | Command::CancelQueuedPrompt { .. }
         | Command::UpsertCustomCommand { .. }
         | Command::RemoveCustomCommand { .. }

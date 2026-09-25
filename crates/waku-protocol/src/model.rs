@@ -142,6 +142,27 @@ impl ProviderKind {
         )
     }
 
+    /// The vendor's own harness for `model` — the "first-party" provider
+    /// for that model id: `claude-*` under Claude, `gpt-*`/`codex-*`/`o*`
+    /// under Codex, `swe-*` under Devin, and so on. Aggregator harnesses
+    /// that proxy other vendors' models (OpenCode, Goose, Copilot, …) are
+    /// never first-party for them, and an id no vendor owns maps to `None`.
+    pub fn native_for_model(model: &str) -> Option<Self> {
+        let id = model.trim().to_ascii_lowercase();
+        let prefixed = |prefixes: &[&str]| prefixes.iter().any(|prefix| id.starts_with(prefix));
+        Some(match () {
+            _ if prefixed(&["claude"]) => Self::Claude,
+            _ if prefixed(&["gpt", "codex", "o1", "o3", "o4"]) => Self::Codex,
+            _ if prefixed(&["grok"]) => Self::Grok,
+            _ if prefixed(&["deepseek"]) => Self::DeepSeek,
+            _ if prefixed(&["kimi", "moonshot"]) => Self::Kimi,
+            _ if prefixed(&["swe", "devin"]) => Self::Devin,
+            _ if prefixed(&["composer"]) => Self::Cursor,
+            _ if prefixed(&["gemini"]) => Self::Antigravity,
+            _ => return None,
+        })
+    }
+
     pub fn short_name(self) -> &'static str {
         match self {
             Self::Antigravity => "Antigravity",
@@ -3373,6 +3394,39 @@ pub struct AgentSessionSearchHit {
     pub snippet: String,
 }
 
+/// One provider/model combination [`crate::Command::AgentListModels`]
+/// returns to a scoped agent caller — a known-good `agentCreateSession`
+/// selection copied from a task the user actually ran, not a catalog entry
+/// the caller would have to guess at. Options arrive in preference order:
+/// the Auto routing entry first (when the evaluation backend is
+/// configured), then each model's first-party harness
+/// ([`ProviderKind::native_for_model`]) before third-party harnesses, then
+/// most recently used.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelOption {
+    /// `None` only on the Auto entry, whose model id is `"auto"`: the
+    /// routing decision chooses the provider itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<ProviderKind>,
+    /// A catalog model id, `"default"` for the provider's own default, or
+    /// `"auto"` on the routing entry.
+    pub model: String,
+    /// The trait selection the newest use of this combo ran with — absent
+    /// when no task on record carried one. `None` lets `create` inherit or
+    /// apply the model's own default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<String>,
+    /// Newest task mutation using this combo, unix seconds — the recency
+    /// half of the ordering. `0` on the Auto entry, which never records a
+    /// use.
+    pub last_used_at: u64,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentTranscriptItemKind {
@@ -5644,6 +5698,32 @@ pub fn compact_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_for_model_maps_vendor_ids_and_rejects_the_rest() {
+        for (model, expected) in [
+            ("claude-sonnet-4-6", Some(ProviderKind::Claude)),
+            ("gpt-5.3-codex", Some(ProviderKind::Codex)),
+            ("o4-mini", Some(ProviderKind::Codex)),
+            ("grok-code-fast-1", Some(ProviderKind::Grok)),
+            ("deepseek-v4", Some(ProviderKind::DeepSeek)),
+            ("kimi-k2", Some(ProviderKind::Kimi)),
+            ("swe-2-high", Some(ProviderKind::Devin)),
+            ("composer-1", Some(ProviderKind::Cursor)),
+            ("gemini-3-pro", Some(ProviderKind::Antigravity)),
+            // No vendor owns these ids — third-party harnesses stay
+            // non-native for them.
+            ("llama-4", None),
+            ("default", None),
+            ("luna", None),
+        ] {
+            assert_eq!(
+                ProviderKind::native_for_model(model),
+                expected,
+                "model {model}"
+            );
+        }
+    }
 
     #[test]
     fn legacy_plan_access_mode_loads_as_supervised() {

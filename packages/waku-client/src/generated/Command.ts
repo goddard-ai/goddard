@@ -100,9 +100,11 @@ owner?: string | null, } | { "type": "writeTerminal", data: string, } | { "type"
  */
 provider?: ProviderKind | null,
 /**
- * An explicit provider model id, `"default"` (or empty) to select
- * the provider's own default model, or `None` to inherit the
- * sending task's model when it runs the resolved provider.
+ * An explicit provider model id, `"auto"` to let Jev routing pick
+ * provider and model for the first prompt (requires `provider` to
+ * be absent), `"default"` (or empty) to select the provider's own
+ * default model, or `None` to inherit the sending task's model
+ * when it runs the resolved provider.
  */
 model?: string | null,
 /**
@@ -156,4 +158,4 @@ threadId?: string | null, provider?: ProviderKind | null,
  * number — `items` each carry it, so a full read names the turn to
  * revisit.
  */
-turn?: number | null, } | { "type": "agentSearchSessions", query: string, lastTurns?: number | null, } | { "type": "agentAsk", questions: Array<UserInputQuestion>, } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, } | { "type": "setFriendSessionSharing", nodeId: string, originUrl: string, enabled: boolean, } | { "type": "getFriendSessions", nodeId: string, originUrl: string, } | { "type": "watchFriendSession", nodeId: string, originUrl: string, sessionId: string, } | { "type": "unwatchFriendSession", sessionId: string, } | { "type": "getPairing" } | { "type": "respondPairRequest", requestId: string, accept: boolean, } | { "type": "revokePairedClient", clientId: string, };
+turn?: number | null, } | { "type": "agentSearchSessions", query: string, lastTurns?: number | null, } | { "type": "agentAsk", questions: Array<UserInputQuestion>, } | { "type": "agentListModels" } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, } | { "type": "setFriendSessionSharing", nodeId: string, originUrl: string, enabled: boolean, } | { "type": "getFriendSessions", nodeId: string, originUrl: string, } | { "type": "watchFriendSession", nodeId: string, originUrl: string, sessionId: string, } | { "type": "unwatchFriendSession", sessionId: string, } | { "type": "getPairing" } | { "type": "respondPairRequest", requestId: string, accept: boolean, } | { "type": "revokePairedClient", clientId: string, };

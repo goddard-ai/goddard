@@ -12,8 +12,8 @@ use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
 use crate::eval::{EvalQuestion, EvalSettings, EvalUsageStats, Evaluation};
 use crate::model::{
-    AgentAskOutcome, AgentSession, AgentSessionSearchHit, AgentSessionTranscript, GoalOperation,
-    MessageAttachment, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
+    AgentAskOutcome, AgentModelOption, AgentSession, AgentSessionSearchHit, AgentSessionTranscript,
+    GoalOperation, MessageAttachment, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
     ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, SessionStatus,
     UserInputAnswer, UserInputQuestion,
 };
@@ -536,9 +536,11 @@ pub enum Command {
         /// known to inherit from.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<ProviderKind>,
-        /// An explicit provider model id, `"default"` (or empty) to select
-        /// the provider's own default model, or `None` to inherit the
-        /// sending task's model when it runs the resolved provider.
+        /// An explicit provider model id, `"auto"` to let Jev routing pick
+        /// provider and model for the first prompt (requires `provider` to
+        /// be absent), `"default"` (or empty) to select the provider's own
+        /// default model, or `None` to inherit the sending task's model
+        /// when it runs the resolved provider.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
         /// Absolute path of the project the task runs in. The daemon
@@ -720,6 +722,12 @@ pub enum Command {
     AgentAsk {
         questions: Vec<UserInputQuestion>,
     },
+    /// Scoped agent credential only: list the provider/model combinations
+    /// [`Self::AgentCreateSession`] accepts — an `"auto"` routing entry
+    /// when the evaluation backend is configured, then every combination a
+    /// started task actually used, in preference order. Agents read this
+    /// instead of guessing catalog model ids.
+    AgentListModels,
     /// Share one of my projects with a friend. The daemon resolves the
     /// project's name and `origin` URL from `project_path` and re-sends
     /// the friend our full shared set.
@@ -1319,6 +1327,11 @@ pub enum ResponsePayload {
     /// free-form clarification, or a cancellation.
     AgentAskResult {
         outcome: AgentAskOutcome,
+    },
+    /// The preference-ordered provider/model list an `agentListModels`
+    /// resolved.
+    AgentModelOptions {
+        options: Vec<AgentModelOption>,
     },
 }
 

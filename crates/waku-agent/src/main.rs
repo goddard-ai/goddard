@@ -44,6 +44,7 @@ USAGE
     goddard-agent read '<json>'              Read a task's transcript
     goddard-agent search '<json>'            Search this project's task transcripts
     goddard-agent ask '<json>'               Ask the user a structured question
+    goddard-agent models                     List the provider/model options `create` accepts
     goddard-agent command list               List the user's custom commands
     goddard-agent command upsert '<json>'    Add or update a custom command
     goddard-agent command remove '<json>'    Remove a custom command
@@ -74,6 +75,8 @@ USAGE CONTRACT
     decision — a choice between options or a confirmation — must come back
     before you can proceed; it is not a substitute for ordinary questions
     you can just ask in your reply.
+    `models` lists the provider/model combinations `create` accepts, in
+    preference order — read it instead of guessing model ids.
     There is no per-call approval gate for either surface; the daemon records
     this task's id on every accepted write, so agent-originated commands and
     turns are visibly attributed to it.
@@ -96,8 +99,8 @@ fn schema() -> serde_json::Value {
         "create": {
             "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation. The task inherits this task's access mode and run environment — a sandboxed task spawns sandboxed tasks.",
             "fields": {
-                "provider": {"type": "string", "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "goose", "grok", "kimi", "muse", "ohmypi", "pi"], "notes": "omit to run the new task on this task's provider"},
-                "model": {"type": "string", "notes": "explicit provider model id; \"default\" selects the provider's own default; omit to inherit this task's model when it runs the resolved provider"},
+                "provider": {"type": "string", "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "goose", "grok", "kimi", "muse", "ohmypi", "pi"], "notes": "omit to run the new task on this task's provider; run `goddard-agent models` for the usable providers"},
+                "model": {"type": "string", "notes": "explicit provider model id — run `goddard-agent models` for the preference-ordered list of usable ids instead of guessing; \"auto\" routes the first prompt through Jev to pick provider and model (omit `provider`); \"default\" selects the provider's own default; omit to inherit this task's model when it runs the resolved provider"},
                 "project": {"type": "string", "required": true, "notes": "absolute path; resolves an existing project or registers a primary Git checkout (linked worktrees are rejected)"},
                 "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},
                 "base_branch": {"type": "string", "required_when": "workspace == \"worktree\"", "notes": "ignored for \"local\""},
@@ -120,6 +123,10 @@ fn schema() -> serde_json::Value {
             },
             "example": "{\"task_id\":\"<uuid>\",\"prompt\":\"How is the migration going?\",\"delivery\":\"queue\"}",
             "returns": {"ok": true}
+        },
+        "models": {
+            "description": "List the provider/model combinations `create` accepts, in preference order — read it instead of guessing model ids. The \"auto\" entry (Jev routing picks provider and model for the first prompt) leads when the eval backend is configured; the rest are combinations tasks on this machine have actually run, each model's first-party (vendor-native) harness ahead of third-party harnesses, then most recently used. Prefer the earliest entry unless the user specified a model. Each option's fields map straight onto `create` payload fields.",
+            "returns": {"options": [{"provider": "provider id — absent only on the \"auto\" entry", "model": "model id, \"default\", or \"auto\"", "reasoning_effort": "effort id the newest use ran, when known", "service_tier": "tier id, when known", "context_window": "window id, when known", "last_used_at": "unix seconds; 0 on the \"auto\" entry"}]}
         },
         "rename": {
             "description": "Set this task's title. The user approves each request unless the task already granted standing permission. Cannot rename another task.",
@@ -315,6 +322,21 @@ fn run() -> anyhow::Result<()> {
         "schema" => {
             println!("{}", serde_json::to_string_pretty(&schema())?);
             Ok(())
+        }
+        "models" => {
+            if arguments.next().is_some() {
+                bail!("`models` takes no arguments");
+            }
+            match connect()?.request(request_session_id(), Uuid::nil(), Command::AgentListModels)? {
+                ResponsePayload::AgentModelOptions { options } => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({ "options": options }))?
+                    );
+                    Ok(())
+                }
+                other => bail!("daemon returned an unexpected response: {other:?}"),
+            }
         }
         "command" => command(arguments.next().as_deref(), arguments.next()),
         "create" | "prompt" | "read" | "search" | "rename" | "ask" => {

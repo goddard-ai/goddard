@@ -6,6 +6,7 @@ export type { ActivityItem } from "./ActivityItem";
 export type { ActivityKind } from "./ActivityKind";
 export type { AgentAskOutcome } from "./AgentAskOutcome";
 export type { AgentInvocation } from "./AgentInvocation";
+export type { AgentModelOption } from "./AgentModelOption";
 export type { AgentPromptDelivery } from "./AgentPromptDelivery";
 export type { AgentSession } from "./AgentSession";
 export type { AgentSessionSearchHit } from "./AgentSessionSearchHit";
