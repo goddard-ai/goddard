@@ -140,7 +140,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
     StatusMarker {
         id: "blocked",
         label_key: "status_markers.blocked",
-        icon: "icons/block.svg",
+        icon: "icons/ban.svg",
         tone: MarkerTone::Danger,
         threshold: 0.45,
         instructions: "The assistant cannot proceed without something outside its \
@@ -850,7 +850,8 @@ fn sidebar_bucket(marker: &StatusMarker) -> Option<(&'static str, MarkerTone)> {
     match marker.id {
         "awaiting-input" | "go-ahead" | "decision" | "details" | "partial"
         | "needs-continuation" => Some(("icons/chat.svg", MarkerTone::Info)),
-        "blocked" | "failed" | "errors-remain" => Some(("icons/block.svg", MarkerTone::Danger)),
+        "blocked" => Some(("icons/ban.svg", MarkerTone::Danger)),
+        "failed" | "errors-remain" => Some(("icons/block.svg", MarkerTone::Danger)),
         _ => None,
     }
 }
@@ -1861,14 +1862,14 @@ mod tests {
             )]))
         };
         // Endings that wait on the user's reply collapse to the chat glyph;
-        // endings that hit a wall collapse to the block glyph.
+        // endings that hit a wall get distinct blocked and failed glyphs.
         for choice in ["awaiting-input", "partial"] {
             let marker = sidebar_marker(&ending(choice, 0.90)).unwrap();
             assert_eq!(marker.icon, "icons/chat.svg");
         }
-        for choice in ["blocked", "failed"] {
+        for (choice, icon) in [("blocked", "icons/ban.svg"), ("failed", "icons/block.svg")] {
             let marker = sidebar_marker(&ending(choice, 0.90)).unwrap();
-            assert_eq!(marker.icon, "icons/block.svg");
+            assert_eq!(marker.icon, icon);
         }
         // Quiet endings never claim the slot.
         assert!(sidebar_marker(&ending("complete", 0.90)).is_none());
