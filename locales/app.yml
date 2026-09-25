@@ -4073,6 +4073,10 @@ diff.unmodified_lines:
   en: "%{count} unmodified lines"
 diff.expand_all_context:
   en: Expand all unmodified lines
+diff.collapse_all_files:
+  en: Collapse all files
+diff.expand_all_files:
+  en: Expand all files
 diff.expand_context:
   en: Expand unmodified lines · Shift-click for all
 diff.expand_context_above:

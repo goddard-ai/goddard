@@ -1,0 +1,1 @@
+- In a commit diff, click a file header to collapse or expand it, or use the control at the top to collapse or expand every file.

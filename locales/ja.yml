@@ -1635,6 +1635,8 @@ diff.refresh_failed: "変更を更新できませんでした：%{error}"
 diff.truncated: 大きな差分 · 先頭 50,000 行を表示
 diff.unmodified_lines: "未変更の行 %{count} 行"
 diff.expand_all_context: 未変更の行をすべて展開
+diff.collapse_all_files: すべてのファイルを折りたたむ
+diff.expand_all_files: すべてのファイルを展開
 diff.expand_context: 未変更の行を展開 · Shift キーを押しながらクリックですべて展開
 diff.expand_context_above: 上の 100 行を表示 · Shift キーを押しながらクリックですべて表示
 diff.expand_context_below: 下の 100 行を表示 · Shift キーを押しながらクリックですべて表示

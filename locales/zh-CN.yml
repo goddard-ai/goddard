@@ -1596,6 +1596,8 @@ diff.refresh_failed: "无法刷新更改：%{error}"
 diff.truncated: 大型差异 · 仅显示前 50,000 行
 diff.unmodified_lines: "%{count} 行未更改"
 diff.expand_all_context: 展开所有未更改的行
+diff.collapse_all_files: 折叠所有文件
+diff.expand_all_files: 展开所有文件
 diff.expand_context: 展开未更改的行 · 按住 Shift 点击可全部展开
 diff.expand_context_above: 显示上方 100 行 · 按住 Shift 点击可全部展开
 diff.expand_context_below: 显示下方 100 行 · 按住 Shift 点击可全部展开

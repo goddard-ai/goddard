@@ -369,6 +369,9 @@ pub(super) struct GitPanelCommitDiff {
     pub body: String,
     pub state: GitPanelCommitDiffState,
     pub list_state: ListState,
+    /// Original snapshot line indexes currently exposed by the virtual list.
+    pub visible_line_indexes: Vec<usize>,
+    pub collapsed_files: HashSet<usize>,
     pub scrollbar: Rc<ScrollbarState>,
     pub body_scroll: ScrollHandle,
     pub body_scrollbar: Rc<ScrollbarState>,
@@ -2519,6 +2522,8 @@ impl Waku {
             body: entry.body.clone(),
             state: GitPanelCommitDiffState::Loading,
             list_state: ListState::new(0, ListAlignment::Top, px(GIT_PANEL_MODAL_HEIGHT)),
+            visible_line_indexes: Vec::new(),
+            collapsed_files: HashSet::new(),
             scrollbar: ScrollbarState::new(),
             body_scroll: ScrollHandle::new(),
             body_scrollbar: ScrollbarState::new(),
@@ -2574,6 +2579,8 @@ impl Waku {
                 match result {
                     Ok(snapshot) => {
                         let count = snapshot.lines.len();
+                        modal.visible_line_indexes = (0..count).collect();
+                        modal.collapsed_files.clear();
                         modal.expanded_paths = snapshot
                             .files
                             .iter()
@@ -3984,6 +3991,42 @@ impl Waku {
         cx.notify();
     }
 
+    fn toggle_git_panel_commit_files(&mut self, file_index: Option<usize>, cx: &mut Context<Self>) {
+        let Some(modal) = self.git_panel_commit_diff.as_mut() else {
+            return;
+        };
+        let Some(snapshot) = modal.state.snapshot().cloned() else {
+            return;
+        };
+        match file_index {
+            Some(index) => {
+                if !modal.collapsed_files.remove(&index) {
+                    modal.collapsed_files.insert(index);
+                }
+            }
+            None if !snapshot.files.is_empty()
+                && modal.collapsed_files.len() == snapshot.files.len() =>
+            {
+                modal.collapsed_files.clear();
+            }
+            None => {
+                modal.collapsed_files = (0..snapshot.files.len()).collect();
+            }
+        }
+        modal.visible_line_indexes = snapshot
+            .lines
+            .iter()
+            .enumerate()
+            .filter_map(|(line_index, line)| {
+                (!modal.collapsed_files.contains(&line.file_index)
+                    || matches!(&line.kind, crate::review_diff::LineKind::FileHeader))
+                .then_some(line_index)
+            })
+            .collect();
+        modal.list_state.reset(modal.visible_line_indexes.len());
+        cx.notify();
+    }
+
     fn select_git_panel_commit_file(&mut self, file_index: usize, cx: &mut Context<Self>) {
         let Some(modal) = self.git_panel_commit_diff.as_mut() else {
             return;
@@ -3998,7 +4041,11 @@ impl Waku {
             // Top-anchor the file's header so its diff body is immediately
             // visible, the same jump the Review panel's tree makes.
             modal.list_state.scroll_to(gpui::ListOffset {
-                item_ix: line,
+                item_ix: modal
+                    .visible_line_indexes
+                    .iter()
+                    .position(|&visible| visible == line)
+                    .unwrap_or(0),
                 offset_in_item: px(0.0),
             });
         }
@@ -5307,7 +5354,21 @@ impl Waku {
                                     .upgrade()
                                     .map(|entity| {
                                         entity.update(cx, |this, cx| {
-                                            this.render_git_panel_commit_diff_line(index, cx)
+                                            let line_index = this
+                                                .git_panel_commit_diff
+                                                .as_ref()
+                                                .and_then(|modal| {
+                                                    modal.visible_line_indexes.get(index)
+                                                })
+                                                .copied();
+                                            line_index.map_or_else(
+                                                || div().into_any_element(),
+                                                |line_index| {
+                                                    this.render_git_panel_commit_diff_line(
+                                                        line_index, cx,
+                                                    )
+                                                },
+                                            )
                                         })
                                     })
                                     .unwrap_or_else(|| div().into_any_element())
@@ -5370,6 +5431,50 @@ impl Waku {
                                     })
                                     .child(subject_text),
                             ),
+                    )
+                    .when(
+                        matches!(&modal.state, GitPanelCommitDiffState::Ready(_)),
+                        |row| {
+                            let all_collapsed = modal.state.snapshot().is_some_and(|snapshot| {
+                                !snapshot.files.is_empty()
+                                    && modal.collapsed_files.len() == snapshot.files.len()
+                            });
+                            row.child(
+                                div()
+                                    .id("git-panel-commit-modal-toggle-all")
+                                    .track_focus(&self.transcript_control_focus(
+                                        "git-panel-commit-toggle-all",
+                                        cx,
+                                    ))
+                                    .tab_index(0)
+                                    .px(px(8.0))
+                                    .py(px(4.0))
+                                    .rounded(px(5.0))
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_secondary)
+                                    .hover(|style| style.bg(theme.overlay))
+                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                    .child(if all_collapsed {
+                                        tr!("diff.expand_all_files")
+                                    } else {
+                                        tr!("diff.collapse_all_files")
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_git_panel_commit_files(None, cx)
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        |this, event: &KeyDownEvent, _, cx| {
+                                            if matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            ) {
+                                                this.toggle_git_panel_commit_files(None, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
+                            )
+                        },
                     )
                     .when_some(github_base.clone(), |row, base| {
                         let url = format!("{base}/commit/{}", modal.sha);
@@ -5452,7 +5557,18 @@ impl Waku {
                     return div().into_any_element();
                 };
                 let open_path = file.path.clone();
+                let file_index = line.file_index;
+                let collapsed = modal.collapsed_files.contains(&file_index);
+                let focus = self.transcript_control_focus(
+                    format!("git-panel-commit-file-toggle-{file_index}"),
+                    cx,
+                );
                 div()
+                    .id(SharedString::from(format!(
+                        "git-panel-commit-file-header-{file_index}"
+                    )))
+                    .track_focus(&focus)
+                    .tab_index(0)
                     .w_full()
                     .min_w_0()
                     .h(px(26.0))
@@ -5465,6 +5581,15 @@ impl Waku {
                     .border_b(hairline())
                     .border_color(theme.separator)
                     .child(file_icon(right_panel::file_icon_for_path(&file.path), 13.0))
+                    .child(icon(
+                        if collapsed {
+                            "icons/chevron-right.svg"
+                        } else {
+                            "icons/chevron-down.svg"
+                        },
+                        10.0,
+                        theme.text_ghost,
+                    ))
                     .child(
                         div()
                             .id(SharedString::from(format!(
@@ -5509,6 +5634,17 @@ impl Waku {
                             cx.stop_propagation();
                         })),
                     )
+                    .hover(|style| style.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_git_panel_commit_files(Some(file_index), cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.toggle_git_panel_commit_files(Some(file_index), cx);
+                            cx.stop_propagation();
+                        }
+                    }))
                     .into_any_element()
             }
             crate::review_diff::LineKind::Gap(gap) => transcript_view::activity_diff_break_row(
