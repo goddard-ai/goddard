@@ -368,6 +368,7 @@ impl Waku {
                 )
         });
         const NAVIGATION_RAIL_ENABLED: bool = true;
+        let navigation_rail_fits = navigation_rail_fits_width(chat_viewport_width);
         let navigation_rail = NAVIGATION_RAIL_ENABLED.then(|| {
             let viewport_size = viewport_bounds.size;
             let navigation_turns = self.navigation_turns();
@@ -376,7 +377,6 @@ impl Waku {
                 navigation_turns.len(),
                 chat_viewport_width,
             );
-            let navigation_rail_fits = navigation_rail_fits_width(chat_viewport_width);
             let scroll_top_row = transcript_rows.logical_scroll_top().item_ix;
             let turn_rows = navigation_turns
                 .iter()
