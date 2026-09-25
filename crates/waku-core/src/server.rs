@@ -29,6 +29,8 @@ use crate::protocol::{
 
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const DESCRIPTOR_RECOVERY_INTERVAL: Duration = Duration::from_millis(250);
+const DESCRIPTOR_WARNING_INTERVAL: Duration = Duration::from_secs(30);
 /// A socket write that makes no progress for this long means the client is
 /// not reading. Keeping the connection would let its event queue grow without
 /// bound, so it is dropped; clients reconnect and resume from their cursors.
@@ -1285,9 +1287,15 @@ fn accept_loop(
     options: Arc<ServerOptions>,
     active_connections: Arc<AtomicUsize>,
 ) -> anyhow::Result<()> {
+    let mut last_descriptor_warning = None;
     while !shutdown.load(Ordering::Acquire) && !server_shutdown.load(Ordering::Acquire) {
-        match listener.accept() {
-            Ok((stream, _)) => {
+        match accept_with_descriptor_recovery(
+            || listener.accept(),
+            &shutdown,
+            &server_shutdown,
+            &mut last_descriptor_warning,
+        )? {
+            Some((stream, _)) => {
                 if active_connections
                     .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                         (active < MAX_CONNECTIONS).then_some(active + 1)
@@ -1321,17 +1329,62 @@ fn accept_loop(
                     })
                     .context("could not start Goddard daemon connection thread")?;
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            None if !shutdown.load(Ordering::Acquire)
+                && !server_shutdown.load(Ordering::Acquire) =>
+            {
                 std::thread::sleep(ACCEPT_POLL_INTERVAL);
             }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error).context("Goddard daemon listener failed"),
+            None => break,
         }
     }
     // This listener's connections watch only its flag — make sure they end
     // when the loop exits for either reason.
     shutdown.store(true, Ordering::Release);
     Ok(())
+}
+
+fn accept_with_descriptor_recovery<T>(
+    mut accept: impl FnMut() -> io::Result<T>,
+    listener_shutdown: &AtomicBool,
+    shutdown: &AtomicBool,
+    last_warning: &mut Option<std::time::Instant>,
+) -> io::Result<Option<T>> {
+    while !listener_shutdown.load(Ordering::Acquire) && !shutdown.load(Ordering::Acquire) {
+        match accept() {
+            Ok(value) => return Ok(Some(value)),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if descriptor_exhaustion(&error) => {
+                let should_log =
+                    last_warning.is_none_or(|at| at.elapsed() >= DESCRIPTOR_WARNING_INTERVAL);
+                if should_log {
+                    eprintln!("goddard-daemon listener is out of file descriptors; retrying");
+                    *last_warning = Some(std::time::Instant::now());
+                }
+                std::thread::sleep(DESCRIPTOR_RECOVERY_INTERVAL);
+            }
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("Goddard daemon listener failed: {error}"),
+                ));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn descriptor_exhaustion(error: &io::Error) -> bool {
+    #[cfg(unix)]
+    return matches!(
+        error.raw_os_error(),
+        Some(libc::EMFILE) | Some(libc::ENFILE)
+    );
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
 }
 
 fn handle_connection(
@@ -2093,6 +2146,63 @@ fn write_json<S: io::Read + io::Write, T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn accept_loop_retries_after_descriptor_exhaustion() {
+        let listener_shutdown = AtomicBool::new(false);
+        let server_shutdown = AtomicBool::new(false);
+        let mut warning = None;
+        let mut attempts = 0;
+        let started = std::time::Instant::now();
+        let accepted = accept_with_descriptor_recovery(
+            || {
+                attempts += 1;
+                if attempts == 1 {
+                    Err(io::Error::from_raw_os_error(libc::EMFILE))
+                } else {
+                    Ok("accepted")
+                }
+            },
+            &listener_shutdown,
+            &server_shutdown,
+            &mut warning,
+        )
+        .expect("a recovered accept should succeed");
+        assert_eq!(accepted, Some("accepted"));
+        assert_eq!(attempts, 2);
+        assert!(started.elapsed() >= DESCRIPTOR_RECOVERY_INTERVAL);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn accept_loop_exits_after_shutdown_during_descriptor_backoff() {
+        let listener_shutdown = std::sync::Arc::new(AtomicBool::new(false));
+        let server_shutdown = AtomicBool::new(false);
+        let stop_after_backoff = std::sync::Arc::clone(&listener_shutdown);
+        let shutdown_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            stop_after_backoff.store(true, Ordering::Release);
+        });
+        let mut warning = None;
+        let mut attempts = 0;
+        let started = std::time::Instant::now();
+        let accepted = accept_with_descriptor_recovery(
+            || {
+                attempts += 1;
+                Err::<(), _>(io::Error::from_raw_os_error(libc::EMFILE))
+            },
+            &listener_shutdown,
+            &server_shutdown,
+            &mut warning,
+        )
+        .expect("shutdown should end descriptor recovery without a listener error");
+        shutdown_thread.join().unwrap();
+        assert_eq!(accepted, None);
+        assert_eq!(attempts, 1, "shutdown must stop repeated accept attempts");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
     #[test]
     fn independent_request_pool_rejects_work_after_its_queue_fills() {
         let pool = IndependentRequestPool::new("test", 1, 1);
