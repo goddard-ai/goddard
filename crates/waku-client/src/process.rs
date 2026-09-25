@@ -1173,38 +1173,40 @@ mod tests {
     fn hello_endpoint() -> String {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap().to_string();
-        std::thread::spawn(move || loop {
-            let Ok((stream, _)) = listener.accept() else {
-                return;
-            };
-            std::thread::spawn(move || {
-                let Ok(mut socket) = tungstenite::accept(stream) else {
+        std::thread::spawn(move || {
+            loop {
+                let Ok((stream, _)) = listener.accept() else {
                     return;
                 };
-                while let Ok(message) = socket.read() {
-                    let tungstenite::Message::Text(text) = message else {
-                        continue;
-                    };
-                    let Ok(waku_protocol::ClientMessage::Hello { .. }) =
-                        serde_json::from_str::<waku_protocol::ClientMessage>(text.as_ref())
-                    else {
-                        continue;
-                    };
-                    let reply = serde_json::to_string(&waku_protocol::ServerMessage::Hello {
-                        protocol_version: PROTOCOL_VERSION,
-                        daemon_version: "test".into(),
-                        daemon_commit: None,
-                        agent_cli_available: false,
-                    })
-                    .unwrap();
-                    if socket
-                        .send(tungstenite::Message::Text(reply.into()))
-                        .is_err()
-                    {
+                std::thread::spawn(move || {
+                    let Ok(mut socket) = tungstenite::accept(stream) else {
                         return;
+                    };
+                    while let Ok(message) = socket.read() {
+                        let tungstenite::Message::Text(text) = message else {
+                            continue;
+                        };
+                        let Ok(waku_protocol::ClientMessage::Hello { .. }) =
+                            serde_json::from_str::<waku_protocol::ClientMessage>(text.as_ref())
+                        else {
+                            continue;
+                        };
+                        let reply = serde_json::to_string(&waku_protocol::ServerMessage::Hello {
+                            protocol_version: PROTOCOL_VERSION,
+                            daemon_version: "test".into(),
+                            daemon_commit: None,
+                            agent_cli_available: false,
+                        })
+                        .unwrap();
+                        if socket
+                            .send(tungstenite::Message::Text(reply.into()))
+                            .is_err()
+                        {
+                            return;
+                        }
                     }
-                }
-            });
+                });
+            }
         });
         address
     }

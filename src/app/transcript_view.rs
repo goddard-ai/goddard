@@ -1516,12 +1516,7 @@ impl Waku {
         // A desktop PTY only opens on a local workspace — a remote
         // session's blocks keep the copy control alone.
         if session
-            .and_then(|id| {
-                self.state
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == id)
-            })
+            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
             .and_then(|session| self.workspace_path_for_session(session))
             .is_some_and(|workspace| !self.is_remote_path(workspace))
         {
