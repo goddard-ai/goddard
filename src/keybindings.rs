@@ -381,10 +381,9 @@ mod tests {
             gpui::KeyContext::parse("TextInput").unwrap(),
         ];
         let (bindings, _) = cx.update(|cx| {
-            cx.key_bindings().borrow().bindings_for_input(
-                &[gpui::Keystroke::parse("escape").unwrap()],
-                &stack,
-            )
+            cx.key_bindings()
+                .borrow()
+                .bindings_for_input(&[gpui::Keystroke::parse("escape").unwrap()], &stack)
         });
         let position = |action: &dyn gpui::Action| {
             bindings
@@ -394,8 +393,8 @@ mod tests {
         let clear = position(&crate::input::Clear).expect("field Clear must match escape");
         let dismiss =
             position(&crate::ui::menu::DismissMenu).expect("modal DismissMenu must match escape");
-        let cancel =
-            position(&crate::CancelTurn { immediate: false }).expect("root CancelTurn still matches");
+        let cancel = position(&crate::CancelTurn { immediate: false })
+            .expect("root CancelTurn still matches");
         assert!(
             clear < dismiss && dismiss < cancel,
             "escape must resolve Clear → DismissMenu → CancelTurn"

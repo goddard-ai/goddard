@@ -1829,12 +1829,14 @@ impl Waku {
         };
         let new_content_dot = self
             .transcript_new_content_dot
-            .filter(|dot| navigation_rail_fits && {
-                matches!(kind, TranscriptRowKind::Message(message_index)
+            .filter(|dot| {
+                navigation_rail_fits && {
+                    matches!(kind, TranscriptRowKind::Message(message_index)
                     if self
                         .selected_session()
                         .and_then(|session| session.messages.get(message_index))
                         .is_some_and(|message| message.id == dot.message_id))
+                }
             })
             .and_then(|dot| {
                 // Once the exit fade has run its course the dot unmounts, so a

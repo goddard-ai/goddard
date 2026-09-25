@@ -1434,10 +1434,7 @@ impl Waku {
             .unwrap_or_default();
         // The keyed item expands; if it left the registry, the newest
         // remaining one stands in rather than leaving an empty pane.
-        let expanded = items
-            .iter()
-            .position(|item| item.key == *key)
-            .unwrap_or(0);
+        let expanded = items.iter().position(|item| item.key == *key).unwrap_or(0);
         let Some(item) = items.get(expanded).copied() else {
             return div()
                 .id("background-work-surface")
@@ -1722,13 +1719,7 @@ impl Waku {
                     )
                     .when_some(stop, |header, stop| header.child(stop)),
             )
-            .child(self.render_background_work_detail(
-                item,
-                output,
-                output_viewport,
-                selection,
-                cx,
-            ))
+            .child(self.render_background_work_detail(item, output, output_viewport, selection, cx))
     }
 
     fn render_background_work_detail(
