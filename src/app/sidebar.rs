@@ -5829,7 +5829,12 @@ impl Waku {
                             .child(tr_cow!("onboarding.question_mark"))
                     }),
             )
-            .children(sync_notice)
+            .child(
+                div()
+                    .h(px(38.0))
+                    .flex_none()
+                    .when_some(sync_notice, |element, notice| element.child(notice)),
+            )
     }
 }
 
