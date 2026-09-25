@@ -1,0 +1,1 @@
+- Clicking or dragging to select text in a terminal now lands on the row under the pointer; the hit target previously drifted up to a row off toward the bottom of the grid.

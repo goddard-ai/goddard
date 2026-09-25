@@ -2273,7 +2273,11 @@ impl Render for TerminalView {
         // the grid must be sized from that same measured advance or the text
         // wraps short of (or past) the panel edge.
         let font_size = font_size(cx);
-        let cell_height = terminal_cell_height(font_size);
+        // GPUI snaps every absolute length to whole device pixels, so each
+        // row paints at the snapped pitch. Grid math — the PTY's cell size,
+        // mouse hit testing, scroll deltas — must divide by that same pitch
+        // or painted rows drift off the input grid.
+        let cell_height = f32::from(window.pixel_snap(px(terminal_cell_height(font_size))));
         let code_family = crate::fonts::current(cx).code;
         let cell_width = match &self.measured_cell_width {
             Some((family, size, width)) if *family == code_family && *size == font_size => *width,
@@ -4028,5 +4032,48 @@ mod tests {
         assert!(mosaic_glyph('a').is_none());
         assert!(mosaic_glyph('│').is_none());
         assert!(mosaic_glyph('─').is_none());
+    }
+
+    #[gpui::test]
+    fn a_click_selects_the_row_under_the_pointer(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| {
+            TerminalView::with_launch(PathBuf::from("/tmp"), TerminalLaunch::Shell, cx)
+        });
+        cx.run_until_parked();
+
+        let (bounds, cell_height, rows) = view.read_with(cx, |view, _| {
+            let bounds = view
+                .grid_bounds
+                .get()
+                .expect("grid bounds are recorded during prepaint");
+            let session = view.session.as_ref().expect("session spawned");
+            (bounds, session.cell_size.1, session.grid_size.1)
+        });
+        // Rows paint at the device-pixel-snapped pitch; the cell height used
+        // for hit testing must match it or deep rows report the wrong line.
+        let painted_pitch = view.update_in(cx, |_, window, cx| {
+            f32::from(window.pixel_snap(px(terminal_cell_height(font_size(cx)))))
+        });
+        assert_eq!(cell_height, painted_pitch);
+
+        for row in [0, 2, 5, rows - 2] {
+            let position = point(
+                bounds.origin.x + px(4.0),
+                bounds.origin.y + px((row as f32 + 0.5) * painted_pitch),
+            );
+            cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::none());
+            view.read_with(cx, |view, _| {
+                let term = view.session.as_ref().unwrap().term.lock();
+                let selection = term.selection.as_ref().expect("click starts a selection");
+                assert!(
+                    selection.intersects_range(Line(row as i32)..=Line(row as i32)),
+                    "a click at the middle of painted row {row} must select row {row}"
+                );
+                assert!(
+                    !selection.intersects_range(Line(row as i32 - 1)..=Line(row as i32 - 1)),
+                    "a click at the middle of painted row {row} must not select the row above"
+                );
+            });
+        }
     }
 }
