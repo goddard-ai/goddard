@@ -62,11 +62,11 @@ use crate::ui::tooltip::Tooltip;
 
 use crate::browser::BrowserView;
 use crate::persistence::{
-    CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand, CustomCommandIcon,
-    DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_GIT_PANEL_WIDTH, DEFAULT_RIGHT_PANEL_WIDTH,
-    DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource, PersistedFullscreenSurface,
-    PersistedListOffset, PersistedNavigationLocation, PersistedRightPanelState,
-    PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
+    AutoModelRouting, CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand,
+    CustomCommandIcon, DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_GIT_PANEL_WIDTH,
+    DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource,
+    PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
+    PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
     PersistedTranscriptScrollPosition, PersistedWindowState, RecentModelUse,
     SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
     UpdateChannel, VoiceBriefingSummaryModel, VoiceBriefingTtsModel,

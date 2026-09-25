@@ -280,7 +280,7 @@ settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシ
 settings.daemon_keywords: デーモン サーバー リモート ウェブ ネットワーク 公開 オリジン トークン ポート websocket
 settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセシビリティ アプリ 制御 codex
 settings.jev: Jev
-settings.jev_keywords: jev typesafe 評価 モデル 自動 ルーティング ルーター バックエンド APIキー 認証情報 vercel cloudflare ポリシー eval routing
+settings.jev_keywords: jev typesafe 評価 モデル 自動 ルーティング ルーター バックエンド APIキー 認証情報 vercel cloudflare ポリシー eval routing ステータスマーカー 提案アクション status markers suggested actions
 settings.commands_keywords: コマンド カスタムコマンド ターミナル シェル スクリプト ショートカット パレット 実行
 settings.archived: アーカイブ済みチャット
 settings.archived_keywords: アーカイブ チャット 会話 非表示 履歴 復元 削除
@@ -1266,6 +1266,15 @@ suggestions.tooltip: 次のおすすめアクション
 jev.tab_suggestions: 提案
 jev.tab_automation: 自動化
 jev.tab_usage: 使用状況
+jev.auto_model_routing: 自動モデルルーティング
+jev.auto_model_routing_description: タスクの最初のプロンプトを評価モデルが分類し、ルーティングポリシーのプロバイダーとモデルに振り分けます。
+jev.auto_routing_picker: モデルピッカーに表示
+jev.auto_routing_default: デフォルトモデルとして強制
+jev.auto_routing_disabled: 無効
+jev.status_markers_title: ターンステータスマーカー
+jev.status_markers_description: アシスタントのターンが終わると、評価モデルが固定のマーカーセット（完了、入力待ち、未検証、一部完了、ブロック中、失敗、脱線）で採点し、しきい値を超えたマーカーが応答の下にチップとして表示されます。
+jev.suggested_actions_title: 提案アクション
+jev.suggested_actions_description: アシスタントのターンが終わると、評価モデルが次の行動（フォローアッププロンプト、Git 操作、セッション管理）を予測し、チップとして提案します。自動実行はアクションごとのオプトインのままです。
 jev.group_prompts: プロンプト
 jev.group_actions: アクション
 jev.group_suggested_actions: 提案アクション
@@ -2174,8 +2183,6 @@ errors.provider_terminal_sessions_local_only: "%{provider} のセッションに
 errors.remote_connect: "%{name} に接続できませんでした：%{error}"
 errors.store_pasted_text: "ペーストしたテキストを添付できませんでした：%{error}"
 errors.voice_briefing: 音声ブリーフィングを生成できませんでした
-experiments.action_predictions_description: アシスタントのターンが終わると、評価モデルが固定の候補セット（フォローアッププロンプト、Git 操作、セッション管理）から次の行動を予測し、ローカルの行動ジャーナルが各予測を解決します。まだ候補は表示されません — まず正確度を測るため、判定結果は ~/.goddard/action-predictions.jsonl に記録されます。
-experiments.action_predictions_title: 行動予測
 experiments.automations_description: プロンプトをタイマーで実行するオートメーションページです — 毎時、毎日、平日、毎週、cron。それぞれを独立したタスクまたは既存タスクで実行し、実行履歴と手動の単発実行に対応します。
 experiments.automations_title: オートメーション
 experiments.big_picture_description: ⌘0 で全ウインドウのセッションカードグリッドを表示します。ライブトランスクリプトとカードごとの入力欄を備え、⌘1–9 で宛先を指定できます。
@@ -2207,8 +2214,6 @@ experiments.memory_description: 各プロジェクトに永続メモリを持た
 experiments.memory_title: プロジェクトメモリ
 experiments.memory_models_caption: 各プロバイダーの終了したセッションをメモリに蒸留するモデル — バックグラウンド実行のため、高価なインタラクティブ用のモデルは適用されません。ここで選ばない限りプロバイダーのデフォルトを使用します。
 experiments.memory_model_default: プロバイダーのデフォルト
-experiments.model_router_description: モデル選択に「自動」を追加します。タスクの最初のプロンプトを評価モデルが分類し、ルーティングポリシーのプロバイダーとモデルに振り分けます。
-experiments.model_router_title: 自動モデルルーティング
 experiments.needs_eval_backend: 評価バックエンドを使用します — まだ構成されていません。
 experiments.open_jev_settings: Jev 設定を開く
 experiments.phase_routing_description: 計画フェーズが必要と評価モデルが判定した自動振り分けタスクは、最上位クラスのモデルで開始し、ツールイベントまたは評価モデルが計画の終了を判断した時点で1クラス下のモデルに切り替えます — 実装が停滞した場合は元に戻ります。サイドバーの行にタスクのフェーズを表示します。
@@ -2223,8 +2228,6 @@ experiments.sandbox_description: 入力欄のアクセスメニューに環境�
 experiments.sandbox_title: サンドボックス VM
 experiments.sidebar_dock_description: ホバーでサイドバーのフッターの上に現れるクイックアクションドックです — 受信トレイ、アーカイブ、キーボードショートカット、設定にワンクリックでアクセスできます。
 experiments.sidebar_dock_title: サイドバードック
-experiments.status_markers_description: アシスタントのターンが終わると、評価モデルが固定のマーカーセット（完了、入力待ち、未検証、一部完了、ブロック中、失敗、脱線）で採点し、しきい値を超えたマーカーが応答の下にチップとして表示されます。
-experiments.status_markers_title: ターンステータスマーカー
 experiments.subagents_description: セッションが実行を名前付きサブエージェントに委任できるようにします。Claude Code、OpenCode、GitHub Copilot、Pi は完全対応、Codex と OpenCode 2 は助言のみ、それ以外のプロバイダーでは無効です。読み取り専用ヘルパーの強制は、ツールポリシーを提供するプロバイダーに限られます。有効化後に開始したセッションに適用されます。
 experiments.subagents_title: サブエージェント
 experiments.voice_briefing_title: 音声ブリーフィング

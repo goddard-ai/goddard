@@ -540,7 +540,7 @@ settings.commands_keywords:
 settings.jev:
   en: Jev
 settings.jev_keywords:
-  en: jev typesafe eval evaluation model auto routing router backend api key credential vercel gateway cloudflare policy prompts questions triggers
+  en: jev typesafe eval evaluation model auto routing router backend api key credential vercel gateway cloudflare policy prompts questions triggers status markers suggested actions
 settings.experiments:
   en: Experiments
 settings.experiments_keywords:
@@ -877,22 +877,10 @@ experiments.integrations_title:
   en: MCP integrations
 experiments.integrations_description:
   en: A Settings → Integrations page for connecting official remote MCP servers — Linear, GitHub, Notion, Stripe, and more — once, and delivering them to every enabled agent through Goddard's local proxy.
-experiments.model_router_title:
-  en: Auto model routing
-experiments.model_router_description:
-  en: Add Auto to the model picker. A task's first prompt is classified by the evaluation model, then routed to a provider and model from your routing policy.
 experiments.needs_eval_backend:
   en: Runs on the evaluation backend — none is configured.
 experiments.open_jev_settings:
   en: Open Jev settings
-experiments.status_markers_title:
-  en: Turn status markers
-experiments.status_markers_description:
-  en: When an assistant turn ends, the evaluation model scores it against a fixed marker set — complete, awaiting input, unverified, partial, blocked, failed, drifted — and markers that clear their threshold appear as chips under the response.
-experiments.action_predictions_title:
-  en: Action predictions
-experiments.action_predictions_description:
-  en: When an assistant turn ends, the evaluation model predicts your next move from a fixed set — follow-up prompts, Git actions, session management — and a local journal of consequential actions resolves each prediction. Nothing is suggested yet; verdicts are logged to ~/.goddard/action-predictions.jsonl to measure accuracy first.
 experiments.phase_routing_title:
   en: Phase-aware routing
 experiments.phase_routing_description:
@@ -1165,6 +1153,24 @@ jev.tab_automation:
   en: Automation
 jev.tab_usage:
   en: Usage
+jev.auto_model_routing:
+  en: Auto model routing
+jev.auto_model_routing_description:
+  en: A task's first prompt is classified by the evaluation model, then routed to a provider and model from your routing policy.
+jev.auto_routing_picker:
+  en: Show in model picker
+jev.auto_routing_default:
+  en: Force as default model
+jev.auto_routing_disabled:
+  en: Disabled
+jev.status_markers_title:
+  en: Turn status markers
+jev.status_markers_description:
+  en: When an assistant turn ends, the evaluation model scores it against a fixed marker set — complete, awaiting input, unverified, partial, blocked, failed, drifted — and markers that clear their threshold appear as chips under the response.
+jev.suggested_actions_title:
+  en: Suggested actions
+jev.suggested_actions_description:
+  en: When an assistant turn ends, the evaluation model predicts your next move — follow-up prompts, Git actions, session management — and offers it as a chip. Automatic runs stay opt-in per action.
 jev.group_prompts:
   en: Prompts
 jev.group_actions:

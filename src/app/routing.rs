@@ -277,12 +277,12 @@ impl Waku {
             .collect()
     }
 
-    /// Whether the draft may pick Auto: the experiment is on, the session
-    /// has not started, and at least one provider could take the route. An
-    /// unconfigured eval backend does not block it — the daemon falls back
-    /// to `last_used` and says so in the decision.
+    /// Whether the draft may pick Auto: routing is not disabled, the
+    /// session has not started, and at least one provider could take the
+    /// route. An unconfigured eval backend does not block it — the daemon
+    /// falls back to `last_used` and says so in the decision.
     pub(super) fn auto_route_available(&self) -> bool {
-        self.state.model_router_enabled
+        self.state.auto_model_routing() != AutoModelRouting::Disabled
             && self
                 .model_picker_session()
                 .is_some_and(|session| !session.provider_locked())

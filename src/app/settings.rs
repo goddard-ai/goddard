@@ -5320,39 +5320,6 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
-                id: "model-router-experiment-toggle",
-                icon: "icons/fork.svg",
-                title_key: "experiments.model_router_title",
-                description_key: "experiments.model_router_description",
-                enabled: self.state.model_router_enabled,
-                set: Self::set_model_router_enabled,
-                eval_backed: true,
-                tuning: None,
-            },
-            ExperimentDef {
-                group: ExperimentGroup::Sessions,
-                id: "status-markers-experiment-toggle",
-                icon: "icons/circle-dot.svg",
-                title_key: "experiments.status_markers_title",
-                description_key: "experiments.status_markers_description",
-                enabled: self.state.status_markers_enabled,
-                set: Self::set_status_markers_enabled,
-                eval_backed: true,
-                tuning: None,
-            },
-            ExperimentDef {
-                group: ExperimentGroup::Sessions,
-                id: "action-predictions-experiment-toggle",
-                icon: "icons/sparkle.svg",
-                title_key: "experiments.action_predictions_title",
-                description_key: "experiments.action_predictions_description",
-                enabled: self.state.action_predictions_enabled,
-                set: Self::set_action_predictions_enabled,
-                eval_backed: true,
-                tuning: None,
-            },
-            ExperimentDef {
-                group: ExperimentGroup::Sessions,
                 id: "phase-routing-experiment-toggle",
                 icon: "icons/map.svg",
                 title_key: "experiments.phase_routing_title",
@@ -7386,14 +7353,24 @@ impl Waku {
         }
     }
 
-    fn set_model_router_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.state.model_router_enabled = enabled;
-        self.close_jev_page_if_unused();
-        if enabled {
+    /// The Auto-routing mode also answers for `model_router_enabled`, the
+    /// legacy flag old builds still read. Disabled unwinds drafts parked
+    /// on Auto back onto their provider/model, which stayed as the
+    /// last-used hint.
+    fn set_auto_model_routing(&mut self, mode: AutoModelRouting, cx: &mut Context<Self>) {
+        self.state.auto_model_routing = Some(mode);
+        self.state.model_router_enabled = mode != AutoModelRouting::Disabled;
+        if mode == AutoModelRouting::Disabled {
+            for session in &mut self.state.sessions {
+                session.auto_route = false;
+            }
+            self.state.last_auto_route = false;
+        } else {
             // The Jev page reads the eval mirror — warm it rather than
             // waiting for the first frame to discover it is missing.
             self.seed_eval_inputs(cx);
         }
+        self.close_jev_page_if_unused();
         self.save();
         cx.notify();
     }
@@ -8272,11 +8249,138 @@ impl Waku {
             settings_group(tr!("routing.provider_classes"), provider_class_cards, theme)
                 .map(|group| div().mt(px(15.0)).child(group).into_any_element());
 
+        let features = self.render_jev_feature_settings(theme, search, cx);
+
         div()
             .children(credentials)
+            .children(features)
             .children(classes)
             .children(provider_classes)
             .into_any_element()
+    }
+
+    /// Which Jev-backed features run — the graduated forms of the old
+    /// eval experiments. Each degrades quietly without a configured
+    /// backend, so the card warns under itself while any enabled feature
+    /// lacks the credential.
+    fn render_jev_feature_settings(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let mode = self.state.auto_model_routing();
+        let weak = cx.entity().downgrade();
+        let mode_handle = self.menu_handle("auto-model-routing-selector", cx);
+        let mode_selector = dropdown_menu(
+            MenuChip::new("auto-model-routing-selector")
+                .label(tr!(mode.label_key()))
+                .outlined()
+                .selected(mode_handle.is_open())
+                .w(px(200.0))
+                .justify_between(),
+            "auto-model-routing-selector-menu",
+            &mode_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                AutoModelRouting::ALL
+                    .into_iter()
+                    .map(|option| {
+                        let weak = weak.clone();
+                        MenuItem::new(tr!(option.label_key()), move |_, cx| {
+                            let _ =
+                                weak.update(cx, |this, cx| this.set_auto_model_routing(option, cx));
+                        })
+                        .selected(option == mode)
+                    })
+                    .collect()
+            },
+        );
+        let credential_missing = self
+            .state
+            .eval
+            .as_ref()
+            .is_none_or(|eval| eval.credential_missing());
+        let needs_credential = credential_missing
+            && (mode != AutoModelRouting::Disabled
+                || self.state.status_markers_enabled
+                || self.state.action_predictions_enabled);
+        let markers_enabled = self.state.status_markers_enabled;
+        let actions_enabled = self.state.action_predictions_enabled;
+        let rows = vec![
+            settings_row(
+                "icons/fork.svg",
+                tr!("jev.auto_model_routing"),
+                tr!("jev.auto_model_routing_description"),
+                mode_selector,
+                theme,
+                search,
+            ),
+            settings_row(
+                "icons/circle-dot.svg",
+                tr!("jev.status_markers_title"),
+                tr!("jev.status_markers_description"),
+                settings_button(
+                    "status-markers-toggle",
+                    if markers_enabled {
+                        tr!("auto_prompts.disable")
+                    } else {
+                        tr!("auto_prompts.enable")
+                    },
+                    true,
+                    false,
+                    true,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_status_markers_enabled(!markers_enabled, cx),
+                ),
+                theme,
+                search,
+            ),
+            settings_row(
+                "icons/sparkle.svg",
+                tr!("jev.suggested_actions_title"),
+                tr!("jev.suggested_actions_description"),
+                settings_button(
+                    "suggested-actions-toggle",
+                    if actions_enabled {
+                        tr!("auto_prompts.disable")
+                    } else {
+                        tr!("auto_prompts.enable")
+                    },
+                    true,
+                    false,
+                    true,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_action_predictions_enabled(!actions_enabled, cx),
+                ),
+                theme,
+                search,
+            ),
+        ];
+        settings_row_card(rows, theme).map(|card| {
+            card.mt(px(15.0))
+                .when(!search.active() && needs_credential, |card| {
+                    card.child(
+                        div()
+                            .px(px(20.0))
+                            .pb(px(13.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(icon("icons/alert.svg", 12.0, theme.warning))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .line_height(sp(16.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("experiments.needs_eval_backend")),
+                            ),
+                    )
+                })
+                .into_any_element()
+        })
     }
 
     /// The Usage tab's card — token spend summed from the daemon's decision
@@ -13854,7 +13958,7 @@ fn eval_feature_label(feature: &str) -> String {
         "route-effort" => tr!("routing.feature_route_effort"),
         "route-phase" => tr!("routing.feature_route_phase"),
         "route-class-suggest" => tr!("routing.feature_route_class_suggest"),
-        "next-action" => tr!("experiments.action_predictions_title"),
+        "next-action" => tr!("jev.suggested_actions_title"),
         "paste-classification" => tr!("routing.feature_paste_classification"),
         "provider-switch" => tr!("routing.feature_provider_switch"),
         "memory-rank" => tr!("routing.feature_memory_rank"),

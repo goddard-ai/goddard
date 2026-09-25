@@ -278,7 +278,7 @@ settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型
 settings.daemon_keywords: 守护进程 服务 远程 网页 网络 暴露 来源 令牌 端口 websocket
 settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 控制 codex
 settings.jev: Jev
-settings.jev_keywords: jev typesafe 评估 模型 自动 路由 后端 API密钥 凭据 vercel cloudflare 策略 eval routing
+settings.jev_keywords: jev typesafe 评估 模型 自动 路由 后端 API密钥 凭据 vercel cloudflare 策略 eval routing 状态标记 建议操作 status markers suggested actions
 settings.commands_keywords: 命令 自定义命令 终端 shell 脚本 快捷键 命令面板 运行
 settings.archived: 已归档的聊天
 settings.archived_keywords: 已归档 聊天 对话 隐藏 历史 恢复 移除
@@ -1238,6 +1238,15 @@ suggestions.tooltip: 建议的下一步
 jev.tab_suggestions: 建议
 jev.tab_automation: 自动化
 jev.tab_usage: 用量
+jev.auto_model_routing: 自动模型路由
+jev.auto_model_routing_description: 任务的第一个提示词由评估模型分类，然后按你的路由策略路由到某个服务商和模型。
+jev.auto_routing_picker: 在模型选择器中显示
+jev.auto_routing_default: 强制设为默认模型
+jev.auto_routing_disabled: 已禁用
+jev.status_markers_title: 轮次状态标记
+jev.status_markers_description: 当助手轮次结束时，评估模型会按固定标记集为其打分 — 已完成、等待输入、未验证、部分完成、受阻、失败、已偏离 — 达到阈值的标记会以标签形式显示在回复下方。
+jev.suggested_actions_title: 建议操作
+jev.suggested_actions_description: 助手轮次结束后，评估模型会预测你的下一步（后续提示词、Git 操作、会话管理）并以标签形式给出建议。自动执行仍需逐项开启。
 jev.group_prompts: 提示词
 jev.group_actions: 操作
 jev.group_suggested_actions: 建议操作
@@ -2125,8 +2134,6 @@ errors.provider_terminal_sessions_local_only: "%{provider} 会话需要本地守
 errors.remote_connect: "无法连接到 %{name}：%{error}"
 errors.store_pasted_text: "无法附加粘贴的文本：%{error}"
 errors.voice_briefing: 无法生成语音简报
-experiments.action_predictions_description: 助手轮次结束后，评估模型会从固定候选集（后续提示词、Git 操作、会话管理）中预测你的下一步，本地的行为日志会逐条核销每个预测。暂不会显示建议 — 判定结果先记录到 ~/.goddard/action-predictions.jsonl 以衡量准确度。
-experiments.action_predictions_title: 行为预测
 experiments.automations_description: 新增“自动化”页面，可按计划定时运行提示词 — 每小时、每天、工作日、每周或 cron — 每次运行可作为独立任务或进入现有任务，并带有运行历史和单次手动运行。
 experiments.automations_title: 自动化
 experiments.big_picture_description: 按 ⌘0 打开全窗口的会话卡片网格，带实时转录、每张卡片的输入框，以及 ⌘1–9 选定。
@@ -2158,8 +2165,6 @@ experiments.memory_description: 为每个项目提供持久记忆。已完成的
 experiments.memory_title: 项目记忆
 experiments.memory_models_caption: 用于将各服务商已完成的会话提炼进记忆的模型 — 在后台运行，因此不会套用为交互式选择的高价模型。除非在此另行选择，否则使用服务商默认值。
 experiments.memory_model_default: 服务商默认值
-experiments.model_router_description: 在模型选择器中新增“自动”。任务的第一个提示词由评估模型分类，然后按你的路由策略路由到某个服务商和模型。
-experiments.model_router_title: 自动模型路由
 experiments.needs_eval_backend: 使用评估后端 — 尚未配置。
 experiments.open_jev_settings: 打开 Jev 设置
 experiments.phase_routing_description: 评估模型判定需要规划阶段的自动路由任务，先用最强档模型启动，待工具流或评估模型判定规划结束后降一档切换模型 — 实现停滞时会切回。侧边栏任务行显示当前阶段。
@@ -2174,8 +2179,6 @@ experiments.sandbox_description: 在输入框的访问菜单中显示环境选�
 experiments.sandbox_title: 沙箱 VM
 experiments.sidebar_dock_description: 一个悬停时在侧边栏底部升起的快捷操作坞 — 收件箱、归档、键盘快捷键和设置一键可达。
 experiments.sidebar_dock_title: 侧边栏操作坞
-experiments.status_markers_description: 当助手轮次结束时，评估模型会按固定标记集为其打分 — 已完成、等待输入、未验证、部分完成、受阻、失败、已偏离 — 达到阈值的标记会以标签形式显示在回复下方。
-experiments.status_markers_title: 轮次状态标记
 experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。Claude Code、OpenCode、GitHub Copilot 和 Pi 完全支持；Codex 和 OpenCode 2 仅提供建议；其他服务商保持禁用。只有提供工具策略的服务商会强制执行只读助手。对开启后启动的会话生效。
 experiments.subagents_title: 子智能体
 experiments.voice_briefing_title: 语音简报

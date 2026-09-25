@@ -147,6 +147,32 @@ impl DefaultWorkspace {
     }
 }
 
+/// How the model picker's Auto route behaves — the Jev eval backend picks
+/// the provider/model a routed task starts on.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoModelRouting {
+    /// Auto sits in the model picker as an opt-in row.
+    #[default]
+    ShowInModelPicker,
+    /// Every fresh draft starts on Auto, whatever was used last.
+    DefaultModel,
+    /// Auto is hidden and routing never runs.
+    Disabled,
+}
+
+impl AutoModelRouting {
+    pub const ALL: [Self; 3] = [Self::ShowInModelPicker, Self::DefaultModel, Self::Disabled];
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::ShowInModelPicker => "jev.auto_routing_picker",
+            Self::DefaultModel => "jev.auto_routing_default",
+            Self::Disabled => "jev.auto_routing_disabled",
+        }
+    }
+}
+
 /// Which appcast the updater checks: released builds from
 /// releases.goddardai.org, or builds published by a dev worktree serving
 /// dev.goddardai.org (`bun run dev --serve`). macOS only — the Windows and
@@ -354,6 +380,12 @@ fn default_computer_use_enabled() -> bool {
 /// builds keep them opt-in. An explicit `false` in the file wins either way.
 fn default_experiment_enabled() -> bool {
     cfg!(debug_assertions)
+}
+
+/// Graduated features default on — their real gate is a configured eval
+/// backend, not a flag.
+fn default_enabled() -> bool {
+    true
 }
 
 /// Guided reading's fixation level: how much of each word is emphasized.
@@ -1087,19 +1119,24 @@ pub struct AppSettings {
     /// Experimental: the Settings → Friends page and friend-to-friend file
     /// transfers. Defaults on in debug builds.
     pub friends_enabled: bool,
-    /// Experimental: Auto in the model picker routes a task's first prompt
-    /// through the daemon's evaluation model and starts on the resolved
-    /// provider/model. Defaults on in debug builds.
+    /// Legacy form of `auto_model_routing`: the experiment toggle's
+    /// recorded answer. Still written so older builds keep the same
+    /// behavior; resolved reads go through the tri-state.
     pub model_router_enabled: bool,
-    /// Experimental: each assistant turn that ends while its session is on
-    /// screen is scored by the evaluation model against a fixed marker set;
-    /// markers that clear their threshold render as chips on the response
-    /// footer. Defaults on in debug builds.
+    /// How the model picker's Auto route behaves. `None` predates the
+    /// tri-state — the effective mode then resolves through
+    /// `model_router_enabled`, where a recorded `false` was an opt-out.
+    /// Runs only with a configured Jev backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_model_routing: Option<AutoModelRouting>,
+    /// Each assistant turn that ends while its session is on screen is
+    /// scored by the evaluation model against a fixed marker set; markers
+    /// that clear their threshold render as chips on the response footer.
+    /// Runs only with a configured Jev backend.
     pub status_markers_enabled: bool,
-    /// Experimental: settled turns get a shadow next-action prediction from
-    /// the evaluation model, journaled user actions resolve it, and every
-    /// verdict is logged for calibration — nothing renders. Defaults on in
-    /// debug builds.
+    /// Settled turns get a next-action prediction from the evaluation
+    /// model, journaled user actions resolve it, and every verdict is
+    /// logged for calibration. Runs only with a configured Jev backend.
     pub action_predictions_enabled: bool,
     /// "Move fast, break things": Jev's next-action suggestions lean toward
     /// forward-momentum picks — land, push, commit, fix — and those picks
@@ -1220,9 +1257,10 @@ impl Default for AppSettings {
             projects_page_enabled: default_experiment_enabled(),
             review_queue_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
-            model_router_enabled: default_experiment_enabled(),
-            status_markers_enabled: default_experiment_enabled(),
-            action_predictions_enabled: default_experiment_enabled(),
+            model_router_enabled: true,
+            auto_model_routing: None,
+            status_markers_enabled: true,
+            action_predictions_enabled: true,
             move_fast_break_things: false,
             phase_routing_enabled: false,
             suggested_prompts: BTreeMap::new(),
@@ -1644,9 +1682,11 @@ pub struct PersistedState {
     pub starred_completion_sound: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
-    /// Experimental feature opt-ins from the Experiments settings page.
-    /// Most default on in debug builds; phase routing defaults off.
-    /// An explicit saved preference still wins.
+    /// Experimental feature opt-ins from the Experiments settings page —
+    /// most default on in debug builds and phase routing defaults off —
+    /// plus the graduated Jev features that moved to the Jev page, which
+    /// default on and gate on a configured eval backend instead. An
+    /// explicit saved preference still wins either way.
     #[serde(default = "default_experiment_enabled")]
     pub big_picture_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
@@ -1659,11 +1699,19 @@ pub struct PersistedState {
     pub review_queue_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub friends_enabled: bool,
-    #[serde(default = "default_experiment_enabled")]
+    /// The Auto-routing experiment toggle's recorded answer — the
+    /// migration input for `auto_model_routing` and the field older
+    /// builds still read. Resolved reads go through
+    /// [`PersistedState::auto_model_routing`].
+    #[serde(default = "default_enabled")]
     pub model_router_enabled: bool,
-    #[serde(default = "default_experiment_enabled")]
+    /// How the model picker's Auto route behaves; `None` predates the
+    /// tri-state and resolves through `model_router_enabled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_model_routing: Option<AutoModelRouting>,
+    #[serde(default = "default_enabled")]
     pub status_markers_enabled: bool,
-    #[serde(default = "default_experiment_enabled")]
+    #[serde(default = "default_enabled")]
     pub action_predictions_enabled: bool,
     /// "Move fast, break things": momentum picks clear an easier suggestion
     /// gate. App-owned; suggestion chips only, never automatic runs.
@@ -2040,9 +2088,10 @@ impl PersistedState {
             projects_page_enabled: default_experiment_enabled(),
             review_queue_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
-            model_router_enabled: default_experiment_enabled(),
-            status_markers_enabled: default_experiment_enabled(),
-            action_predictions_enabled: default_experiment_enabled(),
+            model_router_enabled: true,
+            auto_model_routing: None,
+            status_markers_enabled: true,
+            action_predictions_enabled: true,
             move_fast_break_things: false,
             phase_routing_enabled: false,
             suggested_prompts: BTreeMap::new(),
@@ -2130,6 +2179,18 @@ impl PersistedState {
         resolve_last_environment(self.last_environment, self.last_sandboxed)
     }
 
+    /// The effective Auto-routing mode — read this instead of the fields.
+    /// `auto_model_routing` answers once set; before the tri-state existed
+    /// the experiment toggle did, where a recorded `false` was an opt-out.
+    pub fn auto_model_routing(&self) -> AutoModelRouting {
+        self.auto_model_routing
+            .unwrap_or(if self.model_router_enabled {
+                AutoModelRouting::ShowInModelPicker
+            } else {
+                AutoModelRouting::Disabled
+            })
+    }
+
     pub fn new_session(&self, project_id: Uuid, provider: ProviderKind) -> AgentSession {
         let mut session = AgentSession::new(project_id, provider);
         session.runtime_mode = self.last_runtime_mode;
@@ -2149,7 +2210,12 @@ impl PersistedState {
         };
         // An Auto pick carries to the next draft like the provider/model do;
         // the seeded provider/model stay as the route's last-used hint.
-        session.auto_route = self.last_auto_route && self.model_router_enabled;
+        // Forced routing makes every fresh draft Auto regardless.
+        session.auto_route = match self.auto_model_routing() {
+            AutoModelRouting::Disabled => false,
+            AutoModelRouting::ShowInModelPicker => self.last_auto_route,
+            AutoModelRouting::DefaultModel => true,
+        };
         if provider == self.last_provider {
             session.model.clone_from(&self.last_model);
             session
@@ -2438,7 +2504,10 @@ impl PersistedState {
             projects_page_enabled: self.projects_page_enabled,
             review_queue_enabled: self.review_queue_enabled,
             friends_enabled: self.friends_enabled,
-            model_router_enabled: self.model_router_enabled,
+            // The legacy flag mirrors the resolved mode so downgraded
+            // builds keep the same routing behavior.
+            model_router_enabled: self.auto_model_routing() != AutoModelRouting::Disabled,
+            auto_model_routing: self.auto_model_routing,
             status_markers_enabled: self.status_markers_enabled,
             action_predictions_enabled: self.action_predictions_enabled,
             move_fast_break_things: self.move_fast_break_things,
@@ -2567,6 +2636,7 @@ impl PersistedState {
         self.review_queue_enabled = settings.review_queue_enabled;
         self.friends_enabled = settings.friends_enabled;
         self.model_router_enabled = settings.model_router_enabled;
+        self.auto_model_routing = settings.auto_model_routing;
         self.status_markers_enabled = settings.status_markers_enabled;
         self.action_predictions_enabled = settings.action_predictions_enabled;
         self.move_fast_break_things = settings.move_fast_break_things;
@@ -4669,10 +4739,25 @@ mod tests {
         assert!(session.auto_route);
         assert_eq!(session.provider, ProviderKind::Claude);
 
-        // Without the experiment the remembered flag cannot arm a draft.
+        // With routing disabled the remembered flag cannot arm a draft.
         restored.model_router_enabled = false;
         let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
         assert!(!session.auto_route);
+
+        // The tri-state answers over the legacy flag: an explicit mode
+        // wins, and forced routing arms every draft without a remembered
+        // pick.
+        restored.auto_model_routing = Some(AutoModelRouting::Disabled);
+        restored.model_router_enabled = true;
+        restored.last_auto_route = true;
+        assert_eq!(restored.auto_model_routing(), AutoModelRouting::Disabled);
+        let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
+        assert!(!session.auto_route);
+
+        restored.auto_model_routing = Some(AutoModelRouting::DefaultModel);
+        restored.last_auto_route = false;
+        let session = restored.new_session(Uuid::new_v4(), ProviderKind::Claude);
+        assert!(session.auto_route);
     }
 
     #[test]
