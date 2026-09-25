@@ -1948,7 +1948,7 @@ impl Waku {
                 search,
             ),
             setting_card(
-                "icons/target.svg",
+                "icons/compass.svg",
                 tr!("settings.sidebar_phase_groups"),
                 tr!("settings.sidebar_phase_groups_description"),
                 toggle_switch(

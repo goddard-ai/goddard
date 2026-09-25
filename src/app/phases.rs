@@ -61,7 +61,7 @@ pub(super) fn sidebar_phase_marker(
         return None;
     }
     (session.phase == Some(SessionPhase::Planning))
-        .then_some(("icons/target.svg", "phase.planning"))
+        .then_some(("icons/compass.svg", "phase.planning"))
 }
 
 /// What a settled turn's tool stream says about the phase boundary —
@@ -1009,7 +1009,7 @@ mod tests {
         session.phase = Some(SessionPhase::Planning);
         assert_eq!(
             sidebar_phase_marker(true, &session),
-            Some(("icons/target.svg", "phase.planning"))
+            Some(("icons/compass.svg", "phase.planning"))
         );
         session.phase = Some(SessionPhase::Executing);
         assert_eq!(sidebar_phase_marker(true, &session), None);
