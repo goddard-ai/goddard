@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -44,6 +44,21 @@ pub(crate) struct CapturedOutput {
     pub(crate) stdout: Vec<u8>,
     pub(crate) stderr: Vec<u8>,
 }
+
+#[derive(Debug)]
+pub(crate) struct ProcessTimedOut(Duration);
+
+impl std::fmt::Display for ProcessTimedOut {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "process timed out after {} seconds",
+            self.0.as_secs()
+        )
+    }
+}
+
+impl std::error::Error for ProcessTimedOut {}
 
 pub fn inspect(cwd: &Path) -> anyhow::Result<Snapshot> {
     ensure_repository(cwd)?;
@@ -877,6 +892,31 @@ pub(crate) fn run_capture(
     command: &mut Command,
     timeout: Duration,
 ) -> anyhow::Result<CapturedOutput> {
+    run_capture_inner(command, timeout, None, MAX_STDOUT_BYTES, MAX_STDERR_BYTES)
+}
+
+pub(crate) fn run_capture_unbounded(
+    command: &mut Command,
+    timeout: Duration,
+) -> anyhow::Result<CapturedOutput> {
+    run_capture_inner(command, timeout, None, usize::MAX, usize::MAX)
+}
+
+pub(crate) fn run_capture_unbounded_with_input(
+    command: &mut Command,
+    timeout: Duration,
+    input: &[u8],
+) -> anyhow::Result<CapturedOutput> {
+    run_capture_inner(command, timeout, Some(input), usize::MAX, usize::MAX)
+}
+
+fn run_capture_inner(
+    command: &mut Command,
+    timeout: Duration,
+    input: Option<&[u8]>,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> anyhow::Result<CapturedOutput> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -885,37 +925,84 @@ pub(crate) fn run_capture(
         command.process_group(0);
     }
     let command = command
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = crate::command_env::spawn(command).context("could not start process")?;
     let stdout = child.stdout.take().context("process stdout unavailable")?;
     let stderr = child.stderr.take().context("process stderr unavailable")?;
-    let stdout_reader = thread::spawn(move || read_bounded(stdout, MAX_STDOUT_BYTES));
-    let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_STDERR_BYTES));
+    let stdout_reader = thread::spawn(move || read_bounded(stdout, stdout_limit));
+    let stderr_reader = thread::spawn(move || read_bounded(stderr, stderr_limit));
+    let stdin_writer = input.map(|input| {
+        let mut stdin = child.stdin.take().expect("piped stdin requested");
+        let input = input.to_vec();
+        thread::spawn(move || stdin.write_all(&input))
+    });
     let deadline = Instant::now() + timeout;
     let status = loop {
         if let Some(status) = child.try_wait().context("could not wait for process")? {
             break status;
         }
         if Instant::now() >= deadline {
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
-            let _ = child.kill();
+            terminate_process_tree(&mut child);
             let _ = child.wait();
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
-            bail!("process timed out after {} seconds", timeout.as_secs());
+            if let Some(writer) = stdin_writer {
+                let _ = writer.join();
+            }
+            return Err(ProcessTimedOut(timeout).into());
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
     };
+    if let Some(writer) = stdin_writer {
+        writer
+            .join()
+            .map_err(|_| anyhow!("process stdin writer panicked"))?
+            .context("failed to write process stdin")?;
+    }
     Ok(CapturedOutput {
         status,
         stdout: stdout_reader.join().unwrap_or_default(),
         stderr: stderr_reader.join().unwrap_or_default(),
     })
+}
+
+fn terminate_process_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("taskkill");
+        command
+            .arg("/PID")
+            .arg(child.id().to_string())
+            .args(["/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Ok(mut killer) = crate::command_env::spawn(&mut command) {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                match killer.try_wait() {
+                    Ok(Some(_)) | Err(_) => break,
+                    Ok(None) if Instant::now() >= deadline => {
+                        let _ = killer.kill();
+                        let _ = killer.wait();
+                        break;
+                    }
+                    Ok(None) => thread::sleep(PROCESS_POLL_INTERVAL),
+                }
+            }
+        }
+    }
+    let _ = child.kill();
 }
 
 fn read_bounded(mut reader: impl Read, limit: usize) -> Vec<u8> {

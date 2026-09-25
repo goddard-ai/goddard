@@ -705,6 +705,18 @@ impl WakuBackend {
         turn_count: usize,
         untouched: bool,
     ) -> anyhow::Result<Checkpoint> {
+        crate::checkpoint::with_turn_capture_deadline(|| {
+            self.capture_turn_checkpoint_inner(cwd, session_id, turn_count, untouched)
+        })
+    }
+
+    fn capture_turn_checkpoint_inner(
+        &self,
+        cwd: PathBuf,
+        session_id: Uuid,
+        turn_count: usize,
+        untouched: bool,
+    ) -> anyhow::Result<Checkpoint> {
         let capture_lock = self
             .checkpoint_capture_locks
             .lock()
@@ -712,12 +724,12 @@ impl WakuBackend {
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
         let capture_lock_started = std::time::Instant::now();
-        let _capture = capture_lock.lock();
+        let _capture = crate::checkpoint::lock_capture_mutex(&capture_lock)?;
         let capture_lock_wait = capture_lock_started.elapsed();
 
         let dedupe_started = std::time::Instant::now();
         let in_memory_checkpoint = {
-            let state = self.task_state.lock();
+            let state = crate::checkpoint::lock_capture_mutex(&self.task_state)?;
             state
                 .sessions
                 .iter()
@@ -790,7 +802,7 @@ impl WakuBackend {
             .task_store
             .save_turn_checkpoint(session_id, turn_count, &checkpoint)?
             .unwrap_or(checkpoint);
-        let mut state = self.task_state.lock();
+        let mut state = crate::checkpoint::lock_capture_mutex(&self.task_state)?;
         if let Some(session) = state
             .sessions
             .iter_mut()

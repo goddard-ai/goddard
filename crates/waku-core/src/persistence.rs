@@ -1651,7 +1651,18 @@ impl StateStore {
             ));
         }
 
-        let mut guard = self.storage.lock();
+        let remaining = crate::checkpoint::remaining_capture_time()
+            .map_err(|error| io::Error::new(io::ErrorKind::TimedOut, error.to_string()))?;
+        let mut guard = if let Some(timeout) = remaining {
+            self.storage.try_lock_for(timeout).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "timed out waiting for the checkpoint storage lock",
+                )
+            })?
+        } else {
+            self.storage.lock()
+        };
         if guard.is_none() {
             *guard = Some(Storage {
                 connection: self.open()?,
@@ -1711,6 +1722,8 @@ impl StateStore {
         }
         turn.checkpoint = Some(checkpoint.clone());
         let data = session_data(&session)?;
+        crate::checkpoint::remaining_capture_time()
+            .map_err(|error| io::Error::new(io::ErrorKind::TimedOut, error.to_string()))?;
         let updated = transaction
             .execute(
                 "UPDATE session_details SET data = ?2
@@ -1722,6 +1735,8 @@ impl StateStore {
         if updated == 0 {
             return Ok(None);
         }
+        crate::checkpoint::remaining_capture_time()
+            .map_err(|error| io::Error::new(io::ErrorKind::TimedOut, error.to_string()))?;
         transaction.commit().map_err(to_io_error)?;
         storage.persisted_sessions.insert(session_id);
         storage

@@ -1,12 +1,15 @@
 //! Daemon-owned Git checkpoint capture and restoration.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsStr;
+use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
@@ -23,6 +26,7 @@ const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 /// so the per-capture cost tracks changed files instead of worktree size.
 const CHECKPOINT_INDEX_NAME: &str = "waku-checkpoint-index";
 const CHECKPOINT_INDEX_STATE_NAME: &str = "waku-checkpoint-index.json";
+const TURN_CAPTURE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Ref tips pinned as parents of a turn-start snapshot. Past this bound the
 /// commit object would grow with the repository's ref count on every turn.
 const MAX_TURN_START_PARENTS: usize = 512;
@@ -42,6 +46,77 @@ struct CheckpointIndexState {
     tree: String,
     #[serde(default)]
     untracked_paths: Vec<Vec<u8>>,
+}
+
+thread_local! {
+    static TURN_CAPTURE_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+#[derive(Debug)]
+struct TurnCaptureDeadlineExceeded;
+
+impl Display for TurnCaptureDeadlineExceeded {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("turn checkpoint capture exceeded its 30-second time limit")
+    }
+}
+
+impl std::error::Error for TurnCaptureDeadlineExceeded {}
+
+struct TurnCaptureDeadlineScope {
+    previous: Option<Instant>,
+}
+
+impl Drop for TurnCaptureDeadlineScope {
+    fn drop(&mut self) {
+        TURN_CAPTURE_DEADLINE.with(|deadline| deadline.set(self.previous));
+    }
+}
+
+pub(crate) fn with_turn_capture_deadline<T>(
+    capture: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    with_capture_deadline(TURN_CAPTURE_TIMEOUT, capture)
+}
+
+fn with_capture_deadline<T>(
+    timeout: Duration,
+    capture: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let previous = TURN_CAPTURE_DEADLINE.with(Cell::get);
+    let deadline = previous.unwrap_or_else(|| Instant::now() + timeout);
+    TURN_CAPTURE_DEADLINE.with(|current| current.set(Some(deadline)));
+    let _scope = TurnCaptureDeadlineScope { previous };
+    let result = capture();
+    if Instant::now() >= deadline {
+        return Err(TurnCaptureDeadlineExceeded.into());
+    }
+    result
+}
+
+pub(crate) fn remaining_capture_time() -> anyhow::Result<Option<Duration>> {
+    TURN_CAPTURE_DEADLINE.with(|deadline| {
+        let Some(deadline) = deadline.get() else {
+            return Ok(None);
+        };
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            Err(TurnCaptureDeadlineExceeded.into())
+        } else {
+            Ok(Some(remaining))
+        }
+    })
+}
+
+pub(crate) fn lock_capture_mutex<'a, T: ?Sized>(
+    lock: &'a Mutex<T>,
+) -> anyhow::Result<parking_lot::MutexGuard<'a, T>> {
+    match remaining_capture_time()? {
+        Some(timeout) => lock
+            .try_lock_for(timeout)
+            .ok_or_else(|| TurnCaptureDeadlineExceeded.into()),
+        None => Ok(lock.lock()),
+    }
 }
 
 pub fn checkpoint_ref(session_id: Uuid, turn_count: usize) -> String {
@@ -77,6 +152,10 @@ pub fn archive_ref(session_id: Uuid) -> String {
 /// checkpoint: a branch switch or terminal edit between turns must not be
 /// attributed to either response.
 pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::Result<()> {
+    with_turn_capture_deadline(|| capture_turn_start_inner(cwd, session_id, turn_count))
+}
+
+fn capture_turn_start_inner(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::Result<()> {
     let capture_started = std::time::Instant::now();
     let turn_kind = if turn_count <= 1 { "first" } else { "later" };
     if !is_git_repository(cwd) {
@@ -149,6 +228,14 @@ pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> an
 }
 
 pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::Result<Checkpoint> {
+    with_turn_capture_deadline(|| capture_turn_inner(cwd, session_id, turn_count))
+}
+
+fn capture_turn_inner(
+    cwd: &Path,
+    session_id: Uuid,
+    turn_count: usize,
+) -> anyhow::Result<Checkpoint> {
     let capture_started = std::time::Instant::now();
     let turn_kind = if turn_count <= 1 { "first" } else { "later" };
     let git_ref = checkpoint_ref(session_id, turn_count);
@@ -175,9 +262,6 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
         capture_worktree_commit_from(cwd, end_head.as_deref(), "Goddard worktree snapshot", &[])?
     };
     let snapshot_elapsed = snapshot_started.elapsed();
-    let ref_started = std::time::Instant::now();
-    git_output(cwd, ["update-ref", &git_ref, &end_commit])?;
-    let ref_elapsed = ref_started.elapsed();
     let diff_started = std::time::Instant::now();
     let mut diff_base_elapsed = std::time::Duration::ZERO;
     let mut file_diff_elapsed = std::time::Duration::ZERO;
@@ -205,7 +289,7 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
         diff_base_elapsed = diff_base_started.elapsed();
         let file_diff_started = std::time::Instant::now();
         let files = if has_ref(cwd, &diff_base) {
-            diff_files(cwd, &diff_base, &git_ref)?
+            diff_files(cwd, &diff_base, &end_commit)?
         } else {
             Vec::new()
         };
@@ -213,6 +297,12 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
         files
     };
     let diff_elapsed = diff_started.elapsed();
+    // Publish the ending ref only after diff calculation succeeds. If Git
+    // hits the capture deadline here, the next attempt must not dedupe from
+    // a snapshot whose file list was never produced.
+    let ref_started = std::time::Instant::now();
+    git_output(cwd, ["update-ref", &git_ref, &end_commit])?;
+    let ref_elapsed = ref_started.elapsed();
     let additions = files.iter().map(|file| file.additions).sum();
     let deletions = files.iter().map(|file| file.deletions).sum();
     eprintln!(
@@ -235,6 +325,14 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
 /// Preserve the existing dirty worktree in that snapshot without scanning it
 /// a second time. A moved HEAD or branch needs the normal branch-aware capture.
 pub fn capture_untouched_turn(
+    cwd: &Path,
+    session_id: Uuid,
+    turn_count: usize,
+) -> anyhow::Result<Option<Checkpoint>> {
+    with_turn_capture_deadline(|| capture_untouched_turn_inner(cwd, session_id, turn_count))
+}
+
+fn capture_untouched_turn_inner(
     cwd: &Path,
     session_id: Uuid,
     turn_count: usize,
@@ -341,7 +439,7 @@ fn capture_worktree_commit_with_base(
     // their own indexes and stay independent.
     let capture_lock = capture_lock(&git_dir);
     let lock_started = std::time::Instant::now();
-    let _capture = capture_lock.lock();
+    let _capture = lock_capture_mutex(&capture_lock)?;
     let lock_wait = lock_started.elapsed();
     // A capture killed mid-write leaves its index lock behind; the mutex
     // above makes any leftover dead.
@@ -387,6 +485,16 @@ fn capture_worktree_commit_with_base(
         }
         ok => ok,
     };
+    if result.as_ref().is_err_and(|error| {
+        error
+            .downcast_ref::<TurnCaptureDeadlineExceeded>()
+            .is_some()
+    }) {
+        // Git killed by the deadline can leave only this private index's lock
+        // behind. We hold the per-worktree capture mutex, so it is safe to
+        // remove without touching Git's shared repository locks.
+        let _ = fs::remove_file(index.with_extension("lock"));
+    }
     if result.is_ok() {
         index_state.head = head.map(str::to_owned);
         let save_state = (|| -> anyhow::Result<()> {
@@ -1272,16 +1380,7 @@ fn update_refs(cwd: &Path, commands: String) -> anyhow::Result<()> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let started = std::time::Instant::now();
-    let mut child = command.spawn().context("failed to execute git")?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("git update-ref stdin is unavailable"))?
-        .write_all(commands.as_bytes())
-        .context("failed to send ref updates to git")?;
-    let output = child.wait_with_output().context("failed to execute git")?;
-    log_git_timing(&command, started);
+    let output = timed_git_input_output(&mut command, Some(commands.as_bytes()))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -1503,16 +1602,7 @@ where
     if let Some(index) = index {
         command.env("GIT_INDEX_FILE", index);
     }
-    let started = std::time::Instant::now();
-    let mut child = command.spawn().context("failed to execute git")?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("git stdin is unavailable"))?
-        .write_all(input)
-        .context("failed to write git stdin")?;
-    let output = child.wait_with_output().context("failed to wait for git")?;
-    log_git_timing(&command, started);
+    let output = timed_git_input_output(&mut command, Some(input))?;
     Ok(output)
 }
 
@@ -1558,8 +1648,53 @@ where
 /// checkpoint is a dozen-plus serial invocations, so the per-command line is
 /// the only way to tell spawn overhead apart from a slow `status` or `add`.
 fn timed_git_output(command: &mut Command) -> anyhow::Result<Output> {
+    timed_git_input_output(command, None)
+}
+
+fn timed_git_input_output(command: &mut Command, input: Option<&[u8]>) -> anyhow::Result<Output> {
     let started = std::time::Instant::now();
-    let output = command.output().context("failed to execute git")?;
+    let output = match remaining_capture_time()? {
+        Some(timeout) => {
+            let result = match input {
+                Some(input) => {
+                    crate::git_commit::run_capture_unbounded_with_input(command, timeout, input)
+                }
+                None => crate::git_commit::run_capture_unbounded(command, timeout),
+            };
+            match result {
+                Ok(output) => Output {
+                    status: output.status,
+                    stdout: output.stdout,
+                    stderr: output.stderr,
+                },
+                Err(error)
+                    if error
+                        .downcast_ref::<crate::git_commit::ProcessTimedOut>()
+                        .is_some() =>
+                {
+                    log_git_timing(command, started);
+                    return Err(TurnCaptureDeadlineExceeded.into());
+                }
+                Err(error) => {
+                    log_git_timing(command, started);
+                    return Err(error);
+                }
+            }
+        }
+        None => match input {
+            None => command.output().context("failed to execute git")?,
+            Some(input) => {
+                let mut child = command.spawn().context("failed to execute git")?;
+                child
+                    .stdin
+                    .take()
+                    .ok_or_else(|| anyhow!("git stdin is unavailable"))?
+                    .write_all(input)
+                    .context("failed to write git stdin")?;
+                child.wait_with_output().context("failed to wait for git")?
+            }
+        },
+    };
     log_git_timing(command, started);
     Ok(output)
 }
@@ -2050,6 +2185,105 @@ mod tests {
             "changing ignore rules must not delete user files"
         );
         fs::remove_dir_all(directory).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn turn_capture_timeout_kills_git_and_retries() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        let filter = directory.join("clean-filter.sh");
+        let child_pid_file = directory.with_extension("filter-child.pid");
+        let write_filter = |body: &str| {
+            fs::write(&filter, body).unwrap();
+            let mut permissions = fs::metadata(&filter).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&filter, permissions).unwrap();
+        };
+        write_filter("#!/bin/sh\ncat\n");
+        fs::write(
+            directory.join(".gitattributes"),
+            "*.filtered filter=counted\n",
+        )
+        .unwrap();
+        fs::write(directory.join("payload.filtered"), "baseline\n").unwrap();
+        git_ok(
+            &directory,
+            &["config", "filter.counted.clean", "./clean-filter.sh"],
+        );
+        git_ok(&directory, &["config", "filter.counted.smudge", "cat"]);
+        git_ok(&directory, &["config", "filter.counted.required", "true"]);
+        git_ok(&directory, &["add", "."]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        capture_turn_start(&directory, session, 1).unwrap();
+        fs::write(directory.join("payload.filtered"), "changed\n").unwrap();
+        let child_pid_path = child_pid_file.display();
+        write_filter(&format!(
+            "#!/bin/sh\nsleep 60 &\nprintf '%s\\n' \"$!\" > '{child_pid_path}'\nwait\n"
+        ));
+
+        let started = Instant::now();
+        let error = with_capture_deadline(Duration::from_secs(2), || {
+            capture_turn(&directory, session, 1)
+        })
+        .expect_err("the hanging clean filter should hit the capture deadline");
+        assert!(
+            error
+                .downcast_ref::<TurnCaptureDeadlineExceeded>()
+                .is_some(),
+            "expected deadline error, got {error:#}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(!git_path_exists(&directory, &checkpoint_ref(session, 1)));
+        let index = worktree_git_dir(&directory)
+            .unwrap()
+            .join(CHECKPOINT_INDEX_NAME);
+        assert!(!index.with_extension("lock").exists());
+
+        let child_pid = fs::read_to_string(&child_pid_file).unwrap();
+        let mut child_stopped = false;
+        for _ in 0..40 {
+            let state = std::process::Command::new("/bin/ps")
+                .args(["-o", "stat=", "-p", child_pid.trim()])
+                .output()
+                .unwrap();
+            let state = String::from_utf8_lossy(&state.stdout);
+            if state.trim().is_empty() || state.trim_start().starts_with('Z') {
+                child_stopped = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(child_stopped, "the clean-filter child survived Git timeout");
+
+        write_filter("#!/bin/sh\ncat\n");
+        let retried = capture_turn(&directory, session, 1).unwrap();
+        assert_eq!(retried.status, CheckpointStatus::Ready);
+        assert!(
+            retried
+                .files
+                .iter()
+                .any(|file| file.path == "payload.filtered")
+        );
+        fs::remove_dir_all(directory).ok();
+        fs::remove_file(child_pid_file).ok();
     }
 
     #[test]
