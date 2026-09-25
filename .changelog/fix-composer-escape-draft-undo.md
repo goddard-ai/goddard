@@ -1,0 +1,1 @@
+- Press ⌘Z after Escape saves composer content as a draft to restore that content to the composer.

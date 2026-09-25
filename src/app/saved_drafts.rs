@@ -32,10 +32,16 @@ pub fn init(cx: &mut App) {
 /// its slot in the list, plus what the target composer's draft slot held
 /// before the payload landed.
 pub(super) struct DraftUseUndo {
+    kind: DraftUndoKind,
     saved: SavedDraft,
     index: usize,
     key: ComposerDraftKey,
     previous: Option<ComposerDraft>,
+}
+
+enum DraftUndoKind {
+    Use,
+    Create,
 }
 
 impl Waku {
@@ -73,17 +79,25 @@ impl Waku {
             cx.notify();
             return;
         };
-        self.state.saved_drafts.insert(
-            0,
-            SavedDraft {
-                id: Uuid::new_v4(),
-                target: key.into(),
-                project_id,
-                draft,
-                created_at: unix_time(),
-                hidden: false,
-            },
-        );
+        let saved = SavedDraft {
+            id: Uuid::new_v4(),
+            target: key.into(),
+            project_id,
+            draft: draft.clone(),
+            created_at: unix_time(),
+            hidden: false,
+        };
+        self.state.saved_drafts.insert(0, saved.clone());
+        self.draft_use_undos.push(DraftUseUndo {
+            kind: DraftUndoKind::Create,
+            saved,
+            index: 0,
+            key,
+            previous: Some(draft),
+        });
+        if self.draft_use_undos.len() > DRAFT_USE_UNDO_CAP {
+            self.draft_use_undos.remove(0);
+        }
         // Clear the slot before the composer so the debounced autosave can't
         // file the payload back under the composer key on its next pass.
         self.composer_drafts.remove(key);
@@ -313,6 +327,7 @@ impl Waku {
             self.drafts_editing = None;
         }
         self.draft_use_undos.push(DraftUseUndo {
+            kind: DraftUndoKind::Use,
             previous: self.composer_drafts.get(key).cloned(),
             saved: saved.clone(),
             index,
@@ -351,6 +366,33 @@ impl Waku {
         let Some(undo) = self.draft_use_undos.pop() else {
             return;
         };
+        if matches!(undo.kind, DraftUndoKind::Create) {
+            // Restore only if the composer slot is still empty; later typing
+            // belongs to the user and must not be overwritten by Undo.
+            if self
+                .composer_drafts
+                .get(undo.key)
+                .is_none_or(ComposerDraft::is_empty)
+            {
+                self.state
+                    .saved_drafts
+                    .retain(|draft| draft.id != undo.saved.id);
+                self.composer_drafts.set(undo.key, undo.saved.draft.clone());
+                if self.composer_draft_key() == Some(undo.key) {
+                    self.apply_composer_draft(Some(undo.key), undo.saved.draft, cx);
+                    let focus = self.composer_focus(cx);
+                    window.focus(&focus, cx);
+                }
+            } else {
+                // The slot has newer content, so leave the saved copy intact.
+                let index = undo.index.min(self.state.saved_drafts.len());
+                self.state.saved_drafts.insert(index, undo.saved);
+            }
+            self.schedule_composer_draft_save(cx);
+            self.save();
+            cx.notify();
+            return;
+        }
         let index = undo.index.min(self.state.saved_drafts.len());
         let applied = undo.saved.draft.clone();
         self.state.saved_drafts.insert(index, undo.saved);
