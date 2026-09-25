@@ -5676,3 +5676,47 @@ fn busy_close_counts_skip_idle_and_watched_sessions() {
         (0, 0)
     );
 }
+
+/// Memory log lines split into the parts their rows render: the date they
+/// group under, a `tag:` chip prefix, the body, cited commits, status
+/// words, and whether a fresh session could see the note.
+#[test]
+fn memory_log_entries_parse_structure() {
+    use super::projects::{MemoryNoteStatus, parse_memory_log_entry};
+
+    let entry = parse_memory_log_entry(
+        "2026-09-25 git-check: 87af0eb1 \"fix(transcript): hold markers\" was rebased to ebad430e",
+        0,
+        20,
+    );
+    assert_eq!(entry.date, chrono::NaiveDate::from_ymd_opt(2026, 9, 25));
+    assert_eq!(entry.tag.as_deref(), Some("git-check"));
+    assert_eq!(
+        entry.body,
+        "87af0eb1 \"fix(transcript): hold markers\" was rebased to ebad430e"
+    );
+    assert_eq!(entry.shas, ["87af0eb1", "ebad430e"]);
+    assert!(entry.injection_candidate);
+
+    // A doubled stamp — the distiller's own date ahead of append_notes' —
+    // folds into the first date's group, and status words get ranges.
+    let doubled = parse_memory_log_entry("2026-09-25 2026-09-24 landed on dev", 20, 20);
+    assert_eq!(doubled.date, chrono::NaiveDate::from_ymd_opt(2026, 9, 25));
+    assert_eq!(doubled.body, "landed on dev");
+    assert!(matches!(
+        doubled.status_ranges.first(),
+        Some((_, MemoryNoteStatus::Landed))
+    ));
+    assert!(!doubled.injection_candidate);
+
+    // Prose colons are not tags and ordinary words are not SHAs.
+    let prose = parse_memory_log_entry("2026-09-25 ships at 12:30 UTC", 0, 20);
+    assert_eq!(prose.tag, None);
+    assert_eq!(prose.body, "ships at 12:30 UTC");
+    assert!(prose.shas.is_empty());
+
+    // An undated line keeps its whole text and lands in the undated group.
+    let undated = parse_memory_log_entry("no stamp on this one", 0, 20);
+    assert_eq!(undated.date, None);
+    assert_eq!(undated.body, "no stamp on this one");
+}

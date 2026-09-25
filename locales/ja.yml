@@ -2629,12 +2629,19 @@ settings.memory_refresh: 更新
 settings.memory_unavailable: このプロジェクトのメモリを読み込めませんでした。
 settings.memory_loading: プロジェクトメモリを読み込み中…
 settings.memory_disabled: メモリはオフです。新しい項目を記録するには「設定 → 実験的機能」で有効にしてください。
-settings.memory_older: 古い項目
-settings.memory_newer: 新しい項目
-settings.memory_lines_one: 1 行
-settings.memory_lines_many: "%{count} 行"
+settings.memory_filter: 記録を絞り込む
+settings.memory_edit: 編集
+settings.memory_copy_note: 記録をコピー
+settings.memory_copy_commit: "コミット %{sha} をコピー"
+settings.memory_show_older: "さらに %{count} 件の古い記録を表示"
+settings.memory_undated: 日付なし
+settings.memory_no_match: フィルターに一致する記録はありません。
+settings.memory_summary_caption: このプロジェクトの新しいセッションの最初のプロンプトに含まれます。
+settings.memory_injection_caption: マークされた記録は新しいセッションの最初のプロンプトに含まれる場合があります。
+settings.memory_lines_many: "%{count}/%{cap} 行"
 settings.memory_notes_one: 1 件の記録
 settings.memory_notes_many: "%{count} 件の記録"
+settings.memory_notes_matching: "%{count} 件中 %{shown} 件の記録"
 settings.memory_last_note: "最新 %{date}"
 settings.sidebar_phase_groups: 最近の計画中タスクをまとめる
 settings.sidebar_phase_groups_description: 計画中で過去30分以内に動いていたタスクを日付ビューの「今日」の上に表示します

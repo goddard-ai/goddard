@@ -11,6 +11,10 @@
 //! bulk actions from a right-click menu or the bar under the table.
 
 use std::collections::HashSet;
+use std::ops::Range;
+
+use chrono::NaiveDate;
+use gpui::{HighlightStyle, StyledText, UnderlineStyle};
 
 use super::*;
 
@@ -19,11 +23,55 @@ use waku_client::{
     GitHubAvailability, PullRequestSummary, RepoBranch, RepoWorktree, WorkItemQueryState,
 };
 
+/// Bounds mirrored from `waku_core::memory` — the client crate cannot see
+/// them, and they decide which notes a new session's first prompt may carry.
+const MEMORY_RANK_WINDOW: usize = 60;
+const MEMORY_RECENT_FALLBACK: usize = 20;
+/// `MAX_MEMORY_LINES`: the injectable summary's line cap.
+const MEMORY_SUMMARY_CAP: usize = 60;
+/// Log rows each "show older" step adds — keeps the page's element count
+/// proportional to what is on screen.
+pub(super) const MEMORY_LOG_CHUNK: usize = 60;
+
 pub(super) struct ProjectMemoryContent {
     project_id: Uuid,
     memory: String,
-    log: Vec<String>,
+    /// Parsed `LOG.txt` notes, newest first.
+    entries: Vec<MemoryLogEntry>,
     error: Option<String>,
+}
+
+/// One `LOG.txt` line, parsed at load so the render path never scans text:
+/// the date it groups under, an optional leading `tag:` label, the body the
+/// row paints, and the commit references its context menu offers.
+pub(super) struct MemoryLogEntry {
+    /// First `YYYY-MM-DD` stamp; `None` for undated or malformed lines.
+    pub(super) date: Option<NaiveDate>,
+    /// A leading `label:` prefix such as `git-check` or `User direction`.
+    pub(super) tag: Option<String>,
+    /// The line minus its date stamp(s) and tag — what the row renders.
+    pub(super) body: String,
+    /// The original line, for copy actions.
+    pub(super) raw: String,
+    /// Commit SHAs the note cites.
+    pub(super) shas: Vec<String>,
+    /// `shas`' byte ranges inside `body`, for link styling.
+    pub(super) sha_ranges: Vec<Range<usize>>,
+    /// Commit-status vocabulary (`landed`, `pending-qa`, …) and its byte
+    /// ranges inside `body`, tinted at render.
+    pub(super) status_ranges: Vec<(Range<usize>, MemoryNoteStatus)>,
+    /// Inside the window a new session's injected notes are drawn from.
+    pub(super) injection_candidate: bool,
+}
+
+/// The commit-status words the distiller is required to cite next to a SHA.
+#[derive(Clone, Copy)]
+pub(super) enum MemoryNoteStatus {
+    Landed,
+    PendingQa,
+    WorktreeOnly,
+    Proposed,
+    Rejected,
 }
 
 fn read_project_memory_file(
@@ -48,8 +96,9 @@ fn read_project_memory_file(
     }
 }
 
-/// A log entry's leading `YYYY-MM-DD` date — every note the distiller writes
-/// is date-stamped, so the newest entry's prefix is the store's freshness.
+/// A log entry's leading `YYYY-MM-DD` stamp — every note the distiller
+/// writes is date-stamped. The stamp must end the token, so a glued-on
+/// suffix (`2026-09-25x`) is content, not a date.
 fn memory_log_date(entry: &str) -> Option<&str> {
     let date = entry.get(..10)?;
     let bytes = date.as_bytes();
@@ -58,8 +107,139 @@ fn memory_log_date(entry: &str) -> Option<&str> {
         && bytes
             .iter()
             .enumerate()
-            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit()))
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+        && entry.as_bytes().get(10).map_or(true, |byte| *byte == b' '))
     .then_some(date)
+}
+
+/// Split one `LOG.txt` line into its row parts. `index` is the line's
+/// newest-first position, which `injection_window` turns into the "a new
+/// session may see this" flag — with eval, `rank_notes` picks from the
+/// newest `MEMORY_RANK_WINDOW` lines; without it the newest
+/// `MEMORY_RECENT_FALLBACK` are injected verbatim.
+pub(super) fn parse_memory_log_entry(
+    line: &str,
+    index: usize,
+    injection_window: usize,
+) -> MemoryLogEntry {
+    let mut rest = line.trim();
+    let mut date = None;
+    // The distiller occasionally writes its own stamp before the one
+    // `append_notes` prepends — collapse doubled dates into one group.
+    for _ in 0..2 {
+        let Some(stamp) = memory_log_date(rest) else {
+            break;
+        };
+        if date.is_none() {
+            date = NaiveDate::parse_from_str(stamp, "%Y-%m-%d").ok();
+        }
+        rest = rest[stamp.len()..].trim_start();
+        if rest.is_empty() {
+            break;
+        }
+    }
+    let (tag, mut body) = match memory_log_tag_len(rest) {
+        Some(len) => (Some(rest[..len].to_owned()), rest[len + 2..].to_owned()),
+        None => (None, rest.to_owned()),
+    };
+    if body.is_empty() {
+        body = rest.to_owned();
+    }
+    let commits = memory_log_commits(&body);
+    MemoryLogEntry {
+        date,
+        tag,
+        raw: line.to_owned(),
+        sha_ranges: commits.iter().map(|(range, _)| range.clone()).collect(),
+        shas: commits.into_iter().map(|(_, sha)| sha).collect(),
+        status_ranges: memory_log_status_ranges(&body),
+        body,
+        injection_candidate: index < injection_window,
+    }
+}
+
+/// The length of a leading `label:` prefix — "git-check" in
+/// "git-check: abc123…". Candidates are short label-shaped phrases
+/// (letters, digits, spaces, hyphens); a colon mid-sentence or inside a
+/// URL never qualifies.
+fn memory_log_tag_len(body: &str) -> Option<usize> {
+    let colon = body.find(": ")?;
+    let prefix = &body[..colon];
+    let plausible = (1..=40).contains(&prefix.len())
+        && prefix.starts_with(|c: char| c.is_ascii_alphabetic())
+        && prefix
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-');
+    plausible.then_some(colon)
+}
+
+/// Hex commit runs a note cites: 7–40 lowercase hex chars holding at least
+/// one digit, so ordinary words never light up as SHAs.
+fn memory_log_commits(body: &str) -> Vec<(Range<usize>, String)> {
+    let bytes = body.as_bytes();
+    let is_hex = |byte: u8| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte);
+    let mut commits = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if !is_hex(bytes[index]) || (index > 0 && is_hex(bytes[index - 1])) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < bytes.len() && is_hex(bytes[index]) {
+            index += 1;
+        }
+        if (7..=40).contains(&(index - start))
+            && body[start..index].bytes().any(|byte| byte.is_ascii_digit())
+        {
+            commits.push((start..index, body[start..index].to_owned()));
+        }
+    }
+    commits.truncate(4);
+    commits
+}
+
+/// Whole-word runs of the status vocabulary the distiller must cite next
+/// to a commit — `landed`, `pending-qa`, and friends.
+fn memory_log_status_ranges(body: &str) -> Vec<(Range<usize>, MemoryNoteStatus)> {
+    let bytes = body.as_bytes();
+    let is_word = |byte: u8| byte.is_ascii_alphabetic() || byte == b'-';
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if !is_word(bytes[index]) || (index > 0 && is_word(bytes[index - 1])) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < bytes.len() && is_word(bytes[index]) {
+            index += 1;
+        }
+        let status = match &body[start..index] {
+            "landed" => Some(MemoryNoteStatus::Landed),
+            "pending-qa" => Some(MemoryNoteStatus::PendingQa),
+            "worktree-only" => Some(MemoryNoteStatus::WorktreeOnly),
+            "proposed" => Some(MemoryNoteStatus::Proposed),
+            "rejected" => Some(MemoryNoteStatus::Rejected),
+            _ => None,
+        };
+        if let Some(status) = status {
+            ranges.push((start..index, status));
+        }
+    }
+    ranges
+}
+
+/// A date group's heading: the sidebar's vocabulary for the recent days,
+/// the log's own `YYYY-MM-DD` further back, and a bucket for lines the
+/// distiller stamped unparsably (or not at all).
+fn memory_log_group_label(date: Option<NaiveDate>, today: NaiveDate) -> String {
+    match date {
+        Some(date) if date >= today => tr!("sidebar.today"),
+        Some(date) if today.pred_opt() == Some(date) => tr!("sidebar.yesterday"),
+        Some(date) => date.format("%Y-%m-%d").to_string(),
+        None => tr!("settings.memory_undated"),
+    }
 }
 
 /// The two surfaces' tabs. Issues, Pull Requests, and Activity read through
@@ -3975,7 +4155,7 @@ impl Waku {
         self.settings_memory_requested_project = Some(project_id);
         self.settings_memory_generation += 1;
         let generation = self.settings_memory_generation;
-        self.settings_memory_page = 0;
+        self.settings_memory_shown = MEMORY_LOG_CHUNK;
         self.settings_memory_content = None;
         // A project switch or reload can move the text a selection pointed
         // at; copying stale ranges would hand back the wrong memory.
@@ -3996,11 +4176,24 @@ impl Waku {
             self.settings_memory_content = Some(ProjectMemoryContent {
                 project_id,
                 memory: String::new(),
-                log: Vec::new(),
+                entries: Vec::new(),
                 error: Some(tr!("settings.memory_unavailable")),
             });
             cx.notify();
             return;
+        };
+        // Which notes a fresh session could see depends on whether the eval
+        // backend is usable: ranking draws from the newest
+        // `MEMORY_RANK_WINDOW`, the fallback injects `MEMORY_RECENT_FALLBACK`.
+        let injection_window = if self
+            .state
+            .eval
+            .as_ref()
+            .is_some_and(|eval| !eval.credential_missing())
+        {
+            MEMORY_RANK_WINDOW
+        } else {
+            MEMORY_RECENT_FALLBACK
         };
         cx.spawn(async move |waku, cx| {
             let content = cx
@@ -4011,9 +4204,21 @@ impl Waku {
                     ProjectMemoryContent {
                         project_id,
                         memory: memory.as_ref().cloned().unwrap_or_default(),
-                        log: log
+                        entries: log
                             .as_ref()
-                            .map(|text| text.lines().rev().map(str::to_owned).collect())
+                            .map(|text| {
+                                // Skip blanks the way `read_log_lines`
+                                // does, so `index` lines up with the
+                                // daemon's injection window.
+                                text.lines()
+                                    .filter(|line| !line.trim().is_empty())
+                                    .rev()
+                                    .enumerate()
+                                    .map(|(index, line)| {
+                                        parse_memory_log_entry(line, index, injection_window)
+                                    })
+                                    .collect()
+                            })
                             .unwrap_or_default(),
                         error: memory.err().or_else(|| log.err()),
                     }
@@ -4124,6 +4329,12 @@ impl Waku {
                     .items_center()
                     .gap(px(10.0))
                     .child(selector)
+                    .child(
+                        TextField::new("memory-settings-search", self.memory_search.clone())
+                            .icon("icons/search.svg", 13.0)
+                            .w(px(170.0)),
+                    )
+                    .child(div().flex_1())
                     .child(super::settings::settings_button(
                         "memory-settings-refresh",
                         tr!("settings.memory_refresh"),
@@ -4209,10 +4420,18 @@ impl Waku {
                 .child(tr!("settings.memory_unavailable"))
                 .into_any_element();
         }
-        let count = content.log.len();
-        let page = self.settings_memory_page.min(count.saturating_sub(1) / 30);
-        let start = page * 30;
-        let end = (start + 30).min(count);
+        let query = self.memory_search.read(cx).content().trim().to_lowercase();
+        let total = content.entries.len();
+        let matched: Vec<usize> = content
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                query.is_empty() || entry.raw.to_lowercase().contains(query.as_str())
+            })
+            .map(|(index, _)| index)
+            .collect();
+        let shown = self.settings_memory_shown.min(matched.len());
         let memory_lines = content.memory.lines().count();
         let memory_document = if content.memory.is_empty() {
             div()
@@ -4222,7 +4441,31 @@ impl Waku {
         } else {
             self.memory_document(content, &theme, cx)
         };
-        let latest_note = content.log.first().and_then(|entry| memory_log_date(entry));
+        let project_id = content.project_id;
+        let memory_path = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.join(".goddard/memory/MEMORY.md"));
+        let latest_note = content
+            .entries
+            .iter()
+            .find_map(|entry| entry.date)
+            .map(|date| date.format("%Y-%m-%d").to_string());
+
+        // Newest-first entries stay consecutive by date, so grouping is a
+        // single boundary walk over the rendered window.
+        let today = Local::now().date_naive();
+        let mut groups: Vec<(Option<NaiveDate>, Vec<usize>)> = Vec::new();
+        for &index in &matched[..shown] {
+            let date = content.entries[index].date;
+            match groups.last_mut() {
+                Some((group_date, rows)) if *group_date == date => rows.push(index),
+                _ => groups.push((date, vec![index])),
+            }
+        }
+
         div()
             .w_full()
             .flex()
@@ -4248,14 +4491,60 @@ impl Waku {
                                     div()
                                         .text_size(sp(12.0))
                                         .text_color(theme.text_tertiary)
-                                        .child(if memory_lines == 1 {
-                                            tr!("settings.memory_lines_one")
-                                        } else {
-                                            tr!("settings.memory_lines_many", count = memory_lines)
-                                        }),
+                                        .child(tr!(
+                                            "settings.memory_lines_many",
+                                            count = memory_lines,
+                                            cap = MEMORY_SUMMARY_CAP
+                                        )),
+                                )
+                            })
+                            .child(div().flex_1())
+                            .when_some(memory_path, |element, path| {
+                                element.child(
+                                    super::settings::settings_button(
+                                        "memory-settings-edit",
+                                        tr!("settings.memory_edit"),
+                                        true,
+                                        false,
+                                        true,
+                                        theme,
+                                        cx,
+                                        move |this, _, cx| {
+                                            if this.is_remote_project(project_id) {
+                                                this.show_toast(tr!("errors.remote_host_path"));
+                                                cx.notify();
+                                            } else {
+                                                match this.preferred_file_app() {
+                                                    Some(app) => crate::platform::open_file_in_app(
+                                                        &path, None, app, cx,
+                                                    ),
+                                                    None => crate::platform::open_with_default_app(
+                                                        &path, cx,
+                                                    ),
+                                                }
+                                            }
+                                        },
+                                    )
+                                    .tooltip(Tooltip::text(
+                                        match self.preferred_file_app() {
+                                            Some(app) => {
+                                                tr!("git_panel.open_file_in", app = &app.label)
+                                            }
+                                            None => tr!("git_panel.open_file"),
+                                        },
+                                    )),
                                 )
                             }),
                     )
+                    .when(memory_lines > 0, |element| {
+                        element.child(
+                            div()
+                                .text_size(sp(11.5))
+                                .line_height(sp(15.0))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("settings.memory_summary_caption")),
+                        )
+                    })
                     .child(memory_document),
             )
             .child(
@@ -4273,15 +4562,21 @@ impl Waku {
                                     .font_weight(FontWeight::MEDIUM)
                                     .child(tr!("settings.memory_log")),
                             )
-                            .when(count > 0, |element| {
+                            .when(total > 0, |element| {
                                 element.child(
                                     div()
                                         .text_size(sp(12.0))
                                         .text_color(theme.text_tertiary)
-                                        .child(if count == 1 {
+                                        .child(if !query.is_empty() {
+                                            tr!(
+                                                "settings.memory_notes_matching",
+                                                shown = matched.len(),
+                                                count = total
+                                            )
+                                        } else if total == 1 {
                                             tr!("settings.memory_notes_one")
                                         } else {
-                                            tr!("settings.memory_notes_many", count = count)
+                                            tr!("settings.memory_notes_many", count = total)
                                         }),
                                 )
                             })
@@ -4294,58 +4589,288 @@ impl Waku {
                                 )
                             }),
                     )
-                    .when(count == 0, |element| {
+                    .when(total > 0 && !groups.is_empty(), |element| {
+                        // The stripe sample matches the left marker rows
+                        // carry when a fresh session could see them.
+                        element.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .text_size(sp(11.5))
+                                .line_height(sp(15.0))
+                                .text_color(theme.text_tertiary)
+                                .child(
+                                    div()
+                                        .w(px(2.0))
+                                        .h(px(11.0))
+                                        .rounded(px(1.0))
+                                        .bg(theme.accent.opacity(0.4)),
+                                )
+                                .child(tr!("settings.memory_injection_caption")),
+                        )
+                    })
+                    .when(total == 0, |element| {
                         element.child(
                             div()
                                 .text_color(theme.text_secondary)
                                 .child(tr!("settings.memory_log_empty")),
                         )
                     })
-                    .children(content.log[start..end].iter().map(|entry| {
-                        div()
-                            .py(px(7.0))
-                            .border_b(hairline())
-                            .border_color(theme.separator)
-                            .whitespace_normal()
-                            .text_color(theme.text_secondary)
-                            .child(entry.clone())
-                    }))
-                    .when(count > 30, |element| {
+                    .when(!query.is_empty() && matched.is_empty(), |element| {
                         element.child(
                             div()
-                                .flex()
-                                .gap(px(8.0))
-                                .child(super::settings::settings_button(
-                                    "memory-settings-newer",
-                                    tr!("settings.memory_newer"),
-                                    page > 0,
-                                    false,
-                                    true,
-                                    theme,
-                                    cx,
-                                    |this, _, cx| {
-                                        this.settings_memory_page =
-                                            this.settings_memory_page.saturating_sub(1);
-                                        cx.notify();
-                                    },
-                                ))
-                                .child(super::settings::settings_button(
-                                    "memory-settings-older",
-                                    tr!("settings.memory_older"),
-                                    (page + 1) * 30 < count,
-                                    false,
-                                    true,
-                                    theme,
-                                    cx,
-                                    |this, _, cx| {
-                                        this.settings_memory_page += 1;
-                                        cx.notify();
-                                    },
-                                )),
+                                .text_color(theme.text_secondary)
+                                .child(tr!("settings.memory_no_match")),
                         )
+                    })
+                    .children(groups.into_iter().enumerate().map(
+                        |(group_index, (date, indices))| {
+                            let count = indices.len();
+                            div()
+                                .flex()
+                                .flex_col()
+                                .when(group_index > 0, |element| element.mt(px(8.0)))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_baseline()
+                                        .gap(px(8.0))
+                                        .pb(px(2.0))
+                                        .child(
+                                            div()
+                                                .text_size(sp(11.5))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme.text_tertiary)
+                                                .child(memory_log_group_label(date, today)),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(sp(11.0))
+                                                .text_color(theme.text_ghost)
+                                                .child(if count == 1 {
+                                                    tr!("settings.memory_notes_one")
+                                                } else {
+                                                    tr!("settings.memory_notes_many", count = count)
+                                                }),
+                                        ),
+                                )
+                                .children(indices.into_iter().map(|index| {
+                                    self.memory_log_row(index, &content.entries[index], &theme, cx)
+                                }))
+                        },
+                    ))
+                    .when(matched.len() > shown, |element| {
+                        element.child(div().pt(px(4.0)).child(super::settings::settings_button(
+                            "memory-log-show-older",
+                            tr!(
+                                "settings.memory_show_older",
+                                count = (matched.len() - shown).min(MEMORY_LOG_CHUNK)
+                            ),
+                            true,
+                            false,
+                            true,
+                            theme,
+                            cx,
+                            |this, _, cx| {
+                                this.settings_memory_shown += MEMORY_LOG_CHUNK;
+                                cx.notify();
+                            },
+                        )))
                     }),
             )
             .into_any_element()
+    }
+
+    /// One log note: an optional `tag:` chip, the body with SHAs linked in
+    /// accent and status words tinted, a hover-revealed copy button, and a
+    /// right-click menu. The copy button is the row's keyboard proxy —
+    /// Shift+F10 on it opens the same menu.
+    fn memory_log_row(
+        &self,
+        index: usize,
+        entry: &MemoryLogEntry,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Rows share the group name; `group_hover` resolves against the
+        // nearest `.group` ancestor, so each reveals only its own button.
+        const ROW_GROUP: &str = "memory-log-row";
+        let bookkeeping = entry
+            .tag
+            .as_deref()
+            .is_some_and(|tag| tag.starts_with("git-check"));
+        let feedback_id = format!("memory-note-copy-{index}");
+        let copied = self.control_was_copied(&feedback_id);
+        let menu = self.menu_handle(SharedString::from(format!("memory-note-{index}")), cx);
+
+        let mut highlights: Vec<(Range<usize>, HighlightStyle)> = entry
+            .sha_ranges
+            .iter()
+            .map(|range| {
+                (
+                    range.clone(),
+                    HighlightStyle {
+                        color: Some(theme.accent),
+                        underline: Some(UnderlineStyle {
+                            thickness: px(1.0),
+                            color: None,
+                            wavy: false,
+                        }),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        highlights.extend(entry.status_ranges.iter().map(|(range, status)| {
+            let color = match status {
+                MemoryNoteStatus::Landed => theme.success,
+                MemoryNoteStatus::PendingQa => theme.warning,
+                MemoryNoteStatus::WorktreeOnly | MemoryNoteStatus::Proposed => theme.info,
+                MemoryNoteStatus::Rejected => theme.danger,
+            };
+            (
+                range.clone(),
+                HighlightStyle {
+                    color: Some(color),
+                    font_weight: Some(FontWeight::MEDIUM),
+                    ..Default::default()
+                },
+            )
+        }));
+        let body = if highlights.is_empty() {
+            entry.body.clone().into_any_element()
+        } else {
+            StyledText::new(entry.body.clone())
+                .with_highlights(highlights)
+                .into_any_element()
+        };
+
+        let copy_text = entry.raw.clone();
+        let copy_feedback = feedback_id.clone();
+        let key_text = entry.raw.clone();
+        let key_feedback = feedback_id.clone();
+        let menu_for_key = menu.clone();
+        let copy = div()
+            .id(SharedString::from(format!("memory-note-copy-{index}")))
+            .tab_index(0)
+            .w_0()
+            .h(px(20.0))
+            .overflow_hidden()
+            .rounded(px(4.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(0.0)
+            .group_hover(ROW_GROUP, |style| style.w(px(20.0)).opacity(1.0))
+            .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
+            .hover(|style| style.bg(theme.overlay))
+            .tooltip(Tooltip::text(tr!("settings.memory_copy_note")))
+            .child(icon(
+                if copied {
+                    "icons/check.svg"
+                } else {
+                    "icons/copy.svg"
+                },
+                11.0,
+                theme.text_tertiary,
+            ))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                this.show_control_copied(copy_feedback.clone(), cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    cx.write_to_clipboard(ClipboardItem::new_string(key_text.clone()));
+                    this.show_control_copied(key_feedback.clone(), cx);
+                    cx.stop_propagation();
+                } else if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
+                    menu_for_key.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
+            }));
+
+        let raw = entry.raw.clone();
+        let shas = entry.shas.clone();
+        context_menu(
+            div()
+                .w_full()
+                .group(ROW_GROUP)
+                .border_b(hairline())
+                .border_color(theme.separator)
+                .child(
+                    div()
+                        .w_full()
+                        .border_l(px(2.0))
+                        .border_color(if entry.injection_candidate {
+                            theme.accent.opacity(0.4)
+                        } else {
+                            gpui::transparent_black()
+                        })
+                        .pl(px(8.0))
+                        .py(px(7.0))
+                        .flex()
+                        .items_start()
+                        .gap(px(8.0))
+                        .when_some(entry.tag.clone(), |element, tag| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .mt(px(1.0))
+                                    .rounded(px(4.0))
+                                    .px(px(5.0))
+                                    .py(px(1.0))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .line_height(sp(13.0))
+                                    .text_color(if bookkeeping {
+                                        theme.text_ghost
+                                    } else {
+                                        theme.text_tertiary
+                                    })
+                                    .child(tag),
+                            )
+                        })
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .whitespace_normal()
+                                .text_color(if bookkeeping {
+                                    theme.text_tertiary
+                                } else {
+                                    theme.text_secondary
+                                })
+                                .child(body),
+                        )
+                        .child(copy),
+                ),
+            SharedString::from(format!("memory-note-menu-{index}")),
+            &menu,
+            move |_| {
+                let mut items = vec![MenuItem::new(tr!("settings.memory_copy_note"), {
+                    let raw = raw.clone();
+                    move |_, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()));
+                    }
+                })];
+                items.extend(shas.iter().map(|sha| {
+                    let sha = sha.clone();
+                    let short = sha[..sha.len().min(12)].to_owned();
+                    MenuItem::new(
+                        tr!("settings.memory_copy_commit", sha = short),
+                        move |_, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(sha.clone()));
+                        },
+                    )
+                }));
+                items
+            },
+        )
     }
 
     // ----- Settings → Git page -----
