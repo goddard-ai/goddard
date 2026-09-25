@@ -3515,6 +3515,13 @@ pub struct Waku {
     /// those arrive at commit cadence — deciding "show" from that silence
     /// strobes the button against the frames in between.
     transcript_scroll_to_bottom_visible: Cell<bool>,
+    /// Last decided visibility of the floating status-marker pill, keyed by
+    /// the turn it was decided for — a new turn never inherits the previous
+    /// turn's float. The footer's on-screen position is unknowable on frames
+    /// where its row — or a row between it and the scroll top — is
+    /// unmeasured; answering "hidden" into that silence pops the pill out
+    /// and back in once the rows measure.
+    transcript_status_markers_floating: Cell<Option<(Uuid, bool)>>,
     /// Whether the transcript's scrollbar thumb was held at the last frame, so
     /// render can notice a drag starting and ending.
     transcript_scrollbar_dragging: Cell<bool>,
@@ -6688,6 +6695,7 @@ impl Waku {
                 transcript_landing: None,
                 pending_sidebar_scroll: Cell::new(None),
                 transcript_scroll_to_bottom_visible: Cell::new(false),
+                transcript_status_markers_floating: Cell::new(None),
                 transcript_scrollbar_dragging: Cell::new(false),
                 transcript_new_content_dot: None,
                 transcript_layout_width: Cell::new(Pixels::ZERO),

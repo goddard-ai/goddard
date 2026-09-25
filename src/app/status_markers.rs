@@ -431,6 +431,13 @@ const EVAL_FEATURE: &str = "turn-status";
 /// the viewport, so this much of the row's bottom edge is not theirs.
 const FOOTER_ROW_BELOW_MARKERS: Pixels = px(33.0);
 
+/// How many rows back from the footer `status_markers_below_fold` probes for
+/// unmeasured rows before calling the answer unknowable. A fold-adjacent
+/// footer is never this far from the scroll top in measured rows, so wider
+/// spans only reach here when part of the gap is unmeasured — an honest
+/// "cannot say" that also bounds the probe's per-frame cost.
+const STATUS_MARKER_MEASURE_SPAN: usize = 64;
+
 /// The question map sent with every turn evaluation: one `Choice` for the
 /// ending, conditional subtype choices, plus one `Noul` per flag.
 fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
@@ -1354,15 +1361,21 @@ impl Waku {
         let footer_row = self.transcript_row_kinds.borrow().iter().rposition(
             |kind| matches!(kind, TranscriptRowKind::ResponseFooter(id, _) if *id == turn_id),
         )?;
-        // Unmeasured rows report `None`: no float until the footer has been
-        // laid out once and the list can say where it sits.
-        let footer_bounds = transcript_rows.bounds_for_item(footer_row)?;
-        // The chips ride inside the footer row below the changed-files
-        // card, which can hold the row's top edge on screen while the chips
-        // have already slid under the fold — so judge where they end, not
-        // where the row starts.
-        let markers_bottom = footer_bounds.bottom() - FOOTER_ROW_BELOW_MARKERS;
-        if markers_bottom <= transcript_rows.viewport_bounds().bottom() {
+        // The gate returns `None` while the list cannot say where the footer
+        // sits — hold the last answer for this turn instead of popping the
+        // pill out and back in across the unmeasured frames.
+        let visible = match status_markers_below_fold(transcript_rows, footer_row) {
+            Some(visible) => {
+                self.transcript_status_markers_floating
+                    .set(Some((turn_id, visible)));
+                visible
+            }
+            None => self
+                .transcript_status_markers_floating
+                .get()
+                .is_some_and(|(held_turn, visible)| held_turn == turn_id && visible),
+        };
+        if !visible {
             return None;
         }
         let focus = self.transcript_control_focus("transcript-status-markers", cx);
@@ -1413,6 +1426,45 @@ impl Waku {
         self.pending_status_marker_turns.clear();
         self.status_marker_in_flight.clear();
     }
+}
+
+/// Whether the footer's marker row sits below the transcript fold — `None`
+/// while the list cannot answer honestly this frame.
+///
+/// `bounds_for_item` reports positions off the measurement tree, and a row
+/// GPUI has not measured contributes zero to every distance through it, so a
+/// reported position can only understate how far down the footer really
+/// sits. Three cases resolve without ever guessing:
+///
+/// - A scroll offset parked at or past the item count — where the
+///   bottom-aligned pin and transient end scrolls both land — rests the tail
+///   (and its markers) on screen.
+/// - A bottom reported below the fold is certainly below it.
+/// - A bottom reported at or above the fold is trustworthy only when every
+///   row between the scroll top and the footer is measured; a gap means the
+///   true position is deeper than reported — unknown, not hidden.
+fn status_markers_below_fold(transcript_rows: &ListState, footer_row: usize) -> Option<bool> {
+    let scroll_top = transcript_rows.logical_scroll_top();
+    if scroll_top.item_ix >= transcript_rows.item_count() || footer_row < scroll_top.item_ix {
+        return Some(false);
+    }
+    let markers_bottom =
+        transcript_rows.bounds_for_item(footer_row)?.bottom() - FOOTER_ROW_BELOW_MARKERS;
+    if markers_bottom > transcript_rows.viewport_bounds().bottom() {
+        return Some(true);
+    }
+    // Probe a bounded span — wide enough to cover the rows that can sit near
+    // the fold — instead of trusting a position computed across unmeasured
+    // rows. Wider spans understate the same way, so hold rather than guess.
+    let span = footer_row + 1 - scroll_top.item_ix;
+    if span > STATUS_MARKER_MEASURE_SPAN {
+        return None;
+    }
+    transcript_rows
+        .measured_heights(scroll_top.item_ix..footer_row + 1)
+        .iter()
+        .all(Option::is_some)
+        .then_some(false)
 }
 
 #[cfg(test)]
@@ -1990,5 +2042,47 @@ mod tests {
             state["contextUsage"],
             json!({"tokens": 12_000, "window": 200_000})
         );
+    }
+
+    #[test]
+    fn marker_gate_hides_when_the_tail_is_parked() {
+        // A scroll offset parked at the item count — where the bottom pin and
+        // transient end scrolls both land — rests the footer's markers on
+        // screen, so the answer is a definite hide rather than an unknowable
+        // hold. Without this branch the pill would stick once the
+        // bottom-aligned list sits pinned.
+        let rows = ListState::new(10, ListAlignment::Top, px(2048.0));
+        rows.scroll_to(ListOffset {
+            item_ix: 10,
+            offset_in_item: Pixels::ZERO,
+        });
+        assert_eq!(status_markers_below_fold(&rows, 9), Some(false));
+
+        // The bottom-aligned list resolves its pinned tail the same way.
+        let rows = ListState::new(10, ListAlignment::Bottom, px(2048.0));
+        assert_eq!(status_markers_below_fold(&rows, 9), Some(false));
+    }
+
+    #[test]
+    fn marker_gate_abstains_while_the_footer_is_unmeasured() {
+        // Scrolled mid-list with a footer GPUI has never rendered:
+        // `bounds_for_item` cannot say where the markers sit — the caller
+        // holds its last answer instead of hiding into the silence.
+        let rows = ListState::new(10, ListAlignment::Top, px(2048.0));
+        rows.scroll_to(ListOffset {
+            item_ix: 3,
+            offset_in_item: Pixels::ZERO,
+        });
+        assert_eq!(status_markers_below_fold(&rows, 9), None);
+    }
+
+    #[test]
+    fn marker_gate_hides_when_the_footer_sits_above_the_scroll_top() {
+        let rows = ListState::new(10, ListAlignment::Top, px(2048.0));
+        rows.scroll_to(ListOffset {
+            item_ix: 5,
+            offset_in_item: Pixels::ZERO,
+        });
+        assert_eq!(status_markers_below_fold(&rows, 2), Some(false));
     }
 }
