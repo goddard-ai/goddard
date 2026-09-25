@@ -1,5 +1,5 @@
 import type { AgentSession, ThreadGoal, ThreadGoalStatus } from '@waku/client'
-import { useEffect, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { WakuIcon, type WakuIconName } from '@/components/waku-icon'
@@ -96,6 +96,7 @@ export function GoalDialog({
 }) {
   const { t } = useI18n()
   const [objective, setObjective] = useState('')
+  const objectiveInput = useRef<HTMLTextAreaElement>(null)
   const saveShortcut = usePrimaryShortcut('⌘↩', 'Ctrl+Enter')
   const goal = session?.thread_goal ?? null
 
@@ -106,6 +107,15 @@ export function GoalDialog({
     // must not clobber the draft while the user types.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  useLayoutEffect(() => {
+    const input = objectiveInput.current
+    if (!input) return
+    input.style.height = '0px'
+    const maxHeight = Math.floor(window.innerHeight * 0.5)
+    input.style.height = `${Math.min(input.scrollHeight, maxHeight)}px`
+    input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  }, [objective, open])
 
   const trimmed = objective.trim()
   const saveLabel = goal
@@ -130,7 +140,7 @@ export function GoalDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-[420px] overflow-hidden rounded-[18px] bg-[var(--raised)] p-0"
+        className="max-h-[calc(100dvh-32px)] max-w-[420px] overflow-y-auto rounded-[18px] bg-[var(--raised)] p-0"
         finalFocus={returnFocus}
       >
         <DialogTitle className="flex h-12 items-center gap-2.5 px-4 text-sm font-normal">
@@ -153,8 +163,9 @@ export function GoalDialog({
         <div className="px-4 pb-2.5">
           <Textarea
             autoFocus
-            className="min-h-24 resize-none text-sm"
+            className="min-h-24 resize-none overflow-hidden whitespace-pre-wrap break-words text-sm"
             placeholder={t('goal.objective_placeholder')}
+            ref={objectiveInput}
             value={objective}
             onChange={(event) => setObjective(event.target.value)}
             onKeyDown={(event) => {
