@@ -30,8 +30,9 @@ use crate::computer_use::ComputerAppGrant;
 use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
-    AgentSession, FavoriteModel, Message, MessageAtom, MessageAttachment, MessageRole, Project,
-    ProviderKind, RuntimeEventCursor, RuntimeMode, SessionWorkspace, TranscriptNotice,
+    AgentSession, Checkpoint, CheckpointStatus, FavoriteModel, Message, MessageAtom,
+    MessageAttachment, MessageRole, Project, ProviderKind, RuntimeEventCursor, RuntimeMode,
+    SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
 use waku_protocol::custom_commands::CustomCommand;
@@ -1160,6 +1161,9 @@ struct Storage {
     /// wrote it, so a save only touches the messages that actually changed.
     /// See [`write_messages`].
     written_messages: HashMap<Uuid, HashMap<Uuid, u64>>,
+    /// Canonical terminal checkpoints are merged into full-session writes so
+    /// an older queued batch cannot erase a checkpoint saved independently.
+    terminal_checkpoints: HashMap<Uuid, HashMap<usize, Checkpoint>>,
     saved_projects: u64,
     saved_app_settings: u64,
     saved_app_state: u64,
@@ -1508,6 +1512,7 @@ impl StateStore {
             // A fresh connection has written nothing yet. Sessions loaded here
             // are skeletons anyway, so the first save of one is a full write.
             written_messages: HashMap::new(),
+            terminal_checkpoints: HashMap::new(),
             saved_projects: 0,
             saved_app_settings: if app_settings_are_saved {
                 fingerprint(&serde_json::to_string(&app_settings).map_err(to_io_error)?)
@@ -1600,6 +1605,133 @@ impl StateStore {
         Ok(Some(stored))
     }
 
+    /// Reads a turn checkpoint from the session detail row without loading
+    /// its message history. The detail JSON deliberately excludes messages,
+    /// which live in their own table.
+    pub fn load_turn_checkpoint(
+        &self,
+        session_id: Uuid,
+        turn_count: usize,
+    ) -> io::Result<Option<Checkpoint>> {
+        let connection = self.open()?;
+        let data = connection
+            .query_row(
+                "SELECT detail.data FROM session_details AS detail
+                 INNER JOIN sessions ON sessions.id = detail.session_id
+                 WHERE sessions.id = ?1",
+                params![session_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(to_io_error)?;
+        let Some(data) = data else {
+            return Ok(None);
+        };
+        let session = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
+        Ok(session
+            .turns
+            .into_iter()
+            .find(|turn| turn.turn_count == turn_count)
+            .and_then(|turn| turn.checkpoint))
+    }
+
+    /// Saves a turn checkpoint without snapshotting or serializing the live
+    /// task state. The UPDATE is intentionally conditional on both rows still
+    /// existing, so a late capture cannot recreate a deleted session.
+    pub fn save_turn_checkpoint(
+        &self,
+        session_id: Uuid,
+        turn_count: usize,
+        checkpoint: &Checkpoint,
+    ) -> io::Result<Option<Checkpoint>> {
+        if checkpoint.turn_count != turn_count {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "checkpoint turn count does not match its storage key",
+            ));
+        }
+
+        let mut guard = self.storage.lock();
+        if guard.is_none() {
+            *guard = Some(Storage {
+                connection: self.open()?,
+                persisted_sessions: HashSet::new(),
+                written_messages: HashMap::new(),
+                terminal_checkpoints: HashMap::new(),
+                saved_projects: 0,
+                saved_app_settings: 0,
+                saved_app_state: 0,
+            });
+        }
+        let storage = guard.as_mut().expect("storage opened above");
+        let transaction = storage
+            .connection
+            .unchecked_transaction()
+            .map_err(to_io_error)?;
+        let key = session_id.to_string();
+        let data = transaction
+            .query_row(
+                "SELECT detail.data FROM session_details AS detail
+                 INNER JOIN sessions ON sessions.id = detail.session_id
+                 WHERE sessions.id = ?1",
+                params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(to_io_error)?;
+        let Some(data) = data else {
+            return Ok(None);
+        };
+        let mut session = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
+        if session.id != session_id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "stored checkpoint session id does not match its row",
+            ));
+        }
+        let Some(turn) = session
+            .turns
+            .iter_mut()
+            .find(|turn| turn.turn_count == turn_count)
+        else {
+            return Ok(None);
+        };
+        if let Some(existing) = turn
+            .checkpoint
+            .as_ref()
+            .filter(|checkpoint| is_terminal_checkpoint(checkpoint))
+        {
+            let existing = existing.clone();
+            storage
+                .terminal_checkpoints
+                .entry(session_id)
+                .or_default()
+                .insert(turn_count, existing.clone());
+            return Ok(Some(existing));
+        }
+        turn.checkpoint = Some(checkpoint.clone());
+        let data = session_data(&session)?;
+        let updated = transaction
+            .execute(
+                "UPDATE session_details SET data = ?2
+                 WHERE session_id = ?1
+                   AND EXISTS (SELECT 1 FROM sessions WHERE id = ?1)",
+                params![key, data],
+            )
+            .map_err(to_io_error)?;
+        if updated == 0 {
+            return Ok(None);
+        }
+        transaction.commit().map_err(to_io_error)?;
+        storage.persisted_sessions.insert(session_id);
+        storage
+            .terminal_checkpoints
+            .entry(session_id)
+            .or_default()
+            .insert(turn_count, checkpoint.clone());
+        Ok(Some(checkpoint.clone()))
+    }
+
     /// Persists whatever the app marked as changed, so a streaming turn writes
     /// one session row and a selection change writes no rows at all.
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
@@ -1689,6 +1821,7 @@ impl StateStore {
                 connection: self.open()?,
                 persisted_sessions: HashSet::new(),
                 written_messages: HashMap::new(),
+                terminal_checkpoints: HashMap::new(),
                 saved_projects: 0,
                 saved_app_settings: 0,
                 saved_app_state: 0,
@@ -1747,6 +1880,7 @@ impl StateStore {
         // does not leave this connection believing rows it never wrote are on
         // disk — which would make the next save skip them for good.
         let mut written_messages = Vec::new();
+        let mut persisted_checkpoints = Vec::new();
         for session in &batch.sessions {
             // A skeleton's empty transcript means "not fetched", not "empty".
             // Its promoted list columns may still have changed (for example,
@@ -1762,7 +1896,11 @@ impl StateStore {
                 storage.persisted_sessions.insert(session.id);
                 continue;
             }
-            let data = session_data(session)?;
+            let checkpoint_cache = terminal_checkpoints_for_session(
+                session,
+                storage.terminal_checkpoints.get(&session.id),
+            );
+            let data = session_data_with_checkpoints(session, &checkpoint_cache)?;
             transaction
                 .execute(
                     UPSERT_SESSION,
@@ -1780,6 +1918,7 @@ impl StateStore {
                     storage.written_messages.get(&session.id).unwrap_or(&EMPTY),
                 )?,
             ));
+            persisted_checkpoints.push((session.id, checkpoint_cache));
             storage.persisted_sessions.insert(session.id);
         }
 
@@ -1805,12 +1944,20 @@ impl StateStore {
                 .map_err(to_io_error)?;
             storage.persisted_sessions.remove(&id);
             storage.written_messages.remove(&id);
+            storage.terminal_checkpoints.remove(&id);
         }
 
         transaction.commit().map_err(to_io_error)?;
         // Now that the rows are durable, and not before.
         for (session_id, fingerprints) in written_messages {
             storage.written_messages.insert(session_id, fingerprints);
+        }
+        for (session_id, checkpoints) in persisted_checkpoints {
+            if checkpoints.is_empty() {
+                storage.terminal_checkpoints.remove(&session_id);
+            } else {
+                storage.terminal_checkpoints.insert(session_id, checkpoints);
+            }
         }
         Ok(())
     }
@@ -2085,6 +2232,65 @@ fn session_data(session: &AgentSession) -> io::Result<String> {
         object.remove("messages");
     }
     serde_json::to_string(&value).map_err(to_io_error)
+}
+
+/// Only checkpoints on turns still present in the session are retained, so a
+/// rewind continues to drop its old turns and checkpoints.
+fn terminal_checkpoints_for_session(
+    session: &AgentSession,
+    existing: Option<&HashMap<usize, Checkpoint>>,
+) -> HashMap<usize, Checkpoint> {
+    session
+        .turns
+        .iter()
+        .filter_map(|turn| {
+            existing
+                .and_then(|checkpoints| checkpoints.get(&turn.turn_count))
+                .filter(|checkpoint| is_terminal_checkpoint(checkpoint))
+                .or_else(|| {
+                    turn.checkpoint
+                        .as_ref()
+                        .filter(|checkpoint| is_terminal_checkpoint(checkpoint))
+                })
+                .map(|checkpoint| (turn.turn_count, checkpoint.clone()))
+        })
+        .collect()
+}
+
+/// A stale full-session save must not erase a checkpoint written directly to
+/// the detail row while that save was being prepared.
+fn session_data_with_checkpoints(
+    session: &AgentSession,
+    checkpoints: &HashMap<usize, Checkpoint>,
+) -> io::Result<String> {
+    let mut value = serde_json::to_value(session).map_err(to_io_error)?;
+    let Some(turns) = value
+        .get_mut("turns")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "serialized session detail has no turns array",
+        ));
+    };
+    for (serialized_turn, incoming) in turns.iter_mut().zip(&session.turns) {
+        let Some(checkpoint) = checkpoints.get(&incoming.turn_count) else {
+            continue;
+        };
+        let checkpoint = serde_json::to_value(checkpoint).map_err(to_io_error)?;
+        serialized_turn["checkpoint"] = checkpoint;
+    }
+    if let Some(object) = value.as_object_mut() {
+        object.remove("messages");
+    }
+    serde_json::to_string(&value).map_err(to_io_error)
+}
+
+fn is_terminal_checkpoint(checkpoint: &Checkpoint) -> bool {
+    matches!(
+        checkpoint.status,
+        CheckpointStatus::Ready | CheckpointStatus::Unavailable
+    )
 }
 
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
@@ -2422,6 +2628,18 @@ mod tests {
             directory.join("app.json"),
             vec![directory.join("settings.json")],
         )
+    }
+
+    fn test_checkpoint(turn_count: usize, git_ref: &str) -> Checkpoint {
+        Checkpoint {
+            turn_count,
+            git_ref: git_ref.to_owned(),
+            status: CheckpointStatus::Ready,
+            files: Vec::new(),
+            additions: 0,
+            deletions: 0,
+            created_at: 1,
+        }
     }
 
     /// `load` returns list-only sessions by design; tests that assert on
@@ -2910,6 +3128,67 @@ mod tests {
         );
         assert!(!session.quarantined);
 
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn a_stale_full_save_preserves_a_checkpoint_written_to_the_detail_row() {
+        let directory = temporary_directory();
+        fs::create_dir_all(&directory).unwrap();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let session_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("Ask");
+        state.sessions[0].push_message(MessageRole::Assistant, "an answer");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        store.save(&mut state).unwrap();
+
+        // This full-session batch represents a save that started before the
+        // independent checkpoint write and still has no checkpoint attached.
+        let mut stale_state = store.load().unwrap();
+        store.hydrate(&mut stale_state.sessions[0]).unwrap();
+        stale_state.mark_session_dirty(session_id);
+        let batch = store.save_batch(&mut stale_state);
+        assert!(batch.sessions[0].turns[0].checkpoint.is_none());
+
+        let checkpoint = test_checkpoint(1, "refs/waku/test-turn-1");
+        assert_eq!(
+            store
+                .save_turn_checkpoint(session_id, 1, &checkpoint)
+                .unwrap(),
+            Some(checkpoint.clone())
+        );
+        store.write_batch(&batch).unwrap();
+
+        let restored = load_hydrated(&store);
+        assert_eq!(
+            restored.sessions[0].turns[0].checkpoint.as_ref(),
+            Some(&checkpoint)
+        );
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn a_late_checkpoint_save_does_not_recreate_a_deleted_session() {
+        let directory = temporary_directory();
+        fs::create_dir_all(&directory).unwrap();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let session_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("Ask");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        store.save(&mut state).unwrap();
+
+        state.sessions.clear();
+        store.save(&mut state).unwrap();
+        let checkpoint = test_checkpoint(1, "refs/waku/deleted-session-turn-1");
+        assert_eq!(
+            store
+                .save_turn_checkpoint(session_id, 1, &checkpoint)
+                .unwrap(),
+            None
+        );
+        assert!(store.load().unwrap().sessions.is_empty());
         fs::remove_dir_all(directory).ok();
     }
 

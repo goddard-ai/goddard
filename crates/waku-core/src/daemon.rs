@@ -716,36 +716,53 @@ impl WakuBackend {
         let capture_lock_wait = capture_lock_started.elapsed();
 
         let dedupe_started = std::time::Instant::now();
-        {
-            let mut state = self.task_state.lock();
-            if let Some(index) = state
+        let in_memory_checkpoint = {
+            let state = self.task_state.lock();
+            state
                 .sessions
                 .iter()
-                .position(|session| session.id == session_id)
-            {
-                self.task_store.hydrate(&mut state.sessions[index])?;
-                if let Some(checkpoint) = state.sessions[index]
-                    .turns
-                    .iter()
-                    .find(|turn| turn.turn_count == turn_count)
-                    .and_then(|turn| turn.checkpoint.as_ref())
-                    .filter(|checkpoint| {
-                        matches!(
-                            checkpoint.status,
-                            CheckpointStatus::Ready | CheckpointStatus::Unavailable
-                        )
-                    })
-                {
-                    eprintln!(
-                        "turn checkpoint session={session_id} turn={turn_count} deduped=true lock_wait={capture_lock_wait:?} lookup_time={:?}",
-                        dedupe_started.elapsed()
-                    );
-                    return Ok(checkpoint.clone());
-                }
-            }
+                .find(|session| session.id == session_id)
+                .and_then(|session| {
+                    session
+                        .turns
+                        .iter()
+                        .find(|turn| turn.turn_count == turn_count)
+                })
+                .and_then(|turn| turn.checkpoint.as_ref())
+                .filter(|checkpoint| {
+                    matches!(
+                        checkpoint.status,
+                        CheckpointStatus::Ready | CheckpointStatus::Unavailable
+                    )
+                })
+                .cloned()
+        };
+        if let Some(checkpoint) = in_memory_checkpoint {
+            eprintln!(
+                "turn checkpoint session={session_id} turn={turn_count} deduped=true lock_wait={capture_lock_wait:?} lookup_time={:?}",
+                dedupe_started.elapsed()
+            );
+            return Ok(checkpoint);
         }
-        // Hydrating under the lock is the convoy other commands wait behind —
-        // the hold time is the number that matters, not the git work.
+        // Skeleton sessions have no in-memory turns to inspect. Read their
+        // stored detail on its own connection instead of hydrating under the
+        // task-state lock, where the disk read would convoy every command.
+        if let Some(checkpoint) = self
+            .task_store
+            .load_turn_checkpoint(session_id, turn_count)?
+            .filter(|checkpoint| {
+                matches!(
+                    checkpoint.status,
+                    CheckpointStatus::Ready | CheckpointStatus::Unavailable
+                )
+            })
+        {
+            eprintln!(
+                "turn checkpoint session={session_id} turn={turn_count} deduped=true lock_wait={capture_lock_wait:?} lookup_time={:?}",
+                dedupe_started.elapsed()
+            );
+            return Ok(checkpoint);
+        }
         eprintln!(
             "turn checkpoint session={session_id} turn={turn_count} deduped=false lock_wait={capture_lock_wait:?} lookup_time={:?}",
             dedupe_started.elapsed(),
@@ -769,26 +786,32 @@ impl WakuBackend {
             capture_started.elapsed()
         );
         let persist_started = std::time::Instant::now();
+        let checkpoint = self
+            .task_store
+            .save_turn_checkpoint(session_id, turn_count, &checkpoint)?
+            .unwrap_or(checkpoint);
         let mut state = self.task_state.lock();
-        if let Some(index) = state
+        if let Some(session) = state
             .sessions
-            .iter()
-            .position(|session| session.id == session_id)
+            .iter_mut()
+            .find(|session| session.id == session_id)
         {
-            self.task_store.hydrate(&mut state.sessions[index])?;
-            if let Some(turn) = state.sessions[index]
+            if let Some(turn) = session
                 .turns
                 .iter_mut()
                 .find(|turn| turn.turn_count == turn_count)
             {
+                if let Some(existing) = turn.checkpoint.as_ref().filter(|checkpoint| {
+                    matches!(
+                        checkpoint.status,
+                        CheckpointStatus::Ready | CheckpointStatus::Unavailable
+                    )
+                }) {
+                    // A checkpoint may have landed in memory while this
+                    // capture was running. Keep the daemon's terminal value.
+                    return Ok(existing.clone());
+                }
                 turn.checkpoint = Some(checkpoint.clone());
-                state.mark_session_dirty(session_id);
-                let save_started = std::time::Instant::now();
-                self.task_store.save(&mut state)?;
-                eprintln!(
-                    "turn checkpoint session={session_id} turn={turn_count} persist_time={:?}",
-                    save_started.elapsed()
-                );
             }
         }
         drop(state);
