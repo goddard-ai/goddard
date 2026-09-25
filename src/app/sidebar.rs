@@ -253,6 +253,7 @@ const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
 /// How long the primary modifier must stay down before the sidebar reveals
 /// its ⌘1–⌘9 chips — long enough that quicker chords never flash them.
 pub(super) const SIDEBAR_SHORTCUT_HOLD_DELAY: Duration = Duration::from_millis(400);
+const SIDEBAR_ALT_PEEK_DELAY: Duration = Duration::from_millis(300);
 /// Number of sidebar tasks reachable by the ⌘1–⌘9 row shortcuts.
 const SIDEBAR_SHORTCUT_TARGET_COUNT: usize = 9;
 /// Width of the gradient that dissolves row content ahead of a ⌘n chip.
@@ -2902,11 +2903,32 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Holding Option turns each hovered row's pin control into the
-        // sweep-to-Dormant control; repaint on the flip, not the next hover.
-        if event.modifiers.alt != self.sidebar_alt_held {
-            self.sidebar_alt_held = event.modifiers.alt;
-            cx.notify();
+        // Delay the visual Option state so quick uses of the modifier for
+        // ordinary shortcuts do not flash model details or sweep controls.
+        if event.modifiers.alt != self.sidebar_alt_modifier_down {
+            self.sidebar_alt_modifier_down = event.modifiers.alt;
+            self.sidebar_alt_generation = self.sidebar_alt_generation.wrapping_add(1);
+            let generation = self.sidebar_alt_generation;
+            if !event.modifiers.alt {
+                if self.sidebar_alt_held {
+                    self.sidebar_alt_held = false;
+                    cx.notify();
+                }
+            } else {
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(SIDEBAR_ALT_PEEK_DELAY).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.sidebar_alt_generation != generation
+                            || !this.sidebar_alt_modifier_down
+                        {
+                            return;
+                        }
+                        this.sidebar_alt_held = true;
+                        cx.notify();
+                    });
+                })
+                .detach();
+            }
         }
         self.sidebar_shortcut_hint_generation =
             self.sidebar_shortcut_hint_generation.wrapping_add(1);
@@ -2971,6 +2993,8 @@ impl Waku {
         self.sidebar_shortcut_hint_generation =
             self.sidebar_shortcut_hint_generation.wrapping_add(1);
         self.sidebar_shortcut_hint_chord_used = false;
+        self.sidebar_alt_modifier_down = false;
+        self.sidebar_alt_generation = self.sidebar_alt_generation.wrapping_add(1);
         if self.sidebar_alt_held {
             self.sidebar_alt_held = false;
             cx.notify();

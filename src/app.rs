@@ -2788,8 +2788,10 @@ pub struct Waku {
     sidebar_collapsed_groups: HashSet<SidebarGroup>,
     /// While Option/Alt is held, a session row's hover pin control becomes
     /// the sweep-to-Dormant control. Tracked from the root's
-    /// modifiers-changed events so the swap repaints on the press itself.
+    /// modifiers-changed events after a short hold to avoid shortcut flicker.
     sidebar_alt_held: bool,
+    sidebar_alt_modifier_down: bool,
+    sidebar_alt_generation: u64,
     /// Dormant sessions whose clean worktrees the background sweep has
     /// already snapshotted and removed — re-checked only when a session
     /// leaves dormancy. In-flight entries also dedupe a pass's spawns.
@@ -6353,6 +6355,8 @@ impl Waku {
                     SidebarGroup::Dormant,
                 ]),
                 sidebar_alt_held: false,
+                sidebar_alt_modifier_down: false,
+                sidebar_alt_generation: 0,
                 dormant_worktrees_swept: RefCell::new(HashSet::new()),
                 dormant_sweep_scanned_at: Cell::new(None),
                 dormant_sweep_generation: Cell::new(0),
