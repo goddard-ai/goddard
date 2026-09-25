@@ -5620,6 +5620,7 @@ impl Waku {
         // the search anchors count row ordinals, and they only line up with
         // the results column — which renders them all — if nothing skips.
         let mut tab_rows = vec![(search.ordinal(), JevSettingsTab::Suggestions)];
+        let move_fast = self.render_move_fast_settings(theme, search, cx);
         let prompts = self.render_suggested_prompts_settings(theme, search, cx);
         let actions = self.render_suggested_actions_settings(theme, search, cx);
         tab_rows.push((search.ordinal(), JevSettingsTab::Automation));
@@ -5632,6 +5633,7 @@ impl Waku {
         if search.active() {
             return div()
                 .child(connection)
+                .children(move_fast)
                 .children(prompts)
                 .children(actions)
                 .children(auto_prompts)
@@ -5641,7 +5643,10 @@ impl Waku {
         }
 
         let content = match self.jev_settings_tab {
-            JevSettingsTab::Suggestions => div().children(prompts).children(actions),
+            JevSettingsTab::Suggestions => div()
+                .children(move_fast)
+                .children(prompts)
+                .children(actions),
             JevSettingsTab::Automation => div().children(auto_prompts).children(automatic),
             JevSettingsTab::Usage => div().children(usage),
         };
@@ -6823,6 +6828,48 @@ impl Waku {
         }
         self.save();
         cx.notify();
+    }
+
+    fn set_move_fast_break_things(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.move_fast_break_things = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The Suggestions tab's posture card — one switch for the "move fast,
+    /// break things" mode, which biases Jev toward momentum picks and
+    /// relaxes their render gate. Dead without action predictions, so the
+    /// switch disables while that experiment is off.
+    fn render_move_fast_settings(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let enabled = self.state.move_fast_break_things;
+        let row = settings_row(
+            "icons/gauge.svg",
+            tr!("suggestions.move_fast_title"),
+            tr!("suggestions.move_fast_description"),
+            settings_button(
+                "move-fast-break-things-toggle",
+                if enabled {
+                    tr!("auto_prompts.disable")
+                } else {
+                    tr!("auto_prompts.enable")
+                },
+                self.state.action_predictions_enabled,
+                false,
+                true,
+                theme,
+                cx,
+                move |this, _, cx| this.set_move_fast_break_things(!enabled, cx),
+            ),
+            theme,
+            search,
+        );
+        let card = settings_row_card(vec![row], theme)?;
+        Some(div().mt(px(15.0)).child(card).into_any_element())
     }
 
     /// The Suggestions tab's Actions group — every action Jev can put

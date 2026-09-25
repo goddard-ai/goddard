@@ -1101,6 +1101,11 @@ pub struct AppSettings {
     /// verdict is logged for calibration — nothing renders. Defaults on in
     /// debug builds.
     pub action_predictions_enabled: bool,
+    /// "Move fast, break things": Jev's next-action suggestions lean toward
+    /// forward-momentum picks — land, push, commit, fix — and those picks
+    /// clear an easier render gate. Suggestion chips only; automatic runs
+    /// keep their per-action opt-in floors. Off by default.
+    pub move_fast_break_things: bool,
     /// Experimental: Auto-routed tasks judged plan-worthy start on the
     /// hardest-class target, downshift one class tier once the tool stream
     /// or the evaluation model says planning ended. Off by default,
@@ -1218,6 +1223,7 @@ impl Default for AppSettings {
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
             action_predictions_enabled: default_experiment_enabled(),
+            move_fast_break_things: false,
             phase_routing_enabled: false,
             suggested_prompts: BTreeMap::new(),
             automatic_suggested_actions: BTreeMap::new(),
@@ -1659,6 +1665,10 @@ pub struct PersistedState {
     pub status_markers_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub action_predictions_enabled: bool,
+    /// "Move fast, break things": momentum picks clear an easier suggestion
+    /// gate. App-owned; suggestion chips only, never automatic runs.
+    #[serde(default)]
+    pub move_fast_break_things: bool,
     /// Customized text for stable suggested-prompt action ids.
     #[serde(default)]
     pub suggested_prompts: BTreeMap<String, String>,
@@ -2033,6 +2043,7 @@ impl PersistedState {
             model_router_enabled: default_experiment_enabled(),
             status_markers_enabled: default_experiment_enabled(),
             action_predictions_enabled: default_experiment_enabled(),
+            move_fast_break_things: false,
             phase_routing_enabled: false,
             suggested_prompts: BTreeMap::new(),
             automatic_suggested_actions: BTreeMap::new(),
@@ -2430,6 +2441,7 @@ impl PersistedState {
             model_router_enabled: self.model_router_enabled,
             status_markers_enabled: self.status_markers_enabled,
             action_predictions_enabled: self.action_predictions_enabled,
+            move_fast_break_things: self.move_fast_break_things,
             phase_routing_enabled: self.phase_routing_enabled,
             suggested_prompts: self.suggested_prompts.clone(),
             automatic_suggested_actions: self.automatic_suggested_actions.clone(),
@@ -2557,6 +2569,7 @@ impl PersistedState {
         self.model_router_enabled = settings.model_router_enabled;
         self.status_markers_enabled = settings.status_markers_enabled;
         self.action_predictions_enabled = settings.action_predictions_enabled;
+        self.move_fast_break_things = settings.move_fast_break_things;
         self.phase_routing_enabled = settings.phase_routing_enabled;
         self.suggested_prompts = settings.suggested_prompts;
         self.automatic_suggested_actions = settings

@@ -1269,6 +1269,8 @@ suggestions.commit: 提交
 suggestions.push: 推送
 suggestions.sync: 同步
 suggestions.land: 合入
+suggestions.move_fast_title: 快速行动、不怕出错
+suggestions.move_fast_description: Jev 会倾向于推进工作的操作（合入、推送、提交、修复），并更积极地建议这些下一步。
 sync.behind_one: "落后 %{upstream} 1 个提交"
 sync.behind_many: "落后 %{upstream} %{count} 个提交"
 sync.ahead_one: 领先 1 个提交

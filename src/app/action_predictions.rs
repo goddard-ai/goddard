@@ -220,6 +220,25 @@ fn automatic_action_allowed(
 const SUGGESTION_MIN_PROBABILITY: f64 = 0.5;
 const SUGGESTION_MIN_MARGIN: f64 = 0.15;
 
+/// The "move fast, break things" set: forward-momentum picks whose render
+/// gate relaxes while the mode is on. Review-style picks and outcome-only
+/// candidates keep the standard bar — eager, not indiscriminate.
+pub(super) const MOVE_FAST_ACTIONS: &[&str] = &[
+    "keep-going",
+    "run-tests",
+    "fix-errors",
+    "commit-changes",
+    "open-pr",
+    "commit",
+    "push",
+    "sync",
+    "land",
+];
+
+/// The relaxed gate a momentum pick clears while the mode is on.
+const MOVE_FAST_MIN_PROBABILITY: f64 = 0.35;
+const MOVE_FAST_MIN_MARGIN: f64 = 0.05;
+
 /// One journaled action held in memory — the tail `recentActions` reads.
 /// The file carries the same shape: `{"at", "session", "action"}`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -289,17 +308,26 @@ fn suggestion_dispatch(action: &str) -> Option<SuggestionDispatch> {
 }
 
 /// The pick worth rendering: an actionable argmax that clears the
-/// confidence gate. Returns the candidate's static id for the chip.
-fn gated_suggestion(choice: &str, probabilities: &BTreeMap<String, f64>) -> Option<&'static str> {
+/// confidence gate. Returns the candidate's static id for the chip. While
+/// the move-fast mode is on, momentum picks clear a relaxed gate.
+fn gated_suggestion(
+    choice: &str,
+    probabilities: &BTreeMap<String, f64>,
+    move_fast: bool,
+) -> Option<&'static str> {
     let action = *ACTIONABLE_SUGGESTIONS.iter().find(|id| **id == choice)?;
+    let (min_probability, min_margin) = if move_fast && MOVE_FAST_ACTIONS.contains(&action) {
+        (MOVE_FAST_MIN_PROBABILITY, MOVE_FAST_MIN_MARGIN)
+    } else {
+        (SUGGESTION_MIN_PROBABILITY, SUGGESTION_MIN_MARGIN)
+    };
     let top = probabilities.get(choice).copied().unwrap_or(0.0);
     let runner_up = probabilities
         .iter()
         .filter(|(id, _)| id.as_str() != choice)
         .map(|(_, probability)| *probability)
         .fold(0.0, f64::max);
-    (top >= SUGGESTION_MIN_PROBABILITY && top - runner_up >= SUGGESTION_MIN_MARGIN)
-        .then_some(action)
+    (top >= min_probability && top - runner_up >= min_margin).then_some(action)
 }
 
 /// The decision-log feature tag these evaluations record under, so the
@@ -425,12 +453,23 @@ fn next_action_candidates(
 /// task kinds predict better — while `nextAction` is the shadow pick.
 fn action_prediction_questions(
     candidates: Vec<(&'static str, &'static str)>,
+    move_fast: bool,
 ) -> BTreeMap<String, EvalQuestion> {
     let mut criteria: BTreeMap<String, Option<String>> = candidates
         .into_iter()
         .map(|(id, description)| (id.to_owned(), Some(description.to_owned())))
         .collect();
     criteria.insert("other".to_owned(), None);
+    let mut next_action_instructions = "The assistant's turn just settled. Which of these is the \
+        user most likely to do before their next prompt in this session? Judge from the \
+        turn's outcome and the user's recent actions."
+        .to_owned();
+    if move_fast {
+        next_action_instructions.push_str(
+            " The user runs a move-fast, break-things posture: prefer picks that push the work \
+            forward — land, push, commit, fix, keep going — over review or tidy-up.",
+        );
+    }
     BTreeMap::from([
         (
             "taskType".to_owned(),
@@ -455,10 +494,7 @@ fn action_prediction_questions(
         (
             "nextAction".to_owned(),
             EvalQuestion::Choice {
-                instructions: "The assistant's turn just settled. Which of these is the user \
-                    most likely to do before their next prompt in this session? Judge from the \
-                    turn's outcome and the user's recent actions."
-                    .to_owned(),
+                instructions: next_action_instructions,
                 criteria,
             },
         ),
@@ -559,7 +595,10 @@ impl Waku {
                 ),
             );
         }
-        let questions = action_prediction_questions(next_action_candidates(session, turn_id));
+        let questions = action_prediction_questions(
+            next_action_candidates(session, turn_id),
+            self.state.move_fast_break_things,
+        );
         let tx = self.action_prediction_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         self.action_prediction_in_flight.insert(turn_id);
@@ -656,7 +695,7 @@ impl Waku {
         // A switched-off action never surfaces: no chip, no automatic run.
         // The prediction itself still logs — the shadow record feeds
         // calibration regardless of the display preference.
-        let suggestion = gated_suggestion(choice, probabilities)
+        let suggestion = gated_suggestion(choice, probabilities, self.state.move_fast_break_things)
             .filter(|action| !self.state.disabled_suggested_actions.contains(*action));
         if let Some(action) = suggestion {
             self.action_suggestion = Some(ActionSuggestion {
@@ -1274,16 +1313,44 @@ mod tests {
         };
         // Confident, committed, and actionable — renders.
         let p = probabilities(&[("run-tests", 0.6), ("new-prompt", 0.4)]);
-        assert_eq!(gated_suggestion("run-tests", &p), Some("run-tests"));
+        assert_eq!(gated_suggestion("run-tests", &p, false), Some("run-tests"));
         // Confident but committed to a non-renderable pick — nothing.
         let p = probabilities(&[("archive", 0.8), ("run-tests", 0.2)]);
-        assert_eq!(gated_suggestion("archive", &p), None);
+        assert_eq!(gated_suggestion("archive", &p, false), None);
         // Actionable but under the probability floor — nothing.
         let p = probabilities(&[("run-tests", 0.4), ("new-prompt", 0.6)]);
-        assert_eq!(gated_suggestion("run-tests", &p), None);
+        assert_eq!(gated_suggestion("run-tests", &p, false), None);
         // Actionable and confident but too close to the runner-up.
         let p = probabilities(&[("run-tests", 0.55), ("commit", 0.45)]);
-        assert_eq!(gated_suggestion("run-tests", &p), None);
+        assert_eq!(gated_suggestion("run-tests", &p, false), None);
+    }
+
+    #[test]
+    fn move_fast_relaxes_the_gate_for_momentum_picks_only() {
+        let probabilities = |picks: &[(&str, f64)]| {
+            picks
+                .iter()
+                .map(|(id, p)| (id.to_string(), *p))
+                .collect::<BTreeMap<_, _>>()
+        };
+        // Under the standard floor but ahead of the pack — renders only
+        // with the mode on.
+        let p = probabilities(&[("land", 0.4), ("new-prompt", 0.3), ("archive", 0.3)]);
+        assert_eq!(gated_suggestion("land", &p, false), None);
+        assert_eq!(gated_suggestion("land", &p, true), Some("land"));
+        // The relaxed margin commits on a closer race.
+        let p = probabilities(&[("push", 0.55), ("commit", 0.45)]);
+        assert_eq!(gated_suggestion("push", &p, false), None);
+        assert_eq!(gated_suggestion("push", &p, true), Some("push"));
+        // Cautious picks keep the standard bar even in the mode.
+        let p = probabilities(&[("review-changes", 0.4), ("new-prompt", 0.3)]);
+        assert_eq!(gated_suggestion("review-changes", &p, true), None);
+        // A non-renderable pick stays silent whatever the mode.
+        let p = probabilities(&[("archive", 0.8), ("land", 0.2)]);
+        assert_eq!(gated_suggestion("archive", &p, true), None);
+        // The relaxed floor still wants a real plurality.
+        let p = probabilities(&[("land", 0.3), ("new-prompt", 0.3), ("archive", 0.4)]);
+        assert_eq!(gated_suggestion("land", &p, true), None);
     }
 
     #[test]

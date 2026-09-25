@@ -3350,6 +3350,10 @@ suggestions.sync:
   en: Sync
 suggestions.land:
   en: Land
+suggestions.move_fast_title:
+  en: Move fast, break things
+suggestions.move_fast_description:
+  en: Jev leans toward momentum — land, push, commit, fix — and suggests those next steps more readily.
 sync.behind_one:
   en: 1 commit behind %{upstream}
 sync.behind_many:
