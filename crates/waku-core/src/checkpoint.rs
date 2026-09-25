@@ -22,6 +22,7 @@ const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 /// makes `git add` incremental: entries whose stat is unchanged skip hashing,
 /// so the per-capture cost tracks changed files instead of worktree size.
 const CHECKPOINT_INDEX_NAME: &str = "waku-checkpoint-index";
+const CHECKPOINT_INDEX_STATE_NAME: &str = "waku-checkpoint-index.json";
 /// Ref tips pinned as parents of a turn-start snapshot. Past this bound the
 /// commit object would grow with the repository's ref count on every turn.
 const MAX_TURN_START_PARENTS: usize = 512;
@@ -31,6 +32,16 @@ struct TurnStartMetadata {
     head: Option<String>,
     branch: Option<String>,
     refs: BTreeMap<String, String>,
+}
+
+/// The private index is reusable only while it still describes the same
+/// worktree base. Its tree keeps captured uncommitted files warm between turns.
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct CheckpointIndexState {
+    head: Option<String>,
+    tree: String,
+    #[serde(default)]
+    untracked_paths: Vec<Vec<u8>>,
 }
 
 pub fn checkpoint_ref(session_id: Uuid, turn_count: usize) -> String {
@@ -159,7 +170,7 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
     let has_start_ref = turn_count > 0 && has_ref(cwd, &start_ref);
     let snapshot_started = std::time::Instant::now();
     let end_commit = if has_start_ref {
-        capture_worktree_commit_from_turn_start(cwd, &start_ref)?
+        capture_worktree_commit_from_turn_start(cwd, &start_ref, end_head.as_deref())?
     } else {
         capture_worktree_commit_from(cwd, end_head.as_deref(), "Goddard worktree snapshot", &[])?
     };
@@ -298,8 +309,12 @@ fn capture_worktree_commit_from(
     capture_worktree_commit_with_base(cwd, head, message, parents, None)
 }
 
-fn capture_worktree_commit_from_turn_start(cwd: &Path, start_ref: &str) -> anyhow::Result<String> {
-    capture_worktree_commit_with_base(cwd, None, "Goddard worktree snapshot", &[], Some(start_ref))
+fn capture_worktree_commit_from_turn_start(
+    cwd: &Path,
+    start_ref: &str,
+    head: Option<&str>,
+) -> anyhow::Result<String> {
+    capture_worktree_commit_with_base(cwd, head, "Goddard worktree snapshot", &[], Some(start_ref))
 }
 
 fn capture_worktree_commit_with_base(
@@ -334,18 +349,67 @@ fn capture_worktree_commit_with_base(
 
     let snapshot_started = std::time::Instant::now();
     let mut index_retry = false;
-    let result = match capture_with_index(&root, &scope, &index, head, message, parents, start_ref)
-    {
-        Err(_) => {
+    let state_path = git_dir.join(CHECKPOINT_INDEX_STATE_NAME);
+    let mut index_state = fs::read(&state_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<CheckpointIndexState>(&bytes).ok())
+        .unwrap_or_default();
+    let result = match capture_with_index(
+        &root,
+        &scope,
+        &index,
+        head,
+        message,
+        parents,
+        start_ref,
+        &mut index_state,
+    ) {
+        Err(error) if recoverable_index_error(&error) => {
             // A stale or corrupt side index fails plumbing the caller cannot
-            // fix — rebuild it once from scratch before giving up.
+            // fix. Ignore-rule changes can also make a formerly included
+            // untracked path invalid; rebuilding from HEAD re-applies Git's
+            // current excludes without forcing ignored content in.
             let _ = fs::remove_file(&index);
             let _ = fs::remove_file(index.with_extension("lock"));
+            let _ = fs::remove_file(&state_path);
+            index_state = CheckpointIndexState::default();
             index_retry = true;
-            capture_with_index(&root, &scope, &index, head, message, parents, start_ref)
+            capture_with_index(
+                &root,
+                &scope,
+                &index,
+                head,
+                message,
+                parents,
+                start_ref,
+                &mut index_state,
+            )
         }
         ok => ok,
     };
+    if result.is_ok() {
+        index_state.head = head.map(str::to_owned);
+        let save_state = (|| -> anyhow::Result<()> {
+            index_state.tree = git_with_index(&root, &index, ["write-tree"])?
+                .trim()
+                .to_owned();
+            if index_state.tree.is_empty() {
+                bail!("git write-tree returned no object id for the checkpoint index");
+            }
+            let bytes = serde_json::to_vec(&index_state)?;
+            let temporary = state_path.with_extension("json.tmp");
+            fs::write(&temporary, bytes)?;
+            fs::rename(temporary, &state_path)?;
+            Ok(())
+        })();
+        if let Err(error) = save_state {
+            // The sidecar only avoids future hashing; it is not part of the
+            // checkpoint contract. Do not turn an already-created snapshot
+            // into a capture failure because the cache could not be saved.
+            eprintln!("checkpoint index cache save failed: {error:#}");
+            let _ = fs::remove_file(&state_path);
+        }
+    }
     eprintln!(
         "checkpoint worktree_snapshot lock_wait={lock_wait:?} snapshot_time={:?} index_retry={index_retry}",
         snapshot_started.elapsed(),
@@ -361,9 +425,41 @@ fn capture_with_index(
     message: &str,
     parents: &[String],
     start_ref: Option<&str>,
+    index_state: &mut CheckpointIndexState,
 ) -> anyhow::Result<String> {
     if let Some(start_ref) = start_ref {
-        return capture_with_turn_start_index(root, scope, index, start_ref, message, parents);
+        if index.exists() && index_state.head.as_deref() == head && !index_state.tree.is_empty() {
+            let start_tree = git_output(root, ["rev-parse", &format!("{start_ref}^{{tree}}")])?;
+            if index_state.tree == start_tree.trim() {
+                return capture_with_cached_turn_end_index(
+                    root,
+                    scope,
+                    index,
+                    start_ref,
+                    message,
+                    parents,
+                    index_state,
+                );
+            }
+        }
+        index_state.tree.clear();
+        return capture_with_turn_start_index(
+            root,
+            scope,
+            index,
+            start_ref,
+            message,
+            parents,
+            index_state,
+        );
+    }
+
+    if head.is_some()
+        && index.exists()
+        && index_state.head.as_deref() == head
+        && !index_state.tree.is_empty()
+    {
+        return capture_with_cached_index(root, scope, index, head, message, parents, index_state);
     }
 
     // A clean worktree commits HEAD's tree outright — no index writes and no
@@ -374,10 +470,11 @@ fn capture_with_index(
         "checkpoint worktree_status changed_paths={}",
         changed_paths.len()
     );
-    if let Some(head) = head
+    if let Some(_head) = head
         && changed_paths.is_empty()
+        && index.exists()
     {
-        let tree = git_output(root, ["rev-parse", &format!("{head}^{{tree}}")])?
+        let tree = git_with_index(root, index, ["write-tree"])?
             .trim()
             .to_owned();
         if tree.is_empty() {
@@ -388,6 +485,7 @@ fn capture_with_index(
     if let Some(head) = head {
         git_with_index(root, index, ["read-tree", head])?;
     }
+    index_state.untracked_paths = list_untracked_paths(root, index, scope)?;
     if head.is_some() {
         if let Some(pathspecs) = status_pathspecs(&changed_paths)
             && !pathspecs.is_empty()
@@ -422,8 +520,10 @@ fn capture_with_turn_start_index(
     start_ref: &str,
     message: &str,
     parents: &[String],
+    index_state: &mut CheckpointIndexState,
 ) -> anyhow::Result<String> {
     git_with_index(root, index, ["read-tree", start_ref])?;
+    let removed_ignored = remove_now_ignored_untracked(root, index, index_state)?;
     let mut pathspecs = Vec::new();
     let mut changed_paths = 0;
     for args in [
@@ -439,7 +539,6 @@ fn capture_with_turn_start_index(
             "ls-files",
             "--others",
             "--exclude-standard",
-            "--directory",
             "-z",
             "--",
             scope,
@@ -451,22 +550,27 @@ fn capture_with_turn_start_index(
             .filter(|path| !path.is_empty())
         {
             changed_paths += 1;
+            if args[1] == "--others" {
+                index_state.untracked_paths.push(path.to_vec());
+            }
             push_literal_pathspec(&mut pathspecs, path);
         }
     }
     eprintln!("checkpoint turn_start_diff changed_paths={changed_paths}");
 
-    if pathspecs.is_empty() {
+    if pathspecs.is_empty() && !removed_ignored {
         return resolve_ref(root, start_ref)
             .ok_or_else(|| anyhow!("turn starting checkpoint `{start_ref}` is unavailable"));
     }
 
-    git_with_index_input(
-        root,
-        index,
-        ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
-        &pathspecs,
-    )?;
+    if !pathspecs.is_empty() {
+        git_with_index_input(
+            root,
+            index,
+            ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            &pathspecs,
+        )?;
+    }
     let tree = git_with_index(root, index, ["write-tree"])?
         .trim()
         .to_owned();
@@ -474,6 +578,191 @@ fn capture_with_turn_start_index(
         bail!("git write-tree returned no object id");
     }
     commit_tree(root, &tree, message, parents)
+}
+
+fn capture_with_cached_index(
+    root: &Path,
+    scope: &str,
+    index: &Path,
+    _head: Option<&str>,
+    message: &str,
+    parents: &[String],
+    index_state: &mut CheckpointIndexState,
+) -> anyhow::Result<String> {
+    let mut pathspecs = Vec::new();
+    let _ = remove_now_ignored_untracked(root, index, index_state)?;
+    let changed_paths = worktree_delta_paths(root, index, scope, index_state)?;
+    for path in changed_paths {
+        push_literal_pathspec(&mut pathspecs, &path);
+    }
+    if !pathspecs.is_empty() {
+        git_with_index_input(
+            root,
+            index,
+            ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            &pathspecs,
+        )?;
+    }
+    let tree = git_with_index(root, index, ["write-tree"])?
+        .trim()
+        .to_owned();
+    if tree.is_empty() {
+        bail!("git write-tree returned no object id");
+    }
+    commit_tree(root, &tree, message, parents)
+}
+
+fn capture_with_cached_turn_end_index(
+    root: &Path,
+    scope: &str,
+    index: &Path,
+    _start_ref: &str,
+    message: &str,
+    parents: &[String],
+    index_state: &mut CheckpointIndexState,
+) -> anyhow::Result<String> {
+    capture_with_cached_index(root, scope, index, None, message, parents, index_state)
+}
+
+/// Paths changed relative to the cached snapshot, including deletions and new
+/// non-ignored files. The private index already contains every unchanged file.
+fn worktree_delta_paths(
+    root: &Path,
+    index: &Path,
+    scope: &str,
+    index_state: &mut CheckpointIndexState,
+) -> anyhow::Result<Vec<Vec<u8>>> {
+    let tracked = git_with_index_output(
+        root,
+        index,
+        [
+            "diff-files",
+            "--name-only",
+            "-z",
+            "--ignore-submodules=none",
+            "--",
+            scope,
+        ],
+    )?
+    .stdout;
+    let untracked = list_untracked_paths(root, index, scope)?;
+    let mut paths = tracked
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(<[u8]>::to_vec)
+        .collect::<Vec<_>>();
+    for path in untracked {
+        paths.push(path.clone());
+        index_state.untracked_paths.push(path);
+    }
+    paths.sort();
+    paths.dedup();
+    index_state.untracked_paths.sort();
+    index_state.untracked_paths.dedup();
+    Ok(paths)
+}
+
+fn list_untracked_paths(root: &Path, index: &Path, scope: &str) -> anyhow::Result<Vec<Vec<u8>>> {
+    let output = git_with_index_output(
+        root,
+        index,
+        [
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            scope,
+        ],
+    )?
+    .stdout;
+    Ok(output
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(<[u8]>::to_vec)
+        .collect())
+}
+
+fn remove_now_ignored_untracked(
+    root: &Path,
+    index: &Path,
+    index_state: &mut CheckpointIndexState,
+) -> anyhow::Result<bool> {
+    index_state
+        .untracked_paths
+        .retain(|path| repo_path_from_bytes(root, path).is_some_and(|path| path.exists()));
+    if index_state.untracked_paths.is_empty() {
+        return Ok(false);
+    }
+    let mut input = Vec::new();
+    for path in &index_state.untracked_paths {
+        input.extend_from_slice(path);
+        input.push(0);
+    }
+    let output = git_with_index_input_output(
+        root,
+        index,
+        ["check-ignore", "--no-index", "-z", "--stdin"],
+        &input,
+    )?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        bail!("{}", command_error(&output));
+    }
+    let ignored = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(<[u8]>::to_vec)
+        .collect::<Vec<_>>();
+    if ignored.is_empty() {
+        return Ok(false);
+    }
+    let mut pathspecs = Vec::new();
+    for path in &ignored {
+        push_literal_pathspec(&mut pathspecs, path);
+    }
+    git_with_index_input(
+        root,
+        index,
+        [
+            "rm",
+            "--cached",
+            "--ignore-unmatch",
+            "-r",
+            "-q",
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+        ],
+        &pathspecs,
+    )?;
+    index_state
+        .untracked_paths
+        .retain(|path| !ignored.iter().any(|ignored| ignored == path));
+    Ok(true)
+}
+
+fn repo_path_from_bytes(root: &Path, path: &[u8]) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        Some(root.join(OsStr::from_bytes(path)))
+    }
+    #[cfg(not(unix))]
+    {
+        Some(root.join(std::str::from_utf8(path).ok()?))
+    }
+}
+
+fn recoverable_index_error(error: &anyhow::Error) -> bool {
+    let error = format!("{error:#}").to_ascii_lowercase();
+    [
+        "index file corrupt",
+        "index file smaller than expected",
+        "index file has an unsupported version",
+        "paths are ignored by one of your .gitignore files",
+    ]
+    .iter()
+    .any(|needle| error.contains(needle))
 }
 
 /// The worktree root plus the caller's path within it as a pathspec. Both
@@ -1173,6 +1462,37 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let output = git_with_optional_index_input_output(cwd, index, args, input)?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        bail!("{}", command_error(&output))
+    }
+}
+
+fn git_with_index_input_output<I, S>(
+    cwd: &Path,
+    index: &Path,
+    args: I,
+    input: &[u8],
+) -> anyhow::Result<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    git_with_optional_index_input_output(cwd, Some(index), args, input)
+}
+
+fn git_with_optional_index_input_output<I, S>(
+    cwd: &Path,
+    index: Option<&Path>,
+    args: I,
+    input: &[u8],
+) -> anyhow::Result<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let mut command = crate::command_env::search_path_command("git");
     command
         .args(args)
@@ -1193,11 +1513,7 @@ where
         .context("failed to write git stdin")?;
     let output = child.wait_with_output().context("failed to wait for git")?;
     log_git_timing(&command, started);
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        bail!("{}", command_error(&output))
-    }
+    Ok(output)
 }
 
 fn git_with_identity<I, S>(cwd: &Path, args: I) -> anyhow::Result<String>
@@ -1294,6 +1610,16 @@ mod tests {
             .unwrap();
         assert!(output.status.success(), "git {args:?} failed");
         String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    fn git_path_exists(cwd: &Path, spec: &str) -> bool {
+        crate::command_env::search_path_command("git")
+            .args(["cat-file", "-e", spec])
+            .current_dir(cwd)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
     }
 
     fn diverged_repository() -> PathBuf {
@@ -1569,6 +1895,160 @@ mod tests {
         );
         assert!(!directory.join("discard.txt").exists());
 
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn later_turn_start_reuses_the_cached_tree_with_existing_uncommitted_files() {
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        fs::write(directory.join("tracked.txt"), "baseline\n").unwrap();
+        git_ok(&directory, &["add", "tracked.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        capture_turn_start(&directory, session, 1).unwrap();
+        fs::write(directory.join("preexisting-untracked.txt"), "keep me\n").unwrap();
+        let first = capture_turn(&directory, session, 1).unwrap();
+        assert!(
+            first
+                .files
+                .iter()
+                .any(|file| file.path == "preexisting-untracked.txt")
+        );
+
+        capture_turn_start(&directory, session, 2).unwrap();
+        assert_eq!(
+            git_text(
+                &directory,
+                &[
+                    "show",
+                    &format!("{}:preexisting-untracked.txt", turn_start_ref(session, 2)),
+                ],
+            ),
+            "keep me",
+            "the next start snapshot must retain the previous uncommitted tree"
+        );
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn later_turn_start_does_not_rerun_clean_filters_for_unchanged_untracked_files() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        let filter_log = directory.with_extension("clean-filter.log");
+        let filter_log_path = filter_log.display();
+        fs::write(
+            directory.join("clean-filter.sh"),
+            format!("#!/bin/sh\necho clean >> '{filter_log_path}'\ncat\n"),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(directory.join("clean-filter.sh"))
+            .unwrap()
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(directory.join("clean-filter.sh"), permissions).unwrap();
+        fs::write(
+            directory.join(".gitattributes"),
+            "*.filtered filter=counted\n",
+        )
+        .unwrap();
+        fs::write(directory.join("tracked.txt"), "baseline\n").unwrap();
+        git_ok(
+            &directory,
+            &["config", "filter.counted.clean", "./clean-filter.sh"],
+        );
+        git_ok(&directory, &["config", "filter.counted.smudge", "cat"]);
+        git_ok(&directory, &["config", "filter.counted.required", "true"]);
+        git_ok(&directory, &["add", "."]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        capture_turn_start(&directory, session, 1).unwrap();
+        fs::write(directory.join("unchanged.filtered"), "filter me\n").unwrap();
+        capture_turn(&directory, session, 1).unwrap();
+        let runs_after_end = fs::read_to_string(&filter_log).unwrap().lines().count();
+        assert_eq!(
+            runs_after_end, 1,
+            "staging the new file should clean it once"
+        );
+
+        capture_turn_start(&directory, session, 2).unwrap();
+        assert_eq!(
+            fs::read_to_string(&filter_log).unwrap().lines().count(),
+            runs_after_end,
+            "an unchanged untracked file should come from the cached index tree"
+        );
+        fs::remove_dir_all(directory).ok();
+        fs::remove_file(filter_log).ok();
+    }
+
+    #[test]
+    fn cached_untracked_files_follow_new_ignore_rules_without_touching_the_worktree() {
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        fs::write(directory.join("tracked.txt"), "baseline\n").unwrap();
+        git_ok(&directory, &["add", "tracked.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        capture_turn_start(&directory, session, 1).unwrap();
+        fs::write(directory.join("generated.txt"), "generated\n").unwrap();
+        capture_turn(&directory, session, 1).unwrap();
+        fs::write(directory.join(".gitignore"), "generated.txt\n").unwrap();
+
+        capture_turn_start(&directory, session, 2).unwrap();
+        assert!(!git_path_exists(
+            &directory,
+            &format!("{}:generated.txt", turn_start_ref(session, 2))
+        ));
+        assert_eq!(
+            fs::read_to_string(directory.join("generated.txt")).unwrap(),
+            "generated\n",
+            "changing ignore rules must not delete user files"
+        );
         fs::remove_dir_all(directory).ok();
     }
 
