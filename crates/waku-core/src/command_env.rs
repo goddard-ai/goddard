@@ -362,6 +362,32 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
     spawn(command)?.wait_with_output()
 }
 
+/// GUI launches inherit the macOS 256-file soft cap, and the daemon
+/// multiplexes client sockets, provider runtimes, and capture pipes past
+/// that in normal use — EMFILE then surfaces as "Too many open files"
+/// spawns. Best-effort: a limit that cannot be raised must not stop startup.
+#[cfg(unix)]
+pub fn raise_open_file_limit() {
+    let mut limits = MaybeUninit::<libc::rlimit>::uninit();
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, limits.as_mut_ptr()) } != 0 {
+        return;
+    }
+    let mut limits = unsafe { limits.assume_init() };
+    if limits.rlim_cur >= limits.rlim_max {
+        return;
+    }
+    limits.rlim_cur = limits.rlim_max;
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limits) } != 0 {
+        eprintln!(
+            "Goddard: could not raise the open-file limit: {}",
+            io::Error::last_os_error()
+        );
+    }
+}
+
+#[cfg(not(unix))]
+pub fn raise_open_file_limit() {}
+
 /// Normalize a Goddard-owned provider thread before a dependency spawns the child
 /// internally. The ACP SDK owns its `async_process::Command`, so its dedicated
 /// connection thread uses this once at startup instead of [`spawn`].

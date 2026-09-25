@@ -11,6 +11,7 @@ use waku_protocol::{
 };
 
 fn main() -> anyhow::Result<()> {
+    waku_core::command_env::raise_open_file_limit();
     let mut migration = waku_protocol::migration::migrate_home_directory();
     migration.extend(waku_core::migration::migrate_data_directory());
     for failure in &migration.failures {
