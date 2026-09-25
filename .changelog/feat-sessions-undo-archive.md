@@ -1,1 +1,0 @@
-- The command palette now offers **Undo last archive** after you archive a task: it restores the task and opens it, and a batch archive comes back as a group. The offer lasts until you use it or restart the app — longer than the toast's Undo button.

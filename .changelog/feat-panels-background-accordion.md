@@ -1,1 +1,0 @@
-- When a task has several background processes, its right-panel tab lists them all in order — the one you opened stays expanded and the rest collapse into rows you can click or keyboard-expand to inspect.

@@ -34,6 +34,62 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.12.0]
+
+### Features
+
+- **Settings**
+  - Auto model routing, turn status markers, and suggested actions graduated from Experiments to the Jev settings page, where each can be switched on its own — they still need a configured Jev API key to run. Auto model routing is now a three-way setting: Show in model picker (the default), Force as default model, or Disabled.
+  - Choose Fish Audio S1, S2 Pro, and S2.1 Pro Free for voice briefings in Settings → Experiments, alongside existing speech models and custom model IDs.
+- `goddard-agent` gains a `models` subcommand that lists the provider/model combinations `create` accepts — combinations tasks on this machine have actually run, ordered with each model's first-party (vendor-native) harness first, then by recency, with an `auto` entry at the top whenever a Jev backend is configured. `create` also accepts `model: "auto"`, which routes the new task's first prompt through Jev model routing.
+- In a commit diff, click a file header to collapse or expand it, or use the control at the top to collapse or expand every file.
+- Use ⌘D to jump to the next unread completion; Ctrl+backtick is no longer assigned to that action.
+- Archiving the task you're viewing now picks where to land based on why you opened it: a task that had an unread reply or was waiting on you when you visited continues to the next task needing attention, while a task you were revisiting hands off to the next task below it in the sidebar. The "After archiving a task" and "Continue ⌘D when archiving" settings are gone — no configuration needed.
+- When a task has several background processes, its right-panel tab lists them all in order — the one you opened stays expanded and the rest collapse into rows you can click or keyboard-expand to inspect.
+- Show Devin plan name and daily and weekly quota in the usage meter when Devin's local CLI credentials are available.
+- The command palette now offers **Undo last archive** after you archive a task: it restores the task and opens it, and a batch archive comes back as a group. The offer lasts until you use it or restart the app — longer than the toast's Undo button.
+- Closing or exiting a terminal in the main area returns to the screen you opened it from when that screen is still in navigation history.
+- Runnable fenced code blocks in a task's transcript — `bash`, `sh`, `zsh`, `shell`, `python`, `ruby`, `javascript`, `perl`, `php`, `lua`, and `r` — now show a play button next to the copy button. Clicking it opens a terminal tab in the task's workspace and runs the block there, so you can watch the output and keep using the shell afterward.
+
+### Experiments
+
+- **[Experimental]** Added a "Move fast, break things" switch on Settings → Jev → Suggestions: Jev leans toward momentum — land, push, commit, fix — and those next-step suggestion chips appear more readily. Automatic actions keep their own thresholds.
+
+### Fixed
+
+- **Composer**
+  - The composer's Continue button now shows a pending state while a queued send waits on the post-turn change check, instead of silently doing nothing on click. The queued continue appears as its own row above the composer (removable like any queued message), repeat presses no longer stack duplicate resumes, and the "Checking for changes…" card explains that queued messages send when it finishes.
+  - The selected task's session header is hidden while viewing Composer Drafts and returns when you leave the page.
+  - Press ⌘Z after Escape saves composer content as a draft to restore that content to the composer.
+  - The "Push and open a PR" suggestion no longer appears for a task working in a checkout that is already on the repository's default branch, and it now clears once the changes are landed or a pull request exists for the branch.
+  - Stop now works while a sent prompt is still preparing — during Auto model routing, workspace setup, or checkpoint capture — abandoning the wait and returning the prompt to the composer.
+- **Providers**
+  - The model picker's Auto (Jev) selection now carries to the next new task like a concrete model does — the draft re-routes its own first prompt instead of inheriting the previous task's resolved model.
+  - Provider tasks and checks now clean up their child processes when you end them.
+- **Git**
+  - Git checkpoints save without blocking task updates and stop with a warning if Git stalls for 30 seconds.
+  - On the Projects page, a temporary GitHub CLI or network error no longer marks a GitHub repository as non-GitHub; Refresh retries the lookup.
+  - Stopping a planning turn that has not changed any files skips the Git checkpoint capture.
+- **Transcript**
+  - Fixed the floating turn-status markers popping out and back in shortly after a transcript scroll ended.
+  - The transcript's waiting label now names the work actually running while a prompt prepares — workspace setup, checkpoint capture, routing, or provider startup — instead of showing "Routing task…" for the whole wait.
+  - Hide the unread reply dot when the transcript is too narrow to show turn navigation.
+- **Terminals**
+  - Clicking or dragging to select text in a terminal now lands on the row under the pointer; the hit target previously drifted up to a row off toward the bottom of the grid.
+  - Typing or pasting in a terminal returns its scrollback view to the live bottom.
+- **Keyboard**
+  - ⌥Tab cycles the composer session's favorite models as intended: hold ⌥ and tap Tab to step the highlight, release ⌥ to apply the pick, or press Escape to close the picker without changing anything.
+  - Fixed Escape doing nothing while a keyboard option picker was open — it now closes the ⌘/ model, ⌘⌥N workspace, and ⌘⌥⇧N branch pickers (and backs out of branch creation first), instead of passing through to stop the running turn.
+- **Settings**
+  - The automatic answer sharpening prompt now focuses on rewriting; Jev decides whether an answer needs it.
+  - Voice briefings now report when audio playback cannot start instead of marking the clip as played, so you can retry it.
+- The daemon stays responsive when several subprocess-heavy requests run at once.
+- Sessions no longer periodically stall and disconnect under heavy Git activity.
+- The daemon resumes accepting connections after a temporary system resource shortage.
+- Very long goals now wrap and stay scrollable in the goal dialog instead of overflowing the page.
+- Tasks a Goddard agent spawns with `goddard-agent create` now inherit the agent's access mode and run environment — a sandboxed agent's spawned tasks stay sandboxed — instead of always starting with the default access on the host.
+- Keep the worktree icon and timestamp at the far end of sidebar session rows while holding Alt to peek at the configured model.
+
 ## [0.11.0]
 
 ### Features

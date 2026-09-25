@@ -1,1 +1,0 @@
-- ⌥Tab cycles the composer session's favorite models as intended: hold ⌥ and tap Tab to step the highlight, release ⌥ to apply the pick, or press Escape to close the picker without changing anything.

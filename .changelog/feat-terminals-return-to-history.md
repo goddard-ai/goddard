@@ -1,1 +1,0 @@
-- Closing or exiting a terminal in the main area returns to the screen you opened it from when that screen is still in navigation history.

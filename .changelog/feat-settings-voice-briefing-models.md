@@ -1,1 +1,0 @@
-- Choose Fish Audio S1, S2 Pro, and S2.1 Pro Free for voice briefings in Settings → Experiments, alongside existing speech models and custom model IDs.

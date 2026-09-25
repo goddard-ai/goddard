@@ -1,1 +1,0 @@
-- Fixed the floating turn-status markers popping out and back in shortly after a transcript scroll ended.

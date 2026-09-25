@@ -1,1 +1,0 @@
-- Hide the unread reply dot when the transcript is too narrow to show turn navigation.

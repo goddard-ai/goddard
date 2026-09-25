@@ -1,1 +1,0 @@
-- Runnable fenced code blocks in a task's transcript — `bash`, `sh`, `zsh`, `shell`, `python`, `ruby`, `javascript`, `perl`, `php`, `lua`, and `r` — now show a play button next to the copy button. Clicking it opens a terminal tab in the task's workspace and runs the block there, so you can watch the output and keep using the shell afterward.

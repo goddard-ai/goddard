@@ -1,1 +1,0 @@
-- Stopping a planning turn that has not changed any files skips the Git checkpoint capture.

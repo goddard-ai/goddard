@@ -1,1 +1,0 @@
-- Added a "Move fast, break things" switch on Settings → Jev → Suggestions: Jev leans toward momentum — land, push, commit, fix — and those next-step suggestion chips appear more readily. Automatic actions keep their own thresholds.

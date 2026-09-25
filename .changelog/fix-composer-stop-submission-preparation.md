@@ -1,1 +1,0 @@
-- Stop now works while a sent prompt is still preparing — during Auto model routing, workspace setup, or checkpoint capture — abandoning the wait and returning the prompt to the composer.

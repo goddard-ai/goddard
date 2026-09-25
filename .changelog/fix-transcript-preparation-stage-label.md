@@ -1,1 +1,0 @@
-- The transcript's waiting label now names the work actually running while a prompt prepares — workspace setup, checkpoint capture, routing, or provider startup — instead of showing "Routing task…" for the whole wait.

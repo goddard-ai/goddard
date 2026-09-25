@@ -1,1 +1,0 @@
-- Kept the daemon listener retrying after temporary file descriptor exhaustion instead of stopping the accept loop.

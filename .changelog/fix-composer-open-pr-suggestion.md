@@ -1,1 +1,0 @@
-- The "Push and open a PR" suggestion no longer appears for a task working in a checkout that is already on the repository's default branch, and it now clears once the changes are landed or a pull request exists for the branch.

@@ -1,1 +1,0 @@
-- Bounded concurrent daemon request work so subprocess-heavy requests cannot create an unbounded number of workers.

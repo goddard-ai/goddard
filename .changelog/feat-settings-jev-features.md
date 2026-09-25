@@ -1,1 +1,0 @@
-- Auto model routing, turn status markers, and suggested actions graduated from Experiments to the Jev settings page, where each can be switched on its own — they still need a configured Jev API key to run. Auto model routing is now a three-way setting: Show in model picker (the default), Force as default model, or Disabled.

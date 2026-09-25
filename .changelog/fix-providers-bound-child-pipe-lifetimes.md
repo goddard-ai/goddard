@@ -1,1 +1,0 @@
-- Fixed cases where ending a provider task or check could leave its child processes and output pipes open in the daemon.

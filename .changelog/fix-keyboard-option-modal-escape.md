@@ -1,1 +1,0 @@
-- Fixed Escape doing nothing while a keyboard option picker was open — it now closes the ⌘/ model, ⌘⌥N workspace, and ⌘⌥⇧N branch pickers (and backs out of branch creation first), instead of passing through to stop the running turn.
