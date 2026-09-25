@@ -94,7 +94,7 @@ fn schema() -> serde_json::Value {
     json!({
         "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate; the daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
         "create": {
-            "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation.",
+            "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation. The task inherits this task's access mode and run environment — a sandboxed task spawns sandboxed tasks.",
             "fields": {
                 "provider": {"type": "string", "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "goose", "grok", "kimi", "muse", "ohmypi", "pi"], "notes": "omit to run the new task on this task's provider"},
                 "model": {"type": "string", "notes": "explicit provider model id; \"default\" selects the provider's own default; omit to inherit this task's model when it runs the resolved provider"},

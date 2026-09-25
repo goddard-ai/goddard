@@ -1,0 +1,1 @@
+- Tasks a Goddard agent spawns with `goddard-agent create` now inherit the agent's access mode and run environment — a sandboxed agent's spawned tasks stay sandboxed — instead of always starting with the default access on the host.

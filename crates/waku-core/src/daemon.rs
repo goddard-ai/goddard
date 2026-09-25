@@ -4483,7 +4483,10 @@ impl WakuBackend {
 
     /// The task-creation half of `agent create`, shared with the automation
     /// scheduler: the agent-tools credential gate is the only difference —
-    /// the daemon's own scheduler needs no scoped token.
+    /// the daemon's own scheduler needs no scoped token. A task an agent
+    /// spawns also inherits its access posture — `runtime_mode` and run
+    /// `environment` — so sandboxed or supervised work stays contained;
+    /// senderless automation tasks take the defaults.
     pub(crate) fn create_agent_task(
         &self,
         sender: Option<Uuid>,
@@ -4516,6 +4519,7 @@ impl WakuBackend {
                         session.reasoning_effort.clone(),
                         session.service_tier.clone(),
                         session.context_window.clone(),
+                        (session.runtime_mode, session.environment()),
                     )
                 })
         });
@@ -4525,6 +4529,13 @@ impl WakuBackend {
             .ok_or_else(|| {
                 anyhow!("`provider` is required when no sending task is known to inherit from")
             })?;
+        // Access posture is not provider vocabulary: a sandboxed or
+        // full-access task's spawned work keeps its containment whatever
+        // provider it resolves to.
+        let (sender_mode, sender_environment) = sender_config
+            .as_ref()
+            .map(|config| config.5)
+            .unwrap_or_default();
         let sender_config = sender_config.filter(|config| config.0 == provider);
         let model = match selection.model.as_deref().map(str::trim) {
             Some("" | "default") => None,
@@ -4602,6 +4613,12 @@ impl WakuBackend {
             }
         };
         let mut session = AgentSession::new(project_id, provider);
+        // Posture is stamped verbatim — an environment the resolved
+        // provider cannot run (a sandbox guest or cloud it lacks) fails the
+        // launch honestly rather than silently running the spawned work
+        // somewhere less contained.
+        session.runtime_mode = sender_mode;
+        session.environment = sender_environment;
         session.model = model;
         session.reasoning_effort = reasoning_effort;
         session.service_tier = service_tier;
@@ -6796,6 +6813,99 @@ mod tests {
         assert_eq!(cwd, root.join("sandbox-homes"));
         assert!(args.contains(&"HOME=/root".to_owned()));
         assert!(args.contains(&"--allow-host-writes".to_owned()));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// `agent create` stamps the sender's access posture on the spawned
+    /// task: sandboxed or supervised work stays contained even when the
+    /// child resolves another provider. The provider binary override points
+    /// at a missing path so the first prompt's launch fails deterministically
+    /// after the session persists, never reaching a real provider process.
+    #[test]
+    fn agent_create_inherits_the_senders_access_posture() {
+        let root = std::env::temp_dir().join(format!("waku-agent-create-{}", Uuid::new_v4()));
+        let project_dir = root.join("project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+        let mut daemon_settings = settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        settings.replace(daemon_settings).unwrap();
+        let backend = WakuBackend::new(settings, StateStore::daemon(root.join("app.db"))).unwrap();
+        let create = |sender: Option<Uuid>| {
+            backend.create_agent_task(
+                sender,
+                AgentCreateSelection {
+                    provider: Some(ProviderKind::Codex),
+                    model: None,
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                },
+                project_dir.clone(),
+                AgentWorkspace::Local,
+                None,
+                "Summarize the diff".to_owned(),
+                &EventSink::detached(),
+            )
+        };
+
+        let mut sandboxed = AgentSession::new(Uuid::new_v4(), ProviderKind::Claude);
+        sandboxed.runtime_mode = crate::model::RuntimeMode::FullAccess;
+        sandboxed.environment = crate::model::SessionEnvironment::Sandbox;
+        let sandboxed_id = sandboxed.id;
+        backend.task_state.lock().sessions.push(sandboxed);
+        assert!(create(Some(sandboxed_id)).is_err());
+        {
+            let state = backend.task_state.lock();
+            let created = state
+                .sessions
+                .last()
+                .expect("the spawned task persisted before the failed launch");
+            assert_ne!(created.id, sandboxed_id);
+            assert_eq!(created.provider, ProviderKind::Codex);
+            assert_eq!(created.runtime_mode, crate::model::RuntimeMode::FullAccess);
+            assert_eq!(
+                created.environment(),
+                crate::model::SessionEnvironment::Sandbox
+            );
+        }
+
+        // A supervised sender cannot relax its spawned work into the more
+        // permissive AutoAcceptEdits default.
+        let mut supervised = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        supervised.runtime_mode = crate::model::RuntimeMode::Ask;
+        let supervised_id = supervised.id;
+        backend.task_state.lock().sessions.push(supervised);
+        assert!(create(Some(supervised_id)).is_err());
+        {
+            let state = backend.task_state.lock();
+            let created = state.sessions.last().unwrap();
+            assert_ne!(created.id, supervised_id);
+            assert_eq!(created.runtime_mode, crate::model::RuntimeMode::Ask);
+            assert_eq!(
+                created.environment(),
+                crate::model::SessionEnvironment::Local
+            );
+        }
+
+        // Senderless creation (the automation scheduler's path) keeps the
+        // ordinary defaults.
+        assert!(create(None).is_err());
+        {
+            let state = backend.task_state.lock();
+            let created = state.sessions.last().unwrap();
+            assert_eq!(
+                created.runtime_mode,
+                crate::model::RuntimeMode::AutoAcceptEdits
+            );
+            assert_eq!(
+                created.environment(),
+                crate::model::SessionEnvironment::Local
+            );
+        }
         std::fs::remove_dir_all(&root).ok();
     }
 
