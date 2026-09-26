@@ -988,7 +988,10 @@ fn prepare_turn_diff_base(
 }
 
 fn turn_start_metadata(cwd: &Path, start_ref: &str) -> anyhow::Result<TurnStartMetadata> {
-    let message = git_output(cwd, ["show", "-s", "--format=%B", start_ref])?;
+    // `git log -1` reads the message without the combined-diff pass `git
+    // show -s` still runs per parent — turn-start snapshots carry one parent
+    // per repository ref, so `show` scales with ref count here.
+    let message = git_output(cwd, ["log", "-1", "--format=%B", start_ref])?;
     let encoded = message
         .lines()
         .find_map(|line| line.strip_prefix(TURN_START_METADATA_PREFIX))

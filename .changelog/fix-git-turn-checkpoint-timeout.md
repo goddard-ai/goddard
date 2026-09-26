@@ -1,0 +1,1 @@
+- Fixed a "turn checkpoint capture exceeded its 30-second time limit" error that could appear after a turn finished on repositories with many refs; affected turns now get their changed-files card and restore point.
