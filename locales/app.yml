@@ -1161,6 +1161,10 @@ routing.feature_auto_prompt_suggest_description:
   en: Suggests question weights and a threshold for the auto-prompt editor
 routing.feature_auto_prompt_preview_description:
   en: Test-runs an auto-prompt rule against this task
+routing.feature_managed_goal:
+  en: Managed goal
+routing.feature_managed_goal_description:
+  en: Decides whether the active goal is complete, should continue, or needs your input
 jev.tab_suggestions:
   en: Suggestions
 jev.tab_automation:
