@@ -1,0 +1,1 @@
+- Agent replies render `<ref_snippet>` markers as clickable file and line references.

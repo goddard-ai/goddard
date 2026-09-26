@@ -24,6 +24,11 @@ static BARE_WEB_URL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)\bhttps?://[^\s<>"`\\]+"#).expect("bare web URL regex should compile")
 });
 
+static REF_SNIPPET: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^\s*<ref_snippet\s+file=(?:\"([^\"]+)\"|'([^']+)')\s+line=(?:\"([1-9][0-9]*)\"|'([1-9][0-9]*)')\s*/>\s*$"#)
+        .expect("valid ref_snippet matcher")
+});
+
 // ── Tree model ─────────────────────────────────────────────────────────────
 
 /// Inline styling threaded through nested emphasis and links.
@@ -412,8 +417,6 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
             vec![parse_table(cursor, align)]
         }
         Tag::HtmlBlock => {
-            // Raw HTML renders literally: an agent transcript is far more
-            // likely to be *discussing* markup than asking us to apply it.
             let mut text = String::new();
             loop {
                 match cursor.next_event() {
@@ -423,9 +426,32 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
                 }
             }
             let text = text.trim_end_matches('\n').to_owned();
-            if text.is_empty() {
+            if let Some(captures) = REF_SNIPPET.captures(&text) {
+                let file = captures
+                    .get(1)
+                    .or_else(|| captures.get(2))
+                    .unwrap()
+                    .as_str();
+                let line = captures
+                    .get(3)
+                    .or_else(|| captures.get(4))
+                    .unwrap()
+                    .as_str();
+                let label = format!(
+                    "{}:{line}",
+                    file.rsplit(['/', '\\']).next().unwrap_or(file)
+                );
+                let mut style = InlineStyle::default();
+                style.code = true;
+                style.link = Some(format!("{file}#L{line}"));
+                vec![Block::Paragraph {
+                    runs: vec![InlineRun { text: label, style }],
+                }]
+            } else if text.is_empty() {
                 Vec::new()
             } else {
+                // Raw HTML renders literally: an agent transcript is far more
+                // likely to be *discussing* markup than asking us to apply it.
                 vec![Block::Paragraph {
                     runs: vec![InlineRun::plain(text)],
                 }]
