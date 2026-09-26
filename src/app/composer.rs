@@ -6015,8 +6015,7 @@ impl Waku {
                         let list_selected_branch = selected_branch.clone();
                         let list_weak = weak.clone();
                         let list_popover = popover.clone();
-                        let height =
-                            (visible_branches.len() as f32 * BRANCH_PICKER_ROW_HEIGHT).min(260.0);
+                        let height = (visible_branches.len() as f32 * PICKER_ROW_HEIGHT).min(260.0);
                         div()
                             .id("branch-picker-list")
                             .w_full()
@@ -6050,7 +6049,7 @@ impl Waku {
                                             branch.name
                                         )))
                                         .w_full()
-                                        .h(px(BRANCH_PICKER_ROW_HEIGHT))
+                                        .h(px(PICKER_ROW_HEIGHT))
                                         .px(px(8.0))
                                         .rounded(px(8.0))
                                         .flex()
@@ -6116,7 +6115,7 @@ impl Waku {
                         div()
                             .id("create-workspace-branch")
                             .mx(px(4.0))
-                            .h(px(BRANCH_PICKER_ROW_HEIGHT))
+                            .h(px(PICKER_ROW_HEIGHT))
                             .px(px(8.0))
                             .rounded(px(8.0))
                             .flex()
@@ -6649,7 +6648,31 @@ impl Waku {
         let can_pick_project = can_configure_workspace || subject_switchable;
         let moving_to_worktree = subject_moving;
 
-        let project_handle = self.menu_handle("workspace-project", cx);
+        let project_search = self.project_search.clone();
+        let project_search_focus = project_search.read(cx).focus_handle(cx);
+        let project_handle = {
+            let toggle_weak = cx.entity().downgrade();
+            let reset_search = project_search.clone();
+            let picker_focus = project_search_focus.clone();
+            self.menu_handle_with("workspace-project", cx, move |open, window, cx| {
+                let _ = toggle_weak.update(cx, |this, cx| {
+                    if open {
+                        this.project_picker_highlight = None;
+                        reset_search.update(cx, |input, cx| input.clear(cx));
+                    } else {
+                        let focus = this.composer_focus(cx);
+                        window.focus(&focus, cx);
+                    }
+                    cx.notify();
+                });
+                if open {
+                    let picker_focus = picker_focus.clone();
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| window.focus(&picker_focus, cx));
+                    });
+                }
+            })
+        };
         let project_trigger = MenuChip::new("workspace-project")
             .icon("icons/folder.svg", theme.text_tertiary)
             .label(project_name)
@@ -6662,79 +6685,378 @@ impl Waku {
                     .shortcut_action(&SwitchProjectForward)
             });
         let project_selector = if can_pick_project {
-            let project_options = self
-                .state
-                .projects
+            let normalized_query = project_search
+                .read(cx)
+                .content()
+                .trim()
+                .to_ascii_lowercase();
+            let visible_projects = Rc::new(if project_handle.is_open() {
+                let tokens = normalized_query.split_whitespace().collect::<Vec<_>>();
+                let home = self.home_directory.as_deref();
+                let mut visible = self
+                    .state
+                    .projects
+                    .iter()
+                    .filter(|project| !project.is_projectless())
+                    // A started task can only move to a project its own
+                    // daemon can run — a remote host's path means nothing
+                    // here.
+                    .filter(|project| {
+                        !subject_started
+                            || Some(self.daemons.project_owner(project.id)) == subject_owner
+                    })
+                    .filter(|project| {
+                        if tokens.is_empty() {
+                            return true;
+                        }
+                        let text = format!(
+                            "{} {}",
+                            project.display_name(),
+                            settings::abbreviate_home_path(&project.path, home)
+                        )
+                        .to_ascii_lowercase();
+                        tokens.iter().all(|token| text.contains(token))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                project_picker_order(&mut visible, &self.state.sessions, subject_project_id);
+                visible
+            } else {
+                Vec::new()
+            });
+            let star_focuses = visible_projects
                 .iter()
-                .filter(|project| !project.is_projectless())
-                // A started task can only move to a project its own daemon
-                // can run — a remote host's path means nothing here.
-                .filter(|project| {
-                    !subject_started
-                        || Some(self.daemons.project_owner(project.id)) == subject_owner
+                .map(|project| {
+                    self.transcript_control_focus(format!("project-picker-star-{}", project.id), cx)
                 })
-                .filter(|project| Some(project.id) == subject_project_id)
-                .chain(
-                    self.state
-                        .projects
-                        .iter()
-                        .filter(|project| !project.is_projectless())
-                        .filter(|project| {
-                            !subject_started
-                                || Some(self.daemons.project_owner(project.id)) == subject_owner
-                        })
-                        .filter(|project| Some(project.id) != subject_project_id),
-                )
-                .map(|project| (project.id, project.display_name(), project.starred))
                 .collect::<Vec<_>>();
+            let picker_rows = Rc::new(
+                visible_projects
+                    .iter()
+                    .enumerate()
+                    .map(|(index, project)| {
+                        (
+                            project.id,
+                            SharedString::from(project.display_name()),
+                            project.starred,
+                            star_focuses[index].clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            // "No project" names a destination for a fresh draft — a started
+            // task cannot become projectless, so its list omits the row. Big
+            // Picture's chip stays a destination control and keeps it.
+            let show_no_project = !on_projects_page && (!subject_started || big_picture_open);
+            let actions = Rc::new(
+                picker_rows
+                    .iter()
+                    .map(|(project_id, ..)| ProjectPickerAction::Project(*project_id))
+                    .chain(std::iter::once(ProjectPickerAction::NewProject))
+                    .chain(show_no_project.then_some(ProjectPickerAction::NoProject))
+                    .collect::<Vec<_>>(),
+            );
+            let highlight = self
+                .project_picker_highlight
+                .filter(|index| *index < actions.len());
+            if project_handle.is_open() {
+                self.sync_project_picker_rows(
+                    &picker_rows
+                        .iter()
+                        .map(|(project_id, ..)| *project_id)
+                        .collect::<Vec<_>>(),
+                );
+            }
+            let project_list = self.project_picker_list_state.clone();
             let weak = cx.entity().downgrade();
-            dropdown_menu(
+            let search = project_search.clone();
+            let search_focus = project_search_focus.clone();
+            popover(
                 project_trigger,
-                "workspace-project-menu",
                 &project_handle,
                 MenuAlign::AboveLeft,
-                move |_| {
-                    let mut items = project_options
-                        .clone()
-                        .into_iter()
-                        .map(|(project_id, project_name, starred)| {
-                            let weak = weak.clone();
-                            let star_weak = weak.clone();
-                            MenuItem::new(project_name, move |window, cx| {
-                                if Some(project_id) != subject_project_id {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.select_project_from_composer(project_id, window, cx);
-                                    });
-                                }
-                            })
-                            .selected(Some(project_id) == subject_project_id)
-                            .star(starred, move |_, cx| {
-                                let _ = star_weak.update(cx, |this, cx| {
-                                    this.toggle_project_starred(project_id, cx);
-                                });
-                            })
+                move |popover, _window, _cx| {
+                    let theme = Theme::current(_cx);
+                    let popover = popover.clone();
+                    let next_actions = actions.clone();
+                    let previous_actions = actions.clone();
+                    let confirm_actions = actions.clone();
+                    let next_weak = weak.clone();
+                    let previous_weak = weak.clone();
+                    let confirm_weak = weak.clone();
+                    let confirm_popover = popover.clone();
+
+                    let rows = if picker_rows.is_empty() {
+                        div()
+                            .id("project-picker-list-empty")
+                            .h(px(64.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_ghost)
+                            .child(tr!("projects.none_found"))
+                            .into_any_element()
+                    } else {
+                        let list_rows = picker_rows.clone();
+                        let list_actions = actions.clone();
+                        let list_weak = weak.clone();
+                        let list_popover = popover.clone();
+                        let list_state = project_list.clone();
+                        let field_focus = search_focus.clone();
+                        let height = (picker_rows.len() as f32 * PICKER_ROW_HEIGHT).min(260.0);
+                        div()
+                            .id("project-picker-list")
+                            .w_full()
+                            .h(px(height))
+                            .flex_none()
+                            .px(px(4.0))
+                            .child(
+                                list(list_state.clone(), move |index, _window, _cx| {
+                                    let Some((project_id, name, starred, star_focus)) =
+                                        list_rows.get(index)
+                                    else {
+                                        return div().into_any_element();
+                                    };
+                                    let project_id = *project_id;
+                                    let starred = *starred;
+                                    let star_focus = star_focus.clone();
+                                    let selected = Some(project_id) == subject_project_id;
+                                    let highlighted = highlight
+                                        .and_then(|index| list_actions.get(index))
+                                        .is_some_and(|action| {
+                                            matches!(
+                                                action,
+                                                ProjectPickerAction::Project(id)
+                                                    if *id == project_id
+                                            )
+                                        });
+                                    let star_weak = list_weak.clone();
+                                    let star_key_weak = list_weak.clone();
+                                    let key_rows = list_rows.clone();
+                                    let key_list = list_state.clone();
+                                    let key_field = field_focus.clone();
+                                    let star_button = div()
+                                        .id(SharedString::from(format!(
+                                            "project-picker-star-{project_id}"
+                                        )))
+                                        .flex_none()
+                                        .size(px(20.0))
+                                        .rounded(px(6.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .cursor_default()
+                                        .track_focus(&star_focus)
+                                        .focus_visible(|element| {
+                                            element.bg(theme.focus_highlight())
+                                        })
+                                        .hover(|element| element.bg(theme.overlay_strong))
+                                        .tooltip(Tooltip::text(if starred {
+                                            tr!("common.unstar")
+                                        } else {
+                                            tr!("common.star")
+                                        }))
+                                        .child(icon(
+                                            if starred {
+                                                "icons/star-filled.svg"
+                                            } else {
+                                                "icons/star.svg"
+                                            },
+                                            12.0,
+                                            if starred {
+                                                theme.favorite
+                                            } else {
+                                                theme.text_ghost
+                                            },
+                                        ))
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_mouse_up(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            let _ = star_weak.update(cx, |this, cx| {
+                                                this.toggle_project_starred(project_id, cx);
+                                            });
+                                        })
+                                        // The field owns the arrows while it
+                                        // holds focus, so the stars' cycle
+                                        // is driven by hand: Tab steps
+                                        // between stars with the field at
+                                        // both ends, and any arrow returns
+                                        // to the field's list navigation.
+                                        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                                            match event.keystroke.key.as_str() {
+                                                "enter" | "space" => {
+                                                    cx.stop_propagation();
+                                                    let _ = star_key_weak.update(cx, |this, cx| {
+                                                        this.toggle_project_starred(project_id, cx);
+                                                    });
+                                                }
+                                                "tab" => {
+                                                    cx.stop_propagation();
+                                                    let target = if event.keystroke.modifiers.shift
+                                                    {
+                                                        index.checked_sub(1)
+                                                    } else {
+                                                        (index + 1 < key_rows.len())
+                                                            .then_some(index + 1)
+                                                    };
+                                                    if let Some(target) = target {
+                                                        window.focus(&key_rows[target].3, cx);
+                                                        key_list.scroll_to_reveal_item(target);
+                                                    } else {
+                                                        window.focus(&key_field, cx);
+                                                    }
+                                                }
+                                                "up" | "down" | "left" | "right" => {
+                                                    cx.stop_propagation();
+                                                    window.focus(&key_field, cx);
+                                                }
+                                                _ => {}
+                                            }
+                                        });
+                                    let select_weak = list_weak.clone();
+                                    let select_popover = list_popover.clone();
+                                    div()
+                                        .id(SharedString::from(format!("project-row-{project_id}")))
+                                        .w_full()
+                                        .h(px(PICKER_ROW_HEIGHT))
+                                        .px(px(8.0))
+                                        .rounded(px(8.0))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(8.0))
+                                        .cursor_default()
+                                        .when(highlighted, |element| {
+                                            element.bg(theme.overlay_strong)
+                                        })
+                                        .hover(|element| element.bg(theme.overlay))
+                                        .active(|element| element.opacity(0.85))
+                                        .child(icon("icons/folder.svg", 12.0, theme.text))
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .flex_1()
+                                                .truncate()
+                                                .text_size(sp(12.5))
+                                                .line_height(sp(15.0))
+                                                .text_color(theme.text)
+                                                .child(name.clone()),
+                                        )
+                                        .when(selected, |element| {
+                                            element.child(icon(
+                                                "icons/check.svg",
+                                                11.0,
+                                                theme.text_secondary,
+                                            ))
+                                        })
+                                        .child(star_button)
+                                        .on_click(move |_, window, cx| {
+                                            if Some(project_id) != subject_project_id {
+                                                let _ = select_weak.update(cx, |this, cx| {
+                                                    this.select_project_from_composer(
+                                                        project_id, window, cx,
+                                                    );
+                                                });
+                                            }
+                                            select_popover.close(window, cx);
+                                            window.refresh();
+                                        })
+                                        .into_any_element()
+                                })
+                                .size_full(),
+                            )
+                            .into_any_element()
+                    };
+
+                    let new_project_highlighted = highlight.and_then(|index| actions.get(index))
+                        == Some(&ProjectPickerAction::NewProject);
+                    let new_project_shortcut =
+                        crate::ui::shortcut::ShortcutHint::action(&NewProject)
+                            .resolve(_window, _cx);
+                    let new_project_weak = weak.clone();
+                    let new_project_popover = popover.clone();
+                    let new_project_row = div()
+                        .id("project-picker-new-project")
+                        .mx(px(4.0))
+                        .h(px(PICKER_ROW_HEIGHT))
+                        .px(px(8.0))
+                        .rounded(px(8.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .cursor_default()
+                        .when(new_project_highlighted, |element| {
+                            element.bg(theme.overlay_strong)
                         })
-                        .collect::<Vec<_>>();
-                    if !items.is_empty() {
-                        items.push(MenuItem::Separator);
-                    }
-                    let add_project = weak.clone();
-                    items.push(
-                        MenuItem::new(tr!("project.new_project"), move |_, cx| {
-                            let _ = add_project.update(cx, |this, cx| this.add_project(cx));
+                        .hover(|element| element.bg(theme.overlay))
+                        .active(|element| element.opacity(0.85))
+                        .child(icon("icons/folder-new.svg", 12.0, theme.text_secondary))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .truncate()
+                                .text_size(sp(12.5))
+                                .line_height(sp(15.0))
+                                .text_color(theme.text)
+                                .child(tr!("project.new_project")),
+                        )
+                        .when_some(new_project_shortcut, |element, shortcut| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_ghost)
+                                    .child(shortcut),
+                            )
                         })
-                        .icon("icons/folder-new.svg")
-                        .shortcut_action(&NewProject),
-                    );
-                    let projectless = weak.clone();
-                    // "No project" names a destination for a fresh draft — a
-                    // started task cannot become projectless, so its menu
-                    // omits the row. Big Picture's chip stays a destination
-                    // control and keeps it.
-                    if !on_projects_page && (!subject_started || big_picture_open) {
-                        items.push(
-                            MenuItem::new(tr!("project.no_project"), move |_, cx| {
-                                let _ = projectless.update(cx, |this, cx| {
+                        .on_click(move |_, window, cx| {
+                            new_project_popover.close(window, cx);
+                            let _ = new_project_weak.update(cx, |this, cx| this.add_project(cx));
+                            window.refresh();
+                        });
+
+                    let no_project_row = show_no_project.then(|| {
+                        let highlighted = highlight.and_then(|index| actions.get(index))
+                            == Some(&ProjectPickerAction::NoProject);
+                        let projectless_weak = weak.clone();
+                        let projectless_popover = popover.clone();
+                        div()
+                            .id("project-picker-no-project")
+                            .mx(px(4.0))
+                            .h(px(PICKER_ROW_HEIGHT))
+                            .px(px(8.0))
+                            .rounded(px(8.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .cursor_default()
+                            .when(highlighted, |element| element.bg(theme.overlay_strong))
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.opacity(0.85))
+                            .child(icon("icons/x.svg", 12.0, theme.text_secondary))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(15.0))
+                                    .text_color(theme.text)
+                                    .child(tr!("project.no_project")),
+                            )
+                            .when(projectless_selected, |element| {
+                                element.child(icon("icons/check.svg", 11.0, theme.text_secondary))
+                            })
+                            .on_click(move |_, window, cx| {
+                                projectless_popover.close(window, cx);
+                                let _ = projectless_weak.update(cx, |this, cx| {
                                     let subject_projectless = {
                                         let (_, project_id) = this.workspace_subject();
                                         project_id.is_some_and(|project_id| {
@@ -6747,12 +7069,110 @@ impl Waku {
                                         this.create_projectless_session_from_composer(cx);
                                     }
                                 });
+                                window.refresh();
                             })
-                            .icon("icons/x.svg")
-                            .selected(projectless_selected),
-                        );
-                    }
-                    items
+                    });
+
+                    div()
+                        .w(px(360.0))
+                        .max_h(px(420.0))
+                        .rounded(px(16.0))
+                        .overflow_hidden()
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.raised)
+                        .shadow_lg()
+                        .flex()
+                        .flex_col()
+                        // `tab` reaches the card as an action while the
+                        // field holds focus — hand the stars the entry point
+                        // of the cycle they drive among themselves.
+                        .on_action({
+                            let star_focuses = star_focuses.clone();
+                            let list = project_list.clone();
+                            move |_: &SelectNextTab, window, cx| {
+                                if let Some(focus) = star_focuses.first() {
+                                    window.focus(focus, cx);
+                                    list.scroll_to_reveal_item(0);
+                                }
+                            }
+                        })
+                        .on_action({
+                            let star_focuses = star_focuses.clone();
+                            let list = project_list.clone();
+                            move |_: &SelectPreviousTab, window, cx| {
+                                if let Some(index) = star_focuses.len().checked_sub(1) {
+                                    window.focus(&star_focuses[index], cx);
+                                    list.scroll_to_reveal_item(index);
+                                }
+                            }
+                        })
+                        .on_action(move |_: &SelectNextEntry, _, cx| {
+                            let _ = next_weak.update(cx, |this, cx| {
+                                this.move_project_picker_highlight("down", &next_actions, cx);
+                            });
+                        })
+                        .on_action(move |_: &SelectPreviousEntry, _, cx| {
+                            let _ = previous_weak.update(cx, |this, cx| {
+                                this.move_project_picker_highlight("up", &previous_actions, cx);
+                            });
+                        })
+                        .on_action(move |_: &ConfirmEntry, window, cx| {
+                            let should_close = confirm_weak
+                                .update(cx, |this, cx| {
+                                    this.confirm_project_picker_action(&confirm_actions, window, cx)
+                                })
+                                .unwrap_or(false);
+                            if should_close {
+                                confirm_popover.close(window, cx);
+                                window.refresh();
+                            }
+                        })
+                        .child(
+                            div()
+                                .h(px(52.0))
+                                .px(px(12.0))
+                                .pt(px(10.0))
+                                .pb(px(8.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .h(px(34.0))
+                                        .px(px(10.0))
+                                        .rounded(px(11.0))
+                                        .bg(theme.surface)
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(8.0))
+                                        .child(icon("icons/search.svg", 15.0, theme.text_secondary))
+                                        .child(div().flex_1().min_w_0().child(search.clone())),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .px(px(14.0))
+                                .pt(px(3.0))
+                                .pb(px(7.0))
+                                .text_size(sp(12.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("projects.title")),
+                        )
+                        .child(rows)
+                        .child(
+                            div()
+                                .mx(px(6.0))
+                                .my(px(4.0))
+                                .h(hairline())
+                                .bg(theme.separator),
+                        )
+                        .child(new_project_row)
+                        .when_some(no_project_row, |element, row| element.child(row))
+                        .child(div().h(px(4.0)))
+                        .into_any_element()
                 },
             )
         } else {
@@ -6935,7 +7355,7 @@ impl Waku {
                             let row = div()
                                 .id(SharedString::from(format!("worktree-row-{index}")))
                                 .w_full()
-                                .h(px(BRANCH_PICKER_ROW_HEIGHT))
+                                .h(px(PICKER_ROW_HEIGHT))
                                 .px(px(8.0))
                                 .rounded(px(8.0))
                                 .flex()
@@ -7419,6 +7839,42 @@ pub(super) fn visible_branch_entries(
             .then_with(|| left.name.cmp(&right.name))
     });
     visible
+}
+
+/// Order the composer project picker's rows: starred projects pin to the
+/// top as one group — no section, just their star — and each group ranks by
+/// when a task was last created inside, the picker's definition of
+/// "recently used", with never-used projects falling back to when they
+/// were added. An unstarred current project still leads its tail like the
+/// branch picker's selected row; a starred one just takes its recency
+/// slot. Name breaks every tie.
+pub(super) fn project_picker_order(
+    projects: &mut [Project],
+    sessions: &[AgentSession],
+    subject_project_id: Option<Uuid>,
+) {
+    let mut last_task_created = HashMap::with_capacity(projects.len());
+    for session in sessions {
+        let newest = last_task_created.entry(session.project_id).or_insert(0);
+        *newest = (*newest).max(session.created_at);
+    }
+    projects.sort_by(|left, right| {
+        let recency = |project: &Project| {
+            last_task_created
+                .get(&project.id)
+                .copied()
+                .unwrap_or(project.created_at)
+        };
+        right
+            .starred
+            .cmp(&left.starred)
+            .then_with(|| {
+                (!right.starred && Some(right.id) == subject_project_id)
+                    .cmp(&(!left.starred && Some(left.id) == subject_project_id))
+            })
+            .then_with(|| recency(right).cmp(&recency(left)))
+            .then_with(|| left.display_name().cmp(&right.display_name()))
+    });
 }
 
 /// The mention a dropped file submits: relative to the project root when the

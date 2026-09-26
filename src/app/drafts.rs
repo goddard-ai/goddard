@@ -415,6 +415,97 @@ impl Waku {
         }
     }
 
+    /// Mirror of [`Self::sync_branch_picker_rows`] for the project picker:
+    /// refresh the cached row order and the uniform-height list metrics.
+    ///
+    /// [`Self::sync_branch_picker_rows`]: Self::sync_branch_picker_rows
+    pub(super) fn sync_project_picker_rows(&self, rows: &[Uuid]) {
+        let mut cached = self.project_picker_row_cache.borrow_mut();
+        if cached.as_slice() == rows {
+            return;
+        }
+        *cached = rows.to_vec();
+        self.project_picker_list_state
+            .reset_with_uniform_height(rows.len(), px(PICKER_ROW_HEIGHT));
+    }
+
+    /// Arrow-key step over the project picker's actions, wrapping like the
+    /// branch picker's. Landing on a project scrolls the list to it; the
+    /// pinned footer entries sit below the scrollable area already.
+    pub(super) fn move_project_picker_highlight(
+        &mut self,
+        key: &str,
+        actions: &[ProjectPickerAction],
+        cx: &mut Context<Self>,
+    ) {
+        if actions.is_empty() {
+            return;
+        }
+        let current = self
+            .project_picker_highlight
+            .filter(|index| *index < actions.len());
+        let next = match (key, current) {
+            ("up", Some(0)) => actions.len() - 1,
+            ("up", Some(index)) => index - 1,
+            ("up", None) => actions.len() - 1,
+            (_, Some(index)) => (index + 1) % actions.len(),
+            (_, None) => 0,
+        };
+        self.project_picker_highlight = Some(next);
+        if let Some(ProjectPickerAction::Project(project_id)) = actions.get(next)
+            && let Some(row) = self
+                .project_picker_row_cache
+                .borrow()
+                .iter()
+                .position(|candidate| *candidate == *project_id)
+        {
+            self.project_picker_list_state.scroll_to_reveal_item(row);
+        }
+        cx.notify();
+    }
+
+    /// Apply the keyboard-selected project picker action, returning whether
+    /// the caller should dismiss the popover after releasing its `Waku`
+    /// update lease — the same contract as
+    /// [`confirm_branch_picker_action`].
+    ///
+    /// [`confirm_branch_picker_action`]: Self::confirm_branch_picker_action
+    pub(super) fn confirm_project_picker_action(
+        &mut self,
+        actions: &[ProjectPickerAction],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(action) = actions.get(self.project_picker_highlight.unwrap_or(0)) else {
+            return false;
+        };
+        match action {
+            ProjectPickerAction::Project(project_id) => {
+                let project_id = *project_id;
+                let (_, subject_project_id) = self.workspace_subject();
+                if Some(project_id) != subject_project_id {
+                    self.select_project_from_composer(project_id, window, cx);
+                }
+            }
+            ProjectPickerAction::NewProject => self.add_project(cx),
+            ProjectPickerAction::NoProject => {
+                let subject_projectless = {
+                    let (_, project_id) = self.workspace_subject();
+                    project_id.is_some_and(|project_id| {
+                        self.state
+                            .projects
+                            .iter()
+                            .any(|project| project.id == project_id && project.is_projectless())
+                    })
+                };
+                if !subject_projectless {
+                    self.create_projectless_session_from_composer(cx);
+                }
+            }
+        }
+        true
+    }
+
     /// Submission consumes the active draft before a blank session gains a
     /// durable session identity, so its project-scoped text cannot reappear
     /// the next time the user opens New Task.
