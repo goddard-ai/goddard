@@ -380,6 +380,12 @@ impl Waku {
                 }
             });
         }
+        // Shift-Tab can be handled by the composer's native text input before
+        // GPUI dispatches the shortcut. Give the favorites card focus now so
+        // a quick reverse tap during the hold reaches this picker.
+        if self.keyboard_options.armed && chord == Some(KeyboardOptionsChord::Favorites) {
+            window.focus(&focus, cx);
+        }
         window.on_next_frame(move |window, _| {
             window.on_next_frame(move |window, cx| {
                 let should_focus = weak
@@ -728,6 +734,25 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if !self.keyboard_options.open {
+            return;
+        }
+        let modifiers = event.keystroke.modifiers;
+        if self.keyboard_options.chord == Some(KeyboardOptionsChord::Favorites)
+            && event.keystroke.key == "tab"
+            && modifiers.alt
+            && !modifiers.control
+            && !modifiers.platform
+            && !modifiers.function
+        {
+            let direction = if modifiers.shift { -1 } else { 1 };
+            self.cycle_keyboard_options_chord_direction(
+                KeyboardOptionsChord::Favorites,
+                direction,
+                window,
+                cx,
+            );
+            window.prevent_default();
+            cx.stop_propagation();
             return;
         }
         match event.keystroke.key.as_str() {
