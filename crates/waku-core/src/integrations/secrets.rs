@@ -5,7 +5,7 @@
 use std::fs;
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use anyhow::{Context as _, anyhow};
 
@@ -74,16 +74,15 @@ impl SecretStore {
 /// do not prompt.
 #[cfg(target_os = "macos")]
 fn security_i(command: &str) -> anyhow::Result<std::process::Output> {
-    let mut child = Command::new("/usr/bin/security")
+    let mut child = crate::command_env::plain_command("/usr/bin/security")
         .arg("-i")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .spawn_bounded()
         .context("could not run `security`")?;
     child
-        .stdin
-        .take()
+        .stdin()
         .ok_or_else(|| anyhow!("`security` stdin unavailable"))?
         .write_all(command.as_bytes())
         .context("could not write `security` command")?;

@@ -195,6 +195,7 @@ export type { SlashCommand } from "./SlashCommand";
 export type { StatusEntry } from "./StatusEntry";
 export type { StoredAttachment } from "./StoredAttachment";
 export type { StoredTranscriptBlockContent } from "./StoredTranscriptBlockContent";
+export type { SubprocessLabelSample } from "./SubprocessLabelSample";
 export type { SuspendedProviderSession } from "./SuspendedProviderSession";
 export type { SyncAlertInfo } from "./SyncAlertInfo";
 export type { SyncAlertKind } from "./SyncAlertKind";

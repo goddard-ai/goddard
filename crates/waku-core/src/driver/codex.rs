@@ -421,7 +421,7 @@ impl CodexDriver {
         let title_sandbox = sandbox.clone();
         let mut command = crate::command_env::command(&binary);
         command.args(["app-server", "--stdio"]);
-        configure_computer_use_command(&mut command, computer_use.as_ref());
+        configure_computer_use_command(command.command_mut(), computer_use.as_ref());
         // Connected integrations arrive as `mcp_servers.goddard_<id>` remote
         // entries; the bearer travels in the environment, never argv.
         if !integrations.is_empty() {
@@ -433,7 +433,7 @@ impl CodexDriver {
             }
         }
         if let Some(agent) = &agent {
-            crate::command_env::apply_agent_environment(&mut command, agent);
+            crate::command_env::apply_agent_environment(command.command_mut(), agent);
         }
         // `goddard-agent` is on PATH but nothing else tells the model it
         // exists — `thread/start`'s developer instructions are this
@@ -447,9 +447,9 @@ impl CodexDriver {
         // Inside the guest the VM dying with the session is the teardown
         // guarantee the host-side guardian script provides locally.
         let mut command = if sandbox.is_some() {
-            command
+            command.into_inner()
         } else {
-            crate::command_env::guard_command(command)
+            crate::command_env::guard_command(command.into_inner())
         };
         let command = command
             .current_dir(&cwd)
@@ -1682,7 +1682,7 @@ fn generate_codex_title(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = crate::sandbox::spawn(command, sandbox)
+    let mut child = crate::sandbox::spawn(command.command_ref(), sandbox)
         .context("failed to start Codex title generation")?;
     let mut stdin = child
         .stdin

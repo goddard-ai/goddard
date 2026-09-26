@@ -15,7 +15,6 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use std::process::Stdio;
 
 #[cfg(target_os = "macos")]
-use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Context as _, anyhow};
@@ -515,8 +514,8 @@ pub fn fetch_grok_plan_usage(binary: &std::path::Path) -> anyhow::Result<PlanUsa
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child =
-        crate::sandbox::spawn(command, None).context(keyed!("usage_error.start_grok_probe"))?;
+    let mut child = crate::sandbox::spawn(command.command_ref(), None)
+        .context(keyed!("usage_error.start_grok_probe"))?;
     let result = grok_billing_over_stdio(&mut child);
     // The probe has no shutdown request; ending it is the protocol.
     let _ = child.kill();
@@ -806,7 +805,7 @@ fn read_credentials() -> anyhow::Result<OauthCredentials> {
 
 #[cfg(target_os = "macos")]
 fn keychain_payload() -> anyhow::Result<String> {
-    let output = Command::new("/usr/bin/security")
+    let output = crate::command_env::plain_command("/usr/bin/security")
         .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
         .stdin(Stdio::null())
         .output()
@@ -919,12 +918,11 @@ fn curl_run(url: &str, config: &[String]) -> anyhow::Result<String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .spawn_bounded()
         .context(keyed!("usage_error.run_curl"))?;
     {
-        let stdin = child
-            .stdin
-            .as_mut()
+        let mut stdin = child
+            .stdin()
             .ok_or_else(|| anyhow!(keyed!("usage_error.curl_stdin_unavailable")))?;
         for line in config {
             writeln!(stdin, "{line}").context(keyed!("usage_error.configure_curl"))?;

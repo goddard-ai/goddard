@@ -35,7 +35,7 @@ fn thread_list(binary: &Path, limit: usize) -> anyhow::Result<Value> {
         ])
         .current_dir(cwd)
         .stdin(Stdio::null());
-    let output = crate::command_env::output(command).context("failed to list Amp threads")?;
+    let output = command.output().context("failed to list Amp threads")?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         bail!("Amp could not list its threads: {}", detail.trim());
@@ -242,8 +242,9 @@ pub fn thread_title(binary: &Path, cwd: &Path, thread_id: &str) -> anyhow::Resul
         ])
         .current_dir(cwd)
         .stdin(Stdio::null());
-    let output =
-        crate::command_env::output(command).context("failed to read Amp thread metadata")?;
+    let output = command
+        .output()
+        .context("failed to read Amp thread metadata")?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         bail!("Amp could not list its threads: {}", detail.trim());
@@ -274,7 +275,9 @@ fn export_thread(binary: &Path, cwd: &Path, thread_id: &str) -> anyhow::Result<V
         .args(["threads", "export", thread_id])
         .current_dir(cwd)
         .stdin(Stdio::null());
-    let output = crate::command_env::output(command).context("failed to export the Amp thread")?;
+    let output = command
+        .output()
+        .context("failed to export the Amp thread")?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         bail!("Amp could not export thread {thread_id}: {}", detail.trim());
@@ -288,8 +291,9 @@ fn create_thread(binary: &Path, cwd: &Path) -> anyhow::Result<String> {
         .args(["threads", "new"])
         .current_dir(cwd)
         .stdin(Stdio::null());
-    let output =
-        crate::command_env::output(command).context("failed to create the Amp branch thread")?;
+    let output = command
+        .output()
+        .context("failed to create the Amp branch thread")?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         bail!("Amp could not create the branch thread: {}", detail.trim());

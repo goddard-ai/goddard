@@ -187,6 +187,7 @@ impl DaemonStats {
             children,
             sessions_total: probe.sessions_total,
             sessions: probe.sessions,
+            subprocesses: crate::subprocess::snapshot(),
         }
     }
 }
@@ -590,6 +591,7 @@ mod tests {
             children: Vec::new(),
             sessions_total: 0,
             sessions: Vec::new(),
+            subprocesses: Default::default(),
         };
         append(&path, "boot-a", &first, false);
         let mut second = first.clone();
@@ -620,6 +622,7 @@ mod tests {
             children: Vec::new(),
             sessions_total: 0,
             sessions: Vec::new(),
+            subprocesses: Default::default(),
         };
         append(&path, "boot-a", &sample, false);
         append(&path, "boot-a", &sample, true);
@@ -645,6 +648,7 @@ mod tests {
             children: Vec::new(),
             sessions_total: 0,
             sessions: Vec::new(),
+            subprocesses: Default::default(),
         };
         let line_len = serde_json::to_string(&StatsLine {
             boot: "boot".into(),

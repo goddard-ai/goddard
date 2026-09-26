@@ -55,7 +55,7 @@ pub(crate) fn initialize(
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
-    let mut child = crate::sandbox::spawn(&command, None).ok()?;
+    let mut child = crate::sandbox::spawn(command.command_ref(), None).ok()?;
     let Some(mut stdin) = child.stdin.take() else {
         terminate_child(&mut child);
         return None;

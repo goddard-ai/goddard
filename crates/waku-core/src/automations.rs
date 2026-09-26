@@ -1140,7 +1140,7 @@ fn run_precheck(precheck: &AutomationPrecheck) -> AutomationPrecheckResult {
     command.args(shell_args(&precheck.command));
     command.current_dir("/");
     let timeout = Duration::from_secs(precheck.timeout_seconds.max(1));
-    let mut child = match crate::command_env::spawn(&mut command) {
+    let mut child = match command.spawn_bounded() {
         Ok(child) => child,
         Err(error) => {
             return AutomationPrecheckResult {

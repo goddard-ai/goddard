@@ -74,7 +74,7 @@ pub fn discover_provider_models(mut probe: ProviderProbe) -> ProviderProbe {
 pub fn probe_provider_version(binary: &Path) -> Option<String> {
     let mut command = crate::command_env::command(binary);
     let command = command.arg("--version").stdin(std::process::Stdio::null());
-    let output = crate::command_env::output(command).ok()?;
+    let output = command.output().ok()?;
     let combined = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),

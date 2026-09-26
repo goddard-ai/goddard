@@ -45,17 +45,265 @@ static LAST_SHELL_REFRESH: Mutex<Option<Instant>> = Mutex::new(None);
 /// staleness are not.
 const SHELL_ENV_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
+/// A configured child process. Bounded-duration executions — [`Proc::output`],
+/// [`Proc::status`], [`Proc::spawn_bounded`] — run under a subprocess permit
+/// (see [`crate::subprocess`]) so a burst of them queues instead of forking
+/// the machine into the ground. [`Proc::spawn`] is ungated: it is for
+/// children that outlive the request, and parking a permit on one would
+/// starve every other spawn.
+pub struct Proc {
+    command: Command,
+    label: Option<String>,
+}
+
+impl Proc {
+    fn new(command: Command) -> Self {
+        Self {
+            command,
+            label: None,
+        }
+    }
+
+    /// Name this child in the daemon's subprocess stats, replacing the
+    /// `program[:first-arg]` label derived at execution time.
+    pub fn label(&mut self, label: impl Into<String>) -> &mut Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    fn exec_label(&self) -> String {
+        self.label
+            .clone()
+            .unwrap_or_else(|| command_label(&self.command))
+    }
+
+    /// The wrapped [`Command`], read-only.
+    pub(crate) fn command_ref(&self) -> &Command {
+        &self.command
+    }
+
+    /// The wrapped [`Command`], for helpers that only configure. Run
+    /// methods reached through it bypass the spawn gate — keep those calls
+    /// on `Proc`.
+    pub(crate) fn command_mut(&mut self) -> &mut Command {
+        &mut self.command
+    }
+
+    /// The wrapped [`Command`] — for [`guard_command`] and APIs that own
+    /// the builder. Run methods on the result bypass the spawn gate.
+    pub fn into_inner(self) -> Command {
+        self.command
+    }
+
+    pub fn arg(&mut self, arg: impl AsRef<OsStr>) -> &mut Self {
+        self.command.arg(arg);
+        self
+    }
+
+    pub fn args<I, S>(&mut self, args: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.command.args(args);
+        self
+    }
+
+    pub fn env(&mut self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> &mut Self {
+        self.command.env(key, value);
+        self
+    }
+
+    pub fn envs<I, K, V>(&mut self, vars: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        self.command.envs(vars);
+        self
+    }
+
+    pub fn env_clear(&mut self) -> &mut Self {
+        self.command.env_clear();
+        self
+    }
+
+    pub fn env_remove(&mut self, key: impl AsRef<OsStr>) -> &mut Self {
+        self.command.env_remove(key);
+        self
+    }
+
+    pub fn current_dir(&mut self, dir: impl AsRef<Path>) -> &mut Self {
+        self.command.current_dir(dir);
+        self
+    }
+
+    pub fn stdin(&mut self, cfg: impl Into<Stdio>) -> &mut Self {
+        self.command.stdin(cfg);
+        self
+    }
+
+    pub fn stdout(&mut self, cfg: impl Into<Stdio>) -> &mut Self {
+        self.command.stdout(cfg);
+        self
+    }
+
+    pub fn stderr(&mut self, cfg: impl Into<Stdio>) -> &mut Self {
+        self.command.stderr(cfg);
+        self
+    }
+
+    /// `Command::process_group` — a Unix-only `CommandExt`.
+    #[cfg(unix)]
+    pub fn process_group(&mut self, pgroup: i32) -> &mut Self {
+        self.command.process_group(pgroup);
+        self
+    }
+
+    pub fn get_program(&self) -> &OsStr {
+        self.command.get_program()
+    }
+
+    pub fn get_args(&self) -> std::process::CommandArgs<'_> {
+        self.command.get_args()
+    }
+
+    pub fn get_envs(&self) -> std::process::CommandEnvs<'_> {
+        self.command.get_envs()
+    }
+
+    pub fn get_current_dir(&self) -> Option<&Path> {
+        self.command.get_current_dir()
+    }
+
+    /// Spawn without a spawn permit — for children that outlive the
+    /// request: provider sessions, services, terminals. Gated executions
+    /// are [`Proc::output`], [`Proc::status`], and [`Proc::spawn_bounded`].
+    pub fn spawn(&mut self) -> io::Result<Child> {
+        spawn(&mut self.command)
+    }
+
+    /// Spawn under a spawn permit; the permit releases when the returned
+    /// handle drops — later than [`Proc::output`] only if the caller parks
+    /// the handle, so this suits children a caller must pipe or wait on
+    /// itself but which still end within a request.
+    pub fn spawn_bounded(&mut self) -> io::Result<BoundedChild> {
+        let permit = crate::subprocess::acquire(self.exec_label());
+        spawn(&mut self.command).map(|child| BoundedChild {
+            child: Some(child),
+            _permit: permit,
+        })
+    }
+
+    /// Spawn through [`spawn`] under a permit and collect output; the
+    /// permit holds for the child's whole run.
+    pub fn output(&mut self) -> io::Result<Output> {
+        let _permit = crate::subprocess::acquire(self.exec_label());
+        output(&mut self.command)
+    }
+
+    /// Spawn through [`spawn`] under a permit and wait for exit; the
+    /// permit holds for the child's whole run.
+    pub fn status(&mut self) -> io::Result<ExitStatus> {
+        let _permit = crate::subprocess::acquire(self.exec_label());
+        spawn(&mut self.command)?.wait()
+    }
+}
+
+/// A spawned child running under a spawn permit — the permit returns to
+/// the pool when this handle drops, by which time a short-lived child has
+/// normally exited. [`BoundedChild::into_inner`] releases early.
+pub struct BoundedChild {
+    child: Option<Child>,
+    _permit: crate::subprocess::Permit,
+}
+
+impl BoundedChild {
+    pub fn id(&self) -> u32 {
+        self.child.as_ref().expect("child taken").id()
+    }
+
+    pub fn stdin(&mut self) -> Option<std::process::ChildStdin> {
+        self.child.as_mut()?.stdin.take()
+    }
+
+    pub fn stdout(&mut self) -> Option<std::process::ChildStdout> {
+        self.child.as_mut()?.stdout.take()
+    }
+
+    pub fn stderr(&mut self) -> Option<std::process::ChildStderr> {
+        self.child.as_mut()?.stderr.take()
+    }
+
+    pub fn kill(&mut self) -> io::Result<()> {
+        self.child.as_mut().expect("child taken").kill()
+    }
+
+    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.child.as_mut().expect("child taken").try_wait()
+    }
+
+    pub fn wait(&mut self) -> io::Result<ExitStatus> {
+        self.child.as_mut().expect("child taken").wait()
+    }
+
+    pub fn wait_with_output(mut self) -> io::Result<Output> {
+        // `self` drops — and the permit releases — after the output lands.
+        self.child.take().expect("child taken").wait_with_output()
+    }
+
+    /// The plain child handle, releasing the spawn permit now rather than
+    /// at drop. For a child that turned out to be long-lived.
+    pub fn into_inner(mut self) -> Child {
+        self.child.take().expect("child taken")
+    }
+
+    /// The inner child for helpers that drive wait/kill themselves — the
+    /// spawn permit still belongs to this handle and releases at drop.
+    pub(crate) fn child_mut(&mut self) -> &mut Child {
+        self.child.as_mut().expect("child taken")
+    }
+}
+
+/// A `program[:first-arg]` label for the subprocess stats — `git:status`,
+/// `claude:--version`, `gh:api`. The arg is kept only when it is a plain
+/// word or flag so a path or `key=value` never enters the stats file.
+fn command_label(command: &Command) -> String {
+    let program = command.get_program();
+    let program = Path::new(program)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| program.to_string_lossy().into_owned());
+    let first_arg = command
+        .get_args()
+        .next()
+        .map(|arg| {
+            arg.to_string_lossy()
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                .take(24)
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    if first_arg.is_empty() {
+        program
+    } else {
+        format!("{program}:{first_arg}")
+    }
+}
+
 /// Build a command with the environment a terminal-launched Goddard normally
 /// inherits. Apps opened through LaunchServices do not receive variables
 /// exported by the user's shell, including the PATH needed by script-based
 /// CLIs whose shebang uses `/usr/bin/env` (for example, an npm-installed Codex
 /// launcher needs `node`). Callers can add provider-specific overrides after
 /// this.
-pub fn command(program: impl AsRef<OsStr>) -> Command {
+pub fn command(program: impl AsRef<OsStr>) -> Proc {
     let program = program.as_ref();
     let mut command = plain_command(resolve_spawn_program(program));
     command.envs(shell_environment());
-    apply_search_path(&mut command, program);
+    apply_search_path(command.command_mut(), program);
     command
 }
 
@@ -66,10 +314,10 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
 /// itself resolves from an install the GUI `PATH` predates. Variables like
 /// `GIT_DIR` or a stale `SSH_AUTH_SOCK` cannot leak in and redirect the
 /// operation, which the full [`command`] environment would risk.
-pub fn search_path_command(program: impl AsRef<OsStr>) -> Command {
+pub fn search_path_command(program: impl AsRef<OsStr>) -> Proc {
     let program = program.as_ref();
     let mut command = plain_command(resolve_spawn_program(program));
-    apply_search_path(&mut command, program);
+    apply_search_path(command.command_mut(), program);
     command
 }
 
@@ -255,10 +503,10 @@ fn child_search_path(program: &Path) -> Option<OsString> {
 /// so `CreateProcess` allocates one for every console child — `git`, a
 /// provider CLI, the daemon — and flashes it on screen. `CREATE_NO_WINDOW`
 /// keeps the child's console hidden while its pipes still work.
-pub fn plain_command(program: impl AsRef<OsStr>) -> Command {
+pub fn plain_command(program: impl AsRef<OsStr>) -> Proc {
     let mut command = Command::new(program);
     detach_console(&mut command);
-    command
+    Proc::new(command)
 }
 
 // A spawned provider dies with the daemon only if someone asks it to: a
@@ -319,7 +567,7 @@ pub fn guard_command(command: Command) -> Command {
             }
         }
     }
-    guarded
+    guarded.into_inner()
 }
 
 #[cfg(not(unix))]
@@ -653,7 +901,7 @@ fn capture_command_lookup(
     timeout: Duration,
 ) -> Option<Vec<u8>> {
     let capture = ShellEnvironmentCapture::create()?;
-    let mut command = Command::new(shell);
+    let mut command = plain_command(shell);
     command
         .args(shell_args)
         .arg(SHELL_LOOKUP_COMMAND)
@@ -667,8 +915,8 @@ fn capture_command_lookup(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     command.process_group(0);
-    let mut child = spawn(&mut command).ok()?;
-    if !wait_for_child(&mut child, timeout).ok()?.success() {
+    let mut child = command.spawn_bounded().ok()?;
+    if !wait_for_child(child.child_mut(), timeout).ok()?.success() {
         return None;
     }
     fs::read(capture.path()).ok()
@@ -823,7 +1071,7 @@ fn capture_windows_environment(
     timeout: Duration,
 ) -> Option<ShellEnvironment> {
     let capture = ShellEnvironmentCapture::create()?;
-    let mut command = Command::new(shell);
+    let mut command = plain_command(shell);
     command.arg("-NoLogo").arg("-NonInteractive");
     if !load_profile {
         command.arg("-NoProfile");
@@ -835,8 +1083,8 @@ fn capture_windows_environment(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let mut child = spawn(&mut command).ok()?;
-    if !wait_for_child(&mut child, timeout).ok()?.success() {
+    let mut child = command.spawn_bounded().ok()?;
+    if !wait_for_child(child.child_mut(), timeout).ok()?.success() {
         return None;
     }
     parse_shell_environment(&fs::read(capture.path()).ok()?)
@@ -1153,7 +1401,7 @@ fn capture_shell_environment(
     timeout: Duration,
 ) -> Option<ShellEnvironment> {
     let capture = ShellEnvironmentCapture::create()?;
-    let mut command = Command::new(shell);
+    let mut command = plain_command(shell);
     command
         .args(shell_args)
         .arg(SHELL_ENV_COMMAND)
@@ -1169,8 +1417,8 @@ fn capture_shell_environment(
     #[cfg(unix)]
     command.process_group(0);
 
-    let mut child = spawn(&mut command).ok()?;
-    if !wait_for_child(&mut child, timeout).ok()?.success() {
+    let mut child = command.spawn_bounded().ok()?;
+    if !wait_for_child(child.child_mut(), timeout).ok()?.success() {
         return None;
     }
     parse_shell_environment(&fs::read(capture.path()).ok()?)
@@ -1381,9 +1629,9 @@ mod tests {
     fn apply_agent_environment_prepends_the_cli_directory_to_path() {
         let mut command = command("cat");
         let agent = agent_launch_env("token-3");
-        apply_agent_environment(&mut command, &agent);
+        apply_agent_environment(command.command_mut(), &agent);
 
-        let directories = command_search_path(&command);
+        let directories = command_search_path(command.command_ref());
         assert_eq!(
             directories.first().map(PathBuf::as_path),
             agent.cli_path.parent()
@@ -1406,7 +1654,7 @@ mod tests {
         #[cfg(not(windows))]
         let program = PathBuf::from("/opt/waku-fixture/bin/pi");
 
-        let directories = command_search_path(&command(&program));
+        let directories = command_search_path(command(&program).command_ref());
 
         assert!(directories.contains(&program.parent().expect("fixture parent").to_path_buf()));
         for searched in executable_search_paths() {
@@ -1420,7 +1668,7 @@ mod tests {
 
     #[test]
     fn a_bare_program_name_contributes_no_search_directory() {
-        let directories = command_search_path(&command("git"));
+        let directories = command_search_path(command("git").command_ref());
 
         assert_eq!(directories, executable_search_paths());
     }

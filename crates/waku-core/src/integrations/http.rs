@@ -5,7 +5,7 @@
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Stdio;
 
 use anyhow::{Context as _, anyhow, bail};
 
@@ -25,11 +25,16 @@ pub struct CurlJob<'a> {
     pub follow: bool,
 }
 
-/// Spawn curl for `job` with stdin config written. The child's stdout is the
-/// full `curl -i` response (status line, headers, body) — stream it or
-/// collect it with [`collect`]. Callers that stream pass
-/// `Stdio::null()` for stderr; `collect` callers keep it piped for errors.
-pub fn spawn_with(job: &CurlJob<'_>, stderr: Stdio) -> anyhow::Result<Child> {
+/// Spawn curl for `job` with stdin config written — under a spawn permit,
+/// so a burst of proxied calls queues rather than forks at once. The
+/// child's stdout is the full `curl -i` response (status line, headers,
+/// body) — stream it or collect it with [`collect`]. Callers that stream
+/// pass `Stdio::null()` for stderr; `collect` callers keep it piped for
+/// errors.
+pub fn spawn_with(
+    job: &CurlJob<'_>,
+    stderr: Stdio,
+) -> anyhow::Result<crate::command_env::BoundedChild> {
     let mut config = String::new();
     config.push_str("silent\nshow-error\nno-buffer\nhttp1.1\ninclude\n");
     if job.follow {
@@ -52,16 +57,15 @@ pub fn spawn_with(job: &CurlJob<'_>, stderr: Stdio) -> anyhow::Result<Child> {
                 .replace('"', "\\\"")
         ));
     }
-    let mut child = Command::new(CURL_PATH)
+    let mut child = crate::command_env::plain_command(CURL_PATH)
         .args(["-K", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(stderr)
-        .spawn()
+        .spawn_bounded()
         .context("could not run curl")?;
     child
-        .stdin
-        .take()
+        .stdin()
         .ok_or_else(|| anyhow!("curl stdin unavailable"))?
         .write_all(config.as_bytes())
         .context("could not write curl config")?;
@@ -76,7 +80,7 @@ pub struct CurlResponse {
 /// Collect a finished child's output into a parsed response.
 /// `wait_with_output` drains both pipes concurrently, so a chatty stderr
 /// cannot deadlock a long response body.
-pub fn collect(child: Child) -> anyhow::Result<CurlResponse> {
+pub fn collect(child: crate::command_env::BoundedChild) -> anyhow::Result<CurlResponse> {
     let output = child.wait_with_output().context("curl did not finish")?;
     if !output.status.success() {
         bail!(

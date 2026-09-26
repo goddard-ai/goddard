@@ -458,9 +458,9 @@ fn curl_post_json(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .spawn_bounded()
         .context("could not run curl")?;
-    if let Some(mut stdin) = child.stdin.take() {
+    if let Some(mut stdin) = child.stdin() {
         let _ = stdin.write_all(body);
     }
     let output = child

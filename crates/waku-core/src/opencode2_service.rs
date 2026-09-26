@@ -643,7 +643,8 @@ fn spawn_service(binary: &Path) -> anyhow::Result<(ServiceRegistration, Endpoint
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let mut child = crate::command_env::spawn(&mut command)
+    let mut child = command
+        .spawn()
         .context("failed to start the OpenCode 2 background service")?;
 
     let deadline = Instant::now() + SERVICE_START_BUDGET;

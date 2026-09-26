@@ -7,7 +7,7 @@ use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -1626,11 +1626,14 @@ where
 /// Runs a configured `git` command and records its wall-clock time. A
 /// checkpoint is a dozen-plus serial invocations, so the per-command line is
 /// the only way to tell spawn overhead apart from a slow `status` or `add`.
-fn timed_git_output(command: &mut Command) -> anyhow::Result<Output> {
+fn timed_git_output(command: &mut crate::command_env::Proc) -> anyhow::Result<Output> {
     timed_git_input_output(command, None)
 }
 
-fn timed_git_input_output(command: &mut Command, input: Option<&[u8]>) -> anyhow::Result<Output> {
+fn timed_git_input_output(
+    command: &mut crate::command_env::Proc,
+    input: Option<&[u8]>,
+) -> anyhow::Result<Output> {
     let started = std::time::Instant::now();
     let output = match remaining_capture_time()? {
         Some(timeout) => {
@@ -1663,10 +1666,11 @@ fn timed_git_input_output(command: &mut Command, input: Option<&[u8]>) -> anyhow
         None => match input {
             None => command.output().context("failed to execute git")?,
             Some(input) => {
-                let mut child = command.spawn().context("failed to execute git")?;
+                let mut child = command
+                    .spawn_bounded()
+                    .context("failed to execute git")?;
                 child
-                    .stdin
-                    .take()
+                    .stdin()
                     .ok_or_else(|| anyhow!("git stdin is unavailable"))?
                     .write_all(input)
                     .context("failed to write git stdin")?;
@@ -1678,7 +1682,7 @@ fn timed_git_input_output(command: &mut Command, input: Option<&[u8]>) -> anyhow
     Ok(output)
 }
 
-fn log_git_timing(command: &Command, started: std::time::Instant) {
+fn log_git_timing(command: &crate::command_env::Proc, started: std::time::Instant) {
     let args = command
         .get_args()
         .map(|arg| arg.to_string_lossy())

@@ -11,7 +11,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use anyhow::{Context as _, bail};
 use uuid::Uuid;
@@ -611,7 +611,7 @@ fn add_branch(repository: &Path, path: &Path, branch: &str) -> anyhow::Result<bo
 /// skip retry succeeded, so the caller can warn about stub content.
 fn git_with_lfs_fallback(
     cwd: &Path,
-    configure: impl Fn(&mut Command),
+    configure: impl Fn(&mut crate::command_env::Proc),
 ) -> anyhow::Result<(Output, bool)> {
     let run = |skip_lfs: bool| {
         let mut command = crate::command_env::search_path_command("git");

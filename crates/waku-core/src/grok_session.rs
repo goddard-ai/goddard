@@ -352,7 +352,7 @@ impl GrokRpc {
     fn start(binary: &Path) -> anyhow::Result<Self> {
         let mut command = crate::command_env::command(binary);
         command.args(["agent", "--always-approve", "--no-leader", "stdio"]);
-        let mut command = crate::command_env::guard_command(command);
+        let mut command = crate::command_env::guard_command(command.into_inner());
         let command = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

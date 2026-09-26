@@ -111,6 +111,7 @@ pub mod skills;
 mod slash_command_catalog;
 pub mod stats;
 mod subagents;
+mod subprocess;
 pub mod sync;
 pub mod terminal;
 pub mod theme;

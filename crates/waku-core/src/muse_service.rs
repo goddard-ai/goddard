@@ -298,7 +298,7 @@ impl MuseHost {
         // it could index or lock; an empty scratch directory keeps it neutral.
         let scratch = std::env::temp_dir().join(format!("waku-muse-serve-{}", std::process::id()));
         std::fs::create_dir_all(&scratch).ok();
-        let mut command = crate::command_env::guard_command(command);
+        let mut command = crate::command_env::guard_command(command.into_inner());
         let mut child = crate::command_env::spawn(
             command
                 .current_dir(&scratch)

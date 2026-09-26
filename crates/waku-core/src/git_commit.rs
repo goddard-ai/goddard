@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -889,21 +889,21 @@ pub(crate) fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedO
 }
 
 pub(crate) fn run_capture(
-    command: &mut Command,
+    command: &mut crate::command_env::Proc,
     timeout: Duration,
 ) -> anyhow::Result<CapturedOutput> {
     run_capture_inner(command, timeout, None, MAX_STDOUT_BYTES, MAX_STDERR_BYTES)
 }
 
 pub(crate) fn run_capture_unbounded(
-    command: &mut Command,
+    command: &mut crate::command_env::Proc,
     timeout: Duration,
 ) -> anyhow::Result<CapturedOutput> {
     run_capture_inner(command, timeout, None, usize::MAX, usize::MAX)
 }
 
 pub(crate) fn run_capture_unbounded_with_input(
-    command: &mut Command,
+    command: &mut crate::command_env::Proc,
     timeout: Duration,
     input: &[u8],
 ) -> anyhow::Result<CapturedOutput> {
@@ -911,7 +911,7 @@ pub(crate) fn run_capture_unbounded_with_input(
 }
 
 fn run_capture_inner(
-    command: &mut Command,
+    command: &mut crate::command_env::Proc,
     timeout: Duration,
     input: Option<&[u8]>,
     stdout_limit: usize,
@@ -919,12 +919,11 @@ fn run_capture_inner(
 ) -> anyhow::Result<CapturedOutput> {
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt as _;
         // Agent CLIs can start helpers. Give the invocation its own group so
         // a timeout does not leave those descendants running in the workspace.
         command.process_group(0);
     }
-    let command = command
+    command
         .stdin(if input.is_some() {
             Stdio::piped()
         } else {
@@ -932,13 +931,13 @@ fn run_capture_inner(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = crate::command_env::spawn(command).context("could not start process")?;
-    let stdout = child.stdout.take().context("process stdout unavailable")?;
-    let stderr = child.stderr.take().context("process stderr unavailable")?;
+    let mut child = command.spawn_bounded().context("could not start process")?;
+    let stdout = child.stdout().context("process stdout unavailable")?;
+    let stderr = child.stderr().context("process stderr unavailable")?;
     let stdout_reader = thread::spawn(move || read_bounded(stdout, stdout_limit));
     let stderr_reader = thread::spawn(move || read_bounded(stderr, stderr_limit));
     let stdin_writer = input.map(|input| {
-        let mut stdin = child.stdin.take().expect("piped stdin requested");
+        let mut stdin = child.stdin().expect("piped stdin requested");
         let input = input.to_vec();
         thread::spawn(move || stdin.write_all(&input))
     });
@@ -972,14 +971,14 @@ fn run_capture_inner(
     })
 }
 
-fn terminate_process_tree(child: &mut std::process::Child) {
+fn terminate_process_tree(child: &mut crate::command_env::BoundedChild) {
     #[cfg(unix)]
     unsafe {
         libc::kill(-(child.id() as i32), libc::SIGKILL);
     }
     #[cfg(windows)]
     {
-        let mut command = Command::new("taskkill");
+        let mut command = std::process::Command::new("taskkill");
         command
             .arg("/PID")
             .arg(child.id().to_string())

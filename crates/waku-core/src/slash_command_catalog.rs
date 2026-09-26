@@ -82,7 +82,7 @@ fn discover_codex(binary: &Path, project_root: &Path) -> Option<Vec<SlashCommand
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = crate::sandbox::spawn(&command, None).ok()?;
+    let mut child = crate::sandbox::spawn(command.command_ref(), None).ok()?;
     let Some(mut stdin) = child.stdin.take() else {
         terminate_child(&mut child);
         return None;
@@ -511,7 +511,7 @@ fn capture_json(binary: &Path, args: &[&str], cwd: &Path) -> Option<Value> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = crate::sandbox::spawn(&command, None).ok()?;
+    let mut child = crate::sandbox::spawn(command.command_ref(), None).ok()?;
     let Some(stdout) = child.stdout.take() else {
         terminate_child(&mut child);
         return None;
@@ -548,7 +548,7 @@ fn probe_json_lines(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = crate::sandbox::spawn(&command, None).ok()?;
+    let mut child = crate::sandbox::spawn(command.command_ref(), None).ok()?;
     let Some(mut stdin) = child.stdin.take() else {
         terminate_child(&mut child);
         return None;

@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -130,7 +130,7 @@ impl AmpDriver {
             .transpose()?;
         let computer_use_config = computer_use.as_ref().map(|runtime| runtime.config.clone());
         let reader_initial_thread_id = thread_id.clone();
-        let mut command: Command = crate::command_env::command(&binary);
+        let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd).args(amp_args(
             model.as_deref(),
             reasoning_effort.as_deref(),
@@ -146,14 +146,14 @@ impl AmpDriver {
             );
         }
         if let Some(agent) = &agent {
-            crate::command_env::apply_agent_environment(&mut command, agent);
+            crate::command_env::apply_agent_environment(command.command_mut(), agent);
         }
         // Inside the guest the VM dying with the session is the teardown
         // guarantee the host-side guardian script provides locally.
         let mut command = if sandbox.is_some() {
-            command
+            command.into_inner()
         } else {
-            crate::command_env::guard_command(command)
+            crate::command_env::guard_command(command.into_inner())
         };
         let command = command
             .stdin(Stdio::piped())

@@ -1112,6 +1112,32 @@ pub struct DaemonStatsSample {
     /// Resident or running sessions and what they hold in memory.
     #[serde(default)]
     pub sessions: Vec<DaemonSessionSample>,
+    /// Per-label counters from the daemon's subprocess gate, keyed by
+    /// `program[:first-arg]` (for example `git:status` or `claude`). Empty
+    /// on daemons that predate the gate.
+    #[serde(default)]
+    pub subprocesses: BTreeMap<String, SubprocessLabelSample>,
+}
+
+/// One label's subprocess counters in a [`DaemonStatsSample`]. `spawns`,
+/// `hold_ms`, and `wait_ms` accumulate over the daemon's lifetime while
+/// `in_flight` is live at sample time — a label that holds permits longest
+/// is the one worth bounding or reclassifying.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SubprocessLabelSample {
+    /// Children this label has finished since the daemon booted.
+    pub spawns: u64,
+    /// Children running under a permit — or waiting on one — right now.
+    pub in_flight: u32,
+    /// Cumulative milliseconds holding a permit.
+    pub hold_ms: u64,
+    /// Longest single permit hold.
+    pub max_hold_ms: u64,
+    /// Cumulative milliseconds spent waiting for a free permit.
+    pub wait_ms: u64,
+    /// Longest single wait for a free permit.
+    pub max_wait_ms: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

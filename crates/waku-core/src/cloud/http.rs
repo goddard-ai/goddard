@@ -94,13 +94,12 @@ pub(crate) fn request(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .spawn_bounded()
         .context("failed to launch curl")?;
-    if let Some(stdin) = child.stdin.as_mut() {
+    if let Some(mut stdin) = child.stdin() {
         let payload = body.map(Value::to_string).unwrap_or_default();
         stdin.write_all(payload.as_bytes())?;
     }
-    drop(child.stdin.take());
     let output = child.wait_with_output().context("curl failed to finish")?;
     if !output.status.success() {
         bail!(

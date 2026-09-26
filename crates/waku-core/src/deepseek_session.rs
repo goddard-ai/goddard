@@ -441,9 +441,9 @@ impl DeepSeekServer {
             command.env("DSH_HOME", dsh_home);
         }
         if let Some(agent) = agent {
-            crate::command_env::apply_agent_environment(&mut command, agent);
+            crate::command_env::apply_agent_environment(command.command_mut(), agent);
         }
-        let mut child = crate::sandbox::spawn(&command, None)
+        let mut child = crate::sandbox::spawn(command.command_ref(), None)
             .context("failed to start `dsh web --host 127.0.0.1 --port 0`")?;
         let stdout = child
             .stdout
@@ -703,7 +703,8 @@ fn web_supports_no_open(binary: &Path, dsh_home: Option<&Path>) -> bool {
     if let Some(dsh_home) = dsh_home {
         command.env("DSH_HOME", dsh_home);
     }
-    crate::command_env::output(&mut command)
+    command
+        .output()
         .ok()
         .is_some_and(|output| web_help_supports_no_open(&output.stdout))
 }

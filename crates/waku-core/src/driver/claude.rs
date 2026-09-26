@@ -214,7 +214,7 @@ impl ClaudeDriver {
 
         let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd);
-        configure_stream_command(&mut command, mode);
+        configure_stream_command(command.command_mut(), mode);
         let computer_use = computer_use_enabled
             .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
             .transpose()?;
@@ -234,7 +234,7 @@ impl ClaudeDriver {
             ));
         }
         if let Some(agent) = &agent {
-            crate::command_env::apply_agent_environment(&mut command, agent);
+            crate::command_env::apply_agent_environment(command.command_mut(), agent);
             // `goddard-agent` is on PATH but nothing else tells the model it
             // exists — the launch flag is this provider's announcement
             // channel.
@@ -275,9 +275,9 @@ impl ClaudeDriver {
         // Inside the guest the VM dying with the session is the teardown
         // guarantee the host-side guardian script provides locally.
         let mut command = if sandbox.is_some() {
-            command
+            command.into_inner()
         } else {
-            crate::command_env::guard_command(command)
+            crate::command_env::guard_command(command.into_inner())
         };
         let command = command
             .stdin(Stdio::piped())

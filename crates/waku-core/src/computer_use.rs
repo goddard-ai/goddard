@@ -5,7 +5,7 @@ use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -170,22 +170,22 @@ fn invoke_helper_direct(
         Some("requestPermissions") => Some("request-permissions"),
         _ => None,
     };
-    let mut command = Command::new(helper);
+    let mut command = crate::command_env::plain_command(helper);
     if let Some(mode) = mode {
         command.arg(mode);
     }
-    let command = command
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = crate::command_env::spawn(command)
+    let mut child = command
+        .spawn_bounded()
         .with_context(|| format!("failed to start {}", helper.display()))?;
     let pid = child.id();
     active_helper_pid.store(pid, Ordering::SeqCst);
     let payload = serde_json::to_vec(operation)?;
     child
-        .stdin
-        .take()
+        .stdin()
         .ok_or_else(|| anyhow!("computer-use helper stdin unavailable"))?
         .write_all(&payload)?;
     let output = child.wait_with_output()?;

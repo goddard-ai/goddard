@@ -42,7 +42,7 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = crate::sandbox::spawn(command, None)
+    let mut child = crate::sandbox::spawn(command.command_ref(), None)
         .with_context(|| format!("could not start {} app-server", binary.display()))?;
     let mut stdin = child
         .stdin

@@ -1407,7 +1407,8 @@ impl ShuruVm {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = crate::command_env::spawn(&mut command)
+        let mut child = command
+            .spawn()
             .context("could not start `shuru run --stdio`")?;
         let stdout = child
             .stdout

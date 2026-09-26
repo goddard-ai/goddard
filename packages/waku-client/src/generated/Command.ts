@@ -124,6 +124,11 @@ baseBranch?: string | null,
  */
 prompt: string,
 /**
+ * Optional explicit task title. When supplied, first-prompt title
+ * inference leaves it unchanged.
+ */
+title?: string | null,
+/**
  * Reasoning effort, service tier, and context window for the new
  * session. `None` inherits the sending task's value when it runs
  * the resolved provider and the resolved model's catalog still

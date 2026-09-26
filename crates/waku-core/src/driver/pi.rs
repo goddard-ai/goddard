@@ -296,13 +296,13 @@ impl PiDriver {
         let mut command = crate::command_env::command(&binary);
         command.args(["--mode", "rpc", flavor.full_access_arg()]);
         if let Some(agent) = &agent {
-            crate::command_env::apply_agent_environment(&mut command, agent);
+            crate::command_env::apply_agent_environment(command.command_mut(), agent);
         }
         if flavor.skips_version_check_by_env() {
             command.env("PI_SKIP_VERSION_CHECK", "1");
         }
         configure_pi_computer_use_command(
-            &mut command,
+            command.command_mut(),
             computer_use
                 .as_ref()
                 .zip(pi_extension.as_deref())
@@ -330,9 +330,9 @@ impl PiDriver {
         // Inside the guest the VM dying with the session is the teardown
         // guarantee the host-side guardian script provides locally.
         let mut command = if sandbox.is_some() {
-            command
+            command.into_inner()
         } else {
-            crate::command_env::guard_command(command)
+            crate::command_env::guard_command(command.into_inner())
         };
         let command = command
             .current_dir(&cwd)
@@ -1306,16 +1306,15 @@ fn clone_ohmypi_session(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = crate::command_env::spawn(command)
+    let mut child = command
+        .spawn_bounded()
         .map_err(|error| format!("could not start Oh My Pi to copy the session: {error}"))?;
     let result = (|| {
         let mut stdin = child
-            .stdin
-            .take()
+            .stdin()
             .ok_or_else(|| "Oh My Pi stdin unavailable".to_owned())?;
         let stdout = child
-            .stdout
-            .take()
+            .stdout()
             .ok_or_else(|| "Oh My Pi stdout unavailable".to_owned())?;
         let (tx, rx) = bounded(1);
         thread::Builder::new()

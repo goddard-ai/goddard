@@ -283,8 +283,7 @@ fn relay(
         }
     };
     let mut stdout = child
-        .stdout
-        .take()
+        .stdout()
         .ok_or_else(|| anyhow!("curl stdout unavailable"))?;
     let result = std::io::copy(&mut stdout, stream);
     let _ = child.kill();

@@ -229,7 +229,7 @@ impl OpenCodeServer {
             .env("OPENCODE_SERVER_USERNAME", "opencode")
             .current_dir(cwd);
         // `opencode serve` has no stdio link to notice a daemon death on.
-        let mut command = crate::command_env::guard_command(command);
+        let mut command = crate::command_env::guard_command(command.into_inner());
         let command = command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
