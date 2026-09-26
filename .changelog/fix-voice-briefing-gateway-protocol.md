@@ -1,0 +1,1 @@
+- Voice briefings generate again — the speech request now sends the protocol header the AI Gateway requires.

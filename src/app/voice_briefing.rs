@@ -307,8 +307,10 @@ fn speech_parameters(model_id: &str) -> (&'static str, &'static str) {
 
 /// POST a JSON body with the gateway bearer and parse the JSON answer.
 /// `model_header` carries the speech endpoint's model and protocol headers;
-/// chat completions names its model in the body instead. Non-2xx statuses
-/// fail with the code alone — error bodies can echo the request.
+/// chat completions names its model in the body instead. The AI-SDK surface
+/// (`/v4/ai/*`) rejects calls without `ai-gateway-protocol-version` — the
+/// AI SDK sends it on every request, so it rides along here too. Non-2xx
+/// statuses fail with the code alone — error bodies can echo the request.
 async fn post_json(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
@@ -319,6 +321,7 @@ async fn post_json(
 ) -> anyhow::Result<Value> {
     let mut request = gpui::http_client::Request::post(url)
         .header("authorization", format!("Bearer {key}"))
+        .header("ai-gateway-protocol-version", "0.0.1")
         .header("content-type", "application/json");
     if let Some(model) = model_header {
         request = request
