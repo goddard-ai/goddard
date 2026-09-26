@@ -277,6 +277,10 @@ impl Waku {
             return;
         };
         if self.composer_drafts.move_to_empty(source, destination) {
+            // Draft-use undos track the payload wherever it lands: a
+            // carried draft's ⌘Z must pull its text back from the slot it
+            // actually lives in now, not the one Use staged it under.
+            self.retarget_draft_use_undos(source, destination);
             self.restore_selected_composer_draft(cx);
             self.schedule_composer_draft_save(cx);
         }

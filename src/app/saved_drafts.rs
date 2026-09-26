@@ -64,17 +64,7 @@ impl Waku {
         }
         // The card's context label and the fallback landing spot when the
         // owning task no longer exists.
-        let project_id = match key {
-            ComposerDraftKey::NewSession(project_id) => Some(project_id),
-            ComposerDraftKey::Session(session_id) => self
-                .state
-                .sessions
-                .iter()
-                .find(|session| session.id == session_id)
-                .map(|session| session.project_id),
-        }
-        .or(self.state.selected_project);
-        let Some(project_id) = project_id else {
+        let Some(project_id) = self.composer_draft_project() else {
             self.show_toast(tr!("drafts.no_composer"));
             cx.notify();
             return;
@@ -110,13 +100,65 @@ impl Waku {
         cx.notify();
     }
 
-    /// Drafts the badge counts: visible only — hidden ones stay parked.
-    pub(super) fn visible_saved_draft_count(&self) -> usize {
+    /// The project the composer's draft slot belongs to — the store the
+    /// badge counts and `create_saved_draft` files under — falling back
+    /// to the sidebar's selected project the same way it always has.
+    fn composer_draft_project(&self) -> Option<Uuid> {
+        self.composer_draft_key()
+            .and_then(|key| match key {
+                ComposerDraftKey::NewSession(project_id) => Some(project_id),
+                ComposerDraftKey::Session(session_id) => self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .map(|session| session.project_id),
+            })
+            .or(self.state.selected_project)
+    }
+
+    /// Whether drafts filed under `project_id` belong to the shared "No
+    /// project" store every projectless task draws from. A draft whose
+    /// project is already gone counts too: an ordinary project's parked
+    /// drafts die with their row through `remove_project_drafts`, so an
+    /// orphan can only come from a projectless or temporary row.
+    fn no_project_draft_store(&self, project_id: Uuid) -> bool {
+        self.state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .is_none_or(Project::is_projectless)
+    }
+
+    /// Drafts the badge counts: visible ones in `project_id`'s own store —
+    /// the project's drafts, or the shared store "No project" tasks draw
+    /// from together. Hidden ones stay parked either way.
+    pub(super) fn visible_saved_draft_count(&self, project_id: Uuid) -> usize {
+        let no_project = self.no_project_draft_store(project_id);
         self.state
             .saved_drafts
             .iter()
-            .filter(|draft| !draft.hidden)
+            .filter(|draft| {
+                !draft.hidden
+                    && (draft.project_id == project_id
+                        || (no_project && self.no_project_draft_store(draft.project_id)))
+            })
             .count()
+    }
+
+    /// Keep ⌘Z records pointing at a moved payload: a draft carry
+    /// relocates the slot the content lives in, so records staged under
+    /// `source` follow it to `destination`.
+    pub(super) fn retarget_draft_use_undos(
+        &mut self,
+        source: ComposerDraftKey,
+        destination: ComposerDraftKey,
+    ) {
+        for undo in self.draft_use_undos.iter_mut() {
+            if undo.key == source {
+                undo.key = destination;
+            }
+        }
     }
 
     /// A removed project takes its parked drafts with it, including any
@@ -307,19 +349,27 @@ impl Waku {
             }
             _ => None,
         };
-        if session.is_none()
-            && !self
+        // The session the draft lands on: its own while it still exists,
+        // else — its project already gone, which only projectless and
+        // temporary rows can do to a parked draft — the shared "No
+        // project" store's waiting draft when there is one.
+        let landing = session.or_else(|| {
+            (!self
                 .state
                 .projects
                 .iter()
-                .any(|project| project.id == saved.project_id)
-        {
-            self.show_toast(tr!("drafts.missing_target"));
-            cx.notify();
-            return;
-        }
-        let key = match session {
-            Some(session_id) => ComposerDraftKey::Session(session_id),
+                .any(|project| project.id == saved.project_id))
+            .then(|| self.reusable_projectless_draft())
+            .flatten()
+        });
+        let key = match landing {
+            Some(session_id) => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .map(ComposerDraftKey::for_session)
+                .unwrap_or(ComposerDraftKey::Session(session_id)),
             None => ComposerDraftKey::NewSession(saved.project_id),
         };
         let saved = self.state.saved_drafts.remove(index);
@@ -337,9 +387,23 @@ impl Waku {
             self.draft_use_undos.remove(0);
         }
         self.composer_drafts.set(key, saved.draft.clone());
-        match session {
+        match landing {
             Some(session_id) => self.select_session(session_id, cx),
-            None => self.select_project(saved.project_id, cx),
+            None if self
+                .state
+                .projects
+                .iter()
+                .any(|project| project.id == saved.project_id) =>
+            {
+                // The project pick handles both endings: an ordinary
+                // project's New task draft, or a projectless pick's
+                // retarget/provision carry of the staged payload.
+                self.select_project(saved.project_id, cx);
+            }
+            // The project is gone — necessarily a "No project" orphan —
+            // so the shared store's next draft takes the staged payload:
+            // a freshly provisioned scratch task.
+            None => self.create_projectless_session_inner(None, Some(key), false, cx),
         }
         // Activation restores the slot for us when the session changes;
         // already on that composer (or waiting on a hydration) the payload
@@ -438,10 +502,14 @@ impl Waku {
                 .find(|session| session.id == session_id)
                 .map(|session| session.title.clone())
                 .or_else(project_name)
-                .unwrap_or_else(|| tr!("drafts.missing_task")),
-            ComposerDraftTarget::NewSession { .. } => project_name()
-                .map(|name| tr!("drafts.new_task_in", project = name))
-                .unwrap_or_else(|| tr!("drafts.missing_project")),
+                // An orphan can only be a "No project" draft — an ordinary
+                // project's drafts die with their row.
+                .unwrap_or_else(|| tr!("project.no_project_name")),
+            ComposerDraftTarget::NewSession { .. } => {
+                let name = project_name()
+                    .unwrap_or_else(|| tr!("project.no_project_name"));
+                tr!("drafts.new_task_in", project = name)
+            }
         }
     }
 
@@ -483,13 +551,26 @@ impl Waku {
     // ── Render ─────────────────────────────────────────────────────────────
 
     /// The circular composer badge beside the access control: the visible
-    /// draft count, absent entirely at zero.
+    /// draft count for the card's own store — its project's, or the
+    /// shared one "No project" tasks draw from. Absent at zero, and
+    /// while the composer holds a draft of its own.
     pub(super) fn render_drafts_count_button(
         &self,
         controls: &composer::ComposerControls,
+        has_draft: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let count = self.visible_saved_draft_count();
+        if has_draft {
+            return None;
+        }
+        // The main card counts the store its draft slot files under; a
+        // side chat's copy counts its own session's project.
+        let project_id = if controls.interactive {
+            self.composer_draft_project()
+        } else {
+            controls.session.map(|session| session.project_id)
+        }?;
+        let count = self.visible_saved_draft_count(project_id);
         if count == 0 {
             return None;
         }

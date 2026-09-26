@@ -5501,7 +5501,7 @@ impl Waku {
                     .children(self.render_agent_preset_control(&controls, cx))
                     .child(self.render_access_control(&controls, cx))
                     .children(self.render_composer_incognito_chip(&controls, cx))
-                    .children(self.render_drafts_count_button(&controls, cx))
+                    .children(self.render_drafts_count_button(&controls, has_draft, cx))
                     .children(self.render_goal_control(&controls, cx))
                     .children(self.render_project_map_control(&controls, cx))
                     .child(div().flex_1())
