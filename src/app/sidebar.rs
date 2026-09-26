@@ -3267,17 +3267,6 @@ impl Waku {
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
                     let collapsed = self.sidebar_collapsed_groups.contains(&group);
-                    if date_group == SessionDateGroup::Today
-                        && self.state.sidebar_phase_groups
-                        && rows
-                            .iter()
-                            .any(|row| matches!(row, SidebarRow::Header(SidebarGroup::Planning)))
-                        && grouped_sessions[date_group.index()].is_empty()
-                    {
-                        rows.push(SidebarRow::Header(group));
-                        rows.push(SidebarRow::GroupSpacer);
-                        continue;
-                    }
                     append_sidebar_group_rows(
                         &mut rows,
                         group,
