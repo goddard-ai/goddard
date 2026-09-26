@@ -675,7 +675,15 @@ impl Waku {
         div()
             .flex_none()
             .w_full()
-            .px(px(24.0))
+            // The page can reach the window's left edge while the sidebar is
+            // hidden. Keep its title clear of the macOS traffic lights, and
+            // ease that inset as the sidebar takes over during its animation.
+            .pl(px(if self.sidebar_visible {
+                24.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0)
+            } else {
+                TRAFFIC_LIGHT_CLEARANCE
+            }))
+            .pr(px(24.0))
             .pt(px(16.0))
             .pb(px(10.0))
             .flex()
