@@ -5,7 +5,14 @@
 //! OpenCode Go's API key calls `opencode.ai/zen/go/v1/usage`; Devin's local
 //! CLI credential calls its read-only user-status RPC; Grok answers
 //! the `x.ai/billing` extension request on a short-lived `grok agent stdio`
-//! probe. Some provider usage endpoints are undocumented and may change.
+//! probe. Copilot's GitHub token (env or `gh`) reads `copilot_internal/user`;
+//! Muse's `dca:` device token calls `api.meta.ai/muse-code/key`; Droid's
+//! Factory API key reads `api.factory.ai/api/billing/limits`; Kimi Code's
+//! CLI credential or API key reads its coding-quota endpoints; Cursor's saved
+//! editor session (the app database's JWT, replayed as the session cookie)
+//! reads `cursor.com/api/usage-summary`; Amp's API key or `amp usage` output
+//! carries its free-tier and subscription balances. Some provider usage
+//! endpoints are undocumented and may change.
 //!
 //! Everything in this module blocks on subprocesses and the network and must
 //! run on the background executor. Render reads only the parsed snapshot the
@@ -14,11 +21,12 @@
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::process::Stdio;
 
-#[cfg(target_os = "macos")]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow};
 use serde_json::{Value, json};
+
+use crate::model::unix_time;
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
@@ -36,14 +44,21 @@ const CURL_PATH: &str = "/usr/bin/curl";
 #[cfg(windows)]
 const CURL_PATH: &str = r"C:\Windows\System32\curl.exe";
 
-const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
-const CODEX_RESET_CREDITS_URL: &str =
-    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
-const CODEX_RESET_CREDITS_CONSUME_URL: &str =
-    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume";
+const CODEX_DEFAULT_BASE: &str = "https://chatgpt.com/backend-api";
 const OPENCODE_GO_USAGE_URL: &str = "https://opencode.ai/zen/go/v1/usage";
 const DEVIN_USER_STATUS_PATH: &str = "/exa.seat_management_pb.SeatManagementService/GetUserStatus";
 const DEVIN_API_SERVER_DEFAULT: &str = "https://server.codeium.com";
+const COPILOT_API_HOST: &str = "api.github.com";
+const MUSE_USAGE_URL: &str = "https://api.meta.ai/muse-code/key";
+const FACTORY_API_BASE: &str = "https://api.factory.ai";
+const FACTORY_APP_BASE: &str = "https://app.factory.ai";
+const KIMI_API_BASE: &str = "https://api.kimi.com";
+/// Kimi Code's OAuth credential is issued for the China region; `KIMI_AUTH_TOKEN`
+/// holders may be on either, so the web path falls back to the international host.
+const KIMI_WEB_HOSTS: [&str; 2] = ["https://www.kimi.com", "https://www.kimi.ai"];
+const CURSOR_USAGE_URL: &str = "https://cursor.com/api/usage-summary";
+const CURSOR_REQUESTS_URL: &str = "https://cursor.com/api/usage";
+const AMP_USAGE_URL: &str = "https://ampcode.com/api/internal?userDisplayBalanceInfo";
 
 pub use waku_protocol::usage::{
     CodexResetCreditOutcome, PlanResetCredits, PlanUsage, PlanWindow, format_tokens, reset_label,
@@ -126,13 +141,67 @@ fn profile_plan_label(body: &Value) -> Option<String> {
     plan_label(subscription, tier)
 }
 
+/// `CODEX_HOME` when set, else `~/.codex` — the same root the CLI resolves.
+fn codex_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
+}
+
+/// `chatgpt_base_url` from the Codex config, normalized the way CodexBar
+/// normalizes it: bare `chatgpt.com`/`chat.openai.com` roots pick up
+/// `/backend-api`, and the normalized root chooses between the wham routes
+/// (hosted backend) and `/api/codex/*` (custom backends).
+fn codex_base_url() -> String {
+    let configured = codex_home()
+        .map(|home| home.join("config.toml"))
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.parse::<toml::Value>().ok())
+        .and_then(|config| {
+            config
+                .get("chatgpt_base_url")
+                .and_then(toml::Value::as_str)
+                .map(str::to_owned)
+        });
+    let mut base = configured.unwrap_or_else(|| CODEX_DEFAULT_BASE.to_owned());
+    while base.ends_with('/') {
+        base.pop();
+    }
+    if (base.starts_with("https://chatgpt.com") || base.starts_with("https://chat.openai.com"))
+        && !base.contains("/backend-api")
+    {
+        base.push_str("/backend-api");
+    }
+    base
+}
+
+/// The usage route for the configured base: wham on the hosted backend,
+/// `/api/codex/usage` on a custom `chatgpt_base_url`.
+fn codex_usage_url() -> String {
+    let base = codex_base_url();
+    if base.contains("/backend-api") {
+        format!("{base}/wham/usage")
+    } else {
+        format!("{base}/api/codex/usage")
+    }
+}
+
+/// `wham/<path>` on the hosted base, `None` when a custom base replaces the
+/// backend — reset credits exist only there.
+fn codex_wham_url(path: &str) -> Option<String> {
+    let base = codex_base_url();
+    base.contains("/backend-api")
+        .then(|| format!("{base}/wham/{path}"))
+}
+
 /// The ChatGPT backend credential headers shared by every wham endpoint:
-/// `~/.codex/auth.json` holds the OAuth token and account id. Blocking —
+/// `$CODEX_HOME/auth.json` holds the OAuth token and account id. Blocking —
 /// reads the file.
 fn codex_auth_headers() -> anyhow::Result<Vec<String>> {
-    let path = dirs::home_dir()
+    let path = codex_home()
         .ok_or_else(|| anyhow!(keyed!("usage_error.no_home_directory")))?
-        .join(".codex/auth.json");
+        .join("auth.json");
     let auth: Value = serde_json::from_str(
         &std::fs::read_to_string(&path)
             .with_context(|| keyed!("usage_error.read_file", path = path.display()))?,
@@ -175,7 +244,7 @@ fn codex_status_check(status: u16) -> anyhow::Result<()> {
 /// expiry. Blocking.
 pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
     let headers = codex_auth_headers()?;
-    let (status, body) = http_get(CODEX_USAGE_URL, &headers)?;
+    let (status, body) = http_get(&codex_usage_url(), &headers)?;
     codex_status_check(status)?;
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let mut usage = parse_codex_plan_usage(&body)
@@ -199,7 +268,10 @@ pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
 /// The earliest expiry among the account's redeemable reset credits, or
 /// `None` when the detail read reports none. Blocking.
 fn fetch_codex_reset_credit_expiry(headers: &[String]) -> anyhow::Result<Option<i64>> {
-    let (status, body) = http_get(CODEX_RESET_CREDITS_URL, headers)?;
+    let Some(url) = codex_wham_url("rate-limit-reset-credits") else {
+        return Ok(None);
+    };
+    let (status, body) = http_get(&url, headers)?;
     codex_status_check(status)?;
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     Ok(reset_credit_expiry(&body))
@@ -225,9 +297,10 @@ pub fn consume_codex_reset_credit(
     redeem_request_id: &str,
 ) -> anyhow::Result<CodexResetCreditOutcome> {
     let headers = codex_auth_headers()?;
+    let url = codex_wham_url("rate-limit-reset-credits/consume")
+        .ok_or_else(|| anyhow!(keyed!("usage_error.no_plan_usage", provider = "Codex")))?;
     let body = json!({ "redeem_request_id": redeem_request_id });
-    let (status, response) =
-        http_post_json(CODEX_RESET_CREDITS_CONSUME_URL, &headers, &body.to_string())?;
+    let (status, response) = http_post_json(&url, &headers, &body.to_string())?;
     codex_status_check(status)?;
     let response: Value =
         serde_json::from_str(&response).context(keyed!("usage_error.invalid_json"))?;
@@ -666,6 +739,1531 @@ fn parse_grok_billing(billing: &Value) -> anyhow::Result<PlanUsage> {
     })
 }
 
+/// Read the GitHub account's Copilot quotas from the same internal endpoint
+/// the VS Code extension polls. The credential is a plain GitHub OAuth token —
+/// an explicit env token or the signed-in `gh` CLI's, never a Copilot-specific
+/// exchange. `None` means no GitHub token is reachable, which is normal for a
+/// Copilot CLI login that never touched `gh`.
+pub fn fetch_copilot_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
+    let Some((token, api_host)) = copilot_github_token() else {
+        return Ok(None);
+    };
+    let url = format!("https://{api_host}/copilot_internal/user");
+    let (status, body) = http_get(
+        &url,
+        &[
+            format!("Authorization: token {token}"),
+            "Accept: application/json".to_owned(),
+            // The endpoint gates on the extension identity headers, not on auth alone.
+            "Editor-Version: vscode/1.96.2".to_owned(),
+            "Editor-Plugin-Version: copilot-chat/0.26.7".to_owned(),
+            "User-Agent: GitHubCopilotChat/0.26.7".to_owned(),
+            "X-Github-Api-Version: 2025-04-01".to_owned(),
+        ],
+    )?;
+    match status {
+        200 => {}
+        401 | 403 => {
+            return Err(anyhow!(keyed!(
+                "usage_error.signin_cannot_read",
+                provider = "GitHub Copilot",
+                status = status
+            )));
+        }
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+    }
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+    match parse_copilot_plan_usage(&body) {
+        Some(usage) => Ok(Some(usage)),
+        None => Err(anyhow!(keyed!("usage_error.no_rate_limit_windows"))),
+    }
+}
+
+/// `GH_TOKEN`/`GITHUB_TOKEN`/`COPILOT_API_TOKEN` first — an explicit env token
+/// wins over the CLI's login — then `gh auth token`, which also covers
+/// keychain-backed `gh` logins. `GH_HOST` selects an enterprise host the way
+/// `gh` itself does; its API lives at `api.<host>`.
+fn copilot_github_token() -> Option<(String, String)> {
+    let api_host = match std::env::var("GH_HOST") {
+        Ok(host) if !host.trim().is_empty() && host.trim() != "github.com" => {
+            let host = host.trim();
+            Some(format!("api.{}", host.strip_prefix("api.").unwrap_or(host)))
+        }
+        _ => None,
+    }
+    .unwrap_or_else(|| COPILOT_API_HOST.to_owned());
+    for key in ["COPILOT_API_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] {
+        if let Some(token) = std::env::var(key)
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+        {
+            return Some((token, api_host));
+        }
+    }
+    let mut command = crate::command_env::search_path_command("gh");
+    command.args(["auth", "token"]);
+    if api_host != COPILOT_API_HOST {
+        command.args([
+            "--hostname",
+            api_host.strip_prefix("api.").unwrap_or(&api_host),
+        ]);
+    }
+    let output = crate::command_env::output(&mut command).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!token.is_empty()).then_some((token, api_host))
+}
+
+/// A `quota_snapshots` entry carries `percent_remaining` or the
+/// `entitlement`/`remaining` pair it derives from. Unlimited and all-zero
+/// placeholders describe unmetered or token-billed seats — reading them as 0%
+/// lanes would invent usage that does not exist, so they drop out.
+fn copilot_quota_percent(snapshot: &Value) -> Option<f64> {
+    if snapshot.get("unlimited").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let entitlement = json_number(snapshot.get("entitlement"));
+    let remaining = json_number(snapshot.get("remaining"));
+    if entitlement == Some(0.0) && remaining == Some(0.0) {
+        return None;
+    }
+    if let Some(percent_remaining) = json_number(snapshot.get("percent_remaining")) {
+        return Some((100.0 - percent_remaining).clamp(0.0, 100.0));
+    }
+    match (entitlement, remaining) {
+        (Some(entitlement), Some(remaining)) if entitlement > 0.0 => {
+            Some((100.0 - remaining / entitlement * 100.0).clamp(0.0, 100.0))
+        }
+        _ => None,
+    }
+}
+
+fn parse_copilot_plan_usage(body: &Value) -> Option<PlanUsage> {
+    let resets_at = iso_timestamp(body.get("quota_reset_date")).or_else(|| {
+        body.get("quota_reset_date")
+            .and_then(Value::as_str)
+            .and_then(|raw| chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d").ok())
+            .and_then(|date| date.and_hms_opt(0, 0, 0))
+            .map(|time| time.and_utc().timestamp())
+    });
+    let month = localized!("usage.monthly_limit");
+    let mut windows = Vec::new();
+    let push = |windows: &mut Vec<PlanWindow>, name: &str, percent: f64| {
+        let (label, label_i18n) = scoped_window_label(&month, name);
+        windows.push(PlanWindow {
+            label,
+            label_i18n: Some(label_i18n),
+            percent,
+            resets_at,
+        });
+    };
+    let snapshots = body.get("quota_snapshots").and_then(Value::as_object);
+    if let Some(snapshots) = snapshots {
+        let lookup = |candidates: &[&str]| {
+            candidates.iter().find_map(|needle| {
+                snapshots.iter().find_map(|(key, value)| {
+                    key.to_ascii_lowercase()
+                        .contains(needle)
+                        .then(|| copilot_quota_percent(value))
+                        .flatten()
+                })
+            })
+        };
+        if let Some(percent) = lookup(&["premium", "completion", "code"]) {
+            push(&mut windows, "Premium requests", percent);
+        }
+        if let Some(percent) = lookup(&["chat"]) {
+            push(&mut windows, "Chat", percent);
+        }
+        if windows.is_empty() {
+            // Keys the account schema has not named yet still carry real quotas.
+            for (key, value) in snapshots {
+                if let Some(percent) = copilot_quota_percent(value) {
+                    push(&mut windows, key, percent);
+                    break;
+                }
+            }
+        }
+    }
+    if windows.is_empty() {
+        // The legacy shape reports per-quota monthly ceilings and remaining
+        // counts instead of quota_snapshots.
+        let monthly = body.get("monthly_quotas");
+        let limited = body.get("limited_user_quotas");
+        for (key, name) in [("completions", "Premium requests"), ("chat", "Chat")] {
+            let percent = match (
+                monthly.and_then(|q| json_number(q.get(key))),
+                limited.and_then(|q| json_number(q.get(key))),
+            ) {
+                (Some(limit), Some(remaining)) if limit > 0.0 => {
+                    Some((100.0 - remaining / limit * 100.0).clamp(0.0, 100.0))
+                }
+                _ => None,
+            };
+            if let Some(percent) = percent {
+                push(&mut windows, name, percent);
+            }
+        }
+    }
+    let plan_label = body
+        .get("copilot_plan")
+        .and_then(Value::as_str)
+        .map(title_case_plan)
+        .filter(|label| !label.is_empty() && label != "Unknown");
+    if windows.is_empty() && plan_label.is_none() {
+        return None;
+    }
+    Some(PlanUsage {
+        plan_label,
+        windows,
+        reset_credits: None,
+    })
+}
+
+/// Read Muse Code's subscription quotas. The `dca:` device token lives in
+/// `~/.config/muse/auth.json` (or `MUSE_AUTH_PATH`). OAuth-mode logins park
+/// their token in a keychain item whose ACL does not trust this binary —
+/// reading it would prompt every poll, so those logins report unconfigured.
+/// `None` means no `dca:` credential exists.
+pub fn fetch_muse_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
+    let Some(token) = muse_access_token() else {
+        return Ok(None);
+    };
+    let (status, body) = http_post_json(
+        MUSE_USAGE_URL,
+        &[
+            format!("Authorization: Bearer {token}"),
+            "x-api-version: 1.0.0".to_owned(),
+        ],
+        "{}",
+    )?;
+    match status {
+        200 => {}
+        401 | 403 => {
+            return Err(anyhow!(keyed!(
+                "usage_error.signin_cannot_read",
+                provider = "Muse Code",
+                status = status
+            )));
+        }
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+    }
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+    if body.get("require_payment").and_then(Value::as_bool) == Some(true)
+        || body.get("is_subs_active").and_then(Value::as_bool) != Some(true)
+    {
+        return Err(anyhow!(keyed!(
+            "usage_error.no_active_subscription",
+            provider = "Muse Code"
+        )));
+    }
+    Ok(Some(parse_muse_plan_usage(&body)
+        .ok_or_else(|| anyhow!(keyed!("usage_error.no_rate_limit_windows")))?))
+}
+
+/// The login writes `~/.config/muse/auth.json` whose `providers.meta` entry
+/// carries the `dca:` device token; other login mechanisms cannot read
+/// subscription usage.
+fn muse_access_token() -> Option<String> {
+    let path = std::env::var_os("MUSE_AUTH_PATH")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            dirs::home_dir().map(|home| home.join(".config").join("muse").join("auth.json"))
+        })?;
+    let meta = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|body| body.get("providers")?.get("meta").cloned())?;
+    meta.get("access_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|token| token.starts_with("dca:"))
+        .map(str::to_owned)
+}
+
+/// `muse-code/key` answers `{ subs_tier_name, subs_usage: { window, weekly } }`.
+/// The window fields are omitted while the five-hour lane is idle, so a plan
+/// header with no rows is a real state, not a parse failure.
+fn parse_muse_plan_usage(body: &Value) -> Option<PlanUsage> {
+    let plan_label = body
+        .get("subs_tier_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(str::to_owned);
+    let mut windows = Vec::new();
+    if let Some(usage) = body.get("subs_usage") {
+        if let Some(window) = usage.get("window")
+            && let Some(percent) = json_number(window.get("used_percent"))
+        {
+            let (label, label_i18n) =
+                window_label_from_minutes(json_i64(window.get("window_duration_mins")));
+            windows.push(PlanWindow {
+                label,
+                label_i18n: Some(label_i18n),
+                percent,
+                resets_at: muse_resets_at(window.get("resets_at")),
+            });
+        }
+        if let Some(weekly) = usage.get("weekly")
+            && let Some(percent) = json_number(weekly.get("used_percent"))
+        {
+            let (label, label_i18n) = localized!("usage.weekly_limit");
+            windows.push(PlanWindow {
+                label,
+                label_i18n: Some(label_i18n),
+                percent,
+                resets_at: muse_resets_at(weekly.get("resets_at")),
+            });
+        }
+    }
+    if windows.is_empty() && plan_label.is_none() {
+        return None;
+    }
+    Some(PlanUsage {
+        plan_label,
+        windows,
+        reset_credits: None,
+    })
+}
+
+/// `resets_at` is unix seconds; the plugin drops implausible values while
+/// keeping the quota, so a corrupt timestamp degrades to an unlabeled reset.
+fn muse_resets_at(value: Option<&Value>) -> Option<i64> {
+    json_i64(value).filter(|seconds| *seconds > 0 && *seconds < 64_092_211_200)
+}
+
+/// Read the Droid account's Factory plan quotas. `FACTORY_API_KEY` (env or
+/// `~/.factory/.env`) is a bearer token on the same billing endpoints the web
+/// app calls. `None` means no Factory key is configured.
+pub fn fetch_droid_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
+    let Some(key) = factory_api_key() else {
+        return Ok(None);
+    };
+    let headers = [
+        format!("Authorization: Bearer {key}"),
+        "Accept: application/json".to_owned(),
+        "Content-Type: application/json".to_owned(),
+        "Origin: https://app.factory.ai".to_owned(),
+        "Referer: https://app.factory.ai/".to_owned(),
+        "x-factory-client: web-app".to_owned(),
+    ];
+    // `auth/me` is the auth gate: the API host answers API-key bearers, the app
+    // host session cookies, so try the API host first and keep whichever
+    // answers. A 401/403 from either is the sign-in verdict.
+    let mut auth_body = None;
+    let mut auth_denied = None;
+    for base in [FACTORY_API_BASE, FACTORY_APP_BASE] {
+        match http_get(&format!("{base}/api/app/auth/me"), &headers) {
+            Ok((200, body)) => {
+                auth_body = serde_json::from_str::<Value>(&body).ok();
+                break;
+            }
+            Ok((status @ (401 | 403), _)) => auth_denied = Some(status),
+            _ => continue,
+        }
+    }
+    if auth_body.is_none() {
+        if let Some(status) = auth_denied {
+            return Err(anyhow!(keyed!(
+                "usage_error.signin_cannot_read",
+                provider = "Droid",
+                status = status
+            )));
+        }
+        return Err(anyhow!(keyed!("usage_error.no_plan_usage", provider = "Droid")));
+    }
+    let plan_label = auth_body.as_ref().and_then(factory_plan_label);
+
+    // Token-rate-limits billing is the newer envelope: fixed 5h/weekly/monthly
+    // windows on the standard and core pools.
+    let now = unix_time() as i64;
+    if let Ok((200, body)) = http_get(&format!("{FACTORY_API_BASE}/api/billing/limits"), &headers)
+        && let Ok(body) = serde_json::from_str::<Value>(&body)
+        && body.get("usesTokenRateLimitsBilling").and_then(Value::as_bool) == Some(true)
+    {
+        let windows = factory_rate_limit_windows(body.get("limits"), now);
+        if !windows.is_empty() {
+            return Ok(Some(PlanUsage {
+                plan_label,
+                windows,
+                reset_credits: None,
+            }));
+        }
+    }
+    // Monthly token allowance per tier, shared with the web dashboard.
+    let (status, body) = http_get(
+        &format!("{FACTORY_APP_BASE}/api/organization/subscription/usage"),
+        &headers,
+    )?;
+    match status {
+        200 => {}
+        401 | 403 => {
+            return Err(anyhow!(keyed!(
+                "usage_error.signin_cannot_read",
+                provider = "Droid",
+                status = status
+            )));
+        }
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+    }
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+    let windows = factory_subscription_windows(&body);
+    if windows.is_empty() && plan_label.is_none() {
+        return Err(anyhow!(keyed!("usage_error.no_plan_usage", provider = "Droid")));
+    }
+    Ok(Some(PlanUsage {
+        plan_label,
+        windows,
+        reset_credits: None,
+    }))
+}
+
+fn factory_api_key() -> Option<String> {
+    if let Some(key) = std::env::var("FACTORY_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+    {
+        return Some(key);
+    }
+    let env_path = dirs::home_dir()?.join(".factory").join(".env");
+    let text = std::fs::read_to_string(env_path).ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(value) = line.strip_prefix("FACTORY_API_KEY=") {
+            let value = value.trim().trim_matches('"').trim_matches('\'');
+            if !value.is_empty() {
+                return Some(value.to_owned());
+            }
+        }
+    }
+    None
+}
+
+fn factory_plan_label(auth: &Value) -> Option<String> {
+    let tier = auth
+        .get("organization")
+        .and_then(|org| org.get("subscription"))
+        .and_then(|sub| {
+            sub.get("factoryTier")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    sub.get("orbSubscription")
+                        .and_then(|orb| orb.get("plan"))
+                        .and_then(|plan| plan.get("name"))
+                        .and_then(Value::as_str)
+                })
+        })
+        .map(str::trim)
+        .filter(|tier| !tier.is_empty());
+    tier.map(|tier| format!("Factory {}", title_case_plan(tier)))
+}
+
+/// `api/billing/limits` windows carry `usedPercent` plus either a countdown
+/// (`secondsRemaining`) or an absolute `windowEnd`. A window that already
+/// ended but lost its countdown reads 0 rather than its stale percent.
+fn factory_rate_limit_windows(limits: Option<&Value>, now: i64) -> Vec<PlanWindow> {
+    let Some(limits) = limits else { return Vec::new() };
+    let mut windows = Vec::new();
+    for (pool, scope) in [("standard", None), ("core", Some("Core"))] {
+        let Some(entries) = limits.get(pool).and_then(Value::as_object) else {
+            continue;
+        };
+        for (key, minutes) in [
+            ("fiveHour", Some(5 * 60)),
+            ("weekly", Some(7 * 24 * 60)),
+            ("monthly", None),
+        ] {
+            let Some(window) = entries.get(key) else { continue };
+            let Some(used_percent) = json_number(window.get("usedPercent")) else {
+                continue;
+            };
+            let window_end = flexible_timestamp(window.get("windowEnd"));
+            let seconds_remaining = json_i64(window.get("secondsRemaining"));
+            let resets_at = if seconds_remaining.is_some_and(|seconds| seconds > 0) {
+                Some(now + seconds_remaining.unwrap_or_default())
+            } else {
+                window_end.filter(|end| *end > now)
+            };
+            // CodexBar's stale rule: an ended window only zeroes when the
+            // countdown field is absent entirely — an explicit 0 still counts
+            // as a reported snapshot.
+            let stale = window_end.is_some() && seconds_remaining.is_none() && resets_at.is_none();
+            let percent = if stale {
+                0.0
+            } else {
+                used_percent.clamp(0.0, 100.0)
+            };
+            let base = match minutes {
+                Some(minutes) => window_label_from_minutes(Some(minutes)),
+                None => localized!("usage.monthly_limit"),
+            };
+            let (label, label_i18n) = match scope {
+                Some(name) => scoped_window_label(&base, name),
+                None => base,
+            };
+            windows.push(PlanWindow {
+                label,
+                label_i18n: Some(label_i18n),
+                percent,
+                resets_at,
+            });
+        }
+    }
+    windows
+}
+
+/// `organization/subscription/usage` reports each tier's token allowance as a
+/// `usedRatio` (0–1) beside the raw counts; giant allowances are unlimited
+/// pools, not metered rows.
+fn factory_subscription_windows(body: &Value) -> Vec<PlanWindow> {
+    let Some(usage) = body.get("usage") else {
+        return Vec::new();
+    };
+    let resets_at = json_i64(usage.get("endDate")).map(|ms| ms / 1000);
+    let mut windows = Vec::new();
+    for (key, name) in [("standard", "Standard"), ("premium", "Premium")] {
+        let Some(pool) = usage.get(key) else { continue };
+        let percent = match (
+            json_number(pool.get("usedRatio")),
+            json_number(pool.get("totalAllowance")),
+            json_number(pool.get("userTokens")),
+        ) {
+            (Some(ratio), _, _) if ratio <= 1.0 => Some(ratio * 100.0),
+            (Some(ratio), _, _) => Some(ratio),
+            (None, Some(allowance), Some(used)) if allowance > 0.0 && allowance < 1e12 => {
+                Some(used / allowance * 100.0)
+            }
+            _ => None,
+        };
+        if let Some(percent) = percent {
+            windows.push(PlanWindow {
+                label: tr!("usage.scoped_limit", period = "Monthly", name = name),
+                label_i18n: Some(
+                    localized!("usage.scoped_limit", period = "Monthly", name = name).1,
+                ),
+                percent: percent.clamp(0.0, 100.0),
+                resets_at,
+            });
+        }
+    }
+    windows
+}
+
+/// A timestamp that can be unix seconds, unix milliseconds, or RFC 3339 —
+/// Factory emits all three across its billing payloads.
+fn flexible_timestamp(value: Option<&Value>) -> Option<i64> {
+    let value = value?;
+    if let Some(number) = json_number(Some(value)) {
+        // ms timestamps sit three orders of magnitude past second values.
+        return Some(if number > 1e12 {
+            (number / 1000.0) as i64
+        } else {
+            number as i64
+        });
+    }
+    iso_timestamp(Some(value))
+}
+
+/// Read the Kimi Code subscription's coding quota. The CLI's OAuth credential
+/// (`~/.kimi-code/credentials/kimi-code.json` or `KIMI_AUTH_TOKEN`) calls the
+/// web billing service; `KIMI_CODE_API_KEY` calls the coding API instead. The
+/// two carry different concepts — subscription windows versus API balance —
+/// and are never merged into one account view.
+pub fn fetch_kimi_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
+    if let Some(key) = std::env::var("KIMI_CODE_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+    {
+        return fetch_kimi_code_usage(&key);
+    }
+    let Some((token, china_only)) = kimi_auth_token() else {
+        return Ok(None);
+    };
+    let hosts: &[&str] = if china_only {
+        &KIMI_WEB_HOSTS[..1]
+    } else {
+        &KIMI_WEB_HOSTS
+    };
+    let mut last_error = None;
+    for (index, web) in hosts.iter().enumerate() {
+        match fetch_kimi_web_usage(web, &token) {
+            Ok(usage) => return Ok(Some(usage)),
+            Err(error) if index + 1 < hosts.len() => last_error = Some(error),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow!(keyed!("usage_error.unknown_error"))))
+}
+
+/// The CLI writes `{access_token, expires_at}` to `kimi-code.json`; a token
+/// inside its last minute is already gone. The file credential is issued by
+/// the China login only — region overrides mean the env token path owns it.
+fn kimi_auth_token() -> Option<(String, bool)> {
+    for key in ["KIMI_AUTH_TOKEN", "kimi_auth_token"] {
+        if let Some(token) = std::env::var(key)
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+        {
+            return Some((token, false));
+        }
+    }
+    if std::env::var("KIMI_CODE_BASE_URL").is_ok()
+        || std::env::var("KIMI_CODE_OAUTH_HOST").is_ok()
+        || std::env::var("KIMI_OAUTH_HOST").is_ok()
+    {
+        return None;
+    }
+    let home = std::env::var_os("KIMI_CODE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".kimi-code")))?;
+    let body: Value = serde_json::from_str(
+        &std::fs::read_to_string(home.join("credentials").join("kimi-code.json")).ok()?,
+    )
+    .ok()?;
+    let token = body
+        .get("access_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())?;
+    let expires_at = json_number(body.get("expires_at"))? as i64;
+    if expires_at <= unix_time() as i64 + 60 {
+        return None;
+    }
+    Some((token.to_owned(), true))
+}
+
+fn kimi_web_headers(token: &str, web: &str) -> Vec<String> {
+    vec![
+        format!("Authorization: Bearer {token}"),
+        format!("Cookie: kimi-auth={token}"),
+        "Accept: application/json".to_owned(),
+        "Content-Type: application/json".to_owned(),
+        "connect-protocol-version: 1".to_owned(),
+        "x-msh-platform: web".to_owned(),
+        format!("Origin: {web}"),
+        format!("Referer: {web}/code/console"),
+        "Accept-Language: en-US,en".to_owned(),
+    ]
+}
+
+fn fetch_kimi_web_usage(web: &str, token: &str) -> anyhow::Result<PlanUsage> {
+    let headers = kimi_web_headers(token, web);
+    let (status, body) = http_post_json(
+        &format!("{web}/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages"),
+        &headers,
+        r#"{"scope":["FEATURE_CODING"]}"#,
+    )?;
+    match status {
+        200 => {}
+        401 | 403 => {
+            return Err(anyhow!(keyed!(
+                "usage_error.signin_cannot_read",
+                provider = "Kimi Code",
+                status = status
+            )));
+        }
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+    }
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+    let windows = kimi_web_windows(&body);
+    // The plan name lives on the membership service; its absence is not
+    // worth failing the quota lanes over.
+    let plan_label = http_post_json(
+        &format!("{web}/apiv2/kimi.gateway.membership.v2.MembershipService/GetSubscription"),
+        &headers,
+        "{}",
+    )
+    .ok()
+    .and_then(|(status, body)| (status == 200).then_some(body))
+    .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+    .and_then(|body| {
+        let subscription = body.get("subscription")?;
+        (subscription.get("active").and_then(Value::as_bool) == Some(true)
+            && subscription.get("status").and_then(Value::as_str)
+                == Some("SUBSCRIPTION_STATUS_ACTIVE"))
+        .then(|| {
+            subscription
+                .get("goods")
+                .and_then(|goods| goods.get("title"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .map(str::to_owned)
+        })
+        .flatten()
+    });
+    if windows.is_empty() && plan_label.is_none() {
+        return Err(anyhow!(keyed!("usage_error.no_plan_usage", provider = "Kimi Code")));
+    }
+    Ok(PlanUsage {
+        plan_label,
+        windows,
+        reset_credits: None,
+    })
+}
+
+/// `GetUsages` rows pair a scope with an aggregate `detail` plus per-window
+/// `limits`; the FEATURE_CODING row is the coding subscription, anything else
+/// is unrelated platform balance.
+fn kimi_web_windows(body: &Value) -> Vec<PlanWindow> {
+    let Some(usages) = body.get("usages").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut windows = Vec::new();
+    for usage in usages {
+        if usage.get("scope").and_then(Value::as_str) != Some("FEATURE_CODING") {
+            continue;
+        }
+        if let Some(percent) = usage.get("detail").and_then(kimi_detail_percent) {
+            windows.push(PlanWindow {
+                label: tr!("usage.weekly_limit"),
+                label_i18n: Some(localized!("usage.weekly_limit").1),
+                percent,
+                resets_at: usage.get("detail").and_then(kimi_reset_time),
+            });
+        }
+        // Only the first `limits` entry is the session rate lane — later
+        // entries describe other quota scopes.
+        if let Some(limit) = usage.get("limits").and_then(Value::as_array).and_then(|l| l.first())
+            && let Some(percent) = limit.get("detail").and_then(kimi_detail_percent)
+        {
+            let (label, label_i18n) =
+                window_label_from_minutes(kimi_window_minutes(limit.get("window")));
+            windows.push(PlanWindow {
+                label,
+                label_i18n: Some(label_i18n),
+                percent,
+                resets_at: limit.get("detail").and_then(kimi_reset_time),
+            });
+        }
+    }
+    windows
+}
+
+/// `coding/v1/usages` answers `{usage, usages{limit_*}, limits[], user}` where
+/// the pools are ratios, the limits carry per-window details, and membership
+/// is soft — a malformed `version` must not reject the quota lanes.
+fn fetch_kimi_code_usage(key: &str) -> anyhow::Result<Option<PlanUsage>> {
+    let base = match std::env::var("KIMI_CODE_BASE_URL") {
+        Ok(value) if !value.trim().is_empty() => {
+            let url = url::Url::parse(value.trim()).ok().filter(|url| {
+                url.scheme() == "https" && url.username().is_empty() && url.password().is_none()
+            });
+            let Some(url) = url else {
+                return Err(anyhow!(keyed!(
+                    "usage_error.base_url_invalid",
+                    provider = "Kimi Code"
+                )));
+            };
+            url.to_string().trim_end_matches('/').to_owned()
+        }
+        _ => KIMI_API_BASE.to_owned(),
+    };
+    let suffix = if base.ends_with("/coding/v1") {
+        "/usages"
+    } else if base.ends_with("/coding") {
+        "/v1/usages"
+    } else {
+        "/coding/v1/usages"
+    };
+    let (status, body) = http_get(
+        &format!("{base}{suffix}"),
+        &[
+            format!("Authorization: Bearer {key}"),
+            "Accept: application/json".to_owned(),
+        ],
+    )?;
+    match status {
+        200 => {}
+        401 | 403 => {
+            return Err(anyhow!(keyed!(
+                "usage_error.signin_cannot_read",
+                provider = "Kimi Code",
+                status = status
+            )));
+        }
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+    }
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+    let mut windows = Vec::new();
+    // Top-level `usage` detail is the weekly lane; `usages` pools carry the
+    // 5h/7d/month ratios; `limits.first` is the session rate lane.
+    if let Some(percent) = body.get("usage").and_then(kimi_detail_percent) {
+        windows.push(PlanWindow {
+            label: tr!("usage.weekly_limit"),
+            label_i18n: Some(localized!("usage.weekly_limit").1),
+            percent,
+            resets_at: body.get("usage").and_then(kimi_reset_time),
+        });
+    }
+    if let Some(pools) = body.get("usages") {
+        for (key, minutes) in [
+            ("limit_5h", Some(5 * 60)),
+            ("limit_7d", Some(7 * 24 * 60)),
+            ("limit_month_total", None),
+        ] {
+            let Some(pool) = pools.get(key) else { continue };
+            let Some(ratio) = json_number(pool.get("used_ratio"))
+                .filter(|ratio| ratio.is_finite() && *ratio >= 0.0)
+            else {
+                continue;
+            };
+            let (label, label_i18n) = match minutes {
+                Some(minutes) => window_label_from_minutes(Some(minutes)),
+                None => localized!("usage.monthly_limit"),
+            };
+            windows.push(PlanWindow {
+                label,
+                label_i18n: Some(label_i18n),
+                percent: (ratio.min(1.0) * 100.0).clamp(0.0, 100.0),
+                resets_at: kimi_reset_time(pool),
+            });
+        }
+    }
+    if let Some(limit) = body.get("limits").and_then(Value::as_array).and_then(|l| l.first())
+        && let Some(percent) = limit.get("detail").and_then(kimi_detail_percent)
+    {
+        let (label, label_i18n) =
+            window_label_from_minutes(kimi_window_minutes(limit.get("window")));
+        windows.push(PlanWindow {
+            label,
+            label_i18n: Some(label_i18n),
+            percent,
+            resets_at: limit.get("detail").and_then(kimi_reset_time),
+        });
+    }
+    let plan_label = kimi_membership_label(&body);
+    if windows.is_empty() && plan_label.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(PlanUsage {
+        plan_label,
+        windows,
+        reset_credits: None,
+    }))
+}
+
+/// The coding API names plans through its V1 goods catalog; unknown levels
+/// pass through so a new tier still displays.
+fn kimi_membership_label(body: &Value) -> Option<String> {
+    let level = body
+        .get("user")
+        .and_then(|user| user.get("membership"))
+        .and_then(|membership| membership.get("level"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|level| !level.is_empty() && *level != "LEVEL_UNSPECIFIED")?;
+    // A malformed or unknown catalog version means the level enum may have
+    // drifted — pass it through raw rather than guessing a wrong catalog.
+    let version = body.get("version");
+    if version.is_some_and(|v| !v.is_string() || v.as_str() != Some("GOODS_VERSION_V1")) {
+        return Some(level.to_owned());
+    }
+    Some(
+        match level {
+            "LEVEL_FREE" => "Adagio",
+            "LEVEL_TRIAL" => "Andante",
+            "LEVEL_BASIC" => "Moderato",
+            "LEVEL_INTERMEDIATE" => "Allegretto",
+            "LEVEL_ADVANCED" => "Allegro",
+            other => other,
+        }
+        .to_owned(),
+    )
+}
+
+/// A `detail` block counts `limit`/`used`/`remaining` as decimal strings (or
+/// numbers). Any side that yields a usable percent wins; `remaining` alone is
+/// enough because the limit is still the denominator.
+fn kimi_detail_percent(detail: &Value) -> Option<f64> {
+    let limit = json_number(detail.get("limit"))?;
+    if limit <= 0.0 {
+        return None;
+    }
+    if let Some(used) = json_number(detail.get("used")) {
+        return Some((used / limit * 100.0).clamp(0.0, 100.0));
+    }
+    json_number(detail.get("remaining"))
+        .map(|remaining| (100.0 - remaining / limit * 100.0).clamp(0.0, 100.0))
+}
+
+/// `resetTime`/`reset_time` arrive as ISO strings or epoch seconds.
+fn kimi_reset_time(detail: &Value) -> Option<i64> {
+    for key in ["resetTime", "resetAt", "reset_time", "reset_at"] {
+        if let Some(timestamp) = flexible_timestamp(detail.get(key)) {
+            return Some(timestamp);
+        }
+    }
+    None
+}
+
+/// `window{duration, timeUnit}` uses the protobuf enum units.
+fn kimi_window_minutes(window: Option<&Value>) -> Option<i64> {
+    let window = window?;
+    let duration = json_i64(window.get("duration"))?;
+    match window.get("timeUnit").and_then(Value::as_str) {
+        Some("TIME_UNIT_MINUTE") => Some(duration),
+        Some("TIME_UNIT_HOUR") => duration.checked_mul(60),
+        Some("TIME_UNIT_DAY") => duration.checked_mul(24 * 60),
+        _ => None,
+    }
+}
+
+/// Read the Cursor account's plan usage through the editor's saved session:
+/// the desktop app keeps a session JWT in its `state.vscdb`, which replays as
+/// the `WorkosCursorSessionToken` cookie the web API expects. `None` means no
+/// usable Cursor sign-in exists on this machine.
+pub fn fetch_cursor_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
+    let Some((user_id, token)) = cursor_session_token()? else {
+        return Ok(None);
+    };
+    let cookie = format!("WorkosCursorSessionToken={user_id}%3A%3A{token}");
+    let headers = [
+        format!("Cookie: {cookie}"),
+        "Accept: application/json".to_owned(),
+    ];
+    let (status, body) = http_get(CURSOR_USAGE_URL, &headers)?;
+    match status {
+        200 => {}
+        401 | 403 => {
+            return Err(anyhow!(keyed!(
+                "usage_error.signin_cannot_read",
+                provider = "Cursor",
+                status = status
+            )));
+        }
+        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+    }
+    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+    let mut plan = parse_cursor_plan_usage(&body);
+    // Request-based legacy plans answer the summary with no pool rows; the
+    // per-user requests endpoint still carries their window.
+    if plan.as_ref().is_none_or(|plan| plan.windows.is_empty()) {
+        let (status, body) = http_get(&format!("{CURSOR_REQUESTS_URL}?user={user_id}"), &headers)?;
+        if status == 200
+            && let Ok(body) = serde_json::from_str::<Value>(&body)
+            && let Some(mut legacy) = cursor_legacy_windows(&body)
+        {
+            legacy.plan_label = plan.and_then(|plan| plan.plan_label).or(legacy.plan_label);
+            plan = Some(legacy);
+        }
+    }
+    match plan {
+        Some(plan) if !plan.windows.is_empty() || plan.plan_label.is_some() => Ok(Some(plan)),
+        _ => Err(anyhow!(keyed!("usage_error.no_plan_usage", provider = "Cursor"))),
+    }
+}
+
+/// `(user_id, session_token)` from the editor's storage. The expiry inside the
+/// JWT is the only refresh the app performs, so an expired value is a
+/// sign-in failure, not a missing credential.
+fn cursor_session_token() -> anyhow::Result<Option<(String, String)>> {
+    let Some(db) = cursor_state_db() else {
+        return Ok(None);
+    };
+    let connection =
+        rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| {
+                anyhow!(keyed!("usage_error.read_file", path = db.display().to_string()))
+            })?;
+    let _ = connection.busy_timeout(Duration::from_millis(250));
+    let token: Option<String> = connection
+        .query_row(
+            "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'",
+            [],
+            |row| match row.get::<_, String>(0) {
+                Ok(text) => Ok(text),
+                // The editor can persist blobs; a UTF-16LE value decodes
+                // through pairs, anything else is already UTF-8 bytes.
+                Err(_) => row
+                    .get::<_, Vec<u8>>(0)
+                    .map(|bytes| cursor_decode_token_bytes(&bytes)),
+            },
+        )
+        .ok()
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty());
+    let Some(token) = token else {
+        return Ok(None);
+    };
+    let claims = cursor_jwt_claims(&token);
+    let user_id = claims
+        .as_ref()
+        .and_then(|claims| claims.get("sub"))
+        .and_then(Value::as_str)
+        .and_then(|sub| sub.rsplit('|').next())
+        .map(str::to_owned);
+    let expired = claims
+        .as_ref()
+        .and_then(|claims| json_i64(claims.get("exp")))
+        .is_some_and(|exp| exp <= unix_time() as i64 + 60);
+    match (user_id, expired) {
+        (Some(user_id), false) => Ok(Some((user_id, token))),
+        (_, true) => Err(anyhow!(keyed!(
+            "usage_error.session_expired",
+            provider = "Cursor"
+        ))),
+        _ => Ok(None),
+    }
+}
+
+fn cursor_state_db() -> Option<std::path::PathBuf> {
+    #[allow(unused_mut)]
+    let mut candidates = vec![
+        dirs::home_dir().map(|home| {
+            home.join("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
+        }),
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+            .map(|config| config.join("Cursor/User/globalStorage/state.vscdb")),
+    ];
+    #[cfg(target_os = "windows")]
+    candidates.push(
+        dirs::config_dir().map(|config| config.join("Cursor/User/globalStorage/state.vscdb")),
+    );
+    candidates.into_iter().flatten().find(|path| path.exists())
+}
+
+fn cursor_decode_token_bytes(bytes: &[u8]) -> String {
+    let utf8 = String::from_utf8_lossy(bytes);
+    if utf8.trim().starts_with("ey") {
+        return utf8.into_owned();
+    }
+    if bytes.len().is_multiple_of(2) {
+        let decoded: String = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
+            .map(|unit| char::from_u32(u32::from(unit)).unwrap_or(' '))
+            .collect();
+        if decoded.trim_start_matches('\u{feff}').trim().starts_with("ey") {
+            return decoded;
+        }
+    }
+    utf8.into_owned()
+}
+
+/// A session JWT's payload is plain base64url JSON; only `sub` and `exp` are
+/// needed to mint the cookie and check freshness.
+fn cursor_jwt_claims(token: &str) -> Option<Value> {
+    use base64::Engine as _;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// `api/usage-summary` splits the account into `individualUsage` pools
+/// (percent-reporting plan quota, cents-billed on-demand) and `teamUsage`.
+/// Team pools only surface when the personal lane is absent — showing both
+/// would double-count the same quota.
+fn parse_cursor_plan_usage(body: &Value) -> Option<PlanUsage> {
+    let plan_label = cursor_plan_label(body.get("membershipType"));
+    let resets_at = iso_timestamp(body.get("billingCycleEnd"));
+    let mut windows = Vec::new();
+    if let Some(individual) = body.get("individualUsage") {
+        if let Some(plan) = individual.get("plan") {
+            let percent = json_number(plan.get("totalPercentUsed")).or_else(|| {
+                match (json_number(plan.get("used")), json_number(plan.get("limit"))) {
+                    (Some(used), Some(limit)) if limit > 0.0 => Some(used / limit * 100.0),
+                    _ => None,
+                }
+            });
+            if let Some(percent) = percent {
+                let (label, label_i18n) = localized!("usage.monthly_limit");
+                windows.push(PlanWindow {
+                    label,
+                    label_i18n: Some(label_i18n),
+                    percent: percent.clamp(0.0, 100.0),
+                    resets_at,
+                });
+            }
+        }
+        if let Some(on_demand) = individual.get("onDemand")
+            && on_demand.get("enabled").and_then(Value::as_bool) == Some(true)
+            && let (Some(used), Some(limit)) = (
+                json_number(on_demand.get("used")),
+                json_number(on_demand.get("limit")),
+            )
+            && limit > 0.0
+        {
+            windows.push(PlanWindow {
+                label: tr!("usage.scoped_limit", period = "Monthly", name = "On-demand"),
+                label_i18n: Some(
+                    localized!("usage.scoped_limit", period = "Monthly", name = "On-demand").1,
+                ),
+                percent: (used / limit * 100.0).clamp(0.0, 100.0),
+                resets_at,
+            });
+        }
+    }
+    if windows.is_empty()
+        && let Some(pool) = body.get("teamUsage").and_then(|team| team.get("pooled"))
+        && let (Some(used), Some(limit)) = (
+            json_number(pool.get("used")),
+            json_number(pool.get("limit")),
+        )
+        && limit > 0.0
+    {
+        windows.push(PlanWindow {
+            label: tr!("usage.scoped_limit", period = "Monthly", name = "Team"),
+            label_i18n: Some(
+                localized!("usage.scoped_limit", period = "Monthly", name = "Team").1,
+            ),
+            percent: (used / limit * 100.0).clamp(0.0, 100.0),
+            resets_at,
+        });
+    }
+    if windows.is_empty() && plan_label.is_none() {
+        return None;
+    }
+    Some(PlanUsage {
+        plan_label,
+        windows,
+        reset_credits: None,
+    })
+}
+
+/// Legacy request-based plans keep their quota on the `gpt-4` entry
+/// (`numRequestsTotal`/`numRequests` over `maxRequestUsage`); other model
+/// rows are not request quotas. `startOfMonth` anchors the monthly reset.
+fn cursor_legacy_windows(body: &Value) -> Option<PlanUsage> {
+    let resets_at = iso_timestamp(body.get("startOfMonth")).and_then(|start| {
+        chrono::DateTime::from_timestamp(start, 0)?
+            .checked_add_months(chrono::Months::new(1))
+            .map(|end| end.timestamp())
+    });
+    let entry_percent = |value: &Value| {
+        let used = json_number(value.get("numRequestsTotal"))
+            .or_else(|| json_number(value.get("numRequests")))?;
+        match json_number(value.get("maxRequestUsage")) {
+            Some(limit) if limit > 0.0 => Some(used / limit * 100.0),
+            _ => None,
+        }
+    };
+    // The gpt-4 entry is the contract; other request-quota entries only make
+    // up the lane when it is absent.
+    let percent = body
+        .get("gpt-4")
+        .and_then(entry_percent)
+        .or_else(|| {
+            body.as_object()?.values().filter_map(entry_percent).reduce(f64::max)
+        })?;
+    Some(PlanUsage {
+        plan_label: None,
+        windows: vec![PlanWindow {
+            label: tr!("usage.monthly_limit"),
+            label_i18n: Some(localized!("usage.monthly_limit").1),
+            percent: percent.clamp(0.0, 100.0),
+            resets_at,
+        }],
+        reset_credits: None,
+    })
+}
+
+fn cursor_plan_label(membership: Option<&Value>) -> Option<String> {
+    let tier = membership?.as_str()?.trim();
+    let label = match tier {
+        "pro" => "Cursor Pro",
+        "pro_plus" => "Cursor Pro+",
+        "ultra" => "Cursor Ultra",
+        "enterprise" => "Cursor Enterprise",
+        "team" | "business" => "Cursor Team",
+        "hobby" | "free" | "free_trial" => "Cursor Free",
+        "pro_student" => "Cursor Pro Student",
+        "express" => "Cursor Express",
+        other => return Some(format!("Cursor {}", title_case_plan(other))),
+    };
+    Some(label.to_owned())
+}
+
+/// Read Amp's free-tier and subscription balances. `AMP_API_KEY` calls the
+/// internal balance endpoint directly; otherwise `amp usage` prints the same
+/// display grammar. Both answer English display text, not a quota schema —
+/// the parser owns the interpretation.
+pub fn fetch_amp_plan_usage(binary: Option<&std::path::Path>) -> anyhow::Result<Option<PlanUsage>> {
+    let text = if let Some(key) = std::env::var("AMP_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+    {
+        let (status, body) = http_post_json(
+            AMP_USAGE_URL,
+            &[format!("Authorization: Bearer {key}")],
+            r#"{"method":"userDisplayBalanceInfo","params":{}}"#,
+        )?;
+        match status {
+            200 => {}
+            401 | 403 => {
+                return Err(anyhow!(keyed!(
+                    "usage_error.signin_cannot_read",
+                    provider = "Amp",
+                    status = status
+                )));
+            }
+            429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
+            other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        }
+        let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+        if body.get("ok").and_then(Value::as_bool) == Some(false) {
+            if body.pointer("/error/code").and_then(Value::as_str) == Some("auth-required") {
+                return Err(anyhow!(keyed!(
+                    "usage_error.signin_required",
+                    provider = "Amp"
+                )));
+            }
+            return Err(anyhow!(keyed!(
+                "usage_error.probe_failed",
+                provider = "Amp",
+                error = body
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("API error")
+            )));
+        }
+        body.get("result")
+            .and_then(|result| result.get("displayText"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow!(keyed!("usage_error.no_plan_usage", provider = "Amp")))?
+    } else {
+        let Some(binary) = binary else { return Ok(None) };
+        amp_usage_probe(binary)?
+    };
+    parse_amp_plan_usage(&text)
+        .map(Some)
+        .ok_or_else(|| anyhow!(keyed!("usage_error.no_plan_usage", provider = "Amp")))
+}
+
+/// `amp usage` answers on stdout — or stderr when stdout is empty — with the
+/// same display text the API returns. NO_COLOR keeps the grammar parseable.
+fn amp_usage_probe(binary: &std::path::Path) -> anyhow::Result<String> {
+    let mut command = crate::command_env::command(binary);
+    command
+        .arg("usage")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = crate::command_env::spawn(&mut command)
+        .context(keyed!("usage_error.probe_failed", provider = "Amp", error = "spawn"))?;
+    // `amp usage` prints a handful of lines; the pipe never fills before exit.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(anyhow!(keyed!(
+                    "usage_error.probe_failed",
+                    provider = "Amp",
+                    error = "timeout"
+                )));
+            }
+        }
+    }
+    let output = child.wait_with_output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let text = if stdout.trim().is_empty() {
+        stderr.trim().to_owned()
+    } else {
+        stdout.trim().to_owned()
+    };
+    if text.is_empty() {
+        return Err(anyhow!(keyed!(
+            "usage_error.probe_failed",
+            provider = "Amp",
+            error = "empty output"
+        )));
+    }
+    if output.status.success() {
+        return Ok(text);
+    }
+    if text.to_lowercase().contains("sign in") || text.to_lowercase().contains("log in") {
+        return Err(anyhow!(keyed!("usage_error.signin_required", provider = "Amp")));
+    }
+    Err(anyhow!(keyed!(
+        "usage_error.probe_failed",
+        provider = "Amp",
+        error = format!("exit {}", output.status.code().unwrap_or(-1))
+    )))
+}
+
+/// Every `$`-amount or bare number on the line, in order.
+fn amp_amounts(line: &str) -> Vec<f64> {
+    let mut amounts = Vec::new();
+    let bytes = line.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_digit() {
+            let start = index;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_digit()
+                    || bytes[index] == b','
+                    || bytes[index] == b'.')
+            {
+                index += 1;
+            }
+            if let Ok(value) = line[start..index].replace(',', "").parse::<f64>() {
+                amounts.push(value);
+            }
+        } else {
+            index += 1;
+        }
+    }
+    amounts
+}
+
+/// `amp usage` / `userDisplayBalanceInfo` display text. The free tier counts
+/// down a dollar quota that replenishes hourly; subscriptions count down an
+/// "orb usage" percent that renews on a schedule; credits and workspace
+/// balances are plain dollar balances with no denominator and stay off the
+/// meter.
+fn parse_amp_plan_usage(text: &str) -> Option<PlanUsage> {
+    let text = crate::git_commit::strip_ansi(text).replace("**", "");
+    let mut plan_label = None;
+    let mut windows = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("Amp Free:") {
+            if rest.contains("% remaining") {
+                // "Amp Free: 74% remaining today (resets daily)"
+                if let Some(percent) = amp_amounts(rest).first().copied() {
+                    let (label, label_i18n) = localized!("usage.daily_limit");
+                    windows.push(PlanWindow {
+                        label,
+                        label_i18n: Some(label_i18n),
+                        percent: (100.0 - percent).clamp(0.0, 100.0),
+                        resets_at: rest
+                            .contains("resets daily")
+                            .then(amp_daily_reset)
+                            .flatten(),
+                    });
+                }
+                continue;
+            }
+            // "Amp Free: $7.00 / $10.00 remaining (replenishes +$0.48 / hour)"
+            let amounts = amp_amounts(rest);
+            if amounts.len() >= 2 && rest.contains("remaining") && amounts[1] > 0.0 {
+                let replenish_rate = rest
+                    .split("replenishes")
+                    .nth(1)
+                    .and_then(|tail| amp_amounts(tail).first().copied())
+                    .filter(|rate| *rate > 0.0);
+                let window_minutes = replenish_rate
+                    .map(|rate| (amounts[1] / rate * 60.0).round() as i64);
+                // The drip refills at `rate`/hour, so a full pool lands
+                // `used / rate` hours out.
+                let resets_at = replenish_rate.map(|rate| {
+                    unix_time() as i64
+                        + ((amounts[1] - amounts[0]) / rate * 3600.0).round() as i64
+                });
+                let (label, label_i18n) = window_label_from_minutes(window_minutes);
+                windows.push(PlanWindow {
+                    label,
+                    label_i18n: Some(label_i18n),
+                    percent: ((amounts[1] - amounts[0]) / amounts[1] * 100.0).clamp(0.0, 100.0),
+                    resets_at,
+                });
+            }
+            continue;
+        }
+        let subscription = line
+            .strip_prefix("Subscription ")
+            .filter(|_| line.contains(':'))
+            .map(|rest| rest.split(':').next().unwrap_or(rest).trim())
+            .or_else(|| {
+                line.strip_prefix("Amp ")
+                    .filter(|rest| rest.contains(" Subscription:"))
+                    .and_then(|rest| rest.split(" Subscription:").next())
+                    .map(str::trim)
+            })
+            .filter(|name| !name.is_empty());
+        if let Some(name) = subscription {
+            plan_label = plan_label.or_else(|| Some(name.to_owned()));
+            let amounts = amp_amounts(line);
+            let resets_at = amp_renewal_reset(line);
+            // "75% other usage and 83% orb usage remaining" → two percent lanes.
+            if line.contains("other usage") {
+                if let Some(other) = amounts.first() {
+                    let (label, label_i18n) = localized!("usage.monthly_limit");
+                    windows.push(PlanWindow {
+                        label,
+                        label_i18n: Some(label_i18n),
+                        percent: (100.0 - other).clamp(0.0, 100.0),
+                        resets_at,
+                    });
+                }
+                if let Some(orb) = amounts.get(1).filter(|_| line.contains("orb usage")) {
+                    windows.push(PlanWindow {
+                        label: tr!("usage.scoped_limit", period = "Monthly", name = "Orb"),
+                        label_i18n: Some(
+                            localized!("usage.scoped_limit", period = "Monthly", name = "Orb").1,
+                        ),
+                        percent: (100.0 - orb).clamp(0.0, 100.0),
+                        resets_at,
+                    });
+                }
+            }
+            continue;
+        }
+        // "Amp Pro Tier: agent usage $42.50 of $100.00 remaining ... resets upon
+        // renewal in 12 days" — agent dollars are authoritative over percents.
+        if line.contains(" Tier: agent usage") {
+            if let Some(name) = line
+                .strip_prefix("Amp ")
+                .and_then(|rest| rest.split(" Tier:").next())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            {
+                plan_label = plan_label.or_else(|| Some(name.to_owned()));
+            }
+            let amounts = amp_amounts(line);
+            if amounts.len() >= 2 && amounts[1] > 0.0 {
+                let (label, label_i18n) = localized!("usage.monthly_limit");
+                windows.push(PlanWindow {
+                    label,
+                    label_i18n: Some(label_i18n),
+                    percent: ((amounts[1] - amounts[0]) / amounts[1] * 100.0).clamp(0.0, 100.0),
+                    resets_at: amp_renewal_reset(line),
+                });
+            }
+        }
+    }
+    if windows.is_empty() {
+        return None;
+    }
+    Some(PlanUsage {
+        plan_label,
+        windows,
+        reset_credits: None,
+    })
+}
+
+/// The free tier resets at 20:00 America/New_York, matching CodexBar's
+/// `nextFreeTierReset` anchor.
+fn amp_daily_reset() -> Option<i64> {
+    let eastern = chrono::Utc::now().with_timezone(&chrono_tz::America::New_York);
+    let at_twenty = |date: chrono::NaiveDate| {
+        date.and_hms_opt(20, 0, 0)?
+            .and_local_timezone(chrono_tz::America::New_York)
+            .earliest()
+    };
+    let reset = at_twenty(eastern.date_naive())
+        .filter(|candidate| candidate.timestamp() > unix_time() as i64)
+        .or_else(|| eastern.date_naive().succ_opt().and_then(at_twenty))?;
+    Some(reset.timestamp())
+}
+
+/// "resets upon renewal in N days/months" → an approximate reset timestamp;
+/// months stay calendar months so the lane matches the billing anchor.
+fn amp_renewal_reset(line: &str) -> Option<i64> {
+    let tail = line.split("renewal in").nth(1)?;
+    let count = tail
+        .split_whitespace()
+        .find_map(|word| word.trim_end_matches(',').replace(',', "").parse::<u32>().ok())?;
+    let unit = tail
+        .split_whitespace()
+        .find(|word| word.starts_with("day") || word.starts_with("month"))?;
+    let now = chrono::DateTime::from_timestamp(unix_time() as i64, 0)?;
+    if unit.starts_with("month") {
+        now.checked_add_months(chrono::Months::new(count))
+            .map(|time| time.timestamp())
+    } else {
+        Some(now.timestamp() + i64::from(count) * 24 * 60 * 60)
+    }
+}
+
+/// "Monthly · Orb"-style labels reuse the shared scoped key: the period key's
+/// rendered text without its " limit" suffix is the period word.
+fn scoped_window_label(
+    base: &(String, waku_protocol::WireTranslation),
+    name: &str,
+) -> (String, waku_protocol::WireTranslation) {
+    let suffix = tr!("usage.limit_suffix");
+    let period = base.0.strip_suffix(&suffix).unwrap_or(&base.0).to_owned();
+    (
+        tr!("usage.scoped_limit", period = &period, name = name),
+        waku_protocol::WireTranslation::new(
+            "usage.scoped_limit",
+            [("period", period), ("name", name.to_owned())],
+        ),
+    )
+}
+
+/// Title-case a provider's plan token (`individual_pro` → "Individual Pro").
+fn title_case_plan(raw: &str) -> String {
+    raw.split(['_', '-', ' '])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A JSON number that may arrive as a string.
+fn json_number(value: Option<&Value>) -> Option<f64> {
+    match value? {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+fn json_i64(value: Option<&Value>) -> Option<i64> {
+    match value? {
+        Value::Number(number) => number.as_i64().or_else(|| number.as_f64().map(|n| n as i64)),
+        Value::String(text) => text.trim().parse::<f64>().ok().map(|n| n as i64),
+        _ => None,
+    }
+}
+
+/// RFC 3339 / ISO 8601 timestamps, with or without an offset or time part.
+fn iso_timestamp(value: Option<&Value>) -> Option<i64> {
+    let raw = value?.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|time| time.timestamp())
+        .or_else(|| {
+            chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S")
+                .ok()
+                .map(|time| time.and_utc().timestamp())
+        })
+        .or_else(|| {
+            chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+                .ok()
+                .and_then(|date| date.and_hms_opt(0, 0, 0))
+                .map(|time| time.and_utc().timestamp())
+        })
+}
+
 /// Map the ChatGPT backend's usage response (primary/secondary windows in
 /// seconds, plus model-scoped `additional_rate_limits`) into the panel's
 /// rows.
@@ -820,9 +2418,14 @@ fn keychain_payload() -> anyhow::Result<String> {
 }
 
 fn credentials_file_payload() -> anyhow::Result<String> {
-    let path = dirs::home_dir()
+    // Claude Code treats `CLAUDE_CONFIG_DIR` as the literal config root —
+    // credentials move with it, so the file lookup does too.
+    let path = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".claude")))
         .ok_or_else(|| anyhow!(keyed!("usage_error.no_home_directory")))?
-        .join(".claude/.credentials.json");
+        .join(".credentials.json");
     std::fs::read_to_string(&path)
         .with_context(|| keyed!("usage_error.read_file", path = path.display()))
 }
@@ -971,6 +2574,20 @@ fn parse_plan_usage(body: &Value, credentials: &OauthCredentials) -> PlanUsage {
     if windows.is_empty() {
         windows = flat_field_windows(body);
     }
+    if let Some(extra) = body.get("extra_usage")
+        && extra.get("is_enabled").and_then(Value::as_bool) == Some(true)
+        && let Some(percent) = json_number(extra.get("utilization"))
+    {
+        // Prepaid overage credit: a monthly spend lane beside the quota rows.
+        windows.push(PlanWindow {
+            label: tr!("usage.scoped_limit", period = "Monthly", name = "Extra usage"),
+            label_i18n: Some(
+                localized!("usage.scoped_limit", period = "Monthly", name = "Extra usage").1,
+            ),
+            percent: percent.clamp(0.0, 100.0),
+            resets_at: parse_reset(extra.get("resets_at")),
+        });
+    }
     PlanUsage {
         plan_label: plan_label(
             credentials.subscription_type.as_deref(),
@@ -1018,13 +2635,23 @@ fn limit_entry_windows(body: &Value) -> Vec<PlanWindow> {
 }
 
 /// The older flat shape, kept as a fallback for accounts the `limits` array
-/// has not reached.
+/// has not reached. The seven-day family keeps growing (OAuth apps, routines,
+/// cowork), so unknown `seven_day_*` keys surface generically rather than
+/// dropping.
 fn flat_field_windows(body: &Value) -> Vec<PlanWindow> {
     [
         "five_hour",
         "seven_day",
         "seven_day_opus",
         "seven_day_sonnet",
+        "seven_day_oauth_apps",
+        "seven_day_routines",
+        "seven_day_claude_routines",
+        "claude_routines",
+        "routines",
+        "routine",
+        "seven_day_cowork",
+        "cowork",
     ]
     .into_iter()
     .filter_map(|key| {
@@ -1034,6 +2661,10 @@ fn flat_field_windows(body: &Value) -> Vec<PlanWindow> {
             "seven_day" => localized!("usage.weekly_all_models"),
             "seven_day_opus" => localized!("usage.weekly_model", model = "Opus"),
             "seven_day_sonnet" => localized!("usage.weekly_model", model = "Sonnet"),
+            "seven_day_oauth_apps" => localized!("usage.weekly_model", model = "OAuth apps"),
+            "seven_day_routines" | "seven_day_claude_routines" | "claude_routines" | "routines"
+            | "routine" => localized!("usage.weekly_model", model = "Routines"),
+            "seven_day_cowork" | "cowork" => localized!("usage.weekly_model", model = "Cowork"),
             _ => return None,
         };
         Some(PlanWindow {
@@ -1098,6 +2729,7 @@ fn plan_label(subscription_type: Option<&str>, rate_limit_tier: Option<&str>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
 
     /// Trimmed from a live response captured on 2026-08-07.
     const LIVE_BODY: &str = r#"{
@@ -1560,5 +3192,352 @@ mod tests {
         // depends on the machine's zone, so assert only the shape.
         let far = reset_label(now + 3 * 24 * 3600, now);
         assert!(far.starts_with("Resets ") && !far.contains(" in "), "{far}");
+    }
+
+    #[test]
+    fn copilot_maps_quota_snapshots_and_plan() {
+        // Shape CodexBar decodes: premium/chat snapshots plus plan metadata.
+        let body: Value = serde_json::from_str(
+            r#"{
+                "copilot_plan": "business",
+                "quota_reset_date": "2026-09-01",
+                "quota_snapshots": {
+                    "premium_interactions": {"entitlement": 300, "remaining": 150,
+                        "percent_remaining": 50, "quota_id": "premium", "unlimited": false},
+                    "chat": {"entitlement": 0, "remaining": 0, "percent_remaining": 100,
+                        "quota_id": "chat", "unlimited": false}
+                }
+            }"#,
+        )
+        .unwrap();
+        let usage = parse_copilot_plan_usage(&body).unwrap();
+        assert_eq!(usage.plan_label.as_deref(), Some("Business"));
+        // Chat's all-zero snapshot is a placeholder — GitHub returns it for
+        // token-billed seats — so only the premium lane renders.
+        assert_eq!(
+            usage
+                .windows
+                .iter()
+                .map(|window| (window.label.as_str(), window.percent))
+                .collect::<Vec<_>>(),
+            [("Monthly · Premium requests", 50.0)]
+        );
+        assert_eq!(usage.windows[0].resets_at, Some(1_788_220_800));
+    }
+
+    #[test]
+    fn copilot_unlimited_and_placeholder_snapshots_never_render_meters() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "copilot_plan": "enterprise",
+                "quota_snapshots": {
+                    "premium_interactions": {"unlimited": true},
+                    "chat": {"entitlement": 0, "remaining": 0, "percent_remaining": 100}
+                }
+            }"#,
+        )
+        .unwrap();
+        let usage = parse_copilot_plan_usage(&body).unwrap();
+        assert_eq!(usage.plan_label.as_deref(), Some("Enterprise"));
+        assert!(usage.windows.is_empty());
+    }
+
+    #[test]
+    fn copilot_legacy_quota_counts_become_windows() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "copilot_plan": "free",
+                "monthly_quotas": {"chat": 2000, "completions": 50},
+                "limited_user_quotas": {"chat": 500, "completions": 10}
+            }"#,
+        )
+        .unwrap();
+        let usage = parse_copilot_plan_usage(&body).unwrap();
+        assert_eq!(
+            usage
+                .windows
+                .iter()
+                .map(|window| (window.label.as_str(), window.percent))
+                .collect::<Vec<_>>(),
+            [("Monthly · Premium requests", 80.0), ("Monthly · Chat", 75.0)]
+        );
+    }
+
+    #[test]
+    fn muse_maps_session_and_weekly_windows() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "is_subs_active": true,
+                "subs_tier_name": "Meta Code",
+                "subs_usage": {
+                    "window": {"used_percent": 30.5, "window_duration_mins": 300,
+                        "resets_at": 1780500000},
+                    "weekly": {"used_percent": 12, "resets_at": 1781000000}
+                }
+            }"#,
+        )
+        .unwrap();
+        let usage = parse_muse_plan_usage(&body).unwrap();
+        assert_eq!(usage.plan_label.as_deref(), Some("Meta Code"));
+        assert_eq!(
+            usage
+                .windows
+                .iter()
+                .map(|window| (window.label.as_str(), window.percent, window.resets_at))
+                .collect::<Vec<_>>(),
+            [
+                ("5-hour limit", 30.5, Some(1_780_500_000)),
+                ("Weekly limit", 12.0, Some(1_781_000_000)),
+            ]
+        );
+    }
+
+    #[test]
+    fn muse_idle_window_keeps_the_weekly_lane() {
+        // The login omits `window` while the five-hour lane is idle.
+        let body: Value = serde_json::from_str(
+            r#"{
+                "is_subs_active": true,
+                "subs_tier_name": "Meta Code",
+                "subs_usage": {"weekly": {"used_percent": 5, "resets_at": 1781000000}}
+            }"#,
+        )
+        .unwrap();
+        let usage = parse_muse_plan_usage(&body).unwrap();
+        assert_eq!(usage.windows.len(), 1);
+        assert_eq!(usage.windows[0].label, "Weekly limit");
+        // A corrupt reset timestamp degrades to no reset, not a failed parse.
+        let body: Value = serde_json::from_str(
+            r#"{"is_subs_active": true, "subs_usage": {"weekly": {"used_percent": 5,
+                "resets_at": 99999999999999}}}"#,
+        )
+        .unwrap();
+        assert_eq!(parse_muse_plan_usage(&body).unwrap().windows[0].resets_at, None);
+    }
+
+    #[test]
+    fn droid_rate_limit_windows_zero_out_expired_lanes() {
+        let now = 1_800_000_000_i64;
+        let limits: Value = serde_json::from_str(
+            r#"{
+                "standard": {
+                    "fiveHour": {"usedPercent": 40, "secondsRemaining": 12000,
+                        "windowEnd": "2026-12-31T00:00:00Z"},
+                    "weekly": {"usedPercent": 25, "secondsRemaining": 0,
+                        "windowEnd": "2025-12-31T00:00:00Z"},
+                    "monthly": {"usedPercent": 60, "windowEnd": 1800000000}
+                },
+                "core": {"fiveHour": {"usedPercent": 10, "secondsRemaining": 60}}
+            }"#,
+        )
+        .unwrap();
+        let windows = factory_rate_limit_windows(Some(&limits), now);
+        let rows: Vec<_> = windows
+            .iter()
+            .map(|w| (w.label.as_str(), w.percent, w.resets_at))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                // Countdown wins over the absolute end.
+                ("5-hour limit", 40.0, Some(now + 12_000)),
+                // countdown present-but-zero keeps the reported percent.
+                ("Weekly limit", 25.0, None),
+                // windowEnd past with the countdown field absent → stale zero.
+                ("Monthly limit", 0.0, None),
+                ("5-hour · Core", 10.0, Some(now + 60)),
+            ]
+        );
+    }
+
+    #[test]
+    fn droid_subscription_usage_maps_tier_allowances() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "usage": {
+                    "endDate": 1800000000000,
+                    "standard": {"usedRatio": 0.25, "userTokens": 1000, "totalAllowance": 4000},
+                    "premium": {"usedRatio": 0.5, "userTokens": 200, "totalAllowance": 400}
+                }
+            }"#,
+        )
+        .unwrap();
+        let windows = factory_subscription_windows(&body);
+        assert_eq!(
+            windows
+                .iter()
+                .map(|w| (w.label.as_str(), w.percent, w.resets_at))
+                .collect::<Vec<_>>(),
+            [
+                ("Monthly · Standard", 25.0, Some(1_800_000_000)),
+                ("Monthly · Premium", 50.0, Some(1_800_000_000)),
+            ]
+        );
+    }
+
+    #[test]
+    fn kimi_code_api_maps_ratio_pools_and_membership() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "version": "GOODS_VERSION_V1",
+                "user": {"membership": {"level": "LEVEL_INTERMEDIATE"}},
+                "usages": {
+                    "limit_5h": {"used_ratio": 0.4, "reset_time": "2026-09-01T12:00:00Z"},
+                    "limit_7d": {"used_ratio": 0.1, "reset_time": "2026-09-07T00:00:00Z"}
+                },
+                "limits": [{
+                    "window": {"duration": 30, "timeUnit": "TIME_UNIT_MINUTE"},
+                    "detail": {"limit": "100", "used": "25"}
+                }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(kimi_membership_label(&body).as_deref(), Some("Allegretto"));
+        assert!(kimi_web_windows(&body).is_empty());
+        // The API path parses pools directly; exercise the shared pieces.
+        let pools = body.get("usages").unwrap();
+        assert_eq!(
+            json_number(pools.get("limit_5h").and_then(|p| p.get("used_ratio"))),
+            Some(0.4)
+        );
+        let limit = body.get("limits").unwrap().as_array().unwrap()[0].clone();
+        assert_eq!(kimi_window_minutes(limit.get("window")), Some(30));
+        assert_eq!(kimi_detail_percent(limit.get("detail").unwrap()), Some(25.0));
+    }
+
+    #[test]
+    fn kimi_web_usage_keeps_only_the_coding_scope() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "usages": [
+                    {"scope": "FEATURE_CODING",
+                     "detail": {"limit": "1000", "used": "250", "resetTime": "2026-09-07T00:00:00Z"},
+                     "limits": [{
+                         "window": {"duration": 5, "timeUnit": "TIME_UNIT_HOUR"},
+                         "detail": {"limit": "100", "remaining": "80"}
+                     }]},
+                    {"scope": "FEATURE_CHAT",
+                     "detail": {"limit": "50", "used": "10"}}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let windows = kimi_web_windows(&body);
+        assert_eq!(
+            windows
+                .iter()
+                .map(|w| (w.label.as_str(), w.percent))
+                .collect::<Vec<_>>(),
+            [("Weekly limit", 25.0), ("5-hour limit", 20.0)]
+        );
+        assert!(windows.iter().all(|w| w.resets_at.is_some() || w.label == "5-hour limit"));
+    }
+
+    #[test]
+    fn cursor_summary_maps_plan_and_on_demand_pools() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "membershipType": "pro",
+                "billingCycleEnd": "2026-09-01T00:00:00Z",
+                "individualUsage": {
+                    "plan": {"enabled": true, "totalPercentUsed": 42.5},
+                    "onDemand": {"enabled": true, "used": 1250, "limit": 5000}
+                }
+            }"#,
+        )
+        .unwrap();
+        let usage = parse_cursor_plan_usage(&body).unwrap();
+        assert_eq!(usage.plan_label.as_deref(), Some("Cursor Pro"));
+        assert_eq!(
+            usage
+                .windows
+                .iter()
+                .map(|w| (w.label.as_str(), w.percent))
+                .collect::<Vec<_>>(),
+            [("Monthly limit", 42.5), ("Monthly · On-demand", 25.0)]
+        );
+        assert!(usage.windows.iter().all(|w| w.resets_at.is_some()));
+    }
+
+    #[test]
+    fn cursor_legacy_request_quota_falls_back_to_model_rows() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "startOfMonth": "2026-08-01T00:00:00Z",
+                "gpt-4": {"numRequests": 450, "maxRequestUsage": 500},
+                "gpt-3.5-turbo": {"numRequests": 10, "maxRequestUsage": 100}
+            }"#,
+        )
+        .unwrap();
+        let usage = cursor_legacy_windows(&body).unwrap();
+        assert_eq!(usage.windows.len(), 1);
+        assert_eq!(usage.windows[0].percent, 90.0);
+        assert_eq!(usage.windows[0].resets_at, Some(1_788_220_800));
+    }
+
+    #[test]
+    fn cursor_jwt_claims_reads_sub_and_exp() {
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(br#"{"sub":"auth0|user_123","exp":1893456000}"#);
+        let token = format!("eyJhbGciOiJub25lIn0.{payload}.sig");
+        let claims = cursor_jwt_claims(&token).unwrap();
+        assert_eq!(claims.get("sub").and_then(Value::as_str), Some("auth0|user_123"));
+        assert_eq!(claims.get("exp").and_then(Value::as_i64), Some(1_893_456_000));
+        assert!(cursor_jwt_claims("not-a-jwt").is_none());
+    }
+
+    #[test]
+    fn amp_display_text_maps_free_tier_and_subscription() {
+        let usage = parse_amp_plan_usage(
+            "Amp Free: $7.00 / $10.00 remaining (replenishes +$0.48 / hour)\n\
+             Amp Pro Subscription: 75% other usage and 83% orb usage remaining \
+             - resets upon renewal in 12 days\n\
+             Individual credits: $4.20 remaining\n",
+        )
+        .unwrap();
+        assert_eq!(usage.plan_label.as_deref(), Some("Pro"));
+        // Free lane: 30% used, ~21h window from quota/replenish.
+        assert_eq!(usage.windows[0].percent, 30.0);
+        // Subscription lanes: other usage + orb percentages.
+        assert_eq!(usage.windows[1].percent, 25.0);
+        assert_eq!(usage.windows[2].label, "Monthly · Orb");
+        assert_eq!(usage.windows[2].percent, 17.0);
+        assert!(usage.windows[1].resets_at.is_some());
+    }
+
+    #[test]
+    fn amp_percent_free_tier_and_tier_dollars() {
+        let usage = parse_amp_plan_usage(
+            "Amp Free: 74% remaining today (resets daily)\n\
+             Amp Pro Tier: agent usage $42.50 of $100.00 remaining \
+             (period 2026-08-01 to 2026-09-01) resets upon renewal in 20 days\n",
+        )
+        .unwrap();
+        assert_eq!(usage.plan_label.as_deref(), Some("Pro"));
+        assert_eq!(usage.windows[0].label, "Daily limit");
+        assert_eq!(usage.windows[0].percent, 26.0);
+        assert!((usage.windows[1].percent - 57.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn amp_bare_balances_never_render_meters() {
+        assert!(parse_amp_plan_usage("Individual credits: $4.20 remaining\n").is_none());
+        assert!(parse_amp_plan_usage("Workspace Acme: $10.00 remaining\n").is_none());
+    }
+
+    #[test]
+    fn flexible_timestamp_accepts_seconds_millis_and_iso() {
+        assert_eq!(flexible_timestamp(Some(&serde_json::json!(1_800_000_000))), Some(1_800_000_000));
+        assert_eq!(
+            flexible_timestamp(Some(&serde_json::json!(1_800_000_000_000i64))),
+            Some(1_800_000_000)
+        );
+        assert_eq!(
+            flexible_timestamp(Some(&serde_json::json!("2027-01-14T22:40:00Z"))),
+            chrono::DateTime::parse_from_rfc3339("2027-01-14T22:40:00Z")
+                .ok()
+                .map(|time| time.timestamp())
+        );
+        assert_eq!(flexible_timestamp(Some(&serde_json::json!(null))), None);
     }
 }

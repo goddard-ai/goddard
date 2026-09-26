@@ -2,9 +2,9 @@
 //! opens a panel with the session's context occupancy and the account's
 //! rate-limit lanes, mirroring Claude Code's `/usage` rows. Context numbers
 //! stream in from every provider transport that reports them; plan lanes come
-//! from the Claude OAuth endpoint (fetched off-thread in [`crate::usage`]),
-//! OpenCode Go's usage endpoint, and Codex's own rate-limit
-//! notifications. Frames read only snapshots stored on the entity.
+//! from the per-provider fetchers in `waku-core`'s usage module — the daemon
+//! resolves each provider's own credentials off-thread — and Codex's own
+//! rate-limit notifications. Frames read only snapshots stored on the entity.
 
 use gpui::relative;
 
@@ -15,10 +15,16 @@ const USAGE_METER_MENU_ID: &str = "usage-meter";
 
 /// Providers with an account-level plan fetcher. Codex additionally refreshes
 /// live from its own stream notifications.
-pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 5] = [
+pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 11] = [
+    ProviderKind::Amp,
     ProviderKind::Claude,
     ProviderKind::Codex,
+    ProviderKind::Copilot,
+    ProviderKind::Cursor,
     ProviderKind::Devin,
+    ProviderKind::Droid,
+    ProviderKind::Kimi,
+    ProviderKind::Muse,
     ProviderKind::OpenCode,
     ProviderKind::Grok,
 ];
@@ -399,8 +405,14 @@ fn usage_panel(
             None => tr!("usage.plan_limits"),
         };
         let usage_url = match provider {
+            ProviderKind::Amp => Some("https://ampcode.com/settings/usage"),
             ProviderKind::Claude => Some("https://claude.ai/settings/usage"),
             ProviderKind::Codex => Some("https://chatgpt.com/codex/settings/usage"),
+            ProviderKind::Copilot => Some("https://github.com/settings/copilot"),
+            ProviderKind::Cursor => Some("https://cursor.com/dashboard?tab=usage"),
+            ProviderKind::Droid => Some("https://app.factory.ai/settings/billing"),
+            ProviderKind::Kimi => Some("https://www.kimi.com/code/console"),
+            ProviderKind::Muse => Some("https://dev.meta.ai"),
             _ => None,
         };
         let header_row = div().flex().items_center().gap(px(6.0)).child(

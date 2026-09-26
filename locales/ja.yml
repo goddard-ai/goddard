@@ -1877,6 +1877,12 @@ usage_error.devin_no_quota: Devin のユーザーステータス応答にプラ�
 usage_error.opencode_go_key_rejected: OpenCode Go API キーでは使用量を取得できません（HTTP %{status}）。OpenCode Go に再接続してください
 usage_error.opencode_go_not_entitled: OpenCode Go の使用量には有効な OpenCode Go サブスクリプションが必要です
 usage_error.no_rate_limit_windows: 使用量 API からレート制限期間が返されませんでした
+usage_error.no_active_subscription: "%{provider} に有効なサブスクリプションがありません"
+usage_error.session_expired: "%{provider} のログインが期限切れです。%{provider} で再度ログインしてください"
+usage_error.signin_required: "%{provider} にログインしていません。%{provider} を実行してログインしてください"
+usage_error.no_plan_usage: "%{provider} からプラン使用量が返されませんでした"
+usage_error.probe_failed: "%{provider} の使用量プローブに失敗しました：%{error}"
+usage_error.base_url_invalid: "%{provider} のベース URL 上書きは有効な HTTPS URL ではありません"
 usage_error.start_grok_probe: "`grok agent stdio` を起動できませんでした"
 usage_error.grok_stdin_unavailable: Grok の標準入力を利用できません
 usage_error.grok_stdout_unavailable: Grok の標準出力を利用できません

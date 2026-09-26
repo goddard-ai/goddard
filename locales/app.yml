@@ -4727,6 +4727,18 @@ usage_error.opencode_go_not_entitled:
   en: OpenCode Go usage needs an active OpenCode Go subscription
 usage_error.no_rate_limit_windows:
   en: The usage endpoint reported no rate-limit windows
+usage_error.no_active_subscription:
+  en: "%{provider} reports no active subscription"
+usage_error.session_expired:
+  en: "%{provider} sign-in has expired; sign in again in %{provider}"
+usage_error.signin_required:
+  en: "%{provider} is not signed in; run %{provider} to sign in"
+usage_error.no_plan_usage:
+  en: "%{provider} reported no plan usage"
+usage_error.probe_failed:
+  en: "%{provider} usage probe failed: %{error}"
+usage_error.base_url_invalid:
+  en: "%{provider} base URL override is not a valid HTTPS URL"
 usage_error.start_grok_probe:
   en: Failed to start `grok agent stdio`
 usage_error.grok_stdin_unavailable:

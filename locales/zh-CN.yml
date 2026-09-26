@@ -1829,6 +1829,12 @@ usage_error.devin_no_quota: Devin 用户状态响应中没有套餐用量
 usage_error.opencode_go_key_rejected: OpenCode Go API 密钥无法读取用量（HTTP %{status}）；请重新连接 OpenCode Go
 usage_error.opencode_go_not_entitled: OpenCode Go 用量需要有效的 OpenCode Go 订阅
 usage_error.no_rate_limit_windows: 用量接口未返回任何速率限制周期
+usage_error.no_active_subscription: "%{provider} 返回没有有效订阅"
+usage_error.session_expired: "%{provider} 登录已过期；请在 %{provider} 中重新登录"
+usage_error.signin_required: "%{provider} 未登录；请运行 %{provider} 完成登录"
+usage_error.no_plan_usage: "%{provider} 未返回套餐用量"
+usage_error.probe_failed: "%{provider} 用量探测失败：%{error}"
+usage_error.base_url_invalid: "%{provider} 的基础 URL 覆盖不是有效的 HTTPS 地址"
 usage_error.start_grok_probe: 无法启动 `grok agent stdio`
 usage_error.grok_stdin_unavailable: Grok 的标准输入不可用
 usage_error.grok_stdout_unavailable: Grok 的标准输出不可用

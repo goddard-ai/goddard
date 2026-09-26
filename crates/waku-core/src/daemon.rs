@@ -1805,6 +1805,39 @@ impl Backend for WakuBackend {
                         let binary = probe.path.ok_or_else(|| anyhow!("grok is not installed"))?;
                         Some(crate::usage::fetch_grok_plan_usage(&binary)?)
                     }
+                    // These fetchers resolve env tokens and PATH-resolved CLIs
+                    // (`gh`, `amp`), so the login-shell environment must be
+                    // loaded first — same reason Grok refreshes it.
+                    crate::model::ProviderKind::Copilot => {
+                        ensure_shell_environment();
+                        crate::usage::fetch_copilot_plan_usage()?
+                    }
+                    crate::model::ProviderKind::Muse => {
+                        ensure_shell_environment();
+                        crate::usage::fetch_muse_plan_usage()?
+                    }
+                    crate::model::ProviderKind::Droid => {
+                        ensure_shell_environment();
+                        crate::usage::fetch_droid_plan_usage()?
+                    }
+                    crate::model::ProviderKind::Kimi => {
+                        ensure_shell_environment();
+                        crate::usage::fetch_kimi_plan_usage()?
+                    }
+                    crate::model::ProviderKind::Cursor => {
+                        ensure_shell_environment();
+                        crate::usage::fetch_cursor_plan_usage()?
+                    }
+                    crate::model::ProviderKind::Amp => {
+                        // `AMP_API_KEY` never reaches the probe; the CLI is
+                        // only resolved when the fetch needs `amp usage`.
+                        ensure_shell_environment();
+                        crate::usage::fetch_amp_plan_usage(
+                            crate::model::provider_probe(provider, binary_override.as_deref())
+                                .path
+                                .as_deref(),
+                        )?
+                    }
                     _ => bail!("provider has no plan usage fetcher"),
                 };
                 Ok(ResponsePayload::PlanUsage { usage })
