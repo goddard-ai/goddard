@@ -42,7 +42,12 @@ const MAX_HANDSHAKE_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_REQUEST_LINE_BYTES: usize = 1024;
 const MAX_CONNECTIONS: usize = 64;
 const HEAVY_REQUEST_WORKERS: usize = 4;
-const HEAVY_REQUEST_QUEUE: usize = 16;
+const HEAVY_REQUEST_QUEUE: usize = 32;
+/// A dispatch waits this long for pool capacity before the request is
+/// turned away — long enough that a burst of slow subprocesses queues
+/// instead of erroring, short enough that a saturated daemon still fails
+/// fast. The wait stalls only the submitting connection's read loop.
+const POOL_SUBMIT_WAIT: Duration = Duration::from_secs(5);
 const CONTROL_REQUEST_WORKERS: usize = 4;
 const CONTROL_REQUEST_QUEUE: usize = 64;
 const HEALTH_REQUEST_WORKERS: usize = 2;
@@ -76,6 +81,14 @@ impl IndependentRequestPool {
         Self { jobs }
     }
 
+    fn submit(
+        &self,
+        job: IndependentJob,
+    ) -> Result<(), crossbeam_channel::SendTimeoutError<IndependentJob>> {
+        self.jobs.send_timeout(job, POOL_SUBMIT_WAIT)
+    }
+
+    #[cfg(test)]
     fn try_submit(
         &self,
         job: IndependentJob,
@@ -934,6 +947,27 @@ impl RequestDispatcher {
         let failed_request_id = request.request_id;
         let failed_session_id = request.session_id;
         let failed_outgoing = outgoing.clone();
+        // An ask parks until the user answers — minutes, not subprocess
+        // time — and spawns nothing itself, so no bounded worker may hold
+        // it. The backend already refuses a second parked ask per task,
+        // which bounds these threads on its own.
+        if matches!(request.command, Command::AgentAsk { .. }) {
+            if let Err(error) = std::thread::Builder::new()
+                .name("goddard-daemon-ask".into())
+                .spawn(move || {
+                    handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
+                })
+            {
+                send_dispatch_error(
+                    failed_request_id,
+                    failed_session_id,
+                    failed_outgoing,
+                    &self.hub,
+                    format!("could not start ask worker: {error}"),
+                );
+            }
+            return;
+        }
         let heavy = is_subprocess_heavy(&request.command);
         let health = is_health_check(&request.command);
         let pool = if heavy {
@@ -946,18 +980,18 @@ impl RequestDispatcher {
         let job = Box::new(move || {
             handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
         });
-        let error = match pool.try_submit(job) {
+        let error = match pool.submit(job) {
             Ok(()) => return,
-            Err(crossbeam_channel::TrySendError::Full(_)) if heavy => {
+            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) if heavy => {
                 "daemon is busy with subprocess-heavy work; retry shortly".to_owned()
             }
-            Err(crossbeam_channel::TrySendError::Full(_)) => {
+            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
                 "daemon is busy processing requests; retry shortly".to_owned()
             }
-            Err(crossbeam_channel::TrySendError::Disconnected(_)) if heavy => {
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) if heavy => {
                 "daemon subprocess request workers are unavailable".to_owned()
             }
-            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
                 "daemon request workers are unavailable".to_owned()
             }
         };
