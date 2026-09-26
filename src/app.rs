@@ -122,7 +122,8 @@ const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";
 const AUTOMATION_MODEL_PICKER_MENU_ID: &str = "automation-model-picker";
 const BRANCH_PICKER_MENU_ID: &str = "workspace-branch-picker";
 const RUNTIME_MODE_MENU_ID: &str = "runtime-mode";
-const BRANCH_PICKER_ROW_HEIGHT: f32 = 26.0;
+/// Uniform row height shared by the composer's branch and project pickers.
+const PICKER_ROW_HEIGHT: f32 = 26.0;
 const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 /// The left-edge hover strip that reveals the peek sidebar while the docked
@@ -293,6 +294,15 @@ enum BranchPickerMode {
 enum BranchPickerAction {
     Checkout(String),
     Create,
+}
+
+/// The composer project picker's keyboard targets: a project row, then the
+/// pinned footer entries.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProjectPickerAction {
+    Project(Uuid),
+    NewProject,
+    NoProject,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -2391,6 +2401,16 @@ pub struct Waku {
     branch_picker_highlight: Option<usize>,
     branch_picker_list_state: ListState,
     branch_picker_row_cache: RefCell<Vec<crate::git_branch::BranchEntry>>,
+    /// Filter field in the composer project picker — its own entity for the
+    /// same reason as the branch picker's: focus lives inside the popover.
+    project_search: Entity<TextInput>,
+    /// Keyboard cursor over the project picker's actions — its project rows
+    /// plus the pinned footer entries.
+    project_picker_highlight: Option<usize>,
+    project_picker_list_state: ListState,
+    /// The project ids the open picker's rows were built from, so a keyboard
+    /// step can map an action back onto a list row for scrolling.
+    project_picker_row_cache: RefCell<Vec<Uuid>>,
     /// Name field in the composer worktree picker; empty means the daemon
     /// generates a random name.
     worktree_name_input: Entity<TextInput>,
@@ -4699,6 +4719,12 @@ impl Waku {
                 .accessibility_label(tr!("input.worktree_name"))
                 .placeholder(tr!("input.worktree_name"))
         });
+        let project_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .accessibility_label(tr!("input.search_projects"))
+                .placeholder(tr!("input.search_projects"))
+        });
         let settings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .tab_index(0)
@@ -5166,6 +5192,7 @@ impl Waku {
         let sidebar_list_state = ListState::new(0, ListAlignment::Top, px(256.0));
         let usage_projects_list = ListState::new(0, ListAlignment::Top, px(256.0));
         let branch_picker_list_state = ListState::new(0, ListAlignment::Top, px(152.0));
+        let project_picker_list_state = ListState::new(0, ListAlignment::Top, px(152.0));
         let transcript_is_scrolled = Rc::new(Cell::new(false));
         let transcript_anchor_following = Rc::new(Cell::new(false));
         let transcript_tail_recheck = Rc::new(Cell::new(false));
@@ -5688,6 +5715,22 @@ impl Waku {
                     if matches!(event, InputEvent::Edited) {
                         cx.notify();
                     }
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &project_search,
+                |this: &mut Self, search, event: &InputEvent, cx| {
+                    if !matches!(event, InputEvent::Edited) {
+                        return;
+                    }
+                    if search.read(cx).content().trim().is_empty() {
+                        this.project_picker_highlight = None;
+                    } else {
+                        this.project_picker_highlight = Some(0);
+                        this.project_picker_list_state.scroll_to_reveal_item(0);
+                    }
+                    cx.notify();
                 },
             )
             .detach();
@@ -6242,6 +6285,10 @@ impl Waku {
                 branch_picker_highlight: None,
                 branch_picker_list_state,
                 branch_picker_row_cache: RefCell::new(Vec::new()),
+                project_search,
+                project_picker_highlight: None,
+                project_picker_list_state,
+                project_picker_row_cache: RefCell::new(Vec::new()),
                 branch_snapshots: QueryCache::new(MAX_CACHED_WORKSPACES),
                 remote_files: QueryCache::new(4 * MAX_CACHED_WORKSPACES),
                 base_push_states: RefCell::new(QueryCache::new(MAX_CACHED_WORKSPACES)),

@@ -90,7 +90,7 @@ impl Waku {
         }
         *cached = rows.to_vec();
         self.branch_picker_list_state
-            .reset_with_uniform_height(rows.len(), px(BRANCH_PICKER_ROW_HEIGHT));
+            .reset_with_uniform_height(rows.len(), px(PICKER_ROW_HEIGHT));
     }
 
     /// Read the selected workspace's cached Git branches, starting one

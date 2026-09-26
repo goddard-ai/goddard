@@ -3,8 +3,9 @@ use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
     ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, ContinueState,
     atom_display_content, atom_payload_content, composer_submit_action, continue_state,
-    dropped_file_mention, merged_submission, pasted_text_preview, queued_message_is_continue,
-    remap_marker_seats, splice_inline_atoms, visible_branch_entries, workspace_subject_for,
+    dropped_file_mention, merged_submission, pasted_text_preview, project_picker_order,
+    queued_message_is_continue, remap_marker_seats, splice_inline_atoms, visible_branch_entries,
+    workspace_subject_for,
 };
 use super::model_picker::{
     PickerRow, PolicyRowId, next_picker_highlight, picker_rows, supports_reasoning_default_reset,
@@ -5428,6 +5429,64 @@ fn the_picker_is_empty_only_once_detection_has_answered() {
         false,
         true
     ));
+}
+
+#[test]
+fn project_picker_ranks_projects_by_their_newest_task() {
+    let mut alpha = Project::from_path(std::path::PathBuf::from("/work/alpha"));
+    alpha.created_at = 100;
+    let mut beta = Project::from_path(std::path::PathBuf::from("/work/beta"));
+    beta.created_at = 200;
+    let mut gamma = Project::from_path(std::path::PathBuf::from("/work/gamma"));
+    gamma.created_at = 300;
+
+    let mut stale_beta_task = AgentSession::new(beta.id, ProviderKind::Codex);
+    stale_beta_task.created_at = 500;
+    let mut fresh_alpha_task = AgentSession::new(alpha.id, ProviderKind::Codex);
+    fresh_alpha_task.created_at = 900;
+    let mut older_alpha_task = AgentSession::new(alpha.id, ProviderKind::Codex);
+    older_alpha_task.created_at = 400;
+    let sessions = [stale_beta_task, fresh_alpha_task, older_alpha_task];
+
+    // A project ranks by when a task was last created inside it; a project
+    // that never held one falls back to when it was added.
+    let mut projects = vec![alpha.clone(), beta.clone(), gamma.clone()];
+    project_picker_order(&mut projects, &sessions, None);
+    assert_eq!(
+        projects
+            .iter()
+            .map(|project| project.id)
+            .collect::<Vec<_>>(),
+        vec![alpha.id, beta.id, gamma.id]
+    );
+
+    // The workspace's current project leads its tail regardless of
+    // recency — the same treatment the branch picker gives the checked-out
+    // row.
+    let mut projects = vec![alpha.clone(), beta.clone(), gamma.clone()];
+    project_picker_order(&mut projects, &[], Some(gamma.id));
+    assert_eq!(
+        projects
+            .iter()
+            .map(|project| project.id)
+            .collect::<Vec<_>>(),
+        vec![gamma.id, beta.id, alpha.id]
+    );
+
+    // Starred projects pin above everything, ranked among themselves by
+    // recency; a starred subject takes its recency slot rather than
+    // leading.
+    beta.starred = true;
+    gamma.starred = true;
+    let mut projects = vec![alpha.clone(), beta.clone(), gamma.clone()];
+    project_picker_order(&mut projects, &sessions, Some(gamma.id));
+    assert_eq!(
+        projects
+            .iter()
+            .map(|project| project.id)
+            .collect::<Vec<_>>(),
+        vec![beta.id, gamma.id, alpha.id]
+    );
 }
 
 #[test]

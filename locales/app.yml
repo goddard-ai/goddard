@@ -1674,6 +1674,8 @@ input.search_models:
   en: Search models…
 input.search_branches:
   en: Search branches
+input.search_projects:
+  en: Search projects
 input.search_fonts:
   en: Search fonts…
 input.new_branch_name:
@@ -2291,6 +2293,8 @@ project.relocated_to:
 
 projects.title:
   en: Projects
+projects.none_found:
+  en: No projects found
 activity.tab:
   en: Activity
 activity.filter:
