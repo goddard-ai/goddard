@@ -5881,7 +5881,7 @@ impl Waku {
         let fullscreen = self.panel_fullscreen_active();
         let mut cache = self.file_preview_markdown.borrow_mut();
         if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
-            *cache = Some((relative_path.to_owned(), MarkdownView::new()));
+            *cache = Some((relative_path.to_owned(), MarkdownView::document()));
         }
         let (_, view) = cache.as_mut().expect("entry ensured above");
         view.set_text(editor_state.read(cx).content(), false);

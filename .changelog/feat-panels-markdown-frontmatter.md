@@ -1,0 +1,1 @@
+- Markdown files opened in the Files panel now render a leading `---` YAML frontmatter block as a field table in preview mode instead of showing the raw fence.
