@@ -942,6 +942,10 @@ pub enum PersistedDiffSource {
 #[serde(default)]
 pub struct PersistedRightPanelState {
     pub visible: bool,
+    /// Whether the slot was showing the Git panel for this task — the
+    /// panel's contents rebuild on mount; only the flag persists.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub git_panel_open: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub surfaces: Vec<PersistedRightPanelSurface>,
     /// Index into `surfaces` — already remapped past dropped runtime tabs.
@@ -1443,7 +1447,10 @@ struct AppState {
     sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
     right_panel_visible: bool,
-    #[serde(default)]
+    /// Read-only compatibility field for saves written while the Git panel's
+    /// open flag was global — `apply_app_state` moves it onto the selected
+    /// task's strip. New saves omit it.
+    #[serde(default, skip_serializing)]
     git_panel_visible: bool,
     #[serde(default = "default_sidebar_width")]
     sidebar_width: f32,
@@ -1794,9 +1801,6 @@ pub struct PersistedState {
     pub sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
     pub right_panel_visible: bool,
-    /// The Git panel shares the right panel's slot; both are never visible.
-    #[serde(default)]
-    pub git_panel_visible: bool,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f32,
     #[serde(default)]
@@ -2136,7 +2140,6 @@ impl PersistedState {
             remote_hosts: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
-            git_panel_visible: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_grouping: SidebarGrouping::Date,
             sidebar_ordering: SidebarOrdering::LastUpdated,
@@ -2578,7 +2581,7 @@ impl PersistedState {
             project_worktree_bases: self.project_worktree_bases.clone(),
             sidebar_visible: self.sidebar_visible,
             right_panel_visible: self.right_panel_visible,
-            git_panel_visible: self.git_panel_visible,
+            git_panel_visible: false,
             sidebar_width: self.sidebar_width,
             sidebar_grouping: self.sidebar_grouping,
             sidebar_ordering: self.sidebar_ordering,
@@ -2713,7 +2716,6 @@ impl PersistedState {
         self.project_worktree_bases = app_state.project_worktree_bases;
         self.sidebar_visible = app_state.sidebar_visible;
         self.right_panel_visible = app_state.right_panel_visible;
-        self.git_panel_visible = app_state.git_panel_visible;
         self.sidebar_width = app_state.sidebar_width;
         self.sidebar_grouping = app_state.sidebar_grouping;
         self.sidebar_ordering = app_state.sidebar_ordering;
@@ -2733,6 +2735,19 @@ impl PersistedState {
         self.projects_page = app_state.projects_page;
         self.settings_page = app_state.settings_page;
         self.right_panel_sessions = app_state.right_panel_sessions;
+        // Saves from before the Git panel's open flag was per-task carried
+        // it globally; it belongs to the task that was selected, so it lands
+        // on that strip. A hand-edited file could hold both flags — the
+        // right panel keeps the slot then.
+        if app_state.git_panel_visible
+            && !app_state.right_panel_visible
+            && let Some(selected) = self.selected_session
+        {
+            self.right_panel_sessions
+                .entry(selected)
+                .or_default()
+                .git_panel_open = true;
+        }
         self.fullscreen_surface = app_state.fullscreen_surface;
         self.saved_drafts = app_state.saved_drafts;
     }

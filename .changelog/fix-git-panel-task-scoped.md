@@ -1,0 +1,1 @@
+- The Git panel's open state is now per task: switching sessions closes it unless that task had it open, and each task's panel — including a half-written commit message — is preserved and restored.

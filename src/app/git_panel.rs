@@ -9,8 +9,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    ElementId, HighlightStyle, InteractiveText, KeyBinding, Point, StyledText, UnderlineStyle,
-    actions,
+    ElementId, HighlightStyle, InteractiveText, KeyBinding, PathBuilder, Point, StyledText,
+    UnderlineStyle, actions,
 };
 
 use waku_client::git::{
@@ -403,23 +403,53 @@ impl GitPanelCommitDiffState {
 /// the rest of the history follows.
 #[derive(Clone, Copy, PartialEq)]
 enum CommitLane {
+    /// The log's newest commit — its lane begins at the dot; nothing exits
+    /// the row's top edge.
+    Head,
     Worktree,
+    /// The merge-base row: the worktree lane curves off onto the base lane's
+    /// dot, which the base lane continues down from.
     FirstBase,
     Base,
 }
 
-/// Graph-cell geometry: the lane centers inside the 16px gutter and the row
-/// midline the connector and circles hang on.
-const COMMIT_LANE_WORKTREE: f32 = 5.0;
-const COMMIT_LANE_BASE: f32 = 13.0;
+/// Graph-cell geometry: the lane center lines inside the gutter and the cell
+/// width. The 1px strokes and 6px dots hang off a lane's center equally.
+const COMMIT_LANE_WORKTREE: f32 = 5.5;
+const COMMIT_LANE_BASE: f32 = 13.5;
 const COMMIT_GRAPH_WIDTH: f32 = 18.0;
+const COMMIT_DOT_SIZE: f32 = 6.0;
+
+/// The merge-base row's connector: the worktree lane arcs right and lands on
+/// the base lane's dot at the row's midline. Painted as a path so the handoff
+/// is a real curve rather than an orthogonal jog.
+fn commit_graph_curve(color: Hsla) -> impl IntoElement {
+    canvas(|_, _, _| (), move |bounds, _, window, _| {
+        let left = bounds.origin.x;
+        let top = bounds.origin.y;
+        let mid = bounds.size.height / 2.0;
+        let mut builder = PathBuilder::stroke(px(1.0));
+        builder.move_to(point(left + px(COMMIT_LANE_WORKTREE), top));
+        builder.cubic_bezier_to(
+            point(left + px(COMMIT_LANE_BASE), top + mid),
+            point(left + px(COMMIT_LANE_WORKTREE), top + mid * 0.5),
+            point(left + px(COMMIT_LANE_BASE), top + mid * 0.5),
+        );
+        if let Ok(path) = builder.build() {
+            window.paint_path(path, color);
+        }
+    })
+    .absolute()
+    .inset_0()
+}
 
 fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
     let line = theme.border_strong;
     let (circle_x, circle_color) = match lane {
-        CommitLane::Worktree => (COMMIT_LANE_WORKTREE, theme.accent),
+        CommitLane::Head | CommitLane::Worktree => (COMMIT_LANE_WORKTREE, theme.accent),
         CommitLane::FirstBase | CommitLane::Base => (COMMIT_LANE_BASE, theme.text_ghost),
     };
+    let mid = GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0;
     let mut cell = div()
         .flex_none()
         .w(px(COMMIT_GRAPH_WIDTH))
@@ -428,35 +458,23 @@ fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
     let vertical = |x: f32, top: f32, bottom: f32| {
         div()
             .absolute()
-            .left(px(x))
+            .left(px(x - 0.5))
             .top(px(top))
             .bottom(px(bottom))
             .w(px(1.0))
             .bg(line)
     };
     match lane {
+        CommitLane::Head => {
+            cell = cell.child(vertical(COMMIT_LANE_WORKTREE, mid, 0.0));
+        }
         CommitLane::Worktree => {
             cell = cell.child(vertical(COMMIT_LANE_WORKTREE, 0.0, 0.0));
         }
         CommitLane::FirstBase => {
-            // The worktree lane descends to mid-row, jogs right, and hands
-            // off to the base lane that continues downward.
             cell = cell
-                .child(vertical(
-                    COMMIT_LANE_WORKTREE,
-                    0.0,
-                    GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0,
-                ))
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(COMMIT_LANE_WORKTREE))
-                        .top(px(GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0))
-                        .h(px(1.0))
-                        .w(px(COMMIT_LANE_BASE - COMMIT_LANE_WORKTREE))
-                        .bg(line),
-                )
-                .child(vertical(COMMIT_LANE_BASE, 0.0, 0.0));
+                .child(commit_graph_curve(line))
+                .child(vertical(COMMIT_LANE_BASE, mid, 0.0));
         }
         CommitLane::Base => {
             cell = cell.child(vertical(COMMIT_LANE_BASE, 0.0, 0.0));
@@ -465,10 +483,10 @@ fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
     cell.child(
         div()
             .absolute()
-            .left(px(circle_x - 3.0))
-            .top(px(GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0 - 3.0))
-            .w(px(6.0))
-            .h(px(6.0))
+            .left(px(circle_x - COMMIT_DOT_SIZE / 2.0))
+            .top(px(mid - COMMIT_DOT_SIZE / 2.0))
+            .w(px(COMMIT_DOT_SIZE))
+            .h(px(COMMIT_DOT_SIZE))
             .rounded_full()
             .bg(circle_color),
     )
@@ -538,7 +556,7 @@ impl Waku {
             self.right_panel_visible = false;
             self.right_panel_pending_terminal_focus = None;
             self.git_panel_visible = true;
-            self.open_git_panel(window, cx);
+            self.open_git_panel(window, cx, true);
             self.analytics
                 .track(crate::analytics::Event::GitPanelOpened);
         } else {
@@ -594,8 +612,15 @@ impl Waku {
     }
 
     /// Build the panel state for the selected session's workspace and start
-    /// the first snapshot and commit page.
-    fn open_git_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// the first snapshot and commit page. `take_focus` is false for restores
+    /// that happen under a session switch — the panel reopens without
+    /// claiming the keyboard.
+    pub(super) fn open_git_panel(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        take_focus: bool,
+    ) {
         let Some(workspace) = self
             .selected_workspace_path()
             .map(std::path::Path::to_path_buf)
@@ -635,12 +660,14 @@ impl Waku {
         self.git_panel_generation = self.git_panel_generation.wrapping_add(1);
         self.refresh_git_panel(cx);
         self.refresh_git_panel_commits(cx);
-        let focus = message.read(cx).focus();
-        // Two frames out: the panel needs a paint before its input can take
-        // focus (the same deferral the commit dialog uses).
-        window.on_next_frame(move |window, _| {
-            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-        });
+        if take_focus {
+            let focus = message.read(cx).focus();
+            // Two frames out: the panel needs a paint before its input can
+            // take focus (the same deferral the commit dialog uses).
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+            });
+        }
     }
 
     /// The selected session's recorded base branch — only a materialized
@@ -4577,6 +4604,7 @@ impl Waku {
             let lane = match merge_base_index {
                 Some(base_index) if index > base_index => CommitLane::Base,
                 Some(base_index) if index == base_index && index > 0 => CommitLane::FirstBase,
+                _ if index == 0 => CommitLane::Head,
                 _ => CommitLane::Worktree,
             };
             rows = rows.child(self.render_git_panel_commit_row(

@@ -804,6 +804,7 @@ impl Waku {
                     *session_id,
                     persist_right_panel_state(
                         state.visible,
+                        state.git_panel_open,
                         &state.surfaces,
                         state.active_surface,
                         &state.expanded_paths,
@@ -824,6 +825,7 @@ impl Waku {
                 session_id,
                 persist_right_panel_state(
                     self.right_panel_visible,
+                    self.git_panel_visible,
                     &self.right_panel_surfaces,
                     self.right_panel_active_surface,
                     &self.right_panel_expanded_paths,
@@ -2938,7 +2940,8 @@ impl Waku {
         ) {
             self.state.right_panel_visible = self.right_panel_visible;
         }
-        self.state.git_panel_visible = self.git_panel_visible;
+        // The Git panel's open flag parks with the owner's strip — it
+        // persists through `state.right_panel_sessions`, not globally.
         self.state.sidebar_width = self.sidebar_width;
         self.state.right_panel_width = self.right_panel_width;
         self.state.git_panel_width = self.git_panel_width;
