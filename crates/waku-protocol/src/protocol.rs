@@ -1117,6 +1117,34 @@ pub struct DaemonStatsSample {
     /// on daemons that predate the gate.
     #[serde(default)]
     pub subprocesses: BTreeMap<String, SubprocessLabelSample>,
+    /// Per-pool counters from the request dispatch lanes
+    /// (`heavy`/`control`/`health`) — submit waits and rejections here mean
+    /// request handlers, not children, are what stalls. Empty on daemons
+    /// that predate the pool instrumentation.
+    #[serde(default)]
+    pub request_pools: BTreeMap<String, RequestPoolSample>,
+}
+
+/// One request pool's counters in a [`DaemonStatsSample`]. `submits`,
+/// `waited`, `wait_ms`, and `rejected` accumulate over the daemon's
+/// lifetime while `queued` reads live at sample time.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPoolSample {
+    /// Requests submitted to this pool since boot.
+    pub submits: u64,
+    /// Jobs sitting in the bounded queue right now — at or above the
+    /// worker count means every worker is busy.
+    pub queued: u32,
+    /// Submits that blocked at all waiting for queue capacity.
+    pub waited: u64,
+    /// Cumulative milliseconds submits spent waiting for capacity.
+    pub wait_ms: u64,
+    /// Longest single submit wait.
+    pub max_wait_ms: u64,
+    /// Submits turned away after waiting out the capacity timeout — the
+    /// "daemon is busy" errors the client sees.
+    pub rejected: u64,
 }
 
 /// One label's subprocess counters in a [`DaemonStatsSample`]. `spawns`,

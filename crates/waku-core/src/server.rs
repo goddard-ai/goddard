@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::io::Write as _;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
@@ -54,8 +54,50 @@ const HEALTH_REQUEST_WORKERS: usize = 2;
 const HEALTH_REQUEST_QUEUE: usize = 16;
 type IndependentJob = Box<dyn FnOnce() + Send + 'static>;
 
+#[derive(Default)]
+struct RequestPoolStats {
+    submits: u64,
+    waited: u64,
+    wait_ms: u64,
+    max_wait_ms: u64,
+    rejected: u64,
+}
+
+/// Per-pool counters for the `daemon-stats.jsonl` sample — the entry holds
+/// the jobs channel so a snapshot can read live queue depth.
+static REQUEST_POOLS: OnceLock<Mutex<HashMap<String, (RequestPoolStats, Sender<IndependentJob>)>>> =
+    OnceLock::new();
+
+fn request_pools(
+) -> &'static Mutex<HashMap<String, (RequestPoolStats, Sender<IndependentJob>)>> {
+    REQUEST_POOLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Pool counters for [`crate::stats`]: totals accumulate since boot, while
+/// `queued` samples the queue depth at call time.
+pub(crate) fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSample> {
+    request_pools()
+        .lock()
+        .iter()
+        .map(|(name, (stats, jobs))| {
+            (
+                name.clone(),
+                waku_protocol::RequestPoolSample {
+                    submits: stats.submits,
+                    queued: jobs.len() as u32,
+                    waited: stats.waited,
+                    wait_ms: stats.wait_ms,
+                    max_wait_ms: stats.max_wait_ms,
+                    rejected: stats.rejected,
+                },
+            )
+        })
+        .collect()
+}
+
 /// Fixed execution and queue bounds for independent daemon requests.
 struct IndependentRequestPool {
+    name: String,
     jobs: Sender<IndependentJob>,
 }
 
@@ -78,14 +120,39 @@ impl IndependentRequestPool {
                 eprintln!("could not start daemon request worker: {error}");
             }
         }
-        Self { jobs }
+        request_pools()
+            .lock()
+            .insert(name.to_owned(), (RequestPoolStats::default(), jobs.clone()));
+        Self {
+            name: name.to_owned(),
+            jobs,
+        }
     }
 
     fn submit(
         &self,
         job: IndependentJob,
     ) -> Result<(), crossbeam_channel::SendTimeoutError<IndependentJob>> {
-        self.jobs.send_timeout(job, POOL_SUBMIT_WAIT)
+        let started = Instant::now();
+        let result = self.jobs.send_timeout(job, POOL_SUBMIT_WAIT);
+        let wait_ms = started.elapsed().as_millis() as u64;
+        let mut pools = request_pools().lock();
+        let stats = &mut pools
+            .get_mut(&self.name)
+            .expect("a pool registers itself at construction")
+            .0;
+        stats.submits += 1;
+        // A sub-millisecond send found queue room without blocking; only
+        // longer waits reflect real contention.
+        if wait_ms >= 1 {
+            stats.waited += 1;
+            stats.wait_ms += wait_ms;
+            stats.max_wait_ms = stats.max_wait_ms.max(wait_ms);
+        }
+        if result.is_err() {
+            stats.rejected += 1;
+        }
+        result
     }
 
     #[cfg(test)]
@@ -2271,6 +2338,26 @@ mod tests {
         queued_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("the queued request should run after capacity frees");
+    }
+
+    #[test]
+    fn request_pool_submit_records_stats() {
+        let pool = IndependentRequestPool::new("stats-test", 1, 4);
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        pool.submit(Box::new(move || {
+            release_rx.recv().unwrap();
+        }))
+        .unwrap();
+        // The single worker is parked in the first job, so this submit
+        // stays queued at snapshot time.
+        pool.submit(Box::new(|| {})).unwrap();
+
+        let snapshot = request_pool_snapshot();
+        let stats = &snapshot["stats-test"];
+        assert_eq!(stats.submits, 2);
+        assert!(stats.queued >= 1);
+        assert_eq!(stats.rejected, 0);
+        release_tx.send(()).unwrap();
     }
 
     #[test]

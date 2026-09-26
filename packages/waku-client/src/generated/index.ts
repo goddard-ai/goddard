@@ -160,6 +160,7 @@ export type { RepoBranch } from "./RepoBranch";
 export type { RepoWorktree } from "./RepoWorktree";
 export type { ReportedCommand } from "./ReportedCommand";
 export type { Request } from "./Request";
+export type { RequestPoolSample } from "./RequestPoolSample";
 export type { ResponseOutcome } from "./ResponseOutcome";
 export type { ResponsePayload } from "./ResponsePayload";
 export type { ReviewDecision } from "./ReviewDecision";
