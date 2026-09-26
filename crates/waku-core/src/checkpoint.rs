@@ -592,26 +592,24 @@ fn capture_with_index(
     }
     if let Some(head) = head {
         git_with_index(root, index, ["read-tree", head])?;
+        // The status above ran against the previous capture's index, so a HEAD
+        // move since then — a merge, rebase, or checkout that deletes a file —
+        // leaves it naming paths the reseeded index no longer contains and the
+        // worktree lacks. Rescan against the fresh index so `git add` never
+        // receives a pathspec it cannot match.
+        index_state.untracked_paths.clear();
+        return capture_with_cached_index(
+            root,
+            scope,
+            index,
+            Some(head),
+            message,
+            parents,
+            index_state,
+        );
     }
     index_state.untracked_paths = list_untracked_paths(root, index, scope)?;
-    if head.is_some() {
-        if let Some(pathspecs) = status_pathspecs(&changed_paths)
-            && !pathspecs.is_empty()
-        {
-            git_with_index_input(
-                root,
-                index,
-                ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
-                &pathspecs,
-            )?;
-        } else {
-            // An unfamiliar or empty status record must never omit files from
-            // a checkpoint. Keep the full capture as the safe fallback.
-            git_with_index(root, index, ["add", "-A", "--", scope])?;
-        }
-    } else {
-        git_with_index(root, index, ["add", "-A", "--", scope])?;
-    }
+    git_with_index(root, index, ["add", "-A", "--", scope])?;
     let tree = git_with_index(root, index, ["write-tree"])?
         .trim()
         .to_owned();
@@ -868,6 +866,9 @@ fn recoverable_index_error(error: &anyhow::Error) -> bool {
         "index file smaller than expected",
         "index file has an unsupported version",
         "paths are ignored by one of your .gitignore files",
+        // A path deleted between the delta scan and `git add` — an agent or
+        // user editing mid-capture — fails the whole add the same way.
+        "did not match any files",
     ]
     .iter()
     .any(|needle| error.contains(needle))
@@ -915,31 +916,6 @@ fn worktree_status(root: &Path, index: &Path, scope: &str) -> anyhow::Result<Vec
         ],
     )?
     .stdout)
-}
-
-/// Convert porcelain-v1 NUL records into literal pathspecs suitable for
-/// `git add --pathspec-from-file`. Rename/copy records carry a second path;
-/// including both sides also removes the old name from the new tree.
-fn status_pathspecs(status: &[u8]) -> Option<Vec<u8>> {
-    let mut records = status.split(|byte| *byte == 0);
-    let mut pathspecs = Vec::new();
-    while let Some(record) = records.next() {
-        if record.is_empty() {
-            continue;
-        }
-        if record.len() < 4 || record[2] != b' ' {
-            return None;
-        }
-        push_literal_pathspec(&mut pathspecs, &record[3..]);
-        if matches!(record[0], b'R' | b'C') || matches!(record[1], b'R' | b'C') {
-            let original_path = records.next()?;
-            if original_path.is_empty() {
-                return None;
-            }
-            push_literal_pathspec(&mut pathspecs, original_path);
-        }
-    }
-    Some(pathspecs)
 }
 
 fn push_literal_pathspec(pathspecs: &mut Vec<u8>, path: &[u8]) {
@@ -2516,6 +2492,72 @@ mod tests {
         assert_eq!(turn.status, CheckpointStatus::Ready);
         assert_eq!(turn.files.len(), 1);
         assert_eq!(turn.files[0].path, "tracked.txt");
+        fs::remove_dir_all(directory).ok();
+    }
+
+    /// A deletion committed between captures — the shape a merge or checkout
+    /// of upstream work takes when it lands in the worktree — leaves the stale
+    /// side index naming a file the new HEAD lacks. The next capture must not
+    /// feed that name to `git add`, and the snapshot must not retain the file.
+    #[test]
+    fn a_deletion_committed_between_captures_neither_fails_nor_lingers() {
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        fs::write(directory.join("kept.txt"), "kept\n").unwrap();
+        fs::write(directory.join("deleted.txt"), "deleted\n").unwrap();
+        git_ok(&directory, &["add", "kept.txt", "deleted.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        capture_turn(&directory, session, 0).unwrap();
+
+        git_ok(&directory, &["rm", "--quiet", "deleted.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Goddard Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "delete",
+            ],
+        );
+
+        capture_turn_start(&directory, session, 1).unwrap();
+        assert!(
+            !git_path_exists(
+                &directory,
+                &format!("{}:deleted.txt", turn_start_ref(session, 1)),
+            ),
+            "the start snapshot must not retain a file deleted by the new HEAD"
+        );
+
+        let turn = capture_turn(&directory, session, 1).unwrap();
+        assert_eq!(turn.status, CheckpointStatus::Ready);
+        assert!(git_path_exists(
+            &directory,
+            &format!("{}:kept.txt", turn.git_ref)
+        ));
+        assert!(!git_path_exists(
+            &directory,
+            &format!("{}:deleted.txt", turn.git_ref)
+        ));
         fs::remove_dir_all(directory).ok();
     }
 }
