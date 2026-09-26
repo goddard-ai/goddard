@@ -1757,7 +1757,8 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             None,
             &HashSet::new(),
             None,
-            None
+            None,
+            false
         ),
         Some(starred_unseen)
     );
@@ -1774,7 +1775,8 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             None,
             &HashSet::new(),
             None,
-            None
+            None,
+            false
         ),
         Some(plain_unseen)
     );
@@ -1790,7 +1792,8 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             None,
             &HashSet::new(),
             None,
-            None
+            None,
+            false
         ),
         Some(starred_idle)
     );
@@ -1807,7 +1810,8 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             None,
             &HashSet::new(),
             None,
-            None
+            None,
+            false
         ),
         Some(plain_unseen)
     );
@@ -1826,7 +1830,127 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             None,
             &HashSet::new(),
             None,
-            None
+            None,
+            false
+        ),
+        Some(plain_unseen)
+    );
+}
+
+#[test]
+fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
+    let starred_project = Uuid::new_v4();
+    let plain_project = Uuid::new_v4();
+    let projects = vec![
+        project(starred_project, true),
+        project(plain_project, false),
+    ];
+    let starred_idle = Uuid::new_v4();
+    let starred_unseen = Uuid::new_v4();
+    let plain_unseen = Uuid::new_v4();
+    let mut sessions = vec![
+        project_session(plain_unseen, plain_project),
+        project_session(starred_idle, starred_project),
+        project_session(starred_unseen, starred_project),
+    ];
+    // The unstarred unread sits at the top of the sidebar, then the starred
+    // project's seen idle task, then its unseen one.
+    let rows = vec![
+        SidebarRow::Session(plain_unseen),
+        SidebarRow::Session(starred_idle),
+        SidebarRow::Session(starred_unseen),
+    ];
+    let unseen = HashMap::from([(plain_unseen, 100), (starred_unseen, 200)]);
+
+    // Starred unseen still leads.
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &unseen,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            true
+        ),
+        Some(starred_unseen)
+    );
+    // The reorder the setting turns on: the starred project's seen-but-idle
+    // task outranks the unstarred project's unseen completion.
+    let only_plain_unseen = HashMap::from([(plain_unseen, 100)]);
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &only_plain_unseen,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            true
+        ),
+        Some(starred_idle)
+    );
+    // A starred task blocked on its user is attention, not idle — it still
+    // leads the starred tier ahead of other projects' unread.
+    sessions[1].status = SessionStatus::Waiting;
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &only_plain_unseen,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            true
+        ),
+        Some(starred_idle)
+    );
+    sessions[1].status = SessionStatus::Idle;
+    // Once the starred project's tasks are all gone the unstarred unseen
+    // leads, and its idle rotation still trails.
+    let only_plain = vec![project_session(plain_unseen, plain_project)];
+    let plain_rows = vec![SidebarRow::Session(plain_unseen)];
+    assert_eq!(
+        next_attention_target(
+            &only_plain,
+            &projects,
+            &unseen,
+            &plain_rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            true
+        ),
+        Some(plain_unseen)
+    );
+    // Nothing starred: the flag changes nothing — unread still leads idle.
+    let unstarred = vec![
+        project(starred_project, false),
+        project(plain_project, false),
+    ];
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &unstarred,
+            &unseen,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            true
         ),
         Some(plain_unseen)
     );
@@ -1865,7 +1989,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             None,
             &HashSet::new(),
             None,
-            Some(&visited)
+            Some(&visited),
+            false
         ),
         Some(second)
     );
@@ -1882,7 +2007,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             None,
             &HashSet::new(),
             None,
-            Some(&visited)
+            Some(&visited),
+            false
         ),
         None
     );
@@ -1896,7 +2022,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             None,
             &HashSet::new(),
             None,
-            None
+            None,
+            false
         ),
         Some(first)
     );
@@ -1913,7 +2040,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             None,
             &HashSet::new(),
             None,
-            Some(&visited)
+            Some(&visited),
+            false
         ),
         Some(first)
     );
@@ -1930,7 +2058,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             None,
             &HashSet::new(),
             None,
-            Some(&visited)
+            Some(&visited),
+            false
         ),
         Some(first)
     );
@@ -2025,7 +2154,8 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
             None,
             &dormant,
             None,
-            None
+            None,
+            false
         ),
         Some(live)
     );
@@ -2041,7 +2171,8 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
             None,
             &all_dormant,
             None,
-            None
+            None,
+            false
         ),
         None
     );

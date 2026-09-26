@@ -2826,3 +2826,5 @@ keyboard_options.automatic_routing: 自动路由
 keyboard_options.automatic_routing_description: 发送时为任务选择合适的模型
 keyboard_options.fast: 快速
 keyboard_options.keyboard_hint: ↑ ↓ 移动 · Enter 选择 · Esc 关闭
+settings.starred_idle_before_unseen: 跳转时星标任务优先
+settings.starred_idle_before_unseen_description: "%{keys} 会先访问星标项目中已查看的空闲任务，再前往其他项目的未读完成"

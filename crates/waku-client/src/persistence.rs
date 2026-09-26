@@ -1108,6 +1108,11 @@ pub struct AppSettings {
     /// A task in a starred project plays `CompletionSound::Crystal` instead
     /// of `completion_sound` when it finishes its turn.
     pub starred_completion_sound: bool,
+    /// ⌘D prefers a starred project's seen-but-idle tasks over other
+    /// projects' unseen completions — a starred project drains fully before
+    /// unread elsewhere leads. Off keeps the star leading inside each
+    /// attention tier only.
+    pub starred_idle_before_unseen: bool,
     /// User-owned terminal commands surfaced in the command palette.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
@@ -1262,6 +1267,7 @@ impl Default for AppSettings {
             notify_turn_finished: default_notification_enabled(),
             notify_waiting_input: default_notification_enabled(),
             starred_completion_sound: true,
+            starred_idle_before_unseen: false,
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -1692,6 +1698,10 @@ pub struct PersistedState {
     pub notify_waiting_input: bool,
     #[serde(default = "default_starred_completion_sound")]
     pub starred_completion_sound: bool,
+    /// ⌘D prefers a starred project's seen-but-idle tasks over other
+    /// projects' unseen completions.
+    #[serde(default)]
+    pub starred_idle_before_unseen: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental feature opt-ins from the Experiments settings page —
@@ -2093,6 +2103,7 @@ impl PersistedState {
             notify_turn_finished: default_notification_enabled(),
             notify_waiting_input: default_notification_enabled(),
             starred_completion_sound: true,
+            starred_idle_before_unseen: false,
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -2509,6 +2520,7 @@ impl PersistedState {
             notify_turn_finished: self.notify_turn_finished,
             notify_waiting_input: self.notify_waiting_input,
             starred_completion_sound: self.starred_completion_sound,
+            starred_idle_before_unseen: self.starred_idle_before_unseen,
             custom_commands: self.custom_commands.clone(),
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
@@ -2640,6 +2652,7 @@ impl PersistedState {
         self.notify_turn_finished = settings.notify_turn_finished;
         self.notify_waiting_input = settings.notify_waiting_input;
         self.starred_completion_sound = settings.starred_completion_sound;
+        self.starred_idle_before_unseen = settings.starred_idle_before_unseen;
         self.custom_commands = settings.custom_commands;
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;

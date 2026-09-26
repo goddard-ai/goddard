@@ -2536,6 +2536,7 @@ impl Waku {
             &dormant,
             None,
             None,
+            self.state.starred_idle_before_unseen,
         )
         .is_some()
         {
