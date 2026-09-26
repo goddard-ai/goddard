@@ -22,7 +22,7 @@ import { createPrivateKey, sign } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { defaultDownloadUrlPrefix } from "./appcast.ts";
+import { githubReleaseDownloadUrlPrefix } from "./appcast.ts";
 
 const projectRoot = resolve(import.meta.dir, "..");
 
@@ -142,6 +142,43 @@ export function parseAppcast(xml: string): AppcastItem[] {
     });
 }
 
+/** Move historic R2 enclosure URLs into the matching GitHub release. The
+ *  final R2 bridge rewrites these links back for already-installed clients. */
+export function normalizeReleaseItemsForGitHub(
+  items: AppcastItem[],
+): AppcastItem[] {
+  return items.map((item) => {
+    const url = new URL(item.url);
+    const segments = url.pathname.split("/").filter(Boolean);
+    const legacyR2Asset =
+      url.hostname === "releases.goddardai.org" && segments.length === 1;
+    const githubReleaseAsset =
+      url.hostname === "github.com" &&
+      segments.length === 6 &&
+      segments.slice(0, 4).join("/") ===
+        "goddard-ai/goddard/releases/download";
+    if (
+      url.protocol !== "https:" ||
+      url.port !== "" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.search !== "" ||
+      url.hash !== "" ||
+      (!legacyR2Asset && !githubReleaseAsset)
+    ) {
+      throw new Error(`Unsupported release asset URL in appcast: ${item.url}`);
+    }
+    const filename = segments.at(-1);
+    if (!filename) {
+      throw new Error(`Release asset URL has no filename: ${item.url}`);
+    }
+    return {
+      ...item,
+      url: githubReleaseDownloadUrlPrefix(item.version) + filename,
+    };
+  });
+}
+
 export function renderAppcast(arch: Architecture, items: AppcastItem[]): string {
   const entries = items
     .map(
@@ -205,7 +242,9 @@ export async function generateWindowsAppcasts(
 
     const feedPath = join(assetsDir, appcastName(arch));
     const previous = (await Bun.file(feedPath).exists())
-      ? parseAppcast(await Bun.file(feedPath).text())
+      ? normalizeReleaseItemsForGitHub(
+          parseAppcast(await Bun.file(feedPath).text()),
+        )
       : [];
     await Bun.write(feedPath, renderAppcast(arch, mergeItems(previous, [item])));
     written.push(feedPath);
@@ -226,7 +265,8 @@ if (import.meta.main) {
   await generateWindowsAppcasts(
     assetsDir,
     version,
-    process.env.GODDARD_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix,
+    process.env.GODDARD_DOWNLOAD_URL_PREFIX ??
+      githubReleaseDownloadUrlPrefix(version),
     new Date().toUTCString(),
   );
 }

@@ -658,9 +658,10 @@ set `VK_DRIVER_FILES=/nonexistent.json` to force the GL path.
 **Git-backed features do nothing.** Goddard shells out to `git` — make sure
 `git --version` works in a new terminal (install Git for Windows on Windows).
 
-**Updates never arrive.** The updater fetches `releases.goddardai.org` (via
-`curl.exe` in System32 on Windows); a proxy or filter blocking that host
-blocks updates. **Check for Updates…** in the app menu reports the reason.
+**Updates never arrive.** The updater fetches the feed from GitHub Releases
+(via `curl.exe` in System32 on Windows); a proxy or filter blocking GitHub
+downloads blocks updates. **Check for Updates…** in the app menu reports the
+reason.
 Downloading and running the installer manually is always equivalent.
 
 **SmartScreen warns on first launch (Windows).** Expected when the release

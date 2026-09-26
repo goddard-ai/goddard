@@ -14,12 +14,13 @@ import { sign } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { defaultDownloadUrlPrefix } from "./appcast.ts";
+import { githubReleaseDownloadUrlPrefix } from "./appcast.ts";
 import {
   appPublicKey,
   architectures,
   escapeXml,
   mergeItems,
+  normalizeReleaseItemsForGitHub,
   parseAppcast,
   privateKeyFromSparkleSecret,
   publicKeyBase64,
@@ -97,7 +98,9 @@ export async function generateLinuxAppcasts(
 
     const feedPath = join(assetsDir, appcastName(arch));
     const previous = (await Bun.file(feedPath).exists())
-      ? parseAppcast(await Bun.file(feedPath).text())
+      ? normalizeReleaseItemsForGitHub(
+          parseAppcast(await Bun.file(feedPath).text()),
+        )
       : [];
     await Bun.write(feedPath, renderAppcast(arch, mergeItems(previous, [item])));
     written.push(feedPath);
@@ -118,7 +121,8 @@ if (import.meta.main) {
   await generateLinuxAppcasts(
     assetsDir,
     version,
-    process.env.GODDARD_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix,
+    process.env.GODDARD_DOWNLOAD_URL_PREFIX ??
+      githubReleaseDownloadUrlPrefix(version),
     new Date().toUTCString(),
   );
 }

@@ -24,12 +24,11 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
-    <!-- Sparkle auto-update configuration. The appcast feed lives in the
-         goddard-releases Cloudflare R2 bucket behind releases.goddardai.org, and the
-         private half of SUPublicEDKey signs each archive from the login
-         keychain during `bun run release` (see RELEASING.md). -->
+    <!-- Sparkle auto-update configuration. Stable appcasts and release assets
+         are served from GitHub Releases; the private half of SUPublicEDKey
+         signs each archive during `bun run release` (see RELEASING.md). -->
     <key>SUFeedURL</key>
-    <string>https://releases.goddardai.org/appcast.xml</string>
+    <string>https://github.com/goddard-ai/goddard/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>76F2RtMyXvox/bwTHU/j3hMF3nN//aMu4xRJnvfOx/4=</string>
 	<key>NSHighResolutionCapable</key>

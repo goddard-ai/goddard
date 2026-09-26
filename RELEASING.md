@@ -1,11 +1,12 @@
 # Releasing Goddard
 
-Goddard ships signed in-app updates on macOS, Linux, and Windows. Releases live in
-a **Cloudflare R2** bucket served at **`https://releases.goddardai.org`**. macOS uses
+Goddard ships signed in-app updates on macOS, Linux, and Windows. **GitHub
+Releases** serves versioned artifacts and the stable appcast feeds. macOS uses
 [Sparkle](https://sparkle-project.org), including binary deltas when available;
 the native Linux and Windows updaters read architecture-specific feeds and
-verify artifacts with the same EdDSA key. One release workflow produces all
-platform artifacts and feeds.
+verify artifacts with the same EdDSA key. The final transition release is
+copied once to Cloudflare R2 so older installed clients can take one last
+update; new builds read GitHub's stable feeds directly.
 
 Once set up, cutting a release is the checklist in
 [Cutting a release](#cutting-a-release): prep on `dev`, fast-forward `main` to
@@ -32,15 +33,16 @@ local artifacts; publishing is CI's job.
   a `v*` tag — or on a manual **Run workflow**, which takes the version from
   `Cargo.toml` — and opens a draft GitHub release;
   [`.github/workflows/sync-release.yml`](.github/workflows/sync-release.yml)
-  copies published assets into the R2 bucket.
+  is run manually once to publish the final R2 compatibility bridge.
 
 ---
 
 ## One-time setup
 
 The release runs on [Bun](https://bun.sh) and needs
-[`create-dmg`](https://github.com/create-dmg/create-dmg) and
-[rclone](https://rclone.org) (`brew install bun create-dmg rclone`).
+[`create-dmg`](https://github.com/create-dmg/create-dmg)
+(`brew install bun create-dmg`). The bridge workflow installs and configures
+[rclone](https://rclone.org) on its runner.
 
 ### 1. Sparkle signing keys
 
@@ -87,21 +89,24 @@ xcrun notarytool store-credentials NOTARY \
 Override the environment with `--signing-identity`, or change the notary
 profile with `--notary-profile` / `GODDARD_NOTARY_PROFILE`.
 
-### 3. Cloudflare R2 bucket + domain  ← **still to do once**
+### 3. Final R2 compatibility bridge
 
-1. Create the bucket **`goddard-releases`** (Cloudflare dashboard → R2 → Create
-   bucket). The release script will not create it — a bucket-scoped API token
-   can't.
-2. Attach the custom domain **`releases.goddardai.org`** to the bucket (bucket →
-   Settings → Custom Domains). This serves objects publicly at
-   `https://releases.goddardai.org/<file>`.
-3. Make sure the R2 API token behind the `r2` rclone remote covers this bucket
-   (R2 → Manage API Tokens → Object Read & Write). The remote already exists
-   for kero; if `rclone lsf r2:goddard-releases --s3-no-check-bucket` returns
-   *AccessDenied* after the bucket exists, extend the token's bucket list.
+The `goddard-releases` bucket and `releases.goddardai.org` custom domain are
+needed only for the final transition release. The manual **Sync final R2
+compatibility bridge** workflow copies that release's artifacts to the bucket
+and rewrites its appcasts to R2 URLs, which older Linux clients still require.
+New builds use GitHub for future updates; regular releases do not use this
+bucket.
 
-The rclone remote itself (`~/.config/rclone/rclone.conf`, type S3, provider
-Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
+Before running the bridge, confirm the bucket serves objects at
+`https://releases.goddardai.org/<file>` and that the repository has
+`RELEASES_R2_ACCESS_KEY_ID` and `RELEASES_R2_SECRET_ACCESS_KEY` scoped to Object
+Read & Write on `goddard-releases`. After the bridge succeeds, those release
+credentials are no longer needed; keep the public bucket and domain available
+while older clients may still fetch the transition release.
+
+The bridge workflow configures its temporary rclone remote from the repository
+secrets; no local rclone configuration is required.
 
 ---
 
@@ -167,9 +172,8 @@ GitHub release at the end — that stays a human's click.
    derived from it (`major*1e6 + minor*1e3 + patch`, so `0.2.0` → `2000`),
    which keeps Sparkle's build-number comparison monotonic without a manual
    counter. Prerelease versions (`-beta.1`) become GitHub prereleases through
-   CI: their versioned assets upload normally, but `sync-release` skips the
-   appcasts and `latest-*` pointers, so the update feeds keep serving the
-   stable channel.
+   CI. GitHub's `/releases/latest/download/` links continue to resolve to the
+   latest stable release.
 6. **Write the release notes** — changes accumulate as fragments in
    `.changelog/` (one `.md` file per change, one bullet each, named
    `highlight-`/`feat-`/`exp-`/`fix-<slug>.md` to pick the `###` section, or
@@ -208,15 +212,17 @@ GitHub release at the end — that stays a human's click.
    again), or Actions → Release →
    Run workflow (see below). `bun run release` stays local-only: it builds,
    signs, notarizes, and writes the DMG + zip + appcast into `dist/`, which is
-   what the workflow uploads as the GitHub release's assets and
-   `sync-release.yml` mirrors to R2. To validate a release build by hand:
+   what the workflow uploads as the GitHub release's assets. To validate a
+   release build by hand:
    ```sh
    bun run release --local
    ```
    The workflow opens a **draft** GitHub release — stop there. The notes open
    with a `### Downloads` section the `draft-release` job writes itself; its
-   links only resolve once publishing syncs the assets to R2, so verifying them
-   is part of the human review that follows.
+   links point to the draft's GitHub assets and become public when the release
+   is published, so verify them against the attached files during review. After
+   publishing the final transition release, run **Sync final R2 compatibility
+   bridge** once with its tag so pre-migration clients can update.
 
 The script builds and signs the app via `scripts/bundle.sh release`, verifies
 the bundled JS REPL and computer-use helper, builds the styled DMG, notarizes
@@ -227,14 +233,14 @@ usable Sparkle key is present.
 Test by keeping an older build around, launching it, and choosing
 **Check for Updates…**.
 
-### GitHub draft release + R2 sync
+### GitHub release and final R2 compatibility bridge
 
 The Release workflow runs two ways:
 
 - **Push a `v*` tag** — the tag must match the `version` in `Cargo.toml`, or the
   run fails before anything builds. A prerelease tag like `v0.2.0-beta.1`
-  drafts a GitHub **prerelease**; publishing it uploads its assets but leaves
-  the update feeds and `latest-*` pointers on the stable channel.
+  drafts a GitHub **prerelease**; publishing it does not change the stable
+  `/releases/latest/download/` appcast URLs.
 - **Actions → Release → Run workflow** — no tag needed. The run releases
   whatever `Cargo.toml` says and drafts it as `v<version>`; that tag is created
   at the built commit when you publish the draft.
@@ -295,8 +301,9 @@ rolls back if the replacement cannot open its main window.
   with Node's Ed25519 over the same `SPARKLE_PRIVATE_KEY`, and refuse to run
   when the key does not derive `SUPublicEDKey` (signing with the wrong key
   ships a feed the app rejects).
-- The step pulls the live feeds down first and merges, so previously published
-  releases keep their entries.
+- The step downloads the latest published GitHub feeds and merges them, so
+  previously published releases keep their entries. Historic R2 enclosure URLs
+  are moved to the corresponding versioned GitHub assets.
 
 Both Linux jobs run on **Ubuntu 22.04**, and that choice is load-bearing: the
 binaries link against the build machine's glibc, so the runner sets the oldest
@@ -306,15 +313,30 @@ older.
 
 The workflow opens (or updates) a **draft** GitHub release with those files and
 the matching `CHANGELOG.md` section, plus the `CHANGELOG.mobile.md` section
-under a `### Mobile` heading when the release has one. Publishing the GitHub
-release syncs the assets — including every signed update feed — to R2.
+under a `### Mobile` heading when the release has one. GitHub serves the
+versioned files and the stable feeds from
+`https://github.com/goddard-ai/goddard/releases/latest/download/`.
+
+The final transition release also needs to reach clients built before this
+change. Those clients still request appcasts from `releases.goddardai.org`, and
+older Linux updaters reject GitHub enclosure URLs. After publishing that one
+release, run **Actions → Sync final R2 compatibility bridge** with its tag. The
+workflow copies the release assets to R2 and rewrites its appcasts to R2 URLs.
+The new build then checks GitHub for all later updates. Do not run the bridge
+for subsequent releases.
+
+| Installed build | Update feed | Update files |
+| --- | --- | --- |
+| Before the transition release | R2 bridge | R2-hosted transition assets |
+| Transition release and later | GitHub `/releases/latest/download/` | Tag-specific GitHub release assets |
 
 Every GitHub release's notes open with a **### Downloads** section — direct
 links to the macOS DMG, the Windows installers and portable zips, and the Linux
 tarballs plus the `install.sh` one-liner — above the changelog. The
 `draft-release` job writes it; keep it when editing a draft's notes. The links
-point at the R2 bucket, so they 404 until publishing syncs the assets — a human
-verifies them as part of reviewing the draft. The one-liner
+point at versioned GitHub assets and become public when the release is
+published — verify their filenames against the attached assets during review.
+The one-liner
 pins the release's own tag so it always fetches a published script:
 `curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/<tag>/install.sh | sh`.
 When cutting a release by hand, add the section yourself — but only on
@@ -322,16 +344,16 @@ releases whose tag contains `install.sh` at the repo root; older tags 404 and
 must not recommend it.
 
 `appcast.xml`, the architecture-specific Linux/Windows appcasts,
-`latest-linux.txt`, and `latest-windows.txt` are the bucket's mutable pointers
-and upload with a short cache lifetime; everything else is versioned and
-cached forever. Linux users install from that bucket via
+`latest-linux.txt`, and `latest-windows.txt` are GitHub release assets; the
+`latest` download path selects them from the latest stable release. The final
+R2 bridge copies these small pointers with a short cache lifetime; everything
+else is versioned. Linux users install from GitHub via
 [`install.sh`](install.sh), fetched from the repo's raw GitHub URL
 (`https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh`) — see
 [docs/linux.md](docs/linux.md).
 
-Publishing that GitHub release (or running **Sync release** from Actions)
-uploads the assets to the `goddard-releases` R2 bucket. Configure these repository
-secrets first:
+Only the final transition release is copied to R2. Configure these repository
+secrets before running that bridge:
 
 | Secret | Purpose |
 | --- | --- |
@@ -346,9 +368,9 @@ secrets first:
 | `SPARKLE_PRIVATE_KEY` | EdDSA private key for `generate_appcast` |
 | `WINDOWS_CERTIFICATE` | optional; base64-encoded Authenticode `.pfx` |
 | `WINDOWS_CERTIFICATE_PASSWORD` | optional; password for that `.pfx` |
-| `R2_ACCOUNT_ID` | Cloudflare account id for the R2 API |
-| `R2_ACCESS_KEY_ID` | R2 Object Read & Write token |
-| `R2_SECRET_ACCESS_KEY` | matching secret |
+| `R2_ACCOUNT_ID` | Cloudflare account id for the R2 API; also used by sccache |
+| `RELEASES_R2_ACCESS_KEY_ID` | bucket-scoped R2 Object Read & Write token |
+| `RELEASES_R2_SECRET_ACCESS_KEY` | matching secret |
 | `R2_BUCKET` | optional; defaults to `goddard-releases` |
 
 ### Options
@@ -359,7 +381,7 @@ secrets first:
 | `--adhoc`, `--skip-notarize` | — | unsigned/notarization-free test builds |
 | `--skip-build` | — | reuse existing release binaries |
 | `--build-number <n>` / `GODDARD_BUILD_NUMBER` | derived | `CFBundleVersion` override |
-| `GODDARD_DOWNLOAD_URL_PREFIX` | `https://releases.goddardai.org/` | base URL in the appcast |
+| `GODDARD_DOWNLOAD_URL_PREFIX` | the current version's GitHub release URL | base URL in the appcast |
 | `SPARKLE_BIN` | the `~/Library/Caches/goddard-build` copy | Sparkle tools directory |
 | `GODDARD_ANALYTICS_ENDPOINT`, `GODDARD_ANALYTICS_WEBSITE_ID` | — | embedded at build time; builds without them compile analytics out |
 | `SPARKLE_PRIVATE_KEY` | login keychain | EdDSA key for `generate_appcast`; local builds skip the appcast when no usable key is found |
@@ -369,7 +391,7 @@ secrets first:
 ## The dev channel
 
 Settings → General can switch the updater between **Stable** (the bundle's
-`SUFeedURL`, `releases.goddardai.org`) and **Dev** (`dev.goddardai.org`). The
+`SUFeedURL`, GitHub Releases) and **Dev** (`dev.goddardai.org`). The
 pick persists in the app settings file and Sparkle consults it on every
 check — switching back to Stable restores the production feed.
 
@@ -417,15 +439,17 @@ next.
   `bundle.sh` strips them (plus headers/modules) from the embedded framework
   and re-signs the rest with the app's identity — hardened-runtime library
   validation requires the identities to match.
-- **Old archives stay in R2** so far-behind users can still be served; only
-  the recent history is staged locally under `dist/updates/` (git-ignored).
-- **Platform artifacts:** keep the bucket layout flat and platform-tagged by
-  artifact name/extension — today's macOS names
+- **Old archives stay in GitHub Releases.** The final R2 bridge copies the
+  transition release and its appcasts for clients that still use the old host;
+  regular releases go only to GitHub. Recent macOS history is staged locally
+  under `dist/updates/` (git-ignored).
+- **Platform artifacts:** keep GitHub release assets flat and platform-tagged
+  by artifact name/extension — today's macOS names
   (`Goddard-<v>.dmg`, `Goddard-<v>.zip`, `appcast.xml`) must keep their URLs.
   Linux CI releases produce `Goddard-<v>-<target>.tar.gz` with
   `scripts/bundle-linux.sh`, Windows CI produces `Goddard-<v>-<target>.zip` with
-  `scripts/bundle-windows.ts`, and both land in GitHub Releases, then R2 via
-  the sync workflow. Windows also ships `Goddard-<v>-<arch>-Setup.exe`; each
+  `scripts/bundle-windows.ts`, and both land in GitHub Releases. Windows also
+  ships `Goddard-<v>-<arch>-Setup.exe`; each
   native client updates from `appcast-<platform>-<arch>.xml` while the Linux
   installer resolves `latest-linux.txt`. `src/updater.rs` is the per-platform
   seam, and everything

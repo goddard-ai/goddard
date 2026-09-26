@@ -1,0 +1,1 @@
+- App updates and release downloads now use GitHub Releases. Existing installs receive the transition through their current update feed.

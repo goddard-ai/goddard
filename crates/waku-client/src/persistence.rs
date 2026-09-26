@@ -173,10 +173,10 @@ impl AutoModelRouting {
     }
 }
 
-/// Which appcast the updater checks: released builds from
-/// releases.goddardai.org, or builds published by a dev worktree serving
-/// dev.goddardai.org (`bun run dev --serve`). macOS only — the Windows and
-/// Linux updaters keep their own fixed feeds.
+/// Which appcast the updater checks: released builds from GitHub Releases, or
+/// builds published by a dev worktree serving `dev.goddardai.org`
+/// (`bun run dev --serve`). macOS only — the Windows and Linux updaters keep
+/// their own fixed feeds.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateChannel {

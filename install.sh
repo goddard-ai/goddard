@@ -2,7 +2,7 @@
 set -eu
 
 # Installs Goddard for Linux into ~/.local — no root, no package manager.
-# Downloads the release tarball from https://releases.goddardai.org, unpacks it as
+# Downloads the release tarball from GitHub Releases, unpacks it as
 # ~/.local/goddard.app, links the binary onto PATH, and registers the desktop
 # entry. docs/linux.md documents the equivalent manual steps.
 #
@@ -31,7 +31,7 @@ main() {
     app_dir="$HOME/.local/goddard.app"
     bin_link="$HOME/.local/bin/goddard"
     desktop_file="$HOME/.local/share/applications/org.goddardai.app.desktop"
-    releases="${GODDARD_RELEASES_URL:-https://releases.goddardai.org}"
+    releases="${GODDARD_RELEASES_URL:-}"
 
     case "${1:-}" in
         --uninstall) uninstall; return ;;
@@ -84,6 +84,18 @@ main() {
         cp "$GODDARD_BUNDLE_PATH" "$archive"
     else
         version="${GODDARD_VERSION:-}"
+        if [ -z "$releases" ]; then
+            releases="https://github.com/goddard-ai/goddard/releases/latest/download"
+            if [ -n "$version" ]; then
+                tag="$version"
+                case "$tag" in
+                    v*) version="${tag#v}" ;;
+                    *) tag="v$tag" ;;
+                esac
+                releases="https://github.com/goddard-ai/goddard/releases/download/$tag"
+            fi
+        fi
+        releases="${releases%/}"
         if [ -z "$version" ]; then
             if ! version="$(fetch "$releases/latest-linux.txt")"; then
                 echo "Could not reach $releases/latest-linux.txt." >&2
@@ -92,6 +104,9 @@ main() {
             fi
             version="$(printf '%s' "$version" | tr -d '[:space:]')"
         fi
+        case "$version" in
+            v*) version="${version#v}" ;;
+        esac
         if [ -z "$version" ]; then
             echo "No Goddard version published for Linux yet." >&2
             exit 1

@@ -29,10 +29,8 @@ Set `GODDARD_VERSION` to install a specific version rather than the latest.
 ## Installing manually
 
 The script is a convenience, not a requirement. Download
-`Goddard-<version>-<target>.tar.gz` from
-[releases.goddardai.org](https://releases.goddardai.org) or the
-[GitHub release](https://github.com/goddard-ai/goddard/releases), then unpack it
-wherever you like:
+`Goddard-<version>-<target>.tar.gz` from the [latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest),
+then unpack it wherever you like:
 
 ```sh
 mkdir -p ~/.local/goddard.app
@@ -77,8 +75,8 @@ previous version.
 Every archive is verified with the same Ed25519 release key used by the macOS
 and Windows updaters. The architecture-specific feeds are:
 
-- `https://releases.goddardai.org/appcast-linux-x86_64.xml`
-- `https://releases.goddardai.org/appcast-linux-aarch64.xml`
+- `https://github.com/goddard-ai/goddard/releases/latest/download/appcast-linux-x86_64.xml`
+- `https://github.com/goddard-ai/goddard/releases/latest/download/appcast-linux-aarch64.xml`
 
 Use **Check for Updates** for an explicit check, or disable launch checks in
 **Settings → General → Automatic updates**. System-wide installs such as

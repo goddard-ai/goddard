@@ -107,7 +107,13 @@ install_daemon() {
     *) echo "no release mapping for remote platform $os/$machine" >&2; return 1 ;;
   esac
   name="goddard-daemon-$app_version-$target"
-  base="${GODDARD_RELEASES_URL:-https://releases.goddardai.org}"
+  if [ -n "${GODDARD_RELEASES_URL:-}" ]; then
+    base="$GODDARD_RELEASES_URL"
+  else
+    tag="$app_version"
+    case "$tag" in v*) ;; *) tag="v$app_version" ;; esac
+    base="https://github.com/goddard-ai/goddard/releases/download/$tag"
+  fi
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/goddard-daemon.XXXXXX") || return 1
   if ! fetch "$base/$name.tar.gz" >"$tmp/pkg.tar.gz" 2>/dev/null; then
     rm -rf "$tmp"

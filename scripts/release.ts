@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { defaultDownloadUrlPrefix, generateAppcast } from "./appcast";
+import { generateAppcast, githubReleaseDownloadUrlPrefix } from "./appcast";
 import { extractReleaseNotes } from "./changelog";
 import { cargoPackageVersion, derivedBuildNumber } from "./version";
 
@@ -32,10 +32,10 @@ Usage:
 
 Every run is local: the script builds a signed, notarized DMG, packages the
 Sparkle update archive, and — when a Sparkle key is available — regenerates
-the signed appcast into dist/. Publishing to Cloudflare R2 is the release
-workflow's job: CI builds with this script, drafts a GitHub release from
-dist/, and sync-release.yml mirrors it to the bucket. One-time setup lives
-in RELEASING.md.
+the signed appcast into dist/. CI drafts a GitHub release from dist/. The
+final R2 compatibility bridge is a separate one-time workflow for older
+installs; regular releases are served from GitHub. One-time setup lives in
+RELEASING.md.
 
 Options:
   --local                       Accepted for CI clarity; all builds are local
@@ -60,7 +60,7 @@ Environment:
   GODDARD_ANALYTICS_WEBSITE_ID     analytics website ID embedded at build time
                                 (unset builds compile analytics out)
   GODDARD_DOWNLOAD_URL_PREFIX      base URL the appcast links to
-                                (default: ${defaultDownloadUrlPrefix})
+                                (default: versioned GitHub release URL)
   SPARKLE_BIN                   Sparkle tools dir (default: the bundle.sh cache
                                 under ~/Library/Caches/goddard-build/sparkle)
   SPARKLE_PRIVATE_KEY           Sparkle EdDSA private key (otherwise keychain);
@@ -69,7 +69,7 @@ Environment:
 
 Before the first release:
   xcrun notarytool store-credentials NOTARY   # notarization credentials
-  See RELEASING.md for the R2 bucket, rclone remote, and Sparkle key setup.
+  See RELEASING.md for the compatibility bridge and Sparkle key setup.
 `;
 
 const { values } = parseArgs({
@@ -120,9 +120,6 @@ const explicitBuildNumber =
   values["build-number"] ?? process.env.GODDARD_BUILD_NUMBER;
 const analyticsEndpoint = process.env.GODDARD_ANALYTICS_ENDPOINT?.trim();
 const analyticsWebsiteId = process.env.GODDARD_ANALYTICS_WEBSITE_ID?.trim();
-const downloadUrlPrefix =
-  process.env.GODDARD_DOWNLOAD_URL_PREFIX ?? defaultDownloadUrlPrefix;
-
 if (adhoc && values["signing-identity"]) {
   throw new Error("Use either --adhoc or --signing-identity, not both.");
 }
@@ -161,6 +158,9 @@ if (!adhoc && !skipNotarize) {
 process.chdir(projectRoot);
 
 const version = await cargoPackageVersion(projectRoot, packageName);
+const downloadUrlPrefix =
+  process.env.GODDARD_DOWNLOAD_URL_PREFIX ??
+  githubReleaseDownloadUrlPrefix(version);
 const shortVersion = version.split("-", 1)[0];
 const buildNumber = explicitBuildNumber ?? derivedBuildNumber(version);
 const dmgName = `${appName}-${version}.dmg`;
@@ -557,9 +557,9 @@ try {
   const notesName = `${appName}-${version}.md`;
   const notesContents = `${notes ?? "See CHANGELOG.md for details."}\n`;
   await Bun.write(join(updatesDirectory, notesName), notesContents);
-  // The tag workflow publishes files from dist/ as GitHub release assets;
-  // sync-release then mirrors those assets to R2. Keep the notes beside the
-  // appcast there as well so Sparkle's release-notes URL cannot 404.
+  // The tag workflow publishes the notes with the GitHub appcast. The final R2
+  // compatibility bridge copies both once so older Sparkle clients can still
+  // open their release notes.
   await Bun.write(join(projectRoot, "dist", notesName), notesContents);
   console.log(
     notes

@@ -18,7 +18,14 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { wakuCacheDir } from "./cache-dir";
 
-export const defaultDownloadUrlPrefix = "https://releases.goddardai.org/";
+const githubReleasesUrl = "https://github.com/goddard-ai/goddard/releases";
+
+export const defaultDownloadUrlPrefix = githubReleasesUrl + "/latest/download/";
+
+export function githubReleaseDownloadUrlPrefix(version: string): string {
+  const tag = version.startsWith("v") ? version : "v" + version;
+  return githubReleasesUrl + "/download/" + encodeURIComponent(tag) + "/";
+}
 
 /** Locate Sparkle's `generate_appcast`: SPARKLE_BIN first, then the pinned
  *  distribution scripts/bundle.sh keeps in the shared build cache, then PATH. */

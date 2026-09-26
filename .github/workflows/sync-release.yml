@@ -1,12 +1,10 @@
-name: Sync release
+name: Sync final R2 compatibility bridge
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to sync to R2
+        description: Final transition release tag to sync to the legacy R2 bridge
         required: true
         type: string
 
@@ -19,7 +17,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Sync assets to R2
+    name: Sync final release to R2
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -27,18 +25,25 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          tag="$RELEASE_TAG"
           if [ -z "$tag" ]; then
             echo "::error::No release tag provided"
             exit 1
           fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected a stable release tag such as v0.12.0"
+            exit 1
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          # Prereleases still upload their versioned assets but must not move
-          # the appcasts or latest-* pointers — those are the stable channel.
+          # This one-time bridge only applies to the final stable release.
           prerelease=$(gh release view "$tag" --repo "${{ github.repository }}" \
             --json isPrerelease --jq .isPrerelease)
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          if [ "$prerelease" = "true" ]; then
+            echo "::error::The R2 compatibility bridge accepts stable releases only"
+            exit 1
+          fi
 
       - name: Install rclone
         run: |
@@ -48,16 +53,40 @@ jobs:
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           mkdir -p assets
-          gh release download "${{ steps.release.outputs.tag }}" \
+          gh release download "$RELEASE_TAG" \
             --dir assets \
             --repo "${{ github.repository }}"
           if [ -z "$(ls -A assets)" ]; then
-            echo "::error::Release ${{ steps.release.outputs.tag }} has no assets"
+            echo "::error::Release $RELEASE_TAG has no assets"
             exit 1
           fi
           ls -lah assets
+
+      - name: Rewrite appcasts for existing installs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = "https://github.com/goddard-ai/goddard/releases/download/"
+          pattern = re.compile(re.escape(source) + r"[^/]+/")
+          target = "https://releases.goddardai.org/"
+          feeds = sorted(Path("assets").glob("appcast*.xml"))
+          if not feeds:
+              raise SystemExit("release has no appcast assets")
+          for feed in feeds:
+              text = feed.read_text()
+              rewritten, count = pattern.subn(target, text)
+              if source in rewritten:
+                  raise SystemExit(f"could not rewrite all GitHub URLs in {feed}")
+              if count == 0:
+                  raise SystemExit(f"no GitHub release URLs found in {feed}")
+              feed.write_text(rewritten)
+              print(f"Rewrote {count} URL(s) in {feed}")
+          PY
 
       - name: Upload assets to R2
         env:
@@ -68,7 +97,6 @@ jobs:
           RCLONE_CONFIG_R2_TYPE: s3
           RCLONE_CONFIG_R2_PROVIDER: Cloudflare
           RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
-          IS_PRERELEASE: ${{ steps.release.outputs.prerelease }}
         run: |
           bucket="${R2_BUCKET:-goddard-releases}"
           export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
@@ -88,17 +116,13 @@ jobs:
             --header-upload "$immutable" \
             --progress
 
-          # Prereleases get their versioned assets but never move the feeds
-          # or latest-* pointers — those serve the stable channel only.
-          if [ "$IS_PRERELEASE" != "true" ]; then
-            for pointer in appcast.xml appcast-linux-x86_64.xml \
-              appcast-linux-aarch64.xml appcast-windows-x86_64.xml \
-              appcast-windows-aarch64.xml latest-linux.txt latest-windows.txt; do
-              if [ -f "assets/$pointer" ]; then
-                rclone copyto "assets/$pointer" "${destination}/${pointer}" \
-                  --s3-no-check-bucket \
-                  --header-upload "$fresh" \
-                  --progress
-              fi
-            done
-          fi
+          for pointer in appcast.xml appcast-linux-x86_64.xml \
+            appcast-linux-aarch64.xml appcast-windows-x86_64.xml \
+            appcast-windows-aarch64.xml latest-linux.txt latest-windows.txt; do
+            if [ -f "assets/$pointer" ]; then
+              rclone copyto "assets/$pointer" "${destination}/${pointer}" \
+                --s3-no-check-bucket \
+                --header-upload "$fresh" \
+                --progress
+            fi
+          done

@@ -3,14 +3,13 @@
 ## Install
 
 Download `Goddard-<version>-x86_64-Setup.exe` (or the `aarch64` installer on an
-Arm device) from [releases.goddardai.org](https://releases.goddardai.org) or the
-[GitHub release](https://github.com/goddard-ai/goddard/releases) and run it. It
-installs per-user into `%LOCALAPPDATA%\Programs\Goddard`, so it never asks for
+Arm device) from the [latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest)
+and run it. It installs per-user into `%LOCALAPPDATA%\Programs\Goddard`, so it never asks for
 administrator rights — which is also what lets Goddard update itself later
 without a UAC prompt.
 
-`https://releases.goddardai.org/latest-windows.txt` names the current version if you
-want to script the download.
+`https://github.com/goddard-ai/goddard/releases/latest/download/latest-windows.txt`
+names the current version if you want to script the download.
 
 ### Portable
 
@@ -52,8 +51,8 @@ Updates…** in the app menu still works either way.
 Updates are the same signed feed macOS uses, with one appcast per
 architecture:
 
-- `https://releases.goddardai.org/appcast-windows-x86_64.xml`
-- `https://releases.goddardai.org/appcast-windows-aarch64.xml`
+- `https://github.com/goddard-ai/goddard/releases/latest/download/appcast-windows-x86_64.xml`
+- `https://github.com/goddard-ai/goddard/releases/latest/download/appcast-windows-aarch64.xml`
 
 Every installer carries an EdDSA signature, and Goddard refuses one that does not
 verify against the public key built into it — so a compromised mirror or a
@@ -141,7 +140,7 @@ shim on `PATH`. If the shell finds it but Goddard does not, set the binary path 
 Windows and make sure `git --version` works in a new terminal.
 
 **The update never arrives.** Goddard reaches the feed with the `curl.exe` in
-System32; a proxy or filter that blocks `releases.goddardai.org` blocks updates too.
+System32; a proxy or filter that blocks GitHub Releases blocks updates too.
 **Check for Updates…** reports the reason, where the once-per-launch check
 stays quiet. Downloading the installer by hand and running it is always
 equivalent.
