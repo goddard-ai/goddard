@@ -10922,6 +10922,7 @@ dependencies = [
  "rust-i18n",
  "rust-umami",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "smol",
  "tar",

@@ -717,6 +717,18 @@ fn append_block(block: &Block, beats: &mut Vec<ReadingBeat>) {
                 content: lines.join("\n"),
             });
         }
+        // Unreachable today — the speed reader parses with frontmatter off —
+        // but a metadata block reads naturally as its field lines.
+        Block::Frontmatter { entries } => {
+            let lines = entries
+                .iter()
+                .map(|(key, value)| format!("{key}: {value}"))
+                .collect::<Vec<_>>();
+            beats.push(ReadingBeat::Inspect {
+                title: tr!("speed_reader.table"),
+                content: lines.join("\n"),
+            });
+        }
         Block::Rule => beats.push(ReadingBeat::Inspect {
             title: tr!("speed_reader.section_break"),
             content: tr!("speed_reader.continue_when_ready"),

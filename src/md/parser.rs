@@ -116,6 +116,12 @@ pub enum Block {
         rows: Vec<Vec<Vec<InlineRun>>>,
         align: Vec<TableAlign>,
     },
+    /// YAML frontmatter at the head of a document: `(key, value)` entries in
+    /// source order. Only [`parse_document`] produces it — streamed
+    /// transcript rows keep `---` fences rendering as rules.
+    Frontmatter {
+        entries: Vec<(String, String)>,
+    },
     Rule,
 }
 
@@ -146,6 +152,91 @@ fn options() -> Options {
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_MATH
+}
+
+/// Parse a complete document into a [`BlockTree`]. A leading `---`-fenced
+/// YAML block becomes [`Block::Frontmatter`]; anything that does not parse
+/// into a non-empty field map keeps the ordinary block interpretation.
+///
+/// Detection is deliberately stricter than pulldown-cmark's metadata option,
+/// which would also promote `---` fences in the middle of a document —
+/// frontmatter only exists at offset zero.
+pub fn parse_document(source: &str) -> BlockTree {
+    let Some((entries, frontmatter_end)) = frontmatter(source) else {
+        return parse(source);
+    };
+    let mut tree = parse(&source[frontmatter_end..]);
+    for block in &mut tree.blocks {
+        block.range.start += frontmatter_end;
+        block.range.end += frontmatter_end;
+    }
+    tree.blocks.insert(
+        0,
+        TopBlock {
+            range: 0..frontmatter_end,
+            block: Block::Frontmatter { entries },
+        },
+    );
+    tree
+}
+
+/// The document-leading `---` YAML block, if one is present and parses into
+/// a non-empty field map: its entries and the byte offset where the body
+/// begins (the line after the closing fence).
+fn frontmatter(source: &str) -> Option<(Vec<(String, String)>, usize)> {
+    let opening_end = source.find('\n')?;
+    if source[..opening_end].trim_end() != "---" {
+        return None;
+    }
+    let yaml_start = opening_end + 1;
+    // The first content line cannot be blank — that is a rule followed by a
+    // paragraph, not frontmatter.
+    if source[yaml_start..]
+        .lines()
+        .next()
+        .is_none_or(|line| line.trim().is_empty())
+    {
+        return None;
+    }
+    let mut offset = yaml_start;
+    loop {
+        let line_end = source[offset..]
+            .find('\n')
+            .map_or(source.len(), |index| offset + index);
+        let line = source[offset..line_end].trim_end();
+        if line == "---" || line == "..." {
+            let body_start = (line_end + 1).min(source.len());
+            return frontmatter_entries(&source[yaml_start..offset])
+                .map(|entries| (entries, body_start));
+        }
+        offset = line_end
+            .checked_add(1)
+            .filter(|next| *next <= source.len())?;
+    }
+}
+
+/// YAML frontmatter text into ordered `(key, display value)` pairs. Values
+/// that are not plain scalars keep a compact JSON form; `null` displays
+/// empty, matching the `key:` "present but unset" convention.
+fn frontmatter_entries(yaml: &str) -> Option<Vec<(String, String)>> {
+    let fields = serde_saphyr::from_str::<serde_json::Map<String, serde_json::Value>>(yaml).ok()?;
+    let entries = fields
+        .into_iter()
+        .map(|(key, value)| (key, frontmatter_value(value)))
+        .collect::<Vec<_>>();
+    (!entries.is_empty()).then_some(entries)
+}
+
+fn frontmatter_value(value: serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value,
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Null => String::new(),
+        value @ (serde_json::Value::Array(_) | serde_json::Value::Object(_)) => {
+            serde_json::to_string(&value).unwrap_or_default()
+        }
+    }
 }
 
 /// Parse a whole source into a [`BlockTree`].
@@ -749,6 +840,10 @@ pub struct IncrementalParser {
     stable_prefix: usize,
     /// A link reference definition anywhere forces full reparses.
     full_reparse_only: bool,
+    /// Whole-document parsing: a leading `---` YAML block becomes
+    /// [`Block::Frontmatter`]. Off for transcripts so a response's `---`
+    /// separators keep their usual meaning.
+    document: bool,
 }
 
 impl Default for IncrementalParser {
@@ -764,6 +859,16 @@ impl IncrementalParser {
             tree: BlockTree::default(),
             stable_prefix: 0,
             full_reparse_only: false,
+            document: false,
+        }
+    }
+
+    /// A parser for complete documents: leading YAML frontmatter renders as a
+    /// field table rather than as rule/paragraph/rule.
+    pub fn document() -> Self {
+        Self {
+            document: true,
+            ..Self::new()
         }
     }
 
@@ -793,7 +898,7 @@ impl IncrementalParser {
     /// Discard all state and parse `text` from scratch.
     pub fn reset(&mut self, text: &str) {
         self.text = text.to_owned();
-        self.tree = parse(&self.text);
+        self.tree = self.parse_text();
         self.full_reparse_only = has_link_definition(&self.text);
         self.stable_prefix = self.settled_prefix();
     }
@@ -822,7 +927,14 @@ impl IncrementalParser {
             return;
         }
 
-        let tail = parse(&self.text[boundary..]);
+        // Frontmatter can only exist at offset zero, so a tail reparse past
+        // it must use the ordinary block grammar to stay consistent with a
+        // full parse.
+        let tail = if boundary == 0 {
+            self.parse_text()
+        } else {
+            parse(&self.text[boundary..])
+        };
         self.tree.blocks.truncate(self.stable_prefix);
         self.tree
             .blocks
@@ -834,6 +946,14 @@ impl IncrementalParser {
         self.stable_prefix = self.settled_prefix();
     }
 
+    fn parse_text(&self) -> BlockTree {
+        if self.document {
+            parse_document(&self.text)
+        } else {
+            parse(&self.text)
+        }
+    }
+
     /// Replacement blocks for the final block while streaming, with its hanging
     /// inline markers closed so styling does not flip as the closer arrives.
     /// `None` means the canonical tree already renders correctly.
@@ -843,11 +963,12 @@ impl IncrementalParser {
     /// settled block on every frame.
     pub fn display_tail(&self) -> Option<Vec<TopBlock>> {
         let last = self.tree.blocks.last()?;
-        // A code block's content is literal: mending would corrupt it, and a
-        // half-typed fence must not be reinterpreted.
+        // Literal-content blocks are excluded: mending would corrupt them —
+        // a half-typed code fence must not be reinterpreted, and frontmatter
+        // is YAML, not markdown prose.
         if matches!(
             last.block,
-            Block::CodeBlock { .. } | Block::DisplayMath { .. }
+            Block::CodeBlock { .. } | Block::DisplayMath { .. } | Block::Frontmatter { .. }
         ) {
             return None;
         }
@@ -1418,5 +1539,105 @@ mod tests {
         let mut parser = IncrementalParser::new();
         parser.set_text("```rust\nlet a = **b;\n");
         assert_eq!(parser.display_tree(), *parser.tree());
+    }
+
+    #[test]
+    fn document_frontmatter_parses_as_field_entries() {
+        let source = "---\ntitle: Notes\ndraft: true\ntags: [a, b]\n---\n\nbody\n";
+        let tree = parse_document(source);
+        let Block::Frontmatter { entries } = &tree.blocks[0].block else {
+            panic!("expected frontmatter, got {:?}", tree.blocks);
+        };
+        assert_eq!(
+            entries,
+            &[
+                ("title".to_owned(), "Notes".to_owned()),
+                ("draft".to_owned(), "true".to_owned()),
+                ("tags".to_owned(), "[\"a\",\"b\"]".to_owned()),
+            ]
+        );
+        // The block covers the fenced span; the body parses after it with
+        // ranges in original source coordinates.
+        let body_start = source.rfind("---\n\n").unwrap() + 4;
+        assert_eq!(tree.blocks[0].range, 0..body_start);
+        assert_eq!(paragraph_text(&tree.blocks[1].block), "body");
+        assert_eq!(source[tree.blocks[1].range.clone()].trim(), "body");
+    }
+
+    #[test]
+    fn frontmatter_is_document_only() {
+        let source = "---\ntitle: Notes\n---\n\nbody\n";
+        // The streaming parser keeps the ordinary rule/paragraph reading.
+        assert!(!matches!(
+            parse(source).blocks[0].block,
+            Block::Frontmatter { .. }
+        ));
+        let mut parser = IncrementalParser::new();
+        parser.set_text(source);
+        assert!(!matches!(
+            parser.tree().blocks[0].block,
+            Block::Frontmatter { .. }
+        ));
+        let mut document = IncrementalParser::document();
+        document.set_text(source);
+        assert!(matches!(
+            document.tree().blocks[0].block,
+            Block::Frontmatter { .. }
+        ));
+    }
+
+    /// A mid-document `---` fence is a thematic break, not metadata — pulldown's
+    /// own option would promote it, which is why detection stays manual.
+    #[test]
+    fn frontmatter_only_forms_at_the_document_head() {
+        let source = "intro\n\n---\ntitle: Notes\n---\n\nend\n";
+        assert!(
+            parse_document(source)
+                .blocks
+                .iter()
+                .all(|top| !matches!(top.block, Block::Frontmatter { .. }))
+        );
+    }
+
+    #[test]
+    fn frontmatter_needs_a_closing_fence_and_a_field_map() {
+        // Unclosed: stays a rule and a paragraph.
+        assert!(!matches!(
+            parse_document("---\ntitle: Notes\n\nbody\n").blocks[0].block,
+            Block::Frontmatter { .. }
+        ));
+        // Content that is not a YAML map stays ordinary markdown.
+        assert!(!matches!(
+            parse_document("---\njust a line\n---\n\nbody\n").blocks[0].block,
+            Block::Frontmatter { .. }
+        ));
+        // A blank first line means the fence was a rule, not metadata.
+        assert!(!matches!(
+            parse_document("---\n\ntitle: Notes\n---\n").blocks[0].block,
+            Block::Frontmatter { .. }
+        ));
+    }
+
+    /// Streaming a document must converge on the same tree a one-shot parse
+    /// produces — including while the frontmatter fence is still open.
+    #[test]
+    fn document_appends_match_full_parses() {
+        let source = "---\ntitle: Notes\ndraft: true\n---\n\n# Heading\n\nbody **bold**\n";
+        for chunk_size in [1, 3, 7, 64] {
+            let mut incremental = IncrementalParser::document();
+            let mut built = String::new();
+            let mut chars = source.chars().peekable();
+            while chars.peek().is_some() {
+                let chunk = chars.by_ref().take(chunk_size).collect::<String>();
+                built.push_str(&chunk);
+                incremental.append(&chunk);
+                assert_eq!(
+                    incremental.tree(),
+                    &parse_document(&built),
+                    "divergence at {} bytes with chunk size {chunk_size}",
+                    built.len()
+                );
+            }
+        }
     }
 }

@@ -1160,6 +1160,14 @@ impl MarkdownView {
         }
     }
 
+    /// A view over a complete document — file preview rather than a streamed
+    /// transcript row. Leading YAML frontmatter renders as a field table.
+    pub fn document() -> Self {
+        let mut view = Self::new();
+        view.parser = IncrementalParser::document();
+        view
+    }
+
     /// A view attached to an already-streaming body. Its first rendered text
     /// becomes the full-opacity baseline; later appends fade normally.
     pub fn seeded() -> Self {
@@ -1295,7 +1303,7 @@ impl MarkdownView {
 
 fn block_contains_table(block: &Block) -> bool {
     match block {
-        Block::Table { .. } => true,
+        Block::Table { .. } | Block::Frontmatter { .. } => true,
         Block::BlockQuote { children } => children.iter().any(block_contains_table),
         Block::List { items, .. } => items
             .iter()
@@ -2610,6 +2618,14 @@ fn search_block(
                 *ordinal += 1;
                 search_text(&text, current, regex, cap, matches)
             }),
+        Block::Frontmatter { entries } => entries.iter().any(|(key, value)| {
+            [key, value].iter().any(|cell| {
+                let text = waku_protocol::model::strip_atom_markup(cell);
+                let current = *ordinal;
+                *ordinal += 1;
+                search_text(&text, current, regex, cap, matches)
+            })
+        }),
         Block::Rule => false,
     }
 }
@@ -2842,6 +2858,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             rows,
             align,
         } => render_table(header, rows, align, ctx),
+        Block::Frontmatter { entries } => render_frontmatter(entries, ctx),
         Block::Rule => {
             ctx.copy_lead.take();
             div()
@@ -3395,6 +3412,31 @@ fn code_runs(code: &str, lang: Option<Lang>, code_font: &Font, palette: &Palette
         }
     }
     runs
+}
+
+/// YAML frontmatter as a headerless field table: keys in a semibold first
+/// column, values in the second — the transposed layout stays readable in a
+/// narrow panel no matter how many fields a document declares.
+fn render_frontmatter(entries: &[(String, String)], ctx: &Ctx) -> AnyElement {
+    let rows = entries
+        .iter()
+        .map(|(key, value)| {
+            vec![
+                vec![InlineRun {
+                    text: key.clone(),
+                    style: InlineStyle {
+                        bold: true,
+                        ..InlineStyle::default()
+                    },
+                }],
+                vec![InlineRun {
+                    text: value.clone(),
+                    style: InlineStyle::default(),
+                }],
+            ]
+        })
+        .collect::<Vec<_>>();
+    render_table(&[], &rows, &[TableAlign::Left, TableAlign::Left], ctx)
 }
 
 fn render_table(
