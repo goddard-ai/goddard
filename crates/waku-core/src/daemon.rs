@@ -1841,12 +1841,17 @@ impl Backend for WakuBackend {
                     .eval
                     .ok_or_else(|| anyhow!("no evaluation backend is configured"))?;
                 let started = std::time::Instant::now();
-                let result = crate::eval::evaluate_with_timeout(
-                    &settings,
-                    &state,
-                    &questions,
-                    timeout_secs.unwrap_or(crate::eval::EVAL_TIMEOUT_SECS),
-                );
+                let timeout_secs = timeout_secs.unwrap_or(crate::eval::EVAL_TIMEOUT_SECS);
+                let result = if feature.as_deref() == Some("provider-switch") {
+                    crate::eval::evaluate_with_timeout_retry_503(
+                        &settings,
+                        &state,
+                        &questions,
+                        timeout_secs,
+                    )
+                } else {
+                    crate::eval::evaluate_with_timeout(&settings, &state, &questions, timeout_secs)
+                };
                 let mut record = crate::eval::EvalDecisionRecord::empty("evaluate");
                 if let Some(feature) = feature {
                     record.feature = feature;
