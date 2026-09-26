@@ -2148,6 +2148,37 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.replace_active_right_panel_state(state);
+        // A Git panel that parked with the strip comes back whole — refresh
+        // it for whatever moved underneath while it was away, since fetches
+        // in flight at park time failed their landing check. A relaunch
+        // restore carries only the flag, so the panel rebuilds on the window
+        // a tick out — without claiming focus like a user-opened one does.
+        if self.git_panel_visible {
+            if self.git_panel.is_some() {
+                if let Some(panel) = self.git_panel.as_mut() {
+                    panel.snapshot_loading = false;
+                    panel.commits_loading = false;
+                    panel.upstream_commits_loading = false;
+                }
+                self.refresh_git_panel(cx);
+                self.refresh_git_panel_commits(cx);
+            } else {
+                let waku = cx.entity();
+                let window_handle = self.window_handle;
+                cx.defer(move |cx| {
+                    let _ = window_handle.update(cx, move |_, window, cx| {
+                        let _ = waku.update(cx, move |this, cx| {
+                            // A faster second swap may have parked a real
+                            // panel or closed the slot again — only rebuild
+                            // when the flag still stands with none mounted.
+                            if this.git_panel_visible && this.git_panel.is_none() {
+                                this.open_git_panel(window, cx, false);
+                            }
+                        });
+                    });
+                });
+            }
+        }
         // The draft restored ahead of this swap holds the session's file
         // annotations. Hand each returning editor its share; an editor whose
         // path has none keeps an empty set — the draft is the authority, not
@@ -2294,6 +2325,13 @@ impl Waku {
             .collect();
         self.right_panel_ref_editors.clear();
         self.right_panel_diff_snapshot = None;
+        // The Git panel is this owner's too: park its live state — draft
+        // message included — and shed the hover/prompt leftovers the same
+        // way an outright close does.
+        let git_panel_open = self.git_panel_visible;
+        let git_panel = self.git_panel.take();
+        let git_panel_commit_diff = self.git_panel_commit_diff.take();
+        self.close_git_panel_state();
         RightPanelSessionState {
             visible: self.right_panel_visible,
             surfaces: std::mem::take(&mut self.right_panel_surfaces),
@@ -2315,6 +2353,9 @@ impl Waku {
             diff_snapshot: None,
             diff_selected_file: self.right_panel_diff_selected_file.take(),
             diff_expanded_paths: std::mem::take(&mut self.right_panel_diff_expanded_paths),
+            git_panel_open,
+            git_panel,
+            git_panel_commit_diff,
         }
     }
 
@@ -2327,6 +2368,14 @@ impl Waku {
         if state.visible {
             // A restored-visible panel wins the slot back from the Git panel.
             self.close_git_panel_state();
+        } else if self.state.git_panel_enabled {
+            // The slot's other tenant: this owner's parked Git panel comes
+            // back — flag, live state, and open commit view together.
+            self.git_panel_visible = state.git_panel_open;
+            if state.git_panel_open {
+                self.git_panel = state.git_panel;
+                self.git_panel_commit_diff = state.git_panel_commit_diff;
+            }
         }
         self.right_panel_surfaces = state.surfaces;
         self.right_panel_active_surface = state.active_surface;

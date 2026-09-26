@@ -1252,6 +1252,14 @@ struct RightPanelSessionState {
     diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     diff_selected_file: Option<usize>,
     diff_expanded_paths: HashSet<String>,
+    /// Whether the slot was showing the Git panel for this owner — the panel
+    /// is context property the same way the strip is. `git_panel` carries
+    /// the live state (commit draft included) when one existed; a relaunch
+    /// restores only the flag and the panel rebuilds on mount.
+    git_panel_open: bool,
+    git_panel: Option<git_panel::GitPanelState>,
+    /// The open commit view parked with the panel.
+    git_panel_commit_diff: Option<git_panel::GitPanelCommitDiff>,
 }
 
 /// The files half of a panel strip parked while a different root is on
@@ -1292,6 +1300,9 @@ impl RightPanelSessionState {
             diff_snapshot: None,
             diff_selected_file: None,
             diff_expanded_paths: HashSet::new(),
+            git_panel_open: false,
+            git_panel: None,
+            git_panel_commit_diff: None,
         }
     }
 
@@ -1867,6 +1878,7 @@ fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
 /// drops, the strip reopens on its first remaining surface.
 fn persist_right_panel_state(
     visible: bool,
+    git_panel_open: bool,
     surfaces: &[RightPanelSurface],
     active_surface: Option<usize>,
     expanded_paths: &HashSet<PathBuf>,
@@ -1886,6 +1898,7 @@ fn persist_right_panel_state(
     }
     PersistedRightPanelState {
         visible,
+        git_panel_open,
         active_surface: active_surface.and_then(|index| remap[index]),
         surfaces: kept,
         expanded_paths: expanded_paths.clone(),
@@ -1899,6 +1912,9 @@ fn persist_right_panel_state(
 
 fn right_panel_state_from_persisted(state: &PersistedRightPanelState) -> RightPanelSessionState {
     let mut restored = RightPanelSessionState::empty(state.visible);
+    // The flag survives a relaunch where the panel itself does not — the
+    // restore rebuilds it when the owner mounts.
+    restored.git_panel_open = state.git_panel_open;
     restored.surfaces = state
         .surfaces
         .iter()
@@ -4940,7 +4956,6 @@ impl Waku {
             });
         let sidebar_visible = state.sidebar_visible;
         let right_panel_visible = state.right_panel_visible;
-        let git_panel_visible = state.git_panel_visible && !right_panel_visible;
         let sidebar_width = sanitize_panel_width(
             state.sidebar_width,
             DEFAULT_SIDEBAR_WIDTH,
@@ -6446,7 +6461,9 @@ impl Waku {
                 sidebar_width,
                 right_panel_visible,
                 right_panel_width,
-                git_panel_visible,
+                // Starts closed; `restore_ui_state` mounts the selected
+                // task's parked strip — Git panel included — right after.
+                git_panel_visible: false,
                 git_panel_width,
                 git_panel_top_height,
                 git_panel: None,
@@ -6486,9 +6503,7 @@ impl Waku {
                 sidebar_slide: None,
                 right_panel_slide: None,
                 sidebar_rendered_width: if sidebar_visible { sidebar_width } else { 0.0 },
-                right_panel_rendered_width: if git_panel_visible {
-                    git_panel_width
-                } else if right_panel_visible {
+                right_panel_rendered_width: if right_panel_visible {
                     right_panel_width
                 } else {
                     0.0
@@ -6503,9 +6518,7 @@ impl Waku {
                 sidebar_dock_motion: Cell::new(SidebarDockMotion::Hidden),
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
-                panel_fullscreen_rendered_width: if git_panel_visible {
-                    git_panel_width
-                } else if right_panel_visible {
+                panel_fullscreen_rendered_width: if right_panel_visible {
                     right_panel_width
                 } else {
                     0.0

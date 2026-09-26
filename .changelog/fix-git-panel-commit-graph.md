@@ -1,0 +1,1 @@
+- The commit graph in the Git panel now draws a real curve where the branch lane hands off to the base lane, ends the lane line at the newest commit instead of stubbing past it, and centers each commit dot on its line.
