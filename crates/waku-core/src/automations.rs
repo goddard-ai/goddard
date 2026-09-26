@@ -676,6 +676,7 @@ impl AutomationService {
                     AgentCreateSelection {
                         provider: Some(automation.provider),
                         model: automation.model.clone(),
+                        title: None,
                         reasoning_effort: None,
                         service_tier: None,
                         context_window: None,

@@ -556,6 +556,10 @@ pub enum Command {
         /// The task's first prompt, delivered as a normal turn the moment
         /// its session is running. There is no idle task creation path.
         prompt: String,
+        /// Optional explicit task title. When supplied, first-prompt title
+        /// inference leaves it unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
         /// Reasoning effort, service tier, and context window for the new
         /// session. `None` inherits the sending task's value when it runs
         /// the resolved provider and the resolved model's catalog still

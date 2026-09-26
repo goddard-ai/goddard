@@ -105,11 +105,12 @@ fn schema() -> serde_json::Value {
                 "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},
                 "base_branch": {"type": "string", "required_when": "workspace == \"worktree\"", "notes": "ignored for \"local\""},
                 "prompt": {"type": "string", "required": true},
+                "title": {"type": "string", "notes": "optional explicit task title; when supplied, first-prompt title inference is skipped; when omitted, the title is inferred as usual"},
                 "reasoning_effort": {"type": "string", "notes": "provider-specific effort id; \"default\" selects the provider's own default; omit to inherit this task's effort when it runs the resolved provider (falls back to the model's default when the resolved model does not list it)"},
                 "service_tier": {"type": "string", "notes": "provider-specific tier id; inherits like reasoning_effort"},
                 "context_window": {"type": "string", "notes": "provider-specific window id; inherits like reasoning_effort"}
             },
-            "example": "{\"project\":\"/abs/path\",\"workspace\":\"worktree\",\"base_branch\":\"main\",\"prompt\":\"Summarize the diff\"}",
+            "example": "{\"project\":\"/abs/path\",\"workspace\":\"worktree\",\"base_branch\":\"main\",\"prompt\":\"Summarize the diff\",\"title\":\"Summarize the project diff\"}",
             "returns": {"task_id": "uuid of the created task"}
         },
         "prompt": {
@@ -213,6 +214,8 @@ struct CreatePayload {
     #[serde(default)]
     base_branch: Option<String>,
     prompt: String,
+    #[serde(default)]
+    title: Option<String>,
     #[serde(default)]
     reasoning_effort: Option<String>,
     #[serde(default)]
@@ -460,6 +463,7 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 },
                 base_branch: payload.base_branch,
                 prompt: payload.prompt,
+                title: payload.title,
                 reasoning_effort: payload.reasoning_effort,
                 service_tier: payload.service_tier,
                 context_window: payload.context_window,
@@ -650,6 +654,7 @@ mod tests {
                 reasoning_effort,
                 service_tier,
                 context_window,
+                ..
             } => {
                 assert_eq!(provider, Some(ProviderKind::Codex));
                 assert_eq!(model.as_deref(), Some("default"));

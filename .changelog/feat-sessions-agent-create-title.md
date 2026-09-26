@@ -1,0 +1,1 @@
+- `goddard-agent create` accepts an optional `title` and keeps it instead of inferring a title from the first prompt.

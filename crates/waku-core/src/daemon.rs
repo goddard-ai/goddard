@@ -237,6 +237,7 @@ struct RuntimeEntry {
 pub(crate) struct AgentCreateSelection {
     pub provider: Option<ProviderKind>,
     pub model: Option<String>,
+    pub title: Option<String>,
     pub reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
     pub context_window: Option<String>,
@@ -2731,6 +2732,7 @@ impl Backend for WakuBackend {
                 workspace,
                 base_branch,
                 prompt,
+                title,
                 reasoning_effort,
                 service_tier,
                 context_window,
@@ -2746,6 +2748,7 @@ impl Backend for WakuBackend {
                     AgentCreateSelection {
                         provider,
                         model,
+                        title,
                         reasoning_effort,
                         service_tier,
                         context_window,
@@ -4542,6 +4545,13 @@ impl WakuBackend {
         if prompt.trim().is_empty() {
             bail!("agent sessions require a prompt");
         }
+        if selection
+            .title
+            .as_deref()
+            .is_some_and(|title| title.trim().is_empty())
+        {
+            bail!("agent task titles cannot be empty");
+        }
         if !project.is_absolute() {
             bail!("the project path must be absolute");
         }
@@ -4675,6 +4685,9 @@ impl WakuBackend {
             }
         };
         let mut session = AgentSession::new(project_id, provider);
+        if let Some(title) = selection.title.as_deref() {
+            session.set_title(title);
+        }
         // Posture is stamped verbatim — an environment the resolved
         // provider cannot run (a sandbox guest or cloud it lacks) fails the
         // launch honestly rather than silently running the spawned work
@@ -7043,6 +7056,7 @@ mod tests {
                 AgentCreateSelection {
                     provider: Some(ProviderKind::Codex),
                     model: None,
+                    title: None,
                     reasoning_effort: None,
                     service_tier: None,
                     context_window: None,
