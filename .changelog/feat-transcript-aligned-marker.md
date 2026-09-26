@@ -1,0 +1,1 @@
+- When a task replies by restating what you asked and waits for a green light, the turn now shows an Aligned marker instead of Answered, and the suggested reply becomes "Make it happen" — one click (or ⌘↵) starts the work rather than an ambiguous "Keep going."

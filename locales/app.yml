@@ -995,6 +995,8 @@ status_markers.decision:
   en: Awaiting decision
 status_markers.details:
   en: Awaiting details
+status_markers.aligned:
+  en: Aligned
 status_markers.unverified:
   en: Unverified
 status_markers.partial:
@@ -3346,6 +3348,8 @@ suggestions.prompt_duplicate:
   en: Another suggested action already sends this prompt.
 suggestions.proceed:
   en: Yes, proceed.
+suggestions.make_it_happen:
+  en: Make it happen
 suggestions.add_details:
   en: Add details
 suggestions.choose_manually:

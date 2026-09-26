@@ -94,7 +94,9 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         instructions: "The prompt asked for information — a question, an explanation, \
             or an investigation — and the response delivers that answer, findings, \
             or analysis without making changes. If the prompt also requested work \
-            that was carried out, choose `complete` instead.",
+            that was carried out, choose `complete` instead; if the response mainly \
+            restates the request and waits for confirmation to do the work, choose \
+            `aligned`.",
     },
     StatusMarker {
         id: "nothing-to-do",
@@ -125,7 +127,23 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         threshold: 0.55,
         instructions: "The requested work remains unfinished because the assistant \
             asks the user for a go-ahead, a decision, or missing details before \
-            continuing. A rhetorical question after completed work does not count.",
+            continuing. A rhetorical question after completed work does not count. \
+            A reply whose substance is replaying the request to confirm shared \
+            understanding is `aligned` instead.",
+    },
+    StatusMarker {
+        id: "aligned",
+        label_key: "status_markers.aligned",
+        icon: "icons/chat.svg",
+        tone: MarkerTone::Info,
+        threshold: 0.55,
+        instructions: "The assistant's reply restates the user's request — it played \
+            back its understanding or recapped what it intends to do — and stops \
+            there, waiting for a green light to carry out the work; the only pending \
+            input is confirmation. A question needing more than a yes — a decision, \
+            missing details, or approval of a specific proposed action — is \
+            `awaiting-input`; a reply that delivers the requested information is \
+            `answered`.",
     },
     StatusMarker {
         id: "partial",
@@ -170,7 +188,9 @@ const INPUT_MARKERS: &[StatusMarker] = &[
         threshold: 0.55,
         instructions: "The assistant asks whether it should proceed with proposed \
             work or requests the user's approval before taking a concrete next \
-            action. Examples include 'Want me to proceed?' and 'May I deploy it?'",
+            action. Examples include 'Want me to proceed?' and 'May I deploy it?' \
+            A reply that mainly replays the request back to confirm understanding \
+            ends `aligned` instead of `awaiting-input`.",
     },
     StatusMarker {
         id: "decision",
@@ -232,6 +252,7 @@ const VERIFICATION_MARKERS: &[StatusMarker] = &[StatusMarker {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum StatusSuggestedAction {
     Proceed,
+    MakeItHappen,
     KeepGoing,
     FixErrors,
     RunTests,
@@ -241,11 +262,17 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
     let marker = cleared_markers(evaluation).into_iter().find(|(marker, _)| {
         matches!(
             marker.id,
-            "go-ahead" | "decision" | "needs-continuation" | "errors-remain" | "not-tested"
+            "go-ahead"
+                | "aligned"
+                | "decision"
+                | "needs-continuation"
+                | "errors-remain"
+                | "not-tested"
         )
     });
     match marker.map(|(marker, _)| marker.id) {
         Some("go-ahead") => vec![StatusSuggestedAction::Proceed],
+        Some("aligned") => vec![StatusSuggestedAction::MakeItHappen],
         Some("decision") => Vec::new(),
         Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
         Some("errors-remain") => vec![StatusSuggestedAction::FixErrors],
@@ -258,7 +285,7 @@ fn waiting_for_user_input(evaluation: &Evaluation) -> bool {
     cleared_markers(evaluation).iter().any(|(marker, _)| {
         matches!(
             marker.id,
-            "awaiting-input" | "go-ahead" | "decision" | "details"
+            "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned"
         )
     })
 }
@@ -699,7 +726,7 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
     {
         let winner = probabilities.get(choice).copied().unwrap_or(0.0);
         if winner >= marker.threshold {
-            work_free_ending = matches!(marker.id, "answered" | "nothing-to-do");
+            work_free_ending = matches!(marker.id, "answered" | "nothing-to-do" | "aligned");
             let subtype = match marker.id {
                 "awaiting-input" => cleared_subtype(evaluation, INPUT_QUESTION, INPUT_MARKERS),
                 "partial" => cleared_subtype(evaluation, PARTIAL_QUESTION, PARTIAL_MARKERS),
@@ -780,7 +807,7 @@ pub(super) struct SidebarStatusMarker {
 /// footer-only.
 fn sidebar_bucket(marker: &StatusMarker) -> Option<(&'static str, MarkerTone)> {
     match marker.id {
-        "awaiting-input" | "go-ahead" | "decision" | "details" | "partial"
+        "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned" | "partial"
         | "needs-continuation" => Some(("icons/chat.svg", MarkerTone::Info)),
         "blocked" => Some(("icons/ban.svg", MarkerTone::Danger)),
         "failed" | "errors-remain" => Some(("icons/block.svg", MarkerTone::Danger)),
@@ -863,6 +890,14 @@ impl Waku {
                                             &self.state.suggested_prompts,
                                         )
                                         .unwrap_or_else(|| tr!("suggestions.proceed")),
+                                    ),
+                                    StatusSuggestedAction::MakeItHappen => (
+                                        "icons/play.svg",
+                                        action_predictions::suggested_prompt(
+                                            "make-it-happen",
+                                            &self.state.suggested_prompts,
+                                        )
+                                        .unwrap_or_else(|| tr!("suggestions.make_it_happen")),
                                     ),
                                     StatusSuggestedAction::KeepGoing => (
                                         "icons/sparkle.svg",
@@ -989,10 +1024,12 @@ impl Waku {
                 self.turn_status_suggestions.insert(turn_id, Vec::new());
                 self.submit_canned_prompt_to(session_id, "proceed", prompt, cx);
             }
-            StatusSuggestedAction::KeepGoing
+            StatusSuggestedAction::MakeItHappen
+            | StatusSuggestedAction::KeepGoing
             | StatusSuggestedAction::FixErrors
             | StatusSuggestedAction::RunTests => {
                 let action_id = match action {
+                    StatusSuggestedAction::MakeItHappen => "make-it-happen",
                     StatusSuggestedAction::KeepGoing => "keep-going",
                     StatusSuggestedAction::FixErrors => "fix-errors",
                     StatusSuggestedAction::RunTests => "run-tests",
@@ -1486,6 +1523,59 @@ mod tests {
     }
 
     #[test]
+    fn an_aligned_turn_suggests_making_it_happen() {
+        let verdict = evaluation(BTreeMap::from([(
+            ENDING_QUESTION.to_owned(),
+            ending_choice("aligned", &[("aligned", 0.90), ("answered", 0.10)]),
+        )]));
+        assert_eq!(cleared_markers(&verdict)[0].0.id, "aligned");
+        assert_eq!(
+            suggested_actions(&verdict),
+            [StatusSuggestedAction::MakeItHappen]
+        );
+        assert!(waiting_for_user_input(&verdict));
+        assert_eq!(sidebar_marker(&verdict).unwrap().icon, "icons/chat.svg");
+
+        // Aligned asserts the turn produced no work — `unverified` cannot
+        // ride it even at high confidence.
+        let unchecked = evaluation(
+            [
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice("aligned", &[("aligned", 0.90), ("other", 0.10)]),
+                ),
+                ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let ids: Vec<&str> = cleared_markers(&unchecked)
+            .iter()
+            .map(|(marker, _)| marker.id)
+            .collect();
+        assert_eq!(ids, ["aligned"]);
+
+        // Unlike `answered`, a pending alignment keeps its chip beside a
+        // flag — the turn still waits on the user's confirmation.
+        let flagged = evaluation(
+            [
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice("aligned", &[("aligned", 0.90), ("other", 0.10)]),
+                ),
+                ("assumed".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let ids: Vec<&str> = cleared_markers(&flagged)
+            .iter()
+            .map(|(marker, _)| marker.id)
+            .collect();
+        assert_eq!(ids, ["aligned", "assumed"]);
+    }
+
+    #[test]
     fn actionable_subtypes_replace_only_their_cleared_parent() {
         for (parent, question, subtype, action) in [
             (
@@ -1733,7 +1823,7 @@ mod tests {
         };
         // Endings that wait on the user's reply collapse to the chat glyph;
         // endings that hit a wall get distinct blocked and failed glyphs.
-        for choice in ["awaiting-input", "partial"] {
+        for choice in ["awaiting-input", "aligned", "partial"] {
             let marker = sidebar_marker(&ending(choice, 0.90)).unwrap();
             assert_eq!(marker.icon, "icons/chat.svg");
         }

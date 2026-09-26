@@ -1262,6 +1262,7 @@ suggestions.prompt_editor_description: 点击建议后会发送此文本。
 suggestions.prompt_invalid: 请输入不超过 2,000 个字符的提示词。
 suggestions.prompt_duplicate: 另一个建议操作已使用此提示词。
 suggestions.proceed: 好的，请继续。
+suggestions.make_it_happen: 开始实现
 suggestions.add_details: 补充信息
 suggestions.choose_manually: 输入选择
 suggestions.keep_going: 继续
@@ -2753,6 +2754,7 @@ status_markers.awaiting_input: 等待输入
 status_markers.go_ahead: 等待确认
 status_markers.decision: 等待决定
 status_markers.details: 等待补充信息
+status_markers.aligned: 已对齐
 status_markers.blocked: 受阻
 status_markers.complete: 已完成
 status_markers.answered: 已回答

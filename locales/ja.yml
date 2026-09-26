@@ -1290,6 +1290,7 @@ suggestions.prompt_editor_description: 提案をクリックすると、この�
 suggestions.prompt_invalid: 2,000文字以内のプロンプトを入力してください。
 suggestions.prompt_duplicate: 別の提案アクションが同じプロンプトを送信します。
 suggestions.proceed: はい、進めてください。
+suggestions.make_it_happen: 作業を始めて
 suggestions.add_details: 詳細を入力
 suggestions.choose_manually: 選択を入力
 suggestions.keep_going: 続ける
@@ -2802,6 +2803,7 @@ status_markers.awaiting_input: 入力待ち
 status_markers.go_ahead: 承認待ち
 status_markers.decision: 選択待ち
 status_markers.details: 詳細待ち
+status_markers.aligned: 認識一致
 status_markers.blocked: ブロック中
 status_markers.complete: 完了
 status_markers.answered: 回答済み
