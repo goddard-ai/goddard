@@ -6534,11 +6534,8 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(prompt) = action_predictions::suggested_prompt(
-            id,
-            &self.state.suggested_prompts,
-            Some("{option}"),
-        ) else {
+        let Some(prompt) = action_predictions::suggested_prompt(id, &self.state.suggested_prompts)
+        else {
             return;
         };
         let input = cx.new(|cx| {
@@ -6568,32 +6565,16 @@ impl Waku {
         let id = editor.id;
         let prompt = editor.input.read(cx).content().trim().to_owned();
         if !action_predictions::valid_suggested_prompt(id, &prompt) {
-            self.suggested_prompt_editor.as_mut().unwrap().error = Some(
-                if id == action_predictions::CHOICE_PROMPT_ID
-                    && prompt.matches("{option}").count() != 1
-                {
-                    tr!(
-                        "suggestions.option_placeholder_required",
-                        option = "{option}"
-                    )
-                } else {
-                    tr!("suggestions.prompt_invalid")
-                },
-            );
+            self.suggested_prompt_editor.as_mut().unwrap().error =
+                Some(tr!("suggestions.prompt_invalid"));
             cx.notify();
             return;
         }
-        if id != action_predictions::CHOICE_PROMPT_ID
-            && action_predictions::CANNED_PROMPTS.iter().any(|(other, _)| {
-                *other != id
-                    && action_predictions::suggested_prompt(
-                        other,
-                        &self.state.suggested_prompts,
-                        None,
-                    )
+        if action_predictions::CANNED_PROMPTS.iter().any(|(other, _)| {
+            *other != id
+                && action_predictions::suggested_prompt(other, &self.state.suggested_prompts)
                     .is_some_and(|value| value.trim().eq_ignore_ascii_case(&prompt))
-            })
-        {
+        }) {
             self.suggested_prompt_editor.as_mut().unwrap().error =
                 Some(tr!("suggestions.prompt_duplicate"));
             cx.notify();
@@ -6628,18 +6609,12 @@ impl Waku {
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let entries = action_predictions::CANNED_PROMPTS.iter().copied().chain([(
-            action_predictions::CHOICE_PROMPT_ID,
-            "suggestions.choice_template",
-        )]);
+        let entries = action_predictions::CANNED_PROMPTS.iter().copied();
         let rows = entries
             .map(|(id, label_key)| {
                 let title = tr!(label_key);
-                let prompt = action_predictions::suggested_prompt(
-                    id,
-                    &self.state.suggested_prompts,
-                    Some("{option}"),
-                )?;
+                let prompt =
+                    action_predictions::suggested_prompt(id, &self.state.suggested_prompts)?;
                 let preview: String = prompt.chars().take(120).collect();
                 let description = if prompt.chars().count() > 120 {
                     format!("{preview}…")
@@ -6706,14 +6681,7 @@ impl Waku {
                         div()
                             .text_size(sp(12.0))
                             .text_color(theme.text_tertiary)
-                            .child(if editor.id == action_predictions::CHOICE_PROMPT_ID {
-                                tr!(
-                                    "suggestions.choice_template_description",
-                                    option = "{option}"
-                                )
-                            } else {
-                                tr!("suggestions.prompt_editor_description")
-                            }),
+                            .child(tr!("suggestions.prompt_editor_description")),
                     )
                     .child(
                         div()

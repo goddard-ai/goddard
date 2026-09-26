@@ -103,12 +103,7 @@ pub(super) const CANNED_PROMPTS: &[(&str, &str)] = &[
     ("review-changes", "suggestions.review_changes"),
     ("open-pr", "suggestions.open_pr"),
 ];
-pub(super) const CHOICE_PROMPT_ID: &str = "choose-option";
-
 pub(super) fn default_suggested_prompt(action: &str) -> Option<String> {
-    if action == CHOICE_PROMPT_ID {
-        return Some(tr!("suggestions.chosen_option", option = "{option}"));
-    }
     let (_, key) = CANNED_PROMPTS.iter().find(|(id, _)| *id == action)?;
     Some(tr!(key))
 }
@@ -116,7 +111,6 @@ pub(super) fn default_suggested_prompt(action: &str) -> Option<String> {
 pub(super) fn suggested_prompt(
     action: &str,
     overrides: &BTreeMap<String, String>,
-    option: Option<&str>,
 ) -> Option<String> {
     let default = default_suggested_prompt(action)?;
     let template = overrides
@@ -124,18 +118,12 @@ pub(super) fn suggested_prompt(
         .filter(|value| valid_suggested_prompt(action, value))
         .cloned()
         .unwrap_or(default);
-    if action == CHOICE_PROMPT_ID {
-        Some(template.replace("{option}", option?))
-    } else {
-        Some(template)
-    }
+    Some(template)
 }
 
 pub(super) fn valid_suggested_prompt(action: &str, prompt: &str) -> bool {
     let trimmed = prompt.trim();
-    !trimmed.is_empty()
-        && trimmed.chars().count() <= 2_000
-        && (action != CHOICE_PROMPT_ID || trimmed.matches("{option}").count() == 1)
+    !trimmed.is_empty() && trimmed.chars().count() <= 2_000
 }
 
 /// The canned id for a submitted prompt, when its text is one of the fixed
@@ -149,7 +137,7 @@ pub(super) fn canned_prompt_id(
     CANNED_PROMPTS
         .iter()
         .find(|(id, _)| {
-            suggested_prompt(id, overrides, None)
+            suggested_prompt(id, overrides)
                 .is_some_and(|configured| configured.trim().eq_ignore_ascii_case(normalized))
         })
         .map(|(id, _)| *id)
@@ -817,7 +805,7 @@ impl Waku {
         }
         match suggestion_dispatch(action) {
             Some(SuggestionDispatch::Prompt(id)) => {
-                if let Some(prompt) = suggested_prompt(id, &self.state.suggested_prompts, None) {
+                if let Some(prompt) = suggested_prompt(id, &self.state.suggested_prompts) {
                     self.submit_canned_prompt_to(session_id, id, prompt, cx);
                 }
             }
@@ -1012,7 +1000,7 @@ impl Waku {
             "sync" => Some(("icons/arrow-down.svg", tr!("suggestions.sync"))),
             "land" => Some(("icons/git-merge.svg", tr!("suggestions.land"))),
             canned => {
-                let prompt = suggested_prompt(canned, &self.state.suggested_prompts, None)?;
+                let prompt = suggested_prompt(canned, &self.state.suggested_prompts)?;
                 Some(("icons/sparkle.svg", prompt))
             }
         }
@@ -1171,7 +1159,7 @@ impl Waku {
         }
         match suggestion_dispatch(suggestion.action) {
             Some(SuggestionDispatch::Prompt(id)) => {
-                if let Some(prompt) = suggested_prompt(id, &self.state.suggested_prompts, None) {
+                if let Some(prompt) = suggested_prompt(id, &self.state.suggested_prompts) {
                     self.submit_canned_prompt_to(suggestion.session_id, id, prompt, cx);
                 }
             }
@@ -1330,7 +1318,7 @@ mod tests {
 
         let overrides = BTreeMap::from([("run-tests".to_owned(), "Run focused tests".to_owned())]);
         assert_eq!(
-            suggested_prompt("run-tests", &overrides, None).as_deref(),
+            suggested_prompt("run-tests", &overrides).as_deref(),
             Some("Run focused tests")
         );
         assert_eq!(
@@ -1338,20 +1326,6 @@ mod tests {
             Some("run-tests")
         );
         assert_eq!(canned_prompt_id("Run the tests", &overrides), None);
-        assert!(valid_suggested_prompt(CHOICE_PROMPT_ID, "Choose {option}"));
-        assert!(!valid_suggested_prompt(CHOICE_PROMPT_ID, "Choose this"));
-        assert_eq!(
-            suggested_prompt(
-                CHOICE_PROMPT_ID,
-                &BTreeMap::from([(
-                    CHOICE_PROMPT_ID.to_owned(),
-                    "Select {option} and continue".to_owned()
-                )]),
-                Some("A. SQLite")
-            )
-            .as_deref(),
-            Some("Select A. SQLite and continue")
-        );
     }
 
     #[test]

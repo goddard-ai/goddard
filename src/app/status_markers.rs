@@ -229,77 +229,15 @@ const VERIFICATION_MARKERS: &[StatusMarker] = &[StatusMarker {
 }];
 
 /// A user action justified by the latest settled turn's input marker.
-/// Decision labels come only from short, explicitly enumerated options.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum StatusSuggestedAction {
     Proceed,
-    Choose { option: String },
     KeepGoing,
     FixErrors,
     RunTests,
 }
 
-fn explicit_decision_options(response: &str) -> Vec<String> {
-    let mut run: Vec<(char, String)> = Vec::new();
-    let mut latest = Vec::new();
-    for line in response
-        .lines()
-        .rev()
-        .take(40)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-    {
-        let line = line.trim();
-        let option = line
-            .split_once(". ")
-            .filter(|(index, _)| index.len() == 1)
-            .and_then(|(index, title)| {
-                let index = index.chars().next()?;
-                (index.is_ascii_digit() || ('A'..='D').contains(&index)).then_some((index, title))
-            });
-        if let Some((index, title)) = option {
-            let title = title.trim();
-            let title = title
-                .strip_prefix("**")
-                .and_then(|bold| bold.split_once("**").map(|(title, _)| title))
-                .unwrap_or(title)
-                .trim_matches('`')
-                .trim();
-            if !title.is_empty() && title.chars().count() <= 42 {
-                if run.is_empty() && index != '1' && index != 'A' {
-                    continue;
-                }
-                if run.last().is_some_and(|(last, _)| {
-                    index as u32 != *last as u32 + 1
-                        || index.is_ascii_digit() != last.is_ascii_digit()
-                }) {
-                    if (2..=3).contains(&run.len()) {
-                        latest = std::mem::take(&mut run);
-                    } else {
-                        run.clear();
-                    }
-                }
-                run.push((index, title.to_owned()));
-                continue;
-            }
-        }
-        if (2..=3).contains(&run.len()) {
-            latest = std::mem::take(&mut run);
-        } else {
-            run.clear();
-        }
-    }
-    if (2..=3).contains(&run.len()) {
-        latest = run;
-    }
-    latest
-        .into_iter()
-        .map(|(index, title)| format!("{index}. {title}"))
-        .collect()
-}
-
-fn suggested_actions(evaluation: &Evaluation, response: &str) -> Vec<StatusSuggestedAction> {
+fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
     let marker = cleared_markers(evaluation).into_iter().find(|(marker, _)| {
         matches!(
             marker.id,
@@ -308,13 +246,7 @@ fn suggested_actions(evaluation: &Evaluation, response: &str) -> Vec<StatusSugge
     });
     match marker.map(|(marker, _)| marker.id) {
         Some("go-ahead") => vec![StatusSuggestedAction::Proceed],
-        Some("decision") => {
-            let options = explicit_decision_options(response);
-            options
-                .into_iter()
-                .map(|option| StatusSuggestedAction::Choose { option })
-                .collect()
-        }
+        Some("decision") => Vec::new(),
         Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
         Some("errors-remain") => vec![StatusSuggestedAction::FixErrors],
         Some("not-tested") => vec![StatusSuggestedAction::RunTests],
@@ -929,27 +861,14 @@ impl Waku {
                                         action_predictions::suggested_prompt(
                                             "proceed",
                                             &self.state.suggested_prompts,
-                                            None,
                                         )
                                         .unwrap_or_else(|| tr!("suggestions.proceed")),
-                                    ),
-                                    StatusSuggestedAction::Choose { option } => (
-                                        "icons/chat.svg",
-                                        action_predictions::suggested_prompt(
-                                            action_predictions::CHOICE_PROMPT_ID,
-                                            &self.state.suggested_prompts,
-                                            Some(option),
-                                        )
-                                        .unwrap_or_else(
-                                            || tr!("suggestions.chosen_option", option = option),
-                                        ),
                                     ),
                                     StatusSuggestedAction::KeepGoing => (
                                         "icons/sparkle.svg",
                                         action_predictions::suggested_prompt(
                                             "keep-going",
                                             &self.state.suggested_prompts,
-                                            None,
                                         )
                                         .unwrap_or_else(|| tr!("suggestions.keep_going")),
                                     ),
@@ -958,7 +877,6 @@ impl Waku {
                                         action_predictions::suggested_prompt(
                                             "fix-errors",
                                             &self.state.suggested_prompts,
-                                            None,
                                         )
                                         .unwrap_or_else(|| tr!("suggestions.fix_errors")),
                                     ),
@@ -967,7 +885,6 @@ impl Waku {
                                         action_predictions::suggested_prompt(
                                             "run-tests",
                                             &self.state.suggested_prompts,
-                                            None,
                                         )
                                         .unwrap_or_else(|| tr!("suggestions.run_tests")),
                                     ),
@@ -1066,29 +983,11 @@ impl Waku {
         let session_id = session.id;
         match action {
             StatusSuggestedAction::Proceed => {
-                let prompt = action_predictions::suggested_prompt(
-                    "proceed",
-                    &self.state.suggested_prompts,
-                    None,
-                )
-                .unwrap_or_else(|| tr!("suggestions.proceed"));
+                let prompt =
+                    action_predictions::suggested_prompt("proceed", &self.state.suggested_prompts)
+                        .unwrap_or_else(|| tr!("suggestions.proceed"));
                 self.turn_status_suggestions.insert(turn_id, Vec::new());
                 self.submit_canned_prompt_to(session_id, "proceed", prompt, cx);
-            }
-            StatusSuggestedAction::Choose { option } => {
-                let prompt = action_predictions::suggested_prompt(
-                    action_predictions::CHOICE_PROMPT_ID,
-                    &self.state.suggested_prompts,
-                    Some(option),
-                )
-                .unwrap_or_else(|| tr!("suggestions.chosen_option", option = option));
-                self.turn_status_suggestions.insert(turn_id, Vec::new());
-                self.submit_canned_prompt_to(
-                    session_id,
-                    action_predictions::CHOICE_PROMPT_ID,
-                    prompt,
-                    cx,
-                );
             }
             StatusSuggestedAction::KeepGoing
             | StatusSuggestedAction::FixErrors
@@ -1099,11 +998,9 @@ impl Waku {
                     StatusSuggestedAction::RunTests => "run-tests",
                     _ => unreachable!(),
                 };
-                let Some(prompt) = action_predictions::suggested_prompt(
-                    action_id,
-                    &self.state.suggested_prompts,
-                    None,
-                ) else {
+                let Some(prompt) =
+                    action_predictions::suggested_prompt(action_id, &self.state.suggested_prompts)
+                else {
                     return;
                 };
                 self.turn_status_suggestions.insert(turn_id, Vec::new());
@@ -1231,21 +1128,10 @@ impl Waku {
                         .iter()
                         .find(|session| session.turns.iter().any(|turn| turn.id == turn_id))
                     {
-                        let response = session
-                            .messages
-                            .iter()
-                            .filter(|message| {
-                                message.turn_id == Some(turn_id)
-                                    && message.role == MessageRole::Assistant
-                            })
-                            .map(|message| message.visible_content())
-                            .collect::<Vec<_>>()
-                            .join("\n\n");
-                        let actions = suggested_actions(&evaluation, &response);
-                        // A request for the user's own details or an
-                        // unlisted choice has no one-click reply. Reserve
-                        // the row so a prediction cannot suggest continuing
-                        // past that request.
+                        let actions = suggested_actions(&evaluation);
+                        // A request for the user's own details or a choice
+                        // still reserves the row so predictions cannot
+                        // suggest continuing past that request.
                         if !actions.is_empty() || waiting_for_user_input(&evaluation) {
                             self.turn_status_suggestions.insert(turn_id, actions);
                         }
@@ -1588,31 +1474,14 @@ mod tests {
             ]))
         };
         assert_eq!(
-            suggested_actions(&verdict("go-ahead"), "Want me to proceed?"),
+            suggested_actions(&verdict("go-ahead")),
             [StatusSuggestedAction::Proceed]
         );
-        assert_eq!(suggested_actions(&verdict("details"), "Which account?"), []);
+        assert_eq!(suggested_actions(&verdict("details")), []);
         assert!(waiting_for_user_input(&verdict("details")));
-        assert_eq!(
-            suggested_actions(
-                &verdict("decision"),
-                "1. **SQLite** — local\n2. **JSON** — simple\nWhich do you prefer?"
-            ),
-            [
-                StatusSuggestedAction::Choose {
-                    option: "1. SQLite".to_owned()
-                },
-                StatusSuggestedAction::Choose {
-                    option: "2. JSON".to_owned()
-                },
-            ]
-        );
-        assert_eq!(
-            suggested_actions(&verdict("decision"), "Should we use SQLite or JSON?"),
-            []
-        );
+        assert!(suggested_actions(&verdict("decision")).is_empty());
         assert!(waiting_for_user_input(&verdict("decision")));
-        assert!(suggested_actions(&verdict("other"), "Want me to proceed?").is_empty());
+        assert!(suggested_actions(&verdict("other")).is_empty());
         assert!(waiting_for_user_input(&verdict("other")));
     }
 
@@ -1645,9 +1514,9 @@ mod tests {
                 ]))
             };
             assert_eq!(cleared_markers(&verdict(0.80))[0].0.id, subtype);
-            assert_eq!(suggested_actions(&verdict(0.80), ""), [action]);
+            assert_eq!(suggested_actions(&verdict(0.80)), [action]);
             assert_eq!(cleared_markers(&verdict(0.40))[0].0.id, parent);
-            assert!(suggested_actions(&verdict(0.40), "").is_empty());
+            assert!(suggested_actions(&verdict(0.40)).is_empty());
         }
 
         let untested = evaluation(BTreeMap::from([
@@ -1663,7 +1532,7 @@ mod tests {
         ]));
         assert_eq!(cleared_markers(&untested)[0].0.id, "not-tested");
         assert_eq!(
-            suggested_actions(&untested, ""),
+            suggested_actions(&untested),
             [StatusSuggestedAction::RunTests]
         );
         let unverified = evaluation(BTreeMap::from([
@@ -1674,7 +1543,7 @@ mod tests {
             ),
         ]));
         assert_eq!(cleared_markers(&unverified)[0].0.id, "unverified");
-        assert!(suggested_actions(&unverified, "").is_empty());
+        assert!(suggested_actions(&unverified).is_empty());
     }
 
     #[test]
