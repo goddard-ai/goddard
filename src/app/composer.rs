@@ -1428,15 +1428,18 @@ impl Waku {
         let auto_route = session.is_some_and(|session| session.auto_route);
         let routed = session.is_some_and(|session| session.route_decision.is_some());
         let selected_model = session.and_then(|session| self.catalog_model_id_for_session(session));
+        let session_key = session
+            .map(|session| self.daemons.session_owner(session.id))
+            .unwrap_or(waku_client::DaemonKey::Local);
         let selected_model_name = if auto_route {
             tr!("models.auto")
         } else if routed {
             tr!(
                 "models.auto_routed",
-                model = self.model_display_name(provider, selected_model)
+                model = self.model_display_name_on(session_key, provider, selected_model)
             )
         } else {
-            self.model_display_name(provider, selected_model)
+            self.model_display_name_on(session_key, provider, selected_model)
         };
         let picker_enabled = controls.model_pickers
             && session.is_some_and(|session| session.can_choose_model(provider));
@@ -1485,18 +1488,19 @@ impl Waku {
                         this.model_picker_target = pick_target;
                         empty = this.model_picker_has_no_providers();
                         let locked_provider = this.model_picker_locked_provider();
+                        let picker_key = this.model_picker_daemon_key();
                         // Opening re-runs catalog discovery for every provider
                         // the merged list can draw, so models authored since
                         // launch appear without a restart.
                         for kind in ProviderKind::ALL {
                             if picker_lists_provider(
-                                Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
-                                &this.state.disabled_providers,
+                                Self::probes_on(&this.probes, picker_key),
+                                this.disabled_providers_on(picker_key),
                                 locked_provider,
-                                this.daemon.is_remote(),
+                                this.daemon_key_is_remote(picker_key),
                                 kind,
                             ) {
-                                this.refresh_provider_model_discovery(kind);
+                                this.refresh_provider_model_discovery_on(picker_key, kind);
                             }
                         }
                         this.model_picker.highlight = None;
@@ -1592,9 +1596,10 @@ impl Waku {
         let search_query = self.model_picker.search.read(cx).content().to_owned();
         let normalized_query = search_query.trim().to_ascii_lowercase();
         let searching = !normalized_query.is_empty();
-        let probes = Self::probes_on(&self.probes, waku_client::DaemonKey::Local).to_vec();
-        let disabled_providers = self.state.disabled_providers.clone();
-        let remote = self.daemon.is_remote();
+        let picker_key = self.model_picker_daemon_key();
+        let probes = Self::probes_on(&self.probes, picker_key).to_vec();
+        let disabled_providers = self.disabled_providers_on(picker_key).to_vec();
+        let remote = self.daemon_key_is_remote(picker_key);
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
         let search = self.model_picker.search.clone();
         let locked_provider = self.model_picker_locked_provider();
@@ -1682,7 +1687,7 @@ impl Waku {
         let empty_label = if searching {
             tr!("models.none_found")
         } else if ProviderKind::ALL.into_iter().any(|kind| {
-            pending_discoveries.contains(&(waku_client::DaemonKey::Local, kind))
+            pending_discoveries.contains(&(picker_key, kind))
                 && picker_lists_provider(
                     &probes,
                     &disabled_providers,
@@ -2114,8 +2119,9 @@ impl Waku {
     /// composer, bare models for the automation editor's provider/model
     /// pair.
     pub(super) fn composer_picker_rows(&self, normalized_query: &str) -> Vec<PickerRow> {
+        let picker_key = self.model_picker_daemon_key();
         picker_rows(
-            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
+            Self::probes_on(&self.probes, picker_key),
             &PickerRowSpec {
                 leading: if self.model_picker_offers_auto_route() {
                     &[PolicyRowId::Auto]
@@ -2127,7 +2133,7 @@ impl Waku {
                 favorites: &self.state.favorite_models,
                 pinned: &self.pinned_unfavorites,
                 recents: &self.state.recent_model_uses,
-                disabled_providers: &self.state.disabled_providers,
+                disabled_providers: self.disabled_providers_on(picker_key),
                 locked_provider: self.model_picker_locked_provider(),
                 normalized_query,
             },
@@ -2247,13 +2253,14 @@ impl Waku {
         let packed_suffix = self
             .model_for_session(session)
             .and_then(|requested| {
-                self.provider_probe(session.provider).and_then(|probe| {
-                    waku_protocol::model_catalog::packed_catalog_model(
-                        &probe.models,
-                        requested,
-                        session.provider,
-                    )
-                })
+                self.provider_probe_on(self.daemons.session_owner(session.id), session.provider)
+                    .and_then(|probe| {
+                        waku_protocol::model_catalog::packed_catalog_model(
+                            &probe.models,
+                            requested,
+                            session.provider,
+                        )
+                    })
             })
             .map(|matched| matched.suffix)
             .unwrap_or_default();
@@ -2740,7 +2747,10 @@ impl Waku {
             return None;
         }
         let presets = self
-            .provider_probe(ProviderKind::DeepSeek)
+            .provider_probe_on(
+                self.daemons.session_owner(session.id),
+                ProviderKind::DeepSeek,
+            )
             .map(|probe| probe.agent_presets.clone())
             .unwrap_or_default();
         if presets.is_empty() {
@@ -2771,7 +2781,10 @@ impl Waku {
                     };
                     cx.notify();
                     if open {
-                        this.refresh_provider_model_discovery(ProviderKind::DeepSeek);
+                        this.refresh_provider_model_discovery_on(
+                            this.model_picker_daemon_key(),
+                            ProviderKind::DeepSeek,
+                        );
                     }
                 });
             },

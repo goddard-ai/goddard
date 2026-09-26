@@ -2398,6 +2398,9 @@ impl Waku {
                 supervisor.note_remote_settings(settings.clone());
             }
             self.remote_daemon_settings.insert(host, settings);
+            // The host's own provider_binary_overrides just became known (or
+            // changed): re-detect so its probes reflect them.
+            self.refresh_provider_detection_on(key, None);
             cx.notify();
             return;
         }
@@ -2765,7 +2768,17 @@ impl Waku {
         &self,
         session_id: Uuid,
     ) -> waku_client::DaemonSettings {
-        match self.daemons.session_owner(session_id) {
+        self.daemon_settings_for_key(self.daemons.session_owner(session_id))
+    }
+
+    /// Daemon settings effective for a host: the remote mirror when it has
+    /// reported (the local document stands in until then), the merged local
+    /// document for the primary daemon.
+    pub(super) fn daemon_settings_for_key(
+        &self,
+        key: waku_client::DaemonKey,
+    ) -> waku_client::DaemonSettings {
+        match key {
             waku_client::DaemonKey::Remote(host) => self
                 .remote_daemon_settings
                 .get(&host)
@@ -2773,6 +2786,47 @@ impl Waku {
                 .unwrap_or_else(|| self.daemon.settings()),
             waku_client::DaemonKey::Local => self.state.daemon_settings(),
         }
+    }
+
+    /// The disable list a host's provider picks respect — the remote daemon's
+    /// own settings once mirrored, the local list until then.
+    pub(super) fn disabled_providers_on(&self, key: waku_client::DaemonKey) -> &[ProviderKind] {
+        match key {
+            waku_client::DaemonKey::Remote(host) => self
+                .remote_daemon_settings
+                .get(&host)
+                .map(|settings| settings.disabled_providers.as_slice())
+                .unwrap_or(&self.state.disabled_providers),
+            waku_client::DaemonKey::Local => &self.state.disabled_providers,
+        }
+    }
+
+    /// Whether a daemon cannot host a local PTY — a remote host's supervisor,
+    /// or a remote-attached primary daemon in whole-app remote mode. A
+    /// disconnected remote still counts: its sessions stay remote.
+    pub(super) fn daemon_key_is_remote(&self, key: waku_client::DaemonKey) -> bool {
+        key.is_remote()
+            || self
+                .daemons
+                .supervisor(key)
+                .is_some_and(|daemon| daemon.is_remote())
+    }
+
+    /// The daemon the model picker's reads and writes describe — the target
+    /// session's owner, or the local daemon for the session-less automation
+    /// editor.
+    pub(super) fn model_picker_daemon_key(&self) -> waku_client::DaemonKey {
+        self.model_picker_session()
+            .map(|session| self.daemons.session_owner(session.id))
+            .unwrap_or(waku_client::DaemonKey::Local)
+    }
+
+    /// The daemon the composer's session runs on — its owner, or the local
+    /// daemon while no session is bound yet.
+    pub(super) fn composer_daemon_key(&self) -> waku_client::DaemonKey {
+        self.composer_session()
+            .map(|session| self.daemons.session_owner(session.id))
+            .unwrap_or(waku_client::DaemonKey::Local)
     }
 
     /// Persist the per-host catalog cache off the UI thread.
@@ -3001,6 +3055,25 @@ impl Waku {
         }
         let supervisor = link.supervisor;
         self.daemons.add_remote(host, supervisor.clone());
+        // Optimistic until the host answers: every provider stays selectable
+        // with its fallback catalog so a session can start before (or
+        // despite) detection, and only a completed probe may close one.
+        let remote_key = waku_client::DaemonKey::Remote(host);
+        self.probes.entry(remote_key).or_insert_with(|| {
+            ProviderKind::ALL
+                .iter()
+                .map(|provider| ProviderProbe {
+                    provider: *provider,
+                    installed: true,
+                    path: None,
+                    models: crate::model_catalog::fallback_models(*provider),
+                    agent_presets: crate::model_catalog::fallback_agent_presets(*provider),
+                })
+                .collect()
+        });
+        // The host's provider catalog is its own: sessions routed to it pick
+        // from what this detection reports, not the local machine's install.
+        self.refresh_provider_detection_on(remote_key, None);
         self.remote_errors.remove(&host);
         self.needs_auth_hosts.remove(&host);
         self.interactive_connects_pending.remove(&host);
@@ -3248,6 +3321,20 @@ impl Waku {
             .retain(|project| self.daemons.project_owner(project.id) != remote);
         self.daemons.remove_remote(host);
         self.remote_daemon_settings.remove(&host);
+        // Every probe answer the host left behind goes with it — the next
+        // connect re-detects from scratch rather than trusting a stale
+        // catalog.
+        self.probes.remove(&remote);
+        self.provider_model_discoveries
+            .retain(|(key, _)| *key != remote);
+        self.provider_model_discoveries_pending
+            .retain(|(key, _)| *key != remote);
+        self.provider_versions.retain(|(key, _), _| *key != remote);
+        self.provider_version_probes_pending
+            .retain(|(key, _)| *key != remote);
+        self.provider_detection_remaining.remove(&remote);
+        self.provider_detection_checked_at.remove(&remote);
+        self.provider_detection_pending.remove(&remote);
         self.remote_errors.remove(&host);
         self.needs_auth_hosts.remove(&host);
         self.interactive_connects_pending.remove(&host);
@@ -4071,7 +4158,7 @@ impl Waku {
         self.refresh_provider_model_discovery_on(waku_client::DaemonKey::Local, provider);
     }
 
-    fn refresh_provider_model_discovery_on(
+    pub(super) fn refresh_provider_model_discovery_on(
         &mut self,
         key: waku_client::DaemonKey,
         provider: ProviderKind,
@@ -4139,6 +4226,9 @@ impl Waku {
     pub(super) fn drain_provider_version_events(&mut self) -> bool {
         let mut changed = false;
         while let Ok((key, provider, version)) = self.provider_version_events.try_recv() {
+            if self.daemons.supervisor(key).is_none() {
+                continue;
+            }
             self.provider_version_probes_pending
                 .remove(&(key, provider));
             self.provider_versions.insert((key, provider), version);
@@ -4265,6 +4355,11 @@ impl Waku {
         let mut settled_keys = Vec::new();
         let mut probed_keys = Vec::new();
         while let Ok((key, probe)) = self.provider_detection_events.try_recv() {
+            // A reply landing after the host was removed must not resurrect
+            // its purged state.
+            if self.daemons.supervisor(key).is_none() {
+                continue;
+            }
             let remaining = self.provider_detection_remaining.entry(key).or_insert(0);
             *remaining = remaining.saturating_sub(1);
             if *remaining == 0 {
@@ -4379,9 +4474,19 @@ impl Waku {
     /// Whether the provider can back a new session: installed and not switched
     /// off in the Providers settings.
     pub(super) fn provider_enabled(&self, provider: ProviderKind) -> bool {
-        !self.state.disabled_providers.contains(&provider)
+        self.provider_enabled_on(waku_client::DaemonKey::Local, provider)
+    }
+
+    /// [`Self::provider_enabled`] on a given host — its own probe and its own
+    /// disable list answer instead of the local machine's.
+    pub(super) fn provider_enabled_on(
+        &self,
+        key: waku_client::DaemonKey,
+        provider: ProviderKind,
+    ) -> bool {
+        !self.disabled_providers_on(key).contains(&provider)
             && self
-                .provider_probe(provider)
+                .provider_probe_on(key, provider)
                 .is_some_and(|probe| probe.installed)
     }
 
@@ -4404,29 +4509,40 @@ impl Waku {
                 .map(|session| session.provider),
             model_picker::ModelPickerTarget::AutomationEditor => None,
         };
+        let key = self.model_picker_daemon_key();
         super::model_picker::picker_has_no_providers(
-            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
-            &self.state.disabled_providers,
+            Self::probes_on(&self.probes, key),
+            self.disabled_providers_on(key),
             locked_provider,
-            self.daemon.is_remote(),
-            self.provider_detection_checked_at
-                .contains_key(&waku_client::DaemonKey::Local),
+            self.daemon_key_is_remote(key),
+            self.provider_detection_checked_at.contains_key(&key),
         )
     }
 
     pub(super) fn model_for_session<'a>(&'a self, session: &'a AgentSession) -> Option<&'a str> {
         session.model.as_deref().or_else(|| {
-            self.provider_probe(session.provider)
+            self.provider_probe_on(self.daemons.session_owner(session.id), session.provider)
                 .and_then(ProviderProbe::preferred_model)
                 .map(|model| model.id.as_str())
         })
     }
 
     pub(super) fn model_display_name(&self, provider: ProviderKind, model: Option<&str>) -> String {
+        self.model_display_name_on(waku_client::DaemonKey::Local, provider, model)
+    }
+
+    /// [`Self::model_display_name`] against a host's own catalog — a remote
+    /// session's models resolve against what its daemon reported.
+    pub(super) fn model_display_name_on(
+        &self,
+        key: waku_client::DaemonKey,
+        provider: ProviderKind,
+        model: Option<&str>,
+    ) -> String {
         let Some(model) = model else {
             return provider.short_name().to_owned();
         };
-        self.provider_probe(provider)
+        self.provider_probe_on(key, provider)
             .and_then(|probe| probe.model(model))
             .map(|candidate| {
                 candidate
@@ -4443,7 +4559,8 @@ impl Waku {
         session: &AgentSession,
     ) -> Option<&ProviderModel> {
         let model = self.model_for_session(session)?;
-        self.provider_probe(session.provider)?.model(model)
+        self.provider_probe_on(self.daemons.session_owner(session.id), session.provider)?
+            .model(model)
     }
 
     pub(super) fn catalog_model_id_for_session<'a>(
@@ -5535,8 +5652,9 @@ impl Waku {
     /// and in-session option changes both go through this so they cannot
     /// disagree about what the session is currently set to.
     pub(super) fn session_options(&self, session: &AgentSession) -> SessionOptions {
+        let key = self.daemons.session_owner(session.id);
         let model = session.model.clone().or_else(|| {
-            self.provider_probe(session.provider)
+            self.provider_probe_on(key, session.provider)
                 .and_then(ProviderProbe::preferred_model)
                 .map(|model| model.id.clone())
         });
@@ -5564,7 +5682,7 @@ impl Waku {
             })
         });
         if let Some(requested) = model.as_deref()
-            && let Some(probe) = self.provider_probe(session.provider)
+            && let Some(probe) = self.provider_probe_on(key, session.provider)
             && let Some(matched) = waku_protocol::model_catalog::packed_catalog_model(
                 &probe.models,
                 requested,
@@ -5598,7 +5716,7 @@ impl Waku {
             return None;
         }
         session.agent_preset.clone().or_else(|| {
-            self.provider_probe(session.provider)
+            self.provider_probe_on(self.daemons.session_owner(session.id), session.provider)
                 .and_then(ProviderProbe::preferred_agent_preset)
                 .map(|preset| preset.id.clone())
         })
@@ -5607,7 +5725,7 @@ impl Waku {
     pub(super) fn agent_preset_label_for_session(&self, session: &AgentSession) -> Option<String> {
         let id = self.agent_preset_for_session(session)?;
         Some(
-            self.provider_probe(session.provider)
+            self.provider_probe_on(self.daemons.session_owner(session.id), session.provider)
                 .and_then(|probe| probe.agent_presets.iter().find(|preset| preset.id == id))
                 .map(|preset| preset.display_name())
                 .unwrap_or(id),
@@ -5694,23 +5812,36 @@ impl Waku {
     }
 
     /// The CLI path that launches `provider` on the daemon owning
-    /// `session_id`. A remote host resolves its own override or the bare
-    /// command name against its own PATH — a locally probed absolute path is
-    /// meaningless there. `None` means the local probe found no install.
+    /// `session_id`. A remote host's own probe answers first — an installed
+    /// probe's path is already valid on that machine, and a completed probe
+    /// that found nothing closes the provider. While a host has never been
+    /// probed the fallback stays optimistic: its own override, else the bare
+    /// command name resolved against the remote PATH. `None` means a probe
+    /// that ran found no install.
     pub(super) fn provider_binary_for_session(
         &self,
         session_id: Uuid,
         provider: ProviderKind,
     ) -> Option<PathBuf> {
         match self.daemons.session_owner(session_id) {
-            waku_client::DaemonKey::Remote(_) => Some(
-                self.daemon_settings_for_session(session_id)
-                    .provider_binary_overrides
-                    .get(&provider)
-                    .cloned()
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from(provider.command())),
-            ),
+            waku_client::DaemonKey::Remote(_) => {
+                let key = self.daemons.session_owner(session_id);
+                match self.provider_probe_on(key, provider) {
+                    Some(probe) => probe.installed.then(|| {
+                        probe
+                            .path
+                            .clone()
+                            .unwrap_or_else(|| PathBuf::from(provider.command()))
+                    }),
+                    None => Some(
+                        self.provider_overrides_for_key(key)
+                            .get(&provider)
+                            .cloned()
+                            .map(PathBuf::from)
+                            .unwrap_or_else(|| PathBuf::from(provider.command())),
+                    ),
+                }
+            }
             waku_client::DaemonKey::Local => self
                 .provider_probe_on(waku_client::DaemonKey::Local, provider)
                 .and_then(|probe| probe.path.clone()),
@@ -7398,6 +7529,9 @@ impl Waku {
     pub(super) fn drain_provider_probe_events(&mut self) -> bool {
         let mut changed = false;
         while let Ok((key, probe)) = self.provider_probe_events.try_recv() {
+            if self.daemons.supervisor(key).is_none() {
+                continue;
+            }
             self.provider_model_discoveries_pending
                 .remove(&(key, probe.provider));
             let daemon_probes = self.probes.entry(key).or_default();

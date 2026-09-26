@@ -432,7 +432,7 @@ impl Waku {
             &self.state.route_classes,
         );
         let catalog = self
-            .provider_probe(session.provider)
+            .provider_probe_on(self.daemons.session_owner(session_id), session.provider)
             .map(|probe| probe.models.clone())
             .unwrap_or_default();
         let models: Vec<ProviderModel> = approved
@@ -640,7 +640,7 @@ impl Waku {
     ) -> Option<PhaseTarget> {
         let provider = session.provider;
         let catalog_has = |model: &str| {
-            self.provider_probe(provider)
+            self.provider_probe_on(self.daemons.session_owner(session.id), provider)
                 .is_none_or(|probe| probe.models.is_empty() || probe.model(model).is_some())
         };
         let decision = session

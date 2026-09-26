@@ -5640,9 +5640,10 @@ impl Waku {
                             this.composer_picker_auto_route(),
                             &rows,
                         );
+                        let picker_key = this.model_picker_daemon_key();
                         model_picker::picker_search_edited(
                             &mut this.model_picker,
-                            Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
+                            Self::probes_on(&this.probes, picker_key),
                             &rows,
                             seed,
                             cx,

@@ -5008,7 +5008,11 @@ impl Waku {
         // the selected model does not support, matching the driver options.
         let model_detail = self.sidebar_alt_held.then(|| {
             let options = self.session_options(session);
-            let model = self.model_display_name(session.provider, options.model.as_deref());
+            let model = self.model_display_name_on(
+                self.daemons.session_owner(session.id),
+                session.provider,
+                options.model.as_deref(),
+            );
             let effort = options.reasoning_effort.as_deref().and_then(|effort| {
                 self.model_metadata_for_session(session)
                     .and_then(|model| {

@@ -263,12 +263,12 @@ impl TurnRoutePlan {
 
 impl Waku {
     /// The installed, enabled providers Auto may pick between — the same set
-    /// the model picker offers a draft.
-    pub(super) fn route_candidates(&self) -> Vec<RouteCandidate> {
-        Self::probes_on(&self.probes, waku_client::DaemonKey::Local)
+    /// the model picker offers a draft on the session's own host.
+    pub(super) fn route_candidates_on(&self, key: waku_client::DaemonKey) -> Vec<RouteCandidate> {
+        Self::probes_on(&self.probes, key)
             .iter()
             .filter(|probe| {
-                probe.installed && !self.state.disabled_providers.contains(&probe.provider)
+                probe.installed && !self.disabled_providers_on(key).contains(&probe.provider)
             })
             .map(|probe| RouteCandidate {
                 provider: probe.provider,
@@ -286,7 +286,9 @@ impl Waku {
             && self
                 .model_picker_session()
                 .is_some_and(|session| !session.provider_locked())
-            && !self.route_candidates().is_empty()
+            && !self
+                .route_candidates_on(self.model_picker_daemon_key())
+                .is_empty()
     }
 
     /// Auto prompts are configured directly on the Jev page, so the page
@@ -327,7 +329,8 @@ impl Waku {
         provisional_cwd: PathBuf,
     ) -> Option<RouteStartPlan> {
         let daemon = self.daemons.daemon_for_session(session.id)?;
-        let candidates = self.route_candidates();
+        let key = self.daemons.session_owner(session.id);
+        let candidates = self.route_candidates_on(key);
         let binaries = candidates
             .iter()
             .map(|candidate| {
@@ -342,7 +345,7 @@ impl Waku {
             .map(|candidate| {
                 (
                     candidate.provider,
-                    self.provider_probe(candidate.provider)
+                    self.provider_probe_on(key, candidate.provider)
                         .and_then(|probe| probe.preferred_model())
                         .map(|model| model.id.clone()),
                 )
@@ -364,7 +367,7 @@ impl Waku {
             preferred_models,
             agent_preset: self.agent_preset_for_session(session),
             deepseek_preferred_preset: self
-                .provider_probe(ProviderKind::DeepSeek)
+                .provider_probe_on(key, ProviderKind::DeepSeek)
                 .and_then(|probe| probe.preferred_agent_preset())
                 .map(|preset| preset.id.clone()),
             provider_cursor: session.provider_cursor.clone(),

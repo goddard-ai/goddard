@@ -4201,13 +4201,14 @@ impl Waku {
         let (suffix_effort, suffix_tier) = self
             .model_for_session(session)
             .and_then(|requested| {
-                self.provider_probe(session.provider).and_then(|probe| {
-                    crate::model_catalog::packed_catalog_model(
-                        &probe.models,
-                        requested,
-                        session.provider,
-                    )
-                })
+                self.provider_probe_on(self.daemons.session_owner(session.id), session.provider)
+                    .and_then(|probe| {
+                        crate::model_catalog::packed_catalog_model(
+                            &probe.models,
+                            requested,
+                            session.provider,
+                        )
+                    })
             })
             .map(|matched| {
                 (
@@ -4553,7 +4554,7 @@ impl Waku {
         // `pi` — so a working filter reads differently from a mistyped one.
         let annotations = model_picker::picker_query_annotations(
             &content,
-            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
+            Self::probes_on(&self.probes, self.model_picker_daemon_key()),
         );
         self.model_picker.search.update(cx, |search, cx| {
             search.set_annotation_ranges(annotations, cx);
@@ -4853,7 +4854,9 @@ impl Waku {
         // A switched-off provider's favorite stays reachable only for the
         // session already locked to it — same rule the picker's rows follow.
         let locked = session.provider_locked() && session.provider == favorite.provider;
-        if !locked && !self.provider_enabled(favorite.provider) {
+        if !locked
+            && !self.provider_enabled_on(self.daemons.session_owner(session.id), favorite.provider)
+        {
             return;
         }
         let (provider, model, effort, fast) = self.favorite_model_combo(&favorite);
@@ -4871,21 +4874,28 @@ impl Waku {
         favorite: &FavoriteModel,
     ) -> (ProviderKind, String, Option<String>, bool) {
         let (model, effort, fast) = model_picker::normalize_model_combo(
-            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
+            Self::probes_on(&self.probes, self.composer_daemon_key()),
             favorite.provider,
             &favorite.model,
             favorite.effort.clone(),
             favorite.fast,
         );
-        let effort = effort.or_else(|| self.model_default_effort(favorite.provider, &model));
+        let effort = effort.or_else(|| {
+            self.model_default_effort(self.composer_daemon_key(), favorite.provider, &model)
+        });
         (favorite.provider, model, effort, fast)
     }
 
     /// The effort a `{provider, model}` selection with no stored effort
     /// resolves to: the catalog model's default, or its first ladder rung
     /// when it names none.
-    fn model_default_effort(&self, provider: ProviderKind, model: &str) -> Option<String> {
-        self.provider_probe(provider)
+    fn model_default_effort(
+        &self,
+        key: waku_client::DaemonKey,
+        provider: ProviderKind,
+        model: &str,
+    ) -> Option<String> {
+        self.provider_probe_on(key, provider)
             .and_then(|probe| probe.model(model))
             .and_then(|model| {
                 model.default_reasoning_effort.clone().or_else(|| {
@@ -4932,10 +4942,12 @@ impl Waku {
         // Same gate the ⌘⌥n chords apply: a started session only runs its
         // locked provider; a draft runs whichever providers are enabled.
         let locked_provider = session.provider_locked().then_some(session.provider);
+        let session_key = self.daemons.session_owner(session.id);
         let eligible = |provider: ProviderKind| {
             session.can_choose_model(provider)
                 && (Some(provider) == locked_provider
-                    || (locked_provider.is_none() && self.provider_enabled(provider)))
+                    || (locked_provider.is_none()
+                        && self.provider_enabled_on(session_key, provider)))
         };
         let mut combos: Vec<(ProviderKind, String, Option<String>, bool)> = Vec::new();
         for favorite in &self.state.favorite_models {
@@ -4957,7 +4969,7 @@ impl Waku {
             .filter(|use_| eligible(use_.provider))
             .map(|use_| {
                 let (model, effort, fast) = model_picker::normalize_model_combo(
-                    Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
+                    Self::probes_on(&self.probes, session_key),
                     use_.provider,
                     &use_.model,
                     use_.effort.clone(),
@@ -4991,7 +5003,7 @@ impl Waku {
         }
         items.extend(combos.iter().map(|(provider, model, effort, fast)| {
             let label = self
-                .provider_probe(*provider)
+                .provider_probe_on(session_key, *provider)
                 .and_then(|probe| probe.model(model))
                 .map(|model| model.name.clone())
                 .unwrap_or_else(|| model.clone());
@@ -5158,7 +5170,8 @@ impl Waku {
         fast: bool,
         cx: &mut Context<Self>,
     ) {
-        let default_effort = self.model_default_effort(provider, &model);
+        let default_effort =
+            self.model_default_effort(self.model_picker_daemon_key(), provider, &model);
         let matches = |favorite: &FavoriteModel| {
             super::model_picker::favorite_matches_row(
                 favorite,
@@ -5376,7 +5389,7 @@ impl Waku {
 
     pub(super) fn set_agent_preset(&mut self, agent_preset: String, cx: &mut Context<Self>) {
         let selectable = self
-            .provider_probe(ProviderKind::DeepSeek)
+            .provider_probe_on(self.model_picker_daemon_key(), ProviderKind::DeepSeek)
             .is_some_and(|probe| {
                 probe
                     .agent_presets

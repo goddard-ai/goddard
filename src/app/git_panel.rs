@@ -687,7 +687,7 @@ impl Waku {
         let session = self.selected_session()?;
         Some(crate::git_commit::AgentInvocation {
             provider: session.provider,
-            binary: self.provider_probe(session.provider)?.path.clone()?,
+            binary: self.provider_binary_for_session(session.id, session.provider)?,
             model: self.model_for_session(session).map(str::to_owned),
             reasoning_effort: session.reasoning_effort.clone(),
         })

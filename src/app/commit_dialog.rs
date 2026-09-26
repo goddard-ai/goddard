@@ -122,13 +122,14 @@ impl Waku {
         if self.commit_operation.is_some() {
             return;
         }
-        let Some((workspace, provider, model, reasoning_effort)) =
+        let Some((workspace, provider, model, reasoning_effort, session_id)) =
             self.selected_session().and_then(|session| {
                 Some((
                     self.workspace_path_for_session(session)?.to_path_buf(),
                     session.provider,
                     self.model_for_session(session).map(str::to_owned),
                     session.reasoning_effort.clone(),
+                    session.id,
                 ))
             })
         else {
@@ -138,8 +139,7 @@ impl Waku {
         };
 
         let invocation = self
-            .provider_probe(provider)
-            .and_then(|probe| probe.path.clone())
+            .provider_binary_for_session(session_id, provider)
             .map(|binary| crate::git_commit::AgentInvocation {
                 provider,
                 binary,
@@ -609,6 +609,10 @@ impl Waku {
         let can_push = pending.is_none() && dialog.can_push();
         let pending_status = pending.map(commit_pending_status_label);
         let error = dialog.error.clone();
+        let invocation_key = self
+            .selected_session()
+            .map(|session| self.daemons.session_owner(session.id))
+            .unwrap_or(waku_client::DaemonKey::Local);
         let generation_label = dialog.invocation.as_ref().map(|invocation| {
             let provider = invocation.provider;
             match crate::git_commit::commit_generation_model(provider, invocation.model.as_deref())
@@ -616,7 +620,7 @@ impl Waku {
                 Some(model) => format!(
                     "{} · {}",
                     provider.display_name(),
-                    self.model_display_name(provider, Some(model))
+                    self.model_display_name_on(invocation_key, provider, Some(model))
                 ),
                 None => provider.display_name().to_owned(),
             }
