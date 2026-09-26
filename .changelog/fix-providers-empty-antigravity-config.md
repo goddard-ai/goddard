@@ -1,0 +1,1 @@
+- Antigravity MCP sync now initializes an empty config file instead of reporting a JSON parse error.

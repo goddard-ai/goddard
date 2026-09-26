@@ -154,6 +154,10 @@ fn sync_json(
     entries: &BTreeMap<String, Value>,
 ) -> anyhow::Result<()> {
     let mut document: Value = match fs::read(path) {
+        // Some CLIs create this file before they have any settings to write.
+        // Treat an empty file as a fresh config, while keeping malformed
+        // non-empty files protected from accidental overwrite.
+        Ok(bytes) if bytes.iter().all(u8::is_ascii_whitespace) => Value::Object(Map::new()),
         Ok(bytes) => serde_json::from_slice(&bytes)
             .with_context(|| format!("{} is not valid JSON; skipping", path.display()))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Value::Object(Map::new()),
