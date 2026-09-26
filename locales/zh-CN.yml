@@ -2481,6 +2481,8 @@ routing.connection_failed: "连接失败：%{error}"
 routing.connection_ok: 已连接 — %{model} 在 %{latency} 毫秒内应答
 routing.feature_auto_prompt_description: 判断已完成的轮次是否自动发送后续提示
 routing.feature_auto_prompt_preview_description: 对当前任务试运行自动提示规则
+routing.feature_managed_goal: 托管目标
+routing.feature_managed_goal_description: 判断当前目标是否已完成、应继续进行，或需要你的输入
 routing.feature_auto_prompt_suggest_description: 为自动提示编辑器建议问题权重和阈值
 routing.feature_evaluate: 评估调用
 routing.feature_evaluate_description: 未标记功能标签的调用

@@ -2530,6 +2530,8 @@ routing.connection_failed: "接続に失敗しました：%{error}"
 routing.connection_ok: "接続しました — %{model} が %{latency} ms で応答"
 routing.feature_auto_prompt_description: 完了したターンが自動フォローアップを送信すべきか判断します
 routing.feature_auto_prompt_preview_description: このタスクに対して自動プロンプトルールを試行します
+routing.feature_managed_goal: 管理対象の目標
+routing.feature_managed_goal_description: 現在の目標が完了したか、続行すべきか、ユーザーの入力が必要かを判断します
 routing.feature_auto_prompt_suggest_description: 自動プロンプトエディタの質問の重みとしきい値を提案します
 routing.feature_evaluate: 評価呼び出し
 routing.feature_evaluate_description: 機能タグなしで記録された呼び出し

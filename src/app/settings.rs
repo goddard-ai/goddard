@@ -13967,6 +13967,7 @@ fn eval_feature_label(feature: &str) -> String {
         "auto-prompt" => tr!("auto_prompts.title"),
         "auto-prompt-suggest" => tr!("auto_prompts.suggest"),
         "auto-prompt-preview" => tr!("auto_prompts.try_task"),
+        "managed-goal" => tr!("routing.feature_managed_goal"),
         _ => return feature.to_owned(),
     }
 }
@@ -13992,6 +13993,7 @@ fn eval_feature_description(feature: &str) -> Option<String> {
         "auto-prompt" => tr!("routing.feature_auto_prompt_description"),
         "auto-prompt-suggest" => tr!("routing.feature_auto_prompt_suggest_description"),
         "auto-prompt-preview" => tr!("routing.feature_auto_prompt_preview_description"),
+        "managed-goal" => tr!("routing.feature_managed_goal_description"),
         _ => return None,
     })
 }
