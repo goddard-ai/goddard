@@ -1,0 +1,1 @@
+- ⌘E and ⌘. now cycle their highlighted choices while held; release the Command key to apply the selection. Use ⌘⇧E to cycle reasoning effort backward.

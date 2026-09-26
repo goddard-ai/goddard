@@ -126,6 +126,12 @@ pub(super) enum KeyboardOptionsChord {
     /// steps one choice in the chord's direction: a bare press-release
     /// still changes something.
     Favorites,
+    /// ⌘E / ⌘⇧E — the reasoning-effort ladder has no search field, so an
+    /// armed open steps in the binding's direction and release applies it.
+    ReasoningEffort,
+    /// ⌘. — the access-control picker has no search field, so an armed open
+    /// advances once through runtime modes and release applies the choice.
+    RuntimeMode,
 }
 
 impl KeyboardOptionsChord {
@@ -135,7 +141,9 @@ impl KeyboardOptionsChord {
     fn hold_down(self, secondary: bool, alt: bool) -> bool {
         match self {
             KeyboardOptionsChord::Workspace | KeyboardOptionsChord::Branch => secondary && alt,
-            KeyboardOptionsChord::Model => secondary,
+            KeyboardOptionsChord::Model
+            | KeyboardOptionsChord::ReasoningEffort
+            | KeyboardOptionsChord::RuntimeMode => secondary,
             KeyboardOptionsChord::Favorites => alt,
         }
     }
@@ -189,6 +197,7 @@ impl KeyboardOptionsUi {
 impl Waku {
     pub(super) fn open_access_control_options(
         &mut self,
+        chord: Option<KeyboardOptionsChord>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -271,7 +280,7 @@ impl Waku {
             items,
             highlighted,
             KeyboardOptionFocus::Modal,
-            None,
+            chord,
             window,
             cx,
         );
@@ -823,7 +832,7 @@ impl Waku {
         // menu click opened it — the release that follows commits.
         self.keyboard_options.armed =
             chord.hold_down(window.modifiers().secondary(), window.modifiers().alt);
-        self.move_keyboard_option_highlight(direction, cx);
+        self.move_keyboard_option_highlight_for_chord(direction, cx);
         true
     }
 
@@ -833,7 +842,7 @@ impl Waku {
     /// dispatch) stays on the current choice.
     pub(super) fn step_armed_keyboard_options(&mut self, direction: isize, cx: &mut Context<Self>) {
         if self.keyboard_options.armed {
-            self.move_keyboard_option_highlight(direction, cx);
+            self.move_keyboard_option_highlight_for_chord(direction, cx);
         }
     }
 
@@ -878,6 +887,25 @@ impl Waku {
     }
 
     fn move_keyboard_option_highlight(&mut self, direction: isize, cx: &mut Context<Self>) {
+        self.move_keyboard_option_highlight_matching(direction, false, cx);
+    }
+
+    fn move_keyboard_option_highlight_for_chord(
+        &mut self,
+        direction: isize,
+        cx: &mut Context<Self>,
+    ) {
+        let runtime_mode_only =
+            self.keyboard_options.chord == Some(KeyboardOptionsChord::RuntimeMode);
+        self.move_keyboard_option_highlight_matching(direction, runtime_mode_only, cx);
+    }
+
+    fn move_keyboard_option_highlight_matching(
+        &mut self,
+        direction: isize,
+        runtime_mode_only: bool,
+        cx: &mut Context<Self>,
+    ) {
         let len = self.keyboard_options.items.len();
         if len == 0 || self.keyboard_options.creating_branch {
             return;
@@ -887,7 +915,19 @@ impl Waku {
             .items
             .iter()
             .enumerate()
-            .filter_map(|(index, item)| item.selectable().then_some(index))
+            .filter_map(|(index, item)| {
+                let selectable = if runtime_mode_only {
+                    matches!(
+                        item,
+                        KeyboardOptionItem::Choice(choice)
+                            if choice.enabled
+                                && matches!(choice.action, KeyboardOptionAction::RuntimeMode(_))
+                    )
+                } else {
+                    item.selectable()
+                };
+                selectable.then_some(index)
+            })
             .collect::<Vec<_>>();
         if choices.is_empty() {
             return;

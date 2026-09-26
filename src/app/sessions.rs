@@ -4702,10 +4702,22 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.cycle_keyboard_options_chord(
+            keyboard_options::KeyboardOptionsChord::RuntimeMode,
+            window,
+            cx,
+        ) {
+            return;
+        }
         if self.settings_page.is_some() {
             return;
         }
-        self.open_access_control_options(window, cx);
+        self.open_access_control_options(
+            Some(keyboard_options::KeyboardOptionsChord::RuntimeMode),
+            window,
+            cx,
+        );
+        self.step_armed_keyboard_options(1, cx);
     }
 
     /// Primary modifier + Shift + . opens the access and environment
@@ -4719,7 +4731,7 @@ impl Waku {
         if self.settings_page.is_some() || !self.state.sandbox_experiment_enabled {
             return;
         }
-        self.open_access_control_options(window, cx);
+        self.open_access_control_options(None, window, cx);
     }
 
     /// A keyboard toggle produces no mouse-down for another open menu's
@@ -4988,10 +5000,22 @@ impl Waku {
     /// Providers that can return to a base default include the unset step.
     pub(super) fn cycle_reasoning_effort_action(
         &mut self,
-        _action: &CycleReasoningEffort,
+        action: &CycleReasoningEffort,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let direction = match action.direction {
+            crate::EffortCycleDirection::Forward => 1,
+            crate::EffortCycleDirection::Backward => -1,
+        };
+        if self.cycle_keyboard_options_chord_direction(
+            keyboard_options::KeyboardOptionsChord::ReasoningEffort,
+            direction,
+            window,
+            cx,
+        ) {
+            return;
+        }
         if self.settings_page.is_some() {
             return;
         }
@@ -5065,10 +5089,11 @@ impl Waku {
             items,
             highlighted,
             keyboard_options::KeyboardOptionFocus::Modal,
-            None,
+            Some(keyboard_options::KeyboardOptionsChord::ReasoningEffort),
             window,
             cx,
         );
+        self.step_armed_keyboard_options(direction, cx);
     }
 
     pub(super) fn toggle_favorite_model(
