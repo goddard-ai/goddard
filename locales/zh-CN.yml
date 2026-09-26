@@ -1818,6 +1818,7 @@ usage.reset_credit_failed: "Codex 无法应用重置：%{error}"
 usage_error.signin_cannot_read: "%{provider} 登录状态无法读取用量（HTTP %{status}）。运行一次 %{provider} 任务后即可刷新"
 usage_error.rate_limited: 用量接口当前受到速率限制，请稍后再试
 usage_error.http_status: 用量接口返回了 HTTP %{status}
+usage_error.http_status_detail: "用量接口返回了 HTTP %{status}：%{detail}"
 usage_error.invalid_json: 用量接口返回了无效的 JSON
 usage_error.no_home_directory: 找不到用户主目录
 usage_error.read_file: 无法读取 %{path}

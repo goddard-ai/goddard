@@ -1866,6 +1866,7 @@ usage.reset_credit_failed: "Codex がリセットを適用できませんでし�
 usage_error.signin_cannot_read: "%{provider} のログイン情報では使用量を取得できません（HTTP %{status}）。%{provider} でタスクを 1 回実行すると更新されます"
 usage_error.rate_limited: 使用量 API は現在レート制限されています
 usage_error.http_status: 使用量 API から HTTP %{status} が返されました
+usage_error.http_status_detail: "使用量 API から HTTP %{status} が返されました：%{detail}"
 usage_error.invalid_json: 使用量 API から無効な JSON が返されました
 usage_error.no_home_directory: ホームディレクトリが見つかりません
 usage_error.read_file: "%{path} を読み込めませんでした"

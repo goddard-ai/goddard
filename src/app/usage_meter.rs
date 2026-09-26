@@ -131,11 +131,29 @@ impl Waku {
                 }
                 Err(error) => {
                     let was_unconfigured = self.plan_usage_unconfigured.remove(&provider);
-                    changed |=
-                        self.plan_usage_error.get(&provider) != Some(&error) || was_unconfigured;
+                    let new_error = self.plan_usage_error.get(&provider) != Some(&error);
+                    changed |= new_error || was_unconfigured;
                     // Keep any previous snapshot; stale meters with reset
                     // times still self-correct visually.
-                    self.plan_usage_error.insert(provider, error);
+                    self.plan_usage_error.insert(provider, error.clone());
+                    // A failure the panel retries silently is invisible in
+                    // Diagnostics unless it is journaled — record each new
+                    // error string once so retries do not flood the log.
+                    if new_error {
+                        let context = crate::diagnostics::AppErrorContext {
+                            provider: Some(provider.id()),
+                            ..Default::default()
+                        };
+                        self.background_executor
+                            .spawn(async move {
+                                crate::diagnostics::record_app_error(
+                                    "plan_usage",
+                                    &error,
+                                    context,
+                                );
+                            })
+                            .detach();
+                    }
                 }
             }
         }

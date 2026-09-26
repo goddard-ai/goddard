@@ -4705,6 +4705,8 @@ usage_error.rate_limited:
   en: The usage endpoint is rate limited right now
 usage_error.http_status:
   en: The usage endpoint answered HTTP %{status}
+usage_error.http_status_detail:
+  en: "The usage endpoint answered HTTP %{status}: %{detail}"
 usage_error.invalid_json:
   en: The usage endpoint returned invalid JSON
 usage_error.no_home_directory:

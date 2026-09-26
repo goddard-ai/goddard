@@ -1,0 +1,1 @@
+- A provider's plan-usage failure now lands in Settings → Diagnostics like other app errors — once per distinct error, so retrying lanes don't flood the log — and the error text carries the endpoint's own message when it sends one, instead of a bare "HTTP 500".

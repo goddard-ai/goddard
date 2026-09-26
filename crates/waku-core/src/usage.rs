@@ -97,7 +97,7 @@ pub fn fetch_claude_plan_usage(cli_version: Option<&str>) -> anyhow::Result<Plan
             )));
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let mut usage = parse_plan_usage(&body, &credentials);
@@ -224,7 +224,7 @@ fn codex_auth_headers() -> anyhow::Result<Vec<String>> {
 }
 
 /// Map a ChatGPT backend response status onto the shared usage errors.
-fn codex_status_check(status: u16) -> anyhow::Result<()> {
+fn codex_status_check(status: u16, body: &str) -> anyhow::Result<()> {
     match status {
         200 => Ok(()),
         401 | 403 => Err(anyhow!(keyed!(
@@ -233,7 +233,7 @@ fn codex_status_check(status: u16) -> anyhow::Result<()> {
             status = status
         ))),
         429 => Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => Err(usage_http_error(other, body)),
     }
 }
 
@@ -245,7 +245,7 @@ fn codex_status_check(status: u16) -> anyhow::Result<()> {
 pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
     let headers = codex_auth_headers()?;
     let (status, body) = http_get(&codex_usage_url(), &headers)?;
-    codex_status_check(status)?;
+    codex_status_check(status, &body)?;
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let mut usage = parse_codex_plan_usage(&body)
         .ok_or_else(|| anyhow!(keyed!("usage_error.no_rate_limit_windows")))?;
@@ -272,7 +272,7 @@ fn fetch_codex_reset_credit_expiry(headers: &[String]) -> anyhow::Result<Option<
         return Ok(None);
     };
     let (status, body) = http_get(&url, headers)?;
-    codex_status_check(status)?;
+    codex_status_check(status, &body)?;
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     Ok(reset_credit_expiry(&body))
 }
@@ -301,7 +301,7 @@ pub fn consume_codex_reset_credit(
         .ok_or_else(|| anyhow!(keyed!("usage_error.no_plan_usage", provider = "Codex")))?;
     let body = json!({ "redeem_request_id": redeem_request_id });
     let (status, response) = http_post_json(&url, &headers, &body.to_string())?;
-    codex_status_check(status)?;
+    codex_status_check(status, &response)?;
     let response: Value =
         serde_json::from_str(&response).context(keyed!("usage_error.invalid_json"))?;
     codex_reset_outcome(&response)
@@ -354,7 +354,7 @@ pub fn fetch_opencode_go_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
             });
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     parse_opencode_go_plan_usage(&body)
@@ -434,7 +434,7 @@ pub fn fetch_devin_plan_usage() -> anyhow::Result<PlanUsage> {
             )));
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     parse_devin_plan_usage(&body).ok_or_else(|| anyhow!(keyed!("usage_error.devin_no_quota")))
@@ -492,14 +492,35 @@ fn parse_devin_plan_usage(body: &Value) -> Option<PlanUsage> {
 /// These bodies are `{"type":"error","error":{"type":..,"message":..}}`, and
 /// the message is the only part that says what to actually do — an
 /// `EntitlementError` and a revoked key are both HTTP 403 otherwise.
+/// OpenCode-style APIs nest under `{"error":{"message"}}`; Connect RPC
+/// errors (Devin, Kimi's web service) are flat `{"code","message"}`.
 fn usage_error_detail(body: &str) -> Option<String> {
-    serde_json::from_str::<Value>(body)
-        .ok()?
-        .pointer("/error/message")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|message| !message.is_empty())
-        .map(str::to_owned)
+    let value = serde_json::from_str::<Value>(body).ok()?;
+    for key in ["/error/message", "/message", "/error"] {
+        if let Some(message) = value
+            .pointer(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|message| !message.is_empty())
+        {
+            // One sentence is a hint; a stack trace is not — cap defensively.
+            return Some(message.chars().take(200).collect());
+        }
+    }
+    None
+}
+
+/// An `http_status` error that carries the endpoint's own message when the
+/// body names one — a bare "HTTP 500" only when it does not.
+fn usage_http_error(status: u16, body: &str) -> anyhow::Error {
+    match usage_error_detail(body) {
+        Some(detail) => anyhow!(keyed!(
+            "usage_error.http_status_detail",
+            status = status,
+            detail = detail
+        )),
+        None => anyhow!(keyed!("usage_error.http_status", status = status)),
+    }
 }
 
 /// Match OpenCode's credential precedence closely enough for its Go provider:
@@ -771,7 +792,7 @@ pub fn fetch_copilot_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
             )));
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     match parse_copilot_plan_usage(&body) {
@@ -951,7 +972,7 @@ pub fn fetch_muse_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
             )));
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     if body.get("require_payment").and_then(Value::as_bool) == Some(true)
@@ -1111,7 +1132,7 @@ pub fn fetch_droid_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
             )));
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let windows = factory_subscription_windows(&body);
@@ -1373,7 +1394,7 @@ fn fetch_kimi_web_usage(web: &str, token: &str) -> anyhow::Result<PlanUsage> {
             )));
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let windows = kimi_web_windows(&body);
@@ -1494,7 +1515,7 @@ fn fetch_kimi_code_usage(key: &str) -> anyhow::Result<Option<PlanUsage>> {
             )));
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let mut windows = Vec::new();
@@ -1645,7 +1666,7 @@ pub fn fetch_cursor_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
             )));
         }
         429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+        other => return Err(usage_http_error(other, &body)),
     }
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let mut plan = parse_cursor_plan_usage(&body);
@@ -1918,7 +1939,7 @@ pub fn fetch_amp_plan_usage(binary: Option<&std::path::Path>) -> anyhow::Result<
                 )));
             }
             429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-            other => return Err(anyhow!(keyed!("usage_error.http_status", status = other))),
+            other => return Err(usage_http_error(other, &body)),
         }
         let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
         if body.get("ok").and_then(Value::as_bool) == Some(false) {
@@ -3037,6 +3058,30 @@ mod tests {
         assert_eq!(usage_error_detail("not json"), None);
         assert_eq!(usage_error_detail(r#"{"error":{"type":"X"}}"#), None);
         assert_eq!(usage_error_detail(r#"{"error":{"message":"   "}}"#), None);
+    }
+
+    #[test]
+    fn usage_error_detail_reads_flat_connect_errors_and_caps_the_payload() {
+        // Connect RPC failures are flat {"code","message"} — Devin's 500s
+        // carry this shape, not the nested {"error":{"message"}} one.
+        assert_eq!(
+            usage_error_detail(r#"{"code":"internal","message":"quota backend down"}"#)
+                .as_deref(),
+            Some("quota backend down")
+        );
+        assert_eq!(
+            usage_error_detail(r#"{"error":"plain string error"}"#).as_deref(),
+            Some("plain string error")
+        );
+        let long = format!(r#"{{"message":"{}"}}"#, "x".repeat(500));
+        assert_eq!(
+            usage_error_detail(&long).map(|message| message.chars().count()),
+            Some(200)
+        );
+        assert!(usage_http_error(500, r#"{"message":"backend down"}"#)
+            .to_string()
+            .contains("backend down"));
+        assert!(!usage_http_error(500, "not json").to_string().contains(':'),);
     }
 
     #[test]
