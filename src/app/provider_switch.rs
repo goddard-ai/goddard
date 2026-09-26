@@ -64,9 +64,11 @@ const INDEX_SPANS_PER_TURN: usize = 6;
 /// Below this size a fresh-start segment is cheaper to push verbatim than
 /// to index — and the eval call is skipped entirely.
 const PUSH_FLOOR_BYTES: usize = 16 * 1024;
-/// The serialized `items` array stays under this; the oldest scored items
-/// drop first (always-kept user text never does).
-const MAX_STATE_BYTES: usize = 256 * 1024;
+/// The compact state-and-questions payload must stay under this; the oldest
+/// scored items drop first (always-kept user text never does).
+const MAX_EVAL_PAYLOAD_BYTES: usize = 256 * 1024;
+#[cfg(test)]
+const MAX_STATE_BYTES: usize = MAX_EVAL_PAYLOAD_BYTES;
 /// Fewer answered questions than this fraction of those asked means the
 /// backend's response cannot be trusted to select anything.
 const MIN_ANSWERED_FRACTION: f64 = 0.5;
@@ -212,25 +214,33 @@ fn item_spans(item: &ContextItem) -> Vec<IndexSpan> {
     spans
 }
 
-/// The eval `state`/`questions` pair for the index's span candidates —
-/// same shape as [`compaction_eval`], one `Noul` per span.
-fn span_eval(spans: &[IndexSpan]) -> (Value, BTreeMap<String, EvalQuestion>) {
-    let mut size = spans.iter().map(|span| span.text.len() + 64).sum::<usize>();
-    let mut kept: Vec<&IndexSpan> = spans.iter().collect();
-    // The serialized state stays bounded the same way: oldest spans drop.
-    let mut oldest = 0usize;
-    while size > MAX_STATE_BYTES && oldest < kept.len() {
-        size -= kept.remove(oldest).text.len() + 64;
-        oldest += 1;
-    }
+/// The eval `state`/`questions` pair for provider-switch candidates — one
+/// `Noul` per transcript item or index span.
+fn eval_payload_fits(state: &Value, questions: &BTreeMap<String, EvalQuestion>) -> bool {
+    let Ok(state) = serde_json::to_vec(state) else {
+        return false;
+    };
+    let Ok(questions) = serde_json::to_vec(questions) else {
+        return false;
+    };
+    let bytes = b"{\"state\":"
+        .len()
+        .saturating_add(state.len())
+        .saturating_add(b",\"questions\":".len())
+        .saturating_add(questions.len())
+        .saturating_add(b"}".len());
+    bytes <= MAX_EVAL_PAYLOAD_BYTES
+}
+
+fn span_eval_payload(spans: &[IndexSpan]) -> (Value, BTreeMap<String, EvalQuestion>) {
     let state = json!({
         "task": "session-context-index",
-        "items": kept
+        "items": spans
             .iter()
             .map(|span| json!({ "id": span.id, "text": span.text }))
             .collect::<Vec<_>>(),
     });
-    let questions = kept
+    let questions = spans
         .iter()
         .map(|span| {
             (
@@ -252,22 +262,49 @@ fn span_eval(spans: &[IndexSpan]) -> (Value, BTreeMap<String, EvalQuestion>) {
     (state, questions)
 }
 
-/// The eval `state`/`questions` pair for one segment. When the serialized
-/// items would exceed [`MAX_STATE_BYTES`], the oldest scored items drop out
-/// first — the newest context and every user message are the last to go.
-fn compaction_eval(items: &[ContextItem]) -> (Value, BTreeMap<String, EvalQuestion>) {
-    let mut kept: Vec<&ContextItem> = items.iter().collect();
-    let mut size = kept.iter().map(|item| item.text.len() + 64).sum::<usize>();
-    let mut oldest = 0usize;
-    while size > MAX_STATE_BYTES {
-        while oldest < kept.len() && kept[oldest].always {
-            oldest += 1;
+fn span_eval(spans: &[IndexSpan]) -> (Value, BTreeMap<String, EvalQuestion>) {
+    // Payload size decreases monotonically as older spans are removed, so a
+    // binary search avoids rebuilding the full request once per dropped span.
+    let mut low = 0;
+    let mut high = spans.len();
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let (state, questions) = span_eval_payload(&spans[middle..]);
+        if eval_payload_fits(&state, &questions) {
+            high = middle;
+        } else {
+            low = middle + 1;
         }
-        if oldest >= kept.len() {
-            break;
-        }
-        size -= kept.remove(oldest).text.len() + 64;
     }
+    let payload = span_eval_payload(&spans[low..]);
+    if eval_payload_fits(&payload.0, &payload.1) {
+        payload
+    } else {
+        (json!({}), BTreeMap::new())
+    }
+}
+
+/// The eval `state`/`questions` pair for one segment. When the serialized
+/// items would exceed the payload cap, the oldest scored items drop out
+/// first — user-authored text remains verbatim.
+fn compaction_eval_payload(
+    items: &[ContextItem],
+    drop_oldest_scored: usize,
+) -> (Value, BTreeMap<String, EvalQuestion>) {
+    let mut dropped = 0usize;
+    let kept: Vec<&ContextItem> = items
+        .iter()
+        .filter(|item| {
+            if item.always {
+                return true;
+            }
+            if dropped < drop_oldest_scored {
+                dropped += 1;
+                return false;
+            }
+            true
+        })
+        .collect();
     let state = json!({
         "task": "session-context-extraction",
         "items": kept
@@ -295,6 +332,27 @@ fn compaction_eval(items: &[ContextItem]) -> (Value, BTreeMap<String, EvalQuesti
         })
         .collect();
     (state, questions)
+}
+
+fn compaction_eval(items: &[ContextItem]) -> (Value, BTreeMap<String, EvalQuestion>) {
+    let scored_count = items.iter().filter(|item| !item.always).count();
+    let mut low = 0;
+    let mut high = scored_count;
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let (state, questions) = compaction_eval_payload(items, middle);
+        if eval_payload_fits(&state, &questions) {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    let payload = compaction_eval_payload(items, low);
+    if eval_payload_fits(&payload.0, &payload.1) {
+        payload
+    } else {
+        (json!({}), BTreeMap::new())
+    }
 }
 
 /// What the switch produces once the daemon work finishes: the envelope to
@@ -615,8 +673,8 @@ impl Waku {
                     // - fresh + small: the verbatim push, no eval needed;
                     // - fresh + large: the index of Jev-selected spans.
                     let use_index = !resumed && cli_available && !small;
-                    let evaluate = eval_available && (resumed || !small);
-                    let (state, questions) = if !evaluate {
+                    let should_evaluate = eval_available && (resumed || !small);
+                    let (state, questions) = if !should_evaluate {
                         (json!({}), BTreeMap::new())
                     } else if use_index {
                         let spans: Vec<IndexSpan> = segment
@@ -629,6 +687,8 @@ impl Waku {
                         compaction_eval(&segment)
                     };
                     let asked = questions.len();
+                    let evaluate =
+                        should_evaluate && asked > 0 && eval_payload_fits(&state, &questions);
                     // An eval failure — no backend, a transport error, an
                     // unparseable reply — degrades to the pointer/unfiltered
                     // handoff rather than aborting the switch.

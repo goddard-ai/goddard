@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
 use serde::Serialize;
@@ -237,7 +237,7 @@ pub fn evaluate_with_timeout(
     if !(200..300).contains(&status) {
         // Provider error bodies can echo the request — including the prompt —
         // so the failure carries the status and nothing else.
-        bail!("evaluation backend answered HTTP {status}");
+        return Err(anyhow!(EvaluationHttpStatus(status)));
     }
     if raw.len() > MAX_RESPONSE_BYTES {
         bail!("evaluation response exceeded {} bytes", MAX_RESPONSE_BYTES);
@@ -254,6 +254,52 @@ pub fn evaluate_with_timeout(
         serde_json::from_value(envelope).context("invalid evaluation answer envelope")?;
     evaluation.latency_ms = latency_ms;
     Ok(evaluation)
+}
+
+#[derive(Debug)]
+struct EvaluationHttpStatus(u16);
+
+impl std::fmt::Display for EvaluationHttpStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "evaluation backend answered HTTP {}", self.0)
+    }
+}
+
+impl std::error::Error for EvaluationHttpStatus {}
+
+/// Retry one service-unavailable response without exceeding the caller's
+/// total timeout budget. Provider-switch is the only caller that opts in.
+pub(crate) fn evaluate_with_timeout_retry_503(
+    settings: &EvalSettings,
+    state: &Value,
+    questions: &BTreeMap<String, EvalQuestion>,
+    timeout_secs: u64,
+) -> anyhow::Result<Evaluation> {
+    const RETRY_BACKOFF: Duration = Duration::from_millis(250);
+
+    let started = Instant::now();
+    let error = match evaluate_with_timeout(settings, state, questions, timeout_secs) {
+        Ok(evaluation) => return Ok(evaluation),
+        Err(error) => error,
+    };
+    if !error
+        .downcast_ref::<EvaluationHttpStatus>()
+        .is_some_and(|status| status.0 == 503)
+    {
+        return Err(error);
+    }
+
+    let budget = Duration::from_secs(timeout_secs);
+    if budget.saturating_sub(started.elapsed()) <= RETRY_BACKOFF {
+        return Err(error);
+    }
+    std::thread::sleep(RETRY_BACKOFF);
+    let retry_timeout_secs = budget.saturating_sub(started.elapsed()).as_secs();
+    if retry_timeout_secs == 0 {
+        return Err(error);
+    }
+
+    evaluate_with_timeout(settings, state, questions, retry_timeout_secs)
 }
 
 /// The settings pane's "Test connection" check: one trivial question against
