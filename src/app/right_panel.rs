@@ -3302,8 +3302,6 @@ impl Waku {
             .child(
                 div()
                     .flex_none()
-                    .border_t(hairline())
-                    .border_color(theme.separator)
                     .px(px(10.0))
                     .pt(px(8.0))
                     .child(self.render_composer_card(
@@ -3501,12 +3499,12 @@ impl Waku {
             )))
             .w_full()
             .px(px(20.0))
-            .py(px(4.0))
-            .when(index == 0, |element| element.pt(px(6.0)))
+            .py(px(8.0))
+            .when(index == 0, |element| element.pt(px(22.0)))
             .when(starts_followup_turn, |element| {
                 element.pt(px(FOLLOWUP_TURN_TOP_GAP))
             })
-            .when(index + 1 == row_count, |element| element.pb(px(6.0)))
+            .when(index + 1 == row_count, |element| element.pb(px(22.0)))
             .child(inner)
             .into_any_element()
     }
