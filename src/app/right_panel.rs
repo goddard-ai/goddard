@@ -2725,6 +2725,15 @@ impl Waku {
         else {
             return;
         };
+        self.reveal_right_panel_file_in_tree_at_root(relative_path, workspace, cx);
+    }
+
+    pub(super) fn reveal_right_panel_file_in_tree_at_root(
+        &mut self,
+        relative_path: String,
+        workspace: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
         let absolute = workspace.join(&relative_path);
         // Every directory between the workspace root and the file must be
         // expanded for the row to render at all.
