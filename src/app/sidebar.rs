@@ -1087,6 +1087,7 @@ impl Waku {
             &dormant,
             None,
             sweep,
+            self.state.starred_idle_before_unseen,
         );
         if target.is_none() && sweep.is_some() {
             target = sessions::next_attention_target(
@@ -1099,6 +1100,7 @@ impl Waku {
                 &dormant,
                 None,
                 None,
+                self.state.starred_idle_before_unseen,
             );
         }
         let enabled = unread_target.is_some();

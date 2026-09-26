@@ -1908,6 +1908,27 @@ impl Waku {
                 )
             },
             setting_card(
+                "icons/star.svg",
+                tr!("settings.starred_idle_before_unseen"),
+                tr!(
+                    "settings.starred_idle_before_unseen_description",
+                    keys = crate::platform::primary_shortcut("⌘D", "Ctrl+D")
+                ),
+                toggle_switch(
+                    "starred-idle-before-unseen-toggle",
+                    self.state.starred_idle_before_unseen,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.starred_idle_before_unseen;
+                        move |this, _, cx| this.set_starred_idle_before_unseen(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
+            setting_card(
                 "icons/keyboard.svg",
                 tr!("settings.sidebar_shortcut_tags"),
                 tr!(
@@ -11045,6 +11066,15 @@ impl Waku {
             return;
         }
         self.state.dormant_after_days = days;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_starred_idle_before_unseen(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.starred_idle_before_unseen == enabled {
+            return;
+        }
+        self.state.starred_idle_before_unseen = enabled;
         self.save();
         cx.notify();
     }

@@ -5692,3 +5692,7 @@ keyboard_options.fast:
   en: Fast
 keyboard_options.keyboard_hint:
   en: ↑ ↓ Move · Enter Select · Esc Close
+settings.starred_idle_before_unseen:
+  en: Starred tasks first when jumping
+settings.starred_idle_before_unseen_description:
+  en: "%{keys} visits a starred project's seen tasks before unread completions in other projects"

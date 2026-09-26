@@ -2875,3 +2875,5 @@ keyboard_options.automatic_routing: 自動ルーティング
 keyboard_options.automatic_routing_description: 送信時にタスクに合ったモデルを選択
 keyboard_options.fast: 高速
 keyboard_options.keyboard_hint: ↑ ↓ 移動 · Enter 選択 · Esc 閉じる
+settings.starred_idle_before_unseen: ジャンプ時にスター付きタスクを優先
+settings.starred_idle_before_unseen_description: "%{keys} は他のプロジェクトの未読完了より先に、スター付きプロジェクトの閲覧済みアイドルタスクへ移動します"
