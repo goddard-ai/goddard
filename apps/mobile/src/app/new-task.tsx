@@ -110,7 +110,7 @@ export default function NewTaskScreen() {
 
   useEffect(() => {
     if (!projectId || !projects.some((project) => project.id === projectId)) {
-      setProjectId(projects[0]?.id ?? null);
+      setProjectId(projects.find((project) => project.name !== 'Friends')?.id ?? null);
     }
   }, [projectId, projects]);
 

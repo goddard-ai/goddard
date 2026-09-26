@@ -1,0 +1,1 @@
+- When starting a new task, Goddard skips the Friends file-sharing project when choosing a default project. You can still select Friends explicitly.

@@ -304,7 +304,11 @@ export function WakuApp() {
     if (transition !== 'newTask') return
 
     enteringNewTask.current = true
-    const project = currentProject ?? draftProject ?? taskState.data?.projects[0]
+    const project = defaultNewTaskProject(
+      currentProject,
+      draftProject,
+      taskState.data?.projects.find((item) => item.name !== 'Friends'),
+    )
     setDisplayed(null)
     setNewTaskMode(true)
     setDraftProject(project ?? null)
@@ -395,8 +399,10 @@ export function WakuApp() {
       const rememberedProjectId = rememberedNavigation.current?.kind === 'newTask'
         ? rememberedNavigation.current.projectId
         : undefined
-      const project = taskState.data.projects.find((item) => item.id === rememberedProjectId)
-        ?? taskState.data.projects[0]
+      const project = defaultNewTaskProject(
+        taskState.data.projects.find((item) => item.id === rememberedProjectId),
+        taskState.data.projects.find((item) => item.name !== 'Friends'),
+      )
       if (!project) {
         setDraft(null)
         setDraftProject(null)
@@ -416,7 +422,7 @@ export function WakuApp() {
       .filter((session) => session.last_reply_at || session.turns.length || session.messages.length)
       .sort((a, b) => (b.last_reply_at ?? b.created_at) - (a.last_reply_at ?? a.created_at))[0]
     if (newest) void navigate({ search: { session: newest.id }, replace: true })
-    else startNewTask(taskState.data.projects[0])
+    else startNewTask()
   }, [taskState.data, search.session, newTaskMode, navigate])
 
   useEffect(() => {
@@ -620,7 +626,11 @@ export function WakuApp() {
   function startNewTask(preferred?: Project | null) {
     const project = preferred === null
       ? undefined
-      : preferred ?? currentProject ?? draftProject ?? taskState.data?.projects[0]
+      : preferred ?? defaultNewTaskProject(
+        currentProject,
+        draftProject,
+        taskState.data?.projects.find((item) => item.name !== 'Friends'),
+      ) ?? undefined
     if (newTaskMode && draft) forgetRightPanelSession(draft.id)
     const nextDraft = project
       ? createRememberedSession(project.id)
@@ -1270,6 +1280,10 @@ export function WakuApp() {
       {palette}
     </div>
   )
+}
+
+function defaultNewTaskProject(...projects: Array<Project | null | undefined>) {
+  return projects.find((project) => project && project.name !== 'Friends') ?? null
 }
 
 function readSidebarWidth(): number {
