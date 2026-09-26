@@ -1490,7 +1490,7 @@ impl Waku {
                         // launch appear without a restart.
                         for kind in ProviderKind::ALL {
                             if picker_lists_provider(
-                                &this.probes,
+                                Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                                 &this.state.disabled_providers,
                                 locked_provider,
                                 this.daemon.is_remote(),
@@ -1592,7 +1592,7 @@ impl Waku {
         let search_query = self.model_picker.search.read(cx).content().to_owned();
         let normalized_query = search_query.trim().to_ascii_lowercase();
         let searching = !normalized_query.is_empty();
-        let probes = self.probes.clone();
+        let probes = Self::probes_on(&self.probes, waku_client::DaemonKey::Local).to_vec();
         let disabled_providers = self.state.disabled_providers.clone();
         let remote = self.daemon.is_remote();
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
@@ -1682,7 +1682,7 @@ impl Waku {
         let empty_label = if searching {
             tr!("models.none_found")
         } else if ProviderKind::ALL.into_iter().any(|kind| {
-            pending_discoveries.contains(&kind)
+            pending_discoveries.contains(&(waku_client::DaemonKey::Local, kind))
                 && picker_lists_provider(
                     &probes,
                     &disabled_providers,
@@ -2115,7 +2115,7 @@ impl Waku {
     /// pair.
     pub(super) fn composer_picker_rows(&self, normalized_query: &str) -> Vec<PickerRow> {
         picker_rows(
-            &self.probes,
+            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
             &PickerRowSpec {
                 leading: if self.model_picker_offers_auto_route() {
                     &[PolicyRowId::Auto]

@@ -74,7 +74,7 @@ impl Waku {
             let event_wake = self.event_wake_tx.clone();
             let claude_version = self
                 .provider_versions
-                .get(&ProviderKind::Claude)
+                .get(&(waku_client::DaemonKey::Local, ProviderKind::Claude))
                 .cloned()
                 .flatten();
             let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();

@@ -2122,7 +2122,7 @@ impl Waku {
                             empty = this.model_picker_has_no_providers();
                             for kind in ProviderKind::ALL {
                                 if model_picker::picker_lists_provider(
-                                    &this.probes,
+                                    Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                                     &this.state.disabled_providers,
                                     None,
                                     this.daemon.is_remote(),

@@ -7678,8 +7678,7 @@ impl Waku {
     /// The project-memory card's tuning block: one model picker per enabled
     /// provider, governing only the daemon's background distillation runs.
     fn memory_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let rows = self
-            .probes
+        let rows = Self::probes_on(&self.probes, waku_client::DaemonKey::Local)
             .iter()
             .filter(|probe| {
                 probe.installed && !self.state.disabled_providers.contains(&probe.provider)
@@ -8461,7 +8460,7 @@ impl Waku {
         locked_provider: Option<ProviderKind>,
     ) -> Vec<PickerRow> {
         picker_rows(
-            &self.probes,
+            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
             &PickerRowSpec {
                 leading: &[PolicyRowId::NoOverride],
                 provider_defaults: true,
@@ -8530,7 +8529,7 @@ impl Waku {
                         // launch appear without a restart.
                         for kind in ProviderKind::ALL {
                             if picker_lists_provider(
-                                &this.probes,
+                                Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                                 &this.state.disabled_providers,
                                 None,
                                 this.daemon.is_remote(),
@@ -8583,10 +8582,13 @@ impl Waku {
             .to_ascii_lowercase();
         let searching = !normalized_query.is_empty();
         let remote = self.daemon.is_remote();
-        let probes = self.probes.clone();
+        let probes = Self::probes_on(&self.probes, waku_client::DaemonKey::Local).to_vec();
         let disabled_providers = self.state.disabled_providers.clone();
         let current = current.cloned();
-        let label = route_class_target_label(current.as_ref(), &self.probes);
+        let label = route_class_target_label(
+            current.as_ref(),
+            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
+        );
         // One ordering shared by the rendered rows and `enter`'s handler —
         // the same rule the composer documents for its own list. Only built
         // while the panel is open: it clones every provider's model list.
@@ -8829,7 +8831,7 @@ impl Waku {
     /// pick between, since a class target naming an uninstalled provider
     /// would resolve but could never start.
     fn route_class_probes(&self) -> Vec<ProviderProbe> {
-        self.probes
+        Self::probes_on(&self.probes, waku_client::DaemonKey::Local)
             .iter()
             .filter(|probe| {
                 probe.installed && !self.state.disabled_providers.contains(&probe.provider)
@@ -8972,7 +8974,12 @@ impl Waku {
         }
         let labels: Vec<String> = combos
             .iter()
-            .map(|target| route_class_target_label(Some(target), &self.probes))
+            .map(|target| {
+                route_class_target_label(
+                    Some(target),
+                    Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
+                )
+            })
             .collect();
         self.route_suggest_pending = true;
         self.route_suggest_result = None;
@@ -11308,10 +11315,18 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let checking = self.provider_detection_remaining > 0;
-        let detection_pending = self.provider_detection_checked_at.is_none();
+        let checking = self
+            .provider_detection_remaining
+            .get(&waku_client::DaemonKey::Local)
+            .copied()
+            .unwrap_or_default()
+            > 0;
+        let detection_pending = !self
+            .provider_detection_checked_at
+            .contains_key(&waku_client::DaemonKey::Local);
         let checked_label = self
             .provider_detection_checked_at
+            .get(&waku_client::DaemonKey::Local)
             .filter(|_| !checking)
             .map(|checked_at| detection_checked_label(checked_at.elapsed()));
 
@@ -11355,7 +11370,7 @@ impl Waku {
             let version = (!detection_pending)
                 .then(|| {
                     self.provider_versions
-                        .get(&kind)
+                        .get(&(waku_client::DaemonKey::Local, kind))
                         .and_then(|version| version.clone())
                 })
                 .flatten();
@@ -13186,7 +13201,7 @@ impl Waku {
         for terminal in self.right_panel_terminals.values() {
             terminal.update(cx, |terminal, cx| terminal.refresh_localized_text(cx));
         }
-        for probe in &mut self.probes {
+        for probe in self.probes.values_mut().flatten() {
             probe.models = crate::model_catalog::fallback_models(probe.provider);
         }
         self.refresh_provider_detection(None);

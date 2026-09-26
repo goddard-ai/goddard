@@ -4551,7 +4551,10 @@ impl Waku {
         let content = self.model_picker.search.read(cx).content().to_owned();
         // Wash the recognized values in structured tokens — `provider:pi`'s
         // `pi` — so a working filter reads differently from a mistyped one.
-        let annotations = model_picker::picker_query_annotations(&content, &self.probes);
+        let annotations = model_picker::picker_query_annotations(
+            &content,
+            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
+        );
         self.model_picker.search.update(cx, |search, cx| {
             search.set_annotation_ranges(annotations, cx);
         });
@@ -4868,7 +4871,7 @@ impl Waku {
         favorite: &FavoriteModel,
     ) -> (ProviderKind, String, Option<String>, bool) {
         let (model, effort, fast) = model_picker::normalize_model_combo(
-            &self.probes,
+            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
             favorite.provider,
             &favorite.model,
             favorite.effort.clone(),
@@ -4954,7 +4957,7 @@ impl Waku {
             .filter(|use_| eligible(use_.provider))
             .map(|use_| {
                 let (model, effort, fast) = model_picker::normalize_model_combo(
-                    &self.probes,
+                    Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
                     use_.provider,
                     &use_.model,
                     use_.effort.clone(),

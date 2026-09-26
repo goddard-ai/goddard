@@ -2239,31 +2239,34 @@ pub struct Waku {
     updater_button_animation_from_width: f32,
     updater_button_animation_from_reveal: f32,
     updater_button_animation_generation: u64,
-    probes: Vec<ProviderProbe>,
-    provider_probe_tx: Sender<ProviderProbe>,
-    provider_probe_events: Receiver<ProviderProbe>,
-    provider_model_discoveries: HashSet<ProviderKind>,
-    provider_model_discoveries_pending: HashSet<ProviderKind>,
-    /// CLI version per provider, probed off-thread. Missing key means the
-    /// probe has not answered yet; `None` means it ran and found nothing.
-    provider_versions: HashMap<ProviderKind, Option<String>>,
-    provider_version_tx: Sender<(ProviderKind, Option<String>)>,
-    provider_version_events: Receiver<(ProviderKind, Option<String>)>,
-    /// Providers with a version probe in flight, so a re-detect cannot stack
-    /// a second subprocess on one that has not answered.
-    provider_version_probes_pending: HashSet<ProviderKind>,
-    /// Fast provider detection results from the daemon, including its cached
-    /// model catalog. Live discovery revalidates these probes afterward.
-    provider_detection_tx: Sender<ProviderProbe>,
-    provider_detection_events: Receiver<ProviderProbe>,
-    /// Providers the running re-detection has not answered for yet; empty
-    /// means no re-detection is in flight.
-    provider_detection_remaining: usize,
-    /// When provider detection last completed, for the page's "Checked" label.
-    provider_detection_checked_at: Option<Instant>,
-    /// A re-detection requested while a pass was in flight; the drain starts
-    /// it once the current pass finishes.
-    provider_detection_pending: PendingProviderDetection,
+    probes: HashMap<waku_client::DaemonKey, Vec<ProviderProbe>>,
+    provider_probe_tx: Sender<(waku_client::DaemonKey, ProviderProbe)>,
+    provider_probe_events: Receiver<(waku_client::DaemonKey, ProviderProbe)>,
+    provider_model_discoveries: HashSet<(waku_client::DaemonKey, ProviderKind)>,
+    provider_model_discoveries_pending: HashSet<(waku_client::DaemonKey, ProviderKind)>,
+    /// CLI version per daemon+provider, probed off-thread. Missing key means
+    /// the probe has not answered yet; `None` means it ran and found nothing.
+    provider_versions: HashMap<(waku_client::DaemonKey, ProviderKind), Option<String>>,
+    provider_version_tx: Sender<(waku_client::DaemonKey, ProviderKind, Option<String>)>,
+    provider_version_events: Receiver<(waku_client::DaemonKey, ProviderKind, Option<String>)>,
+    /// Daemon+provider pairs with a version probe in flight, so a re-detect
+    /// cannot stack a second subprocess on one that has not answered.
+    provider_version_probes_pending: HashSet<(waku_client::DaemonKey, ProviderKind)>,
+    /// Fast provider detection results from each daemon, including its
+    /// cached model catalog. Live discovery revalidates these probes
+    /// afterward. `None` marks a probe whose daemon could not answer, so a
+    /// remote transport failure does not read as "not installed".
+    provider_detection_tx: Sender<(waku_client::DaemonKey, Option<ProviderProbe>)>,
+    provider_detection_events: Receiver<(waku_client::DaemonKey, Option<ProviderProbe>)>,
+    /// Providers each daemon's running re-detection has not answered for
+    /// yet; an absent key means no pass is in flight there.
+    provider_detection_remaining: HashMap<waku_client::DaemonKey, usize>,
+    /// When each daemon's provider detection last completed; the local
+    /// daemon's stamp feeds the Providers page's "Checked" label.
+    provider_detection_checked_at: HashMap<waku_client::DaemonKey, Instant>,
+    /// A re-detection queued while a pass was in flight on the same daemon;
+    /// the drain starts it once the current pass finishes.
+    provider_detection_pending: HashMap<waku_client::DaemonKey, PendingProviderDetection>,
     /// The display bucket ("just now"/minutes/hours) the "Checked" label last
     /// rendered — the maintenance tick repaints when it changes.
     provider_checked_label_bucket: Option<u64>,
@@ -5136,16 +5139,19 @@ impl Waku {
             }
             transcript_selection.annotations.borrow_mut().items = items;
         }
-        let probes = ProviderKind::ALL
-            .into_iter()
-            .map(|provider| ProviderProbe {
-                provider,
-                installed: false,
-                path: None,
-                models: crate::model_catalog::fallback_models(provider),
-                agent_presets: crate::model_catalog::fallback_agent_presets(provider),
-            })
-            .collect::<Vec<_>>();
+        let probes = HashMap::from([(
+            waku_client::DaemonKey::Local,
+            ProviderKind::ALL
+                .into_iter()
+                .map(|provider| ProviderProbe {
+                    provider,
+                    installed: false,
+                    path: None,
+                    models: crate::model_catalog::fallback_models(provider),
+                    agent_presets: crate::model_catalog::fallback_agent_presets(provider),
+                })
+                .collect::<Vec<_>>(),
+        )]);
         let (provider_probe_tx, provider_probe_events) = unbounded();
         let (provider_version_tx, provider_version_events) = unbounded();
         let (provider_detection_tx, provider_detection_events) = unbounded();
@@ -5636,7 +5642,7 @@ impl Waku {
                         );
                         model_picker::picker_search_edited(
                             &mut this.model_picker,
-                            &this.probes,
+                            Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                             &rows,
                             seed,
                             cx,
@@ -5668,7 +5674,7 @@ impl Waku {
                         let seed = this.route_class_selected_index(class, provider, &rows);
                         model_picker::picker_search_edited(
                             &mut this.route_class_picker,
-                            &this.probes,
+                            Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                             &rows,
                             seed,
                             cx,
@@ -6243,9 +6249,9 @@ impl Waku {
                 provider_version_probes_pending: HashSet::new(),
                 provider_detection_tx,
                 provider_detection_events,
-                provider_detection_remaining: 0,
-                provider_detection_checked_at: None,
-                provider_detection_pending: PendingProviderDetection::None,
+                provider_detection_remaining: HashMap::new(),
+                provider_detection_checked_at: HashMap::new(),
+                provider_detection_pending: HashMap::new(),
                 provider_checked_label_bucket: None,
                 expanded_provider_settings: None,
                 provider_path_input,

@@ -265,7 +265,7 @@ impl Waku {
     /// The installed, enabled providers Auto may pick between — the same set
     /// the model picker offers a draft.
     pub(super) fn route_candidates(&self) -> Vec<RouteCandidate> {
-        self.probes
+        Self::probes_on(&self.probes, waku_client::DaemonKey::Local)
             .iter()
             .filter(|probe| {
                 probe.installed && !self.state.disabled_providers.contains(&probe.provider)

@@ -298,8 +298,7 @@ impl Waku {
             reasoning_effort,
             ..
         } = self.session_options(&session);
-        let Some(binary) = self
-            .probes
+        let Some(binary) = Self::probes_on(&self.probes, waku_client::DaemonKey::Local)
             .iter()
             .find(|probe| probe.provider == ProviderKind::Antigravity)
             .and_then(|probe| probe.path.clone())
@@ -308,7 +307,10 @@ impl Waku {
             // startup respawn can legitimately run before the `agy` probe
             // lands. Defer instead of failing: the poll tick retries once
             // detection completes, and only an absent binary toasts.
-            if self.provider_detection_checked_at.is_none() {
+            if !self
+                .provider_detection_checked_at
+                .contains_key(&waku_client::DaemonKey::Local)
+            {
                 self.agy_pending_spawns.insert(session_id);
             } else {
                 self.show_toast(tr!(
@@ -483,9 +485,10 @@ impl Waku {
         if self.agy_pending_spawns.is_empty() {
             return;
         }
-        let detected = self.provider_detection_checked_at.is_some();
-        let installed = self
-            .probes
+        let detected = self
+            .provider_detection_checked_at
+            .contains_key(&waku_client::DaemonKey::Local);
+        let installed = Self::probes_on(&self.probes, waku_client::DaemonKey::Local)
             .iter()
             .any(|probe| probe.provider == ProviderKind::Antigravity && probe.path.is_some());
         if !installed {

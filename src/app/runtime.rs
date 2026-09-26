@@ -3953,33 +3953,91 @@ impl Waku {
         self.runtimes.get(&self.state.selected_session?)
     }
 
-    pub(super) fn provider_probe(&self, provider: ProviderKind) -> Option<&ProviderProbe> {
-        self.probes.iter().find(|probe| probe.provider == provider)
+    /// One daemon's probe list — the local daemon's entry is seeded at
+    /// startup; a remote host's appears once its first detection answers.
+    /// An absent entry means the host has not reported, not that nothing is
+    /// installed.
+    pub(super) fn probes_on<'a>(
+        probes: &'a HashMap<waku_client::DaemonKey, Vec<ProviderProbe>>,
+        key: waku_client::DaemonKey,
+    ) -> &'a [ProviderProbe] {
+        probes.get(&key).map(Vec::as_slice).unwrap_or_default()
     }
 
-    pub(super) fn request_provider_model_discovery(&mut self, provider: ProviderKind) {
+    /// The local daemon's probe for a provider — for surfaces that describe
+    /// this machine (the Providers settings page, local-only helpers).
+    /// Session-scoped callers use [`Self::provider_probe_on`] with the
+    /// session's owner instead.
+    pub(super) fn provider_probe(&self, provider: ProviderKind) -> Option<&ProviderProbe> {
+        self.provider_probe_on(waku_client::DaemonKey::Local, provider)
+    }
+
+    pub(super) fn provider_probe_on(
+        &self,
+        key: waku_client::DaemonKey,
+        provider: ProviderKind,
+    ) -> Option<&ProviderProbe> {
+        Self::probes_on(&self.probes, key)
+            .iter()
+            .find(|probe| probe.provider == provider)
+    }
+
+    /// The binary overrides detection should send to a daemon's probe — the
+    /// remote mirror's own overrides for a host, so a local path is never
+    /// asked for on another machine.
+    fn provider_overrides_for_key(
+        &self,
+        key: waku_client::DaemonKey,
+    ) -> HashMap<ProviderKind, String> {
+        match key {
+            waku_client::DaemonKey::Local => self.state.provider_binary_overrides.clone(),
+            waku_client::DaemonKey::Remote(host) => self
+                .remote_daemon_settings
+                .get(&host)
+                .map(|settings| settings.provider_binary_overrides.clone())
+                .or_else(|| {
+                    self.daemons
+                        .supervisor(key)
+                        .map(|supervisor| supervisor.settings().provider_binary_overrides)
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    fn request_provider_model_discovery_on(
+        &mut self,
+        key: waku_client::DaemonKey,
+        provider: ProviderKind,
+    ) {
         if !provider.supports_model_discovery()
-            || self.provider_model_discoveries.contains(&provider)
+            || self.provider_model_discoveries.contains(&(key, provider))
         {
             return;
         }
         let Some(probe) = self
-            .provider_probe(provider)
+            .provider_probe_on(key, provider)
             .filter(|probe| probe.installed)
             .cloned()
         else {
             return;
         };
-        self.provider_model_discoveries.insert(provider);
-        self.provider_model_discoveries_pending.insert(provider);
+        self.provider_model_discoveries.insert((key, provider));
+        self.provider_model_discoveries_pending
+            .insert((key, provider));
         let provider_probe_tx = self.provider_probe_tx.clone();
         let event_wake = self.event_wake_tx.clone();
-        let daemon = self.daemon.client();
-        let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
+        let Some(daemon) = self.daemons.supervisor(key) else {
+            self.provider_model_discoveries.remove(&(key, provider));
+            self.provider_model_discoveries_pending
+                .remove(&(key, provider));
+            return;
+        };
+        let binary_override = self.provider_overrides_for_key(key).get(&provider).cloned();
+        let client = daemon.client();
         if std::thread::Builder::new()
             .name(format!("waku-{}-model-discovery", provider.id()))
             .spawn(move || {
-                let discovered = match daemon.request(
+                let discovered = match client.request(
                     Uuid::nil(),
                     Uuid::nil(),
                     waku_client::Command::ProbeProvider {
@@ -3992,14 +4050,15 @@ impl Waku {
                     Ok(waku_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
                     _ => probe,
                 };
-                if provider_probe_tx.send(discovered).is_ok() {
+                if provider_probe_tx.send((key, discovered)).is_ok() {
                     signal_event_pump(&event_wake);
                 }
             })
             .is_err()
         {
-            self.provider_model_discoveries.remove(&provider);
-            self.provider_model_discoveries_pending.remove(&provider);
+            self.provider_model_discoveries.remove(&(key, provider));
+            self.provider_model_discoveries_pending
+                .remove(&(key, provider));
         }
     }
 
@@ -4009,35 +4068,50 @@ impl Waku {
     /// The stale catalog stays on screen until the fresh probe lands, so an
     /// open menu never blanks into a loading state while it refreshes.
     pub(super) fn refresh_provider_model_discovery(&mut self, provider: ProviderKind) {
-        if self.provider_model_discoveries_pending.contains(&provider) {
+        self.refresh_provider_model_discovery_on(waku_client::DaemonKey::Local, provider);
+    }
+
+    fn refresh_provider_model_discovery_on(
+        &mut self,
+        key: waku_client::DaemonKey,
+        provider: ProviderKind,
+    ) {
+        if self
+            .provider_model_discoveries_pending
+            .contains(&(key, provider))
+        {
             return;
         }
-        self.provider_model_discoveries.remove(&provider);
-        self.request_provider_model_discovery(provider);
+        self.provider_model_discoveries.remove(&(key, provider));
+        self.request_provider_model_discovery_on(key, provider);
     }
 
     /// Ask every installed CLI for its version, one short-lived subprocess per
     /// provider on its own thread. Answers land in `provider_versions` through
     /// the drain loop; render reads only that map.
-    pub(super) fn request_provider_version_probes(&mut self) {
-        let targets = self
-            .probes
+    fn request_provider_version_probes_on(&mut self, key: waku_client::DaemonKey) {
+        let targets = Self::probes_on(&self.probes, key)
             .iter()
             .filter(|probe| probe.installed)
             .map(|probe| probe.provider)
             .collect::<Vec<_>>();
         for provider in targets {
-            if !self.provider_version_probes_pending.insert(provider) {
+            if !self.provider_version_probes_pending.insert((key, provider)) {
                 continue;
             }
             let provider_version_tx = self.provider_version_tx.clone();
             let event_wake = self.event_wake_tx.clone();
-            let daemon = self.daemon.client();
-            let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
+            let Some(daemon) = self.daemons.supervisor(key) else {
+                self.provider_version_probes_pending
+                    .remove(&(key, provider));
+                continue;
+            };
+            let binary_override = self.provider_overrides_for_key(key).get(&provider).cloned();
+            let client = daemon.client();
             if std::thread::Builder::new()
                 .name(format!("waku-{}-version-probe", provider.id()))
                 .spawn(move || {
-                    let version = match daemon.request(
+                    let version = match client.request(
                         Uuid::nil(),
                         Uuid::nil(),
                         waku_client::Command::ProbeProvider {
@@ -4050,22 +4124,24 @@ impl Waku {
                         Ok(waku_client::ResponsePayload::ProviderProbe { version, .. }) => version,
                         _ => None,
                     };
-                    if provider_version_tx.send((provider, version)).is_ok() {
+                    if provider_version_tx.send((key, provider, version)).is_ok() {
                         signal_event_pump(&event_wake);
                     }
                 })
                 .is_err()
             {
-                self.provider_version_probes_pending.remove(&provider);
+                self.provider_version_probes_pending
+                    .remove(&(key, provider));
             }
         }
     }
 
     pub(super) fn drain_provider_version_events(&mut self) -> bool {
         let mut changed = false;
-        while let Ok((provider, version)) = self.provider_version_events.try_recv() {
-            self.provider_version_probes_pending.remove(&provider);
-            self.provider_versions.insert(provider, version);
+        while let Ok((key, provider, version)) = self.provider_version_events.try_recv() {
+            self.provider_version_probes_pending
+                .remove(&(key, provider));
+            self.provider_versions.insert((key, provider), version);
             changed = true;
         }
         changed
@@ -4076,21 +4152,35 @@ impl Waku {
     /// model discovery and version probes for whatever the detection finds
     /// installed.
     pub(super) fn refresh_provider_detection(&mut self, scope: Option<ProviderKind>) {
-        if self.provider_detection_remaining > 0 {
+        self.refresh_provider_detection_on(waku_client::DaemonKey::Local, scope);
+    }
+
+    fn refresh_provider_detection_on(
+        &mut self,
+        key: waku_client::DaemonKey,
+        scope: Option<ProviderKind>,
+    ) {
+        if self
+            .provider_detection_remaining
+            .get(&key)
+            .copied()
+            .unwrap_or_default()
+            > 0
+        {
             // A pass is already probing. Queue the scope instead of dropping
             // it: the in-flight probes may run before the change the request
             // was meant to see — a just-finished setup install — so the
             // queued pass re-asks once this one drains.
+            let pending = self.provider_detection_pending.entry(key).or_default();
             match scope {
-                None => self.provider_detection_pending = PendingProviderDetection::All,
-                Some(provider) => match &mut self.provider_detection_pending {
+                None => *pending = PendingProviderDetection::All,
+                Some(provider) => match pending {
                     PendingProviderDetection::All => {}
                     PendingProviderDetection::Providers(set) => {
                         set.insert(provider);
                     }
                     PendingProviderDetection::None => {
-                        self.provider_detection_pending =
-                            PendingProviderDetection::Providers(HashSet::from([provider]));
+                        *pending = PendingProviderDetection::Providers(HashSet::from([provider]));
                     }
                 },
             }
@@ -4100,24 +4190,32 @@ impl Waku {
             Some(provider) => vec![provider],
             None => ProviderKind::ALL.to_vec(),
         };
-        self.start_provider_detection(providers);
+        self.start_provider_detection_on(key, providers);
     }
 
     /// Spawn the detection thread for a concrete provider list and arm the
     /// bookkeeping a drain expects: the unanswered-probe count and a cleared
     /// model-discovery guard so each provider's catalog revalidates.
-    fn start_provider_detection(&mut self, providers: Vec<ProviderKind>) {
-        self.provider_detection_remaining = providers.len();
-        let overrides = self.state.provider_binary_overrides.clone();
+    fn start_provider_detection_on(
+        &mut self,
+        key: waku_client::DaemonKey,
+        providers: Vec<ProviderKind>,
+    ) {
+        let Some(daemon) = self.daemons.supervisor(key) else {
+            return;
+        };
+        self.provider_detection_remaining
+            .insert(key, providers.len());
+        let overrides = self.provider_overrides_for_key(key);
         let provider_detection_tx = self.provider_detection_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         let detect_providers = providers.clone();
-        let daemon = self.daemon.client();
+        let client = daemon.client();
         if std::thread::Builder::new()
             .name("waku-provider-detection".into())
             .spawn(move || {
                 for provider in detect_providers {
-                    let response = daemon.request(
+                    let response = client.request(
                         Uuid::nil(),
                         Uuid::nil(),
                         waku_client::Command::ProbeProvider {
@@ -4127,74 +4225,101 @@ impl Waku {
                             probe_version: false,
                         },
                     );
+                    // A remote daemon that cannot answer leaves its provider
+                    // unknown — `None` still counts the pass down so the
+                    // drain can settle it without recording a false negative.
                     let probe = match response {
-                        Ok(waku_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
-                        _ => ProviderProbe {
+                        Ok(waku_client::ResponsePayload::ProviderProbe { probe, .. }) => {
+                            Some(probe)
+                        }
+                        _ if key.is_remote() => None,
+                        _ => Some(ProviderProbe {
                             provider,
                             installed: false,
                             path: None,
                             models: crate::model_catalog::fallback_models(provider),
                             agent_presets: crate::model_catalog::fallback_agent_presets(provider),
-                        },
+                        }),
                     };
-                    if provider_detection_tx.send(probe).is_ok() {
+                    if provider_detection_tx.send((key, probe)).is_ok() {
                         signal_event_pump(&event_wake);
                     }
                 }
             })
             .is_err()
         {
-            self.provider_detection_remaining = 0;
+            self.provider_detection_remaining.remove(&key);
             return;
         }
         // A refresh means "re-check everything about these providers":
         // clearing the per-launch guard lets each one's catalog discovery run
         // again as its detection lands below.
         for provider in providers {
-            self.provider_model_discoveries.remove(&provider);
+            self.provider_model_discoveries.remove(&(key, provider));
         }
     }
 
     pub(super) fn drain_provider_detection_events(&mut self) -> bool {
         let mut changed = false;
         let mut installed_providers = Vec::new();
-        while let Ok(probe) = self.provider_detection_events.try_recv() {
+        let mut settled_keys = Vec::new();
+        let mut probed_keys = Vec::new();
+        while let Ok((key, probe)) = self.provider_detection_events.try_recv() {
+            let remaining = self.provider_detection_remaining.entry(key).or_insert(0);
+            *remaining = remaining.saturating_sub(1);
+            if *remaining == 0 {
+                self.provider_detection_checked_at
+                    .insert(key, Instant::now());
+                if !settled_keys.contains(&key) {
+                    settled_keys.push(key);
+                }
+            }
+            let Some(probe) = probe else {
+                changed = true;
+                continue;
+            };
+            if !probed_keys.contains(&key) {
+                probed_keys.push(key);
+            }
             let provider = probe.provider;
             let installed = probe.installed;
             // A probe answering a just-finished setup terminal is the only
-            // place "did setup produce a working provider" is known.
-            if self.provider_setup_outcomes.remove(&provider) {
-                self.analytics
-                    .track(crate::analytics::Event::ProviderSetupFinished {
-                        provider: provider.id(),
-                        outcome: if installed {
-                            "installed"
-                        } else {
-                            "not_detected"
-                        },
-                    });
+            // place "did setup produce a working provider" is known. Setup
+            // runs against the local daemon only, so a remote answer must
+            // not consume its outcome.
+            if key == waku_client::DaemonKey::Local {
+                if self.provider_setup_outcomes.remove(&provider) {
+                    self.analytics
+                        .track(crate::analytics::Event::ProviderSetupFinished {
+                            provider: provider.id(),
+                            outcome: if installed {
+                                "installed"
+                            } else {
+                                "not_detected"
+                            },
+                        });
+                }
+                if self.provider_update_outcomes.remove(&provider) {
+                    self.analytics
+                        .track(crate::analytics::Event::ProviderUpdateFinished {
+                            provider: provider.id(),
+                            outcome: if installed {
+                                "installed"
+                            } else {
+                                "not_detected"
+                            },
+                        });
+                }
             }
-            if self.provider_update_outcomes.remove(&provider) {
-                self.analytics
-                    .track(crate::analytics::Event::ProviderUpdateFinished {
-                        provider: provider.id(),
-                        outcome: if installed {
-                            "installed"
-                        } else {
-                            "not_detected"
-                        },
-                    });
-            }
-            self.provider_detection_remaining = self.provider_detection_remaining.saturating_sub(1);
-            if self.provider_detection_remaining == 0 {
-                self.provider_detection_checked_at = Some(Instant::now());
-            }
-            if let Some(existing) = self
-                .probes
+            let daemon_probes = self.probes.entry(key).or_default();
+            if let Some(existing) = daemon_probes
                 .iter_mut()
                 .find(|existing| existing.provider == provider)
             {
-                if self.provider_model_discoveries_pending.contains(&provider) {
+                if self
+                    .provider_model_discoveries_pending
+                    .contains(&(key, provider))
+                {
                     // A manual refresh may overlap an older live discovery.
                     // Keep that newer catalog while still accepting PATH
                     // detection from this response.
@@ -4204,29 +4329,33 @@ impl Waku {
                     *existing = probe;
                 }
             } else {
-                self.probes.push(probe);
+                daemon_probes.push(probe);
             }
             if installed {
-                installed_providers.push(provider);
+                installed_providers.push((key, provider));
             } else {
-                self.provider_versions.remove(&provider);
+                self.provider_versions.remove(&(key, provider));
             }
             changed = true;
         }
-        for provider in installed_providers {
-            self.request_provider_model_discovery(provider);
+        for (key, provider) in installed_providers {
+            self.request_provider_model_discovery_on(key, provider);
         }
-        if changed {
-            self.request_provider_version_probes();
+        for key in probed_keys {
+            self.request_provider_version_probes_on(key);
         }
-        if self.provider_detection_remaining == 0 {
-            let providers = match std::mem::take(&mut self.provider_detection_pending) {
+        for key in settled_keys {
+            let providers = match self
+                .provider_detection_pending
+                .remove(&key)
+                .unwrap_or_default()
+            {
                 PendingProviderDetection::None => Vec::new(),
                 PendingProviderDetection::All => ProviderKind::ALL.to_vec(),
                 PendingProviderDetection::Providers(set) => set.into_iter().collect(),
             };
             if !providers.is_empty() {
-                self.start_provider_detection(providers);
+                self.start_provider_detection_on(key, providers);
             }
         }
         changed
@@ -4238,6 +4367,7 @@ impl Waku {
     pub(super) fn maybe_refresh_provider_checked_label(&mut self, cx: &mut Context<Self>) {
         let bucket = self
             .provider_detection_checked_at
+            .get(&waku_client::DaemonKey::Local)
             .map(|checked_at| settings::detection_checked_bucket(checked_at.elapsed()));
         if bucket == self.provider_checked_label_bucket {
             return;
@@ -4275,11 +4405,12 @@ impl Waku {
             model_picker::ModelPickerTarget::AutomationEditor => None,
         };
         super::model_picker::picker_has_no_providers(
-            &self.probes,
+            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
             &self.state.disabled_providers,
             locked_provider,
             self.daemon.is_remote(),
-            self.provider_detection_checked_at.is_some(),
+            self.provider_detection_checked_at
+                .contains_key(&waku_client::DaemonKey::Local),
         )
     }
 
@@ -5581,9 +5712,7 @@ impl Waku {
                     .unwrap_or_else(|| PathBuf::from(provider.command())),
             ),
             waku_client::DaemonKey::Local => self
-                .probes
-                .iter()
-                .find(|probe| probe.provider == provider)
+                .provider_probe_on(waku_client::DaemonKey::Local, provider)
                 .and_then(|probe| probe.path.clone()),
         }
     }
@@ -7268,17 +7397,17 @@ impl Waku {
 
     pub(super) fn drain_provider_probe_events(&mut self) -> bool {
         let mut changed = false;
-        while let Ok(probe) = self.provider_probe_events.try_recv() {
+        while let Ok((key, probe)) = self.provider_probe_events.try_recv() {
             self.provider_model_discoveries_pending
-                .remove(&probe.provider);
-            if let Some(existing) = self
-                .probes
+                .remove(&(key, probe.provider));
+            let daemon_probes = self.probes.entry(key).or_default();
+            if let Some(existing) = daemon_probes
                 .iter_mut()
                 .find(|existing| existing.provider == probe.provider)
             {
                 *existing = probe;
             } else {
-                self.probes.push(probe);
+                daemon_probes.push(probe);
             }
             changed = true;
         }
