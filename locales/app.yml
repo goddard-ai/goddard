@@ -3437,6 +3437,8 @@ transcript.waiting_background:
   en: Waiting for background tasks
 session.stopped_before_response:
   en: The agent stopped before returning a response
+session.stopped_before_start:
+  en: Stopped before the agent started — the message may not have reached it
 session.prompt_not_delivered:
   en: We couldn't confirm the message reached the agent
 session.codex_exited_before_response:

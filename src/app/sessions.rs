@@ -5564,12 +5564,28 @@ impl Waku {
         }
         if has_active_turn {
             let needs_fallback = !self.turn_has_assistant_message(session_id);
+            // Stop can land after the prompt was dispatched but before the
+            // provider confirmed the turn — it may never have seen the
+            // message, which a bare "Stopped" doesn't say.
+            let provider_never_confirmed = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.turns.last())
+                .is_some_and(|turn| {
+                    turn.status == TurnStatus::Running && !turn.provider_turn_started
+                });
             if let Some(session) = self.state.session_mut(session_id) {
                 session.status = SessionStatus::Idle;
                 if needs_fallback {
                     session.push_notice_message(
                         MessageRole::Assistant,
-                        tr!("session.stopped"),
+                        if provider_never_confirmed {
+                            tr!("session.stopped_before_start")
+                        } else {
+                            tr!("session.stopped")
+                        },
                         TranscriptNotice::Status {
                             kind: TranscriptNoticeStatus::Stopped,
                         },

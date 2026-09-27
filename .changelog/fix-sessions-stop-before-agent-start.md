@@ -1,0 +1,1 @@
+- Stopping a task after its message was sent but before the agent confirmed it started now says so in the transcript — "Stopped before the agent started — the message may not have reached it" — instead of a generic "Stopped" that read like interrupted work.
