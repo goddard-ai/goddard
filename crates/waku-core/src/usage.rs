@@ -703,7 +703,7 @@ fn copilot_github_token() -> Option<(String, String)> {
             api_host.strip_prefix("api.").unwrap_or(&api_host),
         ]);
     }
-    let output = crate::command_env::output(&mut command).ok()?;
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -1854,7 +1854,8 @@ fn amp_usage_probe(binary: &std::path::Path) -> anyhow::Result<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = crate::command_env::spawn(&mut command)
+    let mut child = command
+        .spawn_bounded()
         .context(keyed!("usage_error.probe_failed", provider = "Amp", error = "spawn"))?;
     // `amp usage` prints a handful of lines; the pipe never fills before exit.
     let deadline = Instant::now() + Duration::from_secs(15);
