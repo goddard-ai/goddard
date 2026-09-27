@@ -1117,6 +1117,8 @@ impl Waku {
                                         chip.child(
                                             div()
                                                 .flex_none()
+                                                .relative()
+                                                .top(px(2.0))
                                                 .text_size(sp(11.0))
                                                 .text_color(theme.text_tertiary)
                                                 .child(label),
