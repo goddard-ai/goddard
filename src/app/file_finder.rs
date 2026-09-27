@@ -349,11 +349,7 @@ impl Waku {
             position: line.map(|line| (line, column.unwrap_or(1))),
         });
         if let Some(workspace) = self.right_panel_files_root.clone() {
-            self.reveal_right_panel_file_in_tree_at_root(
-                relative_path.clone(),
-                workspace,
-                cx,
-            );
+            self.reveal_right_panel_file_in_tree_at_root(relative_path.clone(), workspace, cx);
         } else {
             self.open_right_panel_surface(RightPanelSurface::Files, cx);
         }
