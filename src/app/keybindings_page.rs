@@ -1115,7 +1115,7 @@ impl super::Waku {
                 .absolute()
                 .inset_0()
                 .occlude()
-                .bg(scrim)
+                .child(motion::scrim_enter("keybindings-capture-layer-enter", scrim))
                 .p(px(24.0))
                 .flex()
                 .items_center()
@@ -1127,10 +1127,7 @@ impl super::Waku {
                     }),
                 )
                 .child(motion::modal_enter("keybindings-capture-enter", card));
-            page = page.child(
-                gpui::deferred(motion::fade_in("keybindings-capture-layer-enter", layer))
-                    .into_any_element(),
-            );
+            page = page.child(gpui::deferred(layer).into_any_element());
         }
         page.into_any_element()
     }

@@ -161,7 +161,7 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
+            .child(motion::scrim_enter("full-access-dialog-layer-enter", scrim))
             .p(px(24.0))
             .flex()
             .items_center()
@@ -171,11 +171,7 @@ impl Waku {
                 cx.listener(|waku, _, window, cx| waku.close_full_access_dialog(window, cx)),
             )
             .child(motion::modal_enter("full-access-dialog-card-enter", card));
-        Some(
-            gpui::deferred(motion::fade_in("full-access-dialog-layer-enter", layer))
-                .with_priority(4)
-                .into_any_element(),
-        )
+        Some(gpui::deferred(layer).with_priority(4).into_any_element())
     }
 }
 

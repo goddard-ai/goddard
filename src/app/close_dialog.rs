@@ -301,7 +301,7 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
+            .child(motion::scrim_enter("close-dialog-layer-enter", scrim))
             .p(px(24.0))
             .flex()
             .items_center()
@@ -312,7 +312,7 @@ impl Waku {
             )
             .child(motion::modal_enter("close-dialog-card-enter", card));
         Some(
-            gpui::deferred(motion::fade_in("close-dialog-layer-enter", layer))
+            gpui::deferred(layer)
                 // Above the dialogs other surfaces stack at priority 4 —
                 // this one guards the whole window, so it wins the top.
                 .with_priority(5)

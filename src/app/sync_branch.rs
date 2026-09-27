@@ -613,7 +613,7 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
+            .child(motion::scrim_enter("sync-branch-layer-enter", scrim))
             .px(px(24.0))
             .pt(px(top))
             .flex()
@@ -624,11 +624,7 @@ impl Waku {
                 cx.listener(|this, _, _, cx| this.close_sync_branch(cx)),
             )
             .child(motion::modal_enter("sync-branch-card-enter", card));
-        Some(
-            deferred(motion::fade_in("sync-branch-layer-enter", layer))
-                .with_priority(3)
-                .into_any_element(),
-        )
+        Some(deferred(layer).with_priority(3).into_any_element())
     }
 
     /// A branch row: the label — "Current branch" for the session's own

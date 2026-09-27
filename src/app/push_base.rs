@@ -783,7 +783,7 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
+            .child(motion::scrim_enter("push-base-dialog-layer-enter", scrim))
             .p(px(24.0))
             .flex()
             .items_center()
@@ -793,11 +793,7 @@ impl Waku {
                 cx.listener(|waku, _, _, cx| waku.dismiss_push_base_dialog(cx)),
             )
             .child(motion::modal_enter("push-base-dialog-card-enter", card));
-        Some(
-            gpui::deferred(motion::fade_in("push-base-dialog-layer-enter", layer))
-                .with_priority(4)
-                .into_any_element(),
-        )
+        Some(gpui::deferred(layer).with_priority(4).into_any_element())
     }
 }
 

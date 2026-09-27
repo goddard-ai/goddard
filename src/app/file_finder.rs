@@ -527,7 +527,7 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
+            .child(motion::scrim_enter("file-finder-layer-enter", scrim))
             .px(px(24.0))
             .pt(px(top))
             .flex()
@@ -538,11 +538,7 @@ impl Waku {
                 cx.listener(|this, _, window, cx| this.close_file_finder(window, cx)),
             )
             .child(motion::modal_enter("file-finder-card-enter", card));
-        Some(
-            deferred(motion::fade_in("file-finder-layer-enter", layer))
-                .with_priority(3)
-                .into_any_element(),
-        )
+        Some(deferred(layer).with_priority(3).into_any_element())
     }
 
     /// A file row: icon, basename, then the dimmed parent directory — the

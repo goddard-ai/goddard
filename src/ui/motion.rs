@@ -12,8 +12,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    Animation, AnimationElement, AnimationExt, AnyElement, App, ElementId, EntityId, Global,
-    IntoElement, RenderOnce, Styled, Svg, Transformation, Window, ease_out_quint, percentage,
+    Animation, AnimationElement, AnimationExt, AnyElement, App, Div, ElementId, EntityId, Global,
+    Hsla, IntoElement, RenderOnce, Styled, Svg, Transformation, Window, div, ease_out_quint,
+    percentage,
 };
 
 /// Repeat-tick interval, rounded up so spinner ticks never exceed 60 fps.
@@ -285,6 +286,13 @@ where
 }
 
 /// A bare one-shot fade, for the scrim under a modal.
+///
+/// Never wrap this around an element that contains another entrance
+/// animation (`surface_enter`/`modal_enter`): `element_opacity` multiplies
+/// through nested `with_animation` elements, so a card inside a fading
+/// layer renders at delta² while its siblings render at delta — the scrim
+/// bleeds through the card as a dark veil mid-fade. Animate siblings
+/// instead.
 pub fn fade_in<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
 where
     E: Styled + IntoElement + 'static,
@@ -292,6 +300,13 @@ where
     element.with_animation(id, Animation::new(SCRIM_ENTER), |element, delta| {
         element.opacity(delta)
     })
+}
+
+/// The faded scrim under a modal, as a child of the modal's layer rather
+/// than its animated ancestor — keeps the scrim's fade on `SCRIM_ENTER`
+/// and the card's on `MODAL_ENTER` without multiplying their opacities.
+pub fn scrim_enter(id: impl Into<ElementId>, color: Hsla) -> AnimationElement<Div> {
+    fade_in(id, div().absolute().inset_0().bg(color))
 }
 
 fn fade_surface<E>(id: impl Into<ElementId>, element: E, duration: Duration) -> AnimationElement<E>

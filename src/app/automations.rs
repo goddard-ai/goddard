@@ -2519,7 +2519,7 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
+            .child(motion::scrim_enter("automation-editor-layer-enter", scrim))
             .p(px(24.0))
             .flex()
             .items_center()
@@ -2529,11 +2529,7 @@ impl Waku {
                 cx.listener(|this, _, window, cx| this.close_automation_editor(window, cx)),
             )
             .child(motion::modal_enter("automation-editor-card-enter", card));
-        Some(
-            gpui::deferred(motion::fade_in("automation-editor-layer-enter", layer))
-                .with_priority(4)
-                .into_any_element(),
-        )
+        Some(gpui::deferred(layer).with_priority(4).into_any_element())
     }
 
     fn confirm_automation_editor_action(

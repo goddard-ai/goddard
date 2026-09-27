@@ -424,21 +424,24 @@ const COMMIT_DOT_SIZE: f32 = 6.0;
 /// the base lane's dot at the row's midline. Painted as a path so the handoff
 /// is a real curve rather than an orthogonal jog.
 fn commit_graph_curve(color: Hsla) -> impl IntoElement {
-    canvas(|_, _, _| (), move |bounds, _, window, _| {
-        let left = bounds.origin.x;
-        let top = bounds.origin.y;
-        let mid = bounds.size.height / 2.0;
-        let mut builder = PathBuilder::stroke(px(1.0));
-        builder.move_to(point(left + px(COMMIT_LANE_WORKTREE), top));
-        builder.cubic_bezier_to(
-            point(left + px(COMMIT_LANE_BASE), top + mid),
-            point(left + px(COMMIT_LANE_WORKTREE), top + mid * 0.5),
-            point(left + px(COMMIT_LANE_BASE), top + mid * 0.5),
-        );
-        if let Ok(path) = builder.build() {
-            window.paint_path(path, color);
-        }
-    })
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let left = bounds.origin.x;
+            let top = bounds.origin.y;
+            let mid = bounds.size.height / 2.0;
+            let mut builder = PathBuilder::stroke(px(1.0));
+            builder.move_to(point(left + px(COMMIT_LANE_WORKTREE), top));
+            builder.cubic_bezier_to(
+                point(left + px(COMMIT_LANE_BASE), top + mid),
+                point(left + px(COMMIT_LANE_WORKTREE), top + mid * 0.5),
+                point(left + px(COMMIT_LANE_BASE), top + mid * 0.5),
+            );
+            if let Ok(path) = builder.build() {
+                window.paint_path(path, color);
+            }
+        },
+    )
     .absolute()
     .inset_0()
 }
@@ -4836,14 +4839,16 @@ impl Waku {
         } else {
             gpui::hsla(0.0, 0.0, 0.0, 0.16)
         };
-        deferred(motion::fade_in(
-            SharedString::from(format!("{id}-scrim-enter")),
+        deferred(
             div()
                 .id(id)
                 .absolute()
                 .inset_0()
                 .occlude()
-                .bg(scrim)
+                .child(motion::scrim_enter(
+                    SharedString::from(format!("{id}-scrim-enter")),
+                    scrim,
+                ))
                 .p(px(24.0))
                 .flex()
                 .items_center()
@@ -4856,7 +4861,7 @@ impl Waku {
                     SharedString::from(format!("{id}-card-enter")),
                     card,
                 )),
-        ))
+        )
         .with_priority(4)
         .into_any_element()
     }

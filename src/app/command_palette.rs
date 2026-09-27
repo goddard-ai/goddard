@@ -5532,7 +5532,7 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .bg(scrim)
+            .child(motion::scrim_enter("command-palette-layer-enter", scrim))
             .px(px(24.0))
             .pt(px(top))
             .flex()
@@ -5543,11 +5543,7 @@ impl Waku {
                 cx.listener(|this, _, window, cx| this.close_command_palette(window, cx)),
             )
             .child(motion::modal_enter("command-palette-card-enter", card));
-        Some(
-            gpui::deferred(motion::fade_in("command-palette-layer-enter", layer))
-                .with_priority(3)
-                .into_any_element(),
-        )
+        Some(gpui::deferred(layer).with_priority(3).into_any_element())
     }
 }
 
