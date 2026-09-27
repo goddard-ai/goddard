@@ -1,0 +1,1 @@
+- Turn markers that refine a status, like "Go ahead" or "Needs continuation," no longer understate the model's confidence — the chip shows the refinement's own score instead of a multiplied one.

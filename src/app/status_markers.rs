@@ -733,9 +733,12 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
                 "failed" => cleared_subtype(evaluation, FAILURE_QUESTION, FAILURE_MARKERS),
                 _ => None,
             };
+            // The chip reports the subtype's own score — the parent already
+            // cleared its bar for the chip to exist, so multiplying the two
+            // would understate what the model said.
             cleared.push(
                 subtype
-                    .map(|(subtype, score)| (subtype, winner * score))
+                    .map(|(subtype, score)| (subtype, score))
                     .unwrap_or((marker, winner)),
             );
         }
@@ -754,7 +757,7 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
                 .flatten();
             cleared.push(
                 subtype
-                    .map(|(subtype, score)| (subtype, *noul * score))
+                    .map(|(subtype, score)| (subtype, score))
                     .unwrap_or((marker, *noul)),
             );
         }
@@ -1486,7 +1489,7 @@ mod tests {
         ] {
             let markers = cleared_markers(&answers(choice, 0.82));
             assert_eq!(markers[0].0.id, expected);
-            assert!((markers[0].1 - 0.88 * 0.82).abs() < f64::EPSILON);
+            assert!((markers[0].1 - 0.82).abs() < f64::EPSILON);
         }
         assert_eq!(
             cleared_markers(&answers("go-ahead", 0.40))[0].0.id,
