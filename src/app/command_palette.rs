@@ -5221,24 +5221,7 @@ impl Waku {
                                 .child(hint),
                         )
                     })
-                    .when(show_loading_state && resume_view, |empty| {
-                        let provider = self.command_palette.resume_provider;
-                        empty.child(
-                            div()
-                                .mt(px(12.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(7.0))
-                                .child(provider_mark(&theme, provider, 13.0, theme.text_secondary))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_secondary)
-                                        .child(provider.display_name().to_owned()),
-                                ),
-                        )
-                    })
-                    .when(resume_view && !show_loading_state, |empty| {
+                    .when(resume_view, |empty| {
                         let provider = self.command_palette.resume_provider;
                         empty.child(
                             div()

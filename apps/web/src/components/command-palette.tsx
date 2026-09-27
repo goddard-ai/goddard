@@ -411,7 +411,7 @@ export function CommandPalette({
               setSelected(0)
             }}
             onKeyDown={(event) => {
-              if (event.key === 'Tab' && view === 'resume' && !resultsPending) {
+              if (event.key === 'Tab' && view === 'resume') {
                 event.preventDefault()
                 resumeProviderButton.current?.focus()
                 return
@@ -442,12 +442,7 @@ export function CommandPalette({
               }
             }}
           />
-          {view === 'resume' && (resultsPending ? (
-            <div className="ml-3 flex h-8 shrink-0 items-center gap-2 px-2.5 text-[12px] text-[var(--text-secondary)]">
-              <ProviderIcon className="size-3.5" provider={resumeProvider} />
-              <span>{providerMeta(resumeProvider).name}</span>
-            </div>
-          ) : (
+          {view === 'resume' && (
             <button
               aria-label={`${t('command_palette.change_provider')}: ${providerMeta(resumeProvider).name}`}
               className="ml-3 flex h-8 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-[12px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
@@ -468,7 +463,7 @@ export function CommandPalette({
               <span>{providerMeta(resumeProvider).shortName}</span>
               <WakuIcon className="size-3 text-[var(--text-tertiary)]" name="chevronDown" />
             </button>
-          ))}
+          )}
         </div>
         <div className="min-h-0 overflow-y-auto px-2 pb-2" id="command-palette-results" role="listbox">
           {!items.length ? (
