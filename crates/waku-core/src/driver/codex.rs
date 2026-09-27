@@ -1515,6 +1515,12 @@ impl DriverControl for CodexDriver {
         }
     }
 
+    fn computer_use_available(&self) -> bool {
+        self.computer_use_process_directory.is_some()
+            && self.computer_use_server_path.is_some()
+            && self.computer_use_preview_monitor.is_some()
+    }
+
     fn refresh_background_work(&self) {
         let _ = self.commands.send(CommandMessage::RefreshBackgroundWork);
     }

@@ -391,6 +391,9 @@ impl DriverControl for AmpDriver {
             computer_use.stop();
         }
     }
+    fn computer_use_available(&self) -> bool {
+        self.computer_use.is_some()
+    }
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
     }

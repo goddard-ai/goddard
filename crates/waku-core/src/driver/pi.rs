@@ -853,6 +853,10 @@ impl DriverControl for PiDriver {
         }
     }
 
+    fn computer_use_available(&self) -> bool {
+        self.computer_use.is_some()
+    }
+
     fn respond(&self, _request_id: String, _option_id: String) {}
 
     fn apply_options(&self, options: SessionOptions) -> bool {

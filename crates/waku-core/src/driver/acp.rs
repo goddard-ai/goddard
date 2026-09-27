@@ -3103,6 +3103,10 @@ impl DriverControl for AcpDriver {
         }
     }
 
+    fn computer_use_available(&self) -> bool {
+        self.computer_use.is_some() || self.native_computer_use.is_some()
+    }
+
     fn respond(&self, request_id: String, option_id: String) {
         let _ = self.commands.try_send(CommandMessage::Respond {
             request_id,

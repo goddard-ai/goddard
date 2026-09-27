@@ -123,6 +123,10 @@ impl DriverHandle {
         self.inner.cancel();
     }
 
+    pub fn computer_use_available(&self) -> bool {
+        self.inner.computer_use_available()
+    }
+
     pub fn begin_shutdown(&self) {
         self.inner.begin_shutdown();
     }
@@ -250,6 +254,9 @@ pub trait DriverControl: Send + Sync {
     /// for the old provider process instead of racing its writer.
     fn begin_shutdown(&self) {}
     fn cancel_computer_use(&self) {}
+    fn computer_use_available(&self) -> bool {
+        false
+    }
     fn refresh_background_work(&self) {}
     fn stop_background_work(&self, _key: BackgroundWorkKey, _control_id: String) {}
     fn respond(&self, request_id: String, option_id: String);

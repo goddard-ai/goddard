@@ -627,6 +627,10 @@ impl DriverControl for ClaudeDriver {
         }
     }
 
+    fn computer_use_available(&self) -> bool {
+        self.computer_use.is_some()
+    }
+
     fn stop_background_work(&self, key: BackgroundWorkKey, control_id: String) {
         let _ = self
             .commands

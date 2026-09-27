@@ -340,6 +340,10 @@ impl DriverControl for DeepSeekDriver {
         }
     }
 
+    fn computer_use_available(&self) -> bool {
+        self.computer_use.is_some()
+    }
+
     fn respond(&self, request_id: String, option_id: String) {
         let _ = self.commands.send(CommandMessage::Respond {
             request_id,

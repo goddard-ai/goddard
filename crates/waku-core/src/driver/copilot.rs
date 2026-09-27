@@ -1172,6 +1172,10 @@ impl DriverControl for CopilotDriver {
         }
     }
 
+    fn computer_use_available(&self) -> bool {
+        self.computer_use.is_some()
+    }
+
     fn respond(&self, request_id: String, option_id: String) {
         if let Some(sender) = self.shared.lock().permissions.remove(&request_id) {
             let _ = sender.send(option_id);

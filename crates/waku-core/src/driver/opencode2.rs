@@ -924,6 +924,10 @@ impl DriverControl for OpenCode2Driver {
         }
     }
 
+    fn computer_use_available(&self) -> bool {
+        self.computer_use.is_some()
+    }
+
     fn respond(&self, request_id: String, option_id: String) {
         let _ = self.commands.send(DriverCommand::Respond {
             request_id,

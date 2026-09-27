@@ -333,6 +333,7 @@ struct RuntimeEntry {
     driver: DriverHandle,
     last_active: std::time::Instant,
     resumable: bool,
+    computer_use_available: bool,
     provider: ProviderKind,
     cwd: PathBuf,
 }
@@ -2859,7 +2860,7 @@ impl Backend for WakuBackend {
                 };
                 let resumable = options.provider_cursor.is_some();
                 let cwd = options.cwd.clone();
-                let handle =
+                let (handle, computer_use_available) =
                     self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
                 let supports_steer = handle.supports_steer();
                 let supports_user_input_actions = handle.supports_user_input_actions();
@@ -2870,6 +2871,7 @@ impl Backend for WakuBackend {
                         driver: handle,
                         last_active: std::time::Instant::now(),
                         resumable,
+                        computer_use_available,
                         provider,
                         cwd,
                     },
@@ -4308,7 +4310,7 @@ impl WakuBackend {
         provider: ProviderKind,
         options: DriverStartOptions,
         events: EventSink,
-    ) -> anyhow::Result<DriverHandle> {
+    ) -> anyhow::Result<(DriverHandle, bool)> {
         let (wake, _wake_events) = smol::channel::bounded(1);
         let (event_sender, event_receiver) = driver::event_channel(wake);
         let mut options = options;
@@ -4473,6 +4475,7 @@ impl WakuBackend {
                 return Err(error);
             }
         };
+        let computer_use_available = handle.computer_use_available();
         if sandboxed_launch {
             // The provider process is up — clear the launch phase so the
             // transcript's indicator falls back to its ordinary working state.
@@ -4511,7 +4514,7 @@ impl WakuBackend {
                 );
             })
             .context("could not start daemon event forwarding thread")?;
-        Ok(handle)
+        Ok((handle, computer_use_available))
     }
 
     /// Mint the runtime's scoped credential and assemble the environment the
@@ -4633,9 +4636,9 @@ impl WakuBackend {
         let sink = events.begin_session_runtime(session_id, runtime_id);
         let resumable = options.provider_cursor.is_some();
         let cwd = options.cwd.clone();
-        let handle =
+        let (handle, computer_use_available) =
             match self.spawn_runtime(session_id, runtime_id, provider, options, sink.clone()) {
-                Ok(handle) => handle,
+                Ok(launch) => launch,
                 Err(error) => {
                     sink.end_session_runtime();
                     return Err(error);
@@ -4649,6 +4652,7 @@ impl WakuBackend {
                 driver: handle,
                 last_active: std::time::Instant::now(),
                 resumable,
+                computer_use_available,
                 provider,
                 cwd,
             },
@@ -4930,7 +4934,12 @@ impl WakuBackend {
         }
         let memory = self.memory.context_block(session_id, task);
         let parent_index = self.side_chat_parent_block(session_id);
-        let computer_use = self.settings.get().computer_use_enabled.then(|| {
+        let computer_use_available = self
+            .sessions
+            .lock()
+            .get(&session_id)
+            .is_some_and(|entry| entry.computer_use_available);
+        let computer_use = computer_use_available.then(|| {
             crate::computer_use::skill_root_path().ok().map(|root| {
                 format!(
                     "When the user asks you to interact with a local app, use `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
@@ -8526,6 +8535,7 @@ mod tests {
                 driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
                 last_active: std::time::Instant::now(),
                 resumable: false,
+                computer_use_available: false,
                 provider: ProviderKind::Codex,
                 cwd: root.join("repo"),
             },
@@ -8588,6 +8598,7 @@ mod tests {
                 driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
                 last_active: std::time::Instant::now(),
                 resumable: false,
+                computer_use_available: false,
                 provider: ProviderKind::Codex,
                 cwd: root.join("repo"),
             },
@@ -8636,6 +8647,7 @@ mod tests {
                 driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
                 last_active: std::time::Instant::now(),
                 resumable: false,
+                computer_use_available: false,
                 provider: ProviderKind::Codex,
                 cwd: root.join("repo"),
             },
@@ -8984,6 +8996,7 @@ mod tests {
                 driver: driver.clone(),
                 last_active: std::time::Instant::now(),
                 resumable: true,
+                computer_use_available: false,
                 provider: ProviderKind::Claude,
                 cwd: PathBuf::new(),
             },
@@ -9220,6 +9233,7 @@ mod tests {
                             last_active: std::time::Instant::now()
                                 - std::time::Duration::from_secs(120),
                             resumable: id != unresumable_id,
+                            computer_use_available: false,
                             provider: ProviderKind::Claude,
                             cwd: PathBuf::new(),
                         },
@@ -9250,6 +9264,7 @@ mod tests {
                 driver,
                 last_active: std::time::Instant::now(),
                 resumable: true,
+                computer_use_available: false,
                 provider: ProviderKind::Claude,
                 cwd: PathBuf::new(),
             },

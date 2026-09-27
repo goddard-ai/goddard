@@ -1718,6 +1718,9 @@ impl DriverControl for MuseDriver {
             computer_use.stop();
         }
     }
+    fn computer_use_available(&self) -> bool {
+        self.computer_use.is_some()
+    }
     fn prompt(&self, prompt: String) {
         self.prompt_with_attachments(prompt, Vec::new());
     }
