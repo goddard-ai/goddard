@@ -3218,6 +3218,7 @@ impl Waku {
                 },
                 scrollbar: ScrollbarState::new(),
                 kinds: (0, Rc::new(Vec::new())),
+                response_footers: HashMap::new(),
                 expanded_turns: HashSet::new(),
                 expanded_activity_blocks: HashMap::new(),
             });
@@ -3226,15 +3227,29 @@ impl Waku {
         let previous_kinds = view.kinds.1.clone();
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
             let mut folded = folded_transcript_row_kinds(&session, &expanded_turns, pending_turn);
-            // Panels have no footer or file summary, but a capture holding
+            // Side chats have no general file summary, but a capture holding
             // a queued prompt still marks the settled turn.
             folded.retain(|kind| match kind {
-                TranscriptRowKind::ResponseFooter(..) => false,
                 TranscriptRowKind::ChangedFiles(turn_id) => pending_turn == Some(*turn_id),
                 _ => true,
             });
-            // A footer turn hosts its pending card inside the footer row,
-            // which this surface filters out — append one at the tail.
+            view.response_footers = folded
+                .iter()
+                .filter_map(|kind| {
+                    let TranscriptRowKind::ResponseFooter(_, message_index) = *kind else {
+                        return None;
+                    };
+                    let message = session.messages.get(message_index)?;
+                    let copy_content =
+                        super::transcript::assistant_response_footer(&session, message_index)?;
+                    let timestamp =
+                        super::transcript::assistant_response_footer_time(&session, message_index)
+                            .unwrap_or(message.created_at);
+                    Some((message_index, (SharedString::from(copy_content), timestamp)))
+                })
+                .collect();
+            // A footer turn hosts its pending card inside its footer row on
+            // the main transcript, so append it at the tail in side chats.
             if let Some(turn_id) = pending_turn
                 && !folded.contains(&TranscriptRowKind::ChangedFiles(turn_id))
             {
@@ -3590,11 +3605,42 @@ impl Waku {
             {
                 self.render_card_checkpoint_pending_row(turn_id, &theme)
             }
-            // Folded out of the kinds list entirely; the fallback renders
-            // nothing.
-            TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {
-                div().into_any_element()
+            TranscriptRowKind::ResponseFooter(turn_id, message_index) => {
+                let Some(message) = session.messages.get(message_index) else {
+                    return div().into_any_element();
+                };
+                let Some((copy_content, timestamp)) = self
+                    .side_chat_views
+                    .get(&session_id)
+                    .and_then(|view| view.response_footers.get(&message_index))
+                else {
+                    return div().into_any_element();
+                };
+                let group_name =
+                    SharedString::from(format!("side-chat-response-footer-{session_id}-{turn_id}"));
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .group(group_name.clone())
+                    .child(super::components::render_message_footer(
+                        &theme,
+                        message,
+                        *timestamp,
+                        copy_content.clone(),
+                        self.copied_message_feedback.contains_key(&message.id),
+                        false,
+                        group_name,
+                        false,
+                        false,
+                        None,
+                        None,
+                        cx.entity().downgrade(),
+                    ))
+                    .into_any_element()
             }
+            TranscriptRowKind::ChangedFiles(_) => div().into_any_element(),
         };
         div()
             .id(SharedString::from(format!(

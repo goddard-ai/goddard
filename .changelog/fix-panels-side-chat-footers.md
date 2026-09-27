@@ -1,0 +1,1 @@
+- Side chat replies now show the same timestamp and copy control as replies in the main transcript.

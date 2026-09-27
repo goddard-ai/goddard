@@ -834,6 +834,7 @@ struct SideChatView {
     rows: ListState,
     scrollbar: Rc<ScrollbarState>,
     kinds: (u64, Rc<Vec<TranscriptRowKind>>),
+    response_footers: HashMap<usize, (SharedString, u64)>,
     expanded_turns: HashSet<Uuid>,
     expanded_activity_blocks: HashMap<usize, bool>,
 }
