@@ -1200,23 +1200,81 @@ impl Waku {
 
     pub(super) fn toggle_activities(
         &mut self,
+        session_id: Uuid,
         block_index: usize,
         current: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.state.selected_session != Some(session_id) {
+            let Some(view) = self.side_chat_views.get_mut(&session_id) else {
+                return;
+            };
+            view.expanded_activity_blocks.insert(block_index, !current);
+            let row_index = view
+                .kinds
+                .1
+                .iter()
+                .position(|kind| *kind == TranscriptRowKind::TurnBlock(block_index));
+            if let Some(row_index) = row_index {
+                let scroll_top = view.rows.logical_scroll_top();
+                view.rows.remeasure_items(row_index..row_index + 1);
+                view.rows.scroll_to(scroll_top);
+            }
+            cx.notify();
+            return;
+        }
         self.toggle_block_disclosure(block_index, cx, |this| {
             this.activities_expanded.insert(block_index, !current);
         });
     }
 
-    pub(super) fn toggle_activity_item(&mut self, id: Uuid, current: bool, cx: &mut Context<Self>) {
-        let block_index = self
-            .selected_transcript_blocks()
-            .iter()
-            .position(|block| block.activities.iter().any(|activity| activity.id == id));
+    pub(super) fn toggle_activity_item(
+        &mut self,
+        session_id: Uuid,
+        id: Uuid,
+        current: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let block_index = if self.state.selected_session == Some(session_id) {
+            self.selected_transcript_blocks()
+                .iter()
+                .position(|block| block.activities.iter().any(|activity| activity.id == id))
+        } else {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| {
+                    session
+                        .transcript_blocks
+                        .iter()
+                        .position(|block| block.activities.iter().any(|activity| activity.id == id))
+                })
+        };
         let Some(block_index) = block_index else {
             return;
         };
+        if self.state.selected_session != Some(session_id) {
+            self.expanded_activity_items.insert(id, !current);
+            if current {
+                self.activity_diffs.borrow_mut().remove(&id);
+                self.activity_diff_viewports.borrow_mut().remove(&id);
+            }
+            if let Some(view) = self.side_chat_views.get_mut(&session_id) {
+                let row_index = view
+                    .kinds
+                    .1
+                    .iter()
+                    .position(|kind| *kind == TranscriptRowKind::TurnBlock(block_index));
+                if let Some(row_index) = row_index {
+                    let scroll_top = view.rows.logical_scroll_top();
+                    view.rows.remeasure_items(row_index..row_index + 1);
+                    view.rows.scroll_to(scroll_top);
+                }
+            }
+            cx.notify();
+            return;
+        }
         self.toggle_block_disclosure(block_index, cx, |this| {
             this.expanded_activity_items.insert(id, !current);
             if current {
@@ -1811,10 +1869,18 @@ impl Waku {
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnBlock(block_index) => self
-                .selected_transcript_blocks()
-                .get(block_index)
-                .map(|block| {
-                    self.render_activities_row(&block.activities, block_index, &theme, window, cx)
+                .selected_session()
+                .and_then(|session| {
+                    session.transcript_blocks.get(block_index).map(|block| {
+                        self.render_activities_row(
+                            session.id,
+                            &block.activities,
+                            block_index,
+                            &theme,
+                            window,
+                            cx,
+                        )
+                    })
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnFold(turn_id) => self.render_turn_fold_row(turn_id, &theme, cx),
@@ -3202,6 +3268,7 @@ impl Waku {
 
     pub(super) fn render_activities_row(
         &self,
+        session_id: Uuid,
         activities: &[ActivityItem],
         block_index: usize,
         theme: &Theme,
@@ -3212,7 +3279,12 @@ impl Waku {
         // the next tool after the previous result. The group leaves the live
         // tail only when answer text is appended (so `after_message` falls
         // behind) or when the turn itself settles.
-        let live_group = self.selected_session().is_some_and(|session| {
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id);
+        let live_group = session.is_some_and(|session| {
             session
                 .transcript_blocks
                 .get(block_index)
@@ -3227,18 +3299,20 @@ impl Waku {
                     )
                 })
         });
-        let expanded = self
-            .activities_expanded
-            .get(&block_index)
-            .copied()
-            .unwrap_or(live_group);
+        let expanded = if self.state.selected_session == Some(session_id) {
+            self.activities_expanded.get(&block_index).copied()
+        } else {
+            self.side_chat_views
+                .get(&session_id)
+                .and_then(|view| view.expanded_activity_blocks.get(&block_index).copied())
+        }
+        .unwrap_or(live_group);
         let live_reasoning_id = (self
-            .selected_runtime()
+            .runtimes
+            .get(&session_id)
             .is_some_and(|runtime| runtime.stream_phase == Some(StreamPhase::Reasoning))
-            && self
-                .selected_session()
-                .is_some_and(|session| session.status == SessionStatus::Working)
-            && block_index + 1 == self.selected_transcript_blocks().len())
+            && session.is_some_and(|session| session.status == SessionStatus::Working)
+            && block_index + 1 == session.map_or(0, |session| session.transcript_blocks.len()))
         .then(|| {
             activities
                 .iter()
@@ -3248,8 +3322,8 @@ impl Waku {
         })
         .flatten();
         let header_title = activity_header_title(activities, live_group, live_reasoning_id);
-        let header_focus =
-            self.transcript_control_focus(format!("activity-toggle-{block_index}"), cx);
+        let header_id = format!("activity-toggle-{session_id}-{block_index}");
+        let header_focus = self.transcript_control_focus(header_id.clone(), cx);
         let cluster = div()
             .w_full()
             .min_w_0()
@@ -3258,7 +3332,7 @@ impl Waku {
             .gap(px(4.0))
             .child(
                 div()
-                    .id(SharedString::from(format!("activity-toggle-{block_index}")))
+                    .id(SharedString::from(header_id))
                     .track_focus(&header_focus)
                     .tab_index(0)
                     .w_full()
@@ -3290,11 +3364,11 @@ impl Waku {
                         theme.affordance_icon(),
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_activities(block_index, expanded, cx);
+                        this.toggle_activities(session_id, block_index, expanded, cx);
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.toggle_activities(block_index, expanded, cx);
+                            this.toggle_activities(session_id, block_index, expanded, cx);
                             cx.stop_propagation();
                         }
                     })),
@@ -3319,10 +3393,10 @@ impl Waku {
             .gap(px(8.0));
         for activity in activities {
             let id = activity.id;
-            let background_work = self
-                .state
-                .selected_session
-                .zip(activity.source_id.as_deref())
+            let background_work = activity
+                .source_id
+                .as_deref()
+                .map(|source_id| (session_id, source_id))
                 .and_then(|(session_id, source_id)| {
                     self.background_work_for_activity(session_id, source_id)
                         .map(|item| (session_id, item.key.clone(), item.status))
@@ -3516,14 +3590,14 @@ impl Waku {
                         })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if has_detail {
-                                this.toggle_activity_item(id, item_expanded, cx);
+                                this.toggle_activity_item(session_id, id, item_expanded, cx);
                             }
                         }))
                         .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                             if has_detail
                                 && matches!(event.keystroke.key.as_str(), "enter" | "space")
                             {
-                                this.toggle_activity_item(id, item_expanded, cx);
+                                this.toggle_activity_item(session_id, id, item_expanded, cx);
                                 cx.stop_propagation();
                             }
                         })),
@@ -3541,7 +3615,7 @@ impl Waku {
                         &palette,
                         self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
                         reasoning_live && !cx.reduce_motion(),
-                        self.state.selected_session,
+                        Some(session_id),
                         cx,
                     )
                     .with_standalone_context_menu(
@@ -3648,7 +3722,7 @@ impl Waku {
                     &palette,
                     self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
                     false,
-                    self.state.selected_session,
+                    Some(session_id),
                     cx,
                 );
                 let (mono_size, mono_line) = self.activity_mono_text();

@@ -1,0 +1,1 @@
+- Expand tool activity and completed-turn work in side chats by clicking their disclosure rows or focusing them and pressing Enter or Space.

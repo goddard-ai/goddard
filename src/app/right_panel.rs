@@ -3207,7 +3207,6 @@ impl Waku {
         // appends keep position, a refold re-measures, and the tail re-measures
         // while the session works so fresh text is never clipped.
         let pending_turn = self.blocked_checkpoint_turn(session.id);
-        let fingerprint = transcript_rows_fingerprint(&session, &self.expanded_turns, pending_turn);
         let view = self
             .side_chat_views
             .entry(session_id)
@@ -3219,10 +3218,14 @@ impl Waku {
                 },
                 scrollbar: ScrollbarState::new(),
                 kinds: (0, Rc::new(Vec::new())),
+                expanded_turns: HashSet::new(),
+                expanded_activity_blocks: HashMap::new(),
             });
+        let expanded_turns = view.expanded_turns.clone();
+        let fingerprint = transcript_rows_fingerprint(&session, &expanded_turns, pending_turn);
+        let previous_kinds = view.kinds.1.clone();
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
-            let mut folded =
-                folded_transcript_row_kinds(&session, &self.expanded_turns, pending_turn);
+            let mut folded = folded_transcript_row_kinds(&session, &expanded_turns, pending_turn);
             // Panels have no footer or file summary, but a capture holding
             // a queued prompt still marks the settled turn.
             folded.retain(|kind| match kind {
@@ -3245,15 +3248,18 @@ impl Waku {
         };
         let count = kinds.len();
         let current = view.rows.item_count();
-        if count > current {
-            view.rows.splice(current..current, count - current);
-            if refolded {
-                view.rows.remeasure_items(0..current);
+        if refolded {
+            if let Some((range, new_count)) = transcript_row_splice(&previous_kinds, &kinds) {
+                view.rows.splice(range, new_count);
+            } else if current != count {
+                view.rows.reset(count);
+            } else {
+                view.rows.remeasure_items(0..count);
             }
+        } else if count > current {
+            view.rows.splice(current..current, count - current);
         } else if count < current {
             view.rows.reset(count);
-        } else if refolded {
-            view.rows.remeasure_items(0..count);
         }
         if session.status.is_busy() {
             view.rows
@@ -3322,6 +3328,88 @@ impl Waku {
             });
         }
         panel.into_any_element()
+    }
+
+    fn toggle_side_chat_turn_fold(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        expanded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.side_chat_views.get_mut(&session_id) else {
+            return;
+        };
+        if expanded {
+            view.expanded_turns.remove(&turn_id);
+        } else {
+            view.expanded_turns.insert(turn_id);
+        }
+        cx.notify();
+    }
+
+    fn render_side_chat_turn_fold_row(
+        &self,
+        session_id: Uuid,
+        session: &AgentSession,
+        turn_id: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let expanded = self
+            .side_chat_views
+            .get(&session_id)
+            .is_some_and(|view| view.expanded_turns.contains(&turn_id));
+        let label = turn_fold_label(session, turn_id);
+        let control_id = format!("side-chat-turn-fold-{session_id}-{turn_id}");
+        let focus = self.transcript_control_focus(control_id.clone(), cx);
+        div()
+            .w_full()
+            .h(px(24.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(div().h(hairline()).flex_1().bg(theme.separator))
+            .child(
+                div()
+                    .id(SharedString::from(control_id))
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(24.0))
+                    .px(px(2.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .cursor_default()
+                    .text_size(sp(13.5))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .hover(|style| style.text_color(theme.text_secondary))
+                    .child(SharedString::from(label))
+                    .child(icon(
+                        if expanded {
+                            "icons/chevron-down.svg"
+                        } else {
+                            "icons/chevron-right.svg"
+                        },
+                        11.5,
+                        theme.affordance_icon(),
+                    ))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_side_chat_turn_fold(session_id, turn_id, expanded, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.toggle_side_chat_turn_fold(session_id, turn_id, expanded, cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
+            .child(div().h(hairline()).flex_1().bg(theme.separator))
+            .into_any_element()
     }
 
     /// One row of a side chat's transcript. `index` is a position in the
@@ -3475,11 +3563,22 @@ impl Waku {
                     rendered
                 })
                 .unwrap_or_else(|| div().into_any_element()),
-            TranscriptRowKind::TurnBlock(block_index) => {
-                self.render_card_activities_row(session, block_index, &theme)
-            }
+            TranscriptRowKind::TurnBlock(block_index) => session
+                .transcript_blocks
+                .get(block_index)
+                .map(|block| {
+                    self.render_activities_row(
+                        session_id,
+                        &block.activities,
+                        block_index,
+                        &theme,
+                        window,
+                        cx,
+                    )
+                })
+                .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnFold(turn_id) => {
-                self.render_card_turn_fold_row(session, turn_id, &theme)
+                self.render_side_chat_turn_fold_row(session_id, session, turn_id, &theme, cx)
             }
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)

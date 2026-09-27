@@ -828,13 +828,14 @@ enum RightPanelSurface {
     SideChat(Uuid),
 }
 
-/// One side-chat tab's render state — the same shape a Big Picture card
-/// carries: a bottom-pinned row list, its scrollbar, and the fingerprinted
-/// row-kind cache that keeps per-frame work proportional to what changed.
+/// One side-chat tab's render state — a bottom-pinned row list, its scrollbar,
+/// fingerprinted row-kind cache, and transcript disclosure state.
 struct SideChatView {
     rows: ListState,
     scrollbar: Rc<ScrollbarState>,
     kinds: (u64, Rc<Vec<TranscriptRowKind>>),
+    expanded_turns: HashSet<Uuid>,
+    expanded_activity_blocks: HashMap<usize, bool>,
 }
 
 /// The closed sidebar's left-edge hover peek: the real sidebar pane mounted
