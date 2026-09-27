@@ -2698,6 +2698,10 @@ pub struct Waku {
     /// Turns that settled while their session was off screen, queued as
     /// (turn, finish-summary) pairs per session until it is next opened.
     pending_status_marker_turns: HashMap<Uuid, Vec<(Uuid, Option<String>)>>,
+    /// Scored verdicts waiting on their session's next journaled action —
+    /// one per session, superseded by the next judgement. Runtime-only;
+    /// `status-markers.jsonl` is the durable record.
+    pending_marker_verdicts: HashMap<Uuid, status_markers::PendingMarkerVerdict>,
     /// Turns with an evaluation in flight, so a queued drain cannot double-
     /// request a turn whose answer is still outstanding.
     status_marker_in_flight: HashSet<Uuid>,
@@ -6410,6 +6414,7 @@ impl Waku {
                 turn_status_markers: HashMap::new(),
                 turn_status_suggestions: HashMap::new(),
                 pending_status_marker_turns: HashMap::new(),
+                pending_marker_verdicts: HashMap::new(),
                 status_marker_in_flight: HashSet::new(),
                 status_marker_tx,
                 status_marker_events,

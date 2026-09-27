@@ -65,7 +65,7 @@ pub(super) enum JournalAction {
 
 impl JournalAction {
     /// The candidate id this entry fulfills.
-    fn id(&self) -> &'static str {
+    pub(super) fn id(&self) -> &'static str {
         match self {
             Self::PromptSend { canned } => canned.unwrap_or("new-prompt"),
             Self::GitCommit => "commit",
@@ -374,7 +374,7 @@ fn prediction_log_path() -> PathBuf {
 
 /// Append one JSON line; a write failure is silent — the journal is
 /// instrumentation, never a reason to disturb the action it recorded.
-fn append_jsonl(path: &Path, value: &impl Serialize) {
+pub(super) fn append_jsonl(path: &Path, value: &impl Serialize) {
     let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -838,6 +838,10 @@ impl Waku {
     /// tail bounded, and resolves any predictions this action settles.
     /// Nothing is journaled while the experiment is off.
     pub(super) fn record_action(&mut self, session: Option<Uuid>, action: JournalAction) {
+        // Status-marker verdicts resolve on the same actions — they keep
+        // resolving while predictions are off since their journal is a
+        // separate experiment's calibration record.
+        self.resolve_marker_verdict(session, action);
         if !self.state.action_predictions_enabled {
             return;
         }

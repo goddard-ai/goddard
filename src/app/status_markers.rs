@@ -240,6 +240,32 @@ pub(super) enum StatusSuggestedAction {
     RunTests,
 }
 
+impl StatusSuggestedAction {
+    /// The canned prompt the chip sends — also the id the marker journal
+    /// records, so a hand-typed equivalent reads as the same adoption.
+    fn canned_id(&self) -> &'static str {
+        match self {
+            Self::Proceed => "proceed",
+            Self::MakeItHappen => "make-it-happen",
+            Self::KeepGoing => "keep-going",
+            Self::FixErrors => "fix-errors",
+            Self::RunTests => "run-tests",
+        }
+    }
+}
+
+/// A scored turn's verdict waiting on the user's next journaled action —
+/// the resolution that turns it into calibration data. One pending per
+/// session: a newer judgement supersedes an unresolved one.
+pub(super) struct PendingMarkerVerdict {
+    pub(super) id: Uuid,
+    /// Cleared marker ids in render order — what the footer showed.
+    pub(super) markers: Vec<String>,
+    /// Canned prompt ids the verdict's chips offered, so the resolution can
+    /// tell adopting a suggestion from doing something adjacent.
+    pub(super) suggested: Vec<String>,
+}
+
 fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
     let marker = cleared_markers(evaluation).into_iter().find(|(marker, _)| {
         matches!(
@@ -270,6 +296,49 @@ fn waiting_for_user_input(evaluation: &Evaluation) -> bool {
             "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned"
         )
     })
+}
+
+/// What the resolving action says about the verdict's markers — a coarse
+/// calibration signal recorded beside the raw action so analysis can
+/// reclassify. Cleared markers can disagree about an action; a
+/// contradiction of any one of them wins.
+fn marker_action_signal(markers: &[String], action: &str) -> &'static str {
+    let mut confirmed = false;
+    for marker in markers {
+        match marker.as_str() {
+            // Done-state endings: shipping the work or moving on agrees;
+            // asking for more work or undoing it says the turn was not done.
+            "complete" | "answered" | "nothing-to-do" => match action {
+                "commit" | "push" | "land" | "archive" | "new-prompt" | "new-task"
+                | "new-worktree" => confirmed = true,
+                "revert" | "fix-errors" | "keep-going" | "proceed" | "make-it-happen" => {
+                    return "contradicted";
+                }
+                _ => {}
+            },
+            // A turn that hit a wall: engaging the failure agrees; shipping
+            // anyway says the wall was not real.
+            "failed" | "blocked" | "errors-remain" => match action {
+                "fix-errors" | "keep-going" | "revert" | "new-prompt" => confirmed = true,
+                "commit" | "push" | "land" => return "contradicted",
+                _ => {}
+            },
+            // A turn that waited on the user: a reply — offered or bespoke —
+            // confirms the wait was real.
+            "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned" => match action {
+                "new-prompt" | "proceed" | "make-it-happen" | "keep-going" => {
+                    confirmed = true;
+                }
+                _ => {}
+            },
+            // An unfinished turn that the user resumes; a redirected prompt
+            // says nothing either way.
+            "partial" | "needs-continuation" if action == "keep-going" => confirmed = true,
+            "unverified" | "not-tested" if action == "run-tests" => confirmed = true,
+            _ => {}
+        }
+    }
+    if confirmed { "confirmed" } else { "observed" }
 }
 
 /// Flags stay independent Nouls — qualities that legitimately co-occur with
@@ -390,6 +459,17 @@ const FILES_CHANGED_STATE_MAX: usize = 50;
 /// The decision-log feature tag these evaluations record under, so the
 /// calibration dataset keeps them distinct from ad-hoc `evaluate` calls.
 const EVAL_FEATURE: &str = "turn-status";
+
+/// The marker journal: what each settled turn's verdict showed, resolved
+/// against the user's next journaled action. The daemon's decision log
+/// records what the model said; this records what happened next — the
+/// calibration counterpart that makes threshold debates measurable.
+fn marker_log_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".goddard")
+        .join("status-markers.jsonl")
+}
 
 /// What sits below the marker chips inside the response footer row: the
 /// 27px `render_message_footer` strip plus the column gap and the marker
@@ -1046,20 +1126,14 @@ impl Waku {
             | StatusSuggestedAction::KeepGoing
             | StatusSuggestedAction::FixErrors
             | StatusSuggestedAction::RunTests => {
-                let action_id = match action {
-                    StatusSuggestedAction::MakeItHappen => "make-it-happen",
-                    StatusSuggestedAction::KeepGoing => "keep-going",
-                    StatusSuggestedAction::FixErrors => "fix-errors",
-                    StatusSuggestedAction::RunTests => "run-tests",
-                    _ => unreachable!(),
-                };
-                let Some(prompt) =
-                    action_predictions::suggested_prompt(action_id, &self.state.suggested_prompts)
-                else {
+                let Some(prompt) = action_predictions::suggested_prompt(
+                    action.canned_id(),
+                    &self.state.suggested_prompts,
+                ) else {
                     return;
                 };
                 self.turn_status_suggestions.insert(turn_id, Vec::new());
-                self.submit_canned_prompt_to(session_id, action_id, prompt, cx);
+                self.submit_canned_prompt_to(session_id, action.canned_id(), prompt, cx);
             }
         }
     }
@@ -1183,7 +1257,9 @@ impl Waku {
                         .iter()
                         .find(|session| session.turns.iter().any(|turn| turn.id == turn_id))
                     {
+                        let session_id = session.id;
                         let actions = suggested_actions(&evaluation);
+                        self.note_marker_verdict(session_id, turn_id, &evaluation, &actions);
                         // A request for the user's own details or a choice
                         // still reserves the row so predictions cannot
                         // suggest continuing past that request.
@@ -1200,6 +1276,106 @@ impl Waku {
             }
         }
         changed
+    }
+
+    /// Journal what a landed evaluation decided and park it for resolution.
+    /// The verdict line records the cleared chips even when none rendered —
+    /// a missed marker is calibration data too, so suppression is part of
+    /// the record.
+    fn note_marker_verdict(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        evaluation: &Evaluation,
+        actions: &[StatusSuggestedAction],
+    ) {
+        // Incognito sessions write nothing to the marker journal.
+        if self.session_incognito(session_id) {
+            return;
+        }
+        // A verdict parked for a session that no longer exists can never
+        // resolve — shed it so the map tracks live sessions only.
+        self.pending_marker_verdicts
+            .retain(|id, _| self.state.sessions.iter().any(|session| session.id == *id));
+        let cleared: BTreeMap<&str, f64> = cleared_markers(evaluation)
+            .into_iter()
+            .map(|(marker, score)| (marker.id, score))
+            .collect();
+        let ending = match evaluation.answers.get(ENDING_QUESTION) {
+            Some(EvalAnswer::Choice {
+                choice,
+                probabilities,
+                ..
+            }) => Some(json!({
+                "choice": choice,
+                "probability": probabilities.get(choice).copied().unwrap_or(0.0),
+            })),
+            _ => None,
+        };
+        let verdict = PendingMarkerVerdict {
+            id: Uuid::new_v4(),
+            markers: cleared.keys().map(|id| id.to_string()).collect(),
+            suggested: actions
+                .iter()
+                .map(|action| action.canned_id().to_owned())
+                .collect(),
+        };
+        action_predictions::append_jsonl(
+            &marker_log_path(),
+            &json!({
+                "type": "verdict",
+                "id": verdict.id,
+                "at": unix_time(),
+                "session": session_id,
+                "turn": turn_id,
+                "ending": ending,
+                "cleared": cleared,
+                "suggested": verdict.suggested,
+            }),
+        );
+        // A newer judgement supersedes a pending one for the session — the
+        // user's next action answers the freshest verdict.
+        if let Some(previous) = self.pending_marker_verdicts.insert(session_id, verdict) {
+            action_predictions::append_jsonl(
+                &marker_log_path(),
+                &json!({
+                    "type": "resolution",
+                    "verdict": previous.id,
+                    "at": unix_time(),
+                    "signal": "superseded",
+                }),
+            );
+        }
+    }
+
+    /// The user's next journaled action in a verdict's session resolves it —
+    /// the same event stream predictions resolve on. The record carries the
+    /// action, whether it adopted a chip the verdict offered, and the coarse
+    /// signal `marker_action_signal` derives; quitting censors silently by
+    /// leaving the verdict unresolved.
+    pub(super) fn resolve_marker_verdict(
+        &mut self,
+        session: Option<Uuid>,
+        action: action_predictions::JournalAction,
+    ) {
+        let Some(session_id) = session else {
+            return;
+        };
+        let Some(verdict) = self.pending_marker_verdicts.remove(&session_id) else {
+            return;
+        };
+        let action_id = action.id();
+        action_predictions::append_jsonl(
+            &marker_log_path(),
+            &json!({
+                "type": "resolution",
+                "verdict": verdict.id,
+                "at": unix_time(),
+                "action": action_id,
+                "adopted": verdict.suggested.iter().any(|id| id == action_id),
+                "signal": marker_action_signal(&verdict.markers, action_id),
+            }),
+        );
     }
 
     /// The marker chips a settled turn's response footer shows, if the
@@ -1367,6 +1543,7 @@ impl Waku {
         self.turn_status_markers.clear();
         self.turn_status_suggestions.clear();
         self.pending_status_marker_turns.clear();
+        self.pending_marker_verdicts.clear();
         self.status_marker_in_flight.clear();
     }
 }
@@ -1733,6 +1910,57 @@ mod tests {
             .map(|(marker, _)| marker.id)
             .collect();
         assert_eq!(ids, ["partial", "blocked"]);
+    }
+
+    #[test]
+    fn marker_resolution_signals_read_the_next_action() {
+        let markers = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        // Done-state endings: shipping or moving on confirms, asking for
+        // more work or undoing it contradicts.
+        assert_eq!(
+            marker_action_signal(&markers(&["complete"]), "commit"),
+            "confirmed"
+        );
+        assert_eq!(
+            marker_action_signal(&markers(&["complete"]), "new-prompt"),
+            "confirmed"
+        );
+        assert_eq!(
+            marker_action_signal(&markers(&["complete"]), "revert"),
+            "contradicted"
+        );
+        assert_eq!(
+            marker_action_signal(&markers(&["answered"]), "fix-errors"),
+            "contradicted"
+        );
+        // A waiting ending is confirmed by any reply.
+        assert_eq!(
+            marker_action_signal(&markers(&["awaiting-input"]), "new-prompt"),
+            "confirmed"
+        );
+        // A wall: engaging the failure confirms, shipping anyway denies it.
+        assert_eq!(
+            marker_action_signal(&markers(&["failed"]), "fix-errors"),
+            "confirmed"
+        );
+        assert_eq!(
+            marker_action_signal(&markers(&["blocked"]), "land"),
+            "contradicted"
+        );
+        // Contradiction wins when cleared markers disagree.
+        assert_eq!(
+            marker_action_signal(&markers(&["complete", "failed"]), "push"),
+            "contradicted"
+        );
+        // Unmapped markers and actions stay observations.
+        assert_eq!(
+            marker_action_signal(&markers(&["drifted"]), "sync"),
+            "observed"
+        );
+        assert_eq!(
+            marker_action_signal(&markers(&[]), "new-prompt"),
+            "observed"
+        );
     }
 
     #[test]
