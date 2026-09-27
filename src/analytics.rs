@@ -28,8 +28,8 @@ const POSTHOG_API_KEY: Option<&str> = None;
 
 #[cfg(not(debug_assertions))]
 const POSTHOG_HOST: Option<&str> = Some(match option_env!("GODDARD_POSTHOG_HOST") {
-    Some("") | None => DEFAULT_POSTHOG_HOST,
-    Some(host) => host,
+    Some(host) if host.len() > 0 => host,
+    _ => DEFAULT_POSTHOG_HOST,
 });
 #[cfg(debug_assertions)]
 const POSTHOG_HOST: Option<&str> = None;
