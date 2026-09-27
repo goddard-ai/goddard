@@ -3380,6 +3380,10 @@ suggestions.commit:
   en: Commit
 suggestions.push:
   en: Push
+suggestions.push_changes:
+  en: Push changes
+suggestions.archive:
+  en: Archive
 suggestions.sync:
   en: Sync
 suggestions.land:

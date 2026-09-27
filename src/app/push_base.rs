@@ -431,6 +431,15 @@ impl Waku {
         outcome: PushBaseOutcome,
         cx: &mut Context<Self>,
     ) {
+        let follow_up_session =
+            self.journal_session_for_workspace(&op.workspace)
+                .filter(|session_id| {
+                    self.action_suggestion.as_ref().is_some_and(|suggestion| {
+                        suggestion.prediction_id.is_none()
+                            && suggestion.session_id == *session_id
+                            && suggestion.action == "push-base"
+                    })
+                });
         match outcome {
             PushBaseOutcome::Pushed { base, upstream } => {
                 self.settle_operation_toast(
@@ -438,6 +447,9 @@ impl Waku {
                     tr!("push_base.pushed", base = base, upstream = upstream),
                     ToastTone::Success,
                 );
+                if let Some(session_id) = follow_up_session {
+                    self.set_action_follow_up(session_id, "archive", None);
+                }
             }
             PushBaseOutcome::UpToDate { base, upstream } => {
                 self.settle_operation_toast(
@@ -445,6 +457,9 @@ impl Waku {
                     tr!("push_base.up_to_date", base = base, upstream = upstream),
                     ToastTone::Notice,
                 );
+                if let Some(session_id) = follow_up_session {
+                    self.set_action_follow_up(session_id, "archive", None);
+                }
             }
             PushBaseOutcome::NoUpstream { base } => {
                 self.settle_operation_toast(
@@ -452,6 +467,9 @@ impl Waku {
                     tr!("push_base.no_upstream", base = base),
                     ToastTone::Notice,
                 );
+                if follow_up_session.is_some() {
+                    self.action_suggestion = None;
+                }
             }
             PushBaseOutcome::Rejected {
                 base,
@@ -473,6 +491,7 @@ impl Waku {
         self.invalidate_workspace_queries(cx);
         self.refresh_git_panel(cx);
         self.refresh_git_panel_commits(cx);
+        cx.notify();
     }
 
     /// A `SyncBase` op resolved. `Clean` — or `UpToDate`, the same thing

@@ -1933,6 +1933,10 @@ impl Waku {
                     );
                     self.record_landed_transcript_notice(&op.workspace, &base, commits, ahead);
                     self.mark_workspace_sessions_landed(&op.workspace, cx);
+                    if let Some(session_id) = self.journal_session_for_workspace(&op.workspace) {
+                        self.set_action_follow_up(session_id, "push-base", Some(base.clone()));
+                        cx.notify();
+                    }
                     // The base moved — every landed notice's push answer is
                     // stale, selected workspace or not.
                     self.invalidate_base_push_state(&op.workspace);

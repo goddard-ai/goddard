@@ -251,18 +251,18 @@ pub(super) struct PendingActionPrediction {
     pub adopted: bool,
 }
 
-/// The floating suggestion above the composer — the pending prediction's
-/// gated pick. It clears when the prediction resolves, whatever the
-/// outcome: fulfilled, or the window ended with the next prompt.
+/// The floating suggestion above the composer — either a pending
+/// prediction's gated pick or a deterministic follow-up to a Git action.
 #[derive(Clone)]
 pub(super) struct ActionSuggestion {
-    /// The prediction this chip stands in for — adoption marks and clearing
-    /// both key off it.
-    pub prediction_id: Uuid,
+    /// `None` for deterministic follow-ups that are not part of Jev.
+    pub prediction_id: Option<Uuid>,
     pub session_id: Uuid,
     /// The candidate id; `suggestion_parts` maps it to label, icon, and
     /// dispatch.
     pub action: &'static str,
+    /// The base branch for the post-land push follow-up.
+    pub base: Option<String>,
 }
 
 /// What a chip does when clicked.
@@ -280,6 +280,10 @@ enum SuggestionDispatch {
     Sync,
     /// Land the composer session's worktree onto its base.
     Land,
+    /// Push the base branch after landing.
+    PushBase,
+    /// Archive the task after its base was pushed.
+    Archive,
 }
 
 /// The dispatch behind an actionable candidate id.
@@ -289,6 +293,8 @@ fn suggestion_dispatch(action: &str) -> Option<SuggestionDispatch> {
         "push" => Some(SuggestionDispatch::Push),
         "sync" => Some(SuggestionDispatch::Sync),
         "land" => Some(SuggestionDispatch::Land),
+        "push-base" => Some(SuggestionDispatch::PushBase),
+        "archive" => Some(SuggestionDispatch::Archive),
         canned => CANNED_PROMPTS
             .iter()
             .find(|(id, _)| *id == canned)
@@ -732,12 +738,16 @@ impl Waku {
             candidates: probabilities.keys().cloned().collect(),
             adopted: false,
         };
-        // A new settled turn supersedes the previous suggestion even when
+        // A deterministic follow-up must remain visible if an older Jev
+        // request finishes after the Git action that created it.
+        let has_follow_up = self.has_deterministic_follow_up(session_id);
+        // A new settled turn supersedes the previous prediction even when
         // its prediction is too weak to show a chip.
-        if self
-            .action_suggestion
-            .as_ref()
-            .is_some_and(|suggestion| suggestion.session_id == session_id)
+        if !has_follow_up
+            && self
+                .action_suggestion
+                .as_ref()
+                .is_some_and(|suggestion| suggestion.session_id == session_id)
         {
             self.action_suggestion = None;
         }
@@ -747,11 +757,14 @@ impl Waku {
         let suggestion = gated_suggestion(choice, probabilities, self.state.move_fast_break_things)
             .filter(|action| !self.state.disabled_suggested_actions.contains(*action))
             .filter(|action| *action != "open-pr" || !self.session_has_open_pr(session_id));
-        if let Some(action) = suggestion {
+        if let Some(action) = suggestion
+            && !has_follow_up
+        {
             self.action_suggestion = Some(ActionSuggestion {
-                prediction_id: prediction.id,
+                prediction_id: Some(prediction.id),
                 session_id,
                 action,
+                base: None,
             });
         }
         append_jsonl(
@@ -842,6 +855,22 @@ impl Waku {
         // resolving while predictions are off since their journal is a
         // separate experiment's calibration record.
         self.resolve_marker_verdict(session, action);
+        // These actions end or move the task's suggestion context. Clear
+        // before the experiment gate so deterministic follow-ups work even
+        // when action predictions are disabled.
+        if matches!(
+            action,
+            JournalAction::PromptSend { .. }
+                | JournalAction::SessionArchive
+                | JournalAction::SessionUnarchive
+        ) && let Some(session_id) = session
+            && self
+                .action_suggestion
+                .as_ref()
+                .is_some_and(|suggestion| suggestion.session_id == session_id)
+        {
+            self.action_suggestion = None;
+        }
         if !self.state.action_predictions_enabled {
             return;
         }
@@ -954,7 +983,7 @@ impl Waku {
         if self
             .action_suggestion
             .as_ref()
-            .is_some_and(|suggestion| suggestion.prediction_id == prediction_id)
+            .is_some_and(|suggestion| suggestion.prediction_id == Some(prediction_id))
         {
             self.action_suggestion = None;
         }
@@ -985,14 +1014,36 @@ impl Waku {
             .map(|session| session.id)
     }
 
+    /// Install an unconditional post-action suggestion for one task.
+    pub(super) fn set_action_follow_up(
+        &mut self,
+        session_id: Uuid,
+        action: &'static str,
+        base: Option<String>,
+    ) {
+        self.action_suggestion = Some(ActionSuggestion {
+            prediction_id: None,
+            session_id,
+            action,
+            base,
+        });
+    }
+
     /// Forget pending predictions and in-flight bookkeeping; the journal
     /// and prediction logs are the durable record and stay — toggling off
-    /// only stops the feature's runtime state from going stale.
+    /// only stops the feature's runtime state from going stale. Deterministic
+    /// Git follow-ups are independent of this setting.
     pub(super) fn clear_action_predictions(&mut self) {
         self.pending_action_predictions.clear();
         self.pending_action_prediction_turns.clear();
         self.action_prediction_in_flight.clear();
-        self.action_suggestion = None;
+        if self
+            .action_suggestion
+            .as_ref()
+            .is_some_and(|suggestion| suggestion.prediction_id.is_some())
+        {
+            self.action_suggestion = None;
+        }
     }
 
     /// The chip's presentation: icon and localized label. `None` means the
@@ -1002,6 +1053,8 @@ impl Waku {
         match action {
             "commit" => Some(("icons/git-commit-horizontal.svg", tr!("suggestions.commit"))),
             "push" => Some(("icons/arrow-up.svg", tr!("suggestions.push"))),
+            "push-base" => Some(("icons/arrow-up.svg", tr!("suggestions.push_changes"))),
+            "archive" => Some(("icons/archive.svg", tr!("suggestions.archive"))),
             "sync" => Some(("icons/arrow-down.svg", tr!("suggestions.sync"))),
             "land" => Some(("icons/git-merge.svg", tr!("suggestions.land"))),
             canned => {
@@ -1011,16 +1064,28 @@ impl Waku {
         }
     }
 
+    fn has_deterministic_follow_up(&self, session_id: Uuid) -> bool {
+        self.action_suggestion.as_ref().is_some_and(|suggestion| {
+            suggestion.session_id == session_id && suggestion.prediction_id.is_none()
+        })
+    }
+
     /// Whether the suggestion row renders this frame, mirroring
-    /// `render_action_suggestion`'s layering: a settled turn's status row
-    /// claims the slot first — an empty `turn_status_suggestions` entry
-    /// still claims it, suppressing the prediction fallback — and the
-    /// predicted action chips in only when no entry does. Floats sharing
+    /// `render_action_suggestion`'s layering: a deterministic Git follow-up
+    /// claims the slot first. Otherwise, a settled turn's status row claims
+    /// it — even an empty entry suppresses the prediction fallback — and the
+    /// predicted action chip appears only when no entry does. Floats sharing
     /// the row's slot check this so the two never overlap.
     pub(super) fn action_suggestion_row_visible(&self) -> bool {
         let Some(session) = self.composer_session() else {
             return false;
         };
+        if self.has_deterministic_follow_up(session.id) {
+            return self
+                .action_suggestion
+                .as_ref()
+                .is_some_and(|suggestion| self.suggestion_parts(suggestion.action).is_some());
+        }
         if let Some(turn) = session.turns.last()
             && let Some(actions) = self.turn_status_suggestions.get(&turn.id)
         {
@@ -1044,15 +1109,17 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        if self
-            .composer_session()
-            .and_then(|session| session.turns.last())
-            .is_some_and(|turn| self.turn_status_suggestions.contains_key(&turn.id))
+        let session = self.composer_session()?;
+        if !self.has_deterministic_follow_up(session.id)
+            && session
+                .turns
+                .last()
+                .is_some_and(|turn| self.turn_status_suggestions.contains_key(&turn.id))
         {
             return self.render_status_suggestion(window, cx);
         }
         let suggestion = self.action_suggestion.as_ref()?;
-        if self.composer_session().map(|session| session.id) != Some(suggestion.session_id) {
+        if session.id != suggestion.session_id {
             return None;
         }
         let (icon_path, label) = self.suggestion_parts(suggestion.action)?;
@@ -1160,7 +1227,7 @@ impl Waku {
         if let Some(prediction) = self
             .pending_action_predictions
             .iter_mut()
-            .find(|prediction| prediction.id == suggestion.prediction_id)
+            .find(|prediction| Some(prediction.id) == suggestion.prediction_id)
         {
             prediction.adopted = true;
         }
@@ -1172,6 +1239,26 @@ impl Waku {
             }
             Some(SuggestionDispatch::Commit) => self.open_commit_dialog(window, cx),
             Some(SuggestionDispatch::Land) => self.land_composer_session(PullStrategy::Rebase, cx),
+            Some(SuggestionDispatch::PushBase) => {
+                let Some(base) = suggestion.base else {
+                    return;
+                };
+                let workspace = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == suggestion.session_id)
+                    .and_then(|session| {
+                        self.workspace_path_for_session(session)
+                            .map(Path::to_path_buf)
+                    });
+                if let Some(workspace) = workspace {
+                    self.start_push_base(workspace, base, cx);
+                }
+            }
+            Some(SuggestionDispatch::Archive) => {
+                self.archive_session(suggestion.session_id, window, cx);
+            }
             Some(dispatch) => {
                 let workspace = self
                     .state
@@ -1198,9 +1285,10 @@ impl Waku {
 
     /// ⌘⏎ on an empty composer fires whatever the suggestion lane is
     /// showing, with the same layering `render_action_suggestion` draws:
-    /// a settled turn's status row claims the slot first and its leftmost
-    /// chip is the one the chord hits, the predicted action chips in only
-    /// when no status row does. Returns whether a suggestion fired —
+    /// a deterministic Git follow-up wins first; otherwise a settled turn's
+    /// status row claims the slot and its leftmost chip is the one the chord
+    /// hits, and a predicted action appears only when no status row does.
+    /// Returns whether a suggestion fired —
     /// `false` means the keystroke falls through to its usual empty-draft
     /// meaning.
     ///
@@ -1212,37 +1300,45 @@ impl Waku {
             Status(Uuid, StatusSuggestedAction),
             Action,
         }
-        let displayed = self
+        let has_follow_up = self
             .composer_session()
-            .and_then(|session| session.turns.last())
-            .filter(|turn| {
-                self.state.status_markers_enabled && turn.status == TurnStatus::Completed
-            })
-            .and_then(|turn| {
-                self.turn_status_suggestions
-                    .get(&turn.id)
-                    .and_then(|actions| actions.first())
-                    .map(|action| Displayed::Status(turn.id, action.clone()))
-            });
-        let displayed = match displayed {
-            Some(displayed) => Some(displayed),
-            // The status slot only yields to the prediction when no entry
-            // claims it — same gate as the render path.
-            None if self
+            .is_some_and(|session| self.has_deterministic_follow_up(session.id));
+        let displayed = if has_follow_up {
+            Some(Displayed::Action)
+        } else {
+            let displayed = self
                 .composer_session()
                 .and_then(|session| session.turns.last())
-                .is_some_and(|turn| self.turn_status_suggestions.contains_key(&turn.id)) =>
-            {
-                None
-            }
-            None => self
-                .action_suggestion
-                .as_ref()
-                .filter(|suggestion| {
-                    self.composer_session().map(|session| session.id) == Some(suggestion.session_id)
-                        && self.suggestion_parts(&suggestion.action).is_some()
+                .filter(|turn| {
+                    self.state.status_markers_enabled && turn.status == TurnStatus::Completed
                 })
-                .map(|_| Displayed::Action),
+                .and_then(|turn| {
+                    self.turn_status_suggestions
+                        .get(&turn.id)
+                        .and_then(|actions| actions.first())
+                        .map(|action| Displayed::Status(turn.id, action.clone()))
+                });
+            match displayed {
+                Some(displayed) => Some(displayed),
+                // Without a deterministic follow-up, the status slot yields to
+                // prediction only when no entry claims it — same gate as render.
+                None if self
+                    .composer_session()
+                    .and_then(|session| session.turns.last())
+                    .is_some_and(|turn| self.turn_status_suggestions.contains_key(&turn.id)) =>
+                {
+                    None
+                }
+                None => self
+                    .action_suggestion
+                    .as_ref()
+                    .filter(|suggestion| {
+                        self.composer_session().map(|session| session.id)
+                            == Some(suggestion.session_id)
+                            && self.suggestion_parts(&suggestion.action).is_some()
+                    })
+                    .map(|_| Displayed::Action),
+            }
         };
         let Some(displayed) = displayed else {
             return false;

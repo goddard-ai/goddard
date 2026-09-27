@@ -1306,6 +1306,8 @@ suggestions.review_changes: 変更をレビュー
 suggestions.open_pr: プッシュしてPRを作成
 suggestions.commit: コミット
 suggestions.push: プッシュ
+suggestions.push_changes: 変更をプッシュ
+suggestions.archive: アーカイブ
 suggestions.sync: 同期
 suggestions.land: 取り込む
 suggestions.move_fast_title: 速く進め、壊すことを恐れない

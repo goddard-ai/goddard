@@ -1278,6 +1278,8 @@ suggestions.review_changes: 审查这些更改的问题
 suggestions.open_pr: 推送并创建 PR
 suggestions.commit: 提交
 suggestions.push: 推送
+suggestions.push_changes: 推送更改
+suggestions.archive: 归档
 suggestions.sync: 同步
 suggestions.land: 合入
 suggestions.move_fast_title: 快速行动、不怕出错
