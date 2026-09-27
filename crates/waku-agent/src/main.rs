@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 use waku_client::DaemonClient;
 use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
-use waku_protocol::model::{ProviderKind, UserInputOption, UserInputQuestion};
+use waku_protocol::model::{ProjectMapIntent, ProviderKind, UserInputOption, UserInputQuestion};
 use waku_protocol::{
     AGENT_TASK_ENV, AGENT_TOKEN_ENV, AgentPromptDelivery, AgentWorkspace, Command,
     DAEMON_ADDRESS_ENV, ResponsePayload,
@@ -43,6 +43,7 @@ USAGE
     goddard-agent rename '<json>'            Rename this task after the user approves the request
     goddard-agent read '<json>'              Read a task's transcript
     goddard-agent search '<json>'            Search this project's task transcripts
+    goddard-agent map '<json>'               Find relevant code in this workspace
     goddard-agent ask '<json>'               Ask the user a structured question
     goddard-agent models                     List the provider/model options `create` accepts
     goddard-agent command list               List the user's custom commands
@@ -67,6 +68,11 @@ USAGE CONTRACT
     `read`ing. Use `create` and `prompt` only when the human you are
     working for has explicitly asked — never for exploration,
     convenience, or self-orchestration.
+    `map` searches this workspace's indexed declarations for code relevant to
+    the current task. Ask a specific question, add `anchors` for known symbol
+    names, and use `known_paths` when you have already inspected files; then
+    read the returned source locations before drawing conclusions. Narrow with
+    `path` when you know the relevant directory.
     `rename` changes only this task's title. Unless the task already granted
     standing permission, each call asks the user first — it blocks on the
     request card and fails when the user declines.
@@ -95,7 +101,7 @@ fn schema() -> serde_json::Value {
         .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
         .collect();
     json!({
-        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate; the daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
+        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate; the daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
         "create": {
             "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation. The task inherits this task's access mode and run environment — a sandboxed task spawns sandboxed tasks.",
             "fields": {
@@ -154,6 +160,19 @@ fn schema() -> serde_json::Value {
             },
             "example": "{\"query\":\"status:idle retry logic\"}",
             "returns": {"results": [{"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
+        },
+        "map": {
+            "description": "Ask Jev to rank source evidence from this session's indexed workspace, then return relevant declarations and locations. Use for code discovery and query again as you learn more. Requires the Project Map experiment to be enabled.",
+            "fields": {
+                "query": {"type": "string", "required": true, "notes": "a precise natural-language question about code or behavior"},
+                "path": {"type": "string", "notes": "workspace-relative directory or file scope"},
+                "intent": {"type": "string", "enum": ["locate", "understand", "change"], "default": "understand"},
+                "anchors": {"type": "string[]", "notes": "paths or qualified symbols already known to relate to the query"},
+                "known_paths": {"type": "string[]", "notes": "already-read paths; they are deprioritized, never excluded"},
+                "max_tokens": {"type": "number", "default": 1024, "minimum": 64, "maximum": 4096}
+            },
+            "example": "{\"query\":\"What controls how long a login session lasts?\",\"intent\":\"understand\",\"anchors\":[\"src/auth/session.rs\"],\"known_paths\":[\"src/auth/session.rs\"]}",
+            "returns": {"query": "string", "intent": "locate|understand|change", "text": "ranked source context with paths and line numbers", "indexed_files": "number", "candidates_considered": "number", "omitted_candidates": "number", "mapped_files": "number", "estimated_tokens": "number", "truncated": "boolean", "ranking": "jev|localFallback", "fallback_reason": "optional reason Jev ranking was unavailable"}
         },
         "ask": {
             "description": "Ask this task's user a structured question and block until they resolve it. Renders the session's question card in their Goddard client while your turn keeps running — use it when a human decision (a choice between options, or a confirmation) must come back before you can proceed. Do not use it for questions an ordinary reply can carry.",
@@ -262,6 +281,21 @@ struct SearchPayload {
 }
 
 #[derive(Deserialize)]
+struct ProjectMapPayload {
+    query: String,
+    #[serde(default)]
+    path: Option<PathBuf>,
+    #[serde(default)]
+    max_tokens: Option<usize>,
+    #[serde(default)]
+    intent: ProjectMapIntent,
+    #[serde(default)]
+    anchors: Vec<String>,
+    #[serde(default)]
+    known_paths: Vec<PathBuf>,
+}
+
+#[derive(Deserialize)]
 struct RenamePayload {
     title: String,
 }
@@ -342,7 +376,7 @@ fn run() -> anyhow::Result<()> {
             }
         }
         "command" => command(arguments.next().as_deref(), arguments.next()),
-        "create" | "prompt" | "read" | "search" | "rename" | "ask" => {
+        "create" | "prompt" | "read" | "search" | "map" | "rename" | "ask" => {
             let payload = arguments
                 .next()
                 .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
@@ -374,6 +408,9 @@ fn run() -> anyhow::Result<()> {
                             "session_link_hint": session_link_hint(),
                         }))?
                     );
+                }
+                ResponsePayload::AgentProjectMap { result } => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
                 }
                 ResponsePayload::AgentAskResult { outcome } => {
                     println!("{}", serde_json::to_string_pretty(&outcome)?);
@@ -510,6 +547,18 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
             Ok(Command::AgentSearchSessions {
                 query: payload.query,
                 last_turns: payload.last_turns,
+            })
+        }
+        "map" => {
+            let payload: ProjectMapPayload = serde_json::from_str(payload)
+                .context("`map` takes a JSON object; run `goddard-agent schema` for its shape")?;
+            Ok(Command::AgentProjectMap {
+                query: payload.query,
+                path: payload.path,
+                max_tokens: payload.max_tokens,
+                intent: payload.intent,
+                anchors: payload.anchors,
+                known_paths: payload.known_paths,
             })
         }
         "ask" => Ok(Command::AgentAsk {
@@ -776,6 +825,35 @@ mod tests {
     }
 
     #[test]
+    fn a_map_payload_carries_the_agent_retrieval_hints() {
+        let command = build_command(
+            "map",
+            r#"{"query":"What controls expiry?","path":"src/auth","intent":"change","anchors":["Session::refresh"],"known_paths":["src/auth/session.rs"],"max_tokens":1800}"#,
+        )
+        .expect("a valid map request parses");
+        match command {
+            Command::AgentProjectMap {
+                query,
+                path,
+                max_tokens,
+                intent,
+                anchors,
+                known_paths,
+            } => {
+                assert_eq!(query, "What controls expiry?");
+                assert_eq!(path.as_deref(), Some(std::path::Path::new("src/auth")));
+                assert_eq!(max_tokens, Some(1800));
+                assert_eq!(intent, ProjectMapIntent::Change);
+                assert_eq!(anchors, ["Session::refresh"]);
+                assert_eq!(known_paths, [PathBuf::from("src/auth/session.rs")]);
+            }
+            other => panic!("expected AgentProjectMap, got {other:?}"),
+        }
+        assert!(build_command("map", "{}").is_err());
+        assert!(build_command("map", r#"{"query":"x","intent":"scope"}"#).is_err());
+    }
+
+    #[test]
     fn a_search_payload_may_confine_the_scan_to_the_last_turns() {
         let command = build_command("search", r#"{"query":"retry logic","last_turns":2}"#)
             .expect("a last_turns payload parses");
@@ -918,6 +996,8 @@ mod tests {
                 "the absence of an approval gate must be documented"
             );
         }
+        assert!(USAGE.contains("goddard-agent map"));
+        assert!(schema.contains("\"anchors\""));
         // The schema stays machine-readable.
         let _: serde_json::Value = serde_json::from_str(&schema).unwrap();
     }

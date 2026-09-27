@@ -1844,8 +1844,8 @@ fn token_matches(expected: &str, candidate: &str) -> bool {
 /// deliberately absent from `command_targets_runtime` so they dispatch on
 /// their own workers — the backend serializes target-session delivery itself.
 /// Cross-task commands sit behind `agent_tools_enabled`; self-rename has a
-/// per-task grant. Custom commands use the default-on agent settings surface,
-/// gated inside the backend by `agent_settings_enabled`.
+/// per-task grant. Project-map queries obey their own experiment toggle,
+/// and custom commands use the agent settings surface.
 fn is_agent_command(command: &Command) -> bool {
     matches!(
         command,
@@ -1854,6 +1854,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentRenameSelf { .. }
             | Command::AgentReadSession { .. }
             | Command::AgentSearchSessions { .. }
+            | Command::AgentProjectMap { .. }
             | Command::AgentAsk { .. }
             | Command::AgentListModels
             | Command::UpsertCustomCommand { .. }
@@ -1906,6 +1907,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
             | Command::AgentAsk { .. }
+            | Command::AgentProjectMap { .. }
             | Command::StartIntegrationAuth { .. }
             | Command::ConnectIntegration { .. }
     )

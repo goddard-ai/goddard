@@ -644,6 +644,8 @@ pub struct AgentLaunchEnv {
     /// this credential. On by default; off only when the user disabled the
     /// agent settings surface outright.
     pub settings_writes: bool,
+    /// Whether this session can request query-specific source maps.
+    pub project_maps: bool,
 }
 
 impl AgentLaunchEnv {
@@ -653,6 +655,7 @@ impl AgentLaunchEnv {
         AgentSurfaceScope {
             task_tools: self.task_tools,
             settings_writes: self.settings_writes,
+            project_maps: self.project_maps,
             parent_task_id: self.parent_task_id,
         }
     }
@@ -665,6 +668,7 @@ impl AgentLaunchEnv {
 pub struct AgentSurfaceScope {
     pub task_tools: bool,
     pub settings_writes: bool,
+    pub project_maps: bool,
     pub parent_task_id: Option<Uuid>,
 }
 
@@ -773,6 +777,18 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
             "\n- `read` — to read this task's transcript \
              (`{command} read '{{}}'`, or `'{{\"turn\": N}}'` for one turn)"
         ));
+    }
+    if scope.project_maps {
+        instruction.push_str(&format!(
+            "\n- `map` — find code for a precise question with Jev-ranked \
+             source context (e.g. `{command} map '{{\"query\":\"What controls session expiry?\",\"intent\":\"understand\"}}')"
+        ));
+        instruction.push_str(
+            "\nUse `map` when you need to locate unfamiliar code; include \
+             known paths or symbols as anchors, and pass `known_paths` so \
+             results can favor new context. Results are bounded leads; read \
+             the source before editing and narrow with `path` when truncated.",
+        );
     }
     if scope.settings_writes {
         instruction.push_str(
@@ -1253,6 +1269,7 @@ mod tests {
             shim_directory: directory.to_path_buf(),
             task_tools: true,
             settings_writes: true,
+            project_maps: false,
         }
     }
 
@@ -1332,6 +1349,7 @@ mod tests {
         let env = AgentLaunchEnv {
             task_tools: false,
             settings_writes: false,
+            project_maps: false,
             parent_task_id: Some(parent),
             ..launch_env(&directory)
         };
@@ -1341,6 +1359,7 @@ mod tests {
         let env = AgentLaunchEnv {
             task_tools: true,
             settings_writes: false,
+            project_maps: false,
             ..launch_env(&directory)
         };
         let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
@@ -1355,6 +1374,7 @@ mod tests {
         let scope = AgentSurfaceScope {
             task_tools: true,
             settings_writes: false,
+            project_maps: false,
             parent_task_id: None,
         };
         assert!(state.surface_block(session).is_none());

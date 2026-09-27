@@ -46,10 +46,9 @@ pub struct DaemonSettings {
     /// Off by default in release builds, on in debug builds (`bun run dev`);
     /// toggling affects only sessions started afterwards.
     pub subagents_enabled: bool,
-    /// Experimental: prepend a token-budgeted structural map of the session's
-    /// workspace to the first prompt of every new session, so providers skip
-    /// cold repo exploration. Off by default in release builds, on in debug
-    /// builds; affects only sessions started afterwards.
+    /// Experimental: expose the on-demand, Jev-ranked `goddard-agent map`
+    /// command for the session's workspace. Off by default in release builds,
+    /// on in debug builds; affects only sessions started afterwards.
     pub project_map_enabled: bool,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,

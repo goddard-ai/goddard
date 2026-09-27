@@ -965,10 +965,14 @@ routing.feature_title_quality:
   en: Task titles
 routing.feature_title_quality_description:
   en: Checks whether an automatic task title is confusing or noisy.
+routing.feature_project_map:
+  en: Project map
+routing.feature_project_map_description:
+  en: Ranks indexed code candidates against an agent's source query.
 experiments.project_map_title:
   en: Project map
 experiments.project_map_description:
-  en: Give each new session a compact structural map of the workspace — top-level symbols of the most-referenced files, budgeted near 1,000 tokens — so the agent skips cold repo exploration. Applies to sessions started after turning it on.
+  en: Let each session's agent request relevant code with a precise question. Jev ranks source evidence from the workspace index; results include file paths and line numbers. Applies to sessions started after turning it on.
 experiments.sandbox_title:
   en: Sandbox VM
 experiments.sandbox_description:

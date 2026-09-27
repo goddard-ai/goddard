@@ -1,9 +1,8 @@
-//! A token-budgeted structural map of a workspace.
+//! A token-budgeted, query-specific structural map of a workspace.
 //!
 //! The daemon keeps one [`RepoMapIndex`] per workspace directory, refreshes it
-//! incrementally on a background thread, and renders a bounded text map that is
-//! prepended to the first prompt of a new agent session — so providers skip
-//! re-exploring cold repositories.
+//! incrementally on a background thread. Agents request bounded maps through
+//! the scoped CLI when they need to locate unfamiliar code.
 //!
 //! The map is deterministic tree-sitter extraction only: no model, no network,
 //! nothing is written into the indexed repository.
@@ -17,6 +16,10 @@ use tree_sitter::{Language, Node, Parser};
 
 /// Default rendered-map budget in estimated tokens (chars / 4).
 pub const DEFAULT_TOKEN_BUDGET: usize = 1_024;
+/// Hard cap on a single agent map response.
+pub const MAX_TOKEN_BUDGET: usize = 4_096;
+/// Maximum candidate files presented to Jev in one map request.
+pub const MAX_RANK_CANDIDATES: usize = 96;
 /// Files larger than this are skipped — usually generated or minified.
 const MAX_FILE_BYTES: u64 = 512 * 1024;
 /// Cap on indexed files per workspace.
@@ -27,7 +30,7 @@ const MAX_MEMBERS_PER_CONTAINER: usize = 10;
 /// depth (symbols per file) at map budgets.
 const MAX_SYMBOLS_PER_FILE: usize = 8;
 
-/// A rendered project map plus the statistics the UI reports.
+/// A rendered, bounded project map and its coverage statistics.
 #[derive(Debug, Clone, Default)]
 pub struct ProjectMap {
     /// `path:` headers plus indented signature lines. No wrapper text — the
@@ -37,10 +40,14 @@ pub struct ProjectMap {
     pub indexed_files: usize,
     /// Files the rendered map covers.
     pub mapped_files: usize,
-    /// Symbol-bearing files that did not fit the budget.
-    pub omitted_files: usize,
     /// `text.len() / 4`.
     pub estimated_tokens: usize,
+    /// Paths indexed for this request but not considered by Jev/local ranking.
+    pub omitted_candidates: usize,
+    /// Paths considered by ranking but not shown within the output budget.
+    pub omitted_files: usize,
+    /// Whether any indexed files were left out of the result.
+    pub truncated: bool,
 }
 
 /// An incremental index of a workspace's top-level symbols and import edges.
@@ -57,11 +64,38 @@ pub struct RepoMapIndex {
 struct IndexedFile {
     hash: u64,
     language: usize,
-    /// Signature lines: `(indent_level, text)`.
-    symbols: Vec<(usize, String)>,
+    /// Declarations with their source locations and bounded local evidence.
+    symbols: Vec<IndexedSymbol>,
     /// Raw import specifiers extracted from the source, resolved against the
     /// index after each refresh.
     import_specs: Vec<String>,
+}
+
+#[derive(Clone)]
+struct IndexedSymbol {
+    line: usize,
+    signature: String,
+    excerpt: String,
+}
+
+/// Candidate evidence sent to Jev, or used for deterministic local ranking.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct MapCandidate {
+    /// Stable workspace-relative path, also used as the Jev answer key.
+    pub path: String,
+    /// Bounded declarations and nearby source text from this file.
+    pub evidence: String,
+    /// Cheap local score used to select candidates and break ties.
+    pub local_score: usize,
+}
+
+/// The selected repository files, ordered from most to least useful.
+pub struct CandidateSet {
+    pub candidates: Vec<MapCandidate>,
+    pub omitted: usize,
+    pub indexed_files: usize,
+    /// A few paths beyond the Jev candidate cap, retained as discovery leads.
+    pub omitted_paths: Vec<String>,
 }
 
 struct LangSpec {
@@ -254,22 +288,56 @@ const CONTAINER_BODY_KINDS: &[&str] = &[
     "block",
 ];
 
-fn emit_signature(node: Node, source: &[u8], depth: usize, out: &mut Vec<(usize, String)>) {
+fn bounded_excerpt(node: Node, source: &[u8]) -> String {
+    let Ok(source_text) = std::str::from_utf8(source) else {
+        return String::new();
+    };
+    let mut before: Vec<_> = source_text[..node.start_byte()]
+        .lines()
+        .rev()
+        .take(2)
+        .take_while(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("///")
+                || trimmed.starts_with("//!")
+                || trimmed.starts_with("//")
+                || trimmed.starts_with('*')
+                || trimmed.starts_with('#')
+        })
+        .map(|line| line.trim().to_owned())
+        .collect();
+    before.reverse();
+    let text = node.utf8_text(source).unwrap_or("");
+    let mut excerpt = before;
+    excerpt.extend(
+        text.lines()
+            .skip(1)
+            .take(2)
+            .map(|line| line.trim().to_owned()),
+    );
+    excerpt.join(" ").chars().take(240).collect()
+}
+
+fn emit_signature(node: Node, source: &[u8], out: &mut Vec<IndexedSymbol>) {
     let Ok(text) = node.utf8_text(source) else {
         return;
     };
     let signature = first_line(text);
     if !signature.is_empty() {
-        out.push((depth, signature));
+        out.push(IndexedSymbol {
+            line: node.start_position().row + 1,
+            excerpt: bounded_excerpt(node, source),
+            signature,
+        });
     }
 }
 
-fn collect_members(node: Node, source: &[u8], spec: &LangSpec, out: &mut Vec<(usize, String)>) {
+fn collect_members(node: Node, source: &[u8], spec: &LangSpec, out: &mut Vec<IndexedSymbol>) {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         let kind = child.kind();
         if spec.def_kinds.contains(&kind) {
-            emit_signature(child, source, 1, out);
+            emit_signature(child, source, out);
         } else if CONTAINER_BODY_KINDS.contains(&kind) || spec.wrapper_kinds.contains(&kind) {
             collect_members(child, source, spec, out);
         }
@@ -292,7 +360,7 @@ fn collect_defs(
     source: &[u8],
     spec: &LangSpec,
     prefix: Option<String>,
-    out: &mut Vec<(usize, String)>,
+    out: &mut Vec<IndexedSymbol>,
 ) {
     let mut pending = prefix;
     let mut cursor = node.walk();
@@ -335,14 +403,25 @@ fn collect_defs(
         if signature.is_empty() || signature.starts_with("mod tests") {
             continue;
         }
-        out.push((0, signature));
+        out.push(IndexedSymbol {
+            line: child.start_position().row + 1,
+            excerpt: bounded_excerpt(child, source),
+            signature,
+        });
         if spec.container_kinds.contains(&kind) {
             let mut members = Vec::new();
             collect_members(child, source, spec, &mut members);
             let total = members.len();
             out.extend(members.into_iter().take(MAX_MEMBERS_PER_CONTAINER));
             if total > MAX_MEMBERS_PER_CONTAINER {
-                out.push((1, format!("… +{} more", total - MAX_MEMBERS_PER_CONTAINER)));
+                out.push(IndexedSymbol {
+                    line: 0,
+                    signature: format!(
+                        "… +{} more declarations",
+                        total - MAX_MEMBERS_PER_CONTAINER
+                    ),
+                    excerpt: String::new(),
+                });
             }
         }
     }
@@ -538,7 +617,11 @@ impl RepoMapIndex {
             if symbols.len() > MAX_SYMBOLS_PER_FILE {
                 let extra = symbols.len() - MAX_SYMBOLS_PER_FILE;
                 symbols.truncate(MAX_SYMBOLS_PER_FILE);
-                symbols.push((0, format!("… +{extra} more")));
+                symbols.push(IndexedSymbol {
+                    line: 0,
+                    signature: format!("… +{extra} more declarations"),
+                    excerpt: String::new(),
+                });
             }
 
             let mut raw_specs = Vec::new();
@@ -630,60 +713,243 @@ impl RepoMapIndex {
     ///
     /// Files are ranked by inbound import edges, then by path. Files with no
     /// extracted symbols are never rendered.
-    pub fn render(&self, max_tokens: usize) -> ProjectMap {
-        let mut in_degree: HashMap<PathBuf, usize> = HashMap::new();
+    /// Gather a broad, deterministic candidate set for Jev. Literal matches,
+    /// explicit anchors, and import hubs lead, but nonmatching files are not
+    /// excluded solely because their vocabulary differs from the query.
+    pub fn candidates(
+        &self,
+        query: &str,
+        path_scope: Option<&Path>,
+        anchors: &[String],
+        known_paths: &[PathBuf],
+    ) -> CandidateSet {
+        let mut in_degree: HashMap<&Path, usize> = HashMap::new();
         for targets in self.edges.values() {
             for target in targets {
-                *in_degree.entry(target.clone()).or_default() += 1;
+                *in_degree.entry(target.as_path()).or_default() += 1;
             }
         }
-
-        let mut ranked: Vec<(&PathBuf, &IndexedFile)> = self
-            .files
-            .iter()
-            .filter(|(_, file)| !file.symbols.is_empty())
-            .collect();
-        ranked.sort_by(|(a_path, _a), (b_path, _b)| {
-            let a_deg = in_degree.get(*a_path).copied().unwrap_or(0);
-            let b_deg = in_degree.get(*b_path).copied().unwrap_or(0);
-            b_deg.cmp(&a_deg).then_with(|| a_path.cmp(b_path))
-        });
-
-        let max_chars = max_tokens * 4;
-        let mut text = String::new();
-        let mut mapped = 0usize;
-        let mut omitted = 0usize;
-        for (path, file) in ranked {
-            let mut block = String::new();
-            // Provider-facing paths keep forward slashes on every platform —
-            // `Path::display` would emit `\` on Windows.
-            block.push_str(&path.to_string_lossy().replace('\\', "/"));
-            block.push_str(":\n");
-            for (depth, signature) in &file.symbols {
-                let indent = 2 + depth * 2;
-                block.push_str(&" ".repeat(indent));
-                block.push_str(signature);
-                block.push('\n');
-            }
-            if text.len() + block.len() > max_chars {
-                omitted += 1;
+        let terms = query_terms(query);
+        let anchor_terms: Vec<String> = anchors.iter().map(|s| normalize(s)).collect();
+        let mut ranked = Vec::new();
+        for (path, file) in &self.files {
+            if file.symbols.is_empty()
+                || path_scope
+                    .is_some_and(|scope| !path.starts_with(scope) && path.as_path() != scope)
+            {
                 continue;
             }
-            text.push_str(&block);
-            mapped += 1;
+            let display = path.to_string_lossy().replace('\\', "/");
+            let normalized_path = normalize(&display);
+            let normalized_symbols = normalize(
+                &file
+                    .symbols
+                    .iter()
+                    .map(|symbol| format!("{} {}", symbol.signature, symbol.excerpt))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+            let mut score = 0usize;
+            for term in &terms {
+                if normalized_path.split_whitespace().any(|word| word == term) {
+                    score += 5;
+                }
+                if normalized_symbols
+                    .split_whitespace()
+                    .any(|word| word == term)
+                {
+                    score += 8;
+                }
+            }
+            for anchor in &anchor_terms {
+                if !anchor.is_empty()
+                    && (normalized_path.contains(anchor) || normalized_symbols.contains(anchor))
+                {
+                    score += 40;
+                }
+            }
+            if known_paths
+                .iter()
+                .any(|known| path == known || path.starts_with(known))
+            {
+                score = score.saturating_sub(14);
+            }
+            score += in_degree
+                .get(path.as_path())
+                .copied()
+                .unwrap_or_default()
+                .min(10);
+            let evidence = file
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.line > 0)
+                .take(5)
+                .map(|symbol| {
+                    if symbol.excerpt.is_empty() {
+                        format!("line {}: {}", symbol.line, symbol.signature)
+                    } else {
+                        format!(
+                            "line {}: {} — {}",
+                            symbol.line, symbol.signature, symbol.excerpt
+                        )
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+                .chars()
+                .take(512)
+                .collect::<String>();
+            ranked.push((
+                score,
+                path.clone(),
+                MapCandidate {
+                    path: display,
+                    evidence,
+                    local_score: score,
+                },
+            ));
         }
-        if omitted > 0 {
-            text.push_str(&format!("… {omitted} more files (map budget)\n"));
+        ranked.sort_by(|(score_a, path_a, _), (score_b, path_b, _)| {
+            score_b.cmp(score_a).then_with(|| path_a.cmp(path_b))
+        });
+        let omitted = ranked.len().saturating_sub(MAX_RANK_CANDIDATES);
+        let omitted_paths = ranked
+            .iter()
+            .skip(MAX_RANK_CANDIDATES)
+            .take(20)
+            .map(|(_, _, candidate)| candidate.path.clone())
+            .collect();
+        CandidateSet {
+            candidates: ranked
+                .into_iter()
+                .take(MAX_RANK_CANDIDATES)
+                .map(|(_, _, candidate)| candidate)
+                .collect(),
+            omitted,
+            indexed_files: self.files.len(),
+            omitted_paths,
         }
-        let estimated_tokens = text.len() / 4;
+    }
+
+    /// Render files in caller-supplied relevance order. The output budget
+    /// reserves room for a short path tail so partial results remain useful.
+    pub fn render_ranked(
+        &self,
+        ranked_paths: &[String],
+        other_paths: &[String],
+        omitted_candidates: usize,
+        max_tokens: usize,
+    ) -> ProjectMap {
+        let max_chars = max_tokens.clamp(64, MAX_TOKEN_BUDGET) * 4;
+        let body_budget = max_chars * 4 / 5;
+        let mut text = String::new();
+        let mut mapped = 0usize;
+        let mut omitted_files = 0usize;
+        let mut leads = Vec::new();
+        for path in ranked_paths {
+            let Some(file) = self.files.get(Path::new(path)) else {
+                continue;
+            };
+            let mut block = String::new();
+            for symbol in &file.symbols {
+                if symbol.line == 0 {
+                    block.push_str(&format!("  {}\n", symbol.signature));
+                } else {
+                    block.push_str(&format!("{path}:{}\n  {}\n", symbol.line, symbol.signature));
+                    if !symbol.excerpt.is_empty() {
+                        block.push_str("      ");
+                        block.push_str(&symbol.excerpt);
+                        block.push('\n');
+                    }
+                }
+            }
+            if text.len() + block.len() <= body_budget {
+                text.push_str(&block);
+                mapped += 1;
+            } else {
+                omitted_files += 1;
+                if leads.len() < 20 {
+                    leads.push(path.clone());
+                }
+            }
+        }
+        for path in other_paths {
+            if leads.len() >= 20 {
+                break;
+            }
+            if !leads.contains(path) && !ranked_paths.contains(path) {
+                leads.push(path.clone());
+            }
+        }
+        if !leads.is_empty() {
+            text.push_str("Other candidate paths:\n");
+            for path in &leads {
+                let line = format!("  {path}\n");
+                if text.len() + line.len() > max_chars {
+                    break;
+                }
+                text.push_str(&line);
+            }
+        }
+        if text.is_empty() {
+            text.push_str("No matching declarations were found in the indexed workspace.\n");
+        }
+        let estimated_tokens = text.len().div_ceil(4);
         ProjectMap {
             text,
             indexed_files: self.files.len(),
             mapped_files: mapped,
-            omitted_files: omitted,
+            omitted_files: omitted_files + other_paths.len(),
+            omitted_candidates,
+            truncated: omitted_files > 0 || omitted_candidates > 0 || !other_paths.is_empty(),
             estimated_tokens,
         }
     }
+
+    /// Deterministic fallback ordering for unavailable or unusable Jev results.
+    pub fn fallback_order(candidates: &CandidateSet) -> Vec<String> {
+        candidates
+            .candidates
+            .iter()
+            .map(|candidate| candidate.path.clone())
+            .collect()
+    }
+
+    /// Render a general orientation map, retained for local diagnostics.
+    pub fn render(&self, max_tokens: usize) -> ProjectMap {
+        let candidates = self.candidates("", None, &[], &[]);
+        self.render_ranked(
+            &Self::fallback_order(&candidates),
+            &candidates.omitted_paths,
+            candidates.omitted,
+            max_tokens,
+        )
+    }
+}
+
+fn normalize(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect()
+}
+
+fn query_terms(query: &str) -> Vec<String> {
+    const STOP: &[&str] = &[
+        "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "for", "from", "how", "i",
+        "in", "is", "it", "of", "on", "or", "the", "to", "what", "where", "which", "with",
+    ];
+    normalize(query)
+        .split_whitespace()
+        .filter(|term| term.len() > 1 && !STOP.contains(term))
+        .map(str::to_owned)
+        .collect()
 }
 
 #[cfg(test)]
@@ -781,8 +1047,65 @@ mod tests {
         let map = index.render(100); // 400 chars
         assert!(map.omitted_files > 0);
         assert!(map.mapped_files < 30);
-        assert!(map.text.contains("more files (map budget)"));
-        assert!(map.estimated_tokens <= 110);
+        assert!(map.text.contains("Other candidate paths:"));
+        assert!(map.estimated_tokens <= 100);
+        assert!(map.truncated);
+    }
+
+    #[test]
+    fn candidates_include_line_numbers_and_ranked_source_evidence() {
+        let dir = fixture(&[
+            (
+                "src/auth.rs",
+                "// Renews an expired credential from the refresh token.\npub fn renew_credential(refresh_token: &str) -> Token {\n    issue_token(refresh_token)\n}\n",
+            ),
+            ("src/chat.rs", "pub fn send_message() {}\n"),
+        ]);
+        let index = RepoMapIndex::scan(&dir).unwrap();
+        let candidates = index.candidates(
+            "rotate a credential",
+            None,
+            &["renew_credential".to_owned()],
+            &[],
+        );
+
+        assert_eq!(candidates.candidates[0].path, "src/auth.rs");
+        assert!(candidates.candidates[0].evidence.contains("line 2"));
+        assert!(
+            candidates.candidates[0]
+                .evidence
+                .contains("Renews an expired credential")
+        );
+
+        let map = index.render_ranked(&["src/auth.rs".to_owned()], &[], 0, 256);
+        assert!(map.text.starts_with("src/auth.rs:2\n"));
+        assert!(map.text.contains("pub fn renew_credential"));
+        assert!(map.text.contains("Renews an expired credential"));
+    }
+
+    #[test]
+    fn path_scope_and_known_paths_shape_candidate_order() {
+        let dir = fixture(&[
+            ("src/auth/login.rs", "pub fn login() {}\n"),
+            ("src/auth/token.rs", "pub fn validate_token() {}\n"),
+            ("src/chat/send.rs", "pub fn send_message() {}\n"),
+        ]);
+        let index = RepoMapIndex::scan(&dir).unwrap();
+        let candidates = index.candidates(
+            "token",
+            Some(Path::new("src/auth")),
+            &["validate_token".to_owned()],
+            &[PathBuf::from("src/auth/login.rs")],
+        );
+
+        assert_eq!(candidates.candidates.len(), 2);
+        assert_eq!(candidates.candidates[0].path, "src/auth/token.rs");
+        assert!(
+            candidates
+                .candidates
+                .iter()
+                .all(|candidate| candidate.path.starts_with("src/auth/"))
+        );
     }
 
     #[test]

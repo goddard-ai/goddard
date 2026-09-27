@@ -3569,8 +3569,7 @@ pub fn is_delegation_tool_name(name: &str) -> bool {
 }
 
 /// The daemon's project-map state for one session, streamed while the
-/// experiment opt-in is on. Clients surface it as a small status chip and,
-/// for `Sent`, a transcript artifact carrying the injected text.
+/// experiment opt-in is on. Clients surface index progress as a small status chip.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(
     tag = "state",
@@ -3580,20 +3579,50 @@ pub fn is_delegation_tool_name(name: &str) -> bool {
 pub enum ProjectMapStatus {
     /// The workspace index is building.
     Building,
-    /// The index is ready — a session's first prompt can be mapped.
+    /// The index is ready for agent map requests.
     Ready { indexed_files: usize },
-    /// A settled turn triggered an incremental refresh; a previously sent
-    /// map may lag the code until it finishes.
+    /// A settled turn triggered an incremental refresh; a map request may use
+    /// the previous index until it finishes.
     Refreshing,
-    /// The map was prepended to the session's first prompt. `text` is the
-    /// rendered map itself, so clients can show exactly what the provider
-    /// received.
-    Sent {
-        mapped_files: usize,
-        indexed_files: usize,
-        estimated_tokens: usize,
-        text: String,
-    },
+}
+
+/// The kind of source context an agent is looking for.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectMapIntent {
+    /// Find where a behavior or symbol is implemented.
+    Locate,
+    /// Explain how a behavior works.
+    #[default]
+    Understand,
+    /// Find code and supporting files relevant to a proposed change.
+    Change,
+}
+
+/// How an on-demand project map was selected.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectMapRanking {
+    Jev,
+    LocalFallback,
+}
+
+/// A query-specific, source-backed map returned to a scoped agent.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProjectMapResult {
+    pub query: String,
+    pub intent: ProjectMapIntent,
+    pub text: String,
+    pub indexed_files: usize,
+    pub candidates_considered: usize,
+    pub omitted_candidates: usize,
+    pub mapped_files: usize,
+    pub estimated_tokens: usize,
+    pub truncated: bool,
+    pub ranking: ProjectMapRanking,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
 }
 
 /// Where a sandboxed session's launch is, streamed while the daemon builds

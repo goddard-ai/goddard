@@ -44,10 +44,9 @@ custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
  */
 subagents_enabled: boolean,
 /**
- * Experimental: prepend a token-budgeted structural map of the session's
- * workspace to the first prompt of every new session, so providers skip
- * cold repo exploration. Off by default in release builds, on in debug
- * builds; affects only sessions started afterwards.
+ * Experimental: expose the on-demand, Jev-ranked `goddard-agent map`
+ * command for the session's workspace. Off by default in release builds,
+ * on in debug builds; affects only sessions started afterwards.
  */
 project_map_enabled: boolean, provider_binary_overrides: { [key in ProviderKind]?: string },
 /**

@@ -2952,19 +2952,6 @@ impl Waku {
                 "icons/loader-circle.svg",
                 true,
             ),
-            ProjectMapStatus::Sent {
-                mapped_files,
-                estimated_tokens,
-                ..
-            } => (
-                tr!(
-                    "project_map.sent",
-                    files = *mapped_files,
-                    tokens = *estimated_tokens
-                ),
-                "icons/map.svg",
-                false,
-            ),
         };
         let glyph = icon(icon_path, 10.5, color);
         Some(

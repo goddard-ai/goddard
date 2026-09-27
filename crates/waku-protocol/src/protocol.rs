@@ -12,10 +12,11 @@ use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
 use crate::eval::{EvalQuestion, EvalSettings, EvalUsageStats, Evaluation};
 use crate::model::{
-    AgentAskOutcome, AgentModelOption, AgentSession, AgentSessionSearchHit, AgentSessionTranscript,
-    GoalOperation, MessageAttachment, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
-    ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, SessionStatus,
-    UserInputAnswer, UserInputQuestion,
+    AgentAskOutcome, AgentModelOption, AgentProjectMapResult, AgentSession, AgentSessionSearchHit,
+    AgentSessionTranscript, GoalOperation, MessageAttachment, Project, ProjectMapIntent,
+    ProviderKind, ProviderProbe, ProviderResumeCursor, ProviderSessionCatalogStatus,
+    ProviderSessionHistory, ProviderSessionSummary, SessionStatus, UserInputAnswer,
+    UserInputQuestion,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -726,6 +727,24 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_turns: Option<usize>,
     },
+    /// Scoped agent credential only: ask Jev to select source-backed context
+    /// from the caller's indexed workspace. Output is bounded and carries
+    /// path/line locations; the map setting gates this command.
+    AgentProjectMap {
+        query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(type = "string | null")]
+        path: Option<PathBuf>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_tokens: Option<usize>,
+        #[serde(default)]
+        intent: ProjectMapIntent,
+        #[serde(default)]
+        anchors: Vec<String>,
+        #[serde(default)]
+        #[ts(type = "string[]")]
+        known_paths: Vec<PathBuf>,
+    },
     /// Scoped agent credential only: ask the session's user a structured
     /// question mid-turn. The daemon emits the session's ordinary
     /// `userInputRequested` event and parks this call until the user
@@ -1390,6 +1409,10 @@ pub enum ResponsePayload {
     /// command palette ranks session matches.
     AgentSessionSearch {
         hits: Vec<AgentSessionSearchHit>,
+    },
+    /// The source-backed result an agent requested from its own workspace.
+    AgentProjectMap {
+        result: AgentProjectMapResult,
     },
     /// The resolution of a parked `agentAsk` — the user's answers, their
     /// free-form clarification, or a cancellation.
