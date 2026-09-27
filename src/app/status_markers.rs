@@ -1,11 +1,12 @@
 //! Turn status markers: while the experiment is on, each assistant turn that
 //! ends naturally is scored by the daemon's evaluation model — one `Choice`
-//! question picks how the turn ended (complete, awaiting input, partial,
-//! blocked, failed, other). Follow-up choices refine actionable endings and
+//! question picks how the turn ended (complete, answered, awaiting input,
+//! partial, other). Follow-up choices refine actionable endings and
 //! verification, while independent Nouls flag qualities that can co-occur
-//! with any ending (unverified, drifted). Cleared markers render as
-//! chips on the response footer: colored icon and name, dim confidence
-//! percent.
+//! with any ending — including failure and blockage, which a tidy closing
+//! reply can otherwise hide (unverified, drifted, failed, blocked). Cleared
+//! markers render as chips on the response footer: colored icon and name,
+//! dim confidence percent.
 //!
 //! Evals are spend, so they only run for the session on screen. A turn that
 //! ends while its session is unselected queues behind it and is scored when
@@ -62,8 +63,9 @@ impl MarkerTone {
 /// How the turn ended — the options of one `Choice` question that compete
 /// for probability mass, so only the dominant ending can render and endings
 /// that contradict each other never share the footer. `other` is the escape
-/// bucket: when it wins, no ending chip renders. Bad endings carry lower
-/// thresholds — a false chip is cheap next to a missed failure — while
+/// bucket: when it wins, no ending chip renders. Failure and blockage are
+/// flags rather than endings — a turn can report done while sitting on
+/// unrecovered errors, so they must not compete for this probability mass.
 /// `complete` and `nothing-to-do` only render when the model is sure.
 const ENDING_QUESTION: &str = "ending";
 const ENDING_OTHER_OPTION: &str = "other";
@@ -154,26 +156,6 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         instructions: "The turn stopped before the work was finished — cut off by a \
             context or step limit (`contextUsage` near its `window` is direct \
             evidence), truncated output, or an explicit promise to continue later.",
-    },
-    StatusMarker {
-        id: "blocked",
-        label_key: "status_markers.blocked",
-        icon: "icons/ban.svg",
-        tone: MarkerTone::Danger,
-        threshold: 0.45,
-        instructions: "The assistant cannot proceed without something outside its \
-            control — a missing permission, credential, file, tool, or environment \
-            resource; `toolErrors` output tails surface those failures.",
-    },
-    StatusMarker {
-        id: "failed",
-        label_key: "status_markers.failed",
-        icon: "icons/x-bold.svg",
-        tone: MarkerTone::Danger,
-        threshold: 0.45,
-        instructions: "The turn failed — a reported error, a tool failure that ended \
-            the work, or the assistant saying it could not complete the request; \
-            `toolErrors` lists the calls that went wrong.",
     },
 ];
 
@@ -291,10 +273,35 @@ fn waiting_for_user_input(evaluation: &Evaluation) -> bool {
 }
 
 /// Flags stay independent Nouls — qualities that legitimately co-occur with
-/// any ending (a turn can be `complete` *and* `unverified`, or `blocked`
-/// *and* `drifted`), so they must not compete for the ending's probability
-/// mass.
+/// any ending (a turn can be `complete` *and* `unverified`, or `partial`
+/// *and* `failed`), so they must not compete for the ending's probability
+/// mass. `failed` and `blocked` lead the catalog: winner-take-all endings
+/// used to let a weak `complete` hide a turn that hit a wall — a false chip
+/// is cheap next to a missed failure, so their bars stay low.
 const FLAG_MARKERS: &[StatusMarker] = &[
+    StatusMarker {
+        id: "failed",
+        label_key: "status_markers.failed",
+        icon: "icons/x-bold.svg",
+        tone: MarkerTone::Danger,
+        threshold: 0.45,
+        instructions: "Did the turn fail — a reported error, a tool failure that \
+            ended the work, or the assistant saying it could not complete the \
+            request? `toolErrors` lists the calls that went wrong. Judge this \
+            independently of the ending: a tidy closing reply can still sit on \
+            unrecovered errors.",
+    },
+    StatusMarker {
+        id: "blocked",
+        label_key: "status_markers.blocked",
+        icon: "icons/ban.svg",
+        tone: MarkerTone::Danger,
+        threshold: 0.45,
+        instructions: "Was the assistant unable to proceed without something \
+            outside its control — a missing permission, credential, file, tool, \
+            or environment resource? `toolErrors` output tails surface those \
+            failures.",
+    },
     StatusMarker {
         id: "unverified",
         label_key: "status_markers.unverified",
@@ -407,8 +414,8 @@ fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
                 `response` against the `prompt` and any `priorPrompts` still in play; \
                 `toolSequence`, `toolErrors`, and `filesChanged` carry what the turn \
                 actually did. `answered` is only for asks satisfied entirely by \
-                information — a prompt that requested work ends `complete`, \
-                `partial`, or `failed` even when the response also explains."
+                information — a prompt that requested work ends `complete` or \
+                `partial` even when the response also explains."
                 .to_owned(),
             criteria: ENDING_MARKERS
                 .iter()
@@ -441,7 +448,7 @@ fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
         ),
         (
             FAILURE_QUESTION,
-            "If the ending is `failed`, are there repairable errors still \
+            "If `failed` is true, are there repairable errors still \
                 unresolved? Otherwise choose `other`.",
             FAILURE_MARKERS,
         ),
@@ -730,7 +737,6 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
             let subtype = match marker.id {
                 "awaiting-input" => cleared_subtype(evaluation, INPUT_QUESTION, INPUT_MARKERS),
                 "partial" => cleared_subtype(evaluation, PARTIAL_QUESTION, PARTIAL_MARKERS),
-                "failed" => cleared_subtype(evaluation, FAILURE_QUESTION, FAILURE_MARKERS),
                 _ => None,
             };
             // The chip reports the subtype's own score — the parent already
@@ -752,9 +758,13 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
         if let Some(EvalAnswer::Noul { noul }) = evaluation.answers.get(marker.id)
             && *noul >= marker.threshold
         {
-            let subtype = (marker.id == "unverified")
-                .then(|| cleared_subtype(evaluation, VERIFICATION_QUESTION, VERIFICATION_MARKERS))
-                .flatten();
+            let subtype = match marker.id {
+                "unverified" => {
+                    cleared_subtype(evaluation, VERIFICATION_QUESTION, VERIFICATION_MARKERS)
+                }
+                "failed" => cleared_subtype(evaluation, FAILURE_QUESTION, FAILURE_MARKERS),
+                _ => None,
+            };
             cleared.push(
                 subtype
                     .map(|(subtype, score)| (subtype, score))
@@ -795,7 +805,7 @@ fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) ->
 
 /// What the sidebar status slot can say about a session's last turn. The
 /// footer's many chips collapse to two glyphs — chat for endings that
-/// wait on the user's reply, block for endings that hit a wall — because
+/// wait on the user's reply, block for turns that hit a wall — because
 /// the slot's job is glanceability: more shapes would be harder to keep
 /// straight than the verdict they carry.
 pub(super) struct SidebarStatusMarker {
@@ -806,8 +816,8 @@ pub(super) struct SidebarStatusMarker {
 
 /// Which of the two sidebar glyphs a marker maps to, if any. Endings that
 /// leave nothing pending for the user (`complete`, `answered`,
-/// `nothing-to-do`, `pushed-back`, `other`) and every flag stay
-/// footer-only.
+/// `nothing-to-do`, `pushed-back`, `other`) and the quality flags stay
+/// footer-only; the failure flags claim the danger glyphs.
 fn sidebar_bucket(marker: &StatusMarker) -> Option<(&'static str, MarkerTone)> {
     match marker.id {
         "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned" | "partial"
@@ -819,15 +829,18 @@ fn sidebar_bucket(marker: &StatusMarker) -> Option<(&'static str, MarkerTone)> {
 }
 
 fn sidebar_marker(evaluation: &Evaluation) -> Option<SidebarStatusMarker> {
+    // A turn can carry a waiting ending and a failure flag at once — the
+    // single sidebar glyph reports the danger first.
     cleared_markers(evaluation)
         .into_iter()
-        .find_map(|(marker, _)| {
+        .filter_map(|(marker, _)| {
             sidebar_bucket(marker).map(|(icon, tone)| SidebarStatusMarker {
                 icon,
                 label_key: marker.label_key,
                 tone,
             })
         })
+        .min_by_key(|marker| !matches!(marker.tone, MarkerTone::Danger))
 }
 
 impl Waku {
@@ -1582,37 +1595,47 @@ mod tests {
 
     #[test]
     fn actionable_subtypes_replace_only_their_cleared_parent() {
-        for (parent, question, subtype, action) in [
-            (
-                "partial",
-                PARTIAL_QUESTION,
-                "needs-continuation",
-                StatusSuggestedAction::KeepGoing,
-            ),
-            (
-                "failed",
-                FAILURE_QUESTION,
-                "errors-remain",
-                StatusSuggestedAction::FixErrors,
-            ),
-        ] {
-            let verdict = |score| {
-                evaluation(BTreeMap::from([
-                    (
-                        ENDING_QUESTION.to_owned(),
-                        ending_choice(parent, &[(parent, 0.80)]),
-                    ),
-                    (
-                        question.to_owned(),
-                        ending_choice(subtype, &[(subtype, score)]),
-                    ),
-                ]))
-            };
-            assert_eq!(cleared_markers(&verdict(0.80))[0].0.id, subtype);
-            assert_eq!(suggested_actions(&verdict(0.80)), [action]);
-            assert_eq!(cleared_markers(&verdict(0.40))[0].0.id, parent);
-            assert!(suggested_actions(&verdict(0.40)).is_empty());
-        }
+        let verdict = |score| {
+            evaluation(BTreeMap::from([
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice("partial", &[("partial", 0.80)]),
+                ),
+                (
+                    PARTIAL_QUESTION.to_owned(),
+                    ending_choice("needs-continuation", &[("needs-continuation", score)]),
+                ),
+            ]))
+        };
+        assert_eq!(
+            cleared_markers(&verdict(0.80))[0].0.id,
+            "needs-continuation"
+        );
+        assert_eq!(
+            suggested_actions(&verdict(0.80)),
+            [StatusSuggestedAction::KeepGoing]
+        );
+        assert_eq!(cleared_markers(&verdict(0.40))[0].0.id, "partial");
+        assert!(suggested_actions(&verdict(0.40)).is_empty());
+
+        // `errors-remain` refines the `failed` flag the same way — the
+        // failure is a Noul now, but its subtype still drives the chip.
+        let errors = |score| {
+            evaluation(BTreeMap::from([
+                ("failed".to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+                (
+                    FAILURE_QUESTION.to_owned(),
+                    ending_choice("errors-remain", &[("errors-remain", score)]),
+                ),
+            ]))
+        };
+        assert_eq!(cleared_markers(&errors(0.80))[0].0.id, "errors-remain");
+        assert_eq!(
+            suggested_actions(&errors(0.80)),
+            [StatusSuggestedAction::FixErrors]
+        );
+        assert_eq!(cleared_markers(&errors(0.40))[0].0.id, "failed");
+        assert!(suggested_actions(&errors(0.40)).is_empty());
 
         let untested = evaluation(BTreeMap::from([
             (
@@ -1648,13 +1671,11 @@ mod tests {
                 (
                     ENDING_QUESTION.to_owned(),
                     ending_choice(
-                        "blocked",
+                        "partial",
                         &[
                             ("complete", 0.05),
                             ("awaiting-input", 0.10),
-                            ("partial", 0.15),
-                            ("blocked", 0.60),
-                            ("failed", 0.05),
+                            ("partial", 0.60),
                             ("other", 0.05),
                         ],
                     ),
@@ -1669,9 +1690,49 @@ mod tests {
             .iter()
             .map(|(marker, _)| marker.id)
             .collect();
-        // The ending winner clears blocked's 0.45 bar; unverified's 0.80
+        // The ending winner clears partial's 0.50 bar; unverified's 0.80
         // clears 0.75 while drifted's 0.50 misses 0.70.
-        assert_eq!(ids, ["blocked", "unverified"]);
+        assert_eq!(ids, ["partial", "unverified"]);
+    }
+
+    #[test]
+    fn failure_flags_clear_independently_of_the_ending() {
+        // A tidy `complete` verdict no longer hides unrecovered errors —
+        // the flag clears on its own bar and the done-chip yields to it.
+        let done_but_failed = evaluation(
+            [
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice("complete", &[("complete", 0.90), ("other", 0.10)]),
+                ),
+                ("failed".to_owned(), EvalAnswer::Noul { noul: 0.80 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let ids: Vec<&str> = cleared_markers(&done_but_failed)
+            .iter()
+            .map(|(marker, _)| marker.id)
+            .collect();
+        assert_eq!(ids, ["failed"]);
+
+        // An unfinished ending and a wall can honestly co-occur.
+        let partial_and_blocked = evaluation(
+            [
+                (
+                    ENDING_QUESTION.to_owned(),
+                    ending_choice("partial", &[("partial", 0.90), ("other", 0.10)]),
+                ),
+                ("blocked".to_owned(), EvalAnswer::Noul { noul: 0.80 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let ids: Vec<&str> = cleared_markers(&partial_and_blocked)
+            .iter()
+            .map(|(marker, _)| marker.id)
+            .collect();
+        assert_eq!(ids, ["partial", "blocked"]);
     }
 
     #[test]
@@ -1826,14 +1887,26 @@ mod tests {
                 ),
             )]))
         };
-        // Endings that wait on the user's reply collapse to the chat glyph;
-        // endings that hit a wall get distinct blocked and failed glyphs.
+        // Endings that wait on the user's reply collapse to the chat glyph.
         for choice in ["awaiting-input", "aligned", "partial"] {
             let marker = sidebar_marker(&ending(choice, 0.90)).unwrap();
             assert_eq!(marker.icon, "icons/chat.svg");
         }
-        for (choice, icon) in [("blocked", "icons/ban.svg"), ("failed", "icons/block.svg")] {
-            let marker = sidebar_marker(&ending(choice, 0.90)).unwrap();
+        // The failure flags claim the danger glyphs — including beside a
+        // waiting ending, where the wall outranks the chat.
+        for (flag, icon) in [("blocked", "icons/ban.svg"), ("failed", "icons/block.svg")] {
+            let verdict = evaluation(
+                [
+                    (
+                        ENDING_QUESTION.to_owned(),
+                        ending_choice("awaiting-input", &[("awaiting-input", 0.90)]),
+                    ),
+                    (flag.to_owned(), EvalAnswer::Noul { noul: 0.90 }),
+                ]
+                .into_iter()
+                .collect(),
+            );
+            let marker = sidebar_marker(&verdict).unwrap();
             assert_eq!(marker.icon, icon);
         }
         // Quiet endings never claim the slot.
@@ -1842,7 +1915,7 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_marker_uses_the_cleared_subtype_and_ignores_flags() {
+    fn sidebar_marker_uses_the_cleared_subtype_and_ignores_quality_flags() {
         // A decision refines awaiting-input; the glyph buckets by what the
         // turn wants while the tooltip keeps the subtype's own label.
         let decision = evaluation(BTreeMap::from([
@@ -1862,8 +1935,8 @@ mod tests {
         assert_eq!(marker.icon, "icons/chat.svg");
         assert_eq!(marker.label_key, "status_markers.decision");
 
-        // A flag alone never claims the slot, even as the only cleared
-        // marker — flags stay footer-level nuance.
+        // A quality flag alone never claims the slot, even as the only
+        // cleared marker — they stay footer-level nuance.
         let untested = evaluation(BTreeMap::from([
             (
                 ENDING_QUESTION.to_owned(),

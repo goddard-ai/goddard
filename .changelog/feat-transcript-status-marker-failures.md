@@ -1,0 +1,1 @@
+- Turn footers can now mark a turn Failed or Blocked even when the closing reply reads like a normal ending — an unrecovered error or a missing permission no longer hides behind a "Complete" verdict.
