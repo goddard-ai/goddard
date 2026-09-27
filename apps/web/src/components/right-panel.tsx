@@ -90,10 +90,12 @@ export function RightPanel({
   requestedDiffSource,
   requestedBackgroundWorkKey,
   requestedFile,
+  requestedHeading,
   requestSignal,
   sidebarWidth,
   onOpenChange,
   onPanelWidthChange,
+  onHeadingHandled,
 }: {
   active: boolean
   open: boolean
@@ -104,10 +106,12 @@ export function RightPanel({
   requestedDiffSource: ReviewDiffSource
   requestedBackgroundWorkKey: BackgroundWorkKey | null
   requestedFile: string | null
+  requestedHeading: string | null
   requestSignal: number
   sidebarWidth: number
   onOpenChange: (open: boolean) => void
   onPanelWidthChange: Dispatch<SetStateAction<number>>
+  onHeadingHandled: () => void
 }) {
   const { t } = useI18n()
   const [{ tabs, activeId }, setPanelState] = useState<PanelState>({
@@ -419,6 +423,10 @@ export function RightPanel({
               panelWidth={fittedPanelWidth}
               project={project}
               requestedFile={tab.selectedFile ?? null}
+              requestedHeading={tab.id === activeTab?.id && tab.selectedFile === requestedFile
+                ? requestedHeading
+                : null}
+              onHeadingHandled={onHeadingHandled}
               session={session}
               setBuffers={setFileBuffers}
               tabId={tab.id}
@@ -578,6 +586,33 @@ function PanelCard({
   )
 }
 
+function markdownHeadingLine(contents: string, fragment: string) {
+  const wanted = slugMarkdownHeading(fragment)
+  const counts = new Map<string, number>()
+  for (const [index, line] of contents.split('\n').entries()) {
+    const match = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
+    if (!match) continue
+    const base = slugMarkdownHeading(match[1]!)
+    if (!base) continue
+    const count = counts.get(base) ?? 0
+    counts.set(base, count + 1)
+    const slug = count === 0 ? base : `${base}-${count}`
+    if (slug === wanted) return index + 1
+  }
+  return null
+}
+
+function slugMarkdownHeading(text: string) {
+  return text
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .trim()
+    .replace(/[\s]+/g, '-')
+    .replace(/-+/g, '-')
+}
+
 interface FileBuffer {
   content: string
   diskContent: string
@@ -593,10 +628,12 @@ function FilesPanel({
   session,
   project,
   requestedFile,
+  requestedHeading,
   panelWidth,
   setBuffers,
   onDirtyChange,
   onOpenFile,
+  onHeadingHandled,
 }: {
   active: boolean
   buffers: Record<string, FileBuffer>
@@ -604,10 +641,12 @@ function FilesPanel({
   session: AgentSession | null
   project?: Project
   requestedFile: string | null
+  requestedHeading: string | null
   panelWidth: number
   setBuffers: Dispatch<SetStateAction<Record<string, FileBuffer>>>
   onDirtyChange: (tabId: string, dirty: boolean) => void
   onOpenFile: (tabId: string, path: string, treeWidth: number) => void
+  onHeadingHandled: () => void
 }) {
   const { t } = useI18n()
   const { client, config, phase } = useDaemon()
@@ -684,6 +723,14 @@ function FilesPanel({
   }, [file.data, selected])
 
   const selectedBuffer = selected ? buffers[selected] : undefined
+  useEffect(() => {
+    if (!requestedHeading || !selectedBuffer?.editor || selectedBuffer.content === undefined) return
+    const lineNumber = markdownHeadingLine(selectedBuffer.content, requestedHeading)
+    if (lineNumber !== null) {
+      selectedBuffer.editor.focus({ lineNumber, character: 0 })
+    }
+    onHeadingHandled()
+  }, [onHeadingHandled, requestedHeading, selectedBuffer])
   const dirty = Boolean(selectedBuffer && selectedBuffer.content !== selectedBuffer.diskContent)
   useEffect(() => {
     onDirtyChange(tabId, dirty)

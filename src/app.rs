@@ -1152,6 +1152,7 @@ impl Render for WakuPane {
 struct PendingFileFocus {
     path: String,
     position: Option<(usize, usize)>,
+    heading: Option<String>,
 }
 
 struct RightPanelFileEditor {
@@ -1193,6 +1194,8 @@ struct RightPanelFileEditor {
     /// A `(line, column)` jump target from the finder, waiting on the file's
     /// read — the caret cannot land on a line the editor does not have yet.
     pending_position: Option<(usize, usize)>,
+    /// A Markdown heading fragment waiting for the file's first read.
+    pending_heading: Option<String>,
     /// Pinned selection highlights with comments — this editor's share of the
     /// session's annotation set. Painted inside the field, counted in the
     /// composer chip, drained into the next submission alongside the

@@ -134,6 +134,7 @@ export function WakuApp() {
   } | null>(null)
   const [requestedPanel, setRequestedPanel] = useState<PanelSurface>('files')
   const [requestedFile, setRequestedFile] = useState<string | null>(null)
+  const [requestedHeading, setRequestedHeading] = useState<string | null>(null)
   const [requestedDiffSource, setRequestedDiffSource] = useState<ReviewDiffSource>('uncommitted')
   const [requestedBackgroundWorkKey, setRequestedBackgroundWorkKey] = useState<BackgroundWorkKey | null>(null)
   const [panelRequestSessionId, setPanelRequestSessionId] = useState<string | null>(null)
@@ -537,11 +538,13 @@ export function WakuApp() {
     surface: PanelSurface,
     source: ReviewDiffSource = 'uncommitted',
     file: string | null = null,
+    heading: string | undefined = undefined,
   ) {
     if (!activeSession) return
     retainPanelSession(activeSession, activeProject)
     setRequestedPanel(surface)
     setRequestedFile(surface === 'files' ? file : null)
+    setRequestedHeading(surface === 'files' ? heading ?? null : null)
     if (surface === 'changes') setRequestedDiffSource(source)
     setPanelRequestSessionId(activeSession.id)
     setPanelRequestSignal((value) => value + 1)
@@ -569,7 +572,7 @@ export function WakuApp() {
       toast.error(t('errors.path_outside_workspace'))
       return true
     }
-    openPanel('files', 'uncommitted', route.path)
+    openPanel('files', 'uncommitted', route.path, route.heading)
     return true
   }
 
@@ -1250,6 +1253,8 @@ export function WakuApp() {
             requestedDiffSource={requestedDiffSource}
             requestedBackgroundWorkKey={requestedBackgroundWorkKey}
             requestedFile={requestedFile}
+            requestedHeading={requestedHeading}
+            onHeadingHandled={() => setRequestedHeading(null)}
             requestedSurface={requestedPanel}
             requestSignal={panelRequestSessionId === sessionId ? panelRequestSignal : 0}
             session={panelSession}

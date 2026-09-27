@@ -311,6 +311,7 @@ impl Waku {
             self.right_panel_pending_file_focus = Some(PendingFileFocus {
                 path: path.to_owned(),
                 position: Some((line, column.unwrap_or(1))),
+                heading: None,
             });
             return;
         };

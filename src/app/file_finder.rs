@@ -347,6 +347,7 @@ impl Waku {
         self.right_panel_pending_file_focus = Some(PendingFileFocus {
             path: relative_path.clone(),
             position: line.map(|line| (line, column.unwrap_or(1))),
+            heading: None,
         });
         if let Some(workspace) = self.right_panel_files_root.clone() {
             self.reveal_right_panel_file_in_tree_at_root(relative_path.clone(), workspace, cx);

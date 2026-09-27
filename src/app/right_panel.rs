@@ -35,7 +35,7 @@ pub(super) struct WorkingTreeEntry {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum TranscriptLinkRoute {
-    ProjectFile(String),
+    ProjectFile(String, Option<String>),
     Finder(PathBuf),
     /// A `goddard://task/<id>` reference — `None` when the id is malformed.
     Task(Option<Uuid>),
@@ -149,6 +149,12 @@ fn percent_decode_file_path(path: &str) -> String {
 
 fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
     let target = strip_file_location(target.trim());
+    let target = target
+        .rsplit_once('#')
+        .filter(|(path, fragment)| {
+            !line_fragment(fragment) && path.to_ascii_lowercase().ends_with(".md")
+        })
+        .map_or(target, |(path, _)| path);
     if target
         .get(..5)
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("file:"))
@@ -158,6 +164,72 @@ fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
 
     let path = PathBuf::from(percent_decode_file_path(target));
     path.is_absolute().then_some(path)
+}
+
+fn markdown_file_link_heading(target: &str) -> Option<String> {
+    let (path_target, fragment) = target.trim().rsplit_once('#')?;
+    if fragment.is_empty() || line_fragment(fragment) {
+        return None;
+    }
+    let path = markdown_file_link_path(path_target)?;
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        .then(|| percent_decode_file_path(fragment))
+}
+
+fn markdown_heading_slug(text: &str) -> String {
+    let mut slug = String::new();
+    let mut separator = false;
+    for character in text.chars().flat_map(char::to_lowercase) {
+        if character.is_alphanumeric() {
+            if separator && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(character);
+            separator = false;
+        } else if character.is_whitespace() || character == '-' {
+            separator = true;
+        }
+    }
+    slug
+}
+
+fn markdown_heading_line(content: &str, fragment: &str) -> Option<usize> {
+    let target = markdown_heading_slug(fragment);
+    if target.is_empty() {
+        return None;
+    }
+    let mut prior = Vec::<String>::new();
+    for (index, line) in content.lines().enumerate() {
+        let heading = line.trim_start();
+        let level = heading.bytes().take_while(|byte| *byte == b'#').count();
+        if !(1..=6).contains(&level) {
+            continue;
+        }
+        let Some(title) = heading
+            .get(level..)
+            .filter(|rest| rest.chars().next().is_some_and(char::is_whitespace))
+        else {
+            continue;
+        };
+        let title = title.trim().trim_end_matches('#').trim();
+        let base = markdown_heading_slug(title);
+        if base.is_empty() {
+            continue;
+        }
+        let duplicate = prior.iter().filter(|slug| **slug == base).count();
+        let slug = if duplicate == 0 {
+            base.clone()
+        } else {
+            format!("{base}-{duplicate}")
+        };
+        if slug == target {
+            return Some(index + 1);
+        }
+        prior.push(base);
+    }
+    None
 }
 
 fn normalized_path(path: &Path) -> PathBuf {
@@ -199,11 +271,12 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
     let Some(path) = markdown_file_link_path(target) else {
         return TranscriptLinkRoute::External;
     };
+    let heading = markdown_file_link_heading(target);
     let path = normalized_path(&path);
     if let Some(relative_path) =
         workspace.and_then(|workspace| workspace_relative_file_path(workspace, &path))
     {
-        TranscriptLinkRoute::ProjectFile(relative_path)
+        TranscriptLinkRoute::ProjectFile(relative_path, heading)
     } else {
         TranscriptLinkRoute::Finder(path)
     }
@@ -1253,18 +1326,18 @@ mod tests {
 
         assert_eq!(
             transcript_link_route(&project_file_with_line, Some(workspace)),
-            TranscriptLinkRoute::ProjectFile(relative_project_file.clone())
+            TranscriptLinkRoute::ProjectFile(relative_project_file.clone(), None)
         );
         assert_eq!(
             transcript_link_route(&project_file_with_column, Some(workspace)),
-            TranscriptLinkRoute::ProjectFile(relative_project_file)
+            TranscriptLinkRoute::ProjectFile(relative_project_file, None)
         );
 
         let encoded_file_url =
             url::Url::from_file_path(workspace.join("My File.rs")).expect("absolute file path");
         assert_eq!(
             transcript_link_route(&format!("{encoded_file_url}#L12C4"), Some(workspace)),
-            TranscriptLinkRoute::ProjectFile("My File.rs".into())
+            TranscriptLinkRoute::ProjectFile("My File.rs".into(), None)
         );
 
         let outside_file = workspace.join("../kero/src/app.rs");
@@ -1952,7 +2025,7 @@ impl Waku {
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
         let files_root = self.resolve_right_panel_files_root(cx);
         match transcript_link_route(target, files_root.as_deref()) {
-            TranscriptLinkRoute::ProjectFile(relative_path) => {
+            TranscriptLinkRoute::ProjectFile(relative_path, heading) => {
                 // A `file:line` target rides the same pending slot the finder
                 // uses: the editor takes focus and the jump lands once the
                 // file's first read does.
@@ -1961,10 +2034,11 @@ impl Waku {
                 self.open_right_panel_file(relative_path.clone(), cx);
                 self.right_panel_file_tree_visible = false;
                 cx.notify();
-                if let Some((line, column)) = location {
+                if location.is_some() || heading.is_some() {
                     self.right_panel_pending_file_focus = Some(PendingFileFocus {
                         path: relative_path,
-                        position: Some((line, column.unwrap_or(1))),
+                        position: location.map(|(line, column)| (line, column.unwrap_or(1))),
+                        heading,
                     });
                 }
             }
@@ -2479,6 +2553,7 @@ impl Waku {
             self.right_panel_pending_file_focus = Some(PendingFileFocus {
                 path,
                 position: None,
+                heading: None,
             });
         }
     }
@@ -5624,10 +5699,15 @@ impl Waku {
             None
         };
         let focus_pending = pending_open.is_some();
-        let position_pending = pending_open.and_then(|pending| pending.position);
+        let (position_pending, heading_pending) = pending_open
+            .map(|pending| (pending.position, pending.heading))
+            .unwrap_or_default();
         if let Some(editor) = self.right_panel_file_editors.get_mut(relative_path) {
             if let Some(position) = position_pending {
                 editor.pending_position = Some(position);
+            }
+            if heading_pending.is_some() {
+                editor.pending_heading = heading_pending;
             }
             // An image preview has no editor to focus — the TextInput is not
             // rendered while the pane shows pixels.
@@ -5679,6 +5759,7 @@ impl Waku {
                 reading: false,
                 read_epoch: 0,
                 pending_position: position_pending,
+                pending_heading: heading_pending,
                 annotations: Rc::new(RefCell::new(annotations)),
             },
         );
@@ -5743,19 +5824,78 @@ impl Waku {
         let Some(editor) = self.right_panel_file_editors.get_mut(relative_path) else {
             return;
         };
-        if !editor.reading
-            && let Some((line, column)) = editor.pending_position.take()
-        {
+        if !editor.reading {
             let state = editor.state.clone();
+            let content = state.read(cx).content().to_owned();
+            let heading_line = editor
+                .pending_heading
+                .take()
+                .and_then(|heading| markdown_heading_line(&content, &heading));
+            let position = editor
+                .pending_position
+                .take()
+                .or_else(|| heading_line.map(|line| (line, 1)));
+            let Some((line, column)) = position else {
+                return;
+            };
             let offset = cursor_offset_for_line_column(state.read(cx).content(), line, column);
+            let preview_heading_offset =
+                heading_line.map(|line| cursor_offset_for_line_column(&content, line, 1));
             state.update(cx, |state, cx| state.select_range(offset..offset, cx));
             let weak = cx.entity().downgrade();
+            let path = relative_path.to_owned();
             window.on_next_frame(move |_, cx| {
                 let _ = weak.update(cx, |this, cx| {
                     this.reveal_editor_offset(&state, offset, cx);
+                    if let Some(offset) = preview_heading_offset {
+                        this.reveal_markdown_heading(&path, offset);
+                    }
                 });
             });
         }
+    }
+
+    fn reveal_markdown_heading(&mut self, relative_path: &str, source_offset: usize) {
+        if !self.state.markdown_preview {
+            return;
+        }
+        let preview = self.file_preview_markdown.borrow();
+        let Some((_, view)) = preview.as_ref().filter(|(path, _)| path == relative_path) else {
+            return;
+        };
+        let mut block_index = 0;
+        let target_block = loop {
+            let Some(range) = view.block_source_range(block_index) else {
+                return;
+            };
+            if range.contains(&source_offset) {
+                break block_index;
+            }
+            block_index += 1;
+        };
+        let target_bounds = self
+            .file_preview_selection
+            .registry
+            .borrow()
+            .entries()
+            .iter()
+            .filter(|entry| {
+                !entry.geometry.is_missing()
+                    && md::render::block_index_of_ordinal(entry.key.index) == target_block
+            })
+            .find_map(|entry| {
+                md::render::text_range_bounds(&entry.geometry, &(0..entry.text.len()))
+                    .into_iter()
+                    .next()
+            });
+        let Some(target_bounds) = target_bounds else {
+            return;
+        };
+        let viewport = self.file_preview_scroll_handle.bounds();
+        let current = self.file_preview_scroll_handle.offset();
+        let delta = target_bounds.top() - viewport.top();
+        self.file_preview_scroll_handle
+            .set_offset(point(current.x, current.y - delta));
     }
 
     /// Reads a file into its editor off the UI thread.
