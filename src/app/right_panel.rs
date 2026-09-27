@@ -3221,6 +3221,7 @@ impl Waku {
                 response_footers: HashMap::new(),
                 expanded_turns: HashSet::new(),
                 expanded_activity_blocks: HashMap::new(),
+                expanded_changed_files: HashSet::new(),
                 hovered_response_turn: None,
             });
         let expanded_turns = view.expanded_turns.clone();
@@ -3228,12 +3229,6 @@ impl Waku {
         let previous_kinds = view.kinds.1.clone();
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
             let mut folded = folded_transcript_row_kinds(&session, &expanded_turns, pending_turn);
-            // Side chats have no general file summary, but a capture holding
-            // a queued prompt still marks the settled turn.
-            folded.retain(|kind| match kind {
-                TranscriptRowKind::ChangedFiles(turn_id) => pending_turn == Some(*turn_id),
-                _ => true,
-            });
             view.response_footers = folded
                 .iter()
                 .filter_map(|kind| {
@@ -3362,6 +3357,243 @@ impl Waku {
             view.expanded_turns.insert(turn_id);
         }
         cx.notify();
+    }
+
+    fn toggle_side_chat_changed_files(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        expanded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.side_chat_views.get_mut(&session_id) else {
+            return;
+        };
+        if expanded {
+            view.expanded_changed_files.remove(&turn_id);
+        } else {
+            view.expanded_changed_files.insert(turn_id);
+        }
+        if let Some(row_index) = view.kinds.1.iter().position(|kind| {
+            matches!(
+                kind,
+                TranscriptRowKind::ResponseFooter(id, _) | TranscriptRowKind::ChangedFiles(id)
+                    if *id == turn_id
+            )
+        }) {
+            let scroll_top = view.rows.logical_scroll_top();
+            view.rows.remeasure_items(row_index..row_index + 1);
+            view.rows.scroll_to(scroll_top);
+        }
+        cx.notify();
+    }
+
+    fn render_side_chat_changed_files_row(
+        &self,
+        session_id: Uuid,
+        session: &AgentSession,
+        turn_id: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let checkpoint = session
+            .turns
+            .iter()
+            .find(|turn| turn.id == turn_id)
+            .and_then(|turn| turn.checkpoint.as_ref())
+            .filter(|checkpoint| checkpoint.status == CheckpointStatus::Ready)
+            .filter(|checkpoint| !checkpoint.files.is_empty())?;
+        let expanded = self
+            .side_chat_views
+            .get(&session_id)
+            .is_some_and(|view| view.expanded_changed_files.contains(&turn_id));
+        const PREVIEW_LIMIT: usize = 3;
+        const EXPANDED_LIMIT: usize = 12;
+        let visible_limit = if expanded {
+            EXPANDED_LIMIT
+        } else {
+            PREVIEW_LIMIT
+        };
+        let visible_count = checkpoint.files.len().min(visible_limit);
+        let title = if checkpoint.files.len() == 1 {
+            tr!("transcript.changed_file", count = checkpoint.files.len())
+        } else {
+            tr!("transcript.changed_files", count = checkpoint.files.len())
+        };
+        let mut card = div()
+            .w_full()
+            .min_w_0()
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.overlay)
+            .overflow_hidden()
+            .child(
+                div()
+                    .min_h(px(58.0))
+                    .px(px(12.0))
+                    .py(px(9.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .size(px(36.0))
+                            .flex_none()
+                            .rounded(px(11.0))
+                            .bg(theme.overlay_strong)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon("icons/file-diff.svg", 16.0, theme.text_tertiary)),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(sp(12.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(14.0))
+                                    .child(
+                                        div()
+                                            .text_color(theme.success)
+                                            .child(format!("+{}", checkpoint.additions)),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(theme.danger)
+                                            .child(format!("-{}", checkpoint.deletions)),
+                                    ),
+                            ),
+                    ),
+            );
+        let mut file_rows = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .border_t(hairline())
+            .border_color(theme.separator);
+        for file in checkpoint.files.iter().take(visible_count) {
+            file_rows = file_rows.child(
+                div()
+                    .h(px(29.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(file.path.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(12.5))
+                            .text_color(theme.success)
+                            .child(format!("+{}", file.additions)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(12.5))
+                            .text_color(theme.danger)
+                            .child(format!("-{}", file.deletions)),
+                    ),
+            );
+        }
+        card = card.child(file_rows);
+        if checkpoint.files.len() > PREVIEW_LIMIT {
+            let focus = self.transcript_control_focus(
+                format!("side-chat-changed-files-toggle-{session_id}-{turn_id}"),
+                cx,
+            );
+            let label = if expanded {
+                tr!("transcript.show_fewer_files")
+            } else {
+                tr!(
+                    "transcript.show_more_files",
+                    count = checkpoint.files.len() - PREVIEW_LIMIT
+                )
+            };
+            card = card.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "side-chat-changed-files-toggle-{session_id}-{turn_id}"
+                    )))
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(34.0))
+                    .px(px(12.0))
+                    .border_t(hairline())
+                    .border_color(theme.separator)
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
+                    .active(|style| style.bg(theme.overlay))
+                    .child(SharedString::from(label))
+                    .when(expanded && checkpoint.files.len() > EXPANDED_LIMIT, |row| {
+                        row.child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .font_weight(FontWeight::NORMAL)
+                                .text_color(theme.text_ghost)
+                                .child(tr!(
+                                    "transcript.showing_first_files",
+                                    count = EXPANDED_LIMIT,
+                                    total = checkpoint.files.len()
+                                )),
+                        )
+                    })
+                    .child(div().flex_1())
+                    .child(icon(
+                        if expanded {
+                            "icons/chevron-down.svg"
+                        } else {
+                            "icons/chevron-right.svg"
+                        },
+                        11.0,
+                        theme.affordance_icon(),
+                    ))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_side_chat_changed_files(session_id, turn_id, expanded, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.toggle_side_chat_changed_files(session_id, turn_id, expanded, cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            );
+        }
+        Some(card.into_any_element())
     }
 
     fn render_side_chat_turn_fold_row(
@@ -3599,12 +3831,15 @@ impl Waku {
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)
             }
-            // Only a pending capture's ChangedFiles survives the fold retain;
-            // it renders the compact pending row rather than the full card.
-            TranscriptRowKind::ChangedFiles(turn_id)
-                if self.blocked_checkpoint_turn(session.id) == Some(turn_id) =>
-            {
-                self.render_card_checkpoint_pending_row(turn_id, &theme)
+            TranscriptRowKind::ChangedFiles(turn_id) => {
+                if self.blocked_checkpoint_turn(session.id) == Some(turn_id) {
+                    self.render_card_checkpoint_pending_row(turn_id, &theme)
+                } else {
+                    self.render_side_chat_changed_files_row(
+                        session_id, session, turn_id, &theme, cx,
+                    )
+                    .unwrap_or_else(|| div().into_any_element())
+                }
             }
             TranscriptRowKind::ResponseFooter(turn_id, message_index) => {
                 let Some(message) = session.messages.get(message_index) else {
@@ -3623,12 +3858,17 @@ impl Waku {
                     .side_chat_views
                     .get(&session_id)
                     .is_some_and(|view| view.hovered_response_turn == Some(turn_id));
+                let changed_files = self
+                    .render_side_chat_changed_files_row(session_id, session, turn_id, &theme, cx);
                 div()
                     .w_full()
                     .min_w_0()
                     .flex()
                     .flex_col()
                     .group(group_name.clone())
+                    .when_some(changed_files, |column, card| {
+                        column.child(div().w_full().mb(px(3.0)).child(card))
+                    })
                     .child(super::components::render_message_footer(
                         &theme,
                         message,
@@ -3645,7 +3885,6 @@ impl Waku {
                     ))
                     .into_any_element()
             }
-            TranscriptRowKind::ChangedFiles(_) => div().into_any_element(),
         };
         let response_turn_id = super::transcript::response_row_turn_id(session, kind);
         div()
