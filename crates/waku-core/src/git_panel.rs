@@ -816,6 +816,41 @@ pub fn commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result<Vec<Comm
     log_commits(cwd, &[], skip, limit)
 }
 
+/// `git log` for the selected new-task base branch, paged. When no branch was
+/// selected, resolve the repository default the same way worktree creation
+/// does. A missing or unborn ref has no history yet.
+pub fn base_commits(
+    cwd: &Path,
+    base: Option<&str>,
+    skip: usize,
+    limit: usize,
+) -> anyhow::Result<Vec<CommitEntry>> {
+    ensure_repository(cwd)?;
+    let base_ref = match base {
+        Some(base) => base.to_owned(),
+        None => match crate::worktree::default_base_ref(cwd) {
+            Ok(base_ref) => base_ref,
+            Err(_error) if !ref_exists(cwd, "HEAD")? => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        },
+    };
+    let base_expression = format!("{base_ref}^{{commit}}");
+    let Some(base_commit) = git_optional_stdout(
+        cwd,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &base_expression,
+        ],
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+    log_commits(cwd, &[base_commit], skip, limit)
+}
+
 /// `git log <upstream> --not HEAD`: the commits the tracking branch has that
 /// the checkout lacks — what a pull would bring in. Empty when the branch
 /// has no upstream.

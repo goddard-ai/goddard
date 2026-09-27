@@ -7197,6 +7197,9 @@ impl Waku {
             self.reload_clean_right_panel_file_editors(cx);
             self.ensure_right_panel_terminals(cx);
         }
+        if selected {
+            self.sync_git_panel_workspace(cx);
+        }
         if selected && worktree_restored {
             self.show_toast(tr!("session.worktree_recreated"));
         }

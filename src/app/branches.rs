@@ -348,6 +348,9 @@ impl Waku {
                     },
                 );
                 self.save();
+                if self.state.selected_session == Some(session_id) {
+                    self.sync_git_panel_workspace(cx);
+                }
                 cx.notify();
             }
             return true;
@@ -664,6 +667,7 @@ impl Waku {
                         if selected_path.as_ref() == Some(&path) {
                             waku.invalidate_workspace_queries(cx);
                             waku.reload_clean_right_panel_file_editors(cx);
+                            waku.sync_git_panel_workspace(cx);
                             waku.save();
                         }
                     }

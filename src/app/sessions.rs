@@ -1475,6 +1475,7 @@ impl Waku {
             // surfaces can be open — a Big Picture subject's are not.
             if self.state.selected_session == Some(session_id) {
                 self.ensure_right_panel_terminals(cx);
+                self.sync_git_panel_workspace(cx);
             }
             cx.notify();
         }

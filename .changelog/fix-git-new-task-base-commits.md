@@ -1,0 +1,1 @@
+- When you choose a base branch for a new task, the Git panel shows that branch's commit history.

@@ -266,6 +266,12 @@ pub(super) struct GitPanelState {
     pub error: Option<String>,
     pub commits: Vec<CommitEntry>,
     pub commits_loading: bool,
+    /// Base ref requested for the history list when a task is choosing its
+    /// starting branch. `None` asks the daemon to resolve the default base.
+    pub commit_base: Option<String>,
+    /// New-task drafts list the selected base branch rather than the
+    /// currently checked-out branch.
+    pub commits_from_base: bool,
     /// `git log` returned a short page — the history is exhausted.
     pub commits_exhausted: bool,
     /// The collapsed upstream section above the log: commits the tracking
@@ -631,6 +637,8 @@ impl Waku {
             return;
         };
         let base = self.selected_session_land_base();
+        let commit_base = self.selected_session_commit_base();
+        let commits_from_base = self.selected_session_commits_from_base();
         let invocation = self.git_panel_invocation();
         let message = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -649,6 +657,8 @@ impl Waku {
             error: None,
             commits: Vec::new(),
             commits_loading: false,
+            commit_base,
+            commits_from_base,
             commits_exhausted: false,
             upstream_expanded: false,
             upstream_commits: Vec::new(),
@@ -673,15 +683,32 @@ impl Waku {
         }
     }
 
-    /// The selected session's recorded base branch — only a materialized
-    /// worktree carries one; anything else lets the daemon resolve the
-    /// repository's default.
+    /// The selected session's recorded base for landing its worktree.
     fn selected_session_land_base(&self) -> Option<String> {
         self.selected_session()
             .and_then(|session| match &session.workspace {
                 SessionWorkspace::Worktree { base_branch, .. } => base_branch.clone(),
                 _ => None,
             })
+    }
+
+    /// The selected base for the history list while a task is choosing its
+    /// starting branch.
+    fn selected_session_commit_base(&self) -> Option<String> {
+        self.selected_session()
+            .and_then(|session| match &session.workspace {
+                SessionWorkspace::NewWorktree { base_branch }
+                | SessionWorkspace::Worktree { base_branch, .. } => base_branch.clone(),
+                _ => None,
+            })
+    }
+
+    /// Whether the visible workspace chooser is still selecting the base for
+    /// a new task rather than the checked-out branch of an existing session.
+    fn selected_session_commits_from_base(&self) -> bool {
+        self.selected_session().is_some_and(|session| {
+            super::worktrees::workspace_picks_base(&session.workspace, Some(session))
+        })
     }
 
     /// The agent invocation for generated commit messages — the same
@@ -696,8 +723,8 @@ impl Waku {
         })
     }
 
-    /// The selected session moved to another checkout: point the open panel
-    /// at it, dropping state that named the old working tree.
+    /// The selected session changed checkouts or its selected base: point the
+    /// open panel at the new target and discard results from the old one.
     pub(super) fn sync_git_panel_workspace(&mut self, cx: &mut Context<Self>) {
         let Some(workspace) = self
             .selected_workspace_path()
@@ -705,11 +732,20 @@ impl Waku {
         else {
             return;
         };
-        if self
-            .git_panel
-            .as_ref()
-            .is_none_or(|panel| panel.workspace == workspace)
-        {
+        let base = self.selected_session_land_base();
+        let commit_base = self.selected_session_commit_base();
+        let commits_from_base = self.selected_session_commits_from_base();
+        let history_changed = self.git_panel.as_ref().is_some_and(|panel| {
+            panel.workspace != workspace
+                || panel.commit_base != commit_base
+                || panel.commits_from_base != commits_from_base
+        });
+        if self.git_panel.as_ref().is_none_or(|panel| {
+            panel.workspace == workspace
+                && panel.base == base
+                && panel.commit_base == commit_base
+                && panel.commits_from_base == commits_from_base
+        }) {
             return;
         }
         let invocation = self.git_panel_invocation();
@@ -718,6 +754,9 @@ impl Waku {
         };
         panel.id = Uuid::new_v4();
         panel.workspace = workspace;
+        panel.base = base;
+        panel.commit_base = commit_base;
+        panel.commits_from_base = commits_from_base;
         panel.invocation = invocation;
         panel.snapshot = None;
         panel.error = None;
@@ -727,6 +766,12 @@ impl Waku {
         panel.commits_loading = false;
         panel.commits.clear();
         panel.commits_exhausted = false;
+        if history_changed {
+            panel.commits_scroll = ScrollHandle::new();
+            panel.commits_scrollbar = ScrollbarState::new();
+        }
+        panel.upstream_commits.clear();
+        panel.upstream_commits_loading = false;
         self.git_panel_file_diffs.clear();
         self.git_panel_hover = None;
         self.git_panel_commit_hover = None;
@@ -909,6 +954,8 @@ impl Waku {
         panel.commits_loading = true;
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
+        let base = panel.base.clone();
+        let commits_from_base = panel.commits_from_base;
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             if let Some(panel) = self.git_panel.as_mut() {
                 panel.commits_loading = false;
@@ -920,11 +967,21 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    client.request(WorkspaceOperation::ListCommits {
-                        cwd: workspace,
-                        skip,
-                        limit,
-                    })
+                    let operation = if commits_from_base {
+                        WorkspaceOperation::ListBaseCommits {
+                            cwd: workspace,
+                            base,
+                            skip,
+                            limit,
+                        }
+                    } else {
+                        WorkspaceOperation::ListCommits {
+                            cwd: workspace,
+                            skip,
+                            limit,
+                        }
+                    };
+                    client.request(operation)
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
@@ -4607,12 +4664,20 @@ impl Waku {
         for (index, entry) in panel.commits.iter().enumerate() {
             // `git log` starts at HEAD and the first `ahead` entries are the
             // ones the upstream has not seen.
-            let unpushed = index < ahead as usize;
-            let lane = match merge_base_index {
-                Some(base_index) if index > base_index => CommitLane::Base,
-                Some(base_index) if index == base_index && index > 0 => CommitLane::FirstBase,
-                _ if index == 0 => CommitLane::Head,
-                _ => CommitLane::Worktree,
+            let unpushed = !panel.commits_from_base && index < ahead as usize;
+            let lane = if panel.commits_from_base {
+                if index == 0 {
+                    CommitLane::Head
+                } else {
+                    CommitLane::Base
+                }
+            } else {
+                match merge_base_index {
+                    Some(base_index) if index > base_index => CommitLane::Base,
+                    Some(base_index) if index == base_index && index > 0 => CommitLane::FirstBase,
+                    _ if index == 0 => CommitLane::Head,
+                    _ => CommitLane::Worktree,
+                }
             };
             rows = rows.child(self.render_git_panel_commit_row(
                 entry,

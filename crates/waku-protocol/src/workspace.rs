@@ -1016,6 +1016,16 @@ pub enum WorkspaceOperation {
         skip: usize,
         limit: usize,
     },
+    /// `git log` for the selected new-task base branch, paged. `None` resolves
+    /// the same default base branch used when creating a worktree.
+    ListBaseCommits {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
+        skip: usize,
+        limit: usize,
+    },
     /// `git log` for `@{upstream} --not HEAD`, paged like `ListCommits`:
     /// the commits the tracking branch has that the checkout lacks.
     ListUpstreamCommits {

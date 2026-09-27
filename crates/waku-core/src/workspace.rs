@@ -354,6 +354,14 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         WorkspaceOperation::ListCommits { cwd, skip, limit } => WorkspaceResult::Commits {
             entries: crate::git_panel::commits(&cwd, skip, limit)?,
         },
+        WorkspaceOperation::ListBaseCommits {
+            cwd,
+            base,
+            skip,
+            limit,
+        } => WorkspaceResult::Commits {
+            entries: crate::git_panel::base_commits(&cwd, base.as_deref(), skip, limit)?,
+        },
         WorkspaceOperation::ListUpstreamCommits { cwd, skip, limit } => WorkspaceResult::Commits {
             entries: crate::git_panel::upstream_commits(&cwd, skip, limit)?,
         },

@@ -679,7 +679,7 @@ fn sanitize_name(name: &str) -> Option<String> {
 /// the default branch without fetching or mutating the user's ordinary
 /// checkout. Repositories without that metadata fall back to their current
 /// branch, then detached `HEAD`.
-fn default_base_ref(repository: &Path) -> anyhow::Result<String> {
+pub(crate) fn default_base_ref(repository: &Path) -> anyhow::Result<String> {
     if let Some(remote_default) = git_optional_stdout(
         repository,
         &[
