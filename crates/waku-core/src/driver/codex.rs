@@ -1870,6 +1870,8 @@ struct CodexStreamState {
     next_citation_number: usize,
     /// Item id and part index of the reasoning chunk currently streaming.
     reasoning_part: Option<(String, u64)>,
+    /// Item id of the agent message currently streaming.
+    agent_message_item: Option<String>,
 }
 
 impl CodexStreamState {
@@ -1879,6 +1881,7 @@ impl CodexStreamState {
         self.citation_buffer.clear();
         self.next_citation_number = 1;
         self.reasoning_part = None;
+        self.agent_message_item = None;
     }
 
     fn capture_citations(&mut self, item: &Value) {
@@ -2399,6 +2402,16 @@ fn handle_codex_message(
             if let Some(delta) = params.get("delta").and_then(Value::as_str) {
                 let delta = stream_state.rewrite_citation_delta(delta);
                 if !delta.is_empty() {
+                    // A turn can produce several agentMessage items — interim
+                    // commentary updates as well as the final answer — and the
+                    // deltas carry no separator of their own, so consecutive
+                    // items would run together without a boundary here.
+                    if let Some(item_id) = params.get("itemId").and_then(Value::as_str) {
+                        let previous = stream_state.agent_message_item.replace(item_id.to_owned());
+                        if previous.is_some_and(|previous| previous != item_id) {
+                            let _ = events.send(DriverEvent::TextDelta("\n\n".to_owned()));
+                        }
+                    }
                     let _ = events.send(DriverEvent::TextDelta(delta));
                 }
             }
@@ -4177,6 +4190,62 @@ mod tests {
             reasoning,
             "**Evaluating cleanup**\n\n**Analyzing methods** and detection"
         );
+    }
+
+    #[test]
+    fn agent_message_items_are_separated_from_each_other() {
+        // A turn can stream several agentMessage items — interim commentary
+        // followed by the final answer — and the deltas carry no separator of
+        // their own, so appending them verbatim fuses the sentences.
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-1".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-1".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (goal_commands, _goal_command_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let mut stream_state = CodexStreamState::default();
+
+        let deltas = [
+            ("item-1", "Checking the file."),
+            ("item-2", "The bug"),
+            ("item-2", " is in the parser."),
+        ];
+        for (item_id, delta) in deltas {
+            handle_codex_message(
+                json!({
+                    "method": "item/agentMessage/delta",
+                    "params": {
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "itemId": item_id,
+                        "delta": delta,
+                    }
+                }),
+                &thread_id,
+                &turn_id,
+                &turn_ids,
+                &pending_rollbacks,
+                &pending_steers,
+                &background_rpcs,
+                &goal_rpcs,
+                &goal_commands,
+                &event_tx,
+                &mut stream_state,
+            );
+        }
+
+        let mut text = String::new();
+        while let Ok(event) = event_rx.try_recv() {
+            match event {
+                DriverEvent::TextDelta(delta) => text.push_str(&delta),
+                other => panic!("expected text deltas, got {other:?}"),
+            }
+        }
+
+        assert_eq!(text, "Checking the file.\n\nThe bug is in the parser.");
     }
 
     #[test]
