@@ -3162,6 +3162,21 @@ pub fn code_run_script(language: &str, code: &str) -> Option<CodeRunScript> {
 }
 
 fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElement {
+    render_code_block_toned(language, code, ctx, None)
+}
+
+/// Render a diagnostic message using the code block's wrapping and copy
+/// control, with the theme's danger color marking it as an error.
+pub fn error_box(message: &str, ctx: &Ctx) -> AnyElement {
+    render_code_block_toned(Some("error"), message, ctx, Some(ctx.palette.removed))
+}
+
+fn render_code_block_toned(
+    language: Option<&str>,
+    code: &str,
+    ctx: &Ctx,
+    danger: Option<Hsla>,
+) -> AnyElement {
     let key = ctx.next_key();
     // Tokenizing is the most expensive flatten in the document, so a settled
     // code block is exactly the case the cache exists for.
@@ -3315,8 +3330,10 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .min_w_0()
         .rounded(px(10.0))
         .border(hairline())
-        .border_color(ctx.palette.border_subtle)
-        .bg(ctx.palette.inset)
+        .border_color(danger.map_or(ctx.palette.border_subtle, |color| color.opacity(0.55)))
+        .bg(danger.map_or(ctx.palette.inset, |color| {
+            color.opacity(if ctx.palette.is_dark { 0.10 } else { 0.06 })
+        }))
         .overflow_hidden()
         .child(
             div()
@@ -3327,7 +3344,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                 .flex()
                 .items_center()
                 .border_b(hairline())
-                .border_color(ctx.palette.separator)
+                .border_color(danger.map_or(ctx.palette.separator, |color| color.opacity(0.28)))
                 .child(
                     div()
                         .min_w_0()
@@ -3336,7 +3353,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                         .text_size(px(12.5))
                         .line_height(px(14.0))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(ctx.palette.ghost)
+                        .text_color(danger.unwrap_or(ctx.palette.ghost))
                         .when_some(label, |element, label| {
                             element.child(SharedString::from(label))
                         }),

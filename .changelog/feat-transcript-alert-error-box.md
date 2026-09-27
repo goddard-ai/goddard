@@ -1,0 +1,1 @@
+- Pasted diagnostics alerts in the task transcript now show their message in a danger-styled box with a copy button.

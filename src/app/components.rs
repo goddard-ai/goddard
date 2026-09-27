@@ -406,6 +406,13 @@ pub(super) struct MessageRender<'a> {
     pub(super) transfer_notice: Option<TransferNoticeState>,
 }
 
+#[derive(serde::Deserialize)]
+struct DiagnosticAlert<'a> {
+    kind: &'a str,
+    #[serde(borrow)]
+    message: std::borrow::Cow<'a, str>,
+}
+
 #[derive(Clone, Default)]
 pub(super) struct PastedTextAttachmentView {
     pub(super) expanded: bool,
@@ -940,6 +947,16 @@ fn render_markdown_message_body<'a>(
     theme: &Theme,
     ctx: &MarkdownCtx<'a>,
 ) -> AnyElement {
+    // Error journal entries can be copied into a prompt as JSON. Keep this
+    // parse small and bounded because message rows are rendered repeatedly.
+    if content.len() <= 32 * 1024 && content.trim_start().starts_with('{') {
+        if let Ok(alert) = serde_json::from_str::<DiagnosticAlert<'_>>(content) {
+            if alert.kind == "alert" {
+                return md::render::error_box(&alert.message, ctx);
+            }
+        }
+    }
+
     markdown
         .and_then(|markdown| md::render::markdown(markdown, ctx))
         // Empty or not-yet-parsed content still needs a selectable fallback.
