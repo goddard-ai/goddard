@@ -96,6 +96,37 @@ impl SidebarGroup {
         }
     }
 
+    /// The fold set's serialized form — the disclosure state survives a
+    /// relaunch through `PersistedState::sidebar_collapsed_groups`.
+    pub(super) fn persisted(self) -> PersistedSidebarGroup {
+        match self {
+            Self::Pinned => PersistedSidebarGroup::Pinned,
+            Self::Terminals => PersistedSidebarGroup::Terminals,
+            Self::Dormant => PersistedSidebarGroup::Dormant,
+            Self::Planning => PersistedSidebarGroup::Planning,
+            Self::Date(group) => PersistedSidebarGroup::Date(group.index()),
+            Self::Project(project_id) => PersistedSidebarGroup::Project(project_id),
+            Self::Projectless => PersistedSidebarGroup::Projectless,
+        }
+    }
+
+    /// A stored fold back to its group. `Date` resolves through
+    /// `SessionDateGroup::ALL`, so an index from a newer build drops rather
+    /// than dangles.
+    pub(super) fn from_persisted(group: PersistedSidebarGroup) -> Option<Self> {
+        Some(match group {
+            PersistedSidebarGroup::Pinned => Self::Pinned,
+            PersistedSidebarGroup::Terminals => Self::Terminals,
+            PersistedSidebarGroup::Dormant => Self::Dormant,
+            PersistedSidebarGroup::Planning => Self::Planning,
+            PersistedSidebarGroup::Date(index) => {
+                Self::Date(*SessionDateGroup::ALL.get(index)?)
+            }
+            PersistedSidebarGroup::Project(project_id) => Self::Project(project_id),
+            PersistedSidebarGroup::Projectless => Self::Projectless,
+        })
+    }
+
     fn mix_fingerprint(self, fingerprint: u64) -> u64 {
         match self {
             Self::Pinned => mix(fingerprint, 0x300),

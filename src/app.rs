@@ -66,8 +66,9 @@ use crate::persistence::{
     CustomCommandIcon, DEFAULT_GIT_PANEL_TOP_HEIGHT, DEFAULT_GIT_PANEL_WIDTH,
     DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource,
     PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
-    PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage, PersistedState,
-    PersistedTranscriptScrollPosition, PersistedWindowState, RecentModelUse,
+    PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage,
+    PersistedSidebarGroup, PersistedState, PersistedTranscriptScrollPosition,
+    PersistedWindowState, RecentModelUse,
     SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
     UpdateChannel, VoiceBriefingSummaryModel, VoiceBriefingTtsModel,
 };

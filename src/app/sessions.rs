@@ -774,6 +774,9 @@ impl Waku {
             .filter_map(|location| persisted_location(*location))
             .collect();
         self.state.recent_sessions = self.task_switcher.recent_sessions().to_vec();
+        let mut briefed: Vec<Uuid> = self.briefed_messages.iter().copied().collect();
+        briefed.sort_unstable();
+        self.state.briefed_messages = briefed;
         self.state.transcript_scroll_positions = self
             .transcript_scroll_positions
             .iter()
@@ -785,8 +788,18 @@ impl Waku {
         self.state.sidebar_scroll = (sidebar_top.item_ix > 0
             || sidebar_top.offset_in_item > Pixels::ZERO)
             .then(|| persisted_list_offset(sidebar_top));
+        let mut collapsed_groups: Vec<PersistedSidebarGroup> = self
+            .sidebar_collapsed_groups
+            .iter()
+            .map(|group| group.persisted())
+            .collect();
+        collapsed_groups.sort_unstable();
+        self.state.sidebar_collapsed_groups = collapsed_groups;
         self.state.projects_page = self.projects_page;
         self.state.settings_page = self.settings_page.map(persisted_settings_page);
+        self.state.drafts_page = self.drafts_page;
+        self.state.automations_page = self.automations_page;
+        self.state.inbox_open = self.notifications.open;
         self.state.fullscreen_surface =
             self.fullscreen_surface
                 .clone()
@@ -894,6 +907,19 @@ impl Waku {
             .collect();
         self.pending_sidebar_scroll
             .set(self.state.sidebar_scroll.map(list_offset_from_persisted));
+        // Folds for sections that no longer exist — a removed project's
+        // group — drop rather than dangle.
+        self.sidebar_collapsed_groups = self
+            .state
+            .sidebar_collapsed_groups
+            .iter()
+            .filter_map(|group| SidebarGroup::from_persisted(*group))
+            .filter(|group| match group {
+                SidebarGroup::Project(id) => project_exists(id),
+                _ => true,
+            })
+            .collect();
+        self.briefed_messages = self.state.briefed_messages.iter().copied().collect();
         self.right_panel_states = self
             .state
             .right_panel_sessions
@@ -954,6 +980,19 @@ impl Waku {
             }
             Some((surface, persisted.detail))
         });
+        // Page restores ride the open paths so their side effects — the
+        // Terminals fold, the strip owner swap, search focus — land the same
+        // as a click. Settings stays last: it overlays whichever page sits
+        // underneath.
+        if self.state.drafts_page {
+            self.show_drafts_page(window, cx);
+        }
+        if self.state.automations_page && self.state.automations_enabled {
+            self.show_automations_page(window, cx);
+        }
+        if self.state.inbox_open {
+            self.open_inbox(window, cx);
+        }
         if let Some(project_id) = projects_page {
             self.show_projects_page(project_id, window, cx);
         }

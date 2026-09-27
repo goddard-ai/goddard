@@ -1,0 +1,1 @@
+- Quitting Goddard on the Drafts, Automations, or Inbox page now reopens that page on launch instead of landing on the selected task.

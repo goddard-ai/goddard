@@ -380,6 +380,16 @@ fn default_sidebar_visibility() -> bool {
     true
 }
 
+/// The launch fold set — `Waku` seeds the same two groups at construction.
+/// Used only when the field is absent entirely: a saved `[]` is a user who
+/// expanded everything, not a fresh install, so it must not re-fold.
+fn default_sidebar_collapsed_groups() -> Vec<PersistedSidebarGroup> {
+    vec![
+        PersistedSidebarGroup::Terminals,
+        PersistedSidebarGroup::Dormant,
+    ]
+}
+
 fn default_right_panel_visibility() -> bool {
     false
 }
@@ -837,6 +847,22 @@ pub enum PersistedNavigationLocation {
     ProjectsPage(Uuid),
     DraftsPage,
     AutomationsPage,
+}
+
+/// A collapsible sidebar section the user folded — mirrors
+/// `app::sidebar::SidebarGroup`. `Date` carries `SessionDateGroup::index()`:
+/// the bucket, not its contents, so "This week" still means this week after
+/// days away.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedSidebarGroup {
+    Pinned,
+    Terminals,
+    Dormant,
+    Planning,
+    Date(usize),
+    Project(Uuid),
+    Projectless,
 }
 
 /// A virtualized list's logical scroll position — row index plus the pixel
@@ -1407,6 +1433,10 @@ struct AppState {
     /// used" source for the task and project switchers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_sessions: Vec<Uuid>,
+    /// Replies the voice briefing already played, so a restart does not
+    /// re-speak them. Bounded by the runtime cap; dead ids are inert.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    briefed_messages: Vec<Uuid>,
     #[serde(default = "default_provider")]
     last_provider: ProviderKind,
     /// The last model pick was the router's Auto row — the next draft keeps
@@ -1462,6 +1492,11 @@ struct AppState {
     sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     sidebar_ordering: SidebarOrdering,
+    /// Sidebar sections the user folded, kept sorted for stable file bytes.
+    /// Deliberately not `skip_serializing_if`: an empty list means "expanded
+    /// everything", which must not fall back to the launch defaults.
+    #[serde(default = "default_sidebar_collapsed_groups")]
+    sidebar_collapsed_groups: Vec<PersistedSidebarGroup>,
     #[serde(default = "default_right_panel_width")]
     right_panel_width: f32,
     /// `None` on state files written before the Git panel remembered its
@@ -1490,6 +1525,18 @@ struct AppState {
     projects_page: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     settings_page: Option<PersistedSettingsPage>,
+    /// The Drafts page claiming the main column — same restore contract as
+    /// `projects_page`.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    drafts_page: bool,
+    /// Same for the Automations page's list. The detail pane is not
+    /// persisted: it points at daemon-owned rows that may not have loaded
+    /// yet at restore, so the page reopens on its list.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    automations_page: bool,
+    /// The GitHub inbox claiming the main column.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    inbox_open: bool,
     /// Parked right-panel state per task, plus the selected task's live one.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
@@ -1521,6 +1568,10 @@ pub struct PersistedState {
     /// like the selection, not task state.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_sessions: Vec<Uuid>,
+    /// Replies the voice briefing already played, so a restart does not
+    /// re-speak them. Bounded by the runtime cap; dead ids are inert.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub briefed_messages: Vec<Uuid>,
     pub last_provider: ProviderKind,
     /// The last model pick was the router's Auto row — the next draft keeps
     /// Auto selected instead of inheriting the routed provider/model.
@@ -1816,6 +1867,11 @@ pub struct PersistedState {
     pub sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     pub sidebar_ordering: SidebarOrdering,
+    /// Sidebar sections the user folded, kept sorted for stable file bytes.
+    /// Deliberately not `skip_serializing_if`: an empty list means "expanded
+    /// everything", which must not fall back to the launch defaults.
+    #[serde(default = "default_sidebar_collapsed_groups")]
+    pub sidebar_collapsed_groups: Vec<PersistedSidebarGroup>,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
     /// The Git panel shares the right panel's slot but remembers its own
@@ -1847,6 +1903,18 @@ pub struct PersistedState {
     pub projects_page: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings_page: Option<PersistedSettingsPage>,
+    /// The Drafts page claiming the main column — same restore contract as
+    /// `projects_page`.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub drafts_page: bool,
+    /// Same for the Automations page's list. The detail pane is not
+    /// persisted: it points at daemon-owned rows that may not have loaded
+    /// yet at restore, so the page reopens on its list.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub automations_page: bool,
+    /// The GitHub inbox claiming the main column.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub inbox_open: bool,
     /// Parked right-panel state per task, plus the selected task's live one.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
@@ -2058,6 +2126,7 @@ impl PersistedState {
             selected_session: None,
             unseen_completions: HashMap::new(),
             recent_sessions: Vec::new(),
+            briefed_messages: Vec::new(),
             last_provider: ProviderKind::Codex,
             last_auto_route: false,
             last_runtime_mode: RuntimeMode::default(),
@@ -2153,6 +2222,7 @@ impl PersistedState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_grouping: SidebarGrouping::Date,
             sidebar_ordering: SidebarOrdering::LastUpdated,
+            sidebar_collapsed_groups: default_sidebar_collapsed_groups(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             git_panel_width: DEFAULT_GIT_PANEL_WIDTH,
             git_panel_top_height: DEFAULT_GIT_PANEL_TOP_HEIGHT,
@@ -2164,6 +2234,9 @@ impl PersistedState {
             sidebar_scroll: None,
             projects_page: None,
             settings_page: None,
+            drafts_page: false,
+            automations_page: false,
+            inbox_open: false,
             right_panel_sessions: HashMap::new(),
             fullscreen_surface: None,
             saved_drafts: Vec::new(),
@@ -2576,6 +2649,7 @@ impl PersistedState {
             selected_session: self.persistable_selected_session(),
             unseen_completions: self.unseen_completions.clone(),
             recent_sessions: self.recent_sessions.clone(),
+            briefed_messages: self.briefed_messages.clone(),
             last_provider: self.last_provider,
             last_auto_route: self.last_auto_route,
             last_runtime_mode: self.last_runtime_mode,
@@ -2596,6 +2670,7 @@ impl PersistedState {
             sidebar_width: self.sidebar_width,
             sidebar_grouping: self.sidebar_grouping,
             sidebar_ordering: self.sidebar_ordering,
+            sidebar_collapsed_groups: self.sidebar_collapsed_groups.clone(),
             right_panel_width: self.right_panel_width,
             git_panel_width: Some(self.git_panel_width),
             markdown_preview: self.markdown_preview,
@@ -2606,6 +2681,9 @@ impl PersistedState {
             sidebar_scroll: self.sidebar_scroll,
             projects_page: self.projects_page,
             settings_page: self.settings_page,
+            drafts_page: self.drafts_page,
+            automations_page: self.automations_page,
+            inbox_open: self.inbox_open,
             right_panel_sessions: self.right_panel_sessions.clone(),
             fullscreen_surface: self.fullscreen_surface.clone(),
             saved_drafts: self.saved_drafts.clone(),
@@ -2711,6 +2789,7 @@ impl PersistedState {
         self.selected_session = app_state.selected_session;
         self.unseen_completions = app_state.unseen_completions;
         self.recent_sessions = app_state.recent_sessions;
+        self.briefed_messages = app_state.briefed_messages;
         self.last_provider = app_state.last_provider;
         self.last_auto_route = app_state.last_auto_route;
         self.last_runtime_mode = app_state.last_runtime_mode;
@@ -2731,6 +2810,7 @@ impl PersistedState {
         self.sidebar_width = app_state.sidebar_width;
         self.sidebar_grouping = app_state.sidebar_grouping;
         self.sidebar_ordering = app_state.sidebar_ordering;
+        self.sidebar_collapsed_groups = app_state.sidebar_collapsed_groups;
         self.right_panel_width = app_state.right_panel_width;
         // Pre-split state files have no Git panel width of their own; the
         // shared width they kept was serving as it, so it seeds the first
@@ -2746,6 +2826,9 @@ impl PersistedState {
         self.sidebar_scroll = app_state.sidebar_scroll;
         self.projects_page = app_state.projects_page;
         self.settings_page = app_state.settings_page;
+        self.drafts_page = app_state.drafts_page;
+        self.automations_page = app_state.automations_page;
+        self.inbox_open = app_state.inbox_open;
         self.right_panel_sessions = app_state.right_panel_sessions;
         // Saves from before the Git panel's open flag was per-task carried
         // it globally; it belongs to the task that was selected, so it lands
@@ -4689,6 +4772,58 @@ mod tests {
         // Order survives the round trip; the slot for a task deleted while
         // the app was away is pruned on load.
         assert_eq!(restored.recent_sessions, vec![newer_id, older]);
+    }
+
+    #[test]
+    fn pages_and_briefed_survive_an_app_state_round_trip() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.projects[0].id;
+        state.drafts_page = true;
+        state.inbox_open = true;
+        state.briefed_messages = vec![Uuid::new_v4(), Uuid::new_v4()];
+        state.sidebar_collapsed_groups = vec![
+            PersistedSidebarGroup::Project(project_id),
+            PersistedSidebarGroup::Date(2),
+            PersistedSidebarGroup::Pinned,
+        ];
+
+        let app_state = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+
+        assert!(restored.drafts_page);
+        assert!(restored.inbox_open);
+        assert!(!restored.automations_page);
+        assert_eq!(restored.briefed_messages.len(), 2);
+        assert_eq!(
+            restored.sidebar_collapsed_groups,
+            vec![
+                PersistedSidebarGroup::Project(project_id),
+                PersistedSidebarGroup::Date(2),
+                PersistedSidebarGroup::Pinned,
+            ]
+        );
+    }
+
+    #[test]
+    fn collapsed_sidebar_groups_default_only_when_absent() {
+        // A state file written before the field existed restores the
+        // launch set.
+        let app_state: AppState =
+            serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
+        assert_eq!(
+            app_state.sidebar_collapsed_groups,
+            default_sidebar_collapsed_groups()
+        );
+
+        // A saved `[]` is "expanded everything" — it must not refold.
+        let mut state = PersistedState::empty();
+        state.sidebar_collapsed_groups.clear();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(
+            serde_json::from_value(serde_json::to_value(state.app_state()).unwrap()).unwrap(),
+        );
+        assert!(restored.sidebar_collapsed_groups.is_empty());
     }
 
     #[test]
