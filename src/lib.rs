@@ -284,7 +284,7 @@ const TITLEBAR_GRAB_HEIGHT: f32 = 22.0;
 fn restored_window_placement(cx: &App) -> (WindowBounds, Option<gpui::DisplayId>) {
     let centered = |cx: &App| {
         (
-            WindowBounds::Windowed(Bounds::centered(
+            WindowBounds::Maximized(Bounds::centered(
                 None,
                 size(px(DEFAULT_WINDOW_WIDTH), px(DEFAULT_WINDOW_HEIGHT)),
                 cx,
