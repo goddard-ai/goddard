@@ -73,12 +73,15 @@ pub(crate) fn logs_directory() -> Option<PathBuf> {
 }
 
 /// The directory the local daemon writes `daemon-panics.jsonl` into — the
-/// parent of its `app.db`, so `GODDARD_DATA_DIR` debug instances read their
-/// own daemon's files.
+/// parent of its `app.db`, so isolated debug and dev-served instances read
+/// their own daemon's files.
 fn daemon_data_dir() -> Option<PathBuf> {
-    if cfg!(debug_assertions)
-        && let Some(dir) = std::env::var_os("GODDARD_DATA_DIR").filter(|dir| !dir.is_empty())
-    {
+    let variable = if cfg!(debug_assertions) {
+        "GODDARD_DATA_DIR"
+    } else {
+        "GODDARD_DEV_DATA_DIR"
+    };
+    if let Some(dir) = std::env::var_os(variable).filter(|dir| !dir.is_empty()) {
         return Some(PathBuf::from(dir));
     }
     Some(dirs::data_local_dir()?.join(waku_protocol::identity::DATA_DIRECTORY_NAME))

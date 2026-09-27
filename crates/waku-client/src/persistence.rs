@@ -2959,8 +2959,26 @@ fn configuration_directory() -> PathBuf {
         .join(waku_protocol::identity::HOME_DIRECTORY_NAME)
 }
 
+/// `GODDARD_DATA_DIR` isolates debug instances. The dev server sets
+/// `GODDARD_DEV_DATA_DIR` on its release-profile app so it uses that same
+/// development state without changing a normal release app's data location.
+fn development_data_dir_override() -> Option<PathBuf> {
+    let variable = if cfg!(debug_assertions) {
+        "GODDARD_DATA_DIR"
+    } else {
+        "GODDARD_DEV_DATA_DIR"
+    };
+    std::env::var_os(variable)
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+}
+
+fn uses_development_data_dir() -> bool {
+    cfg!(debug_assertions) || development_data_dir_override().is_some()
+}
+
 fn default_app_settings_path() -> PathBuf {
-    if cfg!(debug_assertions) {
+    if uses_development_data_dir() {
         StateStore::default_path().with_file_name("app.json")
     } else {
         configuration_directory().join("app.json")
@@ -2975,7 +2993,7 @@ fn default_app_state_path() -> PathBuf {
 /// file name is a hash of the script text, so identical scripts share one
 /// file no matter how many commands or invocations reference it.
 pub fn custom_command_scripts_directory() -> PathBuf {
-    if cfg!(debug_assertions) {
+    if uses_development_data_dir() {
         StateStore::default_path().with_file_name("commands")
     } else {
         configuration_directory().join("commands")
@@ -2985,7 +3003,7 @@ pub fn custom_command_scripts_directory() -> PathBuf {
 /// Where the bundled shell-integration scripts live once materialized —
 /// one file per supported shell, rewritten when the bundled text changes.
 pub fn shell_integration_scripts_directory() -> PathBuf {
-    if cfg!(debug_assertions) {
+    if uses_development_data_dir() {
         StateStore::default_path().with_file_name("shell-integration")
     } else {
         configuration_directory().join("shell-integration")
@@ -3021,7 +3039,7 @@ pub fn load_update_channel() -> UpdateChannel {
 }
 
 fn default_legacy_settings_paths() -> Vec<PathBuf> {
-    if cfg!(debug_assertions) {
+    if uses_development_data_dir() {
         vec![StateStore::default_path().with_file_name("settings.json")]
     } else {
         vec![configuration_directory().join("settings.json")]
@@ -3183,13 +3201,10 @@ pub struct LoadedProviderSession {
 
 impl StateStore {
     pub fn default_path() -> PathBuf {
+        if let Some(dir) = development_data_dir_override() {
+            return dir.join("app.db");
+        }
         if cfg!(debug_assertions) {
-            // `GODDARD_DATA_DIR` lets a second debug instance run beside the
-            // first (friend-sharing smoke tests, isolated experiments)
-            // without colliding on `temp/`.
-            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR").filter(|dir| !dir.is_empty()) {
-                return PathBuf::from(dir).join("app.db");
-            }
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
                 .and_then(Path::parent)

@@ -32,6 +32,7 @@ if (serveMode && !isMacOS) {
 const profile = serveMode ? "release" : "debug";
 const appName = serveMode ? "Goddard" : "Goddard Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
+const developmentDataDir = process.env.GODDARD_DATA_DIR || join(root, "temp");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const appPath = isMacOS
   ? join(targetDir, `${profile}/${appName}.app`)
@@ -1456,6 +1457,7 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     cwd: root,
     env: {
       ...process.env,
+      ...(serveMode ? { GODDARD_DEV_DATA_DIR: developmentDataDir } : {}),
       GODDARD_DAEMON_PATH: daemonPath,
       GODDARD_DAEMON_ADDRESS: daemonAddress,
       GODDARD_DAEMON_TOKEN: daemonToken,
