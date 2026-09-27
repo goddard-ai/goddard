@@ -246,11 +246,19 @@ fn frontmatter_value(value: serde_json::Value) -> String {
 
 /// Parse a whole source into a [`BlockTree`].
 pub fn parse(source: &str) -> BlockTree {
+    parse_with_soft_breaks_as_newlines(source, false)
+}
+
+/// Parse markdown with an optional rule that retains soft line breaks.
+pub fn parse_with_soft_breaks_as_newlines(
+    source: &str,
+    soft_breaks_as_newlines: bool,
+) -> BlockTree {
     let events = Parser::new_ext(source, options())
         .into_offset_iter()
         .collect::<Vec<_>>();
     let Some((repaired, repairs)) = super::escape::repair_code_spans(source, &events) else {
-        return tree_from_events(&events);
+        return tree_from_events(&events, soft_breaks_as_newlines);
     };
     // Reparse the repaired source, then map every event range back into the
     // original coordinates the caller slices.
@@ -261,10 +269,13 @@ pub fn parse(source: &str) -> BlockTree {
         range.start = super::escape::original_offset(&repairs, range.start);
         range.end = super::escape::original_offset(&repairs, range.end);
     }
-    tree_from_events(&events)
+    tree_from_events(&events, soft_breaks_as_newlines)
 }
 
-fn tree_from_events(events: &[(Event<'_>, Range<usize>)]) -> BlockTree {
+fn tree_from_events(
+    events: &[(Event<'_>, Range<usize>)],
+    soft_breaks_as_newlines: bool,
+) -> BlockTree {
     let mut cursor = Cursor { events, index: 0 };
     let mut blocks = Vec::new();
     while let Some((event, range)) = cursor.peek() {
@@ -278,7 +289,7 @@ fn tree_from_events(events: &[(Event<'_>, Range<usize>)]) -> BlockTree {
                 });
             }
             Event::Start(_) => {
-                for block in parse_started_block(&mut cursor) {
+                for block in parse_started_block(&mut cursor, soft_breaks_as_newlines) {
                     blocks.push(TopBlock {
                         range: range.clone(),
                         block,
@@ -348,15 +359,17 @@ fn heading_level(level: HeadingLevel) -> u8 {
 
 /// Consume a `Start(tag)` and everything through its matching `End`. Unknown
 /// containers are transparent: their children splice into the parent.
-fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
+fn parse_started_block(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> Vec<Block> {
     let Some(Event::Start(tag)) = cursor.next_event() else {
         return Vec::new();
     };
     match tag {
-        Tag::Paragraph => pieces_into_blocks(parse_inline_container(cursor)),
+        Tag::Paragraph => {
+            pieces_into_blocks(parse_inline_container(cursor, soft_breaks_as_newlines))
+        }
         Tag::Heading { level, .. } => vec![Block::Heading {
             level: heading_level(level),
-            runs: pieces_into_runs(parse_inline_container(cursor)),
+            runs: pieces_into_runs(parse_inline_container(cursor, soft_breaks_as_newlines)),
         }],
         Tag::CodeBlock(kind) => {
             let language = match kind {
@@ -383,7 +396,7 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
             vec![Block::CodeBlock { language, code }]
         }
         Tag::BlockQuote(_) => vec![Block::BlockQuote {
-            children: parse_block_sequence(cursor),
+            children: parse_block_sequence(cursor, soft_breaks_as_newlines),
         }],
         Tag::List(ordered_start) => {
             let mut items = Vec::new();
@@ -391,7 +404,7 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
                 match cursor.peek_event() {
                     Some(Event::Start(Tag::Item)) => {
                         cursor.bump();
-                        items.push(parse_list_item(cursor));
+                        items.push(parse_list_item(cursor, soft_breaks_as_newlines));
                     }
                     Some(Event::End(_)) | None => {
                         cursor.bump();
@@ -414,7 +427,7 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
                     Alignment::None | Alignment::Left => TableAlign::Left,
                 })
                 .collect();
-            vec![parse_table(cursor, align)]
+            vec![parse_table(cursor, align, soft_breaks_as_newlines)]
         }
         Tag::HtmlBlock => {
             let mut text = String::new();
@@ -437,10 +450,7 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
                     .or_else(|| captures.get(4))
                     .unwrap()
                     .as_str();
-                let label = format!(
-                    "{}:{line}",
-                    file.rsplit(['/', '\\']).next().unwrap_or(file)
-                );
+                let label = format!("{}:{line}", file.rsplit(['/', '\\']).next().unwrap_or(file));
                 let mut style = InlineStyle::default();
                 style.code = true;
                 style.link = Some(format!("{file}#L{line}"));
@@ -459,12 +469,12 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
         }
         // Transparent containers (footnote definitions, and anything a future
         // pulldown-cmark adds).
-        _ => parse_block_sequence(cursor),
+        _ => parse_block_sequence(cursor, soft_breaks_as_newlines),
     }
 }
 
 /// Parse a list item, lifting a leading task-list marker out of its content.
-fn parse_list_item(cursor: &mut Cursor) -> ListItem {
+fn parse_list_item(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> ListItem {
     let task = match cursor.peek_event() {
         Some(Event::TaskListMarker(checked)) => {
             let checked = *checked;
@@ -475,13 +485,13 @@ fn parse_list_item(cursor: &mut Cursor) -> ListItem {
     };
     ListItem {
         task,
-        blocks: parse_block_sequence(cursor),
+        blocks: parse_block_sequence(cursor, soft_breaks_as_newlines),
     }
 }
 
 /// Parse blocks until the container's `End` (which is consumed). Bare inline
 /// events — tight list items — accumulate into an implicit paragraph.
-fn parse_block_sequence(cursor: &mut Cursor) -> Vec<Block> {
+fn parse_block_sequence(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
     let mut inline: Vec<InlinePiece> = Vec::new();
     while let Some(event) = cursor.peek_event() {
@@ -492,14 +502,19 @@ fn parse_block_sequence(cursor: &mut Cursor) -> Vec<Block> {
             }
             Event::Start(tag) if is_block_tag(tag) => {
                 flush_paragraph(&mut blocks, &mut inline);
-                blocks.extend(parse_started_block(cursor));
+                blocks.extend(parse_started_block(cursor, soft_breaks_as_newlines));
             }
             Event::Rule => {
                 flush_paragraph(&mut blocks, &mut inline);
                 cursor.bump();
                 blocks.push(Block::Rule);
             }
-            _ => parse_inline_event(cursor, &mut inline, &InlineStyle::default()),
+            _ => parse_inline_event(
+                cursor,
+                &mut inline,
+                &InlineStyle::default(),
+                soft_breaks_as_newlines,
+            ),
         }
     }
     flush_paragraph(&mut blocks, &mut inline);
@@ -512,18 +527,22 @@ fn flush_paragraph(blocks: &mut Vec<Block>, inline: &mut Vec<InlinePiece>) {
     }
 }
 
-fn parse_table(cursor: &mut Cursor, align: Vec<TableAlign>) -> Block {
+fn parse_table(
+    cursor: &mut Cursor,
+    align: Vec<TableAlign>,
+    soft_breaks_as_newlines: bool,
+) -> Block {
     let mut header = Vec::new();
     let mut rows = Vec::new();
     loop {
         match cursor.peek_event() {
             Some(Event::Start(Tag::TableHead)) => {
                 cursor.bump();
-                header = parse_table_row(cursor);
+                header = parse_table_row(cursor, soft_breaks_as_newlines);
             }
             Some(Event::Start(Tag::TableRow)) => {
                 cursor.bump();
-                rows.push(parse_table_row(cursor));
+                rows.push(parse_table_row(cursor, soft_breaks_as_newlines));
             }
             Some(Event::End(_)) | None => {
                 cursor.bump();
@@ -539,7 +558,7 @@ fn parse_table(cursor: &mut Cursor, align: Vec<TableAlign>) -> Block {
     }
 }
 
-fn parse_table_row(cursor: &mut Cursor) -> Vec<Vec<InlineRun>> {
+fn parse_table_row(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> Vec<Vec<InlineRun>> {
     let mut cells = Vec::new();
     loop {
         match cursor.peek_event() {
@@ -547,7 +566,10 @@ fn parse_table_row(cursor: &mut Cursor) -> Vec<Vec<InlineRun>> {
                 cursor.bump();
                 // A table cell is one line of text; an image there degrades to
                 // its alt rather than breaking the row's geometry.
-                cells.push(pieces_into_runs(parse_inline_container(cursor)));
+                cells.push(pieces_into_runs(parse_inline_container(
+                    cursor,
+                    soft_breaks_as_newlines,
+                )));
             }
             Some(Event::End(_)) | None => {
                 cursor.bump();
@@ -560,14 +582,19 @@ fn parse_table_row(cursor: &mut Cursor) -> Vec<Vec<InlineRun>> {
 }
 
 /// Collect inline pieces until the container's `End` (which is consumed).
-fn parse_inline_container(cursor: &mut Cursor) -> Vec<InlinePiece> {
+fn parse_inline_container(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> Vec<InlinePiece> {
     let mut pieces = Vec::new();
     while let Some(event) = cursor.peek_event() {
         if matches!(event, Event::End(_)) {
             cursor.bump();
             break;
         }
-        parse_inline_event(cursor, &mut pieces, &InlineStyle::default());
+        parse_inline_event(
+            cursor,
+            &mut pieces,
+            &InlineStyle::default(),
+            soft_breaks_as_newlines,
+        );
     }
     merge_pieces(pieces)
 }
@@ -626,7 +653,12 @@ fn pieces_into_runs(pieces: Vec<InlinePiece>) -> Vec<InlineRun> {
 
 /// Consume one inline event, appending its runs with `style` applied. Nested
 /// emphasis and links recurse with an extended style.
-fn parse_inline_event(cursor: &mut Cursor, pieces: &mut Vec<InlinePiece>, style: &InlineStyle) {
+fn parse_inline_event(
+    cursor: &mut Cursor,
+    pieces: &mut Vec<InlinePiece>,
+    style: &InlineStyle,
+    soft_breaks_as_newlines: bool,
+) {
     let Some(event) = cursor.next_event() else {
         return;
     };
@@ -653,10 +685,10 @@ fn parse_inline_event(cursor: &mut Cursor, pieces: &mut Vec<InlinePiece>, style:
             });
         }
         Event::DisplayMath(text) => pieces.push(InlinePiece::DisplayMath(text.into_string())),
-        // Soft breaks join source lines as prose; hard breaks remain visible
-        // line breaks in the rendered run.
+        // Most markdown joins soft breaks as prose; transcript prompts can
+        // retain the source line break. Hard breaks are always visible.
         Event::SoftBreak => push_run(InlineRun {
-            text: " ".to_owned(),
+            text: if soft_breaks_as_newlines { "\n" } else { " " }.to_owned(),
             style: style.clone(),
         }),
         Event::HardBreak => push_run(InlineRun {
@@ -673,7 +705,12 @@ fn parse_inline_event(cursor: &mut Cursor, pieces: &mut Vec<InlinePiece>, style:
                     cursor.bump();
                     break;
                 }
-                parse_inline_event(cursor, &mut alt_pieces, &InlineStyle::default());
+                parse_inline_event(
+                    cursor,
+                    &mut alt_pieces,
+                    &InlineStyle::default(),
+                    soft_breaks_as_newlines,
+                );
             }
             let alt = pieces_into_runs(alt_pieces)
                 .into_iter()
@@ -703,7 +740,7 @@ fn parse_inline_event(cursor: &mut Cursor, pieces: &mut Vec<InlinePiece>, style:
                     cursor.bump();
                     break;
                 }
-                parse_inline_event(cursor, pieces, &nested);
+                parse_inline_event(cursor, pieces, &nested, soft_breaks_as_newlines);
             }
         }
         // Inline HTML renders literally, matching the block-level choice.
@@ -870,6 +907,7 @@ pub struct IncrementalParser {
     /// [`Block::Frontmatter`]. Off for transcripts so a response's `---`
     /// separators keep their usual meaning.
     document: bool,
+    soft_breaks_as_newlines: bool,
 }
 
 impl Default for IncrementalParser {
@@ -886,6 +924,7 @@ impl IncrementalParser {
             stable_prefix: 0,
             full_reparse_only: false,
             document: false,
+            soft_breaks_as_newlines: false,
         }
     }
 
@@ -900,6 +939,16 @@ impl IncrementalParser {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    pub fn set_soft_breaks_as_newlines(&mut self, enabled: bool) -> bool {
+        if self.soft_breaks_as_newlines == enabled {
+            return false;
+        }
+        self.soft_breaks_as_newlines = enabled;
+        let text = self.text.clone();
+        self.reset(&text);
+        true
     }
 
     pub fn tree(&self) -> &BlockTree {
@@ -959,7 +1008,7 @@ impl IncrementalParser {
         let tail = if boundary == 0 {
             self.parse_text()
         } else {
-            parse(&self.text[boundary..])
+            parse_with_soft_breaks_as_newlines(&self.text[boundary..], self.soft_breaks_as_newlines)
         };
         self.tree.blocks.truncate(self.stable_prefix);
         self.tree
@@ -976,7 +1025,7 @@ impl IncrementalParser {
         if self.document {
             parse_document(&self.text)
         } else {
-            parse(&self.text)
+            parse_with_soft_breaks_as_newlines(&self.text, self.soft_breaks_as_newlines)
         }
     }
 
@@ -1001,7 +1050,7 @@ impl IncrementalParser {
         let mended = super::mend::close_hanging(&self.text[last.range.start..])?;
         let offset = last.range.start;
         Some(
-            parse(&mended)
+            parse_with_soft_breaks_as_newlines(&mended, self.soft_breaks_as_newlines)
                 .blocks
                 .into_iter()
                 .map(|mut block| {

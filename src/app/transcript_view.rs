@@ -1720,7 +1720,11 @@ impl Waku {
                     let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
                         .then(|| {
                             let view = markdown.entry(message.id).or_default();
-                            view.set_text(message.visible_content(), message.streaming);
+                            view.set_text_with_soft_breaks_as_newlines(
+                                message.visible_content(),
+                                message.streaming,
+                                message.role == MessageRole::User,
+                            );
                             &*view
                         });
                     let landed_push = match &message.notice {

@@ -3426,7 +3426,11 @@ impl Waku {
                             let view = markdown
                                 .entry(message.id)
                                 .or_insert_with(MarkdownView::seeded);
-                            view.set_text(message.visible_content(), message.streaming);
+                            view.set_text_with_soft_breaks_as_newlines(
+                                message.visible_content(),
+                                message.streaming,
+                                message.role == MessageRole::User,
+                            );
                             &*view
                         });
                     let rendered = render_message(

@@ -1132,7 +1132,7 @@ function MessageRow({
             />
           ) : visible ? (
             <div className="max-w-[540px] min-w-0 rounded-xl bg-[var(--raised)] px-3 py-2 text-[14px] leading-5">
-              <Markdown text={visible} compact />
+              <Markdown text={visible} compact preserveSoftBreaks />
             </div>
           ) : null}
           {!editing && (
@@ -1446,14 +1446,40 @@ function MessageContextMenu({
   )
 }
 
+type MarkdownNode = {
+  type: string
+  value?: string
+  children?: MarkdownNode[]
+}
+
+const remarkSoftBreaksAsLineBreaks = () => (tree: MarkdownNode) => {
+  const visit = (node: MarkdownNode) => {
+    if (!node.children) return
+    node.children = node.children.flatMap((child) => {
+      if (child.type === 'text' && child.value?.includes('\n')) {
+        const parts = child.value.split('\n')
+        return parts.flatMap((value, index) => [
+          ...(value ? [{ ...child, value }] : []),
+          ...(index < parts.length - 1 ? [{ type: 'break' }] : []),
+        ])
+      }
+      visit(child)
+      return [child]
+    })
+  }
+  visit(tree)
+}
+
 function Markdown({
   text,
   compact = false,
   streaming = false,
+  preserveSoftBreaks = false,
 }: {
   text: string
   compact?: boolean
   streaming?: boolean
+  preserveSoftBreaks?: boolean
 }) {
   const onOpenLink = useContext(TranscriptLinkContext)
   // Match the painter's attach semantics: text already present when this row
@@ -1464,7 +1490,9 @@ function Markdown({
   return (
     <div className={cn('markdown min-w-0', compact && '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0')}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={preserveSoftBreaks
+          ? [remarkGfm, remarkSoftBreaksAsLineBreaks]
+          : [remarkGfm]}
         rehypePlugins={chunks.length ? [markdownVeilPlugin(chunks, now)] : []}
         components={{
           a: ({ children, href, ...props }) => (

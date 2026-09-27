@@ -1,0 +1,1 @@
+- User prompts in the transcript keep soft line breaks when rendered as markdown.

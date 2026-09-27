@@ -1191,6 +1191,12 @@ impl MarkdownView {
     }
 
     pub fn set_text(&mut self, text: &str, mend: bool) {
+        self.set_text_with_soft_breaks_as_newlines(text, mend, false);
+    }
+
+    /// Point the view at transcript prompt markdown, retaining soft line
+    /// breaks while keeping the default prose behavior for other markdown.
+    pub fn set_text_with_soft_breaks_as_newlines(&mut self, text: &str, mend: bool, enabled: bool) {
         let was_streaming = self.streaming.replace(mend);
         if !mend && was_streaming {
             *self.veil.borrow_mut() = RowVeil::default();
@@ -1199,8 +1205,9 @@ impl MarkdownView {
             // rendered baseline. Do not make that history dissolve again.
             *self.veil.borrow_mut() = RowVeil::seeded();
         }
+        let policy_changed = self.parser.set_soft_breaks_as_newlines(enabled);
         let changed = self.parser.text() != text;
-        let append = !changed || text.starts_with(self.parser.text());
+        let append = !policy_changed && (!changed || text.starts_with(self.parser.text()));
         if changed {
             self.parser.set_text(text);
         }
@@ -1209,13 +1216,13 @@ impl MarkdownView {
         // re-parses — the final block, and `set_text` runs for every visible
         // row on every frame, so a frame that changed neither input must not
         // pay for it.
-        if changed || mend != was_streaming {
+        if changed || policy_changed || mend != was_streaming {
             let tail = if mend {
                 self.parser.display_tail().unwrap_or_default()
             } else {
                 Vec::new()
             };
-            if changed || tail != self.tail {
+            if changed || policy_changed || tail != self.tail {
                 self.tail = tail;
                 // Markdown block structure only ever extends the final block,
                 // so every element before it is still valid. A streamed delta
