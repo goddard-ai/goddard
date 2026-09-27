@@ -1,0 +1,1 @@
+- Pasting multiple lines while the composer caret sits inside a Markdown blockquote now keeps the whole paste quoted — each pasted line after the first opens with the line's own `>` run, so a `>> ` line stays nested and blank lines don't break the quote.

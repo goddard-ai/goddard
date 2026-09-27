@@ -1581,6 +1581,43 @@ pub(crate) struct ListItem {
     pub next_marker: String,
 }
 
+/// A blockquote marker run at `line`'s start — `> `, `>> `, `> > ` —
+/// after optional indent, in the same reading the highlighter paints.
+/// Shared with text fields, which continue the quote under a paste: the
+/// two must agree on what counts as quoting.
+pub(crate) struct Blockquote {
+    /// End of the `>` run from the line start — `line[..marker_end]` is the
+    /// quoting itself, separating whitespace excluded.
+    pub marker_end: usize,
+    /// Start of the quote's text from the line start — past the `>` run
+    /// and its spaces. `line[..body_start]` is the prefix a continued
+    /// line opens with.
+    pub body_start: usize,
+}
+
+/// Parse leading blockquote markers on `line`: any depth of `>` separated
+/// by spaces, after optional indent.
+pub(crate) fn blockquote(line: &str) -> Option<Blockquote> {
+    let bytes = line.as_bytes();
+    let mut index = 0;
+    let mut marker_end = None;
+    loop {
+        while bytes.get(index) == Some(&b' ') {
+            index += 1;
+        }
+        if bytes.get(index) == Some(&b'>') {
+            index += 1;
+            marker_end = Some(index);
+        } else {
+            break;
+        }
+    }
+    Some(Blockquote {
+        marker_end: marker_end?,
+        body_start: index,
+    })
+}
+
 /// Parse a list marker at `line`'s start: a bullet or an up-to-nine-digit
 /// number followed by whitespace or the end of the line.
 pub(crate) fn list_item(line: &str) -> Option<ListItem> {
@@ -1645,16 +1682,11 @@ fn markdown_container_markers(line: &str, tokens: &mut Vec<Token>) -> usize {
     let mut index = 0;
 
     // Leading indent, then any depth of `>` quoting.
-    loop {
-        while bytes.get(index) == Some(&b' ') {
-            index += 1;
+    if let Some(quote) = blockquote(line) {
+        for (at, _) in line[..quote.marker_end].match_indices('>') {
+            push(tokens, at..at + 1, TokenClass::Meta);
         }
-        if bytes.get(index) == Some(&b'>') {
-            push(tokens, index..index + 1, TokenClass::Meta);
-            index += 1;
-        } else {
-            break;
-        }
+        index = quote.body_start;
     }
 
     // One list marker: `- `, `* `, `+ `, `1. `, `1) `. Nested lists mark one

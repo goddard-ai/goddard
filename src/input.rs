@@ -757,7 +757,8 @@ pub struct TextInput {
     /// Shift+Enter still breaks the line. (One-line fields always submit.)
     submit_on_enter: bool,
     /// A newline inside a Markdown list item continues the list rather than
-    /// breaking the line plainly — see [`TextInput::list_continuation`].
+    /// breaking the line plainly, and a paste inside a blockquote keeps its
+    /// pasted lines quoted — see [`TextInput::list_continuation`].
     list_continuation: bool,
     /// A typed quote, backtick, or bracket over a non-empty selection wraps
     /// the text in the matching pair instead of replacing it — an editor
@@ -1093,7 +1094,10 @@ impl TextInput {
     /// the marker repeats, an ordered number increments, a task comes back
     /// unchecked, and text after the caret moves into the new item. On a
     /// line that is only its marker the marker is stripped instead, leaving
-    /// the caret on the blank line that steps out of the list.
+    /// the caret on the blank line that steps out of the list. A multi-line
+    /// paste whose caret sits inside a blockquote carries the same idea:
+    /// every pasted line after the first opens with the caret line's `>`
+    /// run, so the paste stays inside the quote instead of spilling out.
     pub fn list_continuation(mut self) -> Self {
         self.list_continuation = true;
         self
@@ -2409,12 +2413,51 @@ impl TextInput {
         // A paste is its own undo step, never part of the typing around it —
         // the native NSTextView boundary, stricter than Zed's time grouping.
         self.history.seal();
+        // Inside a Markdown blockquote the paste continues the quote — each
+        // pasted line after the first opens with the caret line's `>` run.
+        let text = self.quote_continued(&text).unwrap_or(text);
         if self.accepts_collapsed_paste && collapsible_paste(self.mode, &text) {
             cx.emit(CollapsedPaste(text));
             return;
         }
         self.replace_committed(None, &text, false, cx);
         self.history.seal();
+    }
+
+    /// A multi-line paste landing inside a Markdown blockquote continues the
+    /// quote: each pasted line after the first opens with the caret line's
+    /// `>` run — `> ` under a `> ` line, `>> ` under a `>> ` one — and a
+    /// blank pasted line keeps a bare `>` so the quote never breaks. The
+    /// first pasted line stays inline; it lands behind the marker already
+    /// on the caret's line. Part of
+    /// [`list_continuation`](Self::list_continuation)'s Markdown awareness,
+    /// reading the quote the highlighter's own way,
+    /// [`highlight::blockquote`].
+    fn quote_continued(&self, text: &str) -> Option<String> {
+        if !self.list_continuation || !text.contains('\n') {
+            return None;
+        }
+        let line_start = self.hard_line_start();
+        let line = &self.content[line_start..self.hard_line_end()];
+        let quote = highlight::blockquote(line)?;
+        // A caret inside the marker run itself is outside the quote's text
+        // — the same rule a list marker holds a newline to.
+        if self.cursor_offset() - line_start < quote.marker_end {
+            return None;
+        }
+        let prefix = &line[..quote.body_start];
+        let bare = prefix.trim_end();
+        let mut out = String::with_capacity(
+            text.len() + text.matches('\n').count() * prefix.len(),
+        );
+        for (index, segment) in text.split('\n').enumerate() {
+            if index > 0 {
+                out.push('\n');
+                out.push_str(if segment.is_empty() { bare } else { prefix });
+            }
+            out.push_str(segment);
+        }
+        Some(out)
     }
 
     /// `content[range]` with each [`INLINE_ATOM_MARKER`] swapped for its
@@ -4829,6 +4872,106 @@ mod tests {
 
         cx.read_entity(&input, |input, _| {
             assert_eq!(input.content(), "- one\n");
+        });
+    }
+
+    fn paste_clipboard(composer: &Entity<ComposerInput>, cx: &mut gpui::VisualTestContext, text: &str) {
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
+        });
+        cx.update(|window, cx| {
+            composer.update(cx, |composer, cx| {
+                composer
+                    .input
+                    .update(cx, |input, cx| input.paste(&Paste, window, cx));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn paste_inside_a_blockquote_continues_the_quote(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("> ", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(2..2, cx));
+        });
+
+        paste_clipboard(&composer, cx, "one\ntwo");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "> one\n> two");
+        });
+    }
+
+    #[gpui::test]
+    fn paste_inside_a_nested_blockquote_keeps_its_depth(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content(">> ", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(3..3, cx));
+        });
+
+        paste_clipboard(&composer, cx, "one\ntwo");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), ">> one\n>> two");
+        });
+    }
+
+    #[gpui::test]
+    fn paste_inside_a_blockquote_keeps_blank_lines_quoted(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("> ", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(2..2, cx));
+        });
+
+        paste_clipboard(&composer, cx, "one\n\ntwo");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "> one\n>\n> two");
+        });
+    }
+
+    #[gpui::test]
+    fn paste_ahead_of_a_blockquote_marker_splices_plainly(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("> quoted", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(0..0, cx));
+        });
+
+        paste_clipboard(&composer, cx, "one\ntwo");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "one\ntwo> quoted");
+        });
+    }
+
+    #[gpui::test]
+    fn paste_inside_a_blockquote_without_list_continuation_splices_plainly(
+        cx: &mut TestAppContext,
+    ) {
+        let (input, cx) = setup_input(cx, "> ", px(300.));
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("one\ntwo".to_owned()));
+            input.update(cx, |input, cx| input.select_range(2..2, cx));
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| input.paste(&Paste, window, cx))
+        });
+
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "> one\ntwo");
         });
     }
 
