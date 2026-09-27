@@ -4594,7 +4594,7 @@ impl Waku {
             .bg(theme.inset)
             .flex()
             .items_center()
-            .gap(px(4.0))
+            .gap(px(8.0))
             .track_focus(&focus)
             .tab_index(0)
             .focus_visible(|style| style.bg(theme.focus_highlight()))
