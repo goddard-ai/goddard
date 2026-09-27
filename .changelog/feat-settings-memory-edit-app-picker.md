@@ -1,0 +1,1 @@
+- Choose which app opens `MEMORY.md` from the Project memory Edit menu.

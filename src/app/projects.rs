@@ -4500,8 +4500,8 @@ impl Waku {
                             })
                             .child(div().flex_1())
                             .when_some(memory_path, |element, path| {
-                                element.child(
-                                    super::settings::settings_button(
+                                if self.is_remote_project(project_id) {
+                                    element.child(super::settings::settings_button(
                                         "memory-settings-edit",
                                         tr!("settings.memory_edit"),
                                         true,
@@ -4513,27 +4513,71 @@ impl Waku {
                                             if this.is_remote_project(project_id) {
                                                 this.show_toast(tr!("errors.remote_host_path"));
                                                 cx.notify();
-                                            } else {
-                                                match this.preferred_file_app() {
-                                                    Some(app) => crate::platform::open_file_in_app(
-                                                        &path, None, app, cx,
-                                                    ),
-                                                    None => crate::platform::open_with_default_app(
-                                                        &path, cx,
-                                                    ),
-                                                }
                                             }
                                         },
+                                    ))
+                                } else if self.open_in_apps.is_empty() {
+                                    element.child(
+                                        super::settings::settings_button(
+                                            "memory-settings-edit",
+                                            tr!("settings.memory_edit"),
+                                            true,
+                                            false,
+                                            true,
+                                            theme,
+                                            cx,
+                                            move |_, _, cx| {
+                                                crate::platform::open_with_default_app(&path, cx);
+                                            },
+                                        )
+                                        .tooltip(Tooltip::text(tr!("git_panel.open_file"))),
                                     )
-                                    .tooltip(Tooltip::text(
-                                        match self.preferred_file_app() {
-                                            Some(app) => {
-                                                tr!("git_panel.open_file_in", app = &app.label)
-                                            }
-                                            None => tr!("git_panel.open_file"),
+                                } else {
+                                    let apps = self.open_in_apps.clone();
+                                    let preferred = self.preferred_file_app().map(|app| app.id);
+                                    let weak = cx.entity().downgrade();
+                                    let menu_path = path.clone();
+                                    let handle = self.menu_handle("memory-settings-edit-menu", cx);
+                                    element.child(dropdown_menu(
+                                        MenuChip::new("memory-settings-edit")
+                                            .icon("icons/pencil.svg", theme.text_tertiary)
+                                            .label(tr!("settings.memory_edit"))
+                                            .outlined(),
+                                        "memory-settings-edit-menu",
+                                        &handle,
+                                        MenuAlign::BelowRight,
+                                        move |_| {
+                                            apps.iter()
+                                                .map(|app| {
+                                                    let weak = weak.clone();
+                                                    let path = menu_path.clone();
+                                                    let app_id = app.id;
+                                                    MenuItem::new(
+                                                        tr!("git_panel.open_file_in", app = app.label),
+                                                        move |_, cx| {
+                                                            let _ = weak.update(cx, |this, cx| {
+                                                                if this.is_remote_project(project_id) {
+                                                                    this.show_toast(tr!("errors.remote_host_path"));
+                                                                    cx.notify();
+                                                                } else if let Some(app) = this
+                                                                    .open_in_apps
+                                                                    .iter()
+                                                                    .find(|app| app.id == app_id)
+                                                                {
+                                                                    crate::platform::open_file_in_app(
+                                                                        &path, None, app, cx,
+                                                                    );
+                                                                }
+                                                            });
+                                                        },
+                                                    )
+                                                    .image(app.icon.clone())
+                                                    .selected(Some(app_id) == preferred)
+                                                })
+                                                .collect()
                                         },
-                                    )),
-                                )
+                                    ))
+                                }
                             }),
                     )
                     .when(memory_lines > 0, |element| {
