@@ -106,6 +106,29 @@ for (const helper of [
   }
 }
 
+// Fingerprint-keyed installs nest the helper one level deeper.
+const debugHelperNames = new Set([
+  "Goddard Debug Computer Use.app",
+  "Waku Debug Computer Use.app",
+]);
+for (const root of ["Goddard", "Waku"]) {
+  const installs = join(library, "Application Support", root, "Computer Use");
+  let versions;
+  try {
+    versions = await readdir(installs, { withFileTypes: true });
+  } catch {
+    continue;
+  }
+  for (const version of versions) {
+    if (!version.isDirectory() || version.name.startsWith(".")) continue;
+    const directory = join(installs, version.name);
+    const bundles = await readdir(directory).catch(() => [] as string[]);
+    if (bundles.some((name) => debugHelperNames.has(name))) {
+      addCandidate(directory);
+    }
+  }
+}
+
 // codes.waku.dev was the debug app's bundle ID before org.goddardai.app.debug.
 for (const bundleIdentifier of debugBundleIdentifiers) {
   for (const path of [

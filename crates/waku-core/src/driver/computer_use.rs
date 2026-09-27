@@ -314,8 +314,18 @@ pub(super) fn stop_registered_processes(directory: &Path, helper_executable: &Pa
     let _ = fs::write(directory.join("cancel-kernel"), b"");
     let expected_executable =
         dunce::canonicalize(helper_executable).unwrap_or_else(|_| helper_executable.to_path_buf());
+    // A helper whose install was superseded keeps running from a deleted
+    // bundle; its path no longer equals the current executable, so match any
+    // process still executing from the install root.
+    let install_root = crate::computer_use::helper_install_root().ok();
     for (pid, registration) in registered_processes(directory) {
-        if process_executable(pid).as_deref() == Some(expected_executable.as_path()) {
+        let is_helper = process_executable(pid).is_some_and(|executable| {
+            executable == expected_executable
+                || install_root
+                    .as_deref()
+                    .is_some_and(|root| executable.starts_with(root))
+        });
+        if is_helper {
             // macOS owns a Launch Services bridge; closing it interrupts the
             // native SDK. Portable hosts poll a cancellation marker so they
             // can cancel the operation and await SDK shutdown on both OSes.

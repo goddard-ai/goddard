@@ -301,6 +301,13 @@ pub fn pi_extension_path() -> anyhow::Result<PathBuf> {
     packaged_file(&path, "Goddard Pi Computer Use extension")
 }
 
+pub(crate) fn helper_install_root() -> anyhow::Result<PathBuf> {
+    Ok(dirs::data_dir()
+        .ok_or_else(|| anyhow!("Application Support directory is unavailable"))?
+        .join("Goddard")
+        .join("Computer Use"))
+}
+
 /// Install the bundled helper as an independent, stable runtime service.
 ///
 /// Screen Recording differs from Accessibility on macOS: it follows the
@@ -309,46 +316,147 @@ pub fn pi_extension_path() -> anyhow::Result<PathBuf> {
 /// helper. Launching this standalone copy through Launch Services gives the
 /// helper its own TCC identity while the signed app bundle remains the source
 /// shipped with Goddard.
+///
+/// Installs sit under a fingerprint-named directory instead of replacing one
+/// shared bundle: a helper connection outlives the install that spawned it,
+/// and once a running process's executable is deleted macOS can no longer
+/// resolve its code identity — every TCC check it answers then fails. Side by
+/// side installs keep a newer build from breaking sessions already running.
 fn install_helper_app(source: &Path) -> anyhow::Result<PathBuf> {
-    let application_support =
-        dirs::data_dir().ok_or_else(|| anyhow!("Application Support directory is unavailable"))?;
-    let install_root = application_support.join("Goddard").join("Computer Use");
-    crate::fs_ext::create_private_dir_all(&install_root)
+    install_helper_app_at(source, &helper_install_root()?)
+}
+
+fn install_helper_app_at(source: &Path, install_root: &Path) -> anyhow::Result<PathBuf> {
+    crate::fs_ext::create_private_dir_all(install_root)
         .with_context(|| format!("could not create {}", install_root.display()))?;
     let bundle_name = source
         .file_name()
         .ok_or_else(|| anyhow!("Computer Use helper bundle name is invalid"))?;
-    let destination = install_root.join(bundle_name);
-    if helper_install_matches(source, &destination)? {
-        return Ok(destination);
-    }
-
-    let staging = install_root.join(format!(".install-{}.app", Uuid::new_v4().simple()));
-    copy_directory(source, &staging)?;
-    let previous = install_root.join(format!(".previous-{}.app", Uuid::new_v4().simple()));
-    let had_previous = destination.exists();
-    if had_previous {
-        fs::rename(&destination, &previous)
-            .with_context(|| format!("could not replace {}", destination.display()))?;
-    }
-    if let Err(error) = fs::rename(&staging, &destination) {
-        if had_previous {
-            let _ = fs::rename(&previous, &destination);
+    let fingerprint = helper_fingerprint(source)?;
+    let version_root = install_root.join(&fingerprint);
+    let destination = version_root.join(bundle_name);
+    if !helper_install_matches(source, &destination)? {
+        if helper_executables_running(&destination) {
+            bail!(
+                "the Computer Use helper at {} is in use",
+                destination.display()
+            );
         }
-        let _ = fs::remove_dir_all(&staging);
-        return Err(error).context("could not install Computer Use helper");
+        crate::fs_ext::create_private_dir_all(&version_root)
+            .with_context(|| format!("could not create {}", version_root.display()))?;
+        let staging = version_root.join(format!(".install-{}.app", Uuid::new_v4().simple()));
+        copy_directory(source, &staging)?;
+        if destination.exists() {
+            let _ = fs::remove_dir_all(&destination);
+        }
+        fs::rename(&staging, &destination).context("could not install Computer Use helper")?;
     }
-    if had_previous {
-        let _ = fs::remove_dir_all(previous);
-    }
+    prune_stale_helper_installs(install_root, &fingerprint);
     Ok(destination)
 }
+
+fn helper_fingerprint(source: &Path) -> anyhow::Result<String> {
+    let fingerprint = fs::read_to_string(source.join(HELPER_FINGERPRINT_PATH))
+        .context("Computer Use helper has no build fingerprint")?;
+    let fingerprint = fingerprint.trim();
+    if fingerprint.is_empty()
+        || !fingerprint
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
+    {
+        bail!("Computer Use helper fingerprint is invalid");
+    }
+    Ok(fingerprint.to_owned())
+}
+
+/// Remove installs nothing still executes from — including flat `.app` bundles
+/// left by pre-fingerprint installs. A directory a live helper runs from stays:
+/// deleting its files would break the process's TCC identity.
+fn prune_stale_helper_installs(install_root: &Path, current_fingerprint: &str) {
+    let Ok(entries) = fs::read_dir(install_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        // Dotfiles also cover in-progress .install-* staging directories, which
+        // a concurrent daemon may still be filling — only finished installs
+        // (a directory holding a .app, or a legacy flat .app) are candidates.
+        if name.starts_with('.') || name == current_fingerprint || !path.is_dir() {
+            continue;
+        }
+        let installed = name.ends_with(".app") || contains_app_bundle(&path);
+        if !installed || helper_executables_running(&path) {
+            continue;
+        }
+        let _ = fs::remove_dir_all(&path);
+    }
+}
+
+fn contains_app_bundle(directory: &Path) -> bool {
+    fs::read_dir(directory).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            entry.file_type().is_ok_and(|kind| kind.is_dir())
+                && entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.ends_with(".app"))
+        })
+    })
+}
+
+/// proc_pidpath keeps resolving a helper's launch path after its bundle is
+/// deleted, so this check still guards orphaned helpers.
+#[cfg(target_os = "macos")]
+fn helper_executables_running(directory: &Path) -> bool {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    const PROC_ALL_PIDS: u32 = 1;
+    let bytes = unsafe { libc::proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0) };
+    if bytes <= 0 {
+        return true;
+    }
+    let mut pids = vec![0 as libc::pid_t; bytes as usize / size_of::<libc::pid_t>()];
+    let listed = unsafe { libc::proc_listpids(PROC_ALL_PIDS, 0, pids.as_mut_ptr().cast(), bytes) };
+    if listed <= 0 {
+        return true;
+    }
+    for pid in pids.into_iter().filter(|pid| *pid > 0) {
+        let mut buffer = vec![0_u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let length = unsafe {
+            libc::proc_pidpath(
+                pid,
+                buffer.as_mut_ptr().cast(),
+                libc::PROC_PIDPATHINFO_MAXSIZE as u32,
+            )
+        };
+        if length <= 0 {
+            continue;
+        }
+        buffer.truncate(length as usize);
+        if PathBuf::from(OsString::from_vec(buffer)).starts_with(directory) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Helper installs only happen on macOS; other platforms never reach this.
+#[cfg(not(target_os = "macos"))]
+fn helper_executables_running(_directory: &Path) -> bool {
+    false
+}
+
+const HELPER_FINGERPRINT_PATH: &str = "Contents/Resources/.goddard-helper-fingerprint";
 
 fn helper_install_matches(source: &Path, destination: &Path) -> anyhow::Result<bool> {
     if !destination.is_dir() {
         return Ok(false);
     }
-    let fingerprint = Path::new("Contents/Resources/.goddard-helper-fingerprint");
+    let fingerprint = Path::new(HELPER_FINGERPRINT_PATH);
     let source_fingerprint = fs::read(source.join(fingerprint))?;
     let Ok(installed_fingerprint) = fs::read(destination.join(fingerprint)) else {
         return Ok(false);
@@ -448,6 +556,68 @@ mod tests {
         };
         assert_eq!(target.grant_key(), grant.key());
         assert!(target.persistable());
+    }
+
+    fn bundled_helper(root: &Path, fingerprint: &str) -> PathBuf {
+        let source = root
+            .join(format!("bundled-{fingerprint}"))
+            .join("Goddard Computer Use.app");
+        fs::create_dir_all(source.join("Contents/MacOS")).unwrap();
+        fs::create_dir_all(source.join("Contents/Resources")).unwrap();
+        fs::write(
+            source.join(HELPER_FINGERPRINT_PATH),
+            format!("{fingerprint}\n"),
+        )
+        .unwrap();
+        fs::write(
+            source.join("Contents/MacOS/Goddard Computer Use"),
+            b"helper",
+        )
+        .unwrap();
+        source
+    }
+
+    #[test]
+    fn helper_installs_keyed_by_fingerprint_prune_finished_stale_roots() {
+        let root = std::env::temp_dir().join(format!("helper-install-{}", Uuid::new_v4()));
+        let install_root = root.join("installed");
+        let first_source = bundled_helper(&root, "aaaa1111");
+        let second_source = bundled_helper(&root, "bbbb2222");
+
+        let first = install_helper_app_at(&first_source, &install_root).unwrap();
+        assert_eq!(
+            first,
+            install_root.join("aaaa1111/Goddard Computer Use.app")
+        );
+        assert!(first.join("Contents/MacOS/Goddard Computer Use").is_file());
+
+        // A different build installs beside the first, then prunes it — no
+        // process executes from this test's temp directory.
+        let second = install_helper_app_at(&second_source, &install_root).unwrap();
+        assert_eq!(
+            second,
+            install_root.join("bbbb2222/Goddard Computer Use.app")
+        );
+        assert!(!first.exists());
+        assert!(second.exists());
+
+        // Reinstalling the same fingerprint reuses it; a flat pre-fingerprint
+        // install prunes like any other stale root, while staging leftovers
+        // and unrelated directories stay.
+        let legacy = install_root.join("Goddard Computer Use.app");
+        let staging = install_root.join(".install-leftover.app");
+        let unrelated = install_root.join("unrelated");
+        for directory in [&legacy, &staging, &unrelated] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        let again = install_helper_app_at(&second_source, &install_root).unwrap();
+        assert_eq!(again, second);
+        assert!(!legacy.exists());
+        assert!(staging.exists());
+        assert!(unrelated.exists());
+        assert!(second.exists());
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
