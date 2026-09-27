@@ -1276,12 +1276,20 @@ suggestions.commit_changes: 提交这些更改
 suggestions.add_tests: 为此添加测试
 suggestions.review_changes: 审查这些更改的问题
 suggestions.open_pr: 推送并创建 PR
+suggestions.you_decide_prompt: 由你判断并继续
+suggestions.implement_plan_prompt: 看起来不错——按计划实施
+suggestions.diagnose_prompt: 诊断失败原因并重试
+suggestions.whats_next_prompt: 我们接下来该做什么？
 suggestions.commit: 提交
 suggestions.push: 推送
 suggestions.push_changes: 推送更改
 suggestions.archive: 归档
 suggestions.sync: 同步
 suggestions.land: 合入
+suggestions.you_decide: 由你决定
+suggestions.implement_plan: 实施计划
+suggestions.diagnose: 诊断
+suggestions.whats_next: 下一步？
 suggestions.move_fast_title: 快速行动、不怕出错
 suggestions.move_fast_description: Jev 会倾向于推进工作的操作（合入、推送、提交、修复），并更积极地建议这些下一步。
 sync.behind_one: "落后 %{upstream} 1 个提交"

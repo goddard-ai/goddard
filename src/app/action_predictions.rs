@@ -23,6 +23,7 @@ use uuid::Uuid;
 use waku_client::git::PullStrategy;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{AgentSession, SessionWorkspace};
+use waku_protocol::routing::SessionPhase;
 
 use crate::ui::shortcut::ShortcutHint;
 
@@ -103,6 +104,10 @@ pub(super) const CANNED_PROMPTS: &[(&str, &str)] = &[
     ("add-tests", "suggestions.add_tests"),
     ("review-changes", "suggestions.review_changes"),
     ("open-pr", "suggestions.open_pr"),
+    ("you-decide", "suggestions.you_decide_prompt"),
+    ("implement-plan", "suggestions.implement_plan_prompt"),
+    ("diagnose", "suggestions.diagnose_prompt"),
+    ("whats-next", "suggestions.whats_next_prompt"),
 ];
 pub(super) fn default_suggested_prompt(action: &str) -> Option<String> {
     let (_, key) = CANNED_PROMPTS.iter().find(|(id, _)| *id == action)?;
@@ -156,6 +161,10 @@ pub(super) const ACTIONABLE_SUGGESTIONS: &[&str] = &[
     "add-tests",
     "review-changes",
     "open-pr",
+    "you-decide",
+    "implement-plan",
+    "diagnose",
+    "whats-next",
     "commit",
     "push",
     "sync",
@@ -171,6 +180,12 @@ pub(super) fn suggested_action_title(action: &str) -> Option<String> {
         "push" => Some(tr!("suggestions.push")),
         "sync" => Some(tr!("suggestions.sync")),
         "land" => Some(tr!("suggestions.land")),
+        // The newer ids carry their own titles — their chips label the
+        // action while their canned prompts hold the text that sends.
+        "you-decide" => Some(tr!("suggestions.you_decide")),
+        "implement-plan" => Some(tr!("suggestions.implement_plan")),
+        "diagnose" => Some(tr!("suggestions.diagnose")),
+        "whats-next" => Some(tr!("suggestions.whats_next")),
         _ => CANNED_PROMPTS
             .iter()
             .find(|(id, _)| *id == action)
@@ -187,6 +202,10 @@ pub(super) const AUTOMATIC_ACTIONS: &[&str] = &[
     "add-tests",
     "review-changes",
     "open-pr",
+    "you-decide",
+    "implement-plan",
+    "diagnose",
+    "whats-next",
     "push",
     "sync",
     "land",
@@ -218,6 +237,9 @@ pub(super) const MOVE_FAST_ACTIONS: &[&str] = &[
     "fix-errors",
     "commit-changes",
     "open-pr",
+    "you-decide",
+    "implement-plan",
+    "diagnose",
     "commit",
     "push",
     "sync",
@@ -453,6 +475,7 @@ fn next_action_candidates(
         .any(|activity| activity.failed);
     let mut candidates: Vec<(&'static str, &'static str)> = vec![
         ("keep-going", "Tell the agent to keep going"),
+        ("whats-next", "Ask the agent what to do next"),
         ("archive", "Archive this session"),
         ("new-task", "Start a new task"),
         ("new-worktree", "Start a task in a new worktree"),
@@ -461,6 +484,12 @@ fn next_action_candidates(
             "Write and send a prompt of their own — something not listed",
         ),
     ];
+    if session.phase == Some(SessionPhase::Planning) {
+        candidates.push((
+            "implement-plan",
+            "Tell the agent the plan looks good — implement it",
+        ));
+    }
     if files_changed {
         candidates.extend([
             ("run-tests", "Ask the agent to run the tests"),
@@ -1053,6 +1082,10 @@ impl Waku {
             "archive" => Some(("icons/archive.svg", tr!("suggestions.archive"))),
             "sync" => Some(("icons/arrow-down.svg", tr!("suggestions.sync"))),
             "land" => Some(("icons/git-merge.svg", tr!("suggestions.land"))),
+            // These canned ids label the action rather than echoing the
+            // prompt the chip sends.
+            "implement-plan" => Some(("icons/compass.svg", tr!("suggestions.implement_plan"))),
+            "whats-next" => Some(("icons/circle-help.svg", tr!("suggestions.whats_next"))),
             canned => {
                 let prompt = suggested_prompt(canned, &self.state.suggested_prompts)?;
                 Some(("icons/sparkle.svg", prompt))
@@ -1446,6 +1479,7 @@ mod tests {
         }
         for always in [
             "keep-going",
+            "whats-next",
             "archive",
             "new-task",
             "new-worktree",
@@ -1453,6 +1487,18 @@ mod tests {
         ] {
             assert!(ids.contains(&always), "missing candidate: {always}");
         }
+        // No tracked phase — the plan approval prompt stays out.
+        assert!(!ids.contains(&"implement-plan"));
+    }
+
+    #[test]
+    fn a_planning_phase_turn_offers_implement_plan() {
+        let (mut session, turn_id) = session_with_turn(None);
+        assert!(!candidate_ids(&session, turn_id).contains(&"implement-plan"));
+        session.phase = Some(SessionPhase::Planning);
+        assert!(candidate_ids(&session, turn_id).contains(&"implement-plan"));
+        session.phase = Some(SessionPhase::Executing);
+        assert!(!candidate_ids(&session, turn_id).contains(&"implement-plan"));
     }
 
     #[test]

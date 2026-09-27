@@ -1304,12 +1304,20 @@ suggestions.commit_changes: 変更をコミット
 suggestions.add_tests: テストを追加
 suggestions.review_changes: 変更をレビュー
 suggestions.open_pr: プッシュしてPRを作成
+suggestions.you_decide_prompt: あなたの判断で進めてください
+suggestions.implement_plan_prompt: いいですね — 計画を実装してください
+suggestions.diagnose_prompt: 失敗した原因を調べて再試行してください
+suggestions.whats_next_prompt: 次に何をすべきですか？
 suggestions.commit: コミット
 suggestions.push: プッシュ
 suggestions.push_changes: 変更をプッシュ
 suggestions.archive: アーカイブ
 suggestions.sync: 同期
 suggestions.land: 取り込む
+suggestions.you_decide: あなたが決める
+suggestions.implement_plan: 計画を実装
+suggestions.diagnose: 診断
+suggestions.whats_next: 次は？
 suggestions.move_fast_title: 速く進め、壊すことを恐れない
 suggestions.move_fast_description: Jev は前に進む操作（取り込み、プッシュ、コミット、修正）を優先し、次の一手をより積極的に提案します。
 sync.behind_one: "%{upstream} より 1 コミット遅れています"

@@ -241,6 +241,8 @@ pub(super) enum StatusSuggestedAction {
     KeepGoing,
     FixErrors,
     RunTests,
+    YouDecide,
+    Diagnose,
 }
 
 impl StatusSuggestedAction {
@@ -253,6 +255,8 @@ impl StatusSuggestedAction {
             Self::KeepGoing => "keep-going",
             Self::FixErrors => "fix-errors",
             Self::RunTests => "run-tests",
+            Self::YouDecide => "you-decide",
+            Self::Diagnose => "diagnose",
         }
     }
 }
@@ -276,17 +280,23 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
             "go-ahead"
                 | "aligned"
                 | "decision"
+                | "awaiting-input"
                 | "needs-continuation"
                 | "errors-remain"
                 | "not-tested"
+                | "failed"
+                | "blocked"
         )
     });
     match marker.map(|(marker, _)| marker.id) {
         Some("go-ahead") => vec![StatusSuggestedAction::Proceed],
         Some("aligned") => vec![StatusSuggestedAction::MakeItHappen],
-        Some("decision") => Vec::new(),
+        Some("decision") | Some("awaiting-input") => vec![StatusSuggestedAction::YouDecide],
         Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
+        // `errors-remain` is the failed flag's subtype — it only leads
+        // `cleared` when repairable errors outscored the bare failure.
         Some("errors-remain") => vec![StatusSuggestedAction::FixErrors],
+        Some("failed") | Some("blocked") => vec![StatusSuggestedAction::Diagnose],
         Some("not-tested") => vec![StatusSuggestedAction::RunTests],
         _ => Vec::new(),
     }
@@ -313,8 +323,9 @@ fn marker_action_signal(markers: &[String], action: &str) -> &'static str {
             // asking for more work or undoing it says the turn was not done.
             "complete" | "answered" | "nothing-to-do" => match action {
                 "commit" | "push" | "land" | "archive" | "new-prompt" | "new-task"
-                | "new-worktree" => confirmed = true,
-                "revert" | "fix-errors" | "keep-going" | "proceed" | "make-it-happen" => {
+                | "new-worktree" | "whats-next" => confirmed = true,
+                "revert" | "fix-errors" | "keep-going" | "proceed" | "make-it-happen"
+                | "you-decide" | "implement-plan" | "diagnose" => {
                     return "contradicted";
                 }
                 _ => {}
@@ -322,14 +333,17 @@ fn marker_action_signal(markers: &[String], action: &str) -> &'static str {
             // A turn that hit a wall: engaging the failure agrees; shipping
             // anyway says the wall was not real.
             "failed" | "blocked" | "errors-remain" => match action {
-                "fix-errors" | "keep-going" | "revert" | "new-prompt" => confirmed = true,
+                "fix-errors" | "keep-going" | "revert" | "new-prompt" | "diagnose" => {
+                    confirmed = true;
+                }
                 "commit" | "push" | "land" => return "contradicted",
                 _ => {}
             },
             // A turn that waited on the user: a reply — offered or bespoke —
             // confirms the wait was real.
             "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned" => match action {
-                "new-prompt" | "proceed" | "make-it-happen" | "keep-going" => {
+                "new-prompt" | "proceed" | "make-it-happen" | "keep-going" | "you-decide"
+                | "implement-plan" | "whats-next" => {
                     confirmed = true;
                 }
                 _ => {}
@@ -1022,8 +1036,25 @@ impl Waku {
                                         )
                                         .unwrap_or_else(|| tr!("suggestions.run_tests")),
                                     ),
+                                    // These chips label the action; the
+                                    // tooltip below shows the prompt text
+                                    // that clicking sends.
+                                    StatusSuggestedAction::YouDecide => (
+                                        "icons/chat.svg",
+                                        action_predictions::suggested_action_title("you-decide")
+                                            .unwrap_or_else(|| tr!("suggestions.you_decide")),
+                                    ),
+                                    StatusSuggestedAction::Diagnose => (
+                                        "icons/search.svg",
+                                        action_predictions::suggested_action_title("diagnose")
+                                            .unwrap_or_else(|| tr!("suggestions.diagnose")),
+                                    ),
                                 };
-                                let tooltip = label.clone();
+                                let tooltip = action_predictions::suggested_prompt(
+                                    action.canned_id(),
+                                    &self.state.suggested_prompts,
+                                )
+                                .unwrap_or_else(|| label.clone());
                                 let display_label: String =
                                     label.replace('\n', " ").chars().take(56).collect();
                                 let display_label =
@@ -1128,7 +1159,9 @@ impl Waku {
             StatusSuggestedAction::MakeItHappen
             | StatusSuggestedAction::KeepGoing
             | StatusSuggestedAction::FixErrors
-            | StatusSuggestedAction::RunTests => {
+            | StatusSuggestedAction::RunTests
+            | StatusSuggestedAction::YouDecide
+            | StatusSuggestedAction::Diagnose => {
                 let Some(prompt) = action_predictions::suggested_prompt(
                     action.canned_id(),
                     &self.state.suggested_prompts,
@@ -1710,9 +1743,17 @@ mod tests {
         );
         assert_eq!(suggested_actions(&verdict("details")), []);
         assert!(waiting_for_user_input(&verdict("details")));
-        assert!(suggested_actions(&verdict("decision")).is_empty());
+        assert_eq!(
+            suggested_actions(&verdict("decision")),
+            [StatusSuggestedAction::YouDecide]
+        );
         assert!(waiting_for_user_input(&verdict("decision")));
-        assert!(suggested_actions(&verdict("other")).is_empty());
+        // An input ask the subtype question can't classify keeps the
+        // generic awaiting-input chip — also a "you decide" case.
+        assert_eq!(
+            suggested_actions(&verdict("other")),
+            [StatusSuggestedAction::YouDecide]
+        );
         assert!(waiting_for_user_input(&verdict("other")));
     }
 
@@ -1811,7 +1852,20 @@ mod tests {
             [StatusSuggestedAction::FixErrors]
         );
         assert_eq!(cleared_markers(&errors(0.40))[0].0.id, "failed");
-        assert!(suggested_actions(&errors(0.40)).is_empty());
+        // No repairable-errors subtype — the bare failure gets "Diagnose".
+        assert_eq!(
+            suggested_actions(&errors(0.40)),
+            [StatusSuggestedAction::Diagnose]
+        );
+
+        let blocked = evaluation(BTreeMap::from([(
+            "blocked".to_owned(),
+            EvalAnswer::Noul { noul: 0.90 },
+        )]));
+        assert_eq!(
+            suggested_actions(&blocked),
+            [StatusSuggestedAction::Diagnose]
+        );
 
         let untested = evaluation(BTreeMap::from([
             (

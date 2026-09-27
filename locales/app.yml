@@ -3419,6 +3419,14 @@ suggestions.review_changes:
   en: Review these changes for issues
 suggestions.open_pr:
   en: Push and open a PR
+suggestions.you_decide_prompt:
+  en: Use your judgment and proceed.
+suggestions.implement_plan_prompt:
+  en: Looks good — implement the plan.
+suggestions.diagnose_prompt:
+  en: Diagnose why that failed and retry.
+suggestions.whats_next_prompt:
+  en: What should we do next?
 suggestions.commit:
   en: Commit
 suggestions.push:
@@ -3431,6 +3439,14 @@ suggestions.sync:
   en: Sync
 suggestions.land:
   en: Land
+suggestions.you_decide:
+  en: You decide
+suggestions.implement_plan:
+  en: Implement the plan
+suggestions.diagnose:
+  en: Diagnose
+suggestions.whats_next:
+  en: What next?
 suggestions.move_fast_title:
   en: Move fast, break things
 suggestions.move_fast_description:
