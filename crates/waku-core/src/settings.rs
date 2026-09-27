@@ -59,8 +59,10 @@ impl DaemonSettingsStore {
             }
             Err(error) => return Err(error),
         };
+        let removed_project_map_setting = settings.extra.contains_key("project_map_enabled");
         settings.discard_legacy_app_keys();
         let write_current = write_current
+            || removed_project_map_setting
             || waku_protocol::auto_prompts::refresh_untouched_shipped_rules(
                 &mut settings.auto_prompts,
             );
@@ -119,7 +121,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("waku-settings-{}.json", Uuid::new_v4()));
         fs::write(
             &path,
-            r#"{"theme":"dark","analytics_enabled":false,"computer_use_enabled":true,"future":42}"#,
+            r#"{"theme":"dark","analytics_enabled":false,"computer_use_enabled":true,"project_map_enabled":false,"future":42}"#,
         )
         .unwrap();
 
@@ -127,7 +129,10 @@ mod tests {
         let settings = store.get();
         assert!(settings.computer_use_enabled);
         assert_eq!(settings.extra.get("future"), Some(&Value::from(42)));
+        assert!(!settings.extra.contains_key("project_map_enabled"));
         assert!(!settings.extra.contains_key("theme"));
+        let migrated: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(migrated.get("project_map_enabled").is_none());
         store.replace(settings).unwrap();
 
         let value: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();

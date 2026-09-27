@@ -2177,8 +2177,6 @@ experiments.needs_eval_backend: 使用评估后端 — 尚未配置。
 experiments.open_jev_settings: 打开 Jev 设置
 experiments.phase_routing_description: 评估模型判定需要规划阶段的自动路由任务，先用最强档模型启动，待工具流或评估模型判定规划结束后降一档切换模型 — 实现停滞时会切回。侧边栏任务行显示当前阶段。
 experiments.phase_routing_title: 分阶段路由
-experiments.project_map_description: 为每个新会话提供一份工作区的紧凑结构地图 — 最常被引用文件的顶层符号，预算约 1,000 个令牌 — 让智能体跳过冷启动的仓库探索。对开启后启动的会话生效。
-experiments.project_map_title: 项目地图
 experiments.projects_page_description: 按 ⌘⇧P 打开每个项目的页面，列出其工作树、分支、issue 和拉取请求，⌘⌥1–4 可直接跳转到对应标签页。
 experiments.projects_page_title: 项目页面
 experiments.review_queue_description: 在项目页面新增“审查”标签页，按从旧到新列出审查分支的提议提交，支持逐个批准、拒绝并回退，以及为已批准的范围启动发布任务。分支名可在“设置 → 守护进程”中配置，默认为 dev。
@@ -2416,9 +2414,6 @@ pairing.revoke: 撤销
 pairing.wants_to_pair: 想连接到此守护进程
 project_map.action_label: 项目地图
 project_map.artifact_title: 项目地图 · %{files} 个文件 · 约 %{tokens} 个令牌
-project_map.indexing: 正在索引工作区…
-project_map.ready: 地图就绪 · %{files} 个文件
-project_map.refreshing: 正在刷新地图…
 project_map.sent: 地图 · %{files} 个文件 · ~%{tokens} 令牌
 projects.col_branch: 分支
 projects.col_changes: 更改

@@ -362,10 +362,6 @@ pub struct PersistedState {
     /// Per-provider model for background title rewrites, mirrored from daemon settings.
     #[serde(skip)]
     pub title_models: BTreeMap<ProviderKind, String>,
-    /// Experimental: whether new sessions get the workspace project map
-    /// prepended to their first prompt, mirrored from the settings document.
-    #[serde(default = "default_experiment_enabled")]
-    pub project_map_enabled: bool,
     /// Hosted evaluation-model settings mirrored from the settings document.
     /// Kept out of the on-disk state deliberately: the credential-bearing
     /// document is the daemon's `settings.json`, and this copy exists so the
@@ -504,7 +500,6 @@ impl PersistedState {
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             memory_models: Default::default(),
             title_models: Default::default(),
-            project_map_enabled: default_experiment_enabled(),
             eval: None,
             route_classes: Default::default(),
             provider_route_classes: Default::default(),
@@ -661,7 +656,6 @@ impl PersistedState {
             composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
             memory_models: self.memory_models.clone(),
             title_models: self.title_models.clone(),
-            project_map_enabled: self.project_map_enabled,
             eval: self.eval.clone(),
             route_classes: self.route_classes.clone(),
             provider_route_classes: self.provider_route_classes.clone(),
@@ -725,7 +719,6 @@ impl PersistedState {
         self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;
         self.memory_models = settings.memory_models;
         self.title_models = settings.title_models;
-        self.project_map_enabled = settings.project_map_enabled;
         self.eval = settings.eval;
         self.route_classes = settings.route_classes;
         self.provider_route_classes = settings.provider_route_classes;

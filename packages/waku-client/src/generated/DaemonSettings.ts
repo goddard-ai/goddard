@@ -42,13 +42,7 @@ custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
  * Off by default in release builds, on in debug builds (`bun run dev`);
  * toggling affects only sessions started afterwards.
  */
-subagents_enabled: boolean,
-/**
- * Experimental: expose the on-demand, Jev-ranked `goddard-agent map`
- * command for the session's workspace. Off by default in release builds,
- * on in debug builds; affects only sessions started afterwards.
- */
-project_map_enabled: boolean, provider_binary_overrides: { [key in ProviderKind]?: string },
+subagents_enabled: boolean, provider_binary_overrides: { [key in ProviderKind]?: string },
 /**
  * Hosted evaluation-model configuration (backend + BYOK credentials).
  * `None` means no eval feature can run — callers degrade to their

@@ -3446,8 +3446,7 @@ pub enum ActivityKind {
     Search,
     Plan,
     Tool,
-    /// The daemon-injected structural workspace map, prepended to a fresh
-    /// session's first prompt while the project-map experiment is on.
+    /// Legacy automatic workspace-map context, retained for stored transcripts.
     ProjectMap,
 }
 
@@ -3568,8 +3567,7 @@ pub fn is_delegation_tool_name(name: &str) -> bool {
     )
 }
 
-/// The daemon's project-map state for one session, streamed while the
-/// experiment opt-in is on. Clients surface index progress as a small status chip.
+/// Legacy workspace-index lifecycle status, still decoded from older daemons.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(
     tag = "state",
@@ -3577,12 +3575,8 @@ pub fn is_delegation_tool_name(name: &str) -> bool {
     rename_all_fields = "camelCase"
 )]
 pub enum ProjectMapStatus {
-    /// The workspace index is building.
     Building,
-    /// The index is ready for agent map requests.
     Ready { indexed_files: usize },
-    /// A settled turn triggered an incremental refresh; a map request may use
-    /// the previous index until it finishes.
     Refreshing,
 }
 
@@ -3779,9 +3773,8 @@ pub enum DriverEvent {
     /// or (`None`) cleared. Carries the whole goal so late subscribers need
     /// no earlier event.
     GoalUpdated(Option<ThreadGoal>),
-    /// Project-map state for this session while the experiment is on:
-    /// index lifecycle updates plus the `Sent` record of the map that rode
-    /// the first prompt.
+    /// Legacy index lifecycle updates from older daemons. New daemons keep
+    /// the index internal and do not emit these status events.
     ProjectMap(ProjectMapStatus),
     /// Sandbox launch progress for this session, emitted before the
     /// provider process exists. Ephemeral — replayed to nobody, cleared by

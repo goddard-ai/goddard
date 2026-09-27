@@ -75,7 +75,7 @@ function fixture(options: { attached?: boolean } = {}) {
             computer_use_enabled: false, computer_use_experiment_enabled: false,
             computer_use_allowed_apps: [],
             agent_tools_enabled: false, agent_settings_enabled: true,
-            subagents_enabled: false, project_map_enabled: false,
+            subagents_enabled: false,
             memory_experiment_enabled: false, integrations_enabled: false,
             composer_drafts_experiment_enabled: false,
             sandbox_experiment_enabled: false, sandbox_default_enabled: false,

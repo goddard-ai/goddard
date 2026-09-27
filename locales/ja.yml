@@ -2226,8 +2226,6 @@ experiments.needs_eval_backend: 評価バックエンドを使用します — �
 experiments.open_jev_settings: Jev 設定を開く
 experiments.phase_routing_description: 計画フェーズが必要と評価モデルが判定した自動振り分けタスクは、最上位クラスのモデルで開始し、ツールイベントまたは評価モデルが計画の終了を判断した時点で1クラス下のモデルに切り替えます — 実装が停滞した場合は元に戻ります。サイドバーの行にタスクのフェーズを表示します。
 experiments.phase_routing_title: フェーズ対応ルーティング
-experiments.project_map_description: 新しいセッションにワークスペースのコンパクトな構造マップを渡します — 最も参照されるファイルのトップレベルシンボルを約 1,000 トークンに収め、エージェントが初見のリポジトリ探索を省けます。有効化後に開始したセッションに適用されます。
-experiments.project_map_title: プロジェクトマップ
 experiments.projects_page_description: ⌘⇧P でプロジェクトごとのページを開き、ワークツリー、ブランチ、Issue、プルリクエストを一覧します。⌘⌥1–4 でタブに直接移動できます。
 experiments.projects_page_title: プロジェクトページ
 experiments.review_queue_description: プロジェクトページにレビュータブを追加します。レビュー用ブランチの提案コミットを古い順に表示し、コミットごとの承認、却下とリバート、承認済み範囲のリリースタスクを開始できます。ブランチ名は「設定 → デーモン」で変更でき、初期値は dev です。
@@ -2465,9 +2463,6 @@ pairing.revoke: 解除
 pairing.wants_to_pair: がこのデーモンに接続しようとしています
 project_map.action_label: プロジェクトマップ
 project_map.artifact_title: "プロジェクトマップ · %{files} ファイル · 約 %{tokens} トークン"
-project_map.indexing: ワークスペースをインデックス中…
-project_map.ready: "マップ準備完了 · %{files} ファイル"
-project_map.refreshing: マップを更新中…
 project_map.sent: "マップ · %{files} ファイル · 約 %{tokens} トークン"
 projects.col_branch: ブランチ
 projects.col_changes: 変更

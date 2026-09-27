@@ -487,12 +487,6 @@ big_picture.empty_transcript:
 project_switcher.recently_used:
   en: Recently used
 
-project_map.indexing:
-  en: Indexing workspace…
-project_map.ready:
-  en: Map ready · %{files} files
-project_map.refreshing:
-  en: Refreshing map…
 project_map.sent:
   en: Map · %{files} files · ~%{tokens} tok
 project_map.artifact_title:
@@ -969,10 +963,6 @@ routing.feature_project_map:
   en: Project map
 routing.feature_project_map_description:
   en: Ranks indexed code candidates against an agent's source query.
-experiments.project_map_title:
-  en: Project map
-experiments.project_map_description:
-  en: Let each session's agent request relevant code with a precise question. Jev ranks source evidence from the workspace index; results include file paths and line numbers. Applies to sessions started after turning it on.
 experiments.sandbox_title:
   en: Sandbox VM
 experiments.sandbox_description:

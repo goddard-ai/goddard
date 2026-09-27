@@ -1571,7 +1571,6 @@ mod tests {
             }),
             task_tools: true,
             settings_writes: true,
-            project_maps: false,
         }
     }
 

@@ -20,7 +20,7 @@ use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     AgentAskOutcome, AgentModelOption, AgentProjectMapResult, AgentSession, AgentSessionSearchHit,
     Checkpoint, CheckpointStatus, DriverEvent, PermissionOption, Project, ProjectMapIntent,
-    ProjectMapRanking, ProjectMapStatus, ProviderKind, ProviderModelOption, ProviderResumeCursor,
+    ProjectMapRanking, ProviderKind, ProviderModelOption, ProviderResumeCursor,
     ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace, TurnStatus, UserInputQuestion,
     detail_prefix_signature,
 };
@@ -301,10 +301,9 @@ fn drop_detached<T: Send + 'static>(value: T) {
 /// index per workspace root, built and refreshed on background threads.
 #[derive(Default)]
 struct RepoMaps {
-    /// Session → its workspace root and runtime, recorded for runtimes
-    /// launched while the experiment is on. Scopes map requests, turn-settle
-    /// refresh, and `Ready` broadcasts to same-root sessions.
-    sessions: HashMap<Uuid, (PathBuf, Uuid)>,
+    /// Session → its workspace root. This scopes map requests and incremental
+    /// refreshes to the caller's active local workspace.
+    sessions: HashMap<Uuid, PathBuf>,
     /// Workspace root → index, shared across sessions in the same root.
     indexes: HashMap<PathBuf, crate::repo_map::RepoMapIndex>,
     /// Roots with a build/refresh in flight, so triggers don't pile up.
@@ -4302,29 +4301,23 @@ impl WakuBackend {
             options.computer_use_enabled,
             daemon_settings.computer_use_experiment_enabled,
         );
-        let (environment, rename_allowed) = self
+        let environment = self
             .task_state
             .lock()
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .map(|session| (session.environment(), session.agent_rename_allowed))
+            .map(|session| session.environment())
             .unwrap_or_default();
         // A cloud task runs on the provider's hosted environment — nothing
         // local executes, so the launch injections below (agent surface,
-        // subagents, project map, integrations) would all point at a host
-        // the remote side cannot see. They stay off for cloud launches.
+        // subagents, workspace code-map index, integrations) would all point
+        // at a host the remote side cannot see. They stay off for cloud launches.
         let cloud_launch = environment.is_cloud();
         // The native helper and the REPL approval channel live on this host.
         // A cloud process or sandbox guest cannot reach either one directly.
         options.computer_use_enabled &= !cloud_launch && !environment.is_sandbox();
-        if !cloud_launch
-            && (daemon_settings.project_map_enabled
-                || daemon_settings.agent_tools_enabled
-                || daemon_settings.agent_settings_enabled
-                || rename_allowed
-                || options.read_own_transcript)
-        {
+        if !cloud_launch {
             match self.agent_launch_env(session_id) {
                 Ok(launch) => options.agent = Some(launch),
                 Err(error) => eprintln!(
@@ -4366,31 +4359,17 @@ impl WakuBackend {
             .eval
             .clone()
             .filter(|eval| !eval.credential_missing());
-        // The project map is experimental the same way: record the session's
-        // workspace for first-prompt injection and warm the index in the
-        // background so it can beat the provider's launch.
-        if !cloud_launch && daemon_settings.project_map_enabled {
-            let ready = {
+        // Keep one background index per local workspace warm so the agent's
+        // first precise map request can return immediately. The index itself
+        // stays out of the prompt unless the agent asks for it.
+        if !cloud_launch && options.agent.is_some() {
+            let build_index = {
                 let mut maps = self.repo_maps.0.lock();
-                maps.sessions
-                    .insert(session_id, (options.cwd.clone(), runtime_id));
-                maps.indexes
-                    .get(&options.cwd)
-                    .map(|index| index.indexed_files())
+                maps.sessions.insert(session_id, options.cwd.clone());
+                !maps.indexes.contains_key(&options.cwd)
             };
-            let status = match ready {
-                Some(indexed_files) => ProjectMapStatus::Ready { indexed_files },
-                None => {
-                    spawn_repo_map_refresh(
-                        &self.repo_maps,
-                        options.cwd.clone(),
-                        Some(events.clone()),
-                    );
-                    ProjectMapStatus::Building
-                }
-            };
-            if let Ok(wire) = event_to_wire(DriverEvent::ProjectMap(status)) {
-                let _ = events.send_ephemeral(wire);
+            if build_index {
+                spawn_repo_map_refresh(&self.repo_maps, options.cwd.clone());
             }
         }
         // Connected integrations ride the launch too; drivers that take file
@@ -4528,7 +4507,6 @@ impl WakuBackend {
             shim_directory,
             task_tools: settings.agent_tools_enabled,
             settings_writes: settings.agent_settings_enabled,
-            project_maps: settings.project_map_enabled,
         })
     }
 
@@ -5432,9 +5410,6 @@ impl WakuBackend {
         const MAX_HINT_CHARS: usize = 512;
         const WAIT_FOR_INDEX: std::time::Duration = std::time::Duration::from_millis(1_500);
         let caller = agent.ok_or_else(|| anyhow!("project maps require a scoped agent session"))?;
-        if !self.settings.get().project_map_enabled {
-            bail!("Project Map is not enabled in this daemon's settings");
-        }
         if query.trim().is_empty() || query.chars().count() > MAX_QUERY_CHARS {
             bail!("`query` must contain 1 to {MAX_QUERY_CHARS} characters");
         }
@@ -5474,8 +5449,8 @@ impl WakuBackend {
             let root = maps
                 .sessions
                 .get(&caller)
-                .map(|(root, _)| root.clone())
-                .ok_or_else(|| anyhow!("this session has no local Project Map index"))?;
+                .cloned()
+                .ok_or_else(|| anyhow!("this session has no local code index"))?;
             let deadline = std::time::Instant::now() + WAIT_FOR_INDEX;
             while !maps.indexes.contains_key(&root) && maps.building.contains(&root) {
                 let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now())
@@ -5487,7 +5462,7 @@ impl WakuBackend {
                 }
             }
             let index = maps.indexes.get(&root).ok_or_else(|| {
-                anyhow!("the Project Map index is still building; try again shortly")
+                anyhow!("the local code index is still building; try again shortly")
             })?;
             index.candidates(query, path_scope.as_deref(), anchors, &known_paths)
         };
@@ -5593,20 +5568,17 @@ impl WakuBackend {
                 )
             }
         };
-        let project_map = {
-            let maps = self.repo_maps.0.lock();
-            let root = maps
-                .sessions
-                .get(&caller)
-                .map(|(root, _)| root.clone())
-                .ok_or_else(|| {
-                    anyhow!("this session's Project Map index is no longer available")
+        let project_map =
+            {
+                let maps = self.repo_maps.0.lock();
+                let root = maps.sessions.get(&caller).cloned().ok_or_else(|| {
+                    anyhow!("this session's local code index is no longer available")
                 })?;
-            let index = maps.indexes.get(&root).ok_or_else(|| {
-                anyhow!("this session's Project Map index is no longer available")
-            })?;
-            index.render_ranked(&selected, &other_paths, candidates.omitted, budget)
-        };
+                let index = maps.indexes.get(&root).ok_or_else(|| {
+                    anyhow!("this session's local code index is no longer available")
+                })?;
+                index.render_ranked(&selected, &other_paths, candidates.omitted, budget)
+            };
         Ok(ResponsePayload::AgentProjectMap {
             result: AgentProjectMapResult {
                 query: query.to_owned(),
@@ -6336,20 +6308,15 @@ fn ensure_shell_environment() {
     });
 }
 
-/// Kick a build or refresh of one workspace's project-map index on a
+/// Kick a build or refresh of one workspace's code index on a
 /// background thread. Already-building roots are skipped; the index steps
 /// out of the map while it parses so readers never wait on a refresh — a
-/// missing entry just means "send unmapped" that turn. Returns whether a
-/// build actually started; `sink`, when given, hears the `Ready` update.
-fn spawn_repo_map_refresh(
-    repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>,
-    root: PathBuf,
-    sink: Option<EventSink>,
-) -> bool {
+/// missing entry just means "send unmapped" that turn.
+fn spawn_repo_map_refresh(repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>, root: PathBuf) {
     {
         let mut maps = repo_maps.0.lock();
         if !maps.building.insert(root.clone()) {
-            return false;
+            return;
         }
     }
     let repo_maps = repo_maps.clone();
@@ -6365,25 +6332,7 @@ fn spawn_repo_map_refresh(
             match result {
                 Ok(()) => {
                     if let Some(index) = index {
-                        let indexed_files = index.indexed_files();
                         maps.indexes.insert(root.clone(), index);
-                        if let Some(sink) = &sink
-                            && let Ok(wire) =
-                                event_to_wire(DriverEvent::ProjectMap(ProjectMapStatus::Ready {
-                                    indexed_files,
-                                }))
-                        {
-                            // Every session in this root moves to ready —
-                            // including one that joined the build late and
-                            // never got its own thread.
-                            for (session_id, (_, runtime_id)) in
-                                maps.sessions.iter().filter(|(_, (cwd, _))| *cwd == root)
-                            {
-                                let _ = sink
-                                    .for_session(*session_id, *runtime_id)
-                                    .send_ephemeral(wire.clone());
-                            }
-                        }
                     }
                 }
                 Err(error) => {
@@ -6399,7 +6348,6 @@ fn spawn_repo_map_refresh(
             maps.building.remove(&root);
             repo_maps.1.notify_all();
         });
-    true
 }
 
 /// Pump provider events for one runtime into the client's event stream.
@@ -6541,22 +6489,12 @@ fn forward_driver_events(
             &event,
             DriverEvent::TurnFinished { .. } | DriverEvent::Connected { .. }
         );
-        // A settled turn is the freshness trigger for the workspace map:
-        // whatever the turn edited lands in the index before the next
-        // session's first prompt reads it.
+        // A settled turn is the freshness trigger for the workspace index so
+        // a later on-demand map request sees the changes from this turn.
         if matches!(&event, DriverEvent::TurnFinished { .. }) {
-            let cwd = repo_maps
-                .0
-                .lock()
-                .sessions
-                .get(&session_id)
-                .map(|(cwd, _)| cwd.clone());
-            if let Some(cwd) = cwd
-                && spawn_repo_map_refresh(&repo_maps, cwd, Some(events.clone()))
-                && let Ok(wire) =
-                    event_to_wire(DriverEvent::ProjectMap(ProjectMapStatus::Refreshing))
-            {
-                let _ = events.send_ephemeral(wire);
+            let cwd = repo_maps.0.lock().sessions.get(&session_id).cloned();
+            if let Some(cwd) = cwd {
+                spawn_repo_map_refresh(&repo_maps, cwd);
             }
         }
         let process_exited = matches!(&event, DriverEvent::ProcessExited);
@@ -6672,7 +6610,7 @@ fn reap_idle_runtimes(
 }
 
 /// Retire one runtime the reaper claimed: shut the provider down, release
-/// its agent bookkeeping and project-map state, then tell attached
+/// its agent bookkeeping and workspace-index registration, then tell attached
 /// clients the runtime ended. The notification must run before
 /// `end_session_runtime` clears the hub's routing — afterwards the event
 /// would be dropped as stale — and without it a client keeps its driver
@@ -8212,20 +8150,13 @@ mod tests {
         )
         .unwrap();
         let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
-        settings
-            .replace(crate::DaemonSettings {
-                project_map_enabled: true,
-                ..crate::DaemonSettings::default()
-            })
-            .unwrap();
         let backend = WakuBackend::new(settings, StateStore::daemon(root.join("app.db"))).unwrap();
         let session_id = Uuid::new_v4();
 
         // What spawn_runtime records for an active agent session.
         {
             let mut maps = backend.repo_maps.0.lock();
-            maps.sessions
-                .insert(session_id, (root.clone(), Uuid::new_v4()));
+            maps.sessions.insert(session_id, root.clone());
             maps.indexes.insert(
                 root.clone(),
                 crate::repo_map::RepoMapIndex::scan(&root).unwrap(),
@@ -8395,8 +8326,7 @@ mod tests {
         // What spawn_runtime records for a fresh session.
         {
             let mut maps = backend.repo_maps.0.lock();
-            maps.sessions
-                .insert(session_id, (repo.clone(), Uuid::new_v4()));
+            maps.sessions.insert(session_id, repo.clone());
         }
 
         let capture = Arc::new(CaptureDriver::default());
@@ -8756,7 +8686,6 @@ mod tests {
             crate::agent::AgentSurfaceScope {
                 task_tools: true,
                 settings_writes: true,
-                project_maps: false,
                 parent_task_id: None,
             },
         );
@@ -8781,6 +8710,7 @@ mod tests {
         assert_eq!(steers.len(), 1);
         assert!(steers[0].contains("`goddard-agent`"));
         assert!(steers[0].contains("create, start, or spawn"));
+        assert!(steers[0].contains("`map` — request Jev-ranked source context"));
 
         // The accepted echo marks the surface delivered; the next prompt
         // owes no block, so nothing steers at all.
@@ -8813,7 +8743,6 @@ mod tests {
             crate::agent::AgentSurfaceScope {
                 task_tools: false,
                 settings_writes: false,
-                project_maps: false,
                 parent_task_id: Some(session_id),
             },
         );

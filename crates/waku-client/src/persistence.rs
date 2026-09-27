@@ -1968,11 +1968,6 @@ pub struct PersistedState {
     pub memory_models: std::collections::BTreeMap<ProviderKind, String>,
     #[serde(skip)]
     pub title_models: std::collections::BTreeMap<ProviderKind, String>,
-    /// Experimental: whether new sessions get the workspace project map
-    /// prepended to their first prompt. Daemon-owned; mirrored here so
-    /// clients can render the toggle.
-    #[serde(default = "default_experiment_enabled")]
-    pub project_map_enabled: bool,
     /// Hosted evaluation-model settings. Daemon-owned; mirrored in memory so
     /// the settings surface can read and edit it. Never written into the
     /// client's own state — the credential-bearing document is the daemon's
@@ -2254,7 +2249,6 @@ impl PersistedState {
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             memory_models: Default::default(),
             title_models: Default::default(),
-            project_map_enabled: default_experiment_enabled(),
             eval: None,
             route_classes: Default::default(),
             provider_route_classes: Default::default(),
@@ -2508,7 +2502,6 @@ impl PersistedState {
             composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
             memory_models: self.memory_models.clone(),
             title_models: self.title_models.clone(),
-            project_map_enabled: self.project_map_enabled,
             custom_commands: self.custom_commands.clone(),
             eval: self.eval.clone(),
             route_classes: self.route_classes.clone(),
@@ -2543,7 +2536,6 @@ impl PersistedState {
         self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;
         self.memory_models = settings.memory_models;
         self.title_models = settings.title_models;
-        self.project_map_enabled = settings.project_map_enabled;
         self.custom_commands = settings.custom_commands;
         self.eval = settings.eval;
         self.route_classes = settings.route_classes;

@@ -453,8 +453,9 @@ impl Waku {
                 // `accepts_turn_output` deliberately.
                 self.handle_background_work_event(session_id, event);
             }
-            DriverEvent::ProjectMap(status) => {
-                runtime.project_map = Some(status);
+            DriverEvent::ProjectMap(_) => {
+                // Older daemons report local index lifecycle; current clients
+                // keep that cache status internal and show no composer chip.
             }
             DriverEvent::SandboxSetup(status) => {
                 // Launch progress is transient: `Ready` (or a fresh runtime)

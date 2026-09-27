@@ -1,1 +1,0 @@
-- When Project Map is enabled, ask the agent for a task-specific code map with `goddard-agent map`; it returns ranked declarations with `path:line` locations and names candidate paths that did not fit.

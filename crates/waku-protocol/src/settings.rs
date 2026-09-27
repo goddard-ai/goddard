@@ -46,10 +46,6 @@ pub struct DaemonSettings {
     /// Off by default in release builds, on in debug builds (`bun run dev`);
     /// toggling affects only sessions started afterwards.
     pub subagents_enabled: bool,
-    /// Experimental: expose the on-demand, Jev-ranked `goddard-agent map`
-    /// command for the session's workspace. Off by default in release builds,
-    /// on in debug builds; affects only sessions started afterwards.
-    pub project_map_enabled: bool,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
     /// Hosted evaluation-model configuration (backend + BYOK credentials).
@@ -158,7 +154,6 @@ impl Default for DaemonSettings {
             custom_commands: Vec::new(),
             disabled_providers: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
-            project_map_enabled: default_experiment_enabled(),
             provider_binary_overrides: HashMap::new(),
             eval: None,
             route_classes: RouteClassMap::new(),
@@ -197,6 +192,7 @@ impl DaemonSettings {
             "language",
             "sidebar_transparency",
             "sidebar_transparency_amount",
+            "project_map_enabled",
         ] {
             self.extra.remove(key);
         }
