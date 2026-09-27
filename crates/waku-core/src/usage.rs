@@ -2,8 +2,7 @@
 //! Claude's OAuth credential (macOS keychain first, then
 //! `~/.claude/.credentials.json`) calls `api.anthropic.com/api/oauth/usage`; Codex's
 //! `~/.codex/auth.json` token calls the ChatGPT backend's usage endpoint;
-//! OpenCode Go's API key calls `opencode.ai/zen/go/v1/usage`; Devin's local
-//! CLI credential calls its read-only user-status RPC; Grok answers
+//! OpenCode Go's API key calls `opencode.ai/zen/go/v1/usage`; Grok answers
 //! the `x.ai/billing` extension request on a short-lived `grok agent stdio`
 //! probe. Copilot's GitHub token (env or `gh`) reads `copilot_internal/user`;
 //! Muse's `dca:` device token calls `api.meta.ai/muse-code/key`; Droid's
@@ -46,8 +45,6 @@ const CURL_PATH: &str = r"C:\Windows\System32\curl.exe";
 
 const CODEX_DEFAULT_BASE: &str = "https://chatgpt.com/backend-api";
 const OPENCODE_GO_USAGE_URL: &str = "https://opencode.ai/zen/go/v1/usage";
-const DEVIN_USER_STATUS_PATH: &str = "/exa.seat_management_pb.SeatManagementService/GetUserStatus";
-const DEVIN_API_SERVER_DEFAULT: &str = "https://server.codeium.com";
 const COPILOT_API_HOST: &str = "api.github.com";
 const MUSE_USAGE_URL: &str = "https://api.meta.ai/muse-code/key";
 const FACTORY_API_BASE: &str = "https://api.factory.ai";
@@ -362,138 +359,13 @@ pub fn fetch_opencode_go_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
         .ok_or_else(|| anyhow!(keyed!("usage_error.no_rate_limit_windows")))
 }
 
-/// Fetch account quota from Devin CLI's read-only GetUserStatus RPC. Devin
-/// currently exposes this through its local credential rather than a public
-/// usage API, so keep the request shape isolated here and degrade cleanly if
-/// that private RPC changes.
-pub fn fetch_devin_plan_usage() -> anyhow::Result<PlanUsage> {
-    let credentials_path = std::env::var_os("XDG_DATA_HOME")
-        .filter(|path| !path.is_empty())
-        .map(|path| std::path::PathBuf::from(path).join("devin/credentials.toml"))
-        .or_else(|| {
-            #[cfg(windows)]
-            {
-                dirs::data_dir().map(|data| data.join("devin/credentials.toml"))
-            }
-            #[cfg(not(windows))]
-            {
-                dirs::home_dir().map(|home| home.join(".local/share/devin/credentials.toml"))
-            }
-        })
-        .ok_or_else(|| anyhow!(keyed!("usage_error.no_home_directory")))?;
-    let payload = std::fs::read_to_string(&credentials_path)
-        .with_context(|| keyed!("usage_error.read_file", path = credentials_path.display()))?;
-    let credentials: toml::Value =
-        toml::from_str(&payload).context(keyed!("usage_error.devin_credentials_invalid"))?;
-    let api_key = credentials
-        .get("windsurf_api_key")
-        .and_then(toml::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!(keyed!("usage_error.devin_credentials_missing")))?;
-    let server = credentials
-        .get("api_server_url")
-        .and_then(toml::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(DEVIN_API_SERVER_DEFAULT);
-    let server_url =
-        url::Url::parse(server).context(keyed!("usage_error.devin_credentials_invalid"))?;
-    if server_url.scheme() != "https"
-        || server_url.host_str().is_none()
-        || !server_url.username().is_empty()
-        || server_url.password().is_some()
-        || server_url.query().is_some()
-        || server_url.fragment().is_some()
-    {
-        return Err(anyhow!(keyed!("usage_error.devin_credentials_invalid")));
-    }
-
-    let body = serde_json::to_string(&json!({
-        "metadata": {
-            "apiKey": api_key,
-            "ideName": "devin",
-            "ideVersion": "unknown",
-            "extensionVersion": "unknown",
-            "locale": "en"
-        }
-    }))?;
-    let (status, body) = http_post_json(
-        &format!(
-            "{}{DEVIN_USER_STATUS_PATH}",
-            server_url.as_str().trim_end_matches('/')
-        ),
-        &["Connect-Protocol-Version: 1".to_owned()],
-        &body,
-    )?;
-    match status {
-        200 => {}
-        401 | 403 => {
-            return Err(anyhow!(keyed!(
-                "usage_error.signin_cannot_read",
-                provider = "Devin",
-                status = status
-            )));
-        }
-        429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
-        other => return Err(usage_http_error(other, &body)),
-    }
-    let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
-    parse_devin_plan_usage(&body).ok_or_else(|| anyhow!(keyed!("usage_error.devin_no_quota")))
-}
-
-fn parse_devin_plan_usage(body: &Value) -> Option<PlanUsage> {
-    let user_status = body.get("userStatus")?;
-    let plan_status = user_status.get("planStatus")?;
-    let plan_info = body.get("planInfo").or_else(|| plan_status.get("planInfo"));
-    let plan_label = plan_info
-        .and_then(|info| info.get("planName").or_else(|| info.get("name")))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let windows = [
-        (
-            "dailyQuotaRemainingPercent",
-            "dailyQuotaResetAtUnix",
-            localized!("usage.daily_limit"),
-        ),
-        (
-            "weeklyQuotaRemainingPercent",
-            "weeklyQuotaResetAtUnix",
-            localized!("usage.weekly_limit"),
-        ),
-    ]
-    .into_iter()
-    .filter_map(|(remaining_key, reset_key, (label, label_i18n))| {
-        let resets_at = plan_status
-            .get(reset_key)
-            .and_then(Value::as_i64)
-            .filter(|timestamp| *timestamp > 0);
-        // Proto3 JSON omits default scalar values. A reset timestamp paired
-        // with a missing remaining percentage therefore means 0% remains.
-        let remaining = plan_status
-            .get(remaining_key)
-            .and_then(Value::as_f64)
-            .or_else(|| resets_at.map(|_| 0.0))?;
-        Some(PlanWindow {
-            label,
-            label_i18n: Some(label_i18n),
-            percent: (100.0 - remaining).clamp(0.0, 100.0),
-            resets_at,
-        })
-    })
-    .collect::<Vec<_>>();
-    (plan_label.is_some() || !windows.is_empty()).then_some(PlanUsage {
-        plan_label,
-        windows,
-        reset_credits: None,
-    })
-}
-
 /// The endpoint's own sentence, when it sent one.
 ///
 /// These bodies are `{"type":"error","error":{"type":..,"message":..}}`, and
 /// the message is the only part that says what to actually do — an
 /// `EntitlementError` and a revoked key are both HTTP 403 otherwise.
 /// OpenCode-style APIs nest under `{"error":{"message"}}`; Connect RPC
-/// errors (Devin, Kimi's web service) are flat `{"code","message"}`.
+/// errors (Kimi's web service and friends) are flat `{"code","message"}`.
 fn usage_error_detail(body: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(body).ok()?;
     for key in ["/error/message", "/message", "/error"] {
@@ -3062,8 +2934,8 @@ mod tests {
 
     #[test]
     fn usage_error_detail_reads_flat_connect_errors_and_caps_the_payload() {
-        // Connect RPC failures are flat {"code","message"} — Devin's 500s
-        // carry this shape, not the nested {"error":{"message"}} one.
+        // Connect RPC failures are flat {"code","message"} — the
+        // {"error":{"message"}} nesting is an OpenCode/Anthropic shape.
         assert_eq!(
             usage_error_detail(r#"{"code":"internal","message":"quota backend down"}"#)
                 .as_deref(),
