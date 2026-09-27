@@ -163,6 +163,7 @@ impl CopilotDriver {
             eval,
             sandbox: _,
             allow_model_fallback: _,
+            ephemeral: _,
         } = options;
         let resume_session_id = match provider_cursor {
             Some(ProviderResumeCursor::Copilot { session_id }) => Some(session_id),
@@ -1411,6 +1412,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                ephemeral: false,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
                 mode: RuntimeMode::FullAccess,
@@ -1473,6 +1475,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,

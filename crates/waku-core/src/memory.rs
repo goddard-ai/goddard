@@ -1194,8 +1194,10 @@ fn provider_binary(
 /// stalls until the deadline drops the driver. `model` is the per-provider
 /// override from settings, `None` for the provider's advertised default; a
 /// model that cannot be resolved falls back to that default rather than
-/// sinking the pass. Whatever the outcome, the provider-side session the run
-/// created is deleted before the handle drops — nothing resumes it.
+/// sinking the pass. `ephemeral` asks the provider not to persist or sync the
+/// session — a persisted Codex thread would surface in the ChatGPT app —
+/// and whatever the outcome the provider-side session is deleted before the
+/// handle drops as the fallback — nothing resumes it.
 fn headless_prompt(
     provider: ProviderKind,
     binary: PathBuf,
@@ -1223,6 +1225,7 @@ fn headless_prompt(
         eval: None,
         sandbox: None,
         allow_model_fallback: true,
+        ephemeral: true,
     };
     let handle = driver::start_local(provider, options, sender)
         .context("could not start the memory distillation driver")?;

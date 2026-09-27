@@ -202,6 +202,7 @@ pub struct CodexDriver {
     computer_use_server_path: Option<PathBuf>,
     computer_use_preview_monitor: Option<computer_use_runtime::ComputerUsePreviewMonitor>,
     announced_agent_surface: bool,
+    ephemeral: bool,
 }
 
 #[derive(Default)]
@@ -388,6 +389,7 @@ impl CodexDriver {
             eval: _,
             sandbox,
             allow_model_fallback: _,
+            ephemeral,
         } = options;
         let provider_session_id = match provider_cursor {
             Some(ProviderResumeCursor::Codex { thread_id }) => Some(thread_id),
@@ -492,7 +494,9 @@ impl CodexDriver {
         let background_rpcs = Arc::new(Mutex::new(BackgroundRpcState::default()));
         let goal_rpcs = Arc::new(Mutex::new(GoalRpcState::default()));
         let title_generation = Arc::new(Mutex::new(CodexTitleGeneration {
-            enabled: provider_session_id.is_none(),
+            // An ephemeral thread has no transcript row a title could label,
+            // and naming one is a persisted-thread operation anyway.
+            enabled: provider_session_id.is_none() && !ephemeral,
             launched: false,
             pending: None,
         }));
@@ -625,6 +629,11 @@ impl CodexDriver {
                     if !developer_instructions.is_empty() {
                         params["developerInstructions"] =
                             json!(developer_instructions.join("\n\n"));
+                    }
+                    if ephemeral {
+                        // Never persisted or synced — a distilled thread must
+                        // not surface as a task in the ChatGPT app.
+                        params["ephemeral"] = json!(true);
                     }
                     if let Some(model) = model.as_deref() {
                         params["model"] = json!(model);
@@ -1346,6 +1355,7 @@ impl CodexDriver {
             computer_use_server_path,
             computer_use_preview_monitor,
             announced_agent_surface,
+            ephemeral,
         })
     }
 }
@@ -1538,6 +1548,11 @@ impl DriverControl for CodexDriver {
     }
 
     fn delete_provider_session(&self) {
+        if self.ephemeral {
+            // Nothing was persisted, and the app-server rejects removal of
+            // an ephemeral thread.
+            return;
+        }
         let (done, wait) = bounded(1);
         if self
             .commands
@@ -3189,6 +3204,7 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
+                    ephemeral: false,
                     binary: binary.clone(),
                     cwd: directory.clone(),
                     mode: RuntimeMode::Ask,
@@ -3268,6 +3284,7 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
+                    ephemeral: false,
                     binary: binary.clone(),
                     cwd: directory.clone(),
                     mode: RuntimeMode::Ask,
@@ -3347,6 +3364,73 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn ephemeral_sessions_open_ephemeral_threads_and_skip_removal() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory =
+            std::env::temp_dir().join(format!("waku-codex-ephemeral-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let binary = directory.join("codex");
+        fs::write(&binary, include_str!("fixtures/codex_ephemeral.sh")).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let (events, received) = crate::driver::test_event_channel();
+        let driver = CodexDriver::start(
+            DriverStartOptions {
+                eval: None,
+                sandbox: None,
+                allow_model_fallback: true,
+                ephemeral: true,
+                binary: binary.clone(),
+                cwd: directory.clone(),
+                mode: RuntimeMode::Ask,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                agent: None,
+                read_own_transcript: false,
+                subagents: None,
+                integrations: Vec::new(),
+                provider_cursor: None,
+            },
+            events,
+        )
+        .unwrap();
+        assert!(matches!(
+            received.recv_timeout(Duration::from_secs(5)).unwrap(),
+            DriverEvent::Connected { .. }
+        ));
+
+        driver.prompt("Summarize".into());
+        driver.delete_provider_session();
+        drop(driver);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !matches!(
+            received
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap(),
+            DriverEvent::ProcessExited
+        ) {}
+
+        let requests = fs::read_to_string(directory.join("requests.jsonl")).unwrap();
+        let starts: Vec<&str> = requests
+            .lines()
+            .filter(|line| line.contains("\"method\":\"thread/start\""))
+            .collect();
+        // One thread — title generation must not spawn a second app-server —
+        // and it opened with the ephemeral flag.
+        assert_eq!(starts.len(), 1);
+        assert!(starts[0].contains("\"ephemeral\":true"));
+        assert!(!requests.contains("\"method\":\"thread/delete\""));
+        assert!(!requests.contains("\"method\":\"thread/archive\""));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     #[ignore = "requires an installed, authenticated codex"]
     fn codex_fork_preserves_history_and_both_sessions_against_real_cli() {
@@ -3360,6 +3444,7 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
+                    ephemeral: false,
                     binary: binary.clone(),
                     cwd: cwd.clone(),
                     mode: RuntimeMode::Ask,
@@ -3763,6 +3848,7 @@ mod tests {
             computer_use_server_path: None,
             computer_use_preview_monitor: None,
             announced_agent_surface: false,
+            ephemeral: false,
         };
 
         assert!(driver.apply_options(session_options(RuntimeMode::FullAccess, "gpt-5-codex")));

@@ -246,6 +246,7 @@ impl OpenCodeDriver {
             eval,
             sandbox: _,
             allow_model_fallback: _,
+            ephemeral: _,
         } = options;
         let resume_session_id = match provider_cursor {
             Some(ProviderResumeCursor::OpenCode { session_id }) => {
@@ -1867,6 +1868,7 @@ server.serve_forever()
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                ephemeral: false,
             },
             events,
         )
@@ -2000,6 +2002,7 @@ server.serve_forever()
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                ephemeral: false,
             },
             events,
         )
@@ -2095,6 +2098,7 @@ server.serve_forever()
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                ephemeral: false,
             },
             events,
         )

@@ -1,0 +1,1 @@
+- Project memory distillation no longer adds a task to the ChatGPT app on every run — the background pass now uses a throwaway Codex thread that is never persisted or synced.

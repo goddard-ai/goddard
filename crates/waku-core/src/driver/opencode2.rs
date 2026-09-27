@@ -434,6 +434,7 @@ impl OpenCode2Driver {
             eval,
             sandbox: _,
             allow_model_fallback: _,
+            ephemeral: _,
         } = options;
 
         let resumed = match provider_cursor {
@@ -3519,6 +3520,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -3591,6 +3593,7 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
+                    ephemeral: false,
                     binary: binary.clone(),
                     cwd: test_directory.clone(),
                     mode: RuntimeMode::FullAccess,

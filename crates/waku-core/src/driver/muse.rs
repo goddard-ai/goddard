@@ -158,6 +158,7 @@ impl MuseDriver {
             eval,
             sandbox: _,
             allow_model_fallback: _,
+            ephemeral: _,
         } = options;
 
         let (resumed_id, resume_cursor) = match provider_cursor {
@@ -1844,6 +1845,7 @@ mod tests {
             eval: None,
             sandbox: None,
             allow_model_fallback: false,
+            ephemeral: false,
             binary: PathBuf::new(),
             cwd: cwd.to_path_buf(),
             mode: RuntimeMode::Ask,

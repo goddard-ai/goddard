@@ -105,6 +105,7 @@ impl AmpDriver {
             eval: _,
             sandbox,
             allow_model_fallback: _,
+            ephemeral: _,
         } = options;
         if mode != RuntimeMode::FullAccess {
             return Err(anyhow!("Amp currently supports Full access only"));
@@ -609,6 +610,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,
@@ -674,6 +676,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),
                 mode: RuntimeMode::FullAccess,

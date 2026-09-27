@@ -339,6 +339,13 @@ pub struct DriverStartOptions {
     /// this so a stale stored pick cannot sink the run. Daemon-owned — never
     /// crosses the wire.
     pub allow_model_fallback: bool,
+    /// The provider-side session is a throwaway: never persisted, synced, or
+    /// resumable. Headless launches (memory distillation) set this so a
+    /// background chore cannot surface in the provider's own clients — Codex
+    /// threads otherwise sync to the ChatGPT app. Transports that cannot
+    /// honor it still get the session deleted at teardown. Only meaningful
+    /// on a fresh session. Daemon-owned — never crosses the wire.
+    pub ephemeral: bool,
 }
 
 /// The subset of `DriverStartOptions` a user can change without starting a new
