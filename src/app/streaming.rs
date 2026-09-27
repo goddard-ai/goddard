@@ -188,6 +188,19 @@ impl Waku {
         if !self.state.notify_waiting_input || cx.active_window().is_some() {
             return;
         }
+        // A focused project quiets banners from tasks outside it too.
+        if self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| {
+                self.focused_project_id()
+                    .is_some_and(|focused| session.project_id != focused)
+            })
+        {
+            return;
+        }
         let Some(title) = self.task_notification_title(session_id) else {
             return;
         };
@@ -998,9 +1011,15 @@ impl Waku {
                     .sessions
                     .iter()
                     .find(|session| session.id == session_id);
+                // A focused project quiets the rest: finishes elsewhere
+                // still stamp unread state but neither sound nor toast.
+                let inside_focus = self.focused_project_id().is_none_or(|focused| {
+                    finished.is_some_and(|session| session.project_id == focused)
+                });
                 if self.state.completion_sound_enabled
                     && self.state.selected_session != Some(session_id)
                     && finished.is_some_and(|session| session.queued_messages.is_empty())
+                    && inside_focus
                 {
                     // A starred project's finish plays its own sound unless
                     // the user disabled the override.
@@ -1024,7 +1043,9 @@ impl Waku {
                 // unread, so landing on it plays instantly rather than
                 // waiting on both gateway calls.
                 self.prefetch_voice_brief(session_id, cx);
-                if let Some((title, body)) = task_notification {
+                if let Some((title, body)) = task_notification
+                    && inside_focus
+                {
                     crate::platform::show_task_notification(
                         &task_notification_tag(session_id),
                         &title,

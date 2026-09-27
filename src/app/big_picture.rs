@@ -612,6 +612,9 @@ impl Waku {
             .highlighted
             .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
             .map(|session| session.project_id)
+            // A focused project is the standing default: only a card the
+            // cursor is actually sitting on outranks it.
+            .or_else(|| self.focused_project_id())
             .or_else(|| self.selected_session().map(|session| session.project_id))
             .or_else(|| self.selected_project().map(|project| project.id))
     }

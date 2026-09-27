@@ -1475,6 +1475,71 @@ impl Waku {
             })
     }
 
+    /// The focused project's banner above "New task" — accent-loud so the
+    /// active filter is never hidden state. It is itself the dismiss
+    /// control: click or Enter/Space unfocuses.
+    fn render_sidebar_focused_project(
+        &self,
+        project: &Project,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        div()
+            .id("sidebar-focused-project")
+            .tab_index(0)
+            .w_full()
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .flex_none()
+            .mb(px(SIDEBAR_ACTION_ROW_GAP))
+            .px(px(4.0))
+            .rounded(px(9.0))
+            .bg(theme.accent)
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|element| element.bg(theme.accent.opacity(0.85)))
+            .active(|element| element.bg(theme.accent.opacity(0.7)))
+            .child(
+                div()
+                    .size(px(20.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon("icons/target.svg", 16.0, theme.on_inverse)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_size(sp(14.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.on_inverse)
+                    .child(project.display_name()),
+            )
+            .child(
+                div()
+                    .size(px(20.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon("icons/x.svg", 14.0, theme.on_inverse)),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.unfocus_project(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.unfocus_project(cx);
+                    cx.stop_propagation();
+                }
+            }))
+    }
+
     fn render_sidebar_new_session(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         self.render_sidebar_action_row(
             "sidebar-new-session",
@@ -2735,6 +2800,17 @@ impl Waku {
                 div()
                     .flex_none()
                     .px(px(10.0))
+                    .when_some(
+                        self.focused_project_id().and_then(|project_id| {
+                            self.state
+                                .projects
+                                .iter()
+                                .find(|project| project.id == project_id)
+                        }),
+                        |element, project| {
+                            element.child(self.render_sidebar_focused_project(project, cx))
+                        },
+                    )
                     .child(self.render_sidebar_new_session(window, cx)),
             )
             .child(
@@ -3080,6 +3156,10 @@ impl Waku {
         fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.sidebar_phase_groups));
         fingerprint = mix(fingerprint, u64::from(self.state.phase_routing_enabled));
+        fingerprint = mix_uuid(
+            fingerprint,
+            self.focused_project_id().unwrap_or(Uuid::nil()),
+        );
         // Dormancy is part of every row's placement: mix the derived flag,
         // not the clock it is measured against, so the snapshot only rebuilds
         // on real transitions.
@@ -3195,6 +3275,11 @@ impl Waku {
                     && !self.friend_sessions.contains_key(&session.id)
             })
             .collect::<Vec<_>>();
+        // A focused project narrows the whole history to its tasks — the
+        // pinned, date, and project grouping below only ever sees them.
+        if let Some(focused) = self.focused_project_id() {
+            sorted_sessions.retain(|session| session.project_id == focused);
+        }
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
         // Swept and stale sessions are dormant; where they land depends on
@@ -3378,8 +3463,8 @@ impl Waku {
                 SidebarGrouping::Date => SidebarGroup::Date(SessionDateGroup::Today),
                 SidebarGrouping::Project => {
                     let projectless_root = crate::projectless::workspace_root();
-                    self.state
-                        .selected_project
+                    self.focused_project_id()
+                        .or(self.state.selected_project)
                         .and_then(|project_id| {
                             self.state
                                 .projects

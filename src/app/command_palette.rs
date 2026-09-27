@@ -205,6 +205,12 @@ enum PaletteAction {
     AddRemoteHost,
     OpenRemoveProject,
     RemoveProject(Uuid),
+    /// "Focus project…" — opens the project picker drill-in.
+    OpenFocusProject,
+    ChooseFocusProject(Uuid),
+    /// Clears the sidebar's project filter — the command swaps to this
+    /// while a project is focused.
+    UnfocusProject,
     FocusComposer,
     CreateDraft,
     ViewDrafts,
@@ -286,6 +292,8 @@ enum CommandPaletteView {
     RunScriptWorktrees,
     /// The "Remove project…" project picker.
     RemoveProject,
+    /// The "Focus project…" project picker.
+    FocusProject,
     ShareFileFriends,
     ShareProjects,
     ShareProjectFriends(Uuid),
@@ -951,6 +959,16 @@ impl Waku {
         self.command_palette.view = CommandPaletteView::RemoveProject;
         self.command_palette.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("command_palette.remove_project_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn open_command_palette_focus_project_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::FocusProject;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.focus_project_placeholder"), cx);
             input.clear(cx);
         });
         self.refresh_command_palette_results("", false, cx);
@@ -1799,6 +1817,7 @@ impl Waku {
                 }
             }
             CommandPaletteView::RemoveProject => self.leave_command_palette_drill_in_view(cx),
+            CommandPaletteView::FocusProject => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjects => {
                 self.leave_command_palette_drill_in_view(cx)
             }
@@ -1830,6 +1849,7 @@ impl Waku {
                 tr!("command_palette.run_script_worktree_placeholder")
             }
             CommandPaletteView::RemoveProject => tr!("command_palette.remove_project_placeholder"),
+            CommandPaletteView::FocusProject => tr!("command_palette.focus_project_placeholder"),
             CommandPaletteView::ShareProjects => tr!("command_palette.share_project_placeholder"),
             CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjectFriends(_) => {
                 tr!("command_palette.share_friend_placeholder")
@@ -1881,6 +1901,7 @@ impl Waku {
                 | CommandPaletteView::RunScripts
                 | CommandPaletteView::RunScriptWorktrees
                 | CommandPaletteView::RemoveProject
+                | CommandPaletteView::FocusProject
                 | CommandPaletteView::ShareFileFriends
                 | CommandPaletteView::ShareProjects
                 | CommandPaletteView::ShareProjectFriends(_)
@@ -2435,6 +2456,31 @@ impl Waku {
                 next(),
             ));
         }
+        if self
+            .state
+            .projects
+            .iter()
+            .any(|project| !project.is_projectless())
+        {
+            let focused = self.focused_project_id().is_some();
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                if focused {
+                    tr!("command_palette.unfocus_project")
+                } else {
+                    tr!("command_palette.focus_project")
+                },
+                "icons/target.svg",
+                None,
+                if focused {
+                    PaletteAction::UnfocusProject
+                } else {
+                    PaletteAction::OpenFocusProject
+                },
+                "focus project filter sidebar only tasks unfocus show all projects",
+                next(),
+            ));
+        }
         if self.state.github_enabled {
             commands.push(CommandPaletteItem::command(
                 PaletteSection::Commands,
@@ -2922,6 +2968,11 @@ impl Waku {
             .filter(|session| {
                 session.has_started()
                     && !session.is_side_chat()
+                    // A focused project scopes the palette's task results to
+                    // it — the sidebar already shows nothing else.
+                    && self
+                        .focused_project_id()
+                        .is_none_or(|focused| session.project_id == focused)
                     && match scope {
                         crate::persistence::SessionMessageSearchScope::Active => {
                             session.archived_at.is_none()
@@ -3179,6 +3230,54 @@ impl Waku {
                     icon: PaletteIcon::Asset("icons/trash.svg"),
                     shortcut: None,
                     action: PaletteAction::RemoveProject(project_id),
+                    content_match: None,
+                    order,
+                    recency: 0,
+                })
+            })
+            .collect()
+    }
+
+    /// The "Focus project…" picker's projects — the same recent-usage order
+    /// the other project pickers use, with the focused project marked.
+    fn command_palette_focus_project_candidates(&self) -> Vec<CommandPaletteItem> {
+        let projects = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .collect::<Vec<_>>();
+        let current = self
+            .focused_project_id()
+            .filter(|id| projects.iter().any(|project| project.id == *id));
+        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+        run_script::run_script_project_order(current, &recent, &projects)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(order, project_id)| {
+                let project = projects.iter().find(|project| project.id == project_id)?;
+                let mut detail =
+                    settings::abbreviate_home_path(&project.path, self.home_directory.as_deref());
+                if let waku_client::DaemonKey::Remote(host) = self.project_host(project_id)
+                    && let Some(host) = self.remote_host_name(host)
+                {
+                    detail = format!("{detail} · {host}");
+                }
+                if current == Some(project_id) {
+                    detail = format!("{detail} · {}", tr!("command_palette.current"));
+                }
+                let label = project.display_name();
+                Some(CommandPaletteItem {
+                    section: PaletteSection::Projects,
+                    search_text: format!(
+                        "{label} {} project focus",
+                        project.path.to_string_lossy()
+                    ),
+                    label,
+                    detail: Some(detail),
+                    icon: PaletteIcon::Asset("icons/target.svg"),
+                    shortcut: None,
+                    action: PaletteAction::ChooseFocusProject(project_id),
                     content_match: None,
                     order,
                     recency: 0,
@@ -3447,6 +3546,38 @@ impl Waku {
         self.finish_drill_in_refresh(
             selected_action.flatten(),
             Some(PaletteAction::RemoveProject),
+        );
+    }
+
+    fn refresh_command_palette_focus_project_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_focus_project_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        // On the untouched picker the focused project preselects; once a
+        // query is typed the fuzzy order leads instead.
+        self.finish_drill_in_refresh(
+            selected_action.flatten().or_else(|| {
+                (query.is_empty())
+                    .then(|| {
+                        self.focused_project_id()
+                            .map(PaletteAction::ChooseFocusProject)
+                    })
+                    .flatten()
+            }),
+            None,
         );
     }
 
@@ -3980,6 +4111,10 @@ impl Waku {
                 self.refresh_command_palette_remove_project_results(query, preserve_selection);
                 return;
             }
+            CommandPaletteView::FocusProject => {
+                self.refresh_command_palette_focus_project_results(query, preserve_selection);
+                return;
+            }
             CommandPaletteView::ShareFileFriends
             | CommandPaletteView::ShareProjects
             | CommandPaletteView::ShareProjectFriends(_) => {
@@ -4455,6 +4590,10 @@ impl Waku {
                 self.open_command_palette_remove_project_view(cx);
                 return;
             }
+            PaletteAction::OpenFocusProject => {
+                self.open_command_palette_focus_project_view(cx);
+                return;
+            }
             PaletteAction::ShareFileOrFolder => {
                 self.open_command_palette_friends_view(CommandPaletteView::ShareFileFriends, cx);
                 return;
@@ -4589,6 +4728,8 @@ impl Waku {
                 }
             }
             PaletteAction::RemoveProject(project_id) => self.remove_project(project_id, cx),
+            PaletteAction::ChooseFocusProject(project_id) => self.focus_project(project_id, cx),
+            PaletteAction::UnfocusProject => self.unfocus_project(cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
             PaletteAction::CreateDraft => self.create_saved_draft(window, cx),
             PaletteAction::DoubleCheck => self.start_double_check(cx),
@@ -4798,6 +4939,7 @@ impl Waku {
             | PaletteAction::ChooseRunScriptProject(_)
             | PaletteAction::ChooseRunScriptLocation { .. }
             | PaletteAction::OpenRemoveProject
+            | PaletteAction::OpenFocusProject
             | PaletteAction::ShareFileOrFolder
             | PaletteAction::ShareProject
             | PaletteAction::ChooseShareProject(_)
@@ -4883,6 +5025,7 @@ impl Waku {
             CommandPaletteView::ResumeProviders
             | CommandPaletteView::RunScriptProjects
             | CommandPaletteView::RemoveProject
+            | CommandPaletteView::FocusProject
             | CommandPaletteView::ShareFileFriends
             | CommandPaletteView::ShareProjects
             | CommandPaletteView::ShareProjectFriends(_)

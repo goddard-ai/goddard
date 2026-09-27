@@ -5056,7 +5056,11 @@ impl Waku {
             self.big_picture.is_open(),
             self.big_picture.target(),
             self.state.selected_session,
-            self.state.selected_project,
+            // With no session selected the project chip is the new-task
+            // destination — a focused project owns that default.
+            self.focused_project_id()
+                .filter(|_| self.state.selected_session.is_none())
+                .or(self.state.selected_project),
             self.big_picture.new_task_project,
             &self.state.sessions,
         )

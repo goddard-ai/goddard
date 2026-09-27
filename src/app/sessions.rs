@@ -379,6 +379,32 @@ impl Waku {
         self.create_session_for(project_id, self.state.last_provider, cx);
     }
 
+    /// The project "Focus project…" pinned the sidebar to, if it is still in
+    /// the catalog — re-validated on read so a removed project can never
+    /// hold the filter.
+    pub(super) fn focused_project_id(&self) -> Option<Uuid> {
+        self.focused_project
+            .filter(|id| self.state.projects.iter().any(|project| project.id == *id))
+    }
+
+    /// "Focus project…": the sidebar filters to the project's tasks, ⌘D and
+    /// the palette's task results stay inside it, and new tasks default to
+    /// it until the banner or "Unfocus project" clears it.
+    pub(super) fn focus_project(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        if self.focused_project != Some(project_id) {
+            self.focused_project = Some(project_id);
+            self.sidebar_rows_fingerprint.set(None);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn unfocus_project(&mut self, cx: &mut Context<Self>) {
+        if self.focused_project.take().is_some() {
+            self.sidebar_rows_fingerprint.set(None);
+            cx.notify();
+        }
+    }
+
     pub(super) fn select_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
     }
@@ -1648,6 +1674,9 @@ impl Waku {
                 .find(|project| project.id != project_id && !project.is_projectless())
                 .map(|project| project.id);
         }
+        if self.focused_project == Some(project_id) {
+            self.focused_project = None;
+        }
         self.state
             .projects
             .retain(|project| project.id != project_id);
@@ -2644,6 +2673,7 @@ impl Waku {
         // underneath like every other page does.
         let current_project = self
             .projects_page
+            .or(self.focused_project_id())
             .or(self.state.selected_project)
             .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
             .map(|project| (project.id, project.is_projectless()));
@@ -2684,6 +2714,7 @@ impl Waku {
         self.settings_page = None;
         let current_project = self
             .projects_page
+            .or(self.focused_project_id())
             .or(self.state.selected_project)
             .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
             .map(|project| (project.id, project.is_projectless()));

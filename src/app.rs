@@ -2838,6 +2838,11 @@ pub struct Waku {
     /// Groups the user has folded in either sidebar view. This is
     /// intentionally runtime-only, like transcript disclosure state.
     sidebar_collapsed_groups: HashSet<SidebarGroup>,
+    /// The project "Focus project…" pinned the sidebar to: its rows are the
+    /// only session history shown, ⌘D's sweep and the palette's task
+    /// results stay inside it, and new tasks land there by default.
+    /// Runtime-only like the collapsed set — relaunch starts unfocused.
+    focused_project: Option<Uuid>,
     /// While Option/Alt is held, a session row's hover pin control becomes
     /// the sweep-to-Dormant control. Tracked from the root's
     /// modifiers-changed events after a short hold to avoid shortcut flicker.
@@ -6462,6 +6467,7 @@ impl Waku {
                     SidebarGroup::Terminals,
                     SidebarGroup::Dormant,
                 ]),
+                focused_project: None,
                 sidebar_alt_held: false,
                 sidebar_alt_modifier_down: false,
                 sidebar_alt_generation: 0,
