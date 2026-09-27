@@ -3221,6 +3221,7 @@ impl Waku {
                 response_footers: HashMap::new(),
                 expanded_turns: HashSet::new(),
                 expanded_activity_blocks: HashMap::new(),
+                hovered_response_turn: None,
             });
         let expanded_turns = view.expanded_turns.clone();
         let fingerprint = transcript_rows_fingerprint(&session, &expanded_turns, pending_turn);
@@ -3618,6 +3619,10 @@ impl Waku {
                 };
                 let group_name =
                     SharedString::from(format!("side-chat-response-footer-{session_id}-{turn_id}"));
+                let force_visible = self
+                    .side_chat_views
+                    .get(&session_id)
+                    .is_some_and(|view| view.hovered_response_turn == Some(turn_id));
                 div()
                     .w_full()
                     .min_w_0()
@@ -3632,7 +3637,7 @@ impl Waku {
                         self.copied_message_feedback.contains_key(&message.id),
                         false,
                         group_name,
-                        false,
+                        force_visible,
                         false,
                         None,
                         None,
@@ -3642,6 +3647,7 @@ impl Waku {
             }
             TranscriptRowKind::ChangedFiles(_) => div().into_any_element(),
         };
+        let response_turn_id = super::transcript::response_row_turn_id(session, kind);
         div()
             .id(SharedString::from(format!(
                 "side-chat-row-{session_id}-{index}"
@@ -3655,6 +3661,22 @@ impl Waku {
             })
             .when(index + 1 == row_count, |element| element.pb(px(22.0)))
             .child(inner)
+            .when_some(response_turn_id, |row, turn_id| {
+                row.on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
+                    let Some(view) = this.side_chat_views.get_mut(&session_id) else {
+                        return;
+                    };
+                    let previous = view.hovered_response_turn;
+                    if *hovering {
+                        view.hovered_response_turn = Some(turn_id);
+                    } else if previous == Some(turn_id) {
+                        view.hovered_response_turn = None;
+                    }
+                    if view.hovered_response_turn != previous {
+                        cx.notify();
+                    }
+                }))
+            })
             .into_any_element()
     }
 

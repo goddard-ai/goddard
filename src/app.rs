@@ -837,6 +837,7 @@ struct SideChatView {
     response_footers: HashMap<usize, (SharedString, u64)>,
     expanded_turns: HashSet<Uuid>,
     expanded_activity_blocks: HashMap<usize, bool>,
+    hovered_response_turn: Option<Uuid>,
 }
 
 /// The closed sidebar's left-edge hover peek: the real sidebar pane mounted
