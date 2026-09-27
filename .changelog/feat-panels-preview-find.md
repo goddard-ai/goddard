@@ -1,0 +1,1 @@
+- Pressing Cmd-F while a markdown preview is open in the Files panel now searches the rendered document — matches highlight in place, Enter jumps between them, and the usual case, whole-word, and regex toggles apply.

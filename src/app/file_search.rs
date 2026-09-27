@@ -9,6 +9,8 @@
 use regex::Regex;
 
 use super::*;
+use crate::md::render::TextSearchMatch;
+use crate::md::selection::TextKey;
 
 /// Where a match scan stops. Everything under the cap is highlighted and
 /// navigable; a file with more occurrences than this reports a `+` count.
@@ -33,14 +35,36 @@ pub(super) struct FileSearch {
     whole_word: bool,
     use_regex: bool,
     /// Sorted, non-overlapping, and capped at [`MAX_FILE_SEARCH_MATCHES`].
+    /// Source-coordinate matches; stays empty while `preview` is on.
     matches: Vec<Range<usize>>,
-    /// Index into `matches` navigation is on. `Some` whenever `matches` is
-    /// non-empty, so the count always reads "n of m".
+    /// The target renders as a markdown preview rather than the source
+    /// editor — matches are located in shaped-text coordinates and painted
+    /// by the markdown renderer instead of the editor's washes.
+    preview: bool,
+    /// Rendered-text matches while `preview` is on: the renderer's stable
+    /// element ordinal plus the byte range inside that element's text.
+    preview_matches: Rc<Vec<TextSearchMatch>>,
+    /// Navigation asked the next preview paint to scroll `current` into view.
+    pending_preview_reveal: bool,
+    /// Index into the active match list navigation is on. `Some` whenever
+    /// that list is non-empty, so the count always reads "n of m".
     current: Option<usize>,
     /// The scan stopped at the cap; the count shows `m+`.
     limited: bool,
     /// The query is a regular expression that does not compile.
     invalid: bool,
+}
+
+impl FileSearch {
+    /// The length of whichever match list the current target uses —
+    /// `matches` in the editor, `preview_matches` in the preview.
+    fn match_count(&self) -> usize {
+        if self.preview {
+            self.preview_matches.len()
+        } else {
+            self.matches.len()
+        }
+    }
 }
 
 /// What triggered a match recomputation, which decides how the current match
@@ -243,8 +267,20 @@ impl Waku {
         {
             return true;
         }
-        self.visible_right_panel_file_path()
-            .and_then(|path| self.right_panel_file_editors.get(&path))
+        let Some(path) = self.visible_right_panel_file_path() else {
+            return false;
+        };
+        if self.right_panel_visible && self.file_markdown_preview_active(&path) {
+            // The source editor is unmounted in preview mode; the preview's
+            // own focus stands in for it.
+            return self
+                .transcript_control_focuses
+                .borrow()
+                .get("file-preview")
+                .is_some_and(|focus| focus.is_focused(window));
+        }
+        self.right_panel_file_editors
+            .get(&path)
             .is_some_and(|editor| editor.state.read(cx).focus().is_focused(window))
     }
 
@@ -298,6 +334,9 @@ impl Waku {
             whole_word: false,
             use_regex: false,
             matches: Vec::new(),
+            preview: false,
+            preview_matches: Rc::new(Vec::new()),
+            pending_preview_reveal: false,
             current: None,
             limited: false,
             invalid: false,
@@ -317,23 +356,34 @@ impl Waku {
             return;
         };
         self.ensure_file_search(window, cx);
+        let preview = self.file_markdown_preview_active(&path);
 
-        // Seed the query from the editor's selection, the way editors
-        // conventionally do, but only a single-line one: a multi-line
-        // selection means "search within", which this bar does not model.
-        let seed = self.right_panel_file_editors.get(&path).and_then(|editor| {
-            let editor = editor.state.read(cx);
-            let selection = editor.selected_range();
-            let text = editor.content().get(selection)?;
-            (!text.is_empty() && !text.contains('\n')).then(|| text.to_owned())
-        });
+        // Seed the query from the selection — the preview's rendered-text
+        // selection in preview mode, the editor's caret otherwise — the way
+        // editors conventionally do, but only a single-line one: a
+        // multi-line selection means "search within", which this bar does
+        // not model.
+        let seed = if preview {
+            self.file_preview_selection
+                .selection
+                .borrow()
+                .selected_text()
+                .filter(|text| !text.is_empty() && !text.contains('\n'))
+        } else {
+            self.right_panel_file_editors.get(&path).and_then(|editor| {
+                let editor = editor.state.read(cx);
+                let selection = editor.selected_range();
+                let text = editor.content().get(selection)?;
+                (!text.is_empty() && !text.contains('\n')).then(|| text.to_owned())
+            })
+        };
 
         let search = self
             .file_search
             .as_mut()
             .expect("ensure_file_search just created it");
         search.open = true;
-        if with_replace {
+        if with_replace && !preview {
             search.replace_visible = true;
         }
         let query = search.query.clone();
@@ -363,19 +413,24 @@ impl Waku {
             return;
         };
         search.open = false;
+        search.preview = false;
         search.matches = Vec::new();
+        search.preview_matches = Rc::new(Vec::new());
+        search.pending_preview_reveal = false;
         search.current = None;
         for editor in self.right_panel_file_editors.values() {
             editor.state.update(cx, |editor, cx| {
                 editor.set_search_matches(Vec::new(), None, cx)
             });
         }
-        if restore_editor_focus
-            && let Some(path) = self.visible_right_panel_file_path()
-            && let Some(editor) = self.right_panel_file_editors.get(&path)
-        {
-            let focus = editor.state.read(cx).focus();
-            window.focus(&focus, cx);
+        if restore_editor_focus && let Some(path) = self.visible_right_panel_file_path() {
+            if self.file_markdown_preview_active(&path) {
+                let focus = self.transcript_control_focus("file-preview", cx);
+                window.focus(&focus, cx);
+            } else if let Some(editor) = self.right_panel_file_editors.get(&path) {
+                let focus = editor.state.read(cx).focus();
+                window.focus(&focus, cx);
+            }
         }
         cx.notify();
     }
@@ -387,7 +442,10 @@ impl Waku {
         if let Some(search) = self.file_search.as_mut() {
             search.open = false;
             search.path = String::new();
+            search.preview = false;
             search.matches = Vec::new();
+            search.preview_matches = Rc::new(Vec::new());
+            search.pending_preview_reveal = false;
             search.current = None;
         }
         for editor in self.right_panel_file_editors.values() {
@@ -399,13 +457,15 @@ impl Waku {
 
     /// Re-aims an open search at the file editor actually on screen. Called
     /// from the editor's render path: a cheap string compare per frame, and
-    /// one recompute on the frame after the visible file changes.
+    /// one recompute on the frame after the visible file changes. Toggling a
+    /// file between source and markdown preview counts as a target change —
+    /// the two surfaces need differently-shaped match lists.
     pub(super) fn sync_file_search_target(&mut self, relative_path: &str, cx: &mut Context<Self>) {
-        if self
-            .file_search
-            .as_ref()
-            .is_some_and(|search| search.open && search.path != relative_path)
-        {
+        if self.file_search.as_ref().is_some_and(|search| {
+            search.open
+                && (search.path != relative_path
+                    || search.preview != self.file_markdown_preview_active(relative_path))
+        }) {
             self.refresh_file_search(SearchRefresh::Target(relative_path.to_owned()), cx);
         }
     }
@@ -456,34 +516,69 @@ impl Waku {
             .right_panel_file_editors
             .get(&path)
             .map(|editor| editor.state.clone());
-        let (matches, limited, invalid) = match (
+        let preview = self.file_markdown_preview_active(&path);
+        let (matches, preview_matches, limited, invalid) = match (
             &editor,
             compile_search(&query_text, case_sensitive, whole_word, use_regex),
         ) {
-            (None, _) | (_, CompiledSearch::Empty) => (Vec::new(), false, false),
-            (_, CompiledSearch::Invalid) => (Vec::new(), false, true),
+            (None, _) | (_, CompiledSearch::Empty) => {
+                (Vec::new(), Rc::new(Vec::new()), false, false)
+            }
+            (_, CompiledSearch::Invalid) => (Vec::new(), Rc::new(Vec::new()), false, true),
             (Some(editor), CompiledSearch::Ready(regex)) => {
-                let (matches, limited) = collect_search_matches(
-                    editor.read(cx).content(),
-                    &regex,
-                    Some(MAX_FILE_SEARCH_MATCHES),
-                );
-                (matches, limited, false)
+                if preview {
+                    // Matches index the shaped text the renderer paints —
+                    // markdown syntax itself never matches — so the wash
+                    // lands on the exact glyphs a reader sees.
+                    let (found, limited) = md::render::markdown_document_search_matches(
+                        editor.read(cx).content(),
+                        &regex,
+                        MAX_FILE_SEARCH_MATCHES,
+                    );
+                    (Vec::new(), Rc::new(found), limited, false)
+                } else {
+                    let (matches, limited) = collect_search_matches(
+                        editor.read(cx).content(),
+                        &regex,
+                        Some(MAX_FILE_SEARCH_MATCHES),
+                    );
+                    (matches, Rc::new(Vec::new()), limited, false)
+                }
             }
         };
 
-        let current = match &refresh {
-            SearchRefresh::Query => {
-                let origin = editor
-                    .as_ref()
-                    .map(|editor| editor.read(cx).selected_range().start)
-                    .unwrap_or(0);
-                match_at_or_after(&matches, origin)
+        let current = if preview {
+            if preview_matches.is_empty() {
+                None
+            } else {
+                match &refresh {
+                    // A preview has no caret; anchor at the first match at or
+                    // below the scroll position, like the transcript does.
+                    SearchRefresh::Query | SearchRefresh::Target(_) => {
+                        Some(self.preview_search_anchor(&preview_matches))
+                    }
+                    SearchRefresh::Content => Some(
+                        search
+                            .current
+                            .map(|index| index.min(preview_matches.len() - 1))
+                            .unwrap_or_else(|| self.preview_search_anchor(&preview_matches)),
+                    ),
+                }
             }
-            SearchRefresh::Content => {
-                match_at_or_after(&matches, previous_current_start.unwrap_or(0))
+        } else {
+            match &refresh {
+                SearchRefresh::Query => {
+                    let origin = editor
+                        .as_ref()
+                        .map(|editor| editor.read(cx).selected_range().start)
+                        .unwrap_or(0);
+                    match_at_or_after(&matches, origin)
+                }
+                SearchRefresh::Content => {
+                    match_at_or_after(&matches, previous_current_start.unwrap_or(0))
+                }
+                SearchRefresh::Target(_) => match_at_or_after(&matches, 0),
             }
-            SearchRefresh::Target(_) => match_at_or_after(&matches, 0),
         };
 
         let search = self
@@ -491,7 +586,9 @@ impl Waku {
             .as_mut()
             .expect("still present: nothing above removes it");
         search.path = path;
+        search.preview = preview;
         search.matches = matches;
+        search.preview_matches = preview_matches;
         search.current = current;
         search.limited = limited;
         search.invalid = invalid;
@@ -501,11 +598,23 @@ impl Waku {
     }
 
     /// Pushes the match list into the searched editor, optionally moving its
-    /// selection to the current match and scrolling it into view.
+    /// selection to the current match and scrolling it into view. In preview
+    /// mode there is nothing to push — the renderer reads `preview_matches`
+    /// off the search each frame — so this only arms the scroll reveal.
     fn apply_file_search_to_editor(&mut self, select: bool, reveal: bool, cx: &mut Context<Self>) {
         let Some(search) = self.file_search.as_ref().filter(|search| search.open) else {
             return;
         };
+        if search.preview {
+            if reveal
+                && search.current.is_some()
+                && let Some(search) = self.file_search.as_mut()
+            {
+                search.pending_preview_reveal = true;
+            }
+            cx.notify();
+            return;
+        }
         let matches = search.matches.clone();
         let active = search.current;
         let active_range = active.and_then(|index| matches.get(index)).cloned();
@@ -552,36 +661,203 @@ impl Waku {
         }
     }
 
-    fn file_search_navigate(&mut self, backwards: bool, cx: &mut Context<Self>) {
-        let Some(editor) = self.file_search_editor() else {
+    /// The paint-time wash set for the file preview: every match in the
+    /// rendered document plus the one navigation is on, in the ordinals the
+    /// markdown renderer painted under `file-preview-{path}`.
+    pub(super) fn file_preview_search_highlights(
+        &self,
+        relative_path: &str,
+    ) -> Option<md::render::SearchHighlights> {
+        let search = self.file_search.as_ref().filter(|search| {
+            search.open
+                && search.preview
+                && search.path == relative_path
+                && !search.preview_matches.is_empty()
+        })?;
+        let active = search
+            .current
+            .and_then(|index| search.preview_matches.get(index))
+            .cloned();
+        Some(md::render::SearchHighlights {
+            matches: search.preview_matches.clone(),
+            active,
+        })
+    }
+
+    /// The index of the first match at or below the preview's scroll
+    /// position — where ⌘F lands rather than teleporting to the top of the
+    /// document. Elements register in paint order, so one advancing cursor
+    /// through the last frame's registry finds each ordinal's geometry.
+    /// Everything above the fold yields `0`, the same wrap the transcript's
+    /// `unwrap_or(0)` produces.
+    fn preview_search_anchor(&self, matches: &[TextSearchMatch]) -> usize {
+        let registry = self.file_preview_selection.registry.borrow();
+        let entries = registry.entries();
+        let viewport_top = self.file_preview_scroll_handle.bounds().top();
+        let mut cursor = 0;
+        let mut last: Option<(usize, Pixels)> = None;
+        for (index, found) in matches.iter().enumerate() {
+            if last.is_none_or(|(ordinal, _)| ordinal != found.ordinal) {
+                while entries
+                    .get(cursor)
+                    .is_some_and(|entry| entry.key.index < found.ordinal)
+                {
+                    cursor += 1;
+                }
+                last = entries
+                    .get(cursor)
+                    .filter(|entry| entry.key.index == found.ordinal)
+                    .and_then(|entry| {
+                        md::render::text_range_bounds(&entry.geometry, &found.range)
+                            .first()
+                            .map(|bounds| (found.ordinal, bounds.top()))
+                    });
+            }
+            if let Some((_, top)) = last
+                && top >= viewport_top
+            {
+                return index;
+            }
+        }
+        0
+    }
+
+    /// Scrolls the preview so the current match is comfortably visible.
+    /// Called from the preview's render path: the registry holds the last
+    /// painted frame's geometry, and because the document is not
+    /// virtualized the only miss is the first frame a different file's
+    /// preview mounts — the retry covers that one frame.
+    pub(super) fn apply_pending_preview_search_reveal(
+        &mut self,
+        relative_path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = self.file_search.as_mut().and_then(|search| {
+            let pending = search.open
+                && search.preview
+                && search.pending_preview_reveal
+                && search.path == relative_path;
+            if !pending {
+                return None;
+            }
+            search.pending_preview_reveal = false;
+            search
+                .current
+                .and_then(|index| search.preview_matches.get(index))
+                .cloned()
+        });
+        let Some(target) = target else {
             return;
         };
-        let Some(search) = self.file_search.as_mut().filter(|search| search.open) else {
-            return;
-        };
-        if search.matches.is_empty() {
+        self.reveal_preview_search_match(relative_path, target, 0, window, cx);
+    }
+
+    fn reveal_preview_search_match(
+        &mut self,
+        relative_path: &str,
+        target: TextSearchMatch,
+        attempt: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let still_current = self.file_search.as_ref().is_some_and(|search| {
+            search.open
+                && search.preview
+                && search.path == relative_path
+                && search
+                    .current
+                    .and_then(|index| search.preview_matches.get(index))
+                    == Some(&target)
+        });
+        if !still_current {
             return;
         }
-        let count = search.matches.len();
-        search.current = match search.current {
-            Some(current) if backwards => Some((current + count - 1) % count),
-            Some(current) => Some((current + 1) % count),
-            None => {
+        let key = TextKey::new(format!("file-preview-{relative_path}"), target.ordinal);
+        let bounds = {
+            let registry = self.file_preview_selection.registry.borrow();
+            registry
+                .entries()
+                .iter()
+                .find(|entry| entry.key == key)
+                .and_then(|entry| {
+                    md::render::text_range_bounds(&entry.geometry, &target.range)
+                        .into_iter()
+                        .next()
+                })
+        };
+        let Some(bounds) = bounds else {
+            if attempt < 1 {
+                let relative_path = relative_path.to_owned();
+                cx.on_next_frame(window, move |this, window, cx| {
+                    this.reveal_preview_search_match(
+                        &relative_path,
+                        target,
+                        attempt + 1,
+                        window,
+                        cx,
+                    )
+                });
+            }
+            return;
+        };
+        let scroll = &self.file_preview_scroll_handle;
+        let viewport = scroll.bounds();
+        let current = scroll.offset();
+        if let Some(next) = revealed_scroll_offset(
+            current.y,
+            scroll.max_offset().y,
+            bounds.top(),
+            bounds.size.height,
+            viewport.top(),
+            viewport.bottom(),
+        ) {
+            scroll.set_offset(point(current.x, next));
+            cx.notify();
+        }
+    }
+
+    fn file_search_navigate(&mut self, backwards: bool, cx: &mut Context<Self>) {
+        let Some(search) = self.file_search.as_ref().filter(|search| search.open) else {
+            return;
+        };
+        let count = search.match_count();
+        if count == 0 {
+            return;
+        }
+        // With no current match, navigation starts from the anchor the
+        // target's own coordinates give: the preview's scroll position, or
+        // the editor caret.
+        let fallback = if search.preview {
+            Some(self.preview_search_anchor(&search.preview_matches))
+        } else {
+            self.file_search_editor().and_then(|editor| {
                 let origin = editor.read(cx).selected_range().start;
                 if backwards {
                     match_before(&search.matches, origin)
                 } else {
                     match_at_or_after(&search.matches, origin)
                 }
-            }
+            })
+        };
+        let search = self
+            .file_search
+            .as_mut()
+            .expect("still present: nothing above removes it");
+        search.current = match search.current {
+            Some(current) if backwards => Some((current + count - 1) % count),
+            Some(current) => Some((current + 1) % count),
+            None => fallback,
         };
         self.apply_file_search_to_editor(true, true, cx);
     }
 
     fn file_search_writable(&self) -> bool {
+        // The preview has no editable buffer — replace stays off there even
+        // when the underlying file is writable.
         self.file_search
             .as_ref()
-            .filter(|search| search.open)
+            .filter(|search| search.open && !search.preview)
             .and_then(|search| self.right_panel_file_editors.get(&search.path))
             .is_some_and(|editor| editor.writable)
     }
@@ -828,7 +1104,7 @@ impl Waku {
         // stay exactly aligned at any panel size.
         let input_width = (pane_width - FIND_BAR_CONTROLS_WIDTH).clamp(96.0, 380.0);
         let query_empty = search.query.read(cx).content().is_empty();
-        let has_matches = !search.matches.is_empty();
+        let has_matches = search.match_count() > 0;
         let replace_shown = search.replace_visible && writable;
 
         let count_label: Option<SharedString> = if query_empty {
@@ -839,7 +1115,7 @@ impl Waku {
             Some(tr!("find.no_results").into())
         } else {
             let current = search.current.map(|index| index + 1).unwrap_or(0);
-            let total = search.matches.len();
+            let total = search.match_count();
             let suffix = if search.limited { "+" } else { "" };
             Some(SharedString::from(tr!(
                 "find.result_count",
@@ -1322,6 +1598,28 @@ mod tests {
         assert_eq!(match_before(&matches, 21), Some(2));
         assert_eq!(match_at_or_after(&[], 5), None);
         assert_eq!(match_before(&[], 5), None);
+    }
+
+    #[test]
+    fn preview_search_uses_document_blocks() {
+        // Document parses make leading YAML frontmatter its own block — one
+        // element ordinal per key and per value cell — which is the tree the
+        // file preview paints.
+        let source = "---\ntitle: Doc\n---\n\n# title\n\nbody title\n";
+        let CompiledSearch::Ready(regex) = compile_search("title", false, false, false) else {
+            panic!("literal query must compile");
+        };
+        let (matches, limited) = md::render::markdown_document_search_matches(source, &regex, 20);
+        assert!(!limited);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|found| (found.ordinal, found.range.clone()))
+                .collect::<Vec<_>>(),
+            // Ranges index each element's shaped text — the heading's `# `
+            // marker is not part of it.
+            vec![(0, 0..5), (1 << 16, 0..5), (2 << 16, 5..10)]
+        );
     }
 
     #[test]

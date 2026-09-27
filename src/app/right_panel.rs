@@ -5199,7 +5199,13 @@ impl Waku {
         let body = if image_mode {
             self.render_file_image_preview(&relative_path, cx)
         } else if preview {
-            self.render_file_markdown_preview(&relative_path, &editor_state, window, cx)
+            self.render_file_markdown_preview(
+                &relative_path,
+                &editor_state,
+                panel_width - file_tree_width,
+                window,
+                cx,
+            )
         } else {
             self.render_file_editor_body(
                 &relative_path,
@@ -6330,9 +6336,18 @@ impl Waku {
         &mut self,
         relative_path: &str,
         editor_state: &Entity<TextInput>,
-        window: &Window,
+        pane_width: f32,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
+        // An open find bar follows this surface: re-aim it if the file or
+        // the source/preview mode flipped, and run a pending scroll reveal
+        // here where the frame still owns a `Window` for the retry path.
+        self.sync_file_search_target(relative_path, cx);
+        self.apply_pending_preview_search_reveal(relative_path, window, cx);
+        let search_highlights = self.file_preview_search_highlights(relative_path);
+        let find_bar = self.render_file_search_bar(pane_width, false, window, cx);
+
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
         let fullscreen = self.panel_fullscreen_active();
@@ -6351,7 +6366,7 @@ impl Waku {
         let reader_editor_state = editor_state.clone();
         let reader_title = tr!("speed_reader.preview_title", path = relative_path);
         let reader_waku = cx.entity().downgrade();
-        let ctx = MarkdownCtx::new(
+        let mut ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
             metrics,
@@ -6380,6 +6395,9 @@ impl Waku {
         }))
         .with_link_items(self.markdown_link_menu_items.clone())
         .with_link_handler(self.markdown_link_handler.clone());
+        if let Some(highlights) = search_highlights {
+            ctx = ctx.with_search_highlights(highlights);
+        }
         let document = md::render::markdown(view, &ctx);
 
         let preview_focus = self.transcript_control_focus("file-preview", cx);
@@ -6411,57 +6429,78 @@ impl Waku {
 
         div()
             .key_context("FileEditorPane")
-            .track_focus(&preview_focus)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |_, _, window, cx| {
-                    window.focus(&preview_focus_click, cx);
-                }),
-            )
             .flex_1()
             .min_h_0()
-            .relative()
+            .flex()
+            .flex_col()
             .bg(theme.surface)
+            // The find bar sits in normal flow above the scroll region —
+            // the same arrangement the source view uses — so an open bar
+            // pushes the document down instead of covering it.
+            .children(find_bar)
             .child(
                 div()
-                    .id(SharedString::from(format!("file-preview-{relative_path}")))
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.file_preview_scroll_handle)
-                    // Painted before the document, so the frame's selection
-                    // registry holds exactly this frame's text elements.
-                    .child(md::render::frame_reset(preview_selection.clone()))
+                    .track_focus(&preview_focus)
+                    // The focus claim lives on the document container, not
+                    // the pane: a click in the find bar must not pull the
+                    // caret back out of its query field.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |_, _, window, cx| {
+                            window.focus(&preview_focus_click, cx);
+                        }),
+                    )
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
                     .child(
                         div()
-                            .when(fullscreen, |element| {
-                                element.w_full().flex().justify_center()
-                            })
+                            .id(SharedString::from(format!("file-preview-{relative_path}")))
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.file_preview_scroll_handle)
+                            // Painted before the document, so the frame's
+                            // selection registry holds exactly this frame's
+                            // text elements.
+                            .child(md::render::frame_reset(preview_selection.clone()))
                             .child(
                                 div()
                                     .when(fullscreen, |element| {
-                                        element.w_full().max_w(px(CONTENT_MAX_WIDTH)).min_w_0()
+                                        element.w_full().flex().justify_center()
                                     })
-                                    .px(px(16.0))
-                                    .pt(px(14.0))
-                                    .pb(px(24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES))
-                                    .text_color(theme.text)
-                                    .children(document),
+                                    .child(
+                                        div()
+                                            .when(fullscreen, |element| {
+                                                element
+                                                    .w_full()
+                                                    .max_w(px(CONTENT_MAX_WIDTH))
+                                                    .min_w_0()
+                                            })
+                                            .px(px(16.0))
+                                            .pt(px(14.0))
+                                            .pb(px(
+                                                24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES
+                                            ))
+                                            .text_color(theme.text)
+                                            .children(document),
+                                    ),
                             ),
-                    ),
+                    )
+                    .child(selection_input)
+                    // After the selection canvas so its hit-tests see this
+                    // frame's registry; bubble dispatch runs listeners in
+                    // reverse paint order, so a press on a highlight reaches
+                    // the annotation handlers before the selection's drag
+                    // begins.
+                    .child(self.preview_annotation_input(&preview_selection, relative_path, cx))
+                    .child(scrollbar::vertical(
+                        &self.file_preview_scroll_handle,
+                        &self.file_preview_scrollbar,
+                    ))
+                    .children(annotation_offer)
+                    .children(annotation_editor)
+                    .children(annotation_tooltip),
             )
-            .child(selection_input)
-            // After the selection canvas so its hit-tests see this frame's
-            // registry; bubble dispatch runs listeners in reverse paint
-            // order, so a press on a highlight reaches the annotation
-            // handlers before the selection's drag begins.
-            .child(self.preview_annotation_input(&preview_selection, relative_path, cx))
-            .child(scrollbar::vertical(
-                &self.file_preview_scroll_handle,
-                &self.file_preview_scrollbar,
-            ))
-            .children(annotation_offer)
-            .children(annotation_editor)
-            .children(annotation_tooltip)
     }
 
     /// Picks up an external edit to a file the user has not modified here.

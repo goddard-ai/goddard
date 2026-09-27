@@ -2553,7 +2553,26 @@ pub fn markdown_search_matches(
     regex: &Regex,
     cap: usize,
 ) -> (Vec<TextSearchMatch>, bool) {
-    let tree = super::parser::parse(source);
+    tree_search_matches(&super::parser::parse(source), regex, cap)
+}
+
+/// Like [`markdown_search_matches`], but over a whole-document parse:
+/// leading YAML frontmatter is its own block, matching the tree
+/// [`MarkdownView::document`] paints. The file preview searches with this so
+/// match ordinals line up with the elements on screen.
+pub fn markdown_document_search_matches(
+    source: &str,
+    regex: &Regex,
+    cap: usize,
+) -> (Vec<TextSearchMatch>, bool) {
+    tree_search_matches(&super::parser::parse_document(source), regex, cap)
+}
+
+fn tree_search_matches(
+    tree: &super::parser::BlockTree,
+    regex: &Regex,
+    cap: usize,
+) -> (Vec<TextSearchMatch>, bool) {
     let mut matches = Vec::new();
     for (block_ix, top) in tree.blocks.iter().enumerate() {
         let mut ordinal = block_ordinal_base(block_ix);
