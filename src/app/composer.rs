@@ -6755,6 +6755,7 @@ impl Waku {
                         (
                             project.id,
                             SharedString::from(project.display_name()),
+                            self.is_remote_project(project.id),
                             project.starred,
                             star_focuses[index].clone(),
                         )
@@ -6831,12 +6832,13 @@ impl Waku {
                             .px(px(4.0))
                             .child(
                                 list(list_state.clone(), move |index, _window, _cx| {
-                                    let Some((project_id, name, starred, star_focus)) =
+                                    let Some((project_id, name, remote, starred, star_focus)) =
                                         list_rows.get(index)
                                     else {
                                         return div().into_any_element();
                                     };
                                     let project_id = *project_id;
+                                    let remote = *remote;
                                     let starred = *starred;
                                     let star_focus = star_focus.clone();
                                     let selected = Some(project_id) == subject_project_id;
@@ -6924,7 +6926,7 @@ impl Waku {
                                                             .then_some(index + 1)
                                                     };
                                                     if let Some(target) = target {
-                                                        window.focus(&key_rows[target].3, cx);
+                                                        window.focus(&key_rows[target].4, cx);
                                                         key_list.scroll_to_reveal_item(target);
                                                     } else {
                                                         window.focus(&key_field, cx);
@@ -6954,7 +6956,15 @@ impl Waku {
                                         })
                                         .hover(|element| element.bg(theme.overlay))
                                         .active(|element| element.opacity(0.85))
-                                        .child(icon("icons/folder.svg", 12.0, theme.text))
+                                        .child(icon(
+                                            if remote {
+                                                "icons/server.svg"
+                                            } else {
+                                                "icons/folder.svg"
+                                            },
+                                            12.0,
+                                            theme.text,
+                                        ))
                                         .child(
                                             div()
                                                 .min_w_0()
