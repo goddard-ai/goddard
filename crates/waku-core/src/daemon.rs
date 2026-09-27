@@ -7996,12 +7996,16 @@ mod tests {
     struct CaptureDriver {
         prompts: Mutex<Vec<String>>,
         steers: Mutex<Vec<String>>,
+        shutdowns: Mutex<u32>,
         surface_delivery: crate::driver::AgentSurfaceDelivery,
     }
 
     impl crate::driver::DriverControl for CaptureDriver {
         fn prompt(&self, prompt: String) {
             self.prompts.lock().push(prompt);
+        }
+        fn begin_shutdown(&self) {
+            *self.shutdowns.lock() += 1;
         }
         fn supports_steer(&self) -> bool {
             true
@@ -8695,6 +8699,52 @@ mod tests {
         assert!(sessions.lock().is_empty());
         assert_eq!(events.journaled_event_count(session_id), 0);
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Removing a runtime must reach the driver's `begin_shutdown`: the
+    /// event forwarder keeps a `DriverHandle` clone alive until the driver
+    /// stops emitting, so teardown that waits on `Drop` would never signal
+    /// a provider still holding its session — Devin's `session_locked` on
+    /// the next resume.
+    #[test]
+    fn closing_a_session_begins_driver_shutdown_while_a_handle_is_held() {
+        let root = std::env::temp_dir().join(format!("waku-close-shutdown-{}", Uuid::new_v4()));
+        let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+        let runtime_id = Uuid::new_v4();
+        let capture = Arc::new(CaptureDriver::default());
+        // Stands in for the event forwarder's clone, which outlives removal.
+        let forwarder_clone = DriverHandle::from_control(capture.clone());
+        backend.sessions.lock().insert(
+            session_id,
+            RuntimeEntry {
+                runtime_id,
+                driver: DriverHandle::from_control(capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                provider: ProviderKind::Devin,
+                cwd: root.join("repo"),
+            },
+        );
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id,
+                    command: Command::CloseSession,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        assert!(backend.sessions.lock().is_empty());
+        assert_eq!(
+            *capture.shutdowns.lock(),
+            1,
+            "teardown signaled before the forwarder's clone dropped"
+        );
+        drop(forwarder_clone);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

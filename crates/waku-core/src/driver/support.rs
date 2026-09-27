@@ -87,6 +87,10 @@ impl HeadlessComputerUseRuntime {
         self.runtime.stop();
     }
 
+    pub(super) fn begin_shutdown(&self) {
+        self.runtime.begin_shutdown();
+    }
+
     pub(super) fn grok_home(&self) -> Option<&Path> {
         match &self.config {
             HeadlessComputerUseConfig::Grok { grok_home, .. } => Some(grok_home),

@@ -3052,6 +3052,22 @@ impl DriverControl for AcpDriver {
         let _ = self.commands.try_send(CommandMessage::Cancel);
     }
 
+    /// Signals teardown before the daemon's detached drop: the event
+    /// forwarder holds a `DriverHandle` clone until this driver stops
+    /// emitting, so a `Shutdown` deferred to `Drop` would never reach the
+    /// actor — the provider process would outlive its runtime and keep
+    /// holding the session (Devin's `session_locked`) for whoever resumes
+    /// it next.
+    fn begin_shutdown(&self) {
+        if let Some(computer_use) = self.computer_use.as_ref() {
+            computer_use.begin_shutdown();
+        }
+        if let Some(computer_use) = self.native_computer_use.as_ref() {
+            computer_use.begin_shutdown();
+        }
+        let _ = self.commands.try_send(CommandMessage::Shutdown);
+    }
+
     fn cancel_computer_use(&self) {
         if let Some(computer_use) = self.computer_use.as_ref() {
             computer_use.stop();
@@ -3106,8 +3122,7 @@ impl DriverControl for AcpDriver {
 
 impl Drop for AcpDriver {
     fn drop(&mut self) {
-        self.cancel_computer_use();
-        let _ = self.commands.try_send(CommandMessage::Shutdown);
+        self.begin_shutdown();
     }
 }
 
@@ -3135,6 +3150,29 @@ mod tests {
                 .collect::<Vec<_>>(),
         )
         .category(category)
+    }
+
+    /// Teardown must reach the actor through `begin_shutdown` while handle
+    /// clones keep the driver alive — the daemon's forwarder holds one until
+    /// the driver stops emitting, so a `Shutdown` sent only from `Drop`
+    /// would never arrive and the provider would keep its session lock.
+    #[test]
+    fn begin_shutdown_signals_the_actor_while_a_handle_is_held() {
+        let (commands, command_rx) = smol::channel::unbounded();
+        let handle = crate::driver::DriverHandle::from_control(Arc::new(AcpDriver {
+            commands,
+            supports_steer: false,
+            mode: RuntimeMode::Auto,
+            computer_use: None,
+            native_computer_use: None,
+        }));
+        let forwarders_clone = handle.clone();
+        handle.begin_shutdown();
+        assert!(matches!(
+            command_rx.try_recv(),
+            Ok(CommandMessage::Shutdown)
+        ));
+        drop(forwarders_clone);
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- Fixed Devin and other agent-client-protocol tasks failing to resume with a "session is locked" error after their runtime was closed, replaced, or evicted.

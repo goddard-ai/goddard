@@ -81,6 +81,18 @@ impl ComputerUseRuntime {
     pub(super) fn stop(&self) {
         stop_registered_processes(&self.config.process_directory, &self.config.server_path);
     }
+
+    /// Eager teardown while driver-handle clones are still alive: kills the
+    /// helper processes and releases the preview monitor's thread — its
+    /// event sender would otherwise hold the driver's event channel open
+    /// past every teardown signal, so `Drop` (and the directory cleanup it
+    /// owns) could never run.
+    pub(super) fn begin_shutdown(&self) {
+        self.stop();
+        if let Some(monitor) = self.preview_monitor.as_ref() {
+            monitor.stop();
+        }
+    }
 }
 
 impl Drop for ComputerUseRuntime {
@@ -255,6 +267,13 @@ impl ComputerUsePreviewMonitor {
             })
             .context("failed to start the Computer Use preview monitor")?;
         Ok(Self { running, directory })
+    }
+
+    /// Exits the watcher thread without waiting for `Drop` — the distinction
+    /// matters when the owning driver cannot drop while a forwarder thread
+    /// still holds a handle to it.
+    fn stop(&self) {
+        self.running.store(false, Ordering::Release);
     }
 }
 
