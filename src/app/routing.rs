@@ -21,7 +21,7 @@ use serde_json::json;
 use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 use waku_protocol::model::{ProviderKind, ProviderResumeCursor, RuntimeMode};
-use waku_protocol::routing::{RouteCandidate, RouteDecision, RouteTarget};
+use waku_protocol::routing::{RouteCandidate, RouteDecision, RouteTarget, TaskClass};
 
 use super::runtime::start_driver;
 use super::*;
@@ -455,6 +455,40 @@ impl Waku {
                     Uuid::nil(),
                     session_id,
                     waku_client::Command::RecordRouteOverride { session_id, target },
+                );
+            })
+            .detach();
+    }
+
+    /// Log that phase routing moved a session onto a class-map target inside
+    /// its provider — the `route-class` record pairs with the session-start
+    /// `route` record so the settings counts can split mid-session routes
+    /// from intake ones. `provider_map` records whether the provider's own
+    /// class map or a global entry naming it supplied the target.
+    pub(super) fn record_route_class(
+        &self,
+        session_id: Uuid,
+        class: TaskClass,
+        provider_map: bool,
+        target: RouteTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(daemon) = self.daemon_for_session(session_id) else {
+            return;
+        };
+        cx.background_executor()
+            .spawn(async move {
+                // Same posture as `record_route_override`: a lost record
+                // must not disturb the model move it describes.
+                let _ = daemon.client().request(
+                    Uuid::nil(),
+                    session_id,
+                    waku_client::Command::RecordRouteClass {
+                        session_id,
+                        class,
+                        target,
+                        provider_map,
+                    },
                 );
             })
             .detach();

@@ -60,6 +60,7 @@ pub fn route_task(
     // What the classifier contributed, applied onto whichever target the
     // resolution produced — including fallback targets.
     let mut class_answered: Option<TaskClass> = None;
+    let mut class_applied: Option<TaskClass> = None;
     let mut class_confidence: Option<f64> = None;
     // Whether the task earned a planning phase — applied onto whichever
     // resolution path ran, including fallbacks that skip the eval entirely.
@@ -120,11 +121,16 @@ pub fn route_task(
         // and the boundary downshift pays the spend back. An unmapped hard
         // entry falls back to the task's own class entry.
         let start_class = if phased { TaskClass::Demanding } else { class };
-        match classes.get(&start_class).or_else(|| classes.get(&class)) {
-            Some(entry) => {
+        let applied = classes
+            .get(&start_class)
+            .map(|entry| (start_class, entry))
+            .or_else(|| classes.get(&class).map(|entry| (class, entry)));
+        match applied {
+            Some((entry_class, entry)) => {
                 let (target, note) = resolve_entry(entry, candidates, last_used);
+                class_applied = Some(entry_class);
                 let mut reasons = vec!["class-map"];
-                if start_class != class {
+                if entry_class != class {
                     reasons.push("phase-planning");
                 }
                 reasons.extend(note);
@@ -137,6 +143,7 @@ pub fn route_task(
     let decision = RouteDecision {
         target,
         class: class_answered,
+        applied_class: class_applied,
         class_confidence,
         phased,
         reason: reasons.join("+"),

@@ -1941,6 +1941,29 @@ impl Backend for WakuBackend {
                 crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
                 Ok(ResponsePayload::Ack)
             }
+            Command::RecordRouteClass {
+                session_id,
+                class,
+                target,
+                provider_map,
+            } => {
+                let mut record = crate::eval::EvalDecisionRecord::empty("route-class");
+                record.session_id = Some(session_id);
+                record.class = Some(class.id().to_owned());
+                record.resolved_provider = Some(target.provider);
+                record.resolved_model = target.model;
+                record.resolved_effort = target.effort;
+                record.reason = Some(
+                    if provider_map {
+                        "provider-class-map"
+                    } else {
+                        "global-class-map"
+                    }
+                    .to_owned(),
+                );
+                crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
+                Ok(ResponsePayload::Ack)
+            }
             Command::LoadEvalUsage => Ok(ResponsePayload::EvalUsage {
                 stats: crate::eval::usage_stats(&crate::eval::default_log_path()),
             }),
@@ -6010,6 +6033,7 @@ fn handle_driver_command(
         | Command::TestEvalConnection { .. }
         | Command::RouteTask { .. }
         | Command::RecordRouteOverride { .. }
+        | Command::RecordRouteClass { .. }
         | Command::LoadEvalUsage
         | Command::LoadUsageHistory { .. }
         | Command::LoadSkills { .. }

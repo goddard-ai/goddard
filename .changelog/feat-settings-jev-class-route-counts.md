@@ -1,0 +1,1 @@
+- The Jev routing settings now show how often each Easy/Medium/Hard assignment has routed a task — session-start routes on the main class rows and mid-session phase moves on each provider's own rows.

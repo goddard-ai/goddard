@@ -138,6 +138,12 @@ pub struct RouteDecision {
     pub target: RouteTarget,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class: Option<TaskClass>,
+    /// The class whose map entry supplied the target — `class` normally,
+    /// the hard entry for a phased start, or the answered class when that
+    /// entry was unmapped and the task's own supplied it. Absent when no
+    /// class routed (fallbacks).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_class: Option<TaskClass>,
     /// Confidence the backend reported for the class answer, 0–1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class_confidence: Option<f64>,

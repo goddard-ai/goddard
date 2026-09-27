@@ -27,6 +27,8 @@ use waku_protocol::eval::{
     EvalAnswer, EvalBackend, EvalQuestion, EvalSettings, EvalUsage, EvalUsageStats,
     EvalUsageTotals, Evaluation,
 };
+use waku_protocol::model::ProviderKind;
+use waku_protocol::routing::TaskClass;
 
 const TYPESAFE_URL: &str = "https://api.typesafe.ai/v1/systemone";
 const VERCEL_EVALUATION_URL: &str = "https://ai-gateway.vercel.sh/v4/ai/evaluation-model";
@@ -96,6 +98,10 @@ pub struct EvalDecisionRecord {
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
+    /// The class whose map entry supplied the route's target — `class`
+    /// carries the classifier's answer; this carries what actually ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applied_class: Option<String>,
 }
 
 impl EvalDecisionRecord {
@@ -119,6 +125,7 @@ impl EvalDecisionRecord {
             resolved_effort: None,
             reason: None,
             class: None,
+            applied_class: None,
         }
     }
 
@@ -129,6 +136,7 @@ impl EvalDecisionRecord {
         self.resolved_effort = decision.target.effort.clone();
         self.reason = Some(decision.reason.clone());
         self.class = decision.class.map(|class| class.id().to_owned());
+        self.applied_class = decision.applied_class.map(|class| class.id().to_owned());
         if self.latency_ms.is_none() {
             self.latency_ms = decision.eval_latency_ms;
         }
@@ -163,8 +171,11 @@ pub fn append_decision_log(path: &Path, record: &EvalDecisionRecord) {
 
 /// The fields a usage scan reads out of each log line. Everything else —
 /// the state payload, questions, answers — is skipped, so the scan stays
-/// proportional to line count rather than record size.
+/// proportional to line count rather than record size. `class` and
+/// `resolved_provider` stay strings: an id this build doesn't know must not
+/// poison the line's other fields.
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UsageLogLine {
     #[serde(default)]
     feature: String,
@@ -174,6 +185,16 @@ struct UsageLogLine {
     error: Option<String>,
     #[serde(default)]
     usage: Option<EvalUsage>,
+    #[serde(default)]
+    class: Option<String>,
+    /// The class whose map entry supplied the target — distinct from
+    /// `class` when a phased start launched on the hard entry.
+    #[serde(default)]
+    applied_class: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    resolved_provider: Option<String>,
 }
 
 /// Sum token usage across the decision log for the settings pane. A record
@@ -194,6 +215,34 @@ pub fn usage_stats(path: &Path) -> EvalUsageStats {
         let Ok(record) = serde_json::from_slice::<UsageLogLine>(line) else {
             continue;
         };
+        // Route outcomes count toward the class map they exercised — before
+        // the eval-call filter below, since outcome records carry no usage.
+        match record.feature.as_str() {
+            "route" => {
+                if let Some(class) = applied_route_class(&record) {
+                    *stats.route_class_counts.entry(class).or_default() += 1;
+                }
+            }
+            "route-class" => {
+                let class = record
+                    .class
+                    .as_deref()
+                    .and_then(|id| serde_json::from_value::<TaskClass>(json!(id)).ok());
+                let provider = record
+                    .resolved_provider
+                    .as_deref()
+                    .and_then(|id| serde_json::from_value::<ProviderKind>(json!(id)).ok());
+                if let (Some(class), Some(provider)) = (class, provider) {
+                    *stats
+                        .provider_route_class_counts
+                        .entry(provider)
+                        .or_default()
+                        .entry(class)
+                        .or_default() += 1;
+                }
+            }
+            _ => {}
+        }
         if record.usage.is_none() && record.model.is_none() && record.error.is_none() {
             continue;
         }
@@ -209,6 +258,25 @@ pub fn usage_stats(path: &Path) -> EvalUsageStats {
         fold(stats.features.entry(record.feature).or_default());
     }
     stats
+}
+
+/// The class a session-start route actually launched on, when the
+/// classifier's answer drove the target. `reason` is the "+"-joined chain
+/// `route_task` records — the class only routed when the chain leads with
+/// "class-map". Records written before `appliedClass` existed carry only
+/// the answered class; their "phase-planning" leg marks a start on the
+/// hard entry, which the field now records directly.
+fn applied_route_class(record: &UsageLogLine) -> Option<TaskClass> {
+    let reason = record.reason.as_deref()?;
+    if reason.split('+').next() != Some("class-map") {
+        return None;
+    }
+    let applied = match record.applied_class.as_deref() {
+        Some(_) => record.applied_class.as_deref(),
+        None if reason.split('+').any(|leg| leg == "phase-planning") => Some("hard"),
+        None => record.class.as_deref(),
+    };
+    applied.and_then(|id| serde_json::from_value::<TaskClass>(json!(id)).ok())
 }
 
 /// Run one evaluation against the configured backend, on the default
@@ -683,6 +751,58 @@ mod tests {
     fn usage_stats_tolerates_a_missing_log() {
         let stats = usage_stats(Path::new("/nonexistent/eval-decisions.jsonl"));
         assert_eq!(stats.totals.calls, 0);
+    }
+
+    #[test]
+    fn usage_stats_counts_route_classes() {
+        let path =
+            std::env::temp_dir().join(format!("goddard-eval-log-{}.jsonl", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            concat!(
+                // A class answered and applied at session start.
+                r#"{"feature":"route","class":"medium","appliedClass":"medium","reason":"class-map"}"#,
+                "\n",
+                // A phased start: answered medium, launched on the hard entry.
+                r#"{"feature":"route","class":"medium","appliedClass":"hard","reason":"class-map+phase-planning"}"#,
+                "\n",
+                // Records predating appliedClass fall back to the reason leg.
+                r#"{"feature":"route","class":"easy","reason":"class-map+phase-planning"}"#,
+                "\n",
+                // The class answered but stayed below the confidence floor —
+                // nothing routed to a class entry.
+                r#"{"feature":"route","class":"hard","reason":"low-class-confidence"}"#,
+                "\n",
+                // A failed call routed nothing.
+                r#"{"feature":"route","error":"boom","reason":"eval-failed"}"#,
+                "\n",
+                // Mid-session routes through a provider's class map.
+                r#"{"feature":"route-class","class":"medium","resolvedProvider":"claude","reason":"provider-class-map"}"#,
+                "\n",
+                r#"{"feature":"route-class","class":"medium","resolvedProvider":"claude","reason":"global-class-map"}"#,
+                "\n",
+                r#"{"feature":"route-class","class":"easy","resolvedProvider":"codex","reason":"provider-class-map"}"#,
+                "\n",
+                // No provider recorded — nothing to file it under.
+                r#"{"feature":"route-class","class":"easy"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        let stats = usage_stats(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(stats.route_class_counts[&TaskClass::General], 1);
+        assert_eq!(stats.route_class_counts[&TaskClass::Demanding], 2);
+        assert!(!stats.route_class_counts.contains_key(&TaskClass::Routine));
+        assert_eq!(
+            stats.provider_route_class_counts[&ProviderKind::Claude][&TaskClass::General],
+            2
+        );
+        assert_eq!(
+            stats.provider_route_class_counts[&ProviderKind::Codex][&TaskClass::Routine],
+            1
+        );
+        assert_eq!(stats.provider_route_class_counts.len(), 2);
     }
 
     #[test]

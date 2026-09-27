@@ -160,6 +160,14 @@ pub struct EvalUsageStats {
     pub totals: EvalUsageTotals,
     /// Totals keyed by the decision record's feature name.
     pub features: BTreeMap<String, EvalUsageTotals>,
+    /// Session starts each task class routed: `route` records whose reason
+    /// applied the classifier's answer. A phased start counts toward the
+    /// hard entry it launched on, not the answered class.
+    pub route_class_counts: BTreeMap<crate::routing::TaskClass, u64>,
+    /// Mid-session routes through each provider's own class map —
+    /// provider → class → count — recorded by `route-class` records.
+    pub provider_route_class_counts:
+        BTreeMap<crate::model::ProviderKind, BTreeMap<crate::routing::TaskClass, u64>>,
 }
 
 /// One completed evaluation call.

@@ -1081,8 +1081,12 @@ routing.class_hard:
   en: Hard
 routing.class_hard_description:
   en: Subtle, high-stakes, or long-horizon work — routed to the strongest combo.
+routing.class_route_count:
+  en: Routed %{count} times at session start
 routing.provider_classes:
   en: Per-provider models
+routing.provider_class_route_count:
+  en: Routed %{count} times mid-session
 routing.providers:
   en: Providers
 routing.provider_default:

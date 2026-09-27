@@ -25,7 +25,9 @@ use uuid::Uuid;
 
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{ActivityItem, AgentSession, ProviderKind, ProviderModel};
-use waku_protocol::routing::{PhaseSignal, RouteClassMap, RouteClassTarget, SessionPhase};
+use waku_protocol::routing::{
+    PhaseSignal, RouteClassMap, RouteClassTarget, RouteTarget, SessionPhase, TaskClass,
+};
 
 use super::*;
 
@@ -248,6 +250,15 @@ fn phase_verdict(phase: SessionPhase, evaluation: &Evaluation) -> Option<PhaseVe
 struct PhaseTarget {
     model: Option<String>,
     effort: Option<String>,
+}
+
+/// A resolved phase target plus which decision source supplied it: the
+/// class-map entry — `(implementation class, the provider's own map?)` —
+/// or `None` when the evaluator's pick produced the target. The decision
+/// log counts only class-map routes, so the pick carries no source.
+struct PhaseResolution {
+    target: PhaseTarget,
+    class_source: Option<(TaskClass, bool)>,
 }
 
 /// One class entry resolved the way the route's `resolve_entry` does: a
@@ -591,10 +602,29 @@ impl Waku {
         else {
             return false;
         };
-        let Some(target) = self.phase_implementation_target(session, eval_pick.as_deref()) else {
+        let provider = session.provider;
+        let Some(resolution) = self.phase_implementation_target(session, eval_pick.as_deref())
+        else {
             return false;
         };
-        self.apply_phase_options(session_id, target, cx);
+        let class_route = resolution.class_source.map(|(class, provider_map)| {
+            (
+                class,
+                provider_map,
+                RouteTarget {
+                    provider,
+                    model: resolution.target.model.clone(),
+                    effort: resolution.target.effort.clone(),
+                },
+            )
+        });
+        if self.apply_phase_options(session_id, resolution.target, cx) {
+            // Only an actual model move counts — settle evals re-resolve the
+            // same target and would otherwise double-count it.
+            if let Some((class, provider_map, target)) = class_route {
+                self.record_route_class(session_id, class, provider_map, target, cx);
+            }
+        }
         true
     }
 
@@ -632,12 +662,13 @@ impl Waku {
     /// entry when it names this provider, else the evaluator's pick — which
     /// only applies when it names a model the user approved inside this
     /// provider. A class entry pointing elsewhere would mean a provider
-    /// switch mid-session — phase routing never does that.
+    /// switch mid-session — phase routing never does that. `class_source`
+    /// records which map won so the decision log can count it.
     fn phase_implementation_target(
         &self,
         session: &AgentSession,
         eval_pick: Option<&str>,
-    ) -> Option<PhaseTarget> {
+    ) -> Option<PhaseResolution> {
         let provider = session.provider;
         let catalog_has = |model: &str| {
             self.provider_probe_on(self.daemons.session_owner(session.id), provider)
@@ -650,7 +681,10 @@ impl Waku {
         let implementation_class = decision.class.unwrap_or_default().implementation_class();
         let provider_map = self.state.provider_route_classes.get(&provider);
         if let Some(entry) = provider_map.and_then(|map| map.get(&implementation_class)) {
-            return Some(class_entry_target(entry, &catalog_has));
+            return Some(PhaseResolution {
+                target: class_entry_target(entry, &catalog_has),
+                class_source: Some((implementation_class, true)),
+            });
         }
         if let Some(entry) = self
             .state
@@ -658,39 +692,47 @@ impl Waku {
             .get(&implementation_class)
             .filter(|entry| entry.provider == provider)
         {
-            return Some(class_entry_target(entry, &catalog_has));
+            return Some(PhaseResolution {
+                target: class_entry_target(entry, &catalog_has),
+                class_source: Some((implementation_class, false)),
+            });
         }
         let approved = approved_route_models(provider, provider_map, &self.state.route_classes);
         eval_pick
             .filter(|pick| approved.contains(*pick) && catalog_has(pick))
-            .map(|pick| PhaseTarget {
-                model: Some(pick.to_owned()),
-                effort: waku_client::persistence::remembered_model_traits_for(
-                    self.state.remembered_model_traits(),
-                    provider,
-                    pick,
-                )
-                .0,
+            .map(|pick| PhaseResolution {
+                target: PhaseTarget {
+                    model: Some(pick.to_owned()),
+                    effort: waku_client::persistence::remembered_model_traits_for(
+                        self.state.remembered_model_traits(),
+                        provider,
+                        pick,
+                    )
+                    .0,
+                },
+                class_source: None,
             })
     }
 
     /// Write a phase target onto the session and retune the live driver.
     /// Effort falls back to the model's remembered traits; a provider
     /// default (`None` model) leaves tier and window alone since no named
-    /// model owns remembered values to restore.
+    /// model owns remembered values to restore. Returns whether the
+    /// session's options actually changed — callers that log the route
+    /// count only real moves.
     fn apply_phase_options(
         &mut self,
         session_id: Uuid,
         target: PhaseTarget,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(session) = self
             .state
             .sessions
             .iter()
             .find(|session| session.id == session_id)
         else {
-            return;
+            return false;
         };
         let provider = session.provider;
         let (remembered_effort, remembered_tier, remembered_window) = target
@@ -715,10 +757,10 @@ impl Waku {
             && session.service_tier == tier
             && session.context_window == window
         {
-            return;
+            return false;
         }
         let Some(session) = self.state.session_mut(session_id) else {
-            return;
+            return false;
         };
         session.model = target.model;
         session.reasoning_effort = effort;
@@ -728,6 +770,7 @@ impl Waku {
         self.state.mark_session_dirty(session_id);
         self.apply_session_options(session_id, cx);
         cx.notify();
+        true
     }
 }
 

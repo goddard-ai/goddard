@@ -21,7 +21,7 @@ use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
 };
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
-use crate::routing::{RouteCandidate, RouteDecision, RouteTarget};
+use crate::routing::{RouteCandidate, RouteDecision, RouteTarget, TaskClass};
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
 use crate::usage::PlanUsage;
@@ -418,6 +418,16 @@ pub enum Command {
     RecordRouteOverride {
         session_id: Uuid,
         target: RouteTarget,
+    },
+    /// Append a route-class record to the decision log: mid-session phase
+    /// routing moved the session onto a class-map target inside its
+    /// provider. `provider_map` records which map supplied the entry — the
+    /// provider's own, or a global class entry naming the provider.
+    RecordRouteClass {
+        session_id: Uuid,
+        class: TaskClass,
+        target: RouteTarget,
+        provider_map: bool,
     },
     /// Read the MCP integrations catalog plus the user's configuration for
     /// each entry. Global command — nil session id.

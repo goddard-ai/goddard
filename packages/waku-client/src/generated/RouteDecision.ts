@@ -9,6 +9,13 @@ import type { TaskClass } from "./TaskClass";
  */
 export type RouteDecision = { target: RouteTarget, class?: TaskClass | null,
 /**
+ * The class whose map entry supplied the target — `class` normally,
+ * the hard entry for a phased start, or the answered class when that
+ * entry was unmapped and the task's own supplied it. Absent when no
+ * class routed (fallbacks).
+ */
+appliedClass?: TaskClass | null,
+/**
  * Confidence the backend reported for the class answer, 0–1.
  */
 classConfidence?: number | null,

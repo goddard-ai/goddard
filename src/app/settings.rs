@@ -8323,13 +8323,19 @@ impl Waku {
                 tr!("routing.class_hard_description"),
             ),
         ];
+        let stats = self.eval_usage_stats.as_ref();
         let class_row_elements: Vec<Option<AnyElement>> = class_rows
             .iter()
             .map(|(class, title, description)| {
-                settings_row(
-                    "icons/gauge.svg",
+                route_class_row(
                     title.clone(),
                     description.clone(),
+                    stats.map(|stats| {
+                        tr!(
+                            "routing.class_route_count",
+                            count = stats.route_class_counts.get(class).copied().unwrap_or(0)
+                        )
+                    }),
                     self.route_class_controls(*class, None, cx),
                     theme,
                     search,
@@ -8396,10 +8402,20 @@ impl Waku {
                 let mut rows: Vec<Option<AnyElement>> = class_rows
                     .iter()
                     .map(|(class, title, description)| {
-                        settings_row(
-                            "icons/gauge.svg",
+                        route_class_row(
                             title.clone(),
                             description.clone(),
+                            stats.map(|stats| {
+                                tr!(
+                                    "routing.provider_class_route_count",
+                                    count = stats
+                                        .provider_route_class_counts
+                                        .get(&provider)
+                                        .and_then(|counts| counts.get(class))
+                                        .copied()
+                                        .unwrap_or(0)
+                                )
+                            }),
                             self.route_class_controls(*class, Some(provider), cx),
                             theme,
                             search,
@@ -14132,6 +14148,52 @@ fn settings_row(
             .child(settings_row_label(
                 icon_path,
                 settings_row_text(title, description, matched, theme),
+                theme,
+            ))
+            .child(control)
+            .into_any_element(),
+    )
+}
+
+/// One class-map row — `settings_row`'s shell with a tertiary count line
+/// under the description recording how many routes landed on the class
+/// through the map this row edits. `count` is absent until the usage scan
+/// lands, so the line pops in rather than flashing a zero.
+#[track_caller]
+fn route_class_row(
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    count: Option<String>,
+    control: impl IntoElement,
+    theme: Theme,
+    search: &SettingSearch,
+) -> Option<AnyElement> {
+    let title = title.into();
+    let description = description.into();
+    let matched = search.matched(&title, &description)?;
+    Some(
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(settings_row_label(
+                "icons/gauge.svg",
+                settings_row_text(title, description, matched, theme).when_some(
+                    count,
+                    |text, count| {
+                        text.child(
+                            div()
+                                .mt(px(2.0))
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_tertiary)
+                                .child(count),
+                        )
+                    },
+                ),
                 theme,
             ))
             .child(control)
