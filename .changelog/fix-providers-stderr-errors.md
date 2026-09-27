@@ -1,0 +1,1 @@
+- Provider failure alerts no longer mistake informational stderr logs for errors.

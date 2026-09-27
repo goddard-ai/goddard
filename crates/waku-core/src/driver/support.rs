@@ -327,7 +327,16 @@ pub(super) fn grok_computer_use_launch_configuration(
 pub(super) fn provider_stderr_error(lines: Vec<String>) -> Option<String> {
     let first_error = lines
         .iter()
-        .find(|line| line.to_ascii_lowercase().contains("error"))?
+        .find(|line| {
+            let line = line.trim();
+            // Devin's INFO logs include counters like `errors=0`; only accept
+            // explicit diagnostics or a standalone ERROR log level.
+            line.get(..6)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("error:"))
+                || line
+                    .split_whitespace()
+                    .any(|word| word.trim_end_matches(':').eq_ignore_ascii_case("ERROR"))
+        })?
         .trim();
 
     // CLI parsers can echo a rejected multi-line argument in full. The first
