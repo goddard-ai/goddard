@@ -811,8 +811,9 @@ async function build(target: BuildTarget): Promise<boolean> {
     // bundle.sh only packages and signs the binaries it just produced.
     const laneEnv =
       lane === undefined ? [] : [`GODDARD_BUNDLE_DIR=${laneAppPath(lane)}`];
+    const bundleArgs = [profile, ...(serveMode ? ["--debug-icon"] : [])];
     const result =
-      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${laneEnv} ${join(root, "scripts/bundle.sh")} ${profile}`.nothrow();
+      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${laneEnv} ${join(root, "scripts/bundle.sh")} ${bundleArgs}`.nothrow();
     if (result.exitCode !== 0) {
       console.error(
         "[goddard-dev] Bundle failed; keeping the current app open.",

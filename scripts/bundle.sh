@@ -2,6 +2,11 @@
 set -eu
 
 profile="${1:-debug}"
+debug_icon_override="${2:-}"
+if [ "$#" -gt 2 ] || { [ -n "$debug_icon_override" ] && [ "$debug_icon_override" != "--debug-icon" ]; }; then
+  echo "usage: scripts/bundle.sh [debug|release] [--debug-icon]" >&2
+  exit 2
+fi
 cargo_target_dir="${CARGO_TARGET_DIR:-target}"
 # Shared build cache (see scripts/cache-dir.ts): worktrees share the codesign
 # identity, downloaded SDKs, and compiled helpers instead of resolving them
@@ -54,10 +59,13 @@ case "$profile" in
     icon_file="AppIcon.icns"
     ;;
   *)
-    echo "usage: scripts/bundle.sh [debug|release]" >&2
+    echo "usage: scripts/bundle.sh [debug|release] [--debug-icon]" >&2
     exit 2
     ;;
 esac
+if [ "$debug_icon_override" = "--debug-icon" ]; then
+  icon_file="AppIconDev.icns"
+fi
 if [ "$profile" = "debug" ] && [ "$codesign_identity_from_environment" = "0" ] && [ "$codesign_identity" != "-" ]; then
   mkdir -p "$(dirname "$debug_identity_cache")"
   printf '%s\n' "$codesign_identity" > "$debug_identity_cache"
