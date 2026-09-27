@@ -22,8 +22,11 @@ const WINDOW_MARGIN: f32 = 44.0;
 const VERTICAL_BIAS: f32 = 0.08;
 const VERTICAL_BIAS_MAX: f32 = 96.0;
 
-/// Runtime-only switcher state. Restoration deliberately seeds only the
-/// selected task: opening old windows must not masquerade as user recency.
+/// Switcher state that lives for the app's run. `recent_session_ids` is
+/// the one piece worth keeping: it mirrors onto
+/// `PersistedState::recent_sessions` on save and seeds back in on launch,
+/// so real activation order survives a restart. Everything else — the
+/// snapshot, the highlight, the focus — is runtime-only.
 pub(super) struct TaskSwitcherUi {
     open: bool,
     ordered_session_ids: Vec<Uuid>,
@@ -65,6 +68,17 @@ impl TaskSwitcherUi {
             .map(|session| session.project_id)
             .filter(|project_id| seen.insert(*project_id))
             .collect()
+    }
+
+    /// The recency list as it persists — newest activation first.
+    pub(super) fn recent_sessions(&self) -> &[Uuid] {
+        &self.recent_session_ids
+    }
+
+    /// Seed recency restored from disk; `migrate_loaded` has already pruned
+    /// it to live tasks.
+    pub(super) fn restore_recent(&mut self, session_ids: &[Uuid]) {
+        self.recent_session_ids = session_ids.to_vec();
     }
 
     pub(super) fn record_access(&mut self, session_id: Uuid) {

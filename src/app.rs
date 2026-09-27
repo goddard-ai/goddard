@@ -5276,6 +5276,7 @@ impl Waku {
             )
             .detach();
             let mut task_switcher = task_switcher::TaskSwitcherUi::new(task_switcher_focus);
+            task_switcher.restore_recent(&state.recent_sessions);
             if let Some(selected_session) = state.selected_session {
                 task_switcher.record_access(selected_session);
             }

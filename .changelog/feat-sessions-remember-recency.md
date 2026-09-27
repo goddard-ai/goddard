@@ -1,0 +1,1 @@
+- The Ctrl-Tab task switcher and the project switcher's Recently used list now keep their ordering across restarts instead of starting fresh each launch.

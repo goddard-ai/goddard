@@ -773,6 +773,7 @@ impl Waku {
             .iter()
             .filter_map(|location| persisted_location(*location))
             .collect();
+        self.state.recent_sessions = self.task_switcher.recent_sessions().to_vec();
         self.state.transcript_scroll_positions = self
             .transcript_scroll_positions
             .iter()

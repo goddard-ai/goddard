@@ -1403,6 +1403,10 @@ struct AppState {
     selected_session: Option<Uuid>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     unseen_completions: HashMap<Uuid, u64>,
+    /// Tasks in last-activated order, newest first — the shared "recently
+    /// used" source for the task and project switchers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_sessions: Vec<Uuid>,
     #[serde(default = "default_provider")]
     last_provider: ProviderKind,
     /// The last model pick was the router's Auto row — the next draft keeps
@@ -1512,6 +1516,11 @@ pub struct PersistedState {
     /// is activated. App-local like the selection, not task state.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub unseen_completions: HashMap<Uuid, u64>,
+    /// Tasks in last-activated order, newest first — the "recently used"
+    /// ordering the task and project switchers restore from. App-local
+    /// like the selection, not task state.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_sessions: Vec<Uuid>,
     pub last_provider: ProviderKind,
     /// The last model pick was the router's Auto row — the next draft keeps
     /// Auto selected instead of inheriting the routed provider/model.
@@ -2048,6 +2057,7 @@ impl PersistedState {
             selected_project: None,
             selected_session: None,
             unseen_completions: HashMap::new(),
+            recent_sessions: Vec::new(),
             last_provider: ProviderKind::Codex,
             last_auto_route: false,
             last_runtime_mode: RuntimeMode::default(),
@@ -2565,6 +2575,7 @@ impl PersistedState {
             selected_project: self.selected_project,
             selected_session: self.persistable_selected_session(),
             unseen_completions: self.unseen_completions.clone(),
+            recent_sessions: self.recent_sessions.clone(),
             last_provider: self.last_provider,
             last_auto_route: self.last_auto_route,
             last_runtime_mode: self.last_runtime_mode,
@@ -2699,6 +2710,7 @@ impl PersistedState {
         self.selected_project = app_state.selected_project;
         self.selected_session = app_state.selected_session;
         self.unseen_completions = app_state.unseen_completions;
+        self.recent_sessions = app_state.recent_sessions;
         self.last_provider = app_state.last_provider;
         self.last_auto_route = app_state.last_auto_route;
         self.last_runtime_mode = app_state.last_runtime_mode;
@@ -2809,6 +2821,10 @@ impl PersistedState {
         let live: HashSet<Uuid> = self.sessions.iter().map(|session| session.id).collect();
         self.unseen_completions
             .retain(|session_id, _| live.contains(session_id));
+        // Restored recency gets the same pruning: a slot for a task deleted
+        // while the app was away would resurrect nothing.
+        self.recent_sessions
+            .retain(|session_id| live.contains(session_id));
         self.version = STATE_VERSION;
         normalize_computer_app_grants(&mut self.computer_use_allowed_apps);
         self.backfill_remembered_selection();
@@ -4652,6 +4668,27 @@ mod tests {
         // the app was away is pruned on load.
         assert_eq!(restored.unseen_completions.len(), 1);
         assert_eq!(restored.unseen_completions[&session_id], 42);
+    }
+
+    #[test]
+    fn recent_sessions_survive_an_app_state_round_trip() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.projects[0].id;
+        let older = state.sessions[0].id;
+        let newer = state.new_session(project_id, ProviderKind::Codex);
+        let newer_id = newer.id;
+        state.sessions.push(newer);
+        state.recent_sessions = vec![newer_id, older, Uuid::new_v4()];
+
+        let app_state = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.sessions.clone_from(&state.sessions);
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+        restored.migrate_loaded();
+
+        // Order survives the round trip; the slot for a task deleted while
+        // the app was away is pruned on load.
+        assert_eq!(restored.recent_sessions, vec![newer_id, older]);
     }
 
     #[test]
