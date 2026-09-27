@@ -1065,6 +1065,30 @@ fn settings_navigation_folds_revisits_and_drops_gated_pages() {
     assert_eq!(navigation.go_forward(settings_entry(Appearance, 0.0)), None);
 }
 
+#[test]
+fn settings_leave_parks_the_departed_pane_for_reentry() {
+    use super::SettingsPage::*;
+    let mut navigation = SettingsNavigation::default();
+
+    // General -> Appearance, then back walks past General and out of
+    // settings: the departing pane parks on `forward` atop the remaining
+    // pane hops, so re-entering lands on it and they still replay.
+    navigation.visit(Some(settings_entry(General, 0.0)), Appearance);
+    assert_eq!(
+        navigation.go_back(settings_entry(Appearance, 30.0)),
+        Some(settings_entry(General, 0.0))
+    );
+    navigation.leave(settings_entry(General, 12.0));
+    assert_eq!(
+        navigation.forward.pop(),
+        Some(settings_entry(General, 12.0))
+    );
+    assert_eq!(
+        navigation.go_forward(settings_entry(General, 12.0)),
+        Some(settings_entry(Appearance, 30.0))
+    );
+}
+
 /// A session skeleton, as the session list holds them: stored rows report
 /// started without their transcript detail loaded.
 fn started_session(id: Uuid) -> AgentSession {

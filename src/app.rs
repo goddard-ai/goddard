@@ -1503,6 +1503,10 @@ enum NavigationLocation {
     ProjectsPage(Uuid),
     DraftsPage,
     AutomationsPage,
+    /// The settings overlay. It never enters `back` — the surface it
+    /// opened over holds that slot — but leaving settings through back
+    /// parks it on `forward` so the hop can be replayed.
+    Settings,
 }
 
 #[derive(Debug, Default)]
@@ -1605,7 +1609,8 @@ struct SettingsHistoryEntry {
 /// Back/forward history over settings panes. Kept separate from
 /// `SessionNavigation`: the settings surface replaces the main column
 /// rather than living in it, so its history lives and dies with the visit
-/// and back runs out by leaving settings.
+/// and back runs out by leaving settings — a leave that parks the
+/// departing pane on `forward` for the hop back in.
 #[derive(Debug, Default)]
 struct SettingsNavigation {
     back: Vec<SettingsHistoryEntry>,
@@ -1645,6 +1650,12 @@ impl SettingsNavigation {
 
     fn forward_target(&self) -> Option<SettingsHistoryEntry> {
         self.forward.last().copied()
+    }
+
+    /// Back walked out of the settings visit: park the pane it departed on
+    /// `forward`, where a forward hop back into settings picks it up.
+    fn leave(&mut self, departed: SettingsHistoryEntry) {
+        self.forward.push(departed);
     }
 
     /// A page whose navigation gate closed is no longer a target — a stale
@@ -1702,7 +1713,7 @@ fn persisted_location(location: NavigationLocation) -> Option<PersistedNavigatio
         NavigationLocation::ProjectsPage(id) => Some(PersistedNavigationLocation::ProjectsPage(id)),
         NavigationLocation::DraftsPage => Some(PersistedNavigationLocation::DraftsPage),
         NavigationLocation::AutomationsPage => Some(PersistedNavigationLocation::AutomationsPage),
-        NavigationLocation::Terminal(_) => None,
+        NavigationLocation::Terminal(_) | NavigationLocation::Settings => None,
     }
 }
 

@@ -95,6 +95,12 @@ impl Waku {
         // whichever entry point landed here, the last visit's stack is dead.
         if self.settings_page.is_none() {
             self.settings_navigation.clear();
+            // The open is a hop in the main-column history too: the surface
+            // underneath becomes the back target, so a back that walks out
+            // of settings can be answered by forward.
+            let underneath = self.navigation_location();
+            self.session_navigation
+                .visit(underneath, NavigationLocation::Settings);
         }
         let current = self.current_settings_entry();
         self.show_settings_page(page, gpui::Point::default(), window, cx);

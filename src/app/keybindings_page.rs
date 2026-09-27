@@ -399,6 +399,11 @@ impl super::Waku {
         // already recorded — the visit below folds to the same entry.
         if self.settings_page.is_none() {
             self.settings_navigation.clear();
+            // Same hop `visit_settings_page` records on a fresh open —
+            // reached directly, this is the only place it happens.
+            let underneath = self.navigation_location();
+            self.session_navigation
+                .visit(underneath, super::NavigationLocation::Settings);
         }
         let current = self.current_settings_entry();
         if self.keybindings.is_none() {

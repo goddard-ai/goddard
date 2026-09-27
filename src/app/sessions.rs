@@ -3243,7 +3243,19 @@ impl Waku {
             if self.navigate_settings_history(true, window, cx) {
                 return;
             }
+            let departed = self.current_settings_entry();
             self.settings_page = None;
+            // Leaving through back is a real hop: consume the surface the
+            // visit pushed on open and park the departing pane where the
+            // forward hop back in picks it up. When the recorded surface
+            // is gone, skip the marker rather than pop an unrelated entry.
+            if let Some(departed) = departed
+                && let Some(underneath) = self.navigation_location()
+                && self.session_navigation.back_target() == Some(underneath)
+            {
+                let _ = self.session_navigation.go_back(NavigationLocation::Settings);
+                self.settings_navigation.leave(departed);
+            }
             let focus_handle = self.composer_focus(cx);
             window.focus(&focus_handle, cx);
             cx.notify();
@@ -3283,7 +3295,9 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_automations_page(window, cx);
             }
-            None => {}
+            // The settings overlay never enters `back` — the surface it
+            // opened over holds that slot.
+            Some(NavigationLocation::Settings) | None => {}
         }
     }
 
@@ -3333,6 +3347,23 @@ impl Waku {
             Some(NavigationLocation::AutomationsPage) => {
                 let _ = self.session_navigation.go_forward(current);
                 self.show_automations_page(window, cx);
+            }
+            Some(NavigationLocation::Settings) => {
+                // Back out of settings parked the departing pane on the
+                // settings forward stack; re-entering lands on it with the
+                // pane history intact.
+                if let Some(entry) = self.settings_navigation.forward.pop() {
+                    let _ = self.session_navigation.go_forward(current);
+                    // Set the page before `show_settings_page` so the
+                    // Keybindings divert doesn't mistake the re-entry for a
+                    // fresh visit and clear the pane stacks.
+                    self.settings_page = Some(entry.page);
+                    self.show_settings_page(entry.page, entry.offset, window, cx);
+                } else {
+                    // A marker without its parked pane reopens nothing —
+                    // drop it so forward isn't wedged on a dead hop.
+                    self.session_navigation.forward.pop();
+                }
             }
             None => {}
         }

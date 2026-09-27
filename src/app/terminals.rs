@@ -991,7 +991,7 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_automations_page(window, cx);
             }
-            None => {}
+            Some(NavigationLocation::Settings) | None => {}
         }
     }
 
@@ -1244,6 +1244,7 @@ impl Waku {
                         NavigationLocation::AutomationsPage => {
                             this.show_automations_page(window, cx);
                         }
+                        NavigationLocation::Settings => {}
                     });
                 });
             });
