@@ -7704,9 +7704,8 @@ impl Waku {
             .into_any_element()
     }
 
-    /// One provider's distillation-model picker: provider mark and name on
-    /// the left, a catalog dropdown on the right whose first entry clears
-    /// the override back to the provider default.
+    /// One provider's distillation-model picker. It uses the shared searchable
+    /// model panel; the provider default row clears the memory override.
     fn memory_model_row(&self, probe: &ProviderProbe, theme: Theme, cx: &mut Context<Self>) -> Div {
         let provider = probe.provider;
         let current = self.state.memory_models.get(&provider).cloned();
@@ -7720,9 +7719,70 @@ impl Waku {
             })
             .unwrap_or_else(|| tr!("experiments.memory_model_default"));
         let menu_id = format!("memory-model-{}", provider.id());
-        let handle = self.menu_handle(menu_id.clone(), cx);
+        let search = self.route_class_picker.search.clone();
+        let search_focus = search.read(cx).focus_handle(cx);
         let weak = cx.entity().downgrade();
-        let models = probe.models.clone();
+        let current_for_open = current.clone();
+        let handle = {
+            let open_weak = weak.clone();
+            let reset_search = search.clone();
+            let picker_focus = search_focus.clone();
+            self.menu_handle_with(menu_id.clone(), cx, move |open, window, cx| {
+                if open {
+                    reset_search.update(cx, |search, cx| search.clear(cx));
+                    let _ = open_weak.update(cx, |this, cx| {
+                        this.refresh_provider_model_discovery(provider);
+                        let rows = this.memory_model_picker_rows(provider, "");
+                        let selected = rows.iter().position(|row| match row {
+                            PickerRow::ProviderDefault(kind) => {
+                                *kind == provider && current_for_open.is_none()
+                            }
+                            PickerRow::Combo(row) => {
+                                row.provider == provider
+                                    && current_for_open.as_deref() == Some(row.model.id.as_str())
+                            }
+                            PickerRow::Policy(_) => false,
+                        });
+                        this.route_class_picker.highlight = None;
+                        if let Some(index) = selected {
+                            this.route_class_picker.reveal(index, rows.len());
+                        }
+                        cx.notify();
+                    });
+                    let focus = picker_focus.clone();
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                    });
+                } else {
+                    let _ = open_weak.update(cx, |this, cx| {
+                        this.route_class_picker.highlight = None;
+                        let focus = this.settings_focus.clone();
+                        window.focus(&focus, cx);
+                    });
+                }
+            })
+        };
+        let normalized_query = search.read(cx).content().trim().to_ascii_lowercase();
+        let available_rows = Rc::new(if handle.is_open() {
+            self.memory_model_picker_rows(provider, &normalized_query)
+        } else {
+            Vec::new()
+        });
+        let highlight = self
+            .route_class_picker
+            .highlight
+            .filter(|index| *index < available_rows.len());
+        let list_state = self.route_class_picker.list.clone();
+        let scrollbar_state = self.route_class_picker.scrollbar.clone();
+        let current_for_render = current.clone();
+        let rows_for_render = available_rows.clone();
+        let weak_for_render = weak.clone();
+        let popover_chip = MenuChip::new(format!("memory-model-selector-{}", provider.id()))
+            .label(label)
+            .outlined()
+            .selected(handle.is_open())
+            .w(px(160.0))
+            .justify_between();
         div()
             .flex()
             .items_center()
@@ -7744,40 +7804,160 @@ impl Waku {
                             .child(provider.display_name()),
                     ),
             )
-            .child(dropdown_menu(
-                MenuChip::new(format!("memory-model-selector-{}", provider.id()))
-                    .label(label)
-                    .outlined()
-                    .selected(handle.is_open())
-                    .w(px(160.0))
-                    .justify_between(),
-                format!("memory-model-menu-{}", provider.id()),
+            .child(popover(
+                popover_chip,
                 &handle,
                 MenuAlign::BelowRight,
-                move |_| {
-                    let mut items = vec![{
-                        let weak = weak.clone();
-                        MenuItem::new(tr!("experiments.memory_model_default"), move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_memory_model(provider, None, cx);
-                            });
-                        })
-                        .selected(current.is_none())
-                    }];
-                    items.extend(models.iter().map(|model| {
-                        let weak = weak.clone();
-                        let id = model.id.clone();
-                        let selected = current.as_deref() == Some(model.id.as_str());
-                        MenuItem::new(model.name.clone(), move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_memory_model(provider, Some(id.clone()), cx);
-                            });
-                        })
-                        .selected(selected)
-                    }));
-                    items
+                move |popover, _window, _cx| {
+                    let theme = Theme::current(_cx);
+                    let render_weak = weak_for_render.clone();
+                    let render_current = current_for_render.clone();
+                    let move_current = current.clone();
+                    let render_row = Rc::new(
+                        move |row_index: usize,
+                              row: &PickerRow,
+                              is_highlighted: bool,
+                              popover: &ContextMenuHandle,
+                              _window: &mut Window,
+                              cx: &mut App|
+                              -> AnyElement {
+                            let theme = Theme::current(cx);
+                            let (title, subtitle) = match row {
+                                PickerRow::ProviderDefault(_) => (
+                                    provider.short_name().to_owned(),
+                                    tr!("experiments.memory_model_default"),
+                                ),
+                                PickerRow::Combo(row) => (
+                                    row.model
+                                        .name_i18n
+                                        .as_ref()
+                                        .map(waku_client::WireTranslation::render)
+                                        .unwrap_or_else(|| row.model.name.clone()),
+                                    model_picker_subtitle(
+                                        row.provider,
+                                        row.model.sub_provider.as_deref(),
+                                    ),
+                                ),
+                                PickerRow::Policy(_) => return div().into_any_element(),
+                            };
+                            let mark = provider_mark(&theme, provider, 12.0, theme.text_tertiary)
+                                .into_any_element();
+                            let selected = match row {
+                                PickerRow::ProviderDefault(kind) => {
+                                    *kind == provider && render_current.is_none()
+                                }
+                                PickerRow::Combo(row) => {
+                                    row.provider == provider
+                                        && render_current.as_deref() == Some(row.model.id.as_str())
+                                }
+                                PickerRow::Policy(_) => false,
+                            };
+                            let picked = row.clone();
+                            let picked_weak = render_weak.clone();
+                            let picked_popover = popover.clone();
+                            model_picker_row_shell(
+                                SharedString::from(format!("memory-model-row-{row_index}")),
+                                selected,
+                                is_highlighted,
+                                &theme,
+                            )
+                            .child(model_picker_row_body(title, None, mark, subtitle, &theme))
+                            .when(selected, |element| {
+                                element.child(icon("icons/check.svg", 13.0, theme.accent))
+                            })
+                            .on_click(move |_, window, cx| {
+                                let _ = picked_weak.update(cx, |this, cx| {
+                                    this.apply_memory_model_row(provider, &picked, cx);
+                                });
+                                picked_popover.close(window, cx);
+                            })
+                            .into_any_element()
+                        },
+                    );
+                    model_picker_panel(
+                        ModelPickerPanel {
+                            rows: rows_for_render.clone(),
+                            search: search.clone(),
+                            list_state: list_state.clone(),
+                            scrollbar_state: scrollbar_state.clone(),
+                            highlight,
+                            empty_label: tr!("models.none_found").into(),
+                            rail_sections: Vec::new(),
+                            rail_providers: Vec::new(),
+                            render_row,
+                            on_move: Rc::new(move |this, key, rows, cx| {
+                                let seed = rows.iter().position(|row| match row {
+                                    PickerRow::ProviderDefault(kind) => {
+                                        *kind == provider && move_current.is_none()
+                                    }
+                                    PickerRow::Combo(row) => {
+                                        row.provider == provider
+                                            && move_current.as_deref()
+                                                == Some(row.model.id.as_str())
+                                    }
+                                    PickerRow::Policy(_) => false,
+                                });
+                                if this
+                                    .route_class_picker
+                                    .move_highlight(seed, rows.len(), key)
+                                    .is_some()
+                                {
+                                    cx.notify();
+                                }
+                            }),
+                            on_confirm: Rc::new(move |this, rows, cx| {
+                                if let Some(row) =
+                                    rows.get(this.route_class_picker.highlight.unwrap_or(0))
+                                {
+                                    this.apply_memory_model_row(provider, row, cx);
+                                }
+                            }),
+                            on_cycle_section: None,
+                        },
+                        &popover,
+                        &theme,
+                        &weak,
+                    )
                 },
             ))
+    }
+
+    fn memory_model_picker_rows(
+        &self,
+        provider: ProviderKind,
+        normalized_query: &str,
+    ) -> Vec<PickerRow> {
+        picker_rows(
+            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
+            &PickerRowSpec {
+                leading: &[],
+                provider_defaults: true,
+                granularity: PickerGranularity::Models,
+                favorites: &[],
+                pinned: &[],
+                recents: &[],
+                disabled_providers: &[],
+                locked_provider: Some(provider),
+                normalized_query,
+            },
+        )
+    }
+
+    fn apply_memory_model_row(
+        &mut self,
+        provider: ProviderKind,
+        row: &PickerRow,
+        cx: &mut Context<Self>,
+    ) {
+        match row {
+            PickerRow::ProviderDefault(kind) if *kind == provider => {
+                self.set_memory_model(provider, None, cx);
+            }
+            PickerRow::Combo(row) if row.provider == provider => {
+                self.set_memory_model(provider, Some(row.model.id.clone()), cx);
+            }
+            PickerRow::Policy(_) | PickerRow::ProviderDefault(_) | PickerRow::Combo(_) => {}
+        }
     }
 
     /// The sandbox experiment opt-in is daemon-owned like subagents. Turning

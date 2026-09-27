@@ -1,0 +1,1 @@
+- Choose a project memory model from the searchable model picker in Settings → Memory. Each provider stays scoped to its own models, and “Provider default” clears its override.
