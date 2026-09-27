@@ -1,0 +1,1 @@
+- Grok Build sessions with Computer Use enabled now start successfully and receive Goddard's Computer Use instructions with each regular prompt.

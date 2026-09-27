@@ -97,6 +97,13 @@ impl HeadlessComputerUseRuntime {
             HeadlessComputerUseConfig::OpenCode { .. } => None,
         }
     }
+
+    pub(super) fn grok_rules(&self) -> Option<&str> {
+        match &self.config {
+            HeadlessComputerUseConfig::Grok { rules, .. } => Some(rules),
+            HeadlessComputerUseConfig::OpenCode { .. } => None,
+        }
+    }
 }
 
 fn build_opencode_computer_use_config(
@@ -287,23 +294,20 @@ fn build_grok_computer_use_toml(
     toml::to_string(&root).context("could not encode Grok Computer Use configuration")
 }
 
-/// Process arguments and environment shared by every Grok transport.
+/// Environment shared by Grok Computer Use sessions.
 ///
-/// ACP now launches through the official SDK rather than a `Command`, so its
-/// process configuration must be representable independently of either
-/// process API. Keeping one source of truth also prevents Computer Use from
-/// behaving differently between the headless and ACP drivers.
-pub(super) fn grok_computer_use_launch_configuration(
+/// The skill text travels in ACP prompt content because Grok's ACP CLI rejects
+/// a `--rules` process argument.
+pub(super) fn grok_computer_use_environment(
     config: Option<&HeadlessComputerUseConfig>,
-) -> (Vec<String>, Vec<(String, String)>) {
+) -> Vec<(String, String)> {
     if let Some(HeadlessComputerUseConfig::Grok {
         base,
         grok_home,
         auth_path,
-        rules,
+        ..
     }) = config
     {
-        let args = vec![format!("--rules={rules}")];
         let mut environment = vec![
             ("GROK_HOME".to_owned(), grok_home.display().to_string()),
             (
@@ -318,9 +322,9 @@ pub(super) fn grok_computer_use_launch_configuration(
         if let Some(auth_path) = auth_path {
             environment.push(("GROK_AUTH_PATH".to_owned(), auth_path.display().to_string()));
         }
-        (args, environment)
+        environment
     } else {
-        (Vec::new(), Vec::new())
+        Vec::new()
     }
 }
 
@@ -663,15 +667,14 @@ mod tests {
     }
 
     #[test]
-    fn grok_computer_use_command_is_process_scoped_and_loads_rules() {
+    fn grok_computer_use_environment_is_process_scoped() {
         let config = HeadlessComputerUseConfig::Grok {
             base: computer_use_config(),
             grok_home: PathBuf::from("/tmp/goddard-computer-use/session/grok-home"),
             auth_path: Some(PathBuf::from("/Users/test/.grok/auth.json")),
             rules: "Goddard Computer Use rules".into(),
         };
-        let (arguments, environment) = grok_computer_use_launch_configuration(Some(&config));
-        assert_eq!(arguments, ["--rules=Goddard Computer Use rules"]);
+        let environment = grok_computer_use_environment(Some(&config));
         let environment = environment.into_iter().collect::<HashMap<_, _>>();
         assert_eq!(
             environment.get("GROK_HOME"),

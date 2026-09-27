@@ -186,6 +186,10 @@ impl AcpDriver {
             .as_ref()
             .and_then(super::support::HeadlessComputerUseRuntime::grok_home)
             .map(ToOwned::to_owned);
+        let grok_computer_use_rules = computer_use
+            .as_ref()
+            .and_then(super::support::HeadlessComputerUseRuntime::grok_rules)
+            .map(ToOwned::to_owned);
         let stderr_lines = Arc::new(Mutex::new(Vec::<String>::new()));
         let agent = match &sandbox {
             Some(vm) => guest_transport(
@@ -230,6 +234,7 @@ impl AcpDriver {
                     service_tier,
                     context_window,
                     allow_model_fallback,
+                    grok_computer_use_rules,
                     resume_session_id,
                     fork_context,
                     grok_title_home,
@@ -312,8 +317,7 @@ fn guest_transport(
 ) -> anyhow::Result<AgentTransport> {
     use std::io::{BufRead as _, BufReader, Write as _};
 
-    let (computer_args, computer_env) =
-        super::support::grok_computer_use_launch_configuration(computer_use);
+    let computer_env = super::support::grok_computer_use_environment(computer_use);
     let mut environment = crate::command_env::shell_environment()
         .into_iter()
         .map(|(name, value)| {
@@ -331,7 +335,7 @@ fn guest_transport(
     let mut command = std::process::Command::new(binary);
     command
         .current_dir(cwd)
-        .args(launch.args.iter().chain(computer_args.iter()))
+        .args(launch.args.iter())
         .envs(environment);
     let mut child = crate::sandbox::spawn(&command, Some(vm))
         .context("could not spawn the provider process in the sandbox VM")?;
@@ -411,9 +415,7 @@ fn sdk_agent(
     let cwd = cwd
         .to_str()
         .ok_or_else(|| anyhow!("the ACP working directory is not valid UTF-8"))?;
-    let (computer_args, computer_env) =
-        super::support::grok_computer_use_launch_configuration(computer_use);
-    launch.args.extend(computer_args);
+    let computer_env = super::support::grok_computer_use_environment(computer_use);
     let mut environment = crate::command_env::shell_environment()
         .into_iter()
         .map(|(name, value)| {
@@ -700,6 +702,7 @@ async fn run_sdk_connection(
     service_tier: Option<String>,
     context_window: Option<String>,
     allow_model_fallback: bool,
+    grok_computer_use_rules: Option<String>,
     resume_session_id: Option<String>,
     fork_context: Option<String>,
     grok_title_home: Option<std::path::PathBuf>,
@@ -961,6 +964,7 @@ async fn run_sdk_connection(
                             &prompt_requests,
                             &events,
                             provider,
+                            grok_computer_use_rules.as_deref(),
                             &native_session_id,
                             grok_title_home.clone(),
                             title_placeholder,
@@ -995,6 +999,7 @@ async fn run_sdk_connection(
                             &prompt_requests,
                             &events,
                             provider,
+                            grok_computer_use_rules.as_deref(),
                             &native_session_id,
                             grok_title_home.clone(),
                             first_prompt.lock().clone(),
@@ -2037,6 +2042,7 @@ fn send_prompt(
     prompt_requests: &PendingPromptRequests,
     events: &DriverEventSender,
     provider: ProviderKind,
+    grok_computer_use_rules: Option<&str>,
     native_session_id: &str,
     grok_title_home: Option<std::path::PathBuf>,
     title_placeholder: Option<String>,
@@ -2050,10 +2056,17 @@ fn send_prompt(
         .then(|| crate::kimi_session::wire_offset(native_session_id));
     let extension_id =
         (provider == ProviderKind::Grok).then(|| format!("waku-{}", uuid::Uuid::new_v4()));
-    let mut request = PromptRequest::new(
-        session_id.clone(),
-        vec![ContentBlock::Text(TextContent::new(text))],
-    );
+    let slash_command = is_slash_command(&text);
+    let mut prompt = vec![ContentBlock::Text(TextContent::new(text))];
+    if provider == ProviderKind::Grok
+        && !slash_command
+        && let Some(rules) = grok_computer_use_rules.filter(|rules| !rules.trim().is_empty())
+    {
+        // Grok's ACP command rejects --rules. Like T3 Code's runtime guidance,
+        // send the Computer Use skill as a separate prompt block instead.
+        prompt.push(ContentBlock::Text(TextContent::new(rules.to_owned())));
+    }
+    let mut request = PromptRequest::new(session_id.clone(), prompt);
     if let Some(extension_id) = extension_id.as_ref() {
         let mut meta = serde_json::Map::new();
         meta.insert("promptId".into(), Value::String(extension_id.clone()));
@@ -2106,6 +2119,18 @@ fn send_prompt(
         prompt_requests.lock().settle_request(&request_id, false);
     }
     registered
+}
+
+fn is_slash_command(text: &str) -> bool {
+    let Some(command) = text
+        .trim_start()
+        .split_whitespace()
+        .next()
+        .and_then(|token| token.strip_prefix('/'))
+    else {
+        return false;
+    };
+    !command.is_empty() && !command.contains('/')
 }
 
 fn settle_prompt_request(
