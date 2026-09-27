@@ -80,7 +80,10 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         label_key: "status_markers.complete",
         icon: "icons/check.svg",
         tone: MarkerTone::Success,
-        threshold: 0.65,
+        // Highest bar in the catalog — a false "done" mislabels the turn —
+        // but the decision log shows 0.65 suppressing clear winners that
+        // beat their runner-up by 2x; 0.60 matches `answered`.
+        threshold: 0.60,
         instructions: "The prompt asked for a change or action, the work was carried \
             out end to end, and the final response reports it done — judge the ask \
             as the `prompt` plus any `priorPrompts` still in play. An ask satisfied \

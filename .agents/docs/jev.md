@@ -95,7 +95,7 @@ carry the information the judgment actually needs.
   (≥ 0.5 and ≥ 0.15 ahead), a dead band for irreversible-ish transitions
   (phase commits below 0.4, stays above 0.6), asymmetric bars where false
   positives and misses cost differently (`failed` renders at 0.45,
-  `complete` needs 0.65). Choice options compete for probability mass —
+  `complete` needs 0.60). Choice options compete for probability mass —
   use Choice for mutually exclusive outcomes and Noul for qualities that
   can co-occur.
 - Put judgment-readable summaries in `state`, bounded per field.
