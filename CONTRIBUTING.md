@@ -82,6 +82,14 @@ To produce the portable archive and the installer, on Windows:
 bun scripts/bundle-windows.ts
 ```
 
+The script targets the host architecture by default. To build the other
+Windows architecture — for example the x86_64 release from an Arm64 Windows
+VM, which needs the x64 MSVC build tools installed alongside the arm64 ones:
+
+```sh
+bun scripts/bundle-windows.ts --target x86_64-pc-windows-msvc
+```
+
 Both land under `target/release`. The zip holds the two executables side by
 side beneath one versioned directory — the layout Goddard needs to find its
 daemon — and the installer is built from

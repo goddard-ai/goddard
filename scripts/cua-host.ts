@@ -19,7 +19,9 @@ const root = resolve(import.meta.dir, "..");
 const revision = "1b50c02e2d34734f64d2d22f54eb76cc97b4a663";
 const version = "0.28.0";
 
-export async function prepareCuaHost(): Promise<string> {
+// The cargo target triple when cross-building; the default compiles for the
+// host, which is what the dev watcher wants.
+export async function prepareCuaHost(targetTriple?: string): Promise<string> {
   const extension = await readFile(
     join(root, "resources/computer-use/cua-host.rs"),
     "utf8",
@@ -30,7 +32,7 @@ export async function prepareCuaHost(): Promise<string> {
   );
   const compiler = await $`rustc -vV`.quiet().text();
   const key = createHash("sha256")
-    .update(revision + extension + header + compiler)
+    .update(revision + extension + header + compiler + (targetTriple ?? "host"))
     .digest("hex");
   const cache = join(wakuCacheDir(), "cua-host");
   const destination = join(cache, key);
@@ -76,13 +78,16 @@ export async function prepareCuaHost(): Promise<string> {
     await writeFile(abi, extended);
   const target = join(cache, "target");
   console.error("Building Cua SDK native cursor host...");
-  await $`cargo build --locked --release --manifest-path ${join(source, "libs/cua-driver/rust/Cargo.toml")} --target-dir ${target} --package cua-driver-sdk`.cwd(
+  await $`cargo build --locked --release --manifest-path ${join(source, "libs/cua-driver/rust/Cargo.toml")} --target-dir ${target} --package cua-driver-sdk ${targetTriple ? ["--target", targetTriple] : []}`.cwd(
     join(source, "libs/cua-driver/rust"),
   );
   if (existsSync(join(destination, library))) return destination;
   const staging = await mkdtemp(join(cache, ".host-"));
   try {
-    await cp(join(target, "release", library), join(staging, library));
+    await cp(
+      join(target, ...(targetTriple ? [targetTriple] : []), "release", library),
+      join(staging, library),
+    );
     await cp(
       join(source, "libs/cua-driver/rust/include/cua_driver_abi.h"),
       join(staging, "cua_driver_abi.h"),

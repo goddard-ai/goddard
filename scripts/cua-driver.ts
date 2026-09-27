@@ -99,14 +99,21 @@ export async function bundleComputerUse(
   binDirectory: string,
   resourcesDirectory: string,
   profile: "debug" | "release",
+  // The cargo target triple when cross-building; artifacts, helper binaries,
+  // and the cua-host library all follow it rather than the host.
+  targetTriple?: string,
 ): Promise<void> {
-  const platform = cuaPlatform();
+  const targetArch = targetTriple?.split("-")[0];
+  const platform = cuaPlatform(
+    undefined,
+    targetArch === "aarch64" ? "arm64" : targetArch,
+  );
   const sdk = await prepareCuaSdk(platform);
-  const hostSdk = await prepareCuaHost();
+  const hostSdk = await prepareCuaHost(targetTriple);
   const target = resolve(
     root,
     process.env.CARGO_TARGET_DIR || "target",
-    profile,
+    ...(targetTriple ? [targetTriple, profile] : [profile]),
   );
   const suffix = process.platform === "win32" ? ".exe" : "";
   await mkdir(binDirectory, { recursive: true });

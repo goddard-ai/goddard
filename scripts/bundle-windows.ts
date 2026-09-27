@@ -5,12 +5,16 @@
 // the archive half and resources/windows/waku.iss for the installer half.
 //
 // Usage:
-//   bun scripts/bundle-windows.ts
+//   bun scripts/bundle-windows.ts [--target <triple>]
 //
 // Env:
 //   CARGO_TARGET_DIR              cargo target directory (default: target)
 //   WINDOWS_CERTIFICATE           base64 Authenticode .pfx (optional)
 //   WINDOWS_CERTIFICATE_PASSWORD  password for it
+//
+// --target cross-builds — e.g. an Arm64 Windows host producing the x86_64
+// release needs the x64 MSVC build tools installed and
+// `--target x86_64-pc-windows-msvc`. Without it the host triple is used.
 import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -112,13 +116,27 @@ if (!version) {
 const hostLine = (await $`rustc -vV`.quiet().text())
   .split("\n")
   .find((line) => line.startsWith("host: "));
-const targetTriple = hostLine?.slice("host: ".length).trim();
+const hostTriple = hostLine?.slice("host: ".length).trim();
+const targetFlag = process.argv.findIndex(
+  (argument) => argument === "--target" || argument.startsWith("--target="),
+);
+const requestedTarget =
+  targetFlag === -1
+    ? undefined
+    : process.argv[targetFlag] === "--target"
+      ? process.argv[targetFlag + 1]
+      : process.argv[targetFlag]!.slice("--target=".length);
+const targetTriple = requestedTarget ?? hostTriple;
 const architecture = targetTriple
   ? architectureForTarget[targetTriple]
   : undefined;
 if (!targetTriple || !architecture) {
   throw new Error(`Unsupported Windows target ${targetTriple ?? "(unknown)"}`);
 }
+
+// --target is always passed to cargo, so its output lives in the per-triple
+// directory even when it matches the host.
+const buildDirectory = join(targetDirectory, targetTriple, "release");
 
 const packageDirectoryName = `Goddard-${version}-${targetTriple}`;
 const archive = join(releaseDirectory, `${packageDirectoryName}.zip`);
@@ -127,7 +145,7 @@ const installer = join(
   `Goddard-${version}-${architecture}-Setup.exe`,
 );
 
-await $`cargo build --locked --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-computer-use --bin goddard_computer_use`;
+await $`cargo build --locked --release --target ${targetTriple} --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-computer-use --bin goddard_computer_use`;
 
 const staging = await mkdtemp(join(tmpdir(), "goddard-bundle-"));
 try {
@@ -139,9 +157,10 @@ try {
     packageDirectory,
     join(packageDirectory, "resources"),
     "release",
+    targetTriple,
   );
   for (const file of ["goddard.exe", "goddard-daemon.exe"]) {
-    await copyFile(join(releaseDirectory, file), join(packageDirectory, file));
+    await copyFile(join(buildDirectory, file), join(packageDirectory, file));
   }
   await copyFile(
     join(projectRoot, "LICENSE"),
