@@ -829,6 +829,7 @@ impl Waku {
                 .retain(|entry| entry.provider != pick.provider);
             None
         };
+        session.preserve_title_for_provider_switch();
         session.provider = pick.provider;
         session.provider_cursor = resumed_cursor;
         session.provider_session_id = None;

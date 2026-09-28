@@ -2321,6 +2321,20 @@ impl AgentSession {
         true
     }
 
+    /// Keeps the current inferred title when moving this task to another
+    /// provider, whose title event may be based only on the handoff prompt.
+    pub fn preserve_title_for_provider_switch(&mut self) -> bool {
+        if self.title != Self::DEFAULT_TITLE {
+            return false;
+        }
+        let Some(title) = self.auto_title.take() else {
+            return false;
+        };
+        self.title = title;
+        self.updated_at = unix_time();
+        true
+    }
+
     /// Whether this session has a provider conversation to preserve. Locally
     /// synthesized assistant messages — a transfer's delivery receipt, for
     /// example — do not count until the user actually prompts the session.
