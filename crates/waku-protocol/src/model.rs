@@ -4735,6 +4735,18 @@ fn title_in_any_locale(title: &str, keys: &[&str]) -> bool {
     })
 }
 
+/// Whether the activity is a context-compaction receipt: drivers stamp the
+/// `contextCompaction` item (Codex) and `session.compaction.*` reports
+/// (OpenCode 2) with these keys. Compaction is a session event rather than
+/// turn work — renderers keep its row visible after the turn folds so
+/// `/compact` leaves a durable record.
+pub fn is_context_compaction(activity: &ActivityItem) -> bool {
+    activity
+        .title_i18n
+        .as_ref()
+        .is_some_and(|i18n| i18n.key.starts_with("activity.compact"))
+}
+
 pub fn is_generic_activity_title(kind: ActivityKind, title: &str) -> bool {
     // Classification falling back to `Tool` only means the name is not one of
     // the semantic kinds above. It does not make the provider-supplied tool

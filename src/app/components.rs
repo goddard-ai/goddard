@@ -2802,6 +2802,15 @@ pub(super) fn activity_header_title(
         );
     }
 
+    // A pure compaction block's own label ("Compacted context") is the
+    // receipt — the generic "Ran N tools" summary would erase it.
+    if !activities.is_empty()
+        && activities.iter().all(crate::model::is_context_compaction)
+        && let Some(activity) = activities.last()
+    {
+        return activity_display_title(activity);
+    }
+
     activity_summary(activities)
 }
 

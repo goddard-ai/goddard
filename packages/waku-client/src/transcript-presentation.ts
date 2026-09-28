@@ -178,7 +178,20 @@ export function activityGroupIsLive(
 export function activityHeaderTitle(activities: ActivityItem[], liveGroup: boolean, t?: Translator) {
   const latest = liveGroup ? activities.at(-1) : undefined
   if (latest) return latest.reasoning ? reasoningTitle(latest, t) : activityDisplayTitle(latest, t)
+  // A pure compaction block's own label ("Compacted context") is the
+  // receipt — the generic "Ran N tools" summary would erase it.
+  const last = activities.at(-1)
+  if (last && activities.every(isContextCompaction)) return activityDisplayTitle(last, t)
   return activitySummary(activities, t)
+}
+
+/** Whether the activity is a context-compaction receipt: drivers stamp the
+ * `contextCompaction` item (Codex) and `session.compaction.*` reports
+ * (OpenCode 2) with these keys. Compaction is a session event rather than
+ * turn work — transcripts keep its row visible after the turn folds so
+ * `/compact` leaves a durable record. */
+export function isContextCompaction(activity: ActivityItem) {
+  return activity.title_i18n?.key.startsWith('activity.compact') ?? false
 }
 
 export function reasoningTitle(activity: ActivityItem, t?: Translator) {

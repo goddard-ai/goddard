@@ -3266,6 +3266,74 @@ fn row_kinds_and_row_count_describe_the_same_rows() {
 }
 
 #[test]
+fn compaction_receipt_survives_the_turn_fold() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    let first_turn = session.begin_turn("Summarize this");
+    session.push_message(MessageRole::Assistant, "Done.");
+    session.finish_active_turn(TurnStatus::Completed);
+
+    // A provider-started compaction turn has no prompt — the
+    // contextCompaction item is its only row.
+    let compact_turn = session.begin_provider_turn();
+    let mut compacting = ActivityItem::new(
+        Some("compact-1".into()),
+        ActivityKind::Tool,
+        "Compacting context",
+        None,
+        false,
+    );
+    compacting.title_i18n = Some(waku_client::WireTranslation::new(
+        "activity.compacting_context",
+        [],
+    ));
+    let block_index = session.transcript_blocks.len();
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: session.messages.len(),
+        turn_id: Some(compact_turn),
+        activities: vec![compacting],
+    });
+    // `item/completed` flips the same card to its settled label — the keyed
+    // title must move with it or the row would read "Compacting" forever.
+    let mut compacted = ActivityItem::new(
+        Some("compact-1".into()),
+        ActivityKind::Tool,
+        "Compacted context",
+        None,
+        true,
+    );
+    compacted.title_i18n = Some(waku_client::WireTranslation::new(
+        "activity.compacted_context",
+        [],
+    ));
+    assert!(update_transcript_activity(&mut session, compacted).is_ok());
+    session.finish_active_turn(TurnStatus::Completed);
+
+    let stored = &session.transcript_blocks[block_index].activities[0];
+    assert_eq!(
+        stored.title_i18n.as_ref().map(|i18n| i18n.key.as_str()),
+        Some("activity.compacted_context")
+    );
+    assert_eq!(
+        activity_header_title(
+            &session.transcript_blocks[block_index].activities,
+            false,
+            None
+        ),
+        "Compacted context"
+    );
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
+        vec![
+            Message(0),
+            Message(1),
+            ResponseFooter(first_turn, 1),
+            TurnBlock(block_index),
+        ],
+        "the compaction receipt keeps its own row — no generic fold replaces it"
+    );
+}
+
+#[test]
 fn changed_files_attach_to_the_response_footer() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     let first_turn = session.begin_turn("Build it");

@@ -8,7 +8,12 @@ import type {
   RuntimeMode,
   TranscriptBlock,
 } from '@waku/client';
-import { turnAnswerStart, turnFoldLabel } from '@waku/client/transcript-presentation';
+import { activitiesForBlock } from '@waku/client/event-reducer';
+import {
+  isContextCompaction,
+  turnAnswerStart,
+  turnFoldLabel,
+} from '@waku/client/transcript-presentation';
 
 import { sessionBusy } from './mobile-runtime';
 import type { MarkdownBlock } from '../md/parse';
@@ -338,6 +343,11 @@ interface TaggedRow {
   answerText: boolean;
 }
 
+function isCompactionBlock(block: TranscriptBlock): boolean {
+  const activities = activitiesForBlock(block);
+  return activities.length > 0 && activities.every(isContextCompaction);
+}
+
 /**
  * Interleaves messages with activity blocks and, for every settled turn,
  * hides everything before the terminal answer — thoughts, tool work, and
@@ -390,7 +400,10 @@ export function buildTranscriptPipeline(
           ),
         },
         turnId: block.turn_id,
-        foldable: true,
+        // A compaction block is the transcript's only record that `/compact`
+        // ran — folding it behind a generic "Worked for …" row erases the
+        // evidence, so it keeps its own row.
+        foldable: !isCompactionBlock(block),
         answerText: false,
       });
     }

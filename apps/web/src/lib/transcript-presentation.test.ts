@@ -62,6 +62,15 @@ describe('desktop transcript language', () => {
     expect(activityRowDetail(command)).toBe('git log --oneline -15')
   })
 
+  test('names a settled compaction block by its receipt, not a tool count', () => {
+    const compacted = {
+      ...activity('tool', true),
+      title: 'Compacted context',
+      title_i18n: { key: 'activity.compacted_context' },
+    }
+    expect(activityHeaderTitle([compacted], false)).toBe('Compacted context')
+  })
+
   test('keeps generic tool names and labels AskUserQuestion by purpose', () => {
     const named = {
       ...activity('tool', true),

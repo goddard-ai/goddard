@@ -117,6 +117,42 @@ describe('mobile session presentation', () => {
     expect(expanded.map((row) => row.kind)).toEqual(['user', 'fold', 'activities', 'md']);
   });
 
+  test('keeps a compaction receipt out of the fold', () => {
+    const current = session({
+      turns: [
+        turn({ id: 'turn', status: 'completed', started_at: 10, completed_at: 12 }),
+        turn({ id: 'compact', status: 'completed', started_at: 20, completed_at: 22 }),
+      ],
+      messages: [
+        { id: 'user', turn_id: 'turn', role: 'user', content: 'go', created_at: 1, streaming: false },
+        { id: 'agent', turn_id: 'turn', role: 'assistant', content: 'done', created_at: 2, streaming: false },
+      ],
+      transcript_blocks: [{
+        after_message: 2,
+        turn_id: 'compact',
+        content: {
+          kind: 'activities',
+          data: [{
+            id: 'compaction',
+            source_id: 'compact-1',
+            kind: 'tool',
+            title: 'Compacted context',
+            title_i18n: { key: 'activity.compacted_context' },
+            detail: null,
+            failed: false,
+            complete: true,
+          }],
+        },
+      }],
+    });
+    // The receipt keeps its own row — no generic "Worked for X" replaces it.
+    expect(buildTranscriptRows(current).map((row) => row.kind)).toEqual([
+      'user',
+      'md',
+      'activities',
+    ]);
+  });
+
   test('folds thoughts too — a thought-only turn shows just the answer', () => {
     const current = session({
       turns: [turn({ id: 'turn', status: 'completed', started_at: 10, completed_at: 15 })],

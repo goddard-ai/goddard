@@ -1,0 +1,1 @@
+- `/compact` now leaves a persistent "Compacted context" row in the task transcript; previously the record folded into a generic "Worked for" group, so the command looked like it did nothing.

@@ -1189,12 +1189,31 @@ pub(super) fn folded_transcript_row_kinds(
         if let Some(message_index) = response_footer_message_index_from_rows(session, &turn_rows) {
             response_footers.insert(turn.id, message_index);
         }
-        let hidden = &turn_rows[..turn_answer_start(session, &turn_rows)];
+        // A compaction block is the transcript's only record that `/compact`
+        // ran — folding it behind a generic "Worked for …" row erases the
+        // evidence, so it keeps its own row.
+        let hidden: Vec<TranscriptRowKind> = turn_rows[..turn_answer_start(session, &turn_rows)]
+            .iter()
+            .copied()
+            .filter(|row| {
+                !matches!(row, TranscriptRowKind::TurnBlock(index)
+                if session
+                    .transcript_blocks
+                    .get(*index)
+                    .is_some_and(|block| {
+                        !block.activities.is_empty()
+                            && block
+                                .activities
+                                .iter()
+                                .all(crate::model::is_context_compaction)
+                    }))
+            })
+            .collect();
         let Some(anchor) = hidden.first().copied() else {
             continue;
         };
         fold_anchors.insert(anchor, turn.id);
-        hidden_rows.extend(hidden.iter().copied());
+        hidden_rows.extend(hidden);
     }
 
     let mut rows = Vec::with_capacity(raw_rows.len() + fold_anchors.len() + 1);
