@@ -2849,6 +2849,7 @@ impl Backend for WakuBackend {
                     // catalog, never the wire.
                     computer_use_runtime: None,
                     mcp_servers: Vec::new(),
+                    http_mcp_capability_recorder: None,
                     provider_cursor: options
                         .provider_cursor
                         .map(serde_json::from_value)
@@ -3835,6 +3836,7 @@ impl WakuBackend {
                 subagents: None,
                 computer_use_runtime: None,
                 mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,
@@ -4079,6 +4081,7 @@ impl WakuBackend {
                 subagents: None,
                 computer_use_runtime: None,
                 mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,
@@ -4428,6 +4431,19 @@ impl WakuBackend {
         } else {
             self.integrations.launch_mcp_servers(provider)
         };
+        options.http_mcp_capability_recorder = if crate::integrations::deliver::uses_acp(provider) {
+            let integrations = self.integrations.clone();
+            Some(Arc::new(move |supported| {
+                if let Err(error) = integrations.record_http_mcp_capability(provider, supported) {
+                    eprintln!(
+                        "goddard-mcp: could not record {} HTTP capability: {error:#}",
+                        provider.display_name()
+                    );
+                }
+            }) as Arc<dyn Fn(bool) + Send + Sync>)
+        } else {
+            None
+        };
         // A sandboxed session runs its provider inside a shuru VM — never on
         // the host. Every setup failure fails the task rather than silently
         // falling back to a local process.
@@ -4634,6 +4650,7 @@ impl WakuBackend {
                 subagents: None,
                 computer_use_runtime: None,
                 mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
                 provider_cursor: session.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,

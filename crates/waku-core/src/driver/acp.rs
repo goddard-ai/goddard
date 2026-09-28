@@ -149,6 +149,7 @@ impl AcpDriver {
             read_own_transcript: _,
             subagents: _,
             mut mcp_servers,
+            http_mcp_capability_recorder,
             provider_cursor,
             eval,
             sandbox,
@@ -263,6 +264,7 @@ impl AcpDriver {
                     fork_context,
                     grok_title_home,
                     mcp_servers,
+                    http_mcp_capability_recorder,
                     eval,
                     command_rx,
                     thread_events.clone(),
@@ -731,6 +733,7 @@ async fn run_sdk_connection(
     fork_context: Option<String>,
     grok_title_home: Option<std::path::PathBuf>,
     mcp_server_specs: Vec<super::McpServerSpec>,
+    http_mcp_capability_recorder: Option<Arc<dyn Fn(bool) + Send + Sync>>,
     eval: Option<waku_protocol::eval::EvalSettings>,
     commands: smol::channel::Receiver<CommandMessage>,
     events: DriverEventSender,
@@ -908,7 +911,13 @@ async fn run_sdk_connection(
                 )
                 .block_task()
                 .await?;
-            let mcp_servers = acp_mcp_servers(&mcp_server_specs);
+            let http_mcp_supported = initialize.agent_capabilities.mcp_capabilities.http;
+            if let Some(record_capability) = &http_mcp_capability_recorder {
+                record_capability(http_mcp_supported);
+            }
+            // ACP v1 requires all agents to support stdio; HTTP is opt-in and
+            // has an explicit capability bit in InitializeResponse.
+            let mcp_servers = acp_mcp_servers(&mcp_server_specs, http_mcp_supported);
             let (session_id, modes, config_options) = establish_session(
                 &connection,
                 &initialize,
@@ -1233,7 +1242,7 @@ async fn establish_session(
     Ok((response.session_id, response.modes, response.config_options))
 }
 
-fn acp_mcp_servers(servers: &[super::McpServerSpec]) -> Vec<McpServer> {
+fn acp_mcp_servers(servers: &[super::McpServerSpec], http_supported: bool) -> Vec<McpServer> {
     servers
         .iter()
         .filter_map(|server| {
@@ -1246,7 +1255,8 @@ fn acp_mcp_servers(servers: &[super::McpServerSpec]) -> Vec<McpServer> {
                     ),
                 ));
             }
-            server.http_parts().map(|(name, url, token)| {
+            let (name, url, token) = server.http_parts()?;
+            http_supported.then(|| {
                 McpServer::Http(McpServerHttp::new(name, url).headers(vec![HttpHeader::new(
                     "Authorization",
                     format!("Bearer {token}"),
@@ -4293,6 +4303,7 @@ mod tests {
                 subagents: None,
                 computer_use_runtime: None,
                 mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
                 provider_cursor: None,
             },
             events,
@@ -4355,6 +4366,7 @@ mod tests {
                 subagents: None,
                 computer_use_runtime: None,
                 mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
                 provider_cursor: None,
             },
             events,
@@ -4422,6 +4434,7 @@ mod tests {
                 subagents: None,
                 computer_use_runtime: None,
                 mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
                 provider_cursor: None,
             },
             events,
@@ -4500,6 +4513,7 @@ mod tests {
                 computer_use_enabled: false,
                 computer_use_runtime: None,
                 mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
                 provider_cursor: None,
             },
             events,

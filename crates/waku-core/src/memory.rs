@@ -1221,6 +1221,7 @@ fn headless_prompt(
         subagents: None,
         computer_use_runtime: None,
         mcp_servers: Vec::new(),
+        http_mcp_capability_recorder: None,
         provider_cursor: None,
         eval: None,
         sandbox: None,

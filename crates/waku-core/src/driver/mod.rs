@@ -336,6 +336,9 @@ pub struct DriverStartOptions {
     pub subagents: Option<waku_protocol::model::SubagentSpec>,
     /// Provider-neutral MCP servers composed by the daemon for this launch.
     pub(crate) mcp_servers: Vec<McpServerSpec>,
+    /// ACP reports its HTTP MCP support during initialization. The daemon
+    /// records that capability so file delivery can switch to session scope.
+    pub(crate) http_mcp_capability_recorder: Option<Arc<dyn Fn(bool) + Send + Sync>>,
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// The configured evaluation backend, snapshotted at session start.
     /// `Auto`-mode permission requests for providers without their own

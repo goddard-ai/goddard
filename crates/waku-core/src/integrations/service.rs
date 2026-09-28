@@ -4,8 +4,9 @@
 //! cycle.
 
 use std::collections::HashSet;
+use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, bail};
@@ -36,6 +37,8 @@ pub struct Inner {
     pub data_dir: PathBuf,
     proxy_address: SocketAddr,
     proxy_token: String,
+    http_mcp_capable_providers: Mutex<HashSet<ProviderKind>>,
+    http_mcp_capability_path: PathBuf,
 }
 
 impl Inner {
@@ -85,6 +88,8 @@ impl IntegrationService {
                 minted
             }
         };
+        let http_mcp_capability_path = data_dir.join("integration-http-capable-providers.json");
+        let http_mcp_capable_providers = load_http_mcp_capable_providers(&http_mcp_capability_path);
         let listener = proxy::bind()?;
         let inner = Arc::new(Inner {
             settings,
@@ -92,6 +97,8 @@ impl IntegrationService {
             data_dir,
             proxy_address: listener.local_addr()?,
             proxy_token: token,
+            http_mcp_capable_providers: Mutex::new(http_mcp_capable_providers),
+            http_mcp_capability_path,
         });
         proxy::run(listener, inner.clone());
         Ok(Self {
@@ -128,7 +135,7 @@ impl IntegrationService {
     /// Integrations a provider launch should receive, in the uniform
     /// `goddard_<id>` + local-URL shape. Empty while the experiment is off.
     pub(crate) fn launch_mcp_servers(&self, provider: ProviderKind) -> Vec<McpServerSpec> {
-        if super::deliver::uses_file_sync(provider) {
+        if super::deliver::uses_file_sync(provider) && !super::deliver::uses_acp(provider) {
             return Vec::new();
         }
         let settings = self.inner.settings.get();
@@ -147,6 +154,46 @@ impl IntegrationService {
                 )
             })
             .collect()
+    }
+
+    pub(crate) fn http_mcp_supported(&self, provider: ProviderKind) -> bool {
+        self.inner
+            .http_mcp_capable_providers
+            .lock()
+            .contains(&provider)
+    }
+
+    pub(crate) fn record_http_mcp_capability(
+        &self,
+        provider: ProviderKind,
+        supported: bool,
+    ) -> anyhow::Result<()> {
+        if !super::deliver::uses_acp(provider) {
+            return Ok(());
+        }
+        let provider_ids = {
+            let mut capable = self.inner.http_mcp_capable_providers.lock();
+            let changed = if supported {
+                capable.insert(provider)
+            } else {
+                capable.remove(&provider)
+            };
+            if !changed {
+                return Ok(());
+            }
+            let mut ids = capable
+                .iter()
+                .map(|provider| provider.id().to_owned())
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids
+        };
+        let persisted = super::deliver::write_atomic_json(
+            &self.inner.http_mcp_capability_path,
+            &serde_json::json!(provider_ids),
+        );
+        super::deliver::sync_file_provider(provider, &self.inner.settings.get(), self);
+        persisted
     }
 
     /// Record a connection choice. For API-key entries the key is stored and
@@ -276,4 +323,34 @@ impl IntegrationService {
         self.inner.settings.replace(document)?;
         Ok(())
     }
+}
+
+fn load_http_mcp_capable_providers(path: &Path) -> HashSet<ProviderKind> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return HashSet::new(),
+        Err(error) => {
+            eprintln!(
+                "goddard-mcp: could not read HTTP capability cache {}: {error}",
+                path.display()
+            );
+            return HashSet::new();
+        }
+    };
+    let ids = match serde_json::from_slice::<Vec<String>>(&bytes) {
+        Ok(ids) => ids,
+        Err(error) => {
+            eprintln!(
+                "goddard-mcp: could not parse HTTP capability cache {}: {error}",
+                path.display()
+            );
+            return HashSet::new();
+        }
+    };
+    let ids = ids.into_iter().collect::<HashSet<_>>();
+    ProviderKind::ALL
+        .iter()
+        .copied()
+        .filter(|provider| super::deliver::uses_acp(*provider) && ids.contains(provider.id()))
+        .collect()
 }

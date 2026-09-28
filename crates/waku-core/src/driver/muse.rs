@@ -155,6 +155,7 @@ impl MuseDriver {
             read_own_transcript: _,
             subagents: _,
             mcp_servers,
+            http_mcp_capability_recorder: _,
             provider_cursor,
             eval,
             sandbox: _,
@@ -1860,6 +1861,7 @@ mod tests {
             subagents: None,
             computer_use_runtime: None,
             mcp_servers: Vec::new(),
+            http_mcp_capability_recorder: None,
             provider_cursor: None,
         }
     }

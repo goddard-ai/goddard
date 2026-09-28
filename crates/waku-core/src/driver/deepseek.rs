@@ -117,6 +117,7 @@ impl DeepSeekDriver {
             read_own_transcript: _,
             subagents: _,
             mcp_servers,
+            http_mcp_capability_recorder: _,
             provider_cursor,
             eval,
             sandbox: _,

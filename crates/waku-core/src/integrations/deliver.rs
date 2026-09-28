@@ -35,8 +35,21 @@ const FILE_PROVIDERS: &[ProviderKind] = &[
     ProviderKind::Grok,
 ];
 
+const ACP_PROVIDERS: &[ProviderKind] = &[
+    ProviderKind::Cursor,
+    ProviderKind::Devin,
+    ProviderKind::Droid,
+    ProviderKind::Fx,
+    ProviderKind::Grok,
+    ProviderKind::Kimi,
+];
+
 pub(super) fn uses_file_sync(provider: ProviderKind) -> bool {
     FILE_PROVIDERS.contains(&provider)
+}
+
+pub(crate) fn uses_acp(provider: ProviderKind) -> bool {
+    ACP_PROVIDERS.contains(&provider)
 }
 
 /// Rewrite every file provider's managed entries from `settings`. Called at
@@ -48,13 +61,21 @@ pub(super) fn uses_file_sync(provider: ProviderKind) -> bool {
 /// the others — a broken config file should not wedge the pane.
 pub fn sync_file_providers(settings: &DaemonSettings, service: &super::IntegrationService) {
     for provider in FILE_PROVIDERS {
-        let entries = desired_entries(settings, service, *provider);
-        if let Err(error) = sync_provider(*provider, &entries) {
-            eprintln!(
-                "goddard-mcp: could not sync {} config: {error:#}",
-                provider.display_name()
-            );
-        }
+        sync_file_provider(*provider, settings, service);
+    }
+}
+
+pub(super) fn sync_file_provider(
+    provider: ProviderKind,
+    settings: &DaemonSettings,
+    service: &super::IntegrationService,
+) {
+    let entries = desired_entries(settings, service, provider);
+    if let Err(error) = sync_provider(provider, &entries) {
+        eprintln!(
+            "goddard-mcp: could not sync {} config: {error:#}",
+            provider.display_name()
+        );
     }
 }
 
@@ -64,7 +85,7 @@ fn desired_entries(
     service: &super::IntegrationService,
     provider: ProviderKind,
 ) -> BTreeMap<String, Value> {
-    if !settings.integrations_enabled {
+    if !settings.integrations_enabled || service.http_mcp_supported(provider) {
         return BTreeMap::new();
     }
     settings
@@ -247,7 +268,7 @@ fn sync_grok(entries: &BTreeMap<String, Value>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn write_atomic_json(path: &PathBuf, document: &Value) -> anyhow::Result<()> {
+pub(super) fn write_atomic_json(path: &PathBuf, document: &Value) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
