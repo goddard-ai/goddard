@@ -1,1 +1,0 @@
-- Show a “Preparing archive…” progress toast while Goddard inspects a worktree before opening the archive confirmation.

@@ -1,1 +1,0 @@
-- Tasks only receive the Computer Use hint when the `goddard_js_repl` server was attached at launch.

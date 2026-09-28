@@ -1,1 +1,0 @@
-- Cursor, Devin, Droid, Fx, Grok, and Kimi receive connected integrations inside Goddard sessions when their agent advertises HTTP MCP; otherwise Goddard keeps the provider's managed config-file delivery.

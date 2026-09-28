@@ -34,6 +34,98 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.13.0]
+
+### Features
+
+- **Sessions**
+  - `goddard-agent create` accepts an optional `title` and keeps it instead of inferring a title from the first prompt.
+  - Show a “Preparing archive…” progress toast while Goddard inspects a worktree before opening the archive confirmation.
+  - Local agents can request task-specific code context with `goddard-agent map`; Jev ranks indexed declarations and returns `path:line` locations plus candidate paths that did not fit. The Project Map experiment toggle and automatic index status chip are removed.
+  - The Ctrl-Tab task switcher and the project switcher's Recently used list now keep their ordering across restarts instead of starting fresh each launch.
+- **Composer**
+  - Pasting multiple lines while the composer caret sits inside a Markdown blockquote now keeps the whole paste quoted — each pasted line after the first opens with the line's own `>` run, so a `>> ` line stays nested and blank lines don't break the quote.
+  - Session and pasted-text chips in the composer now lead with matching icons; session chips show the task title without a `session:` prefix.
+  - The composer’s draft counter is scoped to the current project — “No project” tasks share one pool — and it steps aside while the composer already holds a draft; a draft saved in a “No project” task that’s since closed still lands in a no-project composer when used.
+  - The composer's project picker now opens with a search field and a scrollable list like the branch picker beside it, and sorts projects by when a task was last created inside them — starred projects pin to the top, ranked by the same recency.
+- **Providers**
+  - Cursor, Devin, Droid, Fx, Grok, and Kimi receive connected integrations inside Goddard sessions when their agent advertises HTTP MCP; otherwise Goddard keeps the provider's managed config-file delivery.
+  - The usage panel's plan limits now cover Copilot, Cursor, Droid, Kimi, Muse, and Amp alongside Claude, Codex, OpenCode, and Grok, reading each tool's own saved sign-in (GitHub `gh` for Copilot, `amp usage` or `AMP_API_KEY` for Amp, and so on). Claude's panel also picks up OAuth-app, routine, and extra-usage lanes, and Codex honors `CODEX_HOME` and a custom `chatgpt_base_url`. Devin's lane is removed: its only readable quota endpoint fails server-side and the real billing API needs a web session the CLI never stores.
+- **Transcript**
+  - Pasted diagnostics alerts in the task transcript now show their message in a danger-styled box with a copy button.
+  - When a task replies by restating what you asked and waits for a green light, the turn now shows an Aligned marker instead of Answered, and the suggested reply becomes "Make it happen" — one click (or ⌘↵) starts the work rather than an ambiguous "Keep going."
+  - Follow a transcript link ending in `.md#heading` to open that Markdown file at the matching heading.
+  - Agent replies render `<ref_snippet>` markers as clickable file and line references.
+  - Stop showing one-click “I choose” actions when a turn asks the user to pick an option; the question stays available for a manual reply.
+  - Turn footers can now mark a turn Failed or Blocked even when the closing reply reads like a normal ending — an unrecovered error or a missing permission no longer hides behind a "Complete" verdict.
+- **Panels**
+  - Markdown files opened in the Files panel now render a leading `---` YAML frontmatter block as a field table in preview mode instead of showing the raw fence.
+  - Pressing Cmd-F while a markdown preview is open in the Files panel now searches the rendered document — matches highlight in place, Enter jumps between them, and the usual case, whole-word, and regex toggles apply.
+- **Settings**
+  - Settings → Providers gained an Inference providers section — TypeSafe, Vercel AI Gateway, Cloudflare Workers AI, and OpenRouter keys are entered once, stored in the system keychain, and shared by every feature that needs hosted inference (Jev evaluations, voice briefings). Existing keys migrate automatically, and voice briefings can now run on OpenRouter as well as the Vercel AI Gateway.
+  - The Jev routing settings now show how often each Easy/Medium/Hard assignment has routed a task — session-start routes on the main class rows and mid-session phase moves on each provider's own rows.
+  - The Memory settings page groups a project's change log by day, lets you filter notes, and marks the ones a new session may receive — commit references are styled and copyable, and the summary shows its line budget with an Edit button.
+  - Choose which app opens `MEMORY.md` from the Project memory Edit menu.
+  - Choose a project memory model from the searchable model picker in Settings → Memory. Each provider stays scoped to its own models, and “Provider default” clears its override.
+  - Goddard now sends anonymous product analytics through PostHog; sharing can still be disabled in Settings → General.
+  - In Settings → Providers, choose a provider's title cleanup model in a searchable picker, or select Provider default to clear the override.
+- **Platform**
+  - On a first launch, Goddard opens maximized with the menu bar and Dock visible; later launches restore your saved window placement.
+  - App updates and release downloads now use GitHub Releases. Existing installs receive the transition through their current update feed.
+- After Land succeeds, the composer suggests **Push changes**. Once the base is pushed or already up to date, it suggests **Archive**.
+- "Focus project…" in the command palette pins the sidebar to one project's tasks — a colored banner above "New task" shows which project is focused (click it or run "Unfocus project" to clear), and while focused, new tasks, ⌘D, task search, and completion notifications stay inside that project.
+- Settings → General gains "Starred tasks first when jumping": when on, ⌘D visits a starred project's seen-but-idle tasks before unread completions in other projects, instead of keeping every unseen completion ahead.
+
+### Fixed
+
+- **Sessions**
+  - Fixed Devin and other agent-client-protocol tasks failing to resume with a "session is locked" error after their runtime was closed, replaced, or evicted.
+  - When starting a new task, Goddard skips the Friends file-sharing project when choosing a default project. You can still select Friends explicitly.
+  - The Resume command's provider button now stays clickable while a provider's sessions are still loading, so you can switch providers without waiting for the list to finish.
+  - Stopping a task after its message was sent but before the agent confirmed it started now says so in the transcript — "Stopped before the agent started — the message may not have reached it" — instead of a generic "Stopped" that read like interrupted work.
+- **Sidebar**
+  - Sidebar sections you fold or expand — Pinned, Terminals, date and project groups — now keep their state across restarts instead of resetting each launch.
+  - When grouping sidebar tasks by date, empty date groups no longer appear—for example, an empty Today header when today’s tasks are all shown under Planning.
+- **Providers**
+  - Fixed Codex replies where an interim update ran into the final answer with no space between sentences; separate updates now stay a paragraph apart.
+  - Tasks only receive the Computer Use hint when the `goddard_js_repl` server was attached at launch.
+  - Provider sessions continue when the Computer Use helper cannot start, and Goddard reports and journals the cause.
+  - Antigravity MCP sync now initializes an empty config file instead of reporting a JSON parse error.
+  - Grok Build sessions with Computer Use enabled now start successfully and receive Goddard's Computer Use instructions with each regular prompt.
+  - Project memory distillation no longer adds a task to the ChatGPT app on every run — the background pass now uses a throwaway Codex thread that is never persisted or synced.
+  - Provider switching now handles long conversation histories and temporary Jev outages more reliably, falling back when a context handoff cannot be evaluated.
+  - Provider failure alerts no longer mistake informational stderr logs for errors.
+  - A provider's plan-usage failure now lands in Settings → Diagnostics like other app errors — once per distinct error, so retrying lanes don't flood the log — and the error text carries the endpoint's own message when it sends one, instead of a bare "HTTP 500".
+- **Git**
+  - Fixed a checkpoint-capture error alert that could appear when a task's worktree merged or checked out a commit deleting files; affected turns now get their restore point.
+  - When you choose a base branch for a new task, the Git panel shows that branch's commit history.
+  - The commit graph in the Git panel now draws a real curve where the branch lane hands off to the base lane, ends the lane line at the newest commit instead of stubbing past it, and centers each commit dot on its line.
+  - The Git panel's open state is now per task: switching sessions closes it unless that task had it open, and each task's panel — including a half-written commit message — is preserved and restored.
+  - Fixed a "turn checkpoint capture exceeded its 30-second time limit" error that could appear after a turn finished on repositories with many refs; affected turns now get their changed-files card and restore point.
+- **Transcript**
+  - Turn markers that refine a status, like "Go ahead" or "Needs continuation," no longer understate the model's confidence — the chip shows the refinement's own score instead of a multiplied one.
+  - User prompts in the transcript keep soft line breaks when rendered as markdown.
+- **Panels**
+  - Opening a file with Cmd+P now expands its folders and selects it in the Files tree.
+  - Expand tool activity and completed-turn work in side chats by clicking their disclosure rows or focusing them and pressing Enter or Space.
+  - Side chats now show completed file change summaries, including the changed paths and line counts.
+  - Hovering a side-chat reply now reveals its timestamp and copy control.
+  - Side chat replies now show the same timestamp and copy control as replies in the main transcript.
+- **Keyboard**
+  - ⌘E and ⌘. now cycle their highlighted choices while held; release the Command key to apply the selection. Use ⌘⇧E to cycle reasoning effort backward.
+  - Holding ⌥ and pressing ⇧Tab after opening the favorite model picker now moves the highlight backward, even when you press it immediately after ⌥Tab.
+- **Settings**
+  - Going back out of Settings no longer loses the forward hop: forward now reopens Settings on the pane it left, and the pane history inside keeps replaying.
+  - Settings → Jev usage now shows managed-goal evaluations with a translated name and description.
+- Fixed "daemon is busy" errors when several provider checks or Git operations ran at once — requests now wait briefly for capacity instead of failing, a `goddard-agent ask` no longer holds a request worker while it waits for your answer, and the daemon limits how many short-lived subprocesses run at once so bursts queue instead of overloading slower machines.
+Fixed modal dialogs and the command palette painting their card at double the entrance-fade opacity, letting the scrim bleed through as a dark veil mid-fade.
+- The Claude model picker now shows the release version Claude Code names in each family row's description — "Opus 5.5 (1M context)", "Sonnet 5", "Haiku 4.5" — instead of the bare family name.
+- Fixed Computer Use reporting missing macOS Accessibility and Screen Recording access mid-session: each helper build now installs to its own directory instead of replacing the shared one, so a rebuild can no longer invalidate the helper process a task is already using.
+- Quitting Goddard on the Drafts, Automations, or Inbox page now reopens that page on launch instead of landing on the selected task.
+- Tasks running on a connected remote host now show that host's providers and models in the model picker instead of the local machine's — the remote machine's installed CLIs, disabled providers, and custom binary paths apply, and Antigravity is no longer offered for remote tasks.
+- Voice briefings generate again — the speech request now sends the protocol header the AI Gateway requires.
+- A reply's voice briefing no longer plays a second time when you revisit its task after a restart.
+
 ## [0.12.0]
 
 ### Features

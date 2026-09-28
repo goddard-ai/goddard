@@ -1,1 +1,0 @@
-- Fixed a checkpoint-capture error alert that could appear when a task's worktree merged or checked out a commit deleting files; affected turns now get their restore point.

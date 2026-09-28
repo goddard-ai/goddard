@@ -1,1 +1,0 @@
-- Holding ⌥ and pressing ⇧Tab after opening the favorite model picker now moves the highlight backward, even when you press it immediately after ⌥Tab.

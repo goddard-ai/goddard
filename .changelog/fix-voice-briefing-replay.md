@@ -1,1 +1,0 @@
-- A reply's voice briefing no longer plays a second time when you revisit its task after a restart.

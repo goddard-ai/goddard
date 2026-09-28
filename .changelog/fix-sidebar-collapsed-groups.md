@@ -1,1 +1,0 @@
-- Sidebar sections you fold or expand — Pinned, Terminals, date and project groups — now keep their state across restarts instead of resetting each launch.

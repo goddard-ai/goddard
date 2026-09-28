@@ -1,1 +1,0 @@
-- The composer’s draft counter is scoped to the current project — “No project” tasks share one pool — and it steps aside while the composer already holds a draft; a draft saved in a “No project” task that’s since closed still lands in a no-project composer when used

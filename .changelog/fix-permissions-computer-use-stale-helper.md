@@ -1,1 +1,0 @@
-- Fixed Computer Use reporting missing macOS Accessibility and Screen Recording access mid-session: each helper build now installs to its own directory instead of replacing the shared one, so a rebuild can no longer invalidate the helper process a task is already using.

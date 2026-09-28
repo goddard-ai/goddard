@@ -1,1 +1,0 @@
-- Tasks running on a connected remote host now show that host's providers and models in the model picker instead of the local machine's — the remote machine's installed CLIs, disabled providers, and custom binary paths apply, and Antigravity is no longer offered for remote tasks.

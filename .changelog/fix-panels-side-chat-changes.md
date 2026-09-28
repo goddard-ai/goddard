@@ -1,1 +1,0 @@
-- Side chats now show completed file change summaries, including the changed paths and line counts.

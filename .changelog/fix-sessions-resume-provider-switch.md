@@ -1,1 +1,0 @@
-- The Resume command's provider button now stays clickable while a provider's sessions are still loading, so you can switch providers without waiting for the list to finish.

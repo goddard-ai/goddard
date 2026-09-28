@@ -1,1 +1,0 @@
-- When grouping sidebar tasks by date, empty date groups no longer appear—for example, an empty Today header when today’s tasks are all shown under Planning.

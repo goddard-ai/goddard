@@ -1,1 +1,0 @@
-- Opening a file with Cmd+P now expands its folders and selects it in the Files tree.

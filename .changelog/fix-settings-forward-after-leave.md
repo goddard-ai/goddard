@@ -1,1 +1,0 @@
-- Going back out of Settings no longer loses the forward hop: forward now reopens Settings on the pane it left, and the pane history inside keeps replaying.

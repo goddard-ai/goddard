@@ -1,1 +1,0 @@
-- Provider sessions continue when the Computer Use helper cannot start, and Goddard reports and journals the cause.

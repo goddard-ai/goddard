@@ -1,1 +1,0 @@
-- Goddard now sends anonymous product analytics through PostHog; sharing can still be disabled in Settings → General.

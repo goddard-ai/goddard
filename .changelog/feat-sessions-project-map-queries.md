@@ -1,1 +1,0 @@
-- Local agents can request task-specific code context with `goddard-agent map`; Jev ranks indexed declarations and returns `path:line` locations plus candidate paths that did not fit. The Project Map experiment toggle and automatic index status chip are removed.

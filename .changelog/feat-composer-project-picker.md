@@ -1,1 +1,0 @@
-- The composer's project picker now opens with a search field and a scrollable list like the branch picker beside it, and sorts projects by when a task was last created inside them — starred projects pin to the top, ranked by the same recency.

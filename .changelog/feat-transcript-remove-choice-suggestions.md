@@ -1,1 +1,0 @@
-- Stop showing one-click “I choose” actions when a turn asks the user to pick an option; the question stays available for a manual reply.

@@ -1,1 +1,0 @@
-- Fixed "daemon is busy" errors when several provider checks or Git operations ran at once — requests now wait briefly for capacity instead of failing, a `goddard-agent ask` no longer holds a request worker while it waits for your answer, and the daemon limits how many short-lived subprocesses run at once so bursts queue instead of overloading slower machines.

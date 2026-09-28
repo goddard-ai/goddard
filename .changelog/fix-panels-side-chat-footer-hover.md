@@ -1,1 +1,0 @@
-- Hovering a side-chat reply now reveals its timestamp and copy control.

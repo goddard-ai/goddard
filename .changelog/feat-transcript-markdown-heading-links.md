@@ -1,1 +1,0 @@
-- Follow a transcript link ending in `.md#heading` to open that Markdown file at the matching heading.

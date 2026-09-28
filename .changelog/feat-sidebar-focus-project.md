@@ -1,1 +1,0 @@
-- "Focus project…" in the command palette pins the sidebar to one project's tasks — a colored banner above "New task" shows which project is focused (click it or run "Unfocus project" to clear), and while focused, new tasks, ⌘D, task search, and completion notifications stay inside that project.

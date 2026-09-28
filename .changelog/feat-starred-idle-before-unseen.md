@@ -1,1 +1,0 @@
-- Settings → General gains "Starred tasks first when jumping": when on, ⌘D visits a starred project's seen-but-idle tasks before unread completions in other projects, instead of keeping every unseen completion ahead.
