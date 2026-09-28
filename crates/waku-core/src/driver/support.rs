@@ -590,7 +590,7 @@ mod tests {
             value
                 .pointer("/mcp/goddard_js_repl/environment/GODDARD_COMPUTER_USE_SERVER")
                 .and_then(Value::as_str),
-            Some("/Applications/Goddard Computer Use")
+            Some("/tmp/Goddard Computer Use")
         );
         assert_eq!(
             value.get("instructions").and_then(Value::as_array).unwrap(),
