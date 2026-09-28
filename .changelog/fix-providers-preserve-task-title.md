@@ -1,1 +1,0 @@
-- Kept a task’s existing title when switching providers, even if the new provider suggests a title based on the handoff prompt.

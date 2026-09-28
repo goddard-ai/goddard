@@ -57,6 +57,8 @@ the original feature bullet instead of adding separate entries for them.
   - Follow a transcript link ending in `.md#heading` to open that Markdown file at the matching heading.
   - Agent replies render `<ref_snippet>` markers as clickable file and line references.
   - Stop showing one-click “I choose” actions when a turn asks the user to pick an option; the question stays available for a manual reply.
+  - When GitHub notifies you about a pull request a task opened — review comments or failing checks — Jev can now offer a one-tap follow-up on that task's composer: "Address review" or "Fix CI." Both prompts are editable under Settings → Jev → Suggestions and eligible for automatic run at your configured thresholds.
+  - Turn-end suggestions cover more of the replies you actually send: "You decide" when the agent asks you to choose between options, "Diagnose" when a turn ends failed or blocked without repairable errors, "Implement the plan" while a task sits in its planning phase, and "What next?" when the likely move is asking for direction. Prompt text stays editable under Settings → Jev → Suggestions.
   - Turn footers can now mark a turn Failed or Blocked even when the closing reply reads like a normal ending — an unrecovered error or a missing permission no longer hides behind a "Complete" verdict.
 - **Panels**
   - Markdown files opened in the Files panel now render a leading `---` YAML frontmatter block as a field table in preview mode instead of showing the raw fence.
@@ -94,6 +96,7 @@ the original feature bullet instead of adding separate entries for them.
   - Grok Build sessions with Computer Use enabled now start successfully and receive Goddard's Computer Use instructions with each regular prompt.
   - Project memory distillation no longer adds a task to the ChatGPT app on every run — the background pass now uses a throwaway Codex thread that is never persisted or synced.
   - Provider switching now handles long conversation histories and temporary Jev outages more reliably, falling back when a context handoff cannot be evaluated.
+  - Kept a task’s existing title when switching providers, even if the new provider suggests a title based on the handoff prompt.
   - Provider failure alerts no longer mistake informational stderr logs for errors.
   - A provider's plan-usage failure now lands in Settings → Diagnostics like other app errors — once per distinct error, so retrying lanes don't flood the log — and the error text carries the endpoint's own message when it sends one, instead of a bare "HTTP 500".
 - **Git**

@@ -1,1 +1,0 @@
-- When GitHub notifies you about a pull request a task opened — review comments or failing checks — Jev can now offer a one-tap follow-up on that task's composer: "Address review" or "Fix CI." Both prompts are editable under Settings → Jev → Suggestions and eligible for automatic run at your configured thresholds.
