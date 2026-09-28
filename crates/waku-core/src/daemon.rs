@@ -4475,11 +4475,21 @@ impl WakuBackend {
             options.agent = None;
             options.computer_use_enabled = false;
         }
-        if options.computer_use_enabled {
-            let runtime = driver::ComputerUseRuntime::start(event_sender.clone())?;
-            options.mcp_servers.push(runtime.mcp_server_spec());
-            options.computer_use_runtime = Some(runtime);
-        }
+        let computer_use_start_error = if options.computer_use_enabled {
+            match driver::ComputerUseRuntime::start(event_sender.clone()) {
+                Ok(runtime) => {
+                    options.mcp_servers.push(runtime.mcp_server_spec());
+                    options.computer_use_runtime = Some(runtime);
+                    None
+                }
+                Err(error) => {
+                    options.computer_use_enabled = false;
+                    Some(error)
+                }
+            }
+        } else {
+            None
+        };
         // The agent-surface instruction reaches the session through whichever
         // channel its provider offers; first-prompt context needs the launch's
         // scopes for drivers without a native channel. A failed start revokes
@@ -4501,6 +4511,13 @@ impl WakuBackend {
             }
         };
         let computer_use_available = handle.computer_use_available();
+        if let Some(error) = computer_use_start_error {
+            let error = format!("{error:#}");
+            let pair = localized!("errors.computer_use_start_failed", error = &error);
+            if let Ok(wire) = event_to_wire(DriverEvent::localized_notice(pair)) {
+                let _ = events.send(wire);
+            }
+        }
         if sandboxed_launch {
             // The provider process is up — clear the launch phase so the
             // transcript's indicator falls back to its ordinary working state.

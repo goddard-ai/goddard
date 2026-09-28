@@ -3794,6 +3794,13 @@ pub enum DriverEvent {
         message: String,
         i18n: crate::protocol::WireTranslation,
     },
+    /// A localized, user-visible notice that does not fail or settle the
+    /// active turn. Optional session capabilities use this when they are
+    /// unavailable but the provider can still run.
+    LocalizedNotice {
+        message: String,
+        i18n: crate::protocol::WireTranslation,
+    },
     Error(String),
     /// The daemon owning this runtime restarted and the runtime could not
     /// be reattached — its provider process was killed with it. Client-only,
@@ -3807,6 +3814,14 @@ impl DriverEvent {
     /// Wrap the `(fallback, translation)` pair produced by `localized!`.
     pub fn localized_error(pair: (String, crate::protocol::WireTranslation)) -> Self {
         Self::LocalizedError {
+            message: pair.0,
+            i18n: pair.1,
+        }
+    }
+
+    /// Wrap the `(fallback, translation)` pair for a nonfatal user notice.
+    pub fn localized_notice(pair: (String, crate::protocol::WireTranslation)) -> Self {
+        Self::LocalizedNotice {
             message: pair.0,
             i18n: pair.1,
         }

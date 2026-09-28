@@ -584,7 +584,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             [session.id]: result.userInput ?? undefined,
           }))
         }
-        if (result.error) toast.error(result.error)
+        if (result.error) {
+          const message = result.errorI18n
+            ? translate(localeRef.current, result.errorI18n.key, result.errorI18n.args)
+            : result.error
+          toast.error(message)
+        }
         if (result.settled) {
           const projectionTimer = projectionPersistTimers.current.get(session.id)
           if (projectionTimer !== undefined) {

@@ -4212,6 +4212,24 @@ impl Waku {
             Some(ToastActionKind::Session(session_id)) => Some(*session_id),
             _ => self.state.selected_session,
         };
+        self.journal_error_for_session(kind, message, session_id);
+    }
+
+    pub(super) fn journal_session_error(
+        &self,
+        kind: &'static str,
+        message: &str,
+        session_id: Uuid,
+    ) {
+        self.journal_error_for_session(kind, message, Some(session_id));
+    }
+
+    fn journal_error_for_session(
+        &self,
+        kind: &'static str,
+        message: &str,
+        session_id: Option<Uuid>,
+    ) {
         let session =
             session_id.and_then(|id| self.state.sessions.iter().find(|session| session.id == id));
         let context = match session {

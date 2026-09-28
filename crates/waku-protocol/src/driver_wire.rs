@@ -170,6 +170,10 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "localizedError",
             json!({ "message": message, "i18n": i18n }),
         ),
+        DriverEvent::LocalizedNotice { message, i18n } => (
+            "localizedNotice",
+            json!({ "message": message, "i18n": i18n }),
+        ),
         DriverEvent::Error(error) => ("error", Value::String(error)),
         DriverEvent::ProcessExited => ("processExited", Value::Null),
     };
@@ -296,10 +300,17 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             }
         }
         "localizedError" => {
-            let error: LocalizedErrorWire = serde_json::from_value(payload)?;
+            let error: LocalizedMessageWire = serde_json::from_value(payload)?;
             DriverEvent::LocalizedError {
                 message: error.message,
                 i18n: error.i18n,
+            }
+        }
+        "localizedNotice" => {
+            let notice: LocalizedMessageWire = serde_json::from_value(payload)?;
+            DriverEvent::LocalizedNotice {
+                message: notice.message,
+                i18n: notice.i18n,
             }
         }
         "error" => DriverEvent::Error(serde_json::from_value(payload)?),
@@ -344,7 +355,7 @@ struct PermissionWire {
 }
 
 #[derive(Deserialize)]
-struct LocalizedErrorWire {
+struct LocalizedMessageWire {
     message: String,
     i18n: crate::protocol::WireTranslation,
 }

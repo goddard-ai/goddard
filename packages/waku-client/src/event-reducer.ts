@@ -396,6 +396,13 @@ export function reduceRuntimeEvent(
       failTurn(session, value.message, clock)
       break
     }
+    case 'localizedNotice': {
+      const value = asRecord(payload)
+      if (!value || typeof value.message !== 'string') break
+      result.error = value.message
+      result.errorI18n = asWireTranslation(value.i18n)
+      break
+    }
     case 'error': {
       if (typeof payload !== 'string') break
       result.error = payload

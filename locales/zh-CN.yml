@@ -1394,6 +1394,7 @@ errors.register_computer_use_skill: 无法向 Codex 注册 Goddard 电脑操作�
 errors.codex_thread_open_incomplete: "Codex 未能完成此线程的打开。如果此线程已在 ChatGPT 应用或 Codex CLI 中打开，请先在那里关闭，然后在 Goddard 中重试。"
 errors.codex_thread_active_writer: "此 Codex 线程已在其他位置使用。这通常是因为它已在 ChatGPT 应用或 Codex CLI 中打开。请在那里关闭线程，然后在 Goddard 中重试。"
 errors.codex_goals_unsupported: 此版本的 Codex 不支持线程目标
+errors.computer_use_start_failed: "电脑操作无法启动。会话将继续运行，但无法使用电脑操作。详情：%{error}"
 errors.provider_receive_prompt: "%{provider} 未能接收消息"
 errors.provider_start_turn: "%{provider} 未能开始本轮"
 errors.provider_rejected_steer: "%{provider} 拒绝了补充指示：%{error}"

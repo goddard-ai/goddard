@@ -1425,6 +1425,7 @@ errors.register_computer_use_skill: Goddard のコンピュータ操作スキル
 errors.codex_thread_open_incomplete: "Codex はこのスレッドを開ききれませんでした。ChatGPT アプリまたは Codex CLI で開いている場合は、そこで閉じてから Goddard でもう一度お試しください。"
 errors.codex_thread_active_writer: "この Codex スレッドはすでに使用中です。通常、ChatGPT アプリまたは Codex CLI で開いていると発生します。そこで閉じてから Goddard でもう一度お試しください。"
 errors.codex_goals_unsupported: このバージョンの Codex はスレッドゴールに対応していません
+errors.computer_use_start_failed: "コンピュータ操作を開始できませんでした。このセッションはコンピュータ操作を使わずに続行します。詳細: %{error}"
 errors.provider_receive_prompt: "%{provider} はプロンプトを受信できませんでした"
 errors.provider_start_turn: "%{provider} はターンを開始できませんでした"
 errors.provider_rejected_steer: "%{provider} が追加の指示を拒否しました：%{error}"

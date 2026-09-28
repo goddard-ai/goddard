@@ -254,6 +254,14 @@ impl Waku {
             // Unreachable: normalized into `Error` above so it renders in the
             // client's locale before any dispatch runs.
             DriverEvent::LocalizedError { .. } => {}
+            DriverEvent::LocalizedNotice { i18n, .. } => {
+                let message = compact_driver_error(&i18n.render());
+                if self.state.selected_session == Some(session_id) {
+                    self.show_toast(message);
+                } else {
+                    self.journal_session_error("computer-use-start", &message, session_id);
+                }
+            }
             DriverEvent::RuntimeEventCursorAdvanced(cursor) => {
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.runtime_event_cursor = Some(cursor);
