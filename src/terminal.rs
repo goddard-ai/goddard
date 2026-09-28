@@ -4037,7 +4037,7 @@ mod tests {
     #[gpui::test]
     fn a_click_selects_the_row_under_the_pointer(cx: &mut gpui::TestAppContext) {
         let (view, cx) = cx.add_window_view(|_, cx| {
-            TerminalView::with_launch(PathBuf::from("/tmp"), TerminalLaunch::Shell, cx)
+            TerminalView::with_launch(std::env::temp_dir(), TerminalLaunch::Shell, cx)
         });
         cx.run_until_parked();
 
