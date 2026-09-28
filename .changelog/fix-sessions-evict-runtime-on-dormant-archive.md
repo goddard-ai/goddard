@@ -1,0 +1,1 @@
+- Moving a task to Dormant or Archive now releases its provider runtime immediately, including runtimes retained by the daemon after the task was last opened.

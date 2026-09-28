@@ -2888,7 +2888,9 @@ impl Backend for WakuBackend {
                     let mut sessions = self.sessions.lock();
                     sessions
                         .get(&session_id)
-                        .is_some_and(|entry| entry.runtime_id == runtime_id)
+                        // A nil runtime id is an explicit task-wide eviction
+                        // from clients that no longer hold an attachment.
+                        .is_some_and(|entry| runtime_id.is_nil() || entry.runtime_id == runtime_id)
                         .then(|| sessions.remove(&session_id))
                         .flatten()
                 };

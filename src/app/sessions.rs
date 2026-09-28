@@ -2153,6 +2153,7 @@ impl Waku {
         if is_busy {
             self.cancel_session_turn(session_id, cx);
         }
+        self.evict_session_runtime(session_id);
         // Side chats die with their parent rather than archiving: the
         // workspace cleanup below removes the checkout they work in.
         for child_id in self.side_chat_descendants(session_id) {
@@ -2417,6 +2418,7 @@ impl Waku {
         if is_busy {
             self.cancel_session_turn(session_id, cx);
         }
+        self.evict_session_runtime(session_id);
         let now = unix_time();
         if let Some(session) = self.state.session_mut(session_id) {
             session.pinned_at = None;
@@ -4232,6 +4234,43 @@ impl Waku {
             self.mark_background_work_lost(session_id);
         }
         self.project_switch_reset_pending.remove(&session_id);
+    }
+
+    pub(super) fn evict_session_runtime(&mut self, session_id: Uuid) {
+        if let Some(runtime) = self.runtimes.remove(&session_id) {
+            // Busy tasks were cancelled by the caller. Closing this handle
+            // now makes the daemon release the provider process.
+            runtime.driver.close();
+            self.mark_background_work_lost(session_id);
+            self.cancel_drains.remove(&session_id);
+            return;
+        }
+
+        // An idle daemon runtime may outlive this app's attachment. Close it
+        // by session id on a worker so a Dormant/Archive action never waits
+        // for daemon IPC on the UI thread.
+        let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
+            return;
+        };
+        let client = daemon.client();
+        if let Err(error) = std::thread::Builder::new()
+            .name(format!("waku-evict-session-{session_id}"))
+            .spawn(move || {
+                match client.request(session_id, Uuid::nil(), waku_client::Command::CloseSession) {
+                    Ok(waku_client::ResponsePayload::Ack) => {}
+                    Ok(response) => eprintln!(
+                        "could not evict provider runtime for task {session_id}: unexpected response {response:?}"
+                    ),
+                    Err(error) => {
+                        eprintln!("could not evict provider runtime for task {session_id}: {error}");
+                    }
+                }
+            })
+        {
+            eprintln!(
+                "could not schedule provider runtime eviction for task {session_id}: {error}"
+            );
+        }
     }
 
     fn remember_selected_model_traits(&mut self) {
