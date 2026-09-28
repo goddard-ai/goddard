@@ -628,6 +628,7 @@ impl Waku {
         // session is on it.
         self.drain_pending_status_marker_turns(session_id, cx);
         self.drain_pending_action_prediction_turns(session_id, cx);
+        self.drain_pending_inbox_suggestions(session_id, cx);
         // Session selection and terminal selection are mutually exclusive —
         // the transcript takes the main area back from the terminal.
         self.selected_terminal = None;
@@ -1806,6 +1807,7 @@ impl Waku {
         self.pending_action_predictions
             .retain(|prediction| prediction.session_id != session_id);
         self.pending_action_prediction_turns.remove(&session_id);
+        self.pending_inbox_suggestions.remove(&session_id);
         if self
             .action_suggestion
             .as_ref()

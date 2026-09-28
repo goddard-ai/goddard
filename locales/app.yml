@@ -1161,6 +1161,10 @@ routing.feature_route_class_suggest_description:
   en: The Suggest button's proposed class-map defaults
 routing.feature_next_action_description:
   en: Predicts the action you'll likely take after a settled turn
+routing.feature_inbox_action:
+  en: Inbox suggestions
+routing.feature_inbox_action_description:
+  en: Judges whether a GitHub notification on a session's pull request warrants a follow-up suggestion
 routing.feature_paste_classification_description:
   en: Labels pasted composer text, e.g. bug report or code
 routing.feature_provider_switch_description:
@@ -3427,6 +3431,10 @@ suggestions.diagnose_prompt:
   en: Diagnose why that failed and retry.
 suggestions.whats_next_prompt:
   en: What should we do next?
+suggestions.address_review_prompt:
+  en: Address the review comments on the PR
+suggestions.fix_ci_prompt:
+  en: Fix the failing checks
 suggestions.commit:
   en: Commit
 suggestions.push:
@@ -3447,6 +3455,10 @@ suggestions.diagnose:
   en: Diagnose
 suggestions.whats_next:
   en: What next?
+suggestions.address_review:
+  en: Address review
+suggestions.fix_ci:
+  en: Fix CI
 suggestions.move_fast_title:
   en: Move fast, break things
 suggestions.move_fast_description:

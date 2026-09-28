@@ -7488,6 +7488,7 @@ impl Waku {
             | self.drain_status_marker_events()
             | self.drain_title_quality_events(cx)
             | self.drain_action_prediction_events(cx)
+            | self.drain_inbox_suggestion_events(cx)
             | self.drain_phase_eval_events(cx)
         {
             cx.notify();

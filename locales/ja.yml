@@ -1308,6 +1308,8 @@ suggestions.you_decide_prompt: あなたの判断で進めてください
 suggestions.implement_plan_prompt: いいですね — 計画を実装してください
 suggestions.diagnose_prompt: 失敗した原因を調べて再試行してください
 suggestions.whats_next_prompt: 次に何をすべきですか？
+suggestions.address_review_prompt: PRへのレビューコメントに対応してください
+suggestions.fix_ci_prompt: 失敗しているチェックを修正してください
 suggestions.commit: コミット
 suggestions.push: プッシュ
 suggestions.push_changes: 変更をプッシュ
@@ -1318,6 +1320,8 @@ suggestions.you_decide: あなたが決める
 suggestions.implement_plan: 計画を実装
 suggestions.diagnose: 診断
 suggestions.whats_next: 次は？
+suggestions.address_review: レビューに対応
+suggestions.fix_ci: CI を修正
 suggestions.move_fast_title: 速く進め、壊すことを恐れない
 suggestions.move_fast_description: Jev は前に進む操作（取り込み、プッシュ、コミット、修正）を優先し、次の一手をより積極的に提案します。
 sync.behind_one: "%{upstream} より 1 コミット遅れています"
@@ -2550,6 +2554,8 @@ routing.feature_memory_rank_description: メモリ蒸留器のためにトラン
 routing.feature_memory_triage: メモリトリアージ
 routing.feature_memory_triage_description: どのトランスクリプト断片をメモリ蒸留器に送る価値があるか判断します
 routing.feature_next_action_description: 確定したターンの後に取る可能性の高い次の行動を予測します
+routing.feature_inbox_action: 受信トレイの提案
+routing.feature_inbox_action_description: セッションのPRへのGitHub通知がフォローアップ提案に値するか判定します
 routing.feature_paste_classification: ペースト分類
 routing.feature_paste_classification_description: 入力欄にペーストされたテキストを分類します（バグ報告やコードなど）
 routing.feature_permission_review: 権限レビュー

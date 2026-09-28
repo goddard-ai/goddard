@@ -2746,6 +2746,33 @@ pub struct Waku {
     action_prediction_tx: Sender<(Uuid, Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     action_prediction_events:
         Receiver<(Uuid, Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
+    /// GitHub notification threads that resolved to a session-owned pull
+    /// request while that session was off screen — newest per session,
+    /// evaluated when it is next opened.
+    pending_inbox_suggestions: HashMap<
+        Uuid,
+        (
+            waku_protocol::workspace::NotificationThread,
+            waku_protocol::workspace::PullRequestSummary,
+        ),
+    >,
+    /// Threads a suggestion eval already dispatched for, keyed by
+    /// (thread id, updated_at) — a thread that re-fires unread on new
+    /// activity earns a fresh evaluation.
+    inbox_suggestion_in_flight: HashSet<(String, u64)>,
+    /// Thread versions an eval already ran on, so an unread thread that
+    /// never changes never re-requests.
+    inbox_suggestion_seen: HashSet<(String, u64)>,
+    inbox_suggestion_tx: Sender<(
+        Uuid,
+        (String, u64),
+        Result<waku_protocol::eval::Evaluation, String>,
+    )>,
+    inbox_suggestion_events: Receiver<(
+        Uuid,
+        (String, u64),
+        Result<waku_protocol::eval::Evaluation, String>,
+    )>,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -5248,6 +5275,7 @@ impl Waku {
         let (title_quality_tx, title_quality_events) = unbounded();
         let (phase_eval_tx, phase_eval_events) = unbounded();
         let (action_prediction_tx, action_prediction_events) = unbounded();
+        let (inbox_suggestion_tx, inbox_suggestion_events) = unbounded();
         #[cfg(target_os = "macos")]
         if state.computer_use_experiment_enabled {
             let computer_permission_tx = computer_permission_tx.clone();
@@ -6485,6 +6513,11 @@ impl Waku {
                 action_prediction_in_flight: HashSet::new(),
                 action_prediction_tx,
                 action_prediction_events,
+                pending_inbox_suggestions: HashMap::new(),
+                inbox_suggestion_in_flight: HashSet::new(),
+                inbox_suggestion_seen: HashSet::new(),
+                inbox_suggestion_tx,
+                inbox_suggestion_events,
                 runtimes: HashMap::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),

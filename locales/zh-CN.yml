@@ -1280,6 +1280,8 @@ suggestions.you_decide_prompt: 由你判断并继续
 suggestions.implement_plan_prompt: 看起来不错——按计划实施
 suggestions.diagnose_prompt: 诊断失败原因并重试
 suggestions.whats_next_prompt: 我们接下来该做什么？
+suggestions.address_review_prompt: 处理 PR 上的评审意见
+suggestions.fix_ci_prompt: 修复失败的检查
 suggestions.commit: 提交
 suggestions.push: 推送
 suggestions.push_changes: 推送更改
@@ -1290,6 +1292,8 @@ suggestions.you_decide: 由你决定
 suggestions.implement_plan: 实施计划
 suggestions.diagnose: 诊断
 suggestions.whats_next: 下一步？
+suggestions.address_review: 处理评审
+suggestions.fix_ci: 修复 CI
 suggestions.move_fast_title: 快速行动、不怕出错
 suggestions.move_fast_description: Jev 会倾向于推进工作的操作（合入、推送、提交、修复），并更积极地建议这些下一步。
 sync.behind_one: "落后 %{upstream} 1 个提交"
@@ -2501,6 +2505,8 @@ routing.feature_memory_rank_description: 为记忆蒸馏器排序转录片段
 routing.feature_memory_triage: 记忆分诊
 routing.feature_memory_triage_description: 判断哪些转录片段值得送入记忆蒸馏器
 routing.feature_next_action_description: 在轮次结束后预测你可能采取的下一步操作
+routing.feature_inbox_action: 收件箱建议
+routing.feature_inbox_action_description: 判断会话 PR 上的 GitHub 通知是否需要后续操作建议
 routing.feature_paste_classification: 粘贴文本分类
 routing.feature_paste_classification_description: 为粘贴到输入框的文本分类，如错误报告或代码
 routing.feature_permission_review: 权限审查

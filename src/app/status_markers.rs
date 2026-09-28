@@ -325,7 +325,7 @@ fn marker_action_signal(markers: &[String], action: &str) -> &'static str {
                 "commit" | "push" | "land" | "archive" | "new-prompt" | "new-task"
                 | "new-worktree" | "whats-next" => confirmed = true,
                 "revert" | "fix-errors" | "keep-going" | "proceed" | "make-it-happen"
-                | "you-decide" | "implement-plan" | "diagnose" => {
+                | "you-decide" | "implement-plan" | "diagnose" | "address-review" | "fix-ci" => {
                     return "contradicted";
                 }
                 _ => {}
@@ -333,7 +333,7 @@ fn marker_action_signal(markers: &[String], action: &str) -> &'static str {
             // A turn that hit a wall: engaging the failure agrees; shipping
             // anyway says the wall was not real.
             "failed" | "blocked" | "errors-remain" => match action {
-                "fix-errors" | "keep-going" | "revert" | "new-prompt" | "diagnose" => {
+                "fix-errors" | "keep-going" | "revert" | "new-prompt" | "diagnose" | "fix-ci" => {
                     confirmed = true;
                 }
                 "commit" | "push" | "land" => return "contradicted",
@@ -343,7 +343,7 @@ fn marker_action_signal(markers: &[String], action: &str) -> &'static str {
             // confirms the wait was real.
             "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned" => match action {
                 "new-prompt" | "proceed" | "make-it-happen" | "keep-going" | "you-decide"
-                | "implement-plan" | "whats-next" => {
+                | "implement-plan" | "whats-next" | "address-review" | "fix-ci" => {
                     confirmed = true;
                 }
                 _ => {}

@@ -24,6 +24,9 @@ use waku_client::git::PullStrategy;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{AgentSession, SessionWorkspace};
 use waku_protocol::routing::SessionPhase;
+use waku_protocol::workspace::{
+    NotificationReason, NotificationSubjectType, NotificationThread, PullRequestSummary,
+};
 
 use crate::ui::shortcut::ShortcutHint;
 
@@ -108,6 +111,8 @@ pub(super) const CANNED_PROMPTS: &[(&str, &str)] = &[
     ("implement-plan", "suggestions.implement_plan_prompt"),
     ("diagnose", "suggestions.diagnose_prompt"),
     ("whats-next", "suggestions.whats_next_prompt"),
+    ("address-review", "suggestions.address_review_prompt"),
+    ("fix-ci", "suggestions.fix_ci_prompt"),
 ];
 pub(super) fn default_suggested_prompt(action: &str) -> Option<String> {
     let (_, key) = CANNED_PROMPTS.iter().find(|(id, _)| *id == action)?;
@@ -165,6 +170,8 @@ pub(super) const ACTIONABLE_SUGGESTIONS: &[&str] = &[
     "implement-plan",
     "diagnose",
     "whats-next",
+    "address-review",
+    "fix-ci",
     "commit",
     "push",
     "sync",
@@ -186,6 +193,8 @@ pub(super) fn suggested_action_title(action: &str) -> Option<String> {
         "implement-plan" => Some(tr!("suggestions.implement_plan")),
         "diagnose" => Some(tr!("suggestions.diagnose")),
         "whats-next" => Some(tr!("suggestions.whats_next")),
+        "address-review" => Some(tr!("suggestions.address_review")),
+        "fix-ci" => Some(tr!("suggestions.fix_ci")),
         _ => CANNED_PROMPTS
             .iter()
             .find(|(id, _)| *id == action)
@@ -206,6 +215,8 @@ pub(super) const AUTOMATIC_ACTIONS: &[&str] = &[
     "implement-plan",
     "diagnose",
     "whats-next",
+    "address-review",
+    "fix-ci",
     "push",
     "sync",
     "land",
@@ -240,6 +251,8 @@ pub(super) const MOVE_FAST_ACTIONS: &[&str] = &[
     "you-decide",
     "implement-plan",
     "diagnose",
+    "address-review",
+    "fix-ci",
     "commit",
     "push",
     "sync",
@@ -285,6 +298,10 @@ pub(super) struct ActionSuggestion {
     pub action: &'static str,
     /// The base branch for the post-land push follow-up.
     pub base: Option<String>,
+    /// An inbox-event pick preempts the turn-status row the way a
+    /// deterministic follow-up does — the notification is fresher than
+    /// the settled turn's verdict.
+    pub preempts_status: bool,
 }
 
 /// What a chip does when clicked.
@@ -347,6 +364,35 @@ fn gated_suggestion(
     (top >= min_probability && top - runner_up >= min_margin).then_some(action)
 }
 
+/// The follow-up candidate an inbox thread points at, when it points at
+/// one: `ci_activity` on a session-owned pull request is "Fix CI";
+/// authored, subscribed, comment, and mention activity covers reviews
+/// and comments alike — "Address review". Everything else has no chip.
+fn inbox_candidate(reason: NotificationReason) -> Option<&'static str> {
+    match reason {
+        NotificationReason::CiActivity => Some("fix-ci"),
+        NotificationReason::Comment
+        | NotificationReason::Author
+        | NotificationReason::Subscribed
+        | NotificationReason::Mention => Some("address-review"),
+        _ => None,
+    }
+}
+
+/// What the option means in the `suggestion` question — the model needs
+/// the chip's actual effect, not the id.
+fn inbox_candidate_description(candidate: &str) -> String {
+    match candidate {
+        "address-review" => "Offer a chip labeled \"Address review\" that asks the agent to \
+            address the review comments on the pull request"
+            .to_owned(),
+        "fix-ci" => "Offer a chip labeled \"Fix CI\" that asks the agent to fix the \
+            failing checks on the pull request"
+            .to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 /// What a journaled action does to a pending prediction: an exact
 /// candidate match is a hit, an `other` prediction hits on any action the
 /// question never listed, and a prompt send ends the window — its own
@@ -377,6 +423,10 @@ fn prediction_outcome(
 /// The decision-log feature tag these evaluations record under, so the
 /// daemon's log keeps them distinct from the turn-status calls.
 const EVAL_FEATURE: &str = "next-action";
+
+/// Inbox-triggered evaluations record under their own tag — same
+/// prediction journal, different event.
+const INBOX_EVAL_FEATURE: &str = "inbox-action";
 
 /// Journal entries kept in memory for the `recentActions` state field; the
 /// file keeps everything, the prior only needs the recent shape.
@@ -728,6 +778,281 @@ impl Waku {
         changed
     }
 
+    /// A notification that resolved to a session's pull request arrived or
+    /// re-fired unread — the only trigger worth evaluating. Sessions off
+    /// screen queue their newest thread for the next open; everything else
+    /// about the eval — credentials, dispatch, drain — matches the
+    /// settle-triggered path.
+    pub(super) fn note_inbox_notification(
+        &mut self,
+        thread: &NotificationThread,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.state.action_predictions_enabled
+            || !thread.unread
+            || thread.subject_type != NotificationSubjectType::PullRequest
+            || inbox_candidate(thread.reason).is_none()
+        {
+            return;
+        }
+        let key = (thread.id.clone(), thread.updated_at);
+        if self.inbox_suggestion_seen.contains(&key)
+            || self.inbox_suggestion_in_flight.contains(&key)
+        {
+            return;
+        }
+        let Some((session_id, summary)) = self.session_owning_pull_request(thread) else {
+            return;
+        };
+        // Incognito sessions leave no trace — no eval, no journal.
+        if self.session_incognito(session_id) {
+            return;
+        }
+        if self.state.selected_session == Some(session_id) {
+            self.request_inbox_action_eval(session_id, thread.clone(), summary, cx);
+        } else {
+            // Newest wins — an earlier queued thread for the same session is
+            // stale context once a newer event lands.
+            self.pending_inbox_suggestions
+                .insert(session_id, (thread.clone(), summary));
+        }
+    }
+
+    /// Evaluate the queued thread when its session is opened.
+    pub(super) fn drain_pending_inbox_suggestions(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((thread, summary)) = self.pending_inbox_suggestions.remove(&session_id) else {
+            return;
+        };
+        self.request_inbox_action_eval(session_id, thread, summary, cx);
+    }
+
+    /// Ask the daemon whether this notification warrants a suggestion chip.
+    /// One `suggestion` Choice: the event-matched candidate against
+    /// `ignore`. The thread's (id, updated_at) keys dedup — a thread that
+    /// re-fires unread on new activity is a new question.
+    fn request_inbox_action_eval(
+        &mut self,
+        session_id: Uuid,
+        thread: NotificationThread,
+        summary: PullRequestSummary,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (thread.id.clone(), thread.updated_at);
+        if self.inbox_suggestion_in_flight.contains(&key) {
+            return;
+        }
+        let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
+            return;
+        };
+        if daemon
+            .settings()
+            .eval
+            .is_none_or(|eval| eval.credential_missing())
+        {
+            return;
+        }
+        let Some(candidate) = inbox_candidate(thread.reason) else {
+            return;
+        };
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let state = json!({
+            "session": { "title": session.display_title() },
+            "notification": {
+                "repo": thread.repo,
+                "title": thread.title,
+                "reason": thread.reason,
+                "url": thread.url,
+                "updatedAt": thread.updated_at,
+            },
+            "pullRequest": {
+                "number": summary.number,
+                "title": summary.title,
+                "url": summary.url,
+                "state": summary.state,
+                "isDraft": summary.is_draft,
+                "reviewDecision": summary.review_decision,
+                "checkStatus": summary.check_status,
+            },
+            "recentActions": self
+                .action_journal
+                .iter()
+                .map(|record| record.action.as_str())
+                .collect::<Vec<_>>(),
+        });
+        let questions = BTreeMap::from([(
+            "suggestion".to_owned(),
+            EvalQuestion::Choice {
+                instructions: "A GitHub notification just fired for the pull request this \
+                    coding session opened. Decide whether offering the user a one-tap \
+                    follow-up prompt right now would help — a chip that sends the canned \
+                    prompt named by the option to this session's agent. Offer it only when \
+                    the notification plausibly needs the user's action here and recentActions \
+                    do not show it already handled; choose `ignore` for FYI-level, stale, or \
+                    resolved activity."
+                    .to_owned(),
+                criteria: [
+                    (
+                        candidate.to_owned(),
+                        Some(inbox_candidate_description(candidate)),
+                    ),
+                    (
+                        "ignore".to_owned(),
+                        Some(
+                            "Offer nothing — the notification needs no action in this session"
+                                .to_owned(),
+                        ),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        )]);
+        self.inbox_suggestion_in_flight.insert(key.clone());
+        self.inbox_suggestion_seen.insert(key.clone());
+        let tx = self.inbox_suggestion_tx.clone();
+        let event_wake = self.event_wake_tx.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let result = daemon
+                    .client()
+                    .request(
+                        Uuid::nil(),
+                        session_id,
+                        waku_client::Command::Evaluate {
+                            state,
+                            questions,
+                            feature: Some(INBOX_EVAL_FEATURE.to_owned()),
+                            timeout_secs: None,
+                        },
+                    )
+                    .map_err(|error| format!("{error:#}"))
+                    .and_then(|payload| match payload {
+                        waku_client::ResponsePayload::Evaluation { evaluation } => Ok(evaluation),
+                        _ => Err("the daemon returned an invalid evaluation response".to_owned()),
+                    });
+                if tx.send((session_id, key, result)).is_ok() {
+                    signal_event_pump(&event_wake);
+                }
+            })
+            .detach();
+    }
+
+    /// Land inbox evaluations. A gated candidate claims the chip slot ahead
+    /// of the turn-status row — the notification is the fresher event.
+    pub(super) fn drain_inbox_suggestion_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while let Ok((session_id, key, result)) = self.inbox_suggestion_events.try_recv() {
+            self.inbox_suggestion_in_flight.remove(&key);
+            match result {
+                Ok(evaluation) => {
+                    self.apply_inbox_suggestion(session_id, key, &evaluation, cx);
+                    changed = true;
+                }
+                Err(error) => {
+                    eprintln!("Goddard: inbox suggestion evaluation failed: {error}");
+                }
+            }
+        }
+        changed
+    }
+
+    fn apply_inbox_suggestion(
+        &mut self,
+        session_id: Uuid,
+        key: (String, u64),
+        evaluation: &Evaluation,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(EvalAnswer::Choice {
+            choice,
+            probabilities,
+            ..
+        }) = evaluation.answers.get("suggestion")
+        else {
+            return;
+        };
+        let suggestion = gated_suggestion(choice, probabilities, self.state.move_fast_break_things)
+            .filter(|action| !self.state.disabled_suggested_actions.contains(*action));
+        let prediction_id = Uuid::new_v4();
+        let candidates: Vec<String> = probabilities.keys().cloned().collect();
+        append_jsonl(
+            &prediction_log_path(),
+            &json!({
+                "type": "prediction",
+                "id": prediction_id,
+                "at": unix_time(),
+                "session": session_id,
+                "notification": key.0,
+                "predicted": choice,
+                "probabilities": probabilities,
+                "candidates": candidates,
+            }),
+        );
+        // Only an actionable pick can resolve — `ignore` verdicts log for
+        // calibration but sit out the hit/miss journal.
+        if ACTIONABLE_SUGGESTIONS.contains(&choice.as_str()) {
+            self.pending_action_predictions
+                .push(PendingActionPrediction {
+                    id: prediction_id,
+                    session_id,
+                    predicted: choice.clone(),
+                    candidates,
+                    adopted: false,
+                });
+        }
+        let Some(action) = suggestion else { return };
+        if self.has_preemptive_suggestion(session_id) {
+            return;
+        }
+        self.action_suggestion = Some(ActionSuggestion {
+            prediction_id: Some(prediction_id),
+            session_id,
+            action,
+            base: None,
+            preempts_status: true,
+        });
+        // Auto-run mirrors the settle path, with the thread's timestamp
+        // standing in for the turn's completion time.
+        if !automatic_action_allowed(
+            action,
+            probabilities.get(action).copied().unwrap_or(0.0),
+            &self.state.automatic_suggested_actions,
+        ) || self.state.selected_session != Some(session_id)
+            || self
+                .action_journal
+                .iter()
+                .any(|record| record.session == Some(session_id) && record.at > key.1)
+            || !self.state.sessions.iter().any(|session| {
+                session.id == session_id
+                    && session.status == SessionStatus::Idle
+                    && session.queued_messages.is_empty()
+            })
+        {
+            return;
+        }
+        if let Some(pending) = self
+            .pending_action_predictions
+            .iter_mut()
+            .find(|prediction| prediction.id == prediction_id)
+        {
+            pending.adopted = true;
+        }
+        if let Some(prompt) = suggested_prompt(action, &self.state.suggested_prompts) {
+            self.submit_canned_prompt_to(session_id, action, prompt, cx);
+        }
+    }
+
     /// Record the model's pick as a pending prediction and append the
     /// `prediction` line — candidates and the full distribution included,
     /// so the log can answer both "was the argmax right" and "was the
@@ -765,7 +1090,7 @@ impl Waku {
         };
         // A deterministic follow-up must remain visible if an older Jev
         // request finishes after the Git action that created it.
-        let has_follow_up = self.has_deterministic_follow_up(session_id);
+        let has_follow_up = self.has_preemptive_suggestion(session_id);
         // A new settled turn supersedes the previous prediction even when
         // its prediction is too weak to show a chip.
         if !has_follow_up
@@ -790,6 +1115,7 @@ impl Waku {
                 session_id,
                 action,
                 base: None,
+                preempts_status: false,
             });
         }
         append_jsonl(
@@ -1051,6 +1377,7 @@ impl Waku {
             session_id,
             action,
             base,
+            preempts_status: true,
         });
     }
 
@@ -1062,6 +1389,9 @@ impl Waku {
         self.pending_action_predictions.clear();
         self.pending_action_prediction_turns.clear();
         self.action_prediction_in_flight.clear();
+        self.pending_inbox_suggestions.clear();
+        self.inbox_suggestion_in_flight.clear();
+        self.inbox_suggestion_seen.clear();
         if self
             .action_suggestion
             .as_ref()
@@ -1086,6 +1416,11 @@ impl Waku {
             // prompt the chip sends.
             "implement-plan" => Some(("icons/compass.svg", tr!("suggestions.implement_plan"))),
             "whats-next" => Some(("icons/circle-help.svg", tr!("suggestions.whats_next"))),
+            "address-review" => Some((
+                "icons/git-pull-request-arrow.svg",
+                tr!("suggestions.address_review"),
+            )),
+            "fix-ci" => Some(("icons/wrench.svg", tr!("suggestions.fix_ci"))),
             canned => {
                 let prompt = suggested_prompt(canned, &self.state.suggested_prompts)?;
                 Some(("icons/sparkle.svg", prompt))
@@ -1093,15 +1428,17 @@ impl Waku {
         }
     }
 
-    fn has_deterministic_follow_up(&self, session_id: Uuid) -> bool {
+    fn has_preemptive_suggestion(&self, session_id: Uuid) -> bool {
         self.action_suggestion.as_ref().is_some_and(|suggestion| {
-            suggestion.session_id == session_id && suggestion.prediction_id.is_none()
+            suggestion.session_id == session_id
+                && (suggestion.prediction_id.is_none() || suggestion.preempts_status)
         })
     }
 
     /// Whether the suggestion row renders this frame, mirroring
     /// `render_action_suggestion`'s layering: a deterministic Git follow-up
-    /// claims the slot first. Otherwise, a settled turn's status row claims
+    /// or an inbox-event pick claims the slot first. Otherwise, a settled
+    /// turn's status row claims
     /// it — even an empty entry suppresses the prediction fallback — and the
     /// predicted action chip appears only when no entry does. Floats sharing
     /// the row's slot check this so the two never overlap.
@@ -1109,7 +1446,7 @@ impl Waku {
         let Some(session) = self.composer_session() else {
             return false;
         };
-        if self.has_deterministic_follow_up(session.id) {
+        if self.has_preemptive_suggestion(session.id) {
             return self
                 .action_suggestion
                 .as_ref()
@@ -1139,7 +1476,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let session = self.composer_session()?;
-        if !self.has_deterministic_follow_up(session.id)
+        if !self.has_preemptive_suggestion(session.id)
             && session
                 .turns
                 .last()
@@ -1331,7 +1668,7 @@ impl Waku {
         }
         let has_follow_up = self
             .composer_session()
-            .is_some_and(|session| self.has_deterministic_follow_up(session.id));
+            .is_some_and(|session| self.has_preemptive_suggestion(session.id));
         let displayed = if has_follow_up {
             Some(Displayed::Action)
         } else {

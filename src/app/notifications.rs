@@ -316,6 +316,9 @@ impl Waku {
             } => {
                 self.notifications.availability = Some(GitHubAvailability::Ready);
                 self.notifications.adopt_interval(poll_interval_seconds);
+                for thread in &threads {
+                    self.note_inbox_notification(thread, cx);
+                }
                 self.notifications_banner_new(&threads, cx);
                 self.notifications.threads = threads;
                 if etag.is_some() {
@@ -625,7 +628,7 @@ impl Waku {
 
     /// The session whose pull-request window covers this thread's subject —
     /// the same attribution the sidebar badge uses.
-    fn session_owning_pull_request(
+    pub(super) fn session_owning_pull_request(
         &self,
         thread: &NotificationThread,
     ) -> Option<(Uuid, PullRequestSummary)> {
