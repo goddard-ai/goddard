@@ -1225,6 +1225,10 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                         .bg(theme.raised)
                         .pt(px(9.0))
                         .pb(px(8.0))
+                        // The transcript canvas takes focus on mouse down;
+                        // keep that parent listener from stealing focus back
+                        // from this field, as the find bar does.
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(edit_input)
                         .child(
                             div()
