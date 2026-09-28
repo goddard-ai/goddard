@@ -95,9 +95,9 @@ impl Waku {
     }
 
     /// Send `command` only after a native confirmation names what it
-    /// destroys. The button rows hand over no window, so the prompt rides
-    /// the window handle — a declined answer or a closed window sends
-    /// nothing.
+    /// does. Defer the prompt until the click handler releases the window;
+    /// updating its handle inside that handler fails because it is leased.
+    /// A declined answer or a closed window sends nothing.
     fn friends_confirm_command(
         &mut self,
         message: String,
@@ -106,21 +106,21 @@ impl Waku {
         command: waku_client::Command,
         cx: &mut Context<Self>,
     ) {
-        let Ok(answer) = self.window_handle.update(cx, |_, window, cx| {
-            window.prompt(
-                gpui::PromptLevel::Warning,
-                &message,
-                detail.as_deref(),
-                &[
-                    gpui::PromptButton::cancel(tr!("common.cancel")),
-                    gpui::PromptButton::ok(confirm),
-                ],
-                cx,
-            )
-        }) else {
-            return;
-        };
         cx.spawn(async move |this, cx| {
+            let Ok(answer) = this.update_in(cx, |_, window, cx| {
+                window.prompt(
+                    gpui::PromptLevel::Warning,
+                    &message,
+                    detail.as_deref(),
+                    &[
+                        gpui::PromptButton::cancel(tr!("common.cancel")),
+                        gpui::PromptButton::ok(confirm),
+                    ],
+                    cx,
+                )
+            }) else {
+                return;
+            };
             if answer.await.ok().map(prompt_answer_index) != Some(1) {
                 return;
             }
