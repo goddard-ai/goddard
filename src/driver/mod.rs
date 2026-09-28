@@ -188,6 +188,11 @@ fn connect_remote(
                         remote_events = client.subscribe(session_id, runtime_id);
                     }
                     Ok(waku_client::ResponsePayload::SessionRuntime { .. }) => {
+                        // The runtime is gone, but the daemon answering is
+                        // the live connection — teardown commands that land
+                        // after RuntimeLost (cancel-computer-use, close)
+                        // should reach it rather than retry the dead socket.
+                        *forwarding_client.lock() = replacement;
                         let _ = forwarding_events.send(DriverEvent::RuntimeLost);
                         break;
                     }
@@ -247,7 +252,14 @@ impl RemoteDriverControl {
         let client = self.client.lock().clone();
         match client.notify(self.session_id, self.runtime_id, command.clone()) {
             Ok(()) => {}
-            Err(_) if client.is_disconnected() => self.retry_with_replacement(command),
+            Err(_) if client.is_disconnected() => {
+                // The background-work poll re-issues itself on the next tick
+                // once a replacement client lands — a dropped send has
+                // nothing to wait for and nothing to report.
+                if !matches!(command, waku_client::Command::RefreshBackgroundWork) {
+                    self.retry_with_replacement(command);
+                }
+            }
             Err(error) => {
                 let _ = self.events.send(DriverEvent::Error(format!(
                     "Goddard daemon command failed: {error}"
