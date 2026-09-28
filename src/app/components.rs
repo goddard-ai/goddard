@@ -941,8 +941,94 @@ fn render_work_item_ref_chips(
     row.into_any_element()
 }
 
+fn mcp_startup_failure_server(message: &str) -> Option<&str> {
+    const PREFIX: &str = "MCP client for `";
+    const SUFFIX: &str = "` failed to start: MCP startup failed:";
+
+    let rest = message.get(message.find(PREFIX)? + PREFIX.len()..)?;
+    let end = rest.find(SUFFIX)?;
+    let server = rest.get(..end)?.trim();
+    (!server.is_empty()).then_some(server)
+}
+
+fn render_mcp_startup_warning(
+    server: &str,
+    detail: &str,
+    message_id: impl std::fmt::Display,
+    theme: &Theme,
+) -> AnyElement {
+    let warning = tr!(
+        "transcript.mcp_server_start_failed",
+        name = server.to_owned()
+    );
+    let copy_label = tr!("transcript.copy_diagnostic_details");
+    let copy_detail = detail.to_owned();
+    let keyboard_copy_detail = copy_detail.clone();
+
+    div()
+        .id(SharedString::from(format!(
+            "mcp-startup-warning-{message_id}"
+        )))
+        .w_full()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(10.0))
+        .px(px(10.0))
+        .py(px(8.0))
+        .rounded(px(8.0))
+        .border(hairline())
+        .border_color(theme.warning)
+        .bg(theme.inset)
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .child(warning),
+        )
+        .child(
+            div()
+                .id(SharedString::from(format!("mcp-startup-copy-{message_id}")))
+                .tab_index(0)
+                .flex_none()
+                .px(px(8.0))
+                .h(px(27.0))
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_default()
+                .text_size(sp(11.5))
+                .text_color(theme.text_secondary)
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .hover(|style| style.bg(theme.overlay))
+                .child(icon("icons/copy.svg", 11.0, theme.text_tertiary))
+                .child(copy_label.clone())
+                .aria_label(copy_label)
+                .tooltip(Tooltip::text(tr!("transcript.copy_diagnostic_details")))
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy_detail.clone()));
+                })
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.write_to_clipboard(ClipboardItem::new_string(
+                            keyboard_copy_detail.clone(),
+                        ));
+                        cx.stop_propagation();
+                        window.prevent_default();
+                    }
+                }),
+        )
+        .into_any_element()
+}
+
 fn render_markdown_message_body<'a>(
     content: &str,
+    message_id: impl std::fmt::Display,
     markdown: Option<&'a MarkdownView>,
     theme: &Theme,
     ctx: &MarkdownCtx<'a>,
@@ -952,6 +1038,9 @@ fn render_markdown_message_body<'a>(
     if content.len() <= 32 * 1024 && content.trim_start().starts_with('{') {
         if let Ok(alert) = serde_json::from_str::<DiagnosticAlert<'_>>(content) {
             if alert.kind == "alert" {
+                if let Some(server) = mcp_startup_failure_server(&alert.message) {
+                    return render_mcp_startup_warning(server, &alert.message, message_id, theme);
+                }
                 return md::render::error_box(&alert.message, ctx);
             }
         }
@@ -1208,7 +1297,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 );
             } else {
                 if !content.trim().is_empty() {
-                    let body = render_markdown_message_body(&content, markdown, theme, ctx);
+                    let body =
+                        render_markdown_message_body(&content, &message_id, markdown, theme, ctx);
                     // A table claims no intrinsic width — its columns are
                     // fractions of the container — so without the full row a
                     // short message would shrink-wrap the bubble around its
@@ -1416,7 +1506,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 transfer_notice_row(theme, message_id, notice, transfer_notice.as_ref(), &waku)
             } else {
                 let group_name = SharedString::from(format!("assistant-message-{message_id}"));
-                let body = render_markdown_message_body(&content, markdown, theme, ctx);
+                let body =
+                    render_markdown_message_body(&content, &message_id, markdown, theme, ctx);
                 let mut column = div()
                     .w_full()
                     .min_w_0()

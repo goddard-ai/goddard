@@ -4494,6 +4494,10 @@ transcript.edit_message:
   en: Edit message
 transcript.sent_by_agent:
   en: Sent by agent
+transcript.mcp_server_start_failed:
+  en: "MCP server %{name} failed to start. Its tools may be unavailable in this session."
+transcript.copy_diagnostic_details:
+  en: Copy diagnostic details
 transcript.landed:
   en: Landed on %{base}
 transcript.landed_more:
