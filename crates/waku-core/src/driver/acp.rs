@@ -35,8 +35,8 @@ use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
 use crate::model::{
-    ActivityKind, DriverEvent, PermissionOption, ProviderKind, ProviderModel, ProviderResumeCursor,
-    RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
+    ActivityKind, DriverEvent, PermissionOption, ProviderKind, ProviderModel, ProviderModelOption,
+    ProviderResumeCursor, RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 use waku_protocol::model_catalog::{
     PackedModelSelection, normalize_reasoning_effort, packed_suffix_has, resolve_packed_model,
@@ -1706,6 +1706,19 @@ fn advertised_model_config_id(config_options: &[SessionConfigOption]) -> String 
         .unwrap_or_else(|| "model".to_owned())
 }
 
+/// A session-level effort select living outside the model id — Devin's
+/// `thought_level` ("Thinking"). Never `mode`: Devin's mode option is its
+/// permission mode, not effort.
+fn session_effort_config_option(
+    config_options: &[SessionConfigOption],
+) -> Option<&SessionConfigOption> {
+    config_options.iter().find(|option| {
+        matches!(option.kind, SessionConfigKind::Select(_))
+            && (option.category == Some(SessionConfigOptionCategory::ThoughtLevel)
+                || option.id.to_string().eq_ignore_ascii_case("thought_level"))
+    })
+}
+
 fn models_from_session_config_options(
     config_options: &[SessionConfigOption],
 ) -> Vec<ProviderModel> {
@@ -1729,6 +1742,27 @@ fn models_from_session_config_options(
         && let Some(first) = models.first_mut()
     {
         first.is_default = true;
+    }
+    // Devin splits effort out of the model id into `thought_level` — a
+    // session-level dial — so its ladder attaches to every advertised model.
+    if let Some(effort_option) = session_effort_config_option(config_options) {
+        let ladder: Vec<ProviderModelOption> = session_config_select_entries(effort_option)
+            .into_iter()
+            .map(|(id, _)| {
+                let (label, i18n) =
+                    crate::model_catalog::reasoning_effort_pair(&normalize_reasoning_effort(id));
+                ProviderModelOption::new(id.to_owned(), label).with_label_i18n(i18n)
+            })
+            .collect();
+        let current_effort = session_config_current_value(effort_option).map(str::to_owned);
+        if !ladder.is_empty() {
+            for model in &mut models {
+                model.reasoning_efforts = ladder.clone();
+                if model.default_reasoning_effort.is_none() {
+                    model.default_reasoning_effort = current_effort.clone();
+                }
+            }
+        }
     }
     models
 }
@@ -1780,29 +1814,77 @@ fn devin_default_reasoning_effort(option: &SessionConfigOption, requested: &str)
     })
 }
 
+/// The `thought_level` value a Devin selection asks for: the picker's effort,
+/// else the rung spelled inside a legacy packed id (`swe-2-max`). Efforts the
+/// option does not advertise drop rather than send an invalid value.
+fn devin_thought_level_value(
+    option: &SessionConfigOption,
+    model: &str,
+    reasoning_effort: Option<&str>,
+) -> Option<String> {
+    let effort = reasoning_effort
+        .filter(|effort| !effort.is_empty())
+        .map(normalize_reasoning_effort)
+        .or_else(|| {
+            crate::model_catalog::packed_self_strip(model)
+                .map(|(_, suffix)| normalize_reasoning_effort(suffix))
+        })?;
+    session_config_select_values(option)
+        .into_iter()
+        .find(|value| value.eq_ignore_ascii_case(&effort))
+        .map(str::to_owned)
+}
+
 fn resolve_devin_model(
-    option: Option<&SessionConfigOption>,
+    config_options: &[SessionConfigOption],
     requested: &str,
     reasoning_effort: Option<&str>,
     service_tier: Option<&str>,
     allow_model_fallback: bool,
 ) -> Option<String> {
-    let Some(option) = option else {
+    let Some(option) = advertised_model_option(config_options) else {
         return (!is_devin_auto_model(requested)).then(|| requested.to_owned());
     };
     let values = session_config_select_values(option);
-    let default_effort = if reasoning_effort.is_none() {
-        devin_default_reasoning_effort(option, requested)
-    } else {
-        None
-    };
-    let reasoning_effort = reasoning_effort.or(default_effort.as_deref());
-    for candidate in devin_model_candidates(requested, reasoning_effort, service_tier) {
+    if session_effort_config_option(config_options).is_some() {
+        // New shape: effort rides `thought_level`, so the model id only names
+        // the family. `swe-2` — or a legacy packed id like `swe-2-max` —
+        // resolves to the family's advertised member (`swe-2-high`) and the
+        // effort applies separately.
         if let Some(value) = values
             .iter()
-            .find(|value| value.eq_ignore_ascii_case(&candidate))
+            .find(|value| value.eq_ignore_ascii_case(requested))
         {
             return Some((*value).to_owned());
+        }
+        let base = crate::model_catalog::packed_self_strip(requested)
+            .map(|(base, _)| base)
+            .unwrap_or(requested);
+        let in_family = |value: &&str| {
+            value.eq_ignore_ascii_case(base)
+                || crate::model_catalog::packed_self_strip(*value)
+                    .is_some_and(|(value_base, _)| value_base.eq_ignore_ascii_case(base))
+        };
+        if let Some(current) = session_config_current_value(option).filter(|v| in_family(&v)) {
+            return Some(current.to_owned());
+        }
+        if let Some(value) = values.iter().find(|value| in_family(value)) {
+            return Some((*value).to_owned());
+        }
+    } else {
+        let default_effort = if reasoning_effort.is_none() {
+            devin_default_reasoning_effort(option, requested)
+        } else {
+            None
+        };
+        let reasoning_effort = reasoning_effort.or(default_effort.as_deref());
+        for candidate in devin_model_candidates(requested, reasoning_effort, service_tier) {
+            if let Some(value) = values
+                .iter()
+                .find(|value| value.eq_ignore_ascii_case(&candidate))
+            {
+                return Some((*value).to_owned());
+            }
         }
     }
     // Auto picks — and headless launches that would rather run on the agent's
@@ -1987,33 +2069,60 @@ async fn apply_model(
         let options = config_options.unwrap_or_default();
         let option = advertised_model_option(options);
         if let Some(resolved) = resolve_devin_model(
-            option,
+            options,
             model,
             reasoning_effort,
             service_tier,
             allow_model_fallback,
         ) {
-            if option.and_then(session_config_current_value) == Some(resolved.as_str()) {
-                return;
-            }
-            match connection
-                .send_request(SetSessionConfigOptionRequest::new(
-                    session_id.clone(),
-                    advertised_model_config_id(options),
-                    resolved.as_str(),
-                ))
-                .block_task()
-                .await
-            {
-                Ok(_) => return,
-                Err(error) if is_missing_acp_method(&error) => {}
-                Err(error) => {
-                    let _ = events.send(DriverEvent::localized_error(localized!(
-                        "errors.select_model",
-                        error = error
-                    )));
-                    return;
+            let mut options = options.to_vec();
+            let mut applied =
+                option.and_then(session_config_current_value) == Some(resolved.as_str());
+            if !applied {
+                match connection
+                    .send_request(SetSessionConfigOptionRequest::new(
+                        session_id.clone(),
+                        advertised_model_config_id(&options),
+                        resolved.as_str(),
+                    ))
+                    .block_task()
+                    .await
+                {
+                    Ok(response) => {
+                        applied = true;
+                        options = response.config_options;
+                    }
+                    Err(error) if is_missing_acp_method(&error) => {}
+                    Err(error) => {
+                        let _ = events.send(DriverEvent::localized_error(localized!(
+                            "errors.select_model",
+                            error = error
+                        )));
+                        return;
+                    }
                 }
+            }
+            if applied {
+                // Effort is a session-level `thought_level` select when the
+                // agent advertises one — applied after the model set against
+                // the refreshed option list, and deliberately non-fatal like
+                // every other provider's effort write.
+                let refreshed: &[SessionConfigOption] = &options;
+                if let Some(effort_option) = session_effort_config_option(refreshed)
+                    && let Some(effort) =
+                        devin_thought_level_value(effort_option, model, reasoning_effort)
+                    && session_config_current_value(effort_option) != Some(effort.as_str())
+                {
+                    let _ = connection
+                        .send_request(SetSessionConfigOptionRequest::new(
+                            session_id.clone(),
+                            effort_option.id.clone(),
+                            effort.as_str(),
+                        ))
+                        .block_task()
+                        .await;
+                }
+                return;
             }
         } else {
             if option.is_some() && !is_devin_auto_model(model) && !allow_model_fallback {
@@ -3509,53 +3618,160 @@ mod tests {
             &["swe-1-6-slow", "swe-1-6"],
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "adaptive", None, None, false).as_deref(),
+            resolve_devin_model(&[option.clone()], "adaptive", None, None, false).as_deref(),
             Some("swe-1-6-slow")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-1-6", None, None, false).as_deref(),
+            resolve_devin_model(&[option.clone()], "swe-1-6", None, None, false).as_deref(),
             Some("swe-1-6")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "opus", None, None, false),
+            resolve_devin_model(&[option], "opus", None, None, false),
             None
         );
         assert_eq!(
-            resolve_devin_model(None, "adaptive", None, None, false),
+            resolve_devin_model(&[], "adaptive", None, None, false),
             None
         );
         assert_eq!(
-            resolve_devin_model(None, "swe-1-6-slow", None, None, false).as_deref(),
+            resolve_devin_model(&[], "swe-1-6-slow", None, None, false).as_deref(),
             Some("swe-1-6-slow")
         );
     }
 
     #[test]
-    fn devin_repacks_picker_effort_and_fast_tier_into_the_model_id() {
+    fn devin_packs_effort_into_the_model_id_without_a_thought_level_option() {
         let option = select_config_option(
             "model",
             SessionConfigOptionCategory::Model,
             "swe-2-medium",
             &["swe-2-medium", "swe-2-high", "swe-2-high-fast", "swe-2-max"],
         );
+        let options = [option];
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("high"), None, false).as_deref(),
+            resolve_devin_model(&options, "swe-2", Some("high"), None, false).as_deref(),
             Some("swe-2-high")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("high"), Some("fast"), false)
-                .as_deref(),
+            resolve_devin_model(&options, "swe-2", Some("high"), Some("fast"), false).as_deref(),
             Some("swe-2-high-fast")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("xhigh"), Some("fast"), false),
+            resolve_devin_model(&options, "swe-2", Some("xhigh"), Some("fast"), false),
             None
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("medium"), Some("fast"), false)
-                .as_deref(),
+            resolve_devin_model(&options, "swe-2", Some("medium"), Some("fast"), false).as_deref(),
             Some("swe-2-medium")
         );
+    }
+
+    #[test]
+    fn devin_thought_level_resolves_the_family_and_keeps_effort_separate() {
+        // Devin 3000.11+ advertises one model per family and a session-level
+        // `thought_level` select for effort — no packed rungs to repack.
+        let model = select_config_option(
+            "model",
+            SessionConfigOptionCategory::Model,
+            "swe-2-high",
+            &["swe-2-high", "swe-1-7-medium", "swe-1-6", "swe-1-6-fast"],
+        );
+        let thinking = select_config_option(
+            "thought_level",
+            SessionConfigOptionCategory::ThoughtLevel,
+            "high",
+            &["medium", "high", "max"],
+        );
+        let options = [model, thinking];
+        // The bare base lands on the family's advertised member — the current
+        // value when it is one — whatever effort the picker carries.
+        for effort in [None, Some("medium"), Some("max")] {
+            assert_eq!(
+                resolve_devin_model(&options, "swe-2", effort, None, false).as_deref(),
+                Some("swe-2-high")
+            );
+        }
+        // A legacy packed id resolves family-wise too, and its suffix still
+        // contributes the thought_level pick.
+        assert_eq!(
+            resolve_devin_model(&options, "swe-2-max", None, None, false).as_deref(),
+            Some("swe-2-high")
+        );
+        assert_eq!(
+            devin_thought_level_value(&options[1], "swe-2-max", None).as_deref(),
+            Some("max")
+        );
+        assert_eq!(
+            devin_thought_level_value(&options[1], "swe-2", Some("medium")).as_deref(),
+            Some("medium")
+        );
+        // A rung the option does not advertise drops rather than writes junk.
+        assert_eq!(
+            devin_thought_level_value(&options[1], "swe-2", Some("xhigh")),
+            None
+        );
+        // Unpacked ids still match exactly, including the fast variant.
+        assert_eq!(
+            resolve_devin_model(&options, "swe-1-6-fast", None, None, false).as_deref(),
+            Some("swe-1-6-fast")
+        );
+        assert_eq!(
+            devin_thought_level_value(&options[1], "swe-1-6-fast", None),
+            None
+        );
+        // An unknown family falls back like before for auto/headless callers.
+        assert_eq!(
+            resolve_devin_model(&options, "swe-9", None, None, false),
+            None
+        );
+        assert_eq!(
+            resolve_devin_model(&options, "swe-9", None, None, true).as_deref(),
+            Some("swe-2-high")
+        );
+    }
+
+    #[test]
+    fn devin_thought_level_ladder_attaches_to_every_advertised_model() {
+        let model = select_config_option(
+            "model",
+            SessionConfigOptionCategory::Model,
+            "swe-2-high",
+            &["swe-2-high", "swe-1-6", "swe-1-6-fast"],
+        );
+        let thinking = select_config_option(
+            "thought_level",
+            SessionConfigOptionCategory::ThoughtLevel,
+            "high",
+            &["medium", "high", "max"],
+        );
+        let models = models_from_session_config_options(&[model, thinking]);
+        assert_eq!(models.len(), 3);
+        for model in &models {
+            assert_eq!(
+                model
+                    .reasoning_efforts
+                    .iter()
+                    .map(|option| option.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["medium", "high", "max"]
+            );
+            assert_eq!(model.default_reasoning_effort.as_deref(), Some("high"));
+        }
+        // The permission-mode option is never an effort ladder.
+        let model = select_config_option(
+            "model",
+            SessionConfigOptionCategory::Model,
+            "swe-2-high",
+            &["swe-2-high"],
+        );
+        let mode = select_config_option(
+            "mode",
+            SessionConfigOptionCategory::Mode,
+            "smart",
+            &["smart", "plan"],
+        );
+        let models = models_from_session_config_options(&[model, mode]);
+        assert!(models[0].reasoning_efforts.is_empty());
     }
 
     #[test]
@@ -3566,20 +3782,21 @@ mod tests {
             "swe-2-medium",
             &["swe-2-medium", "swe-2-high", "swe-2-high-fast", "swe-2-max"],
         );
+        let options = [option];
         // A session with no saved effort resolves the folded ladder's default
         // rung — high, else medium — instead of failing on the bare base id.
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", None, None, false).as_deref(),
+            resolve_devin_model(&options, "swe-2", None, None, false).as_deref(),
             Some("swe-2-high")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", None, Some("fast"), false).as_deref(),
+            resolve_devin_model(&options, "swe-2", None, Some("fast"), false).as_deref(),
             Some("swe-2-high-fast")
         );
         // A base the provider never advertised still misses rather than
         // guessing a rung.
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-9", None, None, false),
+            resolve_devin_model(&options, "swe-9", None, None, false),
             None
         );
     }
@@ -3592,21 +3809,22 @@ mod tests {
             "swe-2-medium",
             &["swe-2-medium", "swe-2-high", "swe-2-high-fast", "swe-2-max"],
         );
+        let options = [option];
         // Memory distillation replays the session's folded base id plus its
         // stored traits, so the repack still lands on an advertised packed id.
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("high"), None, true).as_deref(),
+            resolve_devin_model(&options, "swe-2", Some("high"), None, true).as_deref(),
             Some("swe-2-high")
         );
         // When even the repack misses — a stored trait the provider dropped —
         // the fallback resolves the advertised current model instead of
         // failing the headless launch outright.
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-2", Some("xhigh"), None, true).as_deref(),
+            resolve_devin_model(&options, "swe-2", Some("xhigh"), None, true).as_deref(),
             Some("swe-2-medium")
         );
         assert_eq!(
-            resolve_devin_model(Some(&option), "swe-9", None, None, true).as_deref(),
+            resolve_devin_model(&options, "swe-9", None, None, true).as_deref(),
             Some("swe-2-medium")
         );
     }

@@ -837,7 +837,7 @@ fn packed_suffix_traits(suffix: &str) -> Option<(Option<String>, bool)> {
 
 /// Strip the trailing trait words off a slug that has no listed base —
 /// `swe-2-high-fast` gives base `swe-2` and suffix `high-fast`.
-fn packed_self_strip(id: &str) -> Option<(&str, &str)> {
+pub(crate) fn packed_self_strip(id: &str) -> Option<(&str, &str)> {
     let mut cut = id.len();
     while let Some(before) = id[..cut].rfind('-') {
         let token = &id[before + 1..cut];
@@ -2438,7 +2438,9 @@ fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
         .collect()
 }
 
-fn reasoning_effort_pair(effort: &str) -> (String, Option<waku_protocol::WireTranslation>) {
+pub(crate) fn reasoning_effort_pair(
+    effort: &str,
+) -> (String, Option<waku_protocol::WireTranslation>) {
     let pair = match effort {
         "none" => localized!("model_option.none"),
         "minimal" => localized!("model_option.minimal"),

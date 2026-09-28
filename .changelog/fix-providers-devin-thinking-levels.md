@@ -1,0 +1,1 @@
+- SWE-2 Medium and SWE-2 Max are back in the Devin model picker, including the Jev routing class maps — Devin moved thinking level out of the model name into a session option, which had left only SWE-2 High listed.
