@@ -178,8 +178,13 @@ pub(super) fn next_unread_completion(
                     && session.queued_messages.is_empty()
                     && starred_tier
                         .is_none_or(|(starred, want)| starred.contains(&session.project_id) == want)
+                    // Intermediate turns in an active goal are not final unread
+                    // completions. Explicit user-input waits still take priority.
                     && (session.status == SessionStatus::Waiting
-                        || unseen_completions.contains_key(&session_id))
+                        || (unseen_completions.contains_key(&session_id)
+                            && !session.thread_goal.as_ref().is_some_and(|goal| {
+                                goal.status == crate::model::ThreadGoalStatus::Active
+                            })))
             })
     })
 }
