@@ -855,8 +855,9 @@ pub fn fetch_muse_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
             provider = "Muse Code"
         )));
     }
-    Ok(Some(parse_muse_plan_usage(&body)
-        .ok_or_else(|| anyhow!(keyed!("usage_error.no_rate_limit_windows")))?))
+    Ok(Some(parse_muse_plan_usage(&body).ok_or_else(|| {
+        anyhow!(keyed!("usage_error.no_rate_limit_windows"))
+    })?))
 }
 
 /// The login writes `~/.config/muse/auth.json` whose `providers.meta` entry
@@ -969,7 +970,10 @@ pub fn fetch_droid_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
                 status = status
             )));
         }
-        return Err(anyhow!(keyed!("usage_error.no_plan_usage", provider = "Droid")));
+        return Err(anyhow!(keyed!(
+            "usage_error.no_plan_usage",
+            provider = "Droid"
+        )));
     }
     let plan_label = auth_body.as_ref().and_then(factory_plan_label);
 
@@ -978,7 +982,10 @@ pub fn fetch_droid_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
     let now = unix_time() as i64;
     if let Ok((200, body)) = http_get(&format!("{FACTORY_API_BASE}/api/billing/limits"), &headers)
         && let Ok(body) = serde_json::from_str::<Value>(&body)
-        && body.get("usesTokenRateLimitsBilling").and_then(Value::as_bool) == Some(true)
+        && body
+            .get("usesTokenRateLimitsBilling")
+            .and_then(Value::as_bool)
+            == Some(true)
     {
         let windows = factory_rate_limit_windows(body.get("limits"), now);
         if !windows.is_empty() {
@@ -1009,7 +1016,10 @@ pub fn fetch_droid_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
     let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
     let windows = factory_subscription_windows(&body);
     if windows.is_empty() && plan_label.is_none() {
-        return Err(anyhow!(keyed!("usage_error.no_plan_usage", provider = "Droid")));
+        return Err(anyhow!(keyed!(
+            "usage_error.no_plan_usage",
+            provider = "Droid"
+        )));
     }
     Ok(Some(PlanUsage {
         plan_label,
@@ -1045,14 +1055,12 @@ fn factory_plan_label(auth: &Value) -> Option<String> {
         .get("organization")
         .and_then(|org| org.get("subscription"))
         .and_then(|sub| {
-            sub.get("factoryTier")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    sub.get("orbSubscription")
-                        .and_then(|orb| orb.get("plan"))
-                        .and_then(|plan| plan.get("name"))
-                        .and_then(Value::as_str)
-                })
+            sub.get("factoryTier").and_then(Value::as_str).or_else(|| {
+                sub.get("orbSubscription")
+                    .and_then(|orb| orb.get("plan"))
+                    .and_then(|plan| plan.get("name"))
+                    .and_then(Value::as_str)
+            })
         })
         .map(str::trim)
         .filter(|tier| !tier.is_empty());
@@ -1063,7 +1071,9 @@ fn factory_plan_label(auth: &Value) -> Option<String> {
 /// (`secondsRemaining`) or an absolute `windowEnd`. A window that already
 /// ended but lost its countdown reads 0 rather than its stale percent.
 fn factory_rate_limit_windows(limits: Option<&Value>, now: i64) -> Vec<PlanWindow> {
-    let Some(limits) = limits else { return Vec::new() };
+    let Some(limits) = limits else {
+        return Vec::new();
+    };
     let mut windows = Vec::new();
     for (pool, scope) in [("standard", None), ("core", Some("Core"))] {
         let Some(entries) = limits.get(pool).and_then(Value::as_object) else {
@@ -1074,7 +1084,9 @@ fn factory_rate_limit_windows(limits: Option<&Value>, now: i64) -> Vec<PlanWindo
             ("weekly", Some(7 * 24 * 60)),
             ("monthly", None),
         ] {
-            let Some(window) = entries.get(key) else { continue };
+            let Some(window) = entries.get(key) else {
+                continue;
+            };
             let Some(used_percent) = json_number(window.get("usedPercent")) else {
                 continue;
             };
@@ -1297,7 +1309,10 @@ fn fetch_kimi_web_usage(web: &str, token: &str) -> anyhow::Result<PlanUsage> {
         .flatten()
     });
     if windows.is_empty() && plan_label.is_none() {
-        return Err(anyhow!(keyed!("usage_error.no_plan_usage", provider = "Kimi Code")));
+        return Err(anyhow!(keyed!(
+            "usage_error.no_plan_usage",
+            provider = "Kimi Code"
+        )));
     }
     Ok(PlanUsage {
         plan_label,
@@ -1328,7 +1343,10 @@ fn kimi_web_windows(body: &Value) -> Vec<PlanWindow> {
         }
         // Only the first `limits` entry is the session rate lane — later
         // entries describe other quota scopes.
-        if let Some(limit) = usage.get("limits").and_then(Value::as_array).and_then(|l| l.first())
+        if let Some(limit) = usage
+            .get("limits")
+            .and_then(Value::as_array)
+            .and_then(|l| l.first())
             && let Some(percent) = limit.get("detail").and_then(kimi_detail_percent)
         {
             let (label, label_i18n) =
@@ -1425,7 +1443,10 @@ fn fetch_kimi_code_usage(key: &str) -> anyhow::Result<Option<PlanUsage>> {
             });
         }
     }
-    if let Some(limit) = body.get("limits").and_then(Value::as_array).and_then(|l| l.first())
+    if let Some(limit) = body
+        .get("limits")
+        .and_then(Value::as_array)
+        .and_then(|l| l.first())
         && let Some(percent) = limit.get("detail").and_then(kimi_detail_percent)
     {
         let (label, label_i18n) =
@@ -1556,7 +1577,10 @@ pub fn fetch_cursor_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
     }
     match plan {
         Some(plan) if !plan.windows.is_empty() || plan.plan_label.is_some() => Ok(Some(plan)),
-        _ => Err(anyhow!(keyed!("usage_error.no_plan_usage", provider = "Cursor"))),
+        _ => Err(anyhow!(keyed!(
+            "usage_error.no_plan_usage",
+            provider = "Cursor"
+        ))),
     }
 }
 
@@ -1570,7 +1594,10 @@ fn cursor_session_token() -> anyhow::Result<Option<(String, String)>> {
     let connection =
         rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|_| {
-                anyhow!(keyed!("usage_error.read_file", path = db.display().to_string()))
+                anyhow!(keyed!(
+                    "usage_error.read_file",
+                    path = db.display().to_string()
+                ))
             })?;
     let _ = connection.busy_timeout(Duration::from_millis(250));
     let token: Option<String> = connection
@@ -1644,7 +1671,11 @@ fn cursor_decode_token_bytes(bytes: &[u8]) -> String {
             .map(|pair| u16::from_le_bytes(*pair))
             .map(|unit| char::from_u32(u32::from(unit)).unwrap_or(' '))
             .collect();
-        if decoded.trim_start_matches('\u{feff}').trim().starts_with("ey") {
+        if decoded
+            .trim_start_matches('\u{feff}')
+            .trim()
+            .starts_with("ey")
+        {
             return decoded;
         }
     }
@@ -1673,7 +1704,10 @@ fn parse_cursor_plan_usage(body: &Value) -> Option<PlanUsage> {
     if let Some(individual) = body.get("individualUsage") {
         if let Some(plan) = individual.get("plan") {
             let percent = json_number(plan.get("totalPercentUsed")).or_else(|| {
-                match (json_number(plan.get("used")), json_number(plan.get("limit"))) {
+                match (
+                    json_number(plan.get("used")),
+                    json_number(plan.get("limit")),
+                ) {
                     (Some(used), Some(limit)) if limit > 0.0 => Some(used / limit * 100.0),
                     _ => None,
                 }
@@ -1716,9 +1750,7 @@ fn parse_cursor_plan_usage(body: &Value) -> Option<PlanUsage> {
     {
         windows.push(PlanWindow {
             label: tr!("usage.scoped_limit", period = "Monthly", name = "Team"),
-            label_i18n: Some(
-                localized!("usage.scoped_limit", period = "Monthly", name = "Team").1,
-            ),
+            label_i18n: Some(localized!("usage.scoped_limit", period = "Monthly", name = "Team").1),
             percent: (used / limit * 100.0).clamp(0.0, 100.0),
             resets_at,
         });
@@ -1752,12 +1784,12 @@ fn cursor_legacy_windows(body: &Value) -> Option<PlanUsage> {
     };
     // The gpt-4 entry is the contract; other request-quota entries only make
     // up the lane when it is absent.
-    let percent = body
-        .get("gpt-4")
-        .and_then(entry_percent)
-        .or_else(|| {
-            body.as_object()?.values().filter_map(entry_percent).reduce(f64::max)
-        })?;
+    let percent = body.get("gpt-4").and_then(entry_percent).or_else(|| {
+        body.as_object()?
+            .values()
+            .filter_map(entry_percent)
+            .reduce(f64::max)
+    })?;
     Some(PlanUsage {
         plan_label: None,
         windows: vec![PlanWindow {
@@ -1813,7 +1845,8 @@ pub fn fetch_amp_plan_usage(binary: Option<&std::path::Path>) -> anyhow::Result<
             429 => return Err(anyhow!(keyed!("usage_error.rate_limited"))),
             other => return Err(usage_http_error(other, &body)),
         }
-        let body: Value = serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
+        let body: Value =
+            serde_json::from_str(&body).context(keyed!("usage_error.invalid_json"))?;
         if body.get("ok").and_then(Value::as_bool) == Some(false) {
             if body.pointer("/error/code").and_then(Value::as_str) == Some("auth-required") {
                 return Err(anyhow!(keyed!(
@@ -1836,7 +1869,9 @@ pub fn fetch_amp_plan_usage(binary: Option<&std::path::Path>) -> anyhow::Result<
             .map(str::to_owned)
             .ok_or_else(|| anyhow!(keyed!("usage_error.no_plan_usage", provider = "Amp")))?
     } else {
-        let Some(binary) = binary else { return Ok(None) };
+        let Some(binary) = binary else {
+            return Ok(None);
+        };
         amp_usage_probe(binary)?
     };
     parse_amp_plan_usage(&text)
@@ -1854,9 +1889,11 @@ fn amp_usage_probe(binary: &std::path::Path) -> anyhow::Result<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn_bounded()
-        .context(keyed!("usage_error.probe_failed", provider = "Amp", error = "spawn"))?;
+    let mut child = command.spawn_bounded().context(keyed!(
+        "usage_error.probe_failed",
+        provider = "Amp",
+        error = "spawn"
+    ))?;
     // `amp usage` prints a handful of lines; the pipe never fills before exit.
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -1893,7 +1930,10 @@ fn amp_usage_probe(binary: &std::path::Path) -> anyhow::Result<String> {
         return Ok(text);
     }
     if text.to_lowercase().contains("sign in") || text.to_lowercase().contains("log in") {
-        return Err(anyhow!(keyed!("usage_error.signin_required", provider = "Amp")));
+        return Err(anyhow!(keyed!(
+            "usage_error.signin_required",
+            provider = "Amp"
+        )));
     }
     Err(anyhow!(keyed!(
         "usage_error.probe_failed",
@@ -1911,9 +1951,7 @@ fn amp_amounts(line: &str) -> Vec<f64> {
         if bytes[index].is_ascii_digit() {
             let start = index;
             while index < bytes.len()
-                && (bytes[index].is_ascii_digit()
-                    || bytes[index] == b','
-                    || bytes[index] == b'.')
+                && (bytes[index].is_ascii_digit() || bytes[index] == b',' || bytes[index] == b'.')
             {
                 index += 1;
             }
@@ -1963,13 +2001,12 @@ fn parse_amp_plan_usage(text: &str) -> Option<PlanUsage> {
                     .nth(1)
                     .and_then(|tail| amp_amounts(tail).first().copied())
                     .filter(|rate| *rate > 0.0);
-                let window_minutes = replenish_rate
-                    .map(|rate| (amounts[1] / rate * 60.0).round() as i64);
+                let window_minutes =
+                    replenish_rate.map(|rate| (amounts[1] / rate * 60.0).round() as i64);
                 // The drip refills at `rate`/hour, so a full pool lands
                 // `used / rate` hours out.
                 let resets_at = replenish_rate.map(|rate| {
-                    unix_time() as i64
-                        + ((amounts[1] - amounts[0]) / rate * 3600.0).round() as i64
+                    unix_time() as i64 + ((amounts[1] - amounts[0]) / rate * 3600.0).round() as i64
                 });
                 let (label, label_i18n) = window_label_from_minutes(window_minutes);
                 windows.push(PlanWindow {
@@ -2072,9 +2109,12 @@ fn amp_daily_reset() -> Option<i64> {
 /// months stay calendar months so the lane matches the billing anchor.
 fn amp_renewal_reset(line: &str) -> Option<i64> {
     let tail = line.split("renewal in").nth(1)?;
-    let count = tail
-        .split_whitespace()
-        .find_map(|word| word.trim_end_matches(',').replace(',', "").parse::<u32>().ok())?;
+    let count = tail.split_whitespace().find_map(|word| {
+        word.trim_end_matches(',')
+            .replace(',', "")
+            .parse::<u32>()
+            .ok()
+    })?;
     let unit = tail
         .split_whitespace()
         .find(|word| word.starts_with("day") || word.starts_with("month"))?;
@@ -2130,7 +2170,9 @@ fn json_number(value: Option<&Value>) -> Option<f64> {
 
 fn json_i64(value: Option<&Value>) -> Option<i64> {
     match value? {
-        Value::Number(number) => number.as_i64().or_else(|| number.as_f64().map(|n| n as i64)),
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_f64().map(|n| n as i64)),
         Value::String(text) => text.trim().parse::<f64>().ok().map(|n| n as i64),
         _ => None,
     }
@@ -2474,9 +2516,18 @@ fn parse_plan_usage(body: &Value, credentials: &OauthCredentials) -> PlanUsage {
     {
         // Prepaid overage credit: a monthly spend lane beside the quota rows.
         windows.push(PlanWindow {
-            label: tr!("usage.scoped_limit", period = "Monthly", name = "Extra usage"),
+            label: tr!(
+                "usage.scoped_limit",
+                period = "Monthly",
+                name = "Extra usage"
+            ),
             label_i18n: Some(
-                localized!("usage.scoped_limit", period = "Monthly", name = "Extra usage").1,
+                localized!(
+                    "usage.scoped_limit",
+                    period = "Monthly",
+                    name = "Extra usage"
+                )
+                .1,
             ),
             percent: percent.clamp(0.0, 100.0),
             resets_at: parse_reset(extra.get("resets_at")),
@@ -2556,7 +2607,10 @@ fn flat_field_windows(body: &Value) -> Vec<PlanWindow> {
             "seven_day_opus" => localized!("usage.weekly_model", model = "Opus"),
             "seven_day_sonnet" => localized!("usage.weekly_model", model = "Sonnet"),
             "seven_day_oauth_apps" => localized!("usage.weekly_model", model = "OAuth apps"),
-            "seven_day_routines" | "seven_day_claude_routines" | "claude_routines" | "routines"
+            "seven_day_routines"
+            | "seven_day_claude_routines"
+            | "claude_routines"
+            | "routines"
             | "routine" => localized!("usage.weekly_model", model = "Routines"),
             "seven_day_cowork" | "cowork" => localized!("usage.weekly_model", model = "Cowork"),
             _ => return None,
@@ -2938,8 +2992,7 @@ mod tests {
         // Connect RPC failures are flat {"code","message"} — the
         // {"error":{"message"}} nesting is an OpenCode/Anthropic shape.
         assert_eq!(
-            usage_error_detail(r#"{"code":"internal","message":"quota backend down"}"#)
-                .as_deref(),
+            usage_error_detail(r#"{"code":"internal","message":"quota backend down"}"#).as_deref(),
             Some("quota backend down")
         );
         assert_eq!(
@@ -2951,9 +3004,11 @@ mod tests {
             usage_error_detail(&long).map(|message| message.chars().count()),
             Some(200)
         );
-        assert!(usage_http_error(500, r#"{"message":"backend down"}"#)
-            .to_string()
-            .contains("backend down"));
+        assert!(
+            usage_http_error(500, r#"{"message":"backend down"}"#)
+                .to_string()
+                .contains("backend down")
+        );
         assert!(!usage_http_error(500, "not json").to_string().contains(':'),);
     }
 
@@ -3177,7 +3232,10 @@ mod tests {
                 .iter()
                 .map(|window| (window.label.as_str(), window.percent))
                 .collect::<Vec<_>>(),
-            [("Monthly · Premium requests", 80.0), ("Monthly · Chat", 75.0)]
+            [
+                ("Monthly · Premium requests", 80.0),
+                ("Monthly · Chat", 75.0)
+            ]
         );
     }
 
@@ -3230,7 +3288,10 @@ mod tests {
                 "resets_at": 99999999999999}}}"#,
         )
         .unwrap();
-        assert_eq!(parse_muse_plan_usage(&body).unwrap().windows[0].resets_at, None);
+        assert_eq!(
+            parse_muse_plan_usage(&body).unwrap().windows[0].resets_at,
+            None
+        );
     }
 
     #[test]
@@ -3320,7 +3381,10 @@ mod tests {
         );
         let limit = body.get("limits").unwrap().as_array().unwrap()[0].clone();
         assert_eq!(kimi_window_minutes(limit.get("window")), Some(30));
-        assert_eq!(kimi_detail_percent(limit.get("detail").unwrap()), Some(25.0));
+        assert_eq!(
+            kimi_detail_percent(limit.get("detail").unwrap()),
+            Some(25.0)
+        );
     }
 
     #[test]
@@ -3348,7 +3412,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             [("Weekly limit", 25.0), ("5-hour limit", 20.0)]
         );
-        assert!(windows.iter().all(|w| w.resets_at.is_some() || w.label == "5-hour limit"));
+        assert!(
+            windows
+                .iter()
+                .all(|w| w.resets_at.is_some() || w.label == "5-hour limit")
+        );
     }
 
     #[test]
@@ -3399,8 +3467,14 @@ mod tests {
             .encode(br#"{"sub":"auth0|user_123","exp":1893456000}"#);
         let token = format!("eyJhbGciOiJub25lIn0.{payload}.sig");
         let claims = cursor_jwt_claims(&token).unwrap();
-        assert_eq!(claims.get("sub").and_then(Value::as_str), Some("auth0|user_123"));
-        assert_eq!(claims.get("exp").and_then(Value::as_i64), Some(1_893_456_000));
+        assert_eq!(
+            claims.get("sub").and_then(Value::as_str),
+            Some("auth0|user_123")
+        );
+        assert_eq!(
+            claims.get("exp").and_then(Value::as_i64),
+            Some(1_893_456_000)
+        );
         assert!(cursor_jwt_claims("not-a-jwt").is_none());
     }
 
@@ -3445,7 +3519,10 @@ mod tests {
 
     #[test]
     fn flexible_timestamp_accepts_seconds_millis_and_iso() {
-        assert_eq!(flexible_timestamp(Some(&serde_json::json!(1_800_000_000))), Some(1_800_000_000));
+        assert_eq!(
+            flexible_timestamp(Some(&serde_json::json!(1_800_000_000))),
+            Some(1_800_000_000)
+        );
         assert_eq!(
             flexible_timestamp(Some(&serde_json::json!(1_800_000_000_000i64))),
             Some(1_800_000_000)

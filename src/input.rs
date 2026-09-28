@@ -2447,9 +2447,7 @@ impl TextInput {
         }
         let prefix = &line[..quote.body_start];
         let bare = prefix.trim_end();
-        let mut out = String::with_capacity(
-            text.len() + text.matches('\n').count() * prefix.len(),
-        );
+        let mut out = String::with_capacity(text.len() + text.matches('\n').count() * prefix.len());
         for (index, segment) in text.split('\n').enumerate() {
             if index > 0 {
                 out.push('\n');
@@ -4875,7 +4873,11 @@ mod tests {
         });
     }
 
-    fn paste_clipboard(composer: &Entity<ComposerInput>, cx: &mut gpui::VisualTestContext, text: &str) {
+    fn paste_clipboard(
+        composer: &Entity<ComposerInput>,
+        cx: &mut gpui::VisualTestContext,
+        text: &str,
+    ) {
         cx.update(|_, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
         });
@@ -4966,9 +4968,7 @@ mod tests {
             input.update(cx, |input, cx| input.select_range(2..2, cx));
         });
 
-        cx.update(|window, cx| {
-            input.update(cx, |input, cx| input.paste(&Paste, window, cx))
-        });
+        cx.update(|window, cx| input.update(cx, |input, cx| input.paste(&Paste, window, cx)));
 
         cx.read_entity(&input, |input, _| {
             assert_eq!(input.content(), "> one\ntwo");

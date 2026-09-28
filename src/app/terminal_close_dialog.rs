@@ -186,7 +186,10 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .child(motion::scrim_enter("terminal-close-dialog-layer-enter", scrim))
+            .child(motion::scrim_enter(
+                "terminal-close-dialog-layer-enter",
+                scrim,
+            ))
             .p(px(24.0))
             .flex()
             .items_center()

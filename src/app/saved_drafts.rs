@@ -506,8 +506,7 @@ impl Waku {
                 // project's drafts die with their row.
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             ComposerDraftTarget::NewSession { .. } => {
-                let name = project_name()
-                    .unwrap_or_else(|| tr!("project.no_project_name"));
+                let name = project_name().unwrap_or_else(|| tr!("project.no_project_name"));
                 tr!("drafts.new_task_in", project = name)
             }
         }

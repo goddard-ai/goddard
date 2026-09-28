@@ -1666,9 +1666,7 @@ fn timed_git_input_output(
         None => match input {
             None => command.output().context("failed to execute git")?,
             Some(input) => {
-                let mut child = command
-                    .spawn_bounded()
-                    .context("failed to execute git")?;
+                let mut child = command.spawn_bounded().context("failed to execute git")?;
                 child
                     .stdin()
                     .ok_or_else(|| anyhow!("git stdin is unavailable"))?

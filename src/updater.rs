@@ -1059,7 +1059,8 @@ mod windows {
     #[cfg(target_arch = "aarch64")]
     const FEED_URL: &str = "https://github.com/goddard-ai/goddard/releases/latest/download/appcast-windows-aarch64.xml";
     #[cfg(not(target_arch = "aarch64"))]
-    const FEED_URL: &str = "https://github.com/goddard-ai/goddard/releases/latest/download/appcast-windows-x86_64.xml";
+    const FEED_URL: &str =
+        "https://github.com/goddard-ai/goddard/releases/latest/download/appcast-windows-x86_64.xml";
 
     /// Read out of `resources/Info.plist` by the build script, so macOS and
     /// Windows cannot end up trusting different keys.

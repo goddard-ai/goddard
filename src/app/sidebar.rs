@@ -119,9 +119,7 @@ impl SidebarGroup {
             PersistedSidebarGroup::Terminals => Self::Terminals,
             PersistedSidebarGroup::Dormant => Self::Dormant,
             PersistedSidebarGroup::Planning => Self::Planning,
-            PersistedSidebarGroup::Date(index) => {
-                Self::Date(*SessionDateGroup::ALL.get(index)?)
-            }
+            PersistedSidebarGroup::Date(index) => Self::Date(*SessionDateGroup::ALL.get(index)?),
             PersistedSidebarGroup::Project(project_id) => Self::Project(project_id),
             PersistedSidebarGroup::Projectless => Self::Projectless,
         })

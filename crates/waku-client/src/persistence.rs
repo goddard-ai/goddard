@@ -4882,8 +4882,7 @@ mod tests {
     fn collapsed_sidebar_groups_default_only_when_absent() {
         // A state file written before the field existed restores the
         // launch set.
-        let app_state: AppState =
-            serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
+        let app_state: AppState = serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
         assert_eq!(
             app_state.sidebar_collapsed_groups,
             default_sidebar_collapsed_groups()

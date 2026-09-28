@@ -3285,7 +3285,9 @@ impl Waku {
                 && let Some(underneath) = self.navigation_location()
                 && self.session_navigation.back_target() == Some(underneath)
             {
-                let _ = self.session_navigation.go_back(NavigationLocation::Settings);
+                let _ = self
+                    .session_navigation
+                    .go_back(NavigationLocation::Settings);
                 self.settings_navigation.leave(departed);
             }
             let focus_handle = self.composer_focus(cx);

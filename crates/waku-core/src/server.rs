@@ -68,8 +68,7 @@ struct RequestPoolStats {
 static REQUEST_POOLS: OnceLock<Mutex<HashMap<String, (RequestPoolStats, Sender<IndependentJob>)>>> =
     OnceLock::new();
 
-fn request_pools(
-) -> &'static Mutex<HashMap<String, (RequestPoolStats, Sender<IndependentJob>)>> {
+fn request_pools() -> &'static Mutex<HashMap<String, (RequestPoolStats, Sender<IndependentJob>)>> {
     REQUEST_POOLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 

@@ -145,11 +145,7 @@ impl Waku {
                         };
                         self.background_executor
                             .spawn(async move {
-                                crate::diagnostics::record_app_error(
-                                    "plan_usage",
-                                    &error,
-                                    context,
-                                );
+                                crate::diagnostics::record_app_error("plan_usage", &error, context);
                             })
                             .detach();
                     }

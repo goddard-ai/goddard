@@ -35,7 +35,10 @@ const PERMIT_WAIT: Duration = Duration::from_secs(60);
 /// counters record that it happened but not *when*.
 const OUTLIER_HOLD: Duration = Duration::from_secs(60);
 
-type PermitTokens = (crossbeam_channel::Sender<()>, crossbeam_channel::Receiver<()>);
+type PermitTokens = (
+    crossbeam_channel::Sender<()>,
+    crossbeam_channel::Receiver<()>,
+);
 
 /// `Permit`-returned tokens ride a bounded channel pre-filled with
 /// [`MAX_CONCURRENT_SUBPROCESSES`] units: `recv` acquires, `send` releases.

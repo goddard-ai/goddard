@@ -1115,7 +1115,10 @@ impl super::Waku {
                 .absolute()
                 .inset_0()
                 .occlude()
-                .child(motion::scrim_enter("keybindings-capture-layer-enter", scrim))
+                .child(motion::scrim_enter(
+                    "keybindings-capture-layer-enter",
+                    scrim,
+                ))
                 .p(px(24.0))
                 .flex()
                 .items_center()

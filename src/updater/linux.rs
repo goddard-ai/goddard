@@ -38,9 +38,12 @@ const MAX_ERROR_BYTES: u64 = 16 * 1024;
 static TEMPORARY_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(target_arch = "aarch64")]
-const FEED_URL: Option<&str> = Some("https://github.com/goddard-ai/goddard/releases/latest/download/appcast-linux-aarch64.xml");
+const FEED_URL: Option<&str> = Some(
+    "https://github.com/goddard-ai/goddard/releases/latest/download/appcast-linux-aarch64.xml",
+);
 #[cfg(target_arch = "x86_64")]
-const FEED_URL: Option<&str> = Some("https://github.com/goddard-ai/goddard/releases/latest/download/appcast-linux-x86_64.xml");
+const FEED_URL: Option<&str> =
+    Some("https://github.com/goddard-ai/goddard/releases/latest/download/appcast-linux-x86_64.xml");
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 const FEED_URL: Option<&str> = None;
 
@@ -550,9 +553,7 @@ fn validate_download_url(value: &str) -> anyhow::Result<()> {
     let legacy_r2_asset = url.host_str() == Some("releases.goddardai.org");
     let github_release_asset = is_github_release_asset(&url);
     anyhow::ensure!(
-        url.scheme() == "https"
-            && url.username().is_empty()
-            && url.password().is_none(),
+        url.scheme() == "https" && url.username().is_empty() && url.password().is_none(),
         "the update feed contains an unsafe URL"
     );
     anyhow::ensure!(
