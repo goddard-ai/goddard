@@ -132,10 +132,20 @@ pub fn inspect(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<GitPanel
     }))
 }
 
-/// `git add` the whole file.
+/// `git add` the whole file. A tracked path beneath an ignored directory goes
+/// through `add -u`: plain `add` rejects any explicit pathspec under an
+/// ignored directory even though ignore rules don't apply to tracked files,
+/// while the update path stages them without consulting the excludes.
 pub fn stage(cwd: &Path, path: &str) -> anyhow::Result<()> {
     ensure_repository(cwd)?;
-    git_success(cwd, &["add", "--", path])?;
+    let tracked = git_capture(cwd, &["ls-files", "--error-unmatch", "--", path])?
+        .status
+        .success();
+    if tracked {
+        git_success(cwd, &["add", "-u", "--", path])?;
+    } else {
+        git_success(cwd, &["add", "--", path])?;
+    }
     Ok(())
 }
 

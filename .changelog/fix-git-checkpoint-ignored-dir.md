@@ -1,0 +1,1 @@
+- Fixed turn checkpoints failing when a project tracks files inside a folder its ignore rules exclude, such as a force-added vendor directory.

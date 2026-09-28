@@ -630,7 +630,8 @@ fn capture_with_turn_start_index(
 ) -> anyhow::Result<String> {
     git_with_index(root, index, ["read-tree", start_ref])?;
     let removed_ignored = remove_now_ignored_untracked(root, index, index_state)?;
-    let mut pathspecs = Vec::new();
+    let mut tracked_pathspecs = Vec::new();
+    let mut untracked_pathspecs = Vec::new();
     let mut changed_paths = 0;
     for args in [
         &[
@@ -651,32 +652,28 @@ fn capture_with_turn_start_index(
         ][..],
     ] {
         let paths = git_with_index_output(root, index, args)?.stdout;
+        let is_untracked = args[1] == "--others";
         for path in paths
             .split(|byte| *byte == 0)
             .filter(|path| !path.is_empty())
         {
             changed_paths += 1;
-            if args[1] == "--others" {
+            if is_untracked {
                 index_state.untracked_paths.push(path.to_vec());
+                push_literal_pathspec(&mut untracked_pathspecs, path);
+            } else {
+                push_literal_pathspec(&mut tracked_pathspecs, path);
             }
-            push_literal_pathspec(&mut pathspecs, path);
         }
     }
     eprintln!("checkpoint turn_start_diff changed_paths={changed_paths}");
 
-    if pathspecs.is_empty() && !removed_ignored {
+    if tracked_pathspecs.is_empty() && untracked_pathspecs.is_empty() && !removed_ignored {
         return resolve_ref(root, start_ref)
             .ok_or_else(|| anyhow!("turn starting checkpoint `{start_ref}` is unavailable"));
     }
 
-    if !pathspecs.is_empty() {
-        git_with_index_input(
-            root,
-            index,
-            ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
-            &pathspecs,
-        )?;
-    }
+    stage_changed_paths(root, index, &tracked_pathspecs, &untracked_pathspecs)?;
     let tree = git_with_index(root, index, ["write-tree"])?
         .trim()
         .to_owned();
@@ -695,20 +692,17 @@ fn capture_with_cached_index(
     parents: &[String],
     index_state: &mut CheckpointIndexState,
 ) -> anyhow::Result<String> {
-    let mut pathspecs = Vec::new();
     let _ = remove_now_ignored_untracked(root, index, index_state)?;
-    let changed_paths = worktree_delta_paths(root, index, scope, index_state)?;
-    for path in changed_paths {
-        push_literal_pathspec(&mut pathspecs, &path);
+    let (tracked, untracked) = worktree_delta_paths(root, index, scope, index_state)?;
+    let mut tracked_pathspecs = Vec::new();
+    for path in &tracked {
+        push_literal_pathspec(&mut tracked_pathspecs, path);
     }
-    if !pathspecs.is_empty() {
-        git_with_index_input(
-            root,
-            index,
-            ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
-            &pathspecs,
-        )?;
+    let mut untracked_pathspecs = Vec::new();
+    for path in &untracked {
+        push_literal_pathspec(&mut untracked_pathspecs, path);
     }
+    stage_changed_paths(root, index, &tracked_pathspecs, &untracked_pathspecs)?;
     let tree = git_with_index(root, index, ["write-tree"])?
         .trim()
         .to_owned();
@@ -730,14 +724,15 @@ fn capture_with_cached_turn_end_index(
     capture_with_cached_index(root, scope, index, None, message, parents, index_state)
 }
 
-/// Paths changed relative to the cached snapshot, including deletions and new
-/// non-ignored files. The private index already contains every unchanged file.
+/// Paths changed relative to the cached snapshot as `(tracked, untracked)` —
+/// modifications and deletions in the first list, new non-ignored files in the
+/// second. The private index already contains every unchanged file.
 fn worktree_delta_paths(
     root: &Path,
     index: &Path,
     scope: &str,
     index_state: &mut CheckpointIndexState,
-) -> anyhow::Result<Vec<Vec<u8>>> {
+) -> anyhow::Result<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
     let tracked = git_with_index_output(
         root,
         index,
@@ -752,20 +747,52 @@ fn worktree_delta_paths(
     )?
     .stdout;
     let untracked = list_untracked_paths(root, index, scope)?;
-    let mut paths = tracked
+    let mut tracked = tracked
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
         .map(<[u8]>::to_vec)
         .collect::<Vec<_>>();
-    for path in untracked {
-        paths.push(path.clone());
-        index_state.untracked_paths.push(path);
+    for path in &untracked {
+        index_state.untracked_paths.push(path.clone());
     }
-    paths.sort();
-    paths.dedup();
+    tracked.sort();
+    tracked.dedup();
     index_state.untracked_paths.sort();
     index_state.untracked_paths.dedup();
-    Ok(paths)
+    Ok((tracked, untracked))
+}
+
+/// Stage the collected worktree paths through the side index.
+///
+/// `git add` rejects an explicit pathspec beneath an ignored directory even
+/// when the file is tracked — the ignore check ignores the index — so tracked
+/// paths go through `add -u`, whose update path never consults ignore rules.
+/// Untracked paths arrive via `ls-files --exclude-standard` and are
+/// non-ignored by construction. `-f` must not be used instead: it would also
+/// force ignored contents in under a directory pathspec.
+fn stage_changed_paths(
+    root: &Path,
+    index: &Path,
+    tracked: &[u8],
+    untracked: &[u8],
+) -> anyhow::Result<()> {
+    if !tracked.is_empty() {
+        git_with_index_input(
+            root,
+            index,
+            ["add", "-u", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            tracked,
+        )?;
+    }
+    if !untracked.is_empty() {
+        git_with_index_input(
+            root,
+            index,
+            ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            untracked,
+        )?;
+    }
+    Ok(())
 }
 
 fn list_untracked_paths(root: &Path, index: &Path, scope: &str) -> anyhow::Result<Vec<Vec<u8>>> {
@@ -2384,6 +2411,53 @@ mod tests {
 
         assert_eq!(second.files.len(), 1);
         assert_eq!(second.files[0].path, "second-turn.txt");
+        fs::remove_dir_all(directory).ok();
+    }
+
+    /// `git add` rejects any explicit pathspec beneath an ignored directory —
+    /// even a committed file, where ignore rules do not apply — so the
+    /// snapshot has to stage tracked changes through `add -u` while ignored
+    /// untracked files still stay out.
+    #[test]
+    fn tracked_files_under_an_ignored_directory_still_capture() {
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        git_ok(&directory, &["config", "user.name", "Goddard Test"]);
+        git_ok(&directory, &["config", "user.email", "waku@example.com"]);
+        fs::write(directory.join(".gitignore"), "vendor/\n").unwrap();
+        fs::create_dir_all(directory.join("vendor")).unwrap();
+        fs::write(directory.join("vendor/lib.js"), "baseline\n").unwrap();
+        git_ok(&directory, &["add", "-f", "vendor/lib.js"]);
+        git_ok(&directory, &["add", ".gitignore"]);
+        git_ok(&directory, &["commit", "--quiet", "-m", "baseline"]);
+
+        fs::write(directory.join("vendor/lib.js"), "changed\n").unwrap();
+        fs::write(directory.join("vendor/ignored-new.js"), "ignored\n").unwrap();
+        let session_id = Uuid::new_v4();
+        capture_turn_start(&directory, session_id, 1).unwrap();
+        let first = capture_turn(&directory, session_id, 1).unwrap();
+
+        let start_ref = turn_start_ref(session_id, 1);
+        assert_eq!(
+            git_output(&directory, ["show", &format!("{start_ref}:vendor/lib.js")]).unwrap(),
+            "changed\n"
+        );
+        assert!(
+            !git_path_exists(&directory, &format!("{start_ref}:vendor/ignored-new.js")),
+            "ignored untracked files must not enter the snapshot"
+        );
+        assert!(
+            first.files.is_empty(),
+            "the pre-turn ignored-dir edit belongs to the starting state: {:?}",
+            first.files
+        );
+
+        capture_turn_start(&directory, session_id, 2).unwrap();
+        fs::write(directory.join("vendor/lib.js"), "changed during turn\n").unwrap();
+        let second = capture_turn(&directory, session_id, 2).unwrap();
+        assert_eq!(second.files.len(), 1);
+        assert_eq!(second.files[0].path, "vendor/lib.js");
         fs::remove_dir_all(directory).ok();
     }
 
