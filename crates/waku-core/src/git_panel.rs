@@ -1852,8 +1852,8 @@ mod tests {
         // reports canonicalized paths — /var resolves to /private/var.
         let (checkout, outcome) = sync_base(&worktree, "main", PullStrategy::Merge).unwrap();
         assert_eq!(
-            dunce::canonicalize(checkout).unwrap(),
-            dunce::canonicalize(repository).unwrap()
+            dunce::canonicalize(&checkout).unwrap(),
+            dunce::canonicalize(&repository).unwrap()
         );
         assert_eq!(outcome, PullOutcome::Clean);
         assert!(repository.join("remote.txt").exists());
