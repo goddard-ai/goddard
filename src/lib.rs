@@ -1091,6 +1091,14 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // mouse. Deep-links the GitHub browser when its project and
         // number are known, falls back to the external URL.
         KeyBinding::new("secondary-alt-i", OpenCreatedIssueInGitHub, None),
+        // With focus outside the composer, ⌘↩ still activates the visible
+        // suggestion in the workspace. TextInput's deeper binding keeps its
+        // normal submit behavior when an editable field owns focus.
+        KeyBinding::new(
+            "secondary-enter",
+            crate::input::SubmitSteer,
+            Some("Workspace"),
+        ),
     ]);
 
     #[cfg(target_os = "macos")]

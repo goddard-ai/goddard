@@ -1649,6 +1649,20 @@ impl Waku {
         }
     }
 
+    pub(super) fn suggested_action_shortcut(
+        &mut self,
+        _: &crate::input::SubmitSteer,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.big_picture.is_open()
+            || !self.composer_is_empty(cx)
+            || !self.accept_displayed_suggestion(cx)
+        {
+            cx.propagate();
+        }
+    }
+
     /// ⌘⏎ on an empty composer fires whatever the suggestion lane is
     /// showing, with the same layering `render_action_suggestion` draws:
     /// a deterministic Git follow-up wins first; otherwise a settled turn's

@@ -674,6 +674,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::double_check_action))
             .on_action(cx.listener(Self::toggle_file_finder_action))
             .on_action(cx.listener(Self::toggle_big_picture_action))
+            .on_action(cx.listener(Self::suggested_action_shortcut))
             .on_action(cx.listener(Self::session_sweep_backward_action))
             .on_action(cx.listener(Self::session_sweep_forward_action))
             .on_action(cx.listener(Self::open_resume_picker_action))
