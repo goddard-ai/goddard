@@ -1332,6 +1332,10 @@ pub(super) fn update_transcript_activity(
             let activity_id = activity.id;
             activity.kind = item.kind;
             activity.title = item.title;
+            // The label's keyed form travels with `title` — a stale key
+            // would keep rendering the earlier lifecycle state (e.g. a
+            // completed compaction forever reading "Compacting context").
+            activity.title_i18n = item.title_i18n;
             if item.tool_name.is_some() {
                 activity.tool_name = item.tool_name;
             }
