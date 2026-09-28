@@ -184,10 +184,11 @@ impl ClaudeDriver {
             context_window,
             agent_preset: _,
             computer_use_enabled,
+            computer_use_runtime,
             agent,
             read_own_transcript: _,
             subagents,
-            integrations: _,
+            mcp_servers,
             provider_cursor,
             eval: _,
             sandbox,
@@ -216,23 +217,24 @@ impl ClaudeDriver {
         let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd);
         configure_stream_command(command.command_mut(), mode);
-        let computer_use = computer_use_enabled
-            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
-            .transpose()?;
+        let computer_use = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
         let mut system_appendix: Vec<String> = Vec::new();
         if let Some(runtime) = &computer_use {
             let config_path = runtime.config.process_directory.join("claude-mcp.json");
             std::fs::write(
                 &config_path,
                 serde_json::to_vec(&json!({
-                    "mcpServers": {"goddard_js_repl": runtime.config.mcp_server()}
+                    "mcpServers": super::mcp::config_map(&mcp_servers, "http")
                 }))?,
             )?;
             command.args(["--mcp-config", &config_path.to_string_lossy()]);
-            system_appendix.push(format!(
-                "When the user asks you to interact with a local app, use `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
-                runtime.config.skill_path.display()
-            ));
+            system_appendix.push(super::computer_use::hint(&runtime.config.skill_path));
         }
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(command.command_mut(), agent);
@@ -2017,7 +2019,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -2093,7 +2096,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,

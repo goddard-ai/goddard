@@ -14,8 +14,7 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use super::computer_use::{ComputerUseConfig, ComputerUseRuntime, create_process_directory};
-use crate::driver::DriverEventSender;
+use super::computer_use::{ComputerUseRuntime, create_process_directory};
 use crate::opencode2_api;
 use crate::opencode2_service::Opencode2Service;
 
@@ -47,8 +46,11 @@ impl McpBridge {
     fn acquire(
         service: &Arc<Opencode2Service>,
         directory: &str,
-        config: &ComputerUseConfig,
+        server_spec: &super::McpServerSpec,
     ) -> anyhow::Result<Arc<Self>> {
+        let Some((name, command, _)) = server_spec.stdio_parts() else {
+            bail!("OpenCode 2 Computer Use requires a stdio MCP server");
+        };
         let key = (Arc::as_ptr(service) as usize, directory.to_owned());
         let mut bridges = BRIDGES.get_or_init(Default::default).lock();
         bridges.retain(|_, bridge| bridge.strong_count() > 0);
@@ -59,10 +61,10 @@ impl McpBridge {
         let bridge = Arc::new(Self {
             service: service.clone(),
             directory: directory.to_owned(),
-            server: format!("goddard_js_repl_{}", Uuid::new_v4().simple()),
+            server: format!("{name}_{}", Uuid::new_v4().simple()),
             config: json!({
                 "type": "local",
-                "command": [config.repl_path],
+                "command": [command],
                 "cwd": directory,
                 // This is already a JavaScript tool. Keep OpenCode's extra
                 // execute/codemode wrapper out of the agent-facing API.
@@ -145,10 +147,21 @@ impl OpenCode2ComputerUse {
         service: &Arc<Opencode2Service>,
         directory: &str,
         session_id: &str,
-        events: DriverEventSender,
+        runtime: ComputerUseRuntime,
+        server_spec: &super::McpServerSpec,
     ) -> anyhow::Result<Self> {
-        let runtime = ComputerUseRuntime::start(events)?;
-        let bridge = McpBridge::acquire(service, directory, &runtime.config)?;
+        let Some((_, _, env)) = server_spec.stdio_parts() else {
+            bail!("OpenCode 2 Computer Use requires a stdio MCP server");
+        };
+        let server_path = env
+            .get("GODDARD_COMPUTER_USE_SERVER")
+            .ok_or_else(|| anyhow!("Computer Use MCP server spec is missing its helper path"))?;
+        let process_directory = env
+            .get("GODDARD_COMPUTER_USE_PROCESS_DIRECTORY")
+            .ok_or_else(|| {
+                anyhow!("Computer Use MCP server spec is missing its process directory")
+            })?;
+        let bridge = McpBridge::acquire(service, directory, server_spec)?;
         let this = Self {
             runtime,
             bridge,
@@ -162,8 +175,8 @@ impl OpenCode2ComputerUse {
         fs::write(
             &temporary,
             serde_json::to_vec(&json!({
-                "server_path": this.runtime.config.server_path,
-                "process_directory": this.runtime.config.process_directory,
+                "server_path": server_path,
+                "process_directory": process_directory,
                 "cwd": directory,
             }))?,
         )?;

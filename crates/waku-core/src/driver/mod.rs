@@ -9,6 +9,7 @@ mod codex;
 mod computer_use;
 mod copilot;
 mod deepseek;
+mod mcp;
 mod muse;
 mod opencode;
 mod opencode2;
@@ -16,6 +17,11 @@ mod opencode2_computer_use;
 mod pi;
 mod support;
 mod title_refresh;
+
+pub(crate) use computer_use::ComputerUseRuntime;
+pub(crate) use computer_use::MCP_SERVER_NAME;
+pub(crate) use computer_use::hint as computer_use_hint;
+pub(crate) use mcp::McpServerSpec;
 
 pub(crate) use acp::{catalog_agent, discover_devin_models_via_acp};
 
@@ -308,6 +314,10 @@ pub struct DriverStartOptions {
     pub context_window: Option<String>,
     pub agent_preset: Option<String>,
     pub computer_use_enabled: bool,
+    /// Computer Use's session-owned resources are prepared by the daemon so
+    /// its stdio server can be described in the same launch spec as HTTP
+    /// integrations.
+    pub(crate) computer_use_runtime: Option<ComputerUseRuntime>,
     /// The scoped agent surface for this launch: the per-session token,
     /// daemon address, and `goddard-agent` CLI location. The daemon fills this
     /// in when `agent_tools_enabled` is on; it never crosses the wire, so no
@@ -324,12 +334,8 @@ pub struct DriverStartOptions {
     /// re-inject mid-session, which is why this is not a `SessionOptions`
     /// field.
     pub subagents: Option<waku_protocol::model::SubagentSpec>,
-    /// Connected MCP integrations, already reduced to `goddard_<id>` server
-    /// entries pointing at the local proxy. Drivers deliver them through
-    /// their own mechanism: launch flags, env config, the service API, or —
-    /// for file-based providers — nothing, because the daemon rewrote the
-    /// provider's config file at connect time.
-    pub integrations: Vec<crate::integrations::LaunchIntegration>,
+    /// Provider-neutral MCP servers composed by the daemon for this launch.
+    pub(crate) mcp_servers: Vec<McpServerSpec>,
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// The configured evaluation backend, snapshotted at session start.
     /// `Auto`-mode permission requests for providers without their own

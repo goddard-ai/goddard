@@ -14,13 +14,13 @@ use std::time::Duration;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     CancelNotification, ClientCapabilities, ContentBlock, DeleteSessionRequest, EnvVariable,
-    Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest, McpServer,
-    McpServerStdio, NewSessionRequest, PermissionOptionKind, PromptRequest, PromptResponse,
-    RequestId, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    ResumeSessionRequest, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOptions, SessionId,
-    SessionModeId, SessionModeState, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, StopReason, TextContent,
+    HttpHeader, Implementation, InitializeRequest, InitializeResponse, LoadSessionRequest,
+    McpServer, McpServerHttp, McpServerStdio, NewSessionRequest, PermissionOptionKind,
+    PromptRequest, PromptResponse, RequestId, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, ResumeSessionRequest, SelectedPermissionOutcome, SessionConfigKind,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
+    SessionConfigSelectOptions, SessionId, SessionModeId, SessionModeState, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TextContent,
 };
 use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent, Client, ConnectTo, ConnectionTo, Handled, LineDirection,
@@ -144,10 +144,11 @@ impl AcpDriver {
             context_window,
             agent_preset: _,
             computer_use_enabled,
+            computer_use_runtime,
             agent: agent_env,
             read_own_transcript: _,
             subagents: _,
-            integrations: _,
+            mut mcp_servers,
             provider_cursor,
             eval,
             sandbox,
@@ -174,15 +175,37 @@ impl AcpDriver {
         };
 
         let launch = launch_for(provider, reasoning_effort.as_deref())?;
-        let computer_use = (provider == ProviderKind::Grok && computer_use_enabled)
-            .then(|| super::support::HeadlessComputerUseRuntime::start(provider, events.clone()))
-            .transpose()?;
-        let native_computer_use = (provider != ProviderKind::Grok && computer_use_enabled)
-            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
-            .transpose()?;
-        let native_computer_use_config = native_computer_use
-            .as_ref()
-            .map(|runtime| runtime.config.clone());
+        let mut computer_use_runtime = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        super::computer_use::ensure_runtime_server_spec(
+            &mut mcp_servers,
+            computer_use_runtime.as_ref(),
+        );
+        let computer_use_spec =
+            super::computer_use::mcp_server_spec(&mcp_servers, computer_use_runtime.as_ref());
+        let computer_use = if provider == ProviderKind::Grok {
+            computer_use_runtime
+                .take()
+                .map(|runtime| {
+                    super::support::HeadlessComputerUseRuntime::from_runtime(
+                        provider,
+                        runtime,
+                        computer_use_spec
+                            .clone()
+                            .expect("Computer Use runtime has an MCP server spec"),
+                    )
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let native_computer_use = computer_use_runtime;
+        if provider == ProviderKind::Grok {
+            mcp_servers.retain(|server| server.name() != super::computer_use::MCP_SERVER_NAME);
+        }
         let grok_title_home = computer_use
             .as_ref()
             .and_then(super::support::HeadlessComputerUseRuntime::grok_home)
@@ -239,7 +262,7 @@ impl AcpDriver {
                     resume_session_id,
                     fork_context,
                     grok_title_home,
-                    native_computer_use_config,
+                    mcp_servers,
                     eval,
                     command_rx,
                     thread_events.clone(),
@@ -707,7 +730,7 @@ async fn run_sdk_connection(
     resume_session_id: Option<String>,
     fork_context: Option<String>,
     grok_title_home: Option<std::path::PathBuf>,
-    native_computer_use: Option<super::computer_use::ComputerUseConfig>,
+    mcp_server_specs: Vec<super::McpServerSpec>,
     eval: Option<waku_protocol::eval::EvalSettings>,
     commands: smol::channel::Receiver<CommandMessage>,
     events: DriverEventSender,
@@ -885,13 +908,14 @@ async fn run_sdk_connection(
                 )
                 .block_task()
                 .await?;
+            let mcp_servers = acp_mcp_servers(&mcp_server_specs);
             let (session_id, modes, config_options) = establish_session(
                 &connection,
                 &initialize,
                 resume_session_id.as_deref(),
                 &cwd,
                 &suppress_session_updates,
-                native_computer_use.as_ref(),
+                &mcp_servers,
             )
             .await?;
 
@@ -1120,7 +1144,7 @@ async fn establish_session(
     resume_session_id: Option<&str>,
     cwd: &Path,
     suppress_session_updates: &AtomicBool,
-    computer_use: Option<&super::computer_use::ComputerUseConfig>,
+    mcp_servers: &[McpServer],
 ) -> agent_client_protocol::Result<(
     SessionId,
     Option<SessionModeState>,
@@ -1137,7 +1161,7 @@ async fn establish_session(
             match connection
                 .send_request(
                     ResumeSessionRequest::new(existing.to_owned(), cwd)
-                        .mcp_servers(computer_use_mcp_servers(computer_use)),
+                        .mcp_servers(mcp_servers.to_vec()),
                 )
                 .block_task()
                 .await
@@ -1162,7 +1186,7 @@ async fn establish_session(
             let mut response = connection
                 .send_request(
                     LoadSessionRequest::new(existing.to_owned(), cwd)
-                        .mcp_servers(computer_use_mcp_servers(computer_use)),
+                        .mcp_servers(mcp_servers.to_vec()),
                 )
                 .block_task()
                 .await;
@@ -1178,7 +1202,7 @@ async fn establish_session(
                 response = connection
                     .send_request(
                         LoadSessionRequest::new(existing.to_owned(), cwd)
-                            .mcp_servers(computer_use_mcp_servers(computer_use)),
+                            .mcp_servers(mcp_servers.to_vec()),
                     )
                     .block_task()
                     .await;
@@ -1203,33 +1227,33 @@ async fn establish_session(
     }
 
     let response = connection
-        .send_request(
-            NewSessionRequest::new(cwd).mcp_servers(computer_use_mcp_servers(computer_use)),
-        )
+        .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers.to_vec()))
         .block_task()
         .await?;
     Ok((response.session_id, response.modes, response.config_options))
 }
 
-fn computer_use_mcp_servers(
-    config: Option<&super::computer_use::ComputerUseConfig>,
-) -> Vec<McpServer> {
-    config
-        .map(|config| {
-            vec![McpServer::Stdio(
-                McpServerStdio::new("goddard_js_repl", config.repl_path.clone()).env(vec![
-                    EnvVariable::new(
-                        "GODDARD_COMPUTER_USE_SERVER",
-                        config.server_path.to_string_lossy().into_owned(),
+fn acp_mcp_servers(servers: &[super::McpServerSpec]) -> Vec<McpServer> {
+    servers
+        .iter()
+        .filter_map(|server| {
+            if let Some((name, command, env)) = server.stdio_parts() {
+                return Some(McpServer::Stdio(
+                    McpServerStdio::new(name, command.clone()).env(
+                        env.iter()
+                            .map(|(name, value)| EnvVariable::new(name, value))
+                            .collect(),
                     ),
-                    EnvVariable::new(
-                        "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY",
-                        config.process_directory.to_string_lossy().into_owned(),
-                    ),
-                ]),
-            )]
+                ));
+            }
+            server.http_parts().map(|(name, url, token)| {
+                McpServer::Http(McpServerHttp::new(name, url).headers(vec![HttpHeader::new(
+                    "Authorization",
+                    format!("Bearer {token}"),
+                )]))
+            })
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 const ACP_SESSION_LOAD_RETRIES: usize = 6;
@@ -4267,7 +4291,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -4328,7 +4353,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -4394,7 +4420,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -4471,7 +4498,8 @@ mod tests {
                 read_own_transcript: false,
                 subagents: None,
                 computer_use_enabled: false,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,

@@ -21,23 +21,13 @@ use super::oauth::{self, StoredCredential};
 use super::proxy;
 use super::secrets::SecretStore;
 use crate::EventSink;
+use crate::driver::McpServerSpec;
 use crate::settings::DaemonSettingsStore;
 
 /// What the proxy needs to forward one request.
 pub struct Upstream {
     pub url: String,
     pub auth_header: Option<String>,
-}
-
-/// One integration as a launch-time deliverable: everything a provider needs
-/// to point at the local proxy.
-#[derive(Clone, Debug)]
-pub struct LaunchIntegration {
-    /// `goddard_<id>` — the server name in provider config.
-    pub name: String,
-    pub integration_id: String,
-    pub url: String,
-    pub token: String,
 }
 
 pub struct Inner {
@@ -137,7 +127,10 @@ impl IntegrationService {
 
     /// Integrations a provider launch should receive, in the uniform
     /// `goddard_<id>` + local-URL shape. Empty while the experiment is off.
-    pub fn launch_integrations(&self, provider: ProviderKind) -> Vec<LaunchIntegration> {
+    pub(crate) fn launch_mcp_servers(&self, provider: ProviderKind) -> Vec<McpServerSpec> {
+        if super::deliver::uses_file_sync(provider) {
+            return Vec::new();
+        }
         let settings = self.inner.settings.get();
         if !settings.integrations_enabled {
             return Vec::new();
@@ -146,11 +139,12 @@ impl IntegrationService {
             .integrations
             .iter()
             .filter(|setting| setting.providers.contains(&provider))
-            .map(|setting| LaunchIntegration {
-                name: super::server_name(&setting.id),
-                integration_id: setting.id.clone(),
-                url: self.endpoint_url(&setting.id),
-                token: self.inner.proxy_token.clone(),
+            .map(|setting| {
+                McpServerSpec::http(
+                    super::server_name(&setting.id),
+                    self.endpoint_url(&setting.id),
+                    self.inner.proxy_token.clone(),
+                )
             })
             .collect()
     }

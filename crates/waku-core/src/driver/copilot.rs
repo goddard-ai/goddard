@@ -35,9 +35,10 @@ use github_copilot_sdk::session_events::{
     ToolExecutionCompleteData, ToolExecutionStartData,
 };
 use github_copilot_sdk::types::{
-    Attachment, DeliveryMode, ExitPlanModeData, McpServerConfig, McpStdioServerConfig,
-    MessageOptions, PermissionRequestData, PermissionRequestKind, RequestId, ResumeSessionConfig,
-    SessionConfig, SessionEvent, SessionId, SetModelOptions, SystemMessageConfig,
+    Attachment, DeliveryMode, ExitPlanModeData, McpHttpServerConfig, McpServerConfig,
+    McpStdioServerConfig, MessageOptions, PermissionRequestData, PermissionRequestKind, RequestId,
+    ResumeSessionConfig, SessionConfig, SessionEvent, SessionId, SetModelOptions,
+    SystemMessageConfig,
 };
 use github_copilot_sdk::{CliProgram, Client, ClientInfo, ClientOptions};
 use parking_lot::Mutex;
@@ -111,36 +112,39 @@ struct CopilotRun {
     shared: Arc<Mutex<Shared>>,
     commands: UnboundedReceiver<CommandMessage>,
     computer_use_config: Option<super::computer_use::ComputerUseConfig>,
+    mcp_servers: Vec<(String, McpServerConfig)>,
 }
 
 fn computer_use_hint(config: &super::computer_use::ComputerUseConfig) -> String {
-    format!(
-        "When the user asks you to interact with a local app, use `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
-        config.skill_path.display()
-    )
+    super::computer_use::hint(&config.skill_path)
 }
 
-fn computer_use_mcp_server(
-    config: &super::computer_use::ComputerUseConfig,
-) -> (String, McpServerConfig) {
-    (
-        "goddard_js_repl".into(),
-        McpServerConfig::Stdio(McpStdioServerConfig {
-            command: config.repl_path.display().to_string(),
-            env: [
+fn copilot_mcp_servers(servers: &[super::McpServerSpec]) -> Vec<(String, McpServerConfig)> {
+    servers
+        .iter()
+        .filter_map(|server| {
+            if let Some((name, command, env)) = server.stdio_parts() {
+                return Some((
+                    name.to_owned(),
+                    McpServerConfig::Stdio(McpStdioServerConfig {
+                        command: command.display().to_string(),
+                        env: env.clone().into_iter().collect(),
+                        ..Default::default()
+                    }),
+                ));
+            }
+            server.http_parts().map(|(name, url, token)| {
                 (
-                    "GODDARD_COMPUTER_USE_SERVER".into(),
-                    config.server_path.display().to_string(),
-                ),
-                (
-                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".into(),
-                    config.process_directory.display().to_string(),
-                ),
-            ]
-            .into(),
-            ..Default::default()
-        }),
-    )
+                    name.to_owned(),
+                    McpServerConfig::Http(McpHttpServerConfig {
+                        url: url.to_owned(),
+                        headers: [("Authorization".into(), format!("Bearer {token}"))].into(),
+                        ..Default::default()
+                    }),
+                )
+            })
+        })
+        .collect()
 }
 
 impl CopilotDriver {
@@ -155,10 +159,11 @@ impl CopilotDriver {
             context_window,
             agent_preset,
             computer_use_enabled,
+            computer_use_runtime,
             agent,
             read_own_transcript: _,
             subagents,
-            integrations: _,
+            mcp_servers,
             provider_cursor,
             eval,
             sandbox: _,
@@ -191,10 +196,15 @@ impl CopilotDriver {
         // so it reports `Silent` and hears about the surface through
         // first-prompt context instead.
         let announced_agent_surface = agent.is_some() && resume_session_id.is_none();
-        let computer_use = computer_use_enabled
-            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
-            .transpose()?;
+        let computer_use = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
         let computer_use_config = computer_use.as_ref().map(|runtime| runtime.config.clone());
+        let mcp_servers = copilot_mcp_servers(&mcp_servers);
         // `UnboundedSender::send` is synchronous, so the `DriverControl`
         // methods talk straight into the runtime task — no pump thread.
         let (commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -229,6 +239,7 @@ impl CopilotDriver {
                     shared: thread_shared,
                     commands: command_rx,
                     computer_use_config,
+                    mcp_servers,
                 }));
                 let _ = thread_events.send(DriverEvent::ProcessExited);
             })
@@ -265,6 +276,7 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
         shared,
         mut commands,
         computer_use_config,
+        mcp_servers,
     } = launch;
 
     let mut client_options = ClientOptions::default();
@@ -308,12 +320,10 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
             {
                 resume = resume.with_custom_agents(agents);
             }
+            if !mcp_servers.is_empty() {
+                resume.mcp_servers = Some(mcp_servers.clone().into_iter().collect());
+            }
             if let Some(computer_use) = &computer_use_config {
-                resume.mcp_servers = Some(
-                    [computer_use_mcp_server(computer_use)]
-                        .into_iter()
-                        .collect(),
-                );
                 resume.skill_directories = Some(vec![
                     computer_use
                         .skill_path
@@ -348,12 +358,10 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
             {
                 config = config.with_custom_agents(agents);
             }
+            if !mcp_servers.is_empty() {
+                config.mcp_servers = Some(mcp_servers.into_iter().collect());
+            }
             if let Some(computer_use) = &computer_use_config {
-                config.mcp_servers = Some(
-                    [computer_use_mcp_server(computer_use)]
-                        .into_iter()
-                        .collect(),
-                );
                 config.skill_directories = Some(vec![
                     computer_use
                         .skill_path
@@ -1429,7 +1437,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -1492,7 +1501,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,

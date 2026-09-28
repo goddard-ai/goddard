@@ -112,10 +112,11 @@ impl DeepSeekDriver {
             context_window: _,
             agent_preset,
             computer_use_enabled,
+            computer_use_runtime,
             agent,
             read_own_transcript: _,
             subagents: _,
-            integrations,
+            mcp_servers,
             provider_cursor,
             eval,
             sandbox: _,
@@ -140,24 +141,19 @@ impl DeepSeekDriver {
         // row per server. A session carrying either the agent surface or
         // integrations gets a dedicated host — the pooled host serves many
         // sessions and must not bake either into its launch.
-        let computer_use = computer_use_enabled
-            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
-            .transpose()?;
-        let patch_args = if integrations.is_empty() && computer_use.is_none() {
+        let computer_use = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+        let patch_args = if mcp_servers.is_empty() {
             Vec::new()
         } else {
             let path = std::env::temp_dir()
                 .join(format!("goddard-dsh-mcp-{}.yaml", Uuid::new_v4().simple()));
-            let mut patch = crate::integrations::deliver::deepseek_overlay_yaml(&integrations);
-            if let Some(runtime) = &computer_use {
-                let config = &runtime.config;
-                patch.push_str(&format!(
-                    "- id: goddard-computer-use\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: goddard_js_repl\n    transport: stdio\n    command: {}\n    args: []\n    env:\n      GODDARD_COMPUTER_USE_SERVER: {}\n      GODDARD_COMPUTER_USE_PROCESS_DIRECTORY: {}\n    toolCallTimeoutMs: 300000\n",
-                    serde_json::to_string(&config.repl_path.to_string_lossy())?,
-                    serde_json::to_string(&config.server_path.to_string_lossy())?,
-                    serde_json::to_string(&config.process_directory.to_string_lossy())?,
-                ));
-            }
+            let patch = crate::integrations::deliver::deepseek_overlay_yaml(&mcp_servers);
             std::fs::write(&path, patch).context("could not write the DeepSeek MCP patch")?;
             vec!["--patch".to_owned(), path.to_string_lossy().into_owned()]
         };

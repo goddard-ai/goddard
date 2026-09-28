@@ -426,16 +426,28 @@ impl OpenCode2Driver {
             context_window: _,
             agent_preset,
             computer_use_enabled,
+            computer_use_runtime,
             agent: agent_env,
             read_own_transcript: _,
             subagents,
-            integrations,
+            mcp_servers,
             provider_cursor,
             eval,
             sandbox: _,
             allow_model_fallback: _,
             ephemeral: _,
         } = options;
+
+        let computer_use_runtime = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(
+            &mut mcp_servers,
+            computer_use_runtime.as_ref(),
+        );
 
         let resumed = match provider_cursor {
             Some(ProviderResumeCursor::OpenCode2 { session_id, .. }) => {
@@ -528,33 +540,30 @@ impl OpenCode2Driver {
             let _ = opencode2_api::switch_model(&endpoint, &session_id, model);
         }
 
-        // Connected integrations register on the service scoped to this
-        // directory — runtime-only, never written to its config files. A
-        // failed registration degrades that integration, not the session.
-        for integration in &integrations {
-            if let Err(error) = opencode2_api::add_mcp(
-                &endpoint,
-                &directory,
-                &integration.name,
-                &json!({
-                    "type": "remote",
-                    "url": integration.url,
-                    "enabled": true,
-                    "headers": {
-                        "Authorization": format!("Bearer {}", integration.token),
-                    },
-                }),
-            ) {
+        // HTTP MCP servers register on the service scoped to this directory —
+        // runtime-only, never written to its config files. A failed
+        // registration degrades that server, not the session.
+        for server in &mcp_servers {
+            let Some((name, _, _)) = server.http_parts() else {
+                continue;
+            };
+            let mut config = server
+                .http_config_value("remote")
+                .expect("HTTP server spec has an HTTP configuration");
+            config["enabled"] = json!(true);
+            if let Err(error) = opencode2_api::add_mcp(&endpoint, &directory, name, &config) {
                 eprintln!(
                     "goddard-mcp: could not register {} with OpenCode 2: {error:#}",
-                    integration.name
+                    name
                 );
             }
         }
 
-        let computer_use = if computer_use_enabled {
+        let computer_use = if let Some(runtime) = computer_use_runtime {
+            let server = super::computer_use::mcp_server_spec(&mcp_servers, Some(&runtime))
+                .expect("Computer Use runtime has an MCP server spec");
             let attached =
-                OpenCode2ComputerUse::start(&service, &directory, &session_id, events.clone());
+                OpenCode2ComputerUse::start(&service, &directory, &session_id, runtime, &server);
             match attached {
                 Ok(runtime) => Some(Arc::new(runtime)),
                 Err(error) => {
@@ -3537,7 +3546,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -3610,7 +3620,8 @@ mod tests {
                     agent: None,
                     read_own_transcript: false,
                     subagents: None,
-                    integrations: Vec::new(),
+                    computer_use_runtime: None,
+                    mcp_servers: Vec::new(),
                     provider_cursor: None,
                 },
                 events,

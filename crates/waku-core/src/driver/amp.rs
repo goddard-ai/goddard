@@ -97,10 +97,11 @@ impl AmpDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled,
+            computer_use_runtime,
             agent,
             read_own_transcript: _,
             subagents: _,
-            integrations: _,
+            mcp_servers,
             provider_cursor,
             eval: _,
             sandbox,
@@ -126,10 +127,13 @@ impl AmpDriver {
 
         let title_binary = binary.clone();
         let title_cwd = cwd.clone();
-        let computer_use = computer_use_enabled
-            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
-            .transpose()?;
-        let computer_use_config = computer_use.as_ref().map(|runtime| runtime.config.clone());
+        let computer_use = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
         let reader_initial_thread_id = thread_id.clone();
         let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd).args(amp_args(
@@ -138,13 +142,11 @@ impl AmpDriver {
             service_tier.as_deref(),
             thread_id.as_deref(),
         ));
-        if let Some(config) = &computer_use_config {
-            command.arg("--mcp-config").arg(
-                serde_json::json!({
-                    "goddard_js_repl": config.mcp_server()
-                })
-                .to_string(),
-            );
+        let mcp_config = super::mcp::config_map(&mcp_servers, "http");
+        if !mcp_config.is_empty() {
+            command
+                .arg("--mcp-config")
+                .arg(serde_json::json!(mcp_config).to_string());
         }
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(command.command_mut(), agent);
@@ -626,7 +628,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -692,7 +695,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,

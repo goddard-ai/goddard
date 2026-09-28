@@ -20,6 +20,8 @@ use crate::driver::DriverEventSender;
 use crate::fs_ext;
 use crate::model::DriverEvent;
 
+pub(crate) const MCP_SERVER_NAME: &str = "goddard_js_repl";
+
 #[cfg(target_os = "macos")]
 use std::ffi::OsString;
 #[cfg(target_os = "macos")]
@@ -34,25 +36,63 @@ pub(super) struct ComputerUseConfig {
 }
 
 impl ComputerUseConfig {
-    pub(super) fn mcp_server(&self) -> serde_json::Value {
-        serde_json::json!({
-            "command": self.repl_path,
-            "args": [],
-            "env": {
-                "GODDARD_COMPUTER_USE_SERVER": self.server_path,
-                "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY": self.process_directory,
-            }
-        })
+    pub(super) fn mcp_server(&self) -> super::McpServerSpec {
+        super::McpServerSpec::stdio(
+            MCP_SERVER_NAME,
+            self.repl_path.clone(),
+            [
+                (
+                    "GODDARD_COMPUTER_USE_SERVER".to_owned(),
+                    self.server_path.display().to_string(),
+                ),
+                (
+                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".to_owned(),
+                    self.process_directory.display().to_string(),
+                ),
+            ]
+            .into(),
+        )
     }
 }
 
-pub(super) struct ComputerUseRuntime {
+pub(super) fn mcp_server_spec(
+    servers: &[super::McpServerSpec],
+    runtime: Option<&ComputerUseRuntime>,
+) -> Option<super::McpServerSpec> {
+    servers
+        .iter()
+        .find(|server| server.name() == MCP_SERVER_NAME)
+        .cloned()
+        .or_else(|| runtime.map(|runtime| runtime.config.mcp_server()))
+}
+
+pub(super) fn ensure_runtime_server_spec(
+    servers: &mut Vec<super::McpServerSpec>,
+    runtime: Option<&ComputerUseRuntime>,
+) {
+    if !servers
+        .iter()
+        .any(|server| server.name() == MCP_SERVER_NAME)
+        && let Some(runtime) = runtime
+    {
+        servers.push(runtime.mcp_server_spec());
+    }
+}
+
+pub(crate) fn hint(skill_path: &Path) -> String {
+    format!(
+        "When the user asks you to interact with a local app, use the `js` tool from `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
+        skill_path.display()
+    )
+}
+
+pub(crate) struct ComputerUseRuntime {
     pub(super) config: ComputerUseConfig,
     preview_monitor: Option<ComputerUsePreviewMonitor>,
 }
 
 impl ComputerUseRuntime {
-    pub(super) fn start(events: DriverEventSender) -> anyhow::Result<Self> {
+    pub(crate) fn start(events: DriverEventSender) -> anyhow::Result<Self> {
         let server_path = computer_use::mcp_server_command()?;
         let repl_path = computer_use::js_repl_server_path()?;
         let skill_path = computer_use::skill_root_path()?
@@ -76,6 +116,24 @@ impl ComputerUseRuntime {
             },
             preview_monitor: Some(preview_monitor),
         })
+    }
+
+    pub(crate) fn mcp_server_spec(&self) -> super::McpServerSpec {
+        self.config.mcp_server()
+    }
+
+    pub(super) fn for_launch(
+        enabled: bool,
+        runtime: Option<Self>,
+        events: DriverEventSender,
+    ) -> anyhow::Result<Option<Self>> {
+        if !enabled {
+            return Ok(None);
+        }
+        match runtime {
+            Some(runtime) => Ok(Some(runtime)),
+            None => Self::start(events).map(Some),
+        }
     }
 
     pub(super) fn stop(&self) {

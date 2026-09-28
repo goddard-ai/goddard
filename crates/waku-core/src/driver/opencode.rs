@@ -238,10 +238,11 @@ impl OpenCodeDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled,
+            computer_use_runtime,
             agent: agent_env,
             read_own_transcript: _,
             subagents,
-            integrations,
+            mcp_servers,
             provider_cursor,
             eval,
             sandbox: _,
@@ -261,11 +262,24 @@ impl OpenCodeDriver {
             None => None,
         };
 
-        let computer_use = computer_use_enabled
-            .then(|| {
-                super::support::HeadlessComputerUseRuntime::start(
+        let computer_use_runtime = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(
+            &mut mcp_servers,
+            computer_use_runtime.as_ref(),
+        );
+        let computer_use = computer_use_runtime
+            .map(|runtime| {
+                let server = super::computer_use::mcp_server_spec(&mcp_servers, Some(&runtime))
+                    .expect("Computer Use runtime has an MCP server spec");
+                super::support::HeadlessComputerUseRuntime::from_runtime(
                     crate::model::ProviderKind::OpenCode,
-                    events.clone(),
+                    runtime,
+                    server,
                 )
             })
             .transpose()?;
@@ -280,15 +294,30 @@ impl OpenCodeDriver {
         }
         // Subagent definitions and connected integrations merge into one
         // `OPENCODE_CONFIG_CONTENT` document layered over the user's files.
-        let mut config_doc = subagents
+        let mut config_doc = environment
+            .iter()
+            .find(|(name, _)| name == "OPENCODE_CONFIG_CONTENT")
+            .and_then(|(_, content)| serde_json::from_str::<Value>(content).ok())
+            .unwrap_or_else(|| json!({}));
+        if let Some(subagent_doc) = subagents
             .as_ref()
             .and_then(crate::subagents::opencode_config_json)
             .and_then(|json| serde_json::from_str::<Value>(&json).ok())
-            .unwrap_or_else(|| json!({}));
-        if !integrations.is_empty() {
-            config_doc["mcp"] = Value::Object(
-                crate::integrations::deliver::opencode_config_entries(&integrations),
-            );
+            .and_then(|value| value.as_object().cloned())
+        {
+            if let Some(config) = config_doc.as_object_mut() {
+                config.extend(subagent_doc);
+            } else {
+                config_doc = Value::Object(subagent_doc);
+            }
+        }
+        if !mcp_servers.is_empty() {
+            let servers = crate::integrations::deliver::opencode_config_entries(&mcp_servers);
+            if let Some(existing) = config_doc.get_mut("mcp").and_then(Value::as_object_mut) {
+                existing.extend(servers);
+            } else {
+                config_doc["mcp"] = Value::Object(servers);
+            }
         }
         // `goddard-agent` is on PATH in this session's dedicated server, but
         // nothing tells the model — OpenCode's `instructions` config is its
@@ -331,7 +360,7 @@ impl OpenCodeDriver {
         let server = if requires_dedicated_server(
             computer_use.is_some(),
             agent_env.is_some(),
-            !integrations.is_empty(),
+            !mcp_servers.is_empty(),
             subagents
                 .as_ref()
                 .is_some_and(|spec| !spec.agents.is_empty()),
@@ -1867,7 +1896,8 @@ server.serve_forever()
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
                 eval: None,
                 sandbox: None,
@@ -2001,7 +2031,8 @@ server.serve_forever()
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
                 eval: None,
                 sandbox: None,
@@ -2097,7 +2128,8 @@ server.serve_forever()
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
                 eval: None,
                 sandbox: None,

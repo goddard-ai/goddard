@@ -150,10 +150,11 @@ impl MuseDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled,
+            computer_use_runtime,
             agent: _,
             read_own_transcript: _,
             subagents: _,
-            integrations: _,
+            mcp_servers,
             provider_cursor,
             eval,
             sandbox: _,
@@ -176,21 +177,15 @@ impl MuseDriver {
         };
 
         let service = muse_service::acquire(&binary)?;
-        let computer_use = computer_use_enabled
-            .then(|| super::computer_use::ComputerUseRuntime::start(events.clone()))
-            .transpose()?;
-        let computer_use_config = computer_use.as_ref().map(|runtime| {
-            let config = &runtime.config;
-            json!({"mcpServers": {"goddard_js_repl": {
-                "transport": "stdio",
-                "command": config.repl_path,
-                "args": [],
-                "env": {
-                    "GODDARD_COMPUTER_USE_SERVER": config.server_path,
-                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY": config.process_directory,
-                }
-            }}})
-        });
+        let computer_use = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+        let computer_use_config = (!mcp_servers.is_empty())
+            .then(|| json!({"mcpServers": super::mcp::config_map(&mcp_servers, "http")}));
         // Goddard mints the id (UUIDv7 is the host's session-id shape) so the
         // subscription can exist before `session/start` returns.
         let resuming = resumed_id.is_some();
@@ -247,10 +242,12 @@ impl MuseDriver {
             eval: eval.map(Arc::new),
             model,
             reasoning_effort,
-            computer_use_instruction: computer_use.as_ref().map(|runtime| format!(
-                "[Goddard Computer Use: When I ask you to interact with a local app, use goddard_js_repl. Read the skill at {} for its API.]",
-                runtime.config.skill_path.display()
-            )),
+            computer_use_instruction: computer_use.as_ref().map(|runtime| {
+                format!(
+                    "[Goddard Computer Use: {}]",
+                    super::computer_use::hint(&runtime.config.skill_path)
+                )
+            }),
             active_turn: session
                 .get("activeTurnId")
                 .and_then(Value::as_str)
@@ -1861,7 +1858,8 @@ mod tests {
             agent: None,
             read_own_transcript: false,
             subagents: None,
-            integrations: Vec::new(),
+            computer_use_runtime: None,
+            mcp_servers: Vec::new(),
             provider_cursor: None,
         }
     }

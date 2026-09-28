@@ -2847,7 +2847,8 @@ impl Backend for WakuBackend {
                     subagents: None,
                     // Filled in by `spawn_runtime` — the daemon owns the
                     // catalog, never the wire.
-                    integrations: Vec::new(),
+                    computer_use_runtime: None,
+                    mcp_servers: Vec::new(),
                     provider_cursor: options
                         .provider_cursor
                         .map(serde_json::from_value)
@@ -3832,7 +3833,8 @@ impl WakuBackend {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,
@@ -4075,7 +4077,8 @@ impl WakuBackend {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: source.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,
@@ -4418,12 +4421,13 @@ impl WakuBackend {
                 spawn_repo_map_refresh(&self.repo_maps, options.cwd.clone());
             }
         }
-        // Connected integrations ride the launch too; drivers that take file
-        // delivery instead see nothing here because their entries were
-        // written at connect time.
-        if !cloud_launch {
-            options.integrations = self.integrations.launch_integrations(provider);
-        }
+        // Connected integrations and Computer Use share one provider-neutral
+        // MCP description. Drivers translate it into their own launch format.
+        options.mcp_servers = if cloud_launch {
+            Vec::new()
+        } else {
+            self.integrations.launch_mcp_servers(provider)
+        };
         // A sandboxed session runs its provider inside a shuru VM — never on
         // the host. Every setup failure fails the task rather than silently
         // falling back to a local process.
@@ -4454,6 +4458,11 @@ impl WakuBackend {
             // bridge is host-side too, so it is off in the sandbox.
             options.agent = None;
             options.computer_use_enabled = false;
+        }
+        if options.computer_use_enabled {
+            let runtime = driver::ComputerUseRuntime::start(event_sender.clone())?;
+            options.mcp_servers.push(runtime.mcp_server_spec());
+            options.computer_use_runtime = Some(runtime);
         }
         // The agent-surface instruction reaches the session through whichever
         // channel its provider offers; first-prompt context needs the launch's
@@ -4623,7 +4632,8 @@ impl WakuBackend {
                     || !session.suspended_provider_sessions.is_empty()
                     || session.pending_provider_context.is_some(),
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: session.provider_cursor.clone(),
                 eval: None,
                 sandbox: None,
@@ -4939,14 +4949,13 @@ impl WakuBackend {
             .lock()
             .get(&session_id)
             .is_some_and(|entry| entry.computer_use_available);
-        let computer_use = computer_use_available.then(|| {
-            crate::computer_use::skill_root_path().ok().map(|root| {
-                format!(
-                    "When the user asks you to interact with a local app, use `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
-                    root.join("goddard-computer-use/SKILL.md").display()
-                )
+        let computer_use = computer_use_available
+            .then(|| {
+                crate::computer_use::skill_root_path().ok().map(|root| {
+                    driver::computer_use_hint(&root.join("goddard-computer-use/SKILL.md"))
+                })
             })
-        }).flatten();
+            .flatten();
         let block = [
             memory.clone(),
             parent_index.clone(),

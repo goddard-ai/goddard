@@ -13,7 +13,7 @@ mod service;
 pub use oauth::StoredCredential;
 pub(crate) use secrets::SecretStore;
 pub(crate) use service::Inner;
-pub use service::{IntegrationService, LaunchIntegration, Upstream};
+pub use service::{IntegrationService, Upstream};
 
 /// Server name agents see for a delivered integration: `goddard_linear`,
 /// `goddard_github`, … The prefix keeps delivered entries distinct from

@@ -1,7 +1,6 @@
 //! Codex app-server transport.
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -17,7 +16,6 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::computer_use as computer_use_runtime;
-use crate::computer_use;
 use crate::driver::{
     AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
     SessionOptions,
@@ -198,9 +196,7 @@ pub struct CodexDriver {
     binary: PathBuf,
     cwd: PathBuf,
     mode: RuntimeMode,
-    computer_use_process_directory: Option<PathBuf>,
-    computer_use_server_path: Option<PathBuf>,
-    computer_use_preview_monitor: Option<computer_use_runtime::ComputerUsePreviewMonitor>,
+    computer_use: Option<computer_use_runtime::ComputerUseRuntime>,
     announced_agent_surface: bool,
     ephemeral: bool,
 }
@@ -297,40 +293,15 @@ impl CodexThreadLease {
     }
 }
 
-struct CodexComputerUseConfig {
-    server_path: PathBuf,
-    server: String,
-    repl: String,
-    skill_root: PathBuf,
-    process_directory: PathBuf,
-    process_directory_config: String,
-}
-
-impl CodexComputerUseConfig {
-    fn load() -> anyhow::Result<Self> {
-        let server_path = computer_use::mcp_server_command()?;
-        let server = toml_string(&server_path.display().to_string());
-        let repl_path = computer_use::js_repl_server_path()?;
-        let repl = toml_string(&repl_path.display().to_string());
-        let skill_root = computer_use::skill_root_path()?;
-        let process_directory = computer_use_runtime::create_process_directory()?;
-        let process_directory_config = toml_string(&process_directory.display().to_string());
-        Ok(Self {
-            server_path,
-            server,
-            repl,
-            skill_root,
-            process_directory,
-            process_directory_config,
-        })
-    }
-}
-
 /// Register Goddard's long-lived QuickJS MCP server and keep the raw native helper
 /// private behind its built-in `cua` object. Codex sees only the compact
 /// `js` / `js_reset` execution surface.
-fn configure_computer_use_command(command: &mut Command, config: Option<&CodexComputerUseConfig>) {
-    if let Some(config) = config {
+fn configure_computer_use_command(
+    command: &mut Command,
+    computer_use_enabled: bool,
+    servers: &[super::McpServerSpec],
+) {
+    if computer_use_enabled {
         command
             .arg("-c")
             .arg(DISABLE_EXTERNAL_COMPUTER_USE_PLUGIN)
@@ -343,29 +314,13 @@ fn configure_computer_use_command(command: &mut Command, config: Option<&CodexCo
             .arg("-c")
             .arg(DISABLE_CODEX_NODE_REPL_COMMAND)
             .arg("-c")
-            .arg(DISABLE_CODEX_NODE_REPL)
-            .env("GODDARD_COMPUTER_USE_SERVER", &config.server_path)
-            .env(
-                "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY",
-                &config.process_directory,
-            )
-            .arg("-c")
-            .arg(format!(
-                "mcp_servers.goddard_js_repl.command={}",
-                config.repl
-            ))
-            .arg("-c")
-            .arg("mcp_servers.goddard_js_repl.args=[]")
-            .arg("-c")
-            .arg(format!(
-                "mcp_servers.goddard_js_repl.env.GODDARD_COMPUTER_USE_SERVER={}",
-                config.server
-            ))
-            .arg("-c")
-            .arg(format!(
-                "mcp_servers.goddard_js_repl.env.GODDARD_COMPUTER_USE_PROCESS_DIRECTORY={}",
-                config.process_directory_config
-            ));
+            .arg(DISABLE_CODEX_NODE_REPL);
+    }
+    for server in servers {
+        if let Some((_, _, token)) = server.http_parts() {
+            command.env("GODDARD_MCP_PROXY_TOKEN", token);
+        }
+        command.args(crate::integrations::deliver::codex_config_args(server));
     }
 }
 
@@ -381,10 +336,11 @@ impl CodexDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled,
+            computer_use_runtime,
             agent,
             read_own_transcript: _,
             subagents,
-            integrations,
+            mcp_servers,
             provider_cursor,
             eval: _,
             sandbox,
@@ -405,35 +361,31 @@ impl CodexDriver {
         if let Some(thread_id) = provider_session_id.as_deref() {
             thread_lease.claim(thread_id)?;
         }
-        let computer_use = computer_use_enabled
-            .then(CodexComputerUseConfig::load)
-            .transpose()?;
-        let computer_use_skill_root = computer_use
+        let computer_use = computer_use_runtime::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+        let computer_use_skill_root = computer_use.as_ref().and_then(|runtime| {
+            runtime
+                .config
+                .skill_path
+                .parent()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf)
+        });
+        let computer_use_hint = computer_use
             .as_ref()
-            .map(|config| config.skill_root.clone());
+            .map(|runtime| super::computer_use::hint(&runtime.config.skill_path));
         let announce_computer_use = computer_use.is_some();
-        let computer_use_process_directory = computer_use
-            .as_ref()
-            .map(|config| config.process_directory.clone());
-        let computer_use_server_path = computer_use
-            .as_ref()
-            .map(|config| config.server_path.clone());
         let title_binary = binary.clone();
         let title_cwd = cwd.clone();
         let title_sandbox = sandbox.clone();
         let mut command = crate::command_env::command(&binary);
         command.args(["app-server", "--stdio"]);
-        configure_computer_use_command(command.command_mut(), computer_use.as_ref());
-        // Connected integrations arrive as `mcp_servers.goddard_<id>` remote
-        // entries; the bearer travels in the environment, never argv.
-        if !integrations.is_empty() {
-            if let Some(token) = integrations.first().map(|i| i.token.clone()) {
-                command.env("GODDARD_MCP_PROXY_TOKEN", token);
-            }
-            for integration in &integrations {
-                command.args(crate::integrations::deliver::codex_config_args(integration));
-            }
-        }
+        configure_computer_use_command(command.command_mut(), announce_computer_use, &mcp_servers);
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(command.command_mut(), agent);
         }
@@ -473,15 +425,6 @@ impl CodexDriver {
             .stderr
             .take()
             .ok_or_else(|| anyhow!("Codex stderr unavailable"))?;
-        let computer_use_preview_monitor = computer_use_process_directory
-            .as_ref()
-            .map(|directory| {
-                computer_use_runtime::ComputerUsePreviewMonitor::start(
-                    directory.clone(),
-                    events.clone(),
-                )
-            })
-            .transpose()?;
         let (commands, command_rx) = unbounded();
         let (process_shutdown, process_shutdown_rx) = bounded(1);
         let thread_id = Arc::new(Mutex::new(None::<String>));
@@ -585,17 +528,14 @@ impl CodexDriver {
                 // field.
                 let mut developer_instructions: Vec<String> =
                     agent_instruction.iter().cloned().collect();
-                if announce_computer_use {
-                    developer_instructions.push("When the user asks you to interact with a local app, use the `js` tool from `goddard_js_repl`. Read the bundled Goddard Computer Use skill for its API and operating instructions.".into());
+                if let Some(hint) = &computer_use_hint {
+                    developer_instructions.push(hint.clone());
                 }
                 if subagents
                     .as_ref()
                     .is_some_and(|spec| !spec.agents.is_empty())
                 {
-                    if let Some(hint) = subagents
-                        .as_ref()
-                        .and_then(crate::subagents::codex_hint)
-                    {
+                    if let Some(hint) = subagents.as_ref().and_then(crate::subagents::codex_hint) {
                         developer_instructions.push(hint);
                     }
                 }
@@ -1351,9 +1291,7 @@ impl CodexDriver {
             binary,
             cwd,
             mode,
-            computer_use_process_directory,
-            computer_use_server_path,
-            computer_use_preview_monitor,
+            computer_use,
             announced_agent_surface,
             ephemeral,
         })
@@ -1394,10 +1332,6 @@ fn turn_start_params(
         // a native reasoning disclosure, so explicitly request readable text.
         "summary": "auto"
     })
-}
-
-fn toml_string(value: &str) -> String {
-    serde_json::to_string(value).expect("a filesystem path is always valid JSON")
 }
 
 /// `thread/goal/set` params. Omitted fields keep their provider-side value,
@@ -1507,18 +1441,13 @@ impl DriverControl for CodexDriver {
     }
 
     fn cancel_computer_use(&self) {
-        if let (Some(directory), Some(server_path)) = (
-            self.computer_use_process_directory.as_deref(),
-            self.computer_use_server_path.as_deref(),
-        ) {
-            computer_use_runtime::stop_registered_processes(directory, server_path);
+        if let Some(runtime) = self.computer_use.as_ref() {
+            runtime.stop();
         }
     }
 
     fn computer_use_available(&self) -> bool {
-        self.computer_use_process_directory.is_some()
-            && self.computer_use_server_path.is_some()
-            && self.computer_use_preview_monitor.is_some()
+        self.computer_use.is_some()
     }
 
     fn refresh_background_work(&self) {
@@ -1628,10 +1557,6 @@ impl Drop for CodexDriver {
     fn drop(&mut self) {
         self.begin_shutdown();
         self.cancel_computer_use();
-        drop(self.computer_use_preview_monitor.take());
-        if let Some(directory) = self.computer_use_process_directory.as_deref() {
-            let _ = fs::remove_dir_all(directory);
-        }
     }
 }
 
@@ -3223,7 +3148,8 @@ mod tests {
                     agent: None,
                     read_own_transcript: false,
                     subagents: None,
-                    integrations: Vec::new(),
+                    computer_use_runtime: None,
+                    mcp_servers: Vec::new(),
                     provider_cursor,
                 },
                 events,
@@ -3303,7 +3229,8 @@ mod tests {
                     agent: None,
                     read_own_transcript: false,
                     subagents: None,
-                    integrations: Vec::new(),
+                    computer_use_runtime: None,
+                    mcp_servers: Vec::new(),
                     provider_cursor: Some(cursor),
                 },
                 events,
@@ -3463,7 +3390,8 @@ mod tests {
                     agent: None,
                     read_own_transcript: false,
                     subagents: None,
-                    integrations: Vec::new(),
+                    computer_use_runtime: None,
+                    mcp_servers: Vec::new(),
                     provider_cursor: cursor,
                 },
                 events,
@@ -3850,9 +3778,7 @@ mod tests {
             binary: PathBuf::from("codex"),
             cwd: std::env::temp_dir(),
             mode: RuntimeMode::FullAccess,
-            computer_use_process_directory: None,
-            computer_use_server_path: None,
-            computer_use_preview_monitor: None,
+            computer_use: None,
             announced_agent_surface: false,
             ephemeral: false,
         };
@@ -3885,7 +3811,7 @@ mod tests {
     #[test]
     fn computer_use_command_configuration_follows_the_setting() {
         let mut disabled = Command::new("/usr/bin/true");
-        configure_computer_use_command(&mut disabled, None);
+        configure_computer_use_command(&mut disabled, false, &[]);
         let disabled_arguments = disabled
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
@@ -3897,16 +3823,23 @@ mod tests {
                 .all(|(name, _)| { !name.to_string_lossy().starts_with("GODDARD_COMPUTER_USE_") })
         );
 
-        let config = CodexComputerUseConfig {
-            server_path: PathBuf::from("/tmp/goddard-computer-use-server"),
-            server: toml_string("/tmp/goddard-computer-use-server"),
-            repl: toml_string("/tmp/waku"),
-            skill_root: PathBuf::from("/tmp/goddard-computer-use-skill"),
-            process_directory: PathBuf::from("/tmp/goddard-computer-use-processes"),
-            process_directory_config: toml_string("/tmp/goddard-computer-use-processes"),
-        };
+        let server = super::super::McpServerSpec::stdio(
+            "goddard_js_repl",
+            "/tmp/waku",
+            [
+                (
+                    "GODDARD_COMPUTER_USE_SERVER".into(),
+                    "/tmp/goddard-computer-use-server".into(),
+                ),
+                (
+                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".into(),
+                    "/tmp/goddard-computer-use-processes".into(),
+                ),
+            ]
+            .into(),
+        );
         let mut enabled = Command::new("/usr/bin/true");
-        configure_computer_use_command(&mut enabled, Some(&config));
+        configure_computer_use_command(&mut enabled, true, &[server]);
         let enabled_arguments = enabled
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
@@ -3953,11 +3886,9 @@ mod tests {
                 .iter()
                 .any(|argument| argument == DISABLE_CODEX_NODE_REPL_COMMAND)
         );
-        assert!(
-            enabled
-                .get_envs()
-                .any(|(name, _)| { name.to_string_lossy() == "GODDARD_COMPUTER_USE_SERVER" })
-        );
+        assert!(enabled_arguments.iter().any(|argument| {
+            argument.contains("mcp_servers.goddard_js_repl.env.GODDARD_COMPUTER_USE_SERVER")
+        }));
     }
 
     #[test]

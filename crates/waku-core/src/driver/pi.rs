@@ -187,20 +187,18 @@ pub struct PiDriver {
 
 fn configure_pi_computer_use_command(
     command: &mut std::process::Command,
-    config: Option<(&computer_use_runtime::ComputerUseConfig, &Path)>,
+    config: Option<(super::McpServerSpec, &Path, &Path)>,
 ) {
-    if let Some((config, extension)) = config {
-        command
-            .arg("--extension")
-            .arg(extension)
-            .arg("--skill")
-            .arg(&config.skill_path)
-            .env("GODDARD_JS_REPL_SERVER", &config.repl_path)
-            .env("GODDARD_COMPUTER_USE_SERVER", &config.server_path)
-            .env(
-                "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY",
-                &config.process_directory,
-            );
+    if let Some((server, skill_path, extension)) = config {
+        if let Some((_, executable, env)) = server.stdio_parts() {
+            command
+                .arg("--extension")
+                .arg(extension)
+                .arg("--skill")
+                .arg(skill_path)
+                .env("GODDARD_JS_REPL_SERVER", executable)
+                .envs(env);
+        }
     }
 }
 
@@ -220,10 +218,11 @@ impl PiDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled,
+            computer_use_runtime,
             agent,
             read_own_transcript: _,
             subagents,
-            integrations: _,
+            mcp_servers,
             provider_cursor,
             eval: _,
             sandbox,
@@ -259,21 +258,18 @@ impl PiDriver {
             parse_model_slug(model)?;
         }
 
-        let computer_use = (computer_use_enabled && flavor.supports_goddard_computer_use())
-            .then(|| computer_use_runtime::ComputerUseRuntime::start(events.clone()))
-            .transpose()?;
+        let computer_use = computer_use_runtime::ComputerUseRuntime::for_launch(
+            computer_use_enabled && flavor.supports_goddard_computer_use(),
+            computer_use_runtime,
+            events.clone(),
+        )?;
+        let mut mcp_servers = mcp_servers;
+        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
         let pi_extension = computer_use
             .as_ref()
             .filter(|_| flavor == PiFlavor::Pi)
             .map(|_| crate::computer_use::pi_extension_path())
             .transpose()?;
-        let omp_computer_use_skill = (flavor == PiFlavor::OhMyPi)
-            .then(|| {
-                computer_use
-                    .as_ref()
-                    .map(|runtime| runtime.config.skill_path.clone())
-            })
-            .flatten();
         // Pi has no built-in subagent tool, so delegation arrives as a
         // goddard-owned extension: a `goddard_delegate` tool that runs `pi -p`
         // subprocesses on the spec's models. The file lives in Goddard's
@@ -307,16 +303,21 @@ impl PiDriver {
             computer_use
                 .as_ref()
                 .zip(pi_extension.as_deref())
-                .map(|(runtime, extension)| (&runtime.config, extension)),
+                .and_then(|(runtime, extension)| {
+                    let server = super::computer_use::mcp_server_spec(&mcp_servers, Some(runtime))?;
+                    Some((server, runtime.config.skill_path.as_path(), extension))
+                }),
         );
         if flavor == PiFlavor::OhMyPi
-            && let Some(runtime) = &computer_use
+            && let Some(runtime) = computer_use.as_ref()
+            && !mcp_servers.is_empty()
         {
+            let servers = super::mcp::config_map(&mcp_servers, "http");
             let mcp_config = runtime.config.process_directory.join("omp-mcp.json");
             std::fs::write(
                 &mcp_config,
                 serde_json::to_vec(&serde_json::json!({
-                    "mcpServers": { "goddard_js_repl": runtime.config.mcp_server() }
+                    "mcpServers": servers
                 }))?,
             )?;
             command.arg("--mcp-config").arg(mcp_config);
@@ -1929,7 +1930,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,
@@ -2234,7 +2236,8 @@ mod tests {
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
                 provider_cursor: None,
             },
             events,

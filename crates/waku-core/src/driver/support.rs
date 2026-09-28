@@ -11,7 +11,6 @@ use parking_lot::Mutex;
 use serde_json::Value;
 
 use super::computer_use as computer_use_runtime;
-use crate::driver::DriverEventSender;
 use crate::fs_ext;
 use crate::model::{ActivityKind, ProviderKind};
 
@@ -36,14 +35,14 @@ pub(super) fn claude_context_tokens(usage: &Value) -> Option<u64> {
 #[derive(Clone)]
 pub(super) enum HeadlessComputerUseConfig {
     OpenCode {
-        base: computer_use_runtime::ComputerUseConfig,
         config_content: String,
+        server: super::McpServerSpec,
     },
     Grok {
-        base: computer_use_runtime::ComputerUseConfig,
         grok_home: PathBuf,
         auth_path: Option<PathBuf>,
         rules: String,
+        server: super::McpServerSpec,
     },
 }
 
@@ -53,8 +52,11 @@ pub(super) struct HeadlessComputerUseRuntime {
 }
 
 impl HeadlessComputerUseRuntime {
-    pub(super) fn start(provider: ProviderKind, events: DriverEventSender) -> anyhow::Result<Self> {
-        let runtime = computer_use_runtime::ComputerUseRuntime::start(events)?;
+    pub(super) fn from_runtime(
+        provider: ProviderKind,
+        runtime: computer_use_runtime::ComputerUseRuntime,
+        server: super::McpServerSpec,
+    ) -> anyhow::Result<Self> {
         let config = match provider {
             ProviderKind::OpenCode => {
                 let existing = match std::env::var("OPENCODE_CONFIG_CONTENT") {
@@ -67,17 +69,15 @@ impl HeadlessComputerUseRuntime {
                 let base = runtime.config.clone();
                 let config_content = build_opencode_computer_use_config(
                     existing.as_deref(),
-                    &base.server_path,
-                    &base.repl_path,
+                    &server,
                     &base.skill_path,
-                    &base.process_directory,
                 )?;
                 HeadlessComputerUseConfig::OpenCode {
-                    base,
                     config_content,
+                    server,
                 }
             }
-            ProviderKind::Grok => build_grok_computer_use_config(runtime.config.clone())?,
+            ProviderKind::Grok => build_grok_computer_use_config(runtime.config.clone(), server)?,
             _ => return Err(anyhow!("Computer Use is not supported by this driver")),
         };
         Ok(Self { runtime, config })
@@ -108,10 +108,8 @@ impl HeadlessComputerUseRuntime {
 
 fn build_opencode_computer_use_config(
     existing: Option<&str>,
-    server_path: &Path,
-    repl_path: &Path,
+    server: &super::McpServerSpec,
     skill_path: &Path,
-    process_directory: &Path,
 ) -> anyhow::Result<String> {
     let mut config = existing
         .map(serde_json::from_str::<Value>)
@@ -126,16 +124,16 @@ fn build_opencode_computer_use_config(
         .or_insert_with(|| serde_json::json!({}))
         .as_object_mut()
         .ok_or_else(|| anyhow!("OPENCODE_CONFIG_CONTENT.mcp must be a JSON object"))?;
+    let Some((name, command, environment)) = server.stdio_parts() else {
+        return Err(anyhow!("OpenCode Computer Use requires a stdio MCP server"));
+    };
     mcp.insert(
-        "goddard_js_repl".into(),
+        name.to_owned(),
         serde_json::json!({
             "type": "local",
-            "command": [repl_path.display().to_string()],
+            "command": [command.display().to_string()],
             "enabled": true,
-            "environment": {
-                "GODDARD_COMPUTER_USE_SERVER": server_path.display().to_string(),
-                "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY": process_directory.display().to_string(),
-            },
+            "environment": environment,
         }),
     );
     let instructions = root
@@ -158,27 +156,27 @@ pub(super) fn opencode_computer_use_environment(
     config: &HeadlessComputerUseConfig,
 ) -> Vec<(String, String)> {
     let HeadlessComputerUseConfig::OpenCode {
-        base,
         config_content,
+        server,
+        ..
     } = config
     else {
         return Vec::new();
     };
-    vec![
-        ("OPENCODE_CONFIG_CONTENT".to_owned(), config_content.clone()),
-        (
-            "GODDARD_COMPUTER_USE_SERVER".to_owned(),
-            base.server_path.display().to_string(),
-        ),
-        (
-            "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".to_owned(),
-            base.process_directory.display().to_string(),
-        ),
-    ]
+    let mut environment = vec![("OPENCODE_CONFIG_CONTENT".to_owned(), config_content.clone())];
+    if let Some((_, _, server_environment)) = server.stdio_parts() {
+        environment.extend(
+            server_environment
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+    }
+    environment
 }
 
 fn build_grok_computer_use_config(
     base: computer_use_runtime::ComputerUseConfig,
+    server: super::McpServerSpec,
 ) -> anyhow::Result<HeadlessComputerUseConfig> {
     let source_home = match std::env::var_os("GROK_HOME") {
         Some(home) => PathBuf::from(home),
@@ -231,7 +229,7 @@ fn build_grok_computer_use_config(
             });
         }
     };
-    let config_content = build_grok_computer_use_toml(existing.as_deref(), &base)?;
+    let config_content = build_grok_computer_use_toml(existing.as_deref(), &server)?;
     fs::write(grok_home.join("config.toml"), config_content).with_context(|| {
         format!(
             "could not write isolated Grok config {}",
@@ -251,16 +249,16 @@ fn build_grok_computer_use_config(
         )
     })?;
     Ok(HeadlessComputerUseConfig::Grok {
-        base,
         grok_home,
         auth_path,
         rules,
+        server,
     })
 }
 
 fn build_grok_computer_use_toml(
     existing: Option<&str>,
-    base: &computer_use_runtime::ComputerUseConfig,
+    server_spec: &super::McpServerSpec,
 ) -> anyhow::Result<String> {
     let mut root = match existing.filter(|content| !content.trim().is_empty()) {
         Some(content) => {
@@ -273,24 +271,22 @@ fn build_grok_computer_use_toml(
         .or_insert_with(|| toml::Value::Table(toml::Table::new()))
         .as_table_mut()
         .ok_or_else(|| anyhow!("Grok config.toml mcp_servers must be a table"))?;
-    let mut environment = toml::Table::new();
-    environment.insert(
-        "GODDARD_COMPUTER_USE_SERVER".into(),
-        toml::Value::String(base.server_path.display().to_string()),
-    );
-    environment.insert(
-        "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".into(),
-        toml::Value::String(base.process_directory.display().to_string()),
-    );
+    let Some((name, command, env)) = server_spec.stdio_parts() else {
+        return Err(anyhow!("Grok Computer Use requires a stdio MCP server"));
+    };
+    let environment = env
+        .iter()
+        .map(|(name, value)| (name.clone(), toml::Value::String(value.clone())))
+        .collect::<toml::Table>();
     let mut server = toml::Table::new();
     server.insert(
         "command".into(),
-        toml::Value::String(base.repl_path.display().to_string()),
+        toml::Value::String(command.display().to_string()),
     );
     server.insert("args".into(), toml::Value::Array(Vec::new()));
     server.insert("env".into(), toml::Value::Table(environment));
     server.insert("enabled".into(), toml::Value::Boolean(true));
-    mcp_servers.insert("goddard_js_repl".into(), toml::Value::Table(server));
+    mcp_servers.insert(name.to_owned(), toml::Value::Table(server));
     toml::to_string(&root).context("could not encode Grok Computer Use configuration")
 }
 
@@ -302,23 +298,20 @@ pub(super) fn grok_computer_use_environment(
     config: Option<&HeadlessComputerUseConfig>,
 ) -> Vec<(String, String)> {
     if let Some(HeadlessComputerUseConfig::Grok {
-        base,
         grok_home,
         auth_path,
+        server,
         ..
     }) = config
     {
-        let mut environment = vec![
-            ("GROK_HOME".to_owned(), grok_home.display().to_string()),
-            (
-                "GODDARD_COMPUTER_USE_SERVER".to_owned(),
-                base.server_path.display().to_string(),
-            ),
-            (
-                "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".to_owned(),
-                base.process_directory.display().to_string(),
-            ),
-        ];
+        let mut environment = vec![("GROK_HOME".to_owned(), grok_home.display().to_string())];
+        if let Some((_, _, server_environment)) = server.stdio_parts() {
+            environment.extend(
+                server_environment
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone())),
+            );
+        }
         if let Some(auth_path) = auth_path {
             environment.push(("GROK_AUTH_PATH".to_owned(), auth_path.display().to_string()));
         }
@@ -573,12 +566,10 @@ mod tests {
                     "plugin": ["existing-plugin"]
                 }"#,
             ),
-            Path::new("/Applications/Goddard Computer Use"),
-            Path::new("/Applications/Goddard.app/Contents/Resources/goddard_js_repl"),
+            &computer_use_config().mcp_server(),
             Path::new(
                 "/Applications/Goddard.app/Contents/Resources/skills/goddard-computer-use/SKILL.md",
             ),
-            Path::new("/tmp/waku computer use/session"),
         )
         .unwrap();
         let value: Value = serde_json::from_str(&content).unwrap();
@@ -632,7 +623,7 @@ mod tests {
                     command = "stale-server"
                 "#,
             ),
-            &computer_use_config(),
+            &computer_use_config().mcp_server(),
         )
         .unwrap();
         let value: toml::Value = toml::from_str(&content).unwrap();
@@ -669,10 +660,10 @@ mod tests {
     #[test]
     fn grok_computer_use_environment_is_process_scoped() {
         let config = HeadlessComputerUseConfig::Grok {
-            base: computer_use_config(),
             grok_home: PathBuf::from("/tmp/goddard-computer-use/session/grok-home"),
             auth_path: Some(PathBuf::from("/Users/test/.grok/auth.json")),
             rules: "Goddard Computer Use rules".into(),
+            server: computer_use_config().mcp_server(),
         };
         let environment = grok_computer_use_environment(Some(&config));
         let environment = environment.into_iter().collect::<HashMap<_, _>>();
@@ -684,6 +675,11 @@ mod tests {
             environment.get("GROK_AUTH_PATH"),
             Some(&"/Users/test/.grok/auth.json".into())
         );
+        assert_eq!(
+            environment.get("GODDARD_COMPUTER_USE_SERVER"),
+            Some(&"/tmp/Goddard Computer Use".into())
+        );
+        assert!(environment.contains_key("GODDARD_COMPUTER_USE_PROCESS_DIRECTORY"));
     }
 
     #[test]

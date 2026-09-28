@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 use waku_protocol::DaemonSettings;
 use waku_protocol::model::ProviderKind;
 
-use super::LaunchIntegration;
+use crate::driver::McpServerSpec;
 
 /// Providers whose integration delivery is a config file Goddard rewrites at
 /// connect/disconnect time. The rest are launch-injected per session.
@@ -34,6 +34,10 @@ const FILE_PROVIDERS: &[ProviderKind] = &[
     ProviderKind::Muse,
     ProviderKind::Grok,
 ];
+
+pub(super) fn uses_file_sync(provider: ProviderKind) -> bool {
+    FILE_PROVIDERS.contains(&provider)
+}
 
 /// Rewrite every file provider's managed entries from `settings`. Called at
 /// startup — the proxy's port is ephemeral, so entries written by an earlier
@@ -70,16 +74,18 @@ fn desired_entries(
         .map(|setting| {
             let url = service.endpoint_url(&setting.id);
             let token = service.proxy_token();
-            (
-                super::server_name(&setting.id),
-                server_entry(provider, &url, token),
-            )
+            let server =
+                McpServerSpec::http(super::server_name(&setting.id), url, token.to_owned());
+            (server.name().to_owned(), server_entry(provider, &server))
         })
         .collect()
 }
 
 /// The server object in one provider's dialect.
-fn server_entry(provider: ProviderKind, url: &str, token: &str) -> Value {
+fn server_entry(provider: ProviderKind, server: &McpServerSpec) -> Value {
+    let Some((_, url, token)) = server.http_parts() else {
+        unreachable!("file integration delivery requires an HTTP MCP server")
+    };
     let bearer = format!("Bearer {token}");
     match provider {
         ProviderKind::Antigravity => serde_json::json!({
@@ -253,50 +259,98 @@ fn write_atomic_json(path: &PathBuf, document: &Value) -> anyhow::Result<()> {
 
 /// Codex launch flags for one integration: the URL and an env-var-referenced
 /// bearer, so the token stays out of argv.
-pub fn codex_config_args(integration: &LaunchIntegration) -> Vec<String> {
-    vec![
-        "-c".to_owned(),
-        format!("mcp_servers.{}.url={}", integration.name, integration.url),
-        "-c".to_owned(),
-        format!(
-            "mcp_servers.{}.bearer_token_env_var=GODDARD_MCP_PROXY_TOKEN",
-            integration.name
-        ),
-    ]
+pub(crate) fn codex_config_args(server: &McpServerSpec) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some((name, command, env)) = server.stdio_parts() {
+        args.extend([
+            "-c".to_owned(),
+            format!(
+                "mcp_servers.{name}.command={}",
+                toml_string(&command.display().to_string())
+            ),
+            "-c".to_owned(),
+            format!("mcp_servers.{name}.args=[]"),
+        ]);
+        for (key, value) in env {
+            args.extend([
+                "-c".to_owned(),
+                format!("mcp_servers.{name}.env.{key}={}", toml_string(value)),
+            ]);
+        }
+    } else if let Some((name, url, _)) = server.http_parts() {
+        args.extend([
+            "-c".to_owned(),
+            format!("mcp_servers.{name}.url={url}"),
+            "-c".to_owned(),
+            format!("mcp_servers.{name}.bearer_token_env_var=GODDARD_MCP_PROXY_TOKEN"),
+        ]);
+    }
+    args
 }
 
-/// The OpenCode `mcp` map entries for a set of integrations, merged into
-/// `OPENCODE_CONFIG_CONTENT` by the caller.
-pub fn opencode_config_entries(integrations: &[LaunchIntegration]) -> Map<String, Value> {
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_owned()).to_string()
+}
+
+/// OpenCode's `mcp` map entries for a set of launch MCP servers.
+pub(crate) fn opencode_config_entries(servers: &[McpServerSpec]) -> Map<String, Value> {
     let mut mcp = Map::new();
-    for integration in integrations {
-        mcp.insert(
-            integration.name.clone(),
+    for server in servers {
+        let value = if let Some((_, command, env)) = server.stdio_parts() {
+            serde_json::json!({
+                "type": "local",
+                "command": [command.display().to_string()],
+                "enabled": true,
+                "environment": env,
+            })
+        } else if let Some((_, url, token)) = server.http_parts() {
             serde_json::json!({
                 "type": "remote",
-                "url": integration.url,
+                "url": url,
                 "enabled": true,
-                "headers": { "Authorization": format!("Bearer {}", integration.token) },
-            }),
-        );
+                "headers": { "Authorization": format!("Bearer {token}") },
+            })
+        } else {
+            continue;
+        };
+        mcp.insert(server.name().to_owned(), value);
     }
     mcp
 }
 
 /// One DeepSeek Cordis overlay row per integration — `dsh web --patch` takes
 /// the generated file at launch.
-pub fn deepseek_overlay_yaml(integrations: &[LaunchIntegration]) -> String {
+pub(crate) fn deepseek_overlay_yaml(servers: &[McpServerSpec]) -> String {
     let mut yaml = String::new();
-    for integration in integrations {
-        yaml.push_str(&format!(
-            "- id: {}\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: {}\n    transport: streamable-http\n    url: {}\n    headers:\n      Authorization: 'Bearer {}'\n",
-            integration.name,
-            // dsh serverName is capped at [A-Za-z0-9_-]{1,32} — the
-            // goddard_<id> names already fit.
-            integration.name,
-            integration.url,
-            integration.token,
-        ));
+    for server in servers {
+        if let Some((name, url, token)) = server.http_parts() {
+            yaml.push_str(&format!(
+                "- id: {name}\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: {name}\n    transport: streamable-http\n    url: {}\n    headers:\n      Authorization: {}\n",
+                serde_json::to_string(url).expect("URL is valid JSON"),
+                serde_json::to_string(&format!("Bearer {token}"))
+                    .expect("authorization header is valid JSON"),
+            ));
+        } else if let Some((name, command, env)) = server.stdio_parts() {
+            let id = if name == crate::driver::MCP_SERVER_NAME {
+                "goddard-computer-use"
+            } else {
+                name
+            };
+            yaml.push_str(&format!(
+                "- id: {id}\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: {name}\n    transport: stdio\n    command: {}\n    args: []\n    env:\n",
+                serde_json::to_string(&command.display().to_string())
+                    .expect("command path is valid JSON"),
+            ));
+            for (key, value) in env {
+                yaml.push_str(&format!(
+                    "      {key}: {}\n",
+                    serde_json::to_string(value).expect("environment value is valid JSON"),
+                ));
+            }
+            if name == crate::driver::MCP_SERVER_NAME {
+                yaml.push_str("    toolCallTimeoutMs: 300000\n");
+            }
+        }
     }
     yaml
 }
@@ -399,26 +453,21 @@ mod tests {
 
     #[test]
     fn codex_args_keep_the_token_out_of_argv() {
-        let integration = LaunchIntegration {
-            name: "goddard_linear".into(),
-            integration_id: "linear".into(),
-            url: "http://127.0.0.1:9/mcp/linear".into(),
-            token: "secret".into(),
-        };
-        let args = codex_config_args(&integration);
+        let server =
+            McpServerSpec::http("goddard_linear", "http://127.0.0.1:9/mcp/linear", "secret");
+        let args = codex_config_args(&server);
         assert!(args.iter().any(|arg| arg.contains("bearer_token_env_var")));
         assert!(!args.iter().any(|arg| arg.contains("secret")));
     }
 
     #[test]
     fn deepseek_overlay_is_one_plugin_row_per_integration() {
-        let integrations = vec![LaunchIntegration {
-            name: "goddard_linear".into(),
-            integration_id: "linear".into(),
-            url: "http://127.0.0.1:9/mcp/linear".into(),
-            token: "tok".into(),
-        }];
-        let yaml = deepseek_overlay_yaml(&integrations);
+        let servers = vec![McpServerSpec::http(
+            "goddard_linear",
+            "http://127.0.0.1:9/mcp/linear",
+            "tok",
+        )];
+        let yaml = deepseek_overlay_yaml(&servers);
         assert!(yaml.contains("@deepseek-ai/dsh-mcp-client"));
         assert!(yaml.contains("transport: streamable-http"));
         assert!(yaml.contains("Bearer tok"));
