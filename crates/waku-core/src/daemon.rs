@@ -572,40 +572,37 @@ impl WakuBackend {
             let task_state = backend.task_state.clone();
             let task_store = backend.task_store.clone();
             let share_dir = share_dir.clone();
-            backend.share.set_transfer_hook(Arc::new(
-                move |transfer| match create_transfer_session(
-                    &task_state,
-                    &task_store,
-                    &share_dir,
-                    transfer,
-                ) {
-                    Ok(session_id) => Some(session_id),
-                    Err(error) => {
-                        eprintln!("could not create transfer session: {error:#}");
-                        None
-                    }
-                },
-            ));
+            backend
+                .share
+                .set_transfer_hook(Arc::new(
+                    move |transfer, peer_name| match create_transfer_session(
+                        &task_state,
+                        &task_store,
+                        &share_dir,
+                        transfer,
+                        peer_name,
+                    ) {
+                        Ok(session_id) => Some(session_id),
+                        Err(error) => {
+                            eprintln!("could not create transfer session: {error:#}");
+                            None
+                        }
+                    },
+                ));
         }
         {
             let task_state = backend.task_state.clone();
             let task_store = backend.task_store.clone();
             let share_dir = share_dir.clone();
-            backend.share.set_chat_hook(Arc::new(
-                move |peer_name, text| match create_chat_session(
-                    &task_state,
-                    &task_store,
-                    &share_dir,
-                    &peer_name,
-                    &text,
-                ) {
+            backend.share.set_chat_hook(Arc::new(move |delivery| {
+                match create_chat_session(&task_state, &task_store, &share_dir, &delivery) {
                     Ok(session_id) => Some(session_id),
                     Err(error) => {
                         eprintln!("could not create chat session: {error:#}");
                         None
                     }
-                },
-            ));
+                }
+            }));
         }
         {
             // The share layer's view of local projects — paths, names,
@@ -1249,8 +1246,8 @@ fn migrate_projectless_state(
     Ok(())
 }
 
-/// Materialize a transfer's agent session: a task under the synthetic
-/// "Friends" project whose first messages are the sender's note and the
+/// Materialize a transfer's agent session: a task under the sender's
+/// friend project whose first messages are the sender's note and the
 /// receipt — peer, title, and where the files landed — rendered as
 /// assistant messages, not a sent bubble. The session stays quarantined
 /// (idle, no provider turn started) until the user chooses to trust it.
@@ -1259,12 +1256,13 @@ fn create_transfer_session(
     task_store: &Arc<StateStore>,
     share_dir: &Path,
     transfer: &waku_protocol::friends::TransferInfo,
+    peer_name: &str,
 ) -> anyhow::Result<Uuid> {
     let Some(dest_dir) = &transfer.dest_dir else {
         bail!("incoming transfer completed without a destination");
     };
     let mut state = task_state.lock();
-    let project_id = friends_project_id(&mut state, share_dir);
+    let project_id = friend_project_id(&mut state, share_dir, &transfer.peer_id, peer_name);
     // Transfer sessions are unconditionally sandboxed (received files never
     // reach the host fs), so the provider must be one the sandbox can run —
     // fall back to Claude rather than minting a session that can never start.
@@ -1274,7 +1272,9 @@ fn create_transfer_session(
         ProviderKind::Claude
     };
     let mut session = state.new_session(project_id, provider);
-    session.title = format!("{} from {}", transfer.title, transfer.peer_name);
+    // The sender owns the title — their display name is already the
+    // project the session files under.
+    session.title = transfer.title.clone();
     // The receipt is a notification, not a prompt awaiting a reply — a
     // provider turn holds the assistant messages so they render like an
     // agent reply (bot style), not a sent bubble. The sender's note rides
@@ -1283,16 +1283,16 @@ fn create_transfer_session(
     if let Some(note) = transfer.note.as_deref().filter(|note| !note.is_empty()) {
         session.push_message(crate::model::MessageRole::Assistant, note);
     }
-    let payload = transfer_payload_path(dest_dir, &transfer.title);
+    let payload = transfer_payload_path(dest_dir, transfer.payload_name());
     session.push_notice_message(
         crate::model::MessageRole::Assistant,
         format!(
             "{} sent you \"{}\".\n\nFiles are in {}\n\nThe files have not been opened or executed — decide whether you trust them before asking me to work with them.",
-            transfer.peer_name,
-            transfer.title,
+            peer_name,
+            transfer.payload_name(),
             dest_dir.display()
         ),
-        transfer_receipt_notice(transfer, &payload),
+        transfer_receipt_notice(transfer, &payload, peer_name),
     );
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
@@ -1326,6 +1326,7 @@ fn transfer_payload_path(dest_dir: &Path, title: &str) -> PathBuf {
 fn transfer_receipt_notice(
     transfer: &waku_protocol::friends::TransferInfo,
     payload: &Path,
+    peer_name: &str,
 ) -> crate::model::TranscriptNotice {
     let metadata = std::fs::metadata(payload).ok();
     let is_dir = metadata.as_ref().is_some_and(|meta| meta.is_dir());
@@ -1335,11 +1336,12 @@ fn transfer_receipt_notice(
         (Vec::new(), 0)
     };
     crate::model::TranscriptNotice::TransferReceived {
-        peer_name: transfer.peer_name.clone(),
-        title: transfer.title.clone(),
+        peer_name: peer_name.to_owned(),
+        title: transfer.payload_name().to_owned(),
         path: payload.to_path_buf(),
         is_dir,
-        is_image: !is_dir && waku_protocol::attachments::is_image_file_name(&transfer.title),
+        is_image: !is_dir
+            && waku_protocol::attachments::is_image_file_name(transfer.payload_name()),
         size_bytes: if is_dir {
             transfer.bytes_total
         } else {
@@ -1378,19 +1380,32 @@ fn transfer_manifest_entries(dir: &Path) -> (Vec<crate::model::TransferManifestE
     (entries, entry_count)
 }
 
-/// The "Friends" project transfer and chat sessions live in — found by
-/// path or registered on first delivery.
-fn friends_project_id(state: &mut PersistedState, share_dir: &Path) -> Uuid {
+/// The friend's project transfer and chat sessions live in — one project
+/// per peer, named after them, so the sidebar groups their deliveries by
+/// sender. Found by the stored peer id or registered on first delivery;
+/// the name tracks the friend's current display name. All friend projects
+/// share the share dir as their path — the sessions' cwd.
+fn friend_project_id(
+    state: &mut PersistedState,
+    share_dir: &Path,
+    peer_id: &str,
+    peer_name: &str,
+) -> Uuid {
     match state
         .projects
-        .iter()
-        .find(|project| project.path == share_dir)
-        .map(|project| project.id)
+        .iter_mut()
+        .find(|project| project.friend_peer_id.as_deref() == Some(peer_id))
     {
-        Some(id) => id,
+        Some(project) => {
+            if project.name != peer_name {
+                project.name = peer_name.to_owned();
+            }
+            project.id
+        }
         None => {
             let mut project = Project::from_path(share_dir.to_path_buf());
-            project.name = "Friends".to_owned();
+            project.name = peer_name.to_owned();
+            project.friend_peer_id = Some(peer_id.to_owned());
             let id = project.id;
             state.projects.push(project);
             id
@@ -1399,22 +1414,27 @@ fn friends_project_id(state: &mut PersistedState, share_dir: &Path) -> Uuid {
 }
 
 /// An incoming chat message materializes like a delivered transfer — a
-/// session in the "Friends" project with the text rendered as an agent
-/// reply. There is nothing to trust or hand off, so unlike a transfer it
-/// is neither quarantined nor sandboxed — just an idle chat.
+/// session in the sender's friend project with the text rendered as an
+/// agent reply and the sender's title. There is nothing to trust or hand
+/// off, so unlike a transfer it is neither quarantined nor sandboxed —
+/// just an idle chat.
 fn create_chat_session(
     task_state: &Arc<Mutex<PersistedState>>,
     task_store: &Arc<StateStore>,
     share_dir: &Path,
-    peer_name: &str,
-    text: &str,
+    delivery: &crate::share::ChatDelivery,
 ) -> anyhow::Result<Uuid> {
     let mut state = task_state.lock();
-    let project_id = friends_project_id(&mut state, share_dir);
+    let project_id = friend_project_id(
+        &mut state,
+        share_dir,
+        &delivery.peer_id,
+        &delivery.peer_name,
+    );
     let mut session = state.new_session(project_id, state.last_provider);
-    session.title = format!("Message from {peer_name}");
+    session.title = delivery.title.clone();
     session.begin_provider_turn();
-    session.push_message(crate::model::MessageRole::Assistant, text);
+    session.push_message(crate::model::MessageRole::Assistant, delivery.text.clone());
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
     let session_id = session.id;
@@ -1664,9 +1684,10 @@ impl Backend for WakuBackend {
             Command::SendFileToFriend {
                 node_id,
                 path,
+                title,
                 note,
             } => {
-                self.share.send_file(node_id, path, note)?;
+                self.share.send_file(node_id, path, title, note)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::SendMessageToFriend { node_id, text } => {
@@ -1686,7 +1707,8 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::SetFriendNickname { node_id, nickname } => {
-                self.share.set_friend_nickname(node_id, nickname)?;
+                self.share.set_friend_nickname(node_id.clone(), nickname)?;
+                self.rename_friend_project(&node_id)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::ShareProjectWithFriend {
@@ -3340,6 +3362,40 @@ enum ReviewMove {
 }
 
 impl WakuBackend {
+    /// Rename a friend's delivery project to their current display name —
+    /// called when a nickname changes so the sidebar group keeps showing
+    /// the name the user knows them by. Deliveries do the same inline.
+    fn rename_friend_project(&self, node_id: &str) -> anyhow::Result<()> {
+        let name = self
+            .share
+            .state()
+            .friends
+            .iter()
+            .find(|friend| friend.node_id == node_id)
+            .map(|friend| {
+                friend
+                    .nickname
+                    .clone()
+                    .filter(|nickname| !nickname.is_empty())
+                    .unwrap_or_else(|| friend.name.clone())
+            });
+        let Some(name) = name else {
+            return Ok(());
+        };
+        let mut state = self.task_state.lock();
+        let mut changed = false;
+        for project in state.projects.iter_mut() {
+            if project.friend_peer_id.as_deref() == Some(node_id) && project.name != name {
+                project.name = name.clone();
+                changed = true;
+            }
+        }
+        if changed {
+            self.task_store.save(&mut state)?;
+        }
+        Ok(())
+    }
+
     /// A review op moved `refs/notes/qa`, the QA branch, or the base
     /// branch on a shared origin — tell friends sharing it and bump review
     /// surfaces locally. Best-effort: no notices go out without an
@@ -7769,7 +7825,9 @@ mod tests {
             direction: waku_protocol::friends::TransferDirection::Incoming,
             peer_id: "peer".into(),
             peer_name: "maya".into(),
-            title: "design.pdf".into(),
+            // The sender's display title — not the payload's file name.
+            title: "new season mockups".into(),
+            file_name: Some("design.pdf".into()),
             note: Some("here's the new mockups".into()),
             status: waku_protocol::friends::TransferStatus::Done,
             bytes_done: 12,
@@ -7782,16 +7840,17 @@ mod tests {
         std::fs::write(&payload_file, b"hello world!").unwrap();
 
         let session_id =
-            create_transfer_session(&task_state, &store, &share_dir, &transfer).unwrap();
+            create_transfer_session(&task_state, &store, &share_dir, &transfer, "maya").unwrap();
 
         {
             let state = task_state.lock();
             let project = state
                 .projects
                 .iter()
-                .find(|project| project.path == share_dir)
-                .expect("a Friends project at the share dir");
-            assert_eq!(project.name, "Friends");
+                .find(|project| project.friend_peer_id.as_deref() == Some("peer"))
+                .expect("a friend project for the sending peer");
+            assert_eq!(project.name, "maya");
+            assert_eq!(project.path, share_dir);
             let session = state
                 .sessions
                 .iter()
@@ -7808,7 +7867,7 @@ mod tests {
             assert!(!session.provider_locked());
             assert!(session.can_choose_model(ProviderKind::Claude));
             assert_eq!(session.project_id, project.id);
-            assert_eq!(session.title, "design.pdf from maya");
+            assert_eq!(session.title, "new season mockups");
             let receipt = &session.turns[0];
             assert_eq!(receipt.status, crate::model::TurnStatus::Completed);
             // Note and receipt are assistant messages — bot-style blocks,
@@ -7862,13 +7921,16 @@ mod tests {
         std::fs::write(folder_dir.join("a.txt"), b"a").unwrap();
         let second = waku_protocol::friends::TransferInfo {
             id: Uuid::new_v4(),
-            title: "mockups".into(),
+            title: "mockups folder".into(),
+            file_name: Some("mockups".into()),
             dest_dir: Some(share_dir.join("transfers/y")),
             ..transfer.clone()
         };
-        let second_id = create_transfer_session(&task_state, &store, &share_dir, &second).unwrap();
+        let second_id =
+            create_transfer_session(&task_state, &store, &share_dir, &second, "maya").unwrap();
         {
             let state = task_state.lock();
+            // The same peer reuses its friend project — one group per sender.
             assert_eq!(
                 state
                     .projects
@@ -7938,8 +8000,12 @@ mod tests {
             &task_state,
             &store,
             &share_dir,
-            "maya",
-            "shipping the update tonight — changelog attached",
+            &crate::share::ChatDelivery {
+                peer_id: "peer".into(),
+                peer_name: "maya".into(),
+                title: "shipping the update tonight".into(),
+                text: "shipping the update tonight — changelog attached".into(),
+            },
         )
         .unwrap();
 
@@ -7949,16 +8015,15 @@ mod tests {
             .iter()
             .find(|session| session.id == session_id)
             .expect("the message's session");
-        assert_eq!(
-            session.project_id,
-            state
-                .projects
-                .iter()
-                .find(|project| project.path == share_dir)
-                .expect("a Friends project at the share dir")
-                .id
-        );
-        assert_eq!(session.title, "Message from maya");
+        let project = state
+            .projects
+            .iter()
+            .find(|project| project.friend_peer_id.as_deref() == Some("peer"))
+            .expect("a friend project for the sending peer");
+        assert_eq!(project.name, "maya");
+        assert_eq!(session.project_id, project.id);
+        // The sender owns the title — it names what was sent, not the peer.
+        assert_eq!(session.title, "shipping the update tonight");
         assert_eq!(session.status, SessionStatus::Idle);
         // A message has nothing to quarantine or sandbox — it is just an
         // idle chat holding the friend's text as an agent reply.
@@ -7975,16 +8040,70 @@ mod tests {
         );
         drop(state);
 
-        // A second message reuses the same Friends project.
-        create_chat_session(&task_state, &store, &share_dir, "maya", "and the pdf").unwrap();
+        // A second message reuses the same friend project; a different
+        // sender gets their own.
+        create_chat_session(
+            &task_state,
+            &store,
+            &share_dir,
+            &crate::share::ChatDelivery {
+                peer_id: "peer".into(),
+                peer_name: "maya".into(),
+                title: "and the pdf".into(),
+                text: "and the pdf".into(),
+            },
+        )
+        .unwrap();
+        create_chat_session(
+            &task_state,
+            &store,
+            &share_dir,
+            &crate::share::ChatDelivery {
+                peer_id: "peer-2".into(),
+                peer_name: "kai".into(),
+                title: "re: deployment".into(),
+                text: "did the deploy land?".into(),
+            },
+        )
+        .unwrap();
+        let state = task_state.lock();
+        assert_eq!(
+            state
+                .projects
+                .iter()
+                .filter(|project| project.path == share_dir)
+                .count(),
+            2
+        );
+        let kai = state
+            .projects
+            .iter()
+            .find(|project| project.friend_peer_id.as_deref() == Some("peer-2"))
+            .expect("a second friend project");
+        assert_eq!(kai.name, "kai");
+        drop(state);
+
+        // A display-name change on the next delivery renames the project.
+        create_chat_session(
+            &task_state,
+            &store,
+            &share_dir,
+            &crate::share::ChatDelivery {
+                peer_id: "peer".into(),
+                peer_name: "maya r.".into(),
+                title: "one more".into(),
+                text: "one more".into(),
+            },
+        )
+        .unwrap();
         assert_eq!(
             task_state
                 .lock()
                 .projects
                 .iter()
-                .filter(|project| project.path == share_dir)
-                .count(),
-            1
+                .find(|project| project.friend_peer_id.as_deref() == Some("peer"))
+                .map(|project| project.name.as_str()),
+            Some("maya r.")
         );
 
         std::fs::remove_dir_all(root).ok();

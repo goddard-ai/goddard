@@ -650,15 +650,18 @@ pub enum Command {
         node_id: String,
     },
     /// Offer a file or directory to a friend. Spawns a transfer; progress
-    /// arrives through `FriendsChanged` broadcasts.
+    /// arrives through `FriendsChanged` broadcasts. `title` is the
+    /// sender-chosen display title the receiver's sidebar shows — the
+    /// dialog's field: a manual title, or the file name.
     SendFileToFriend {
         node_id: String,
         #[ts(type = "string")]
         path: PathBuf,
+        title: Option<String>,
         note: Option<String>,
     },
     /// Send a chat message to a friend — lands on their side as a session
-    /// in the Friends project, like a delivered transfer's note.
+    /// in the sender's friend project, like a delivered transfer's note.
     SendMessageToFriend {
         node_id: String,
         text: String,

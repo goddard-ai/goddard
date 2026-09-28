@@ -48,15 +48,15 @@ async fn chat_delivers_name_and_text_to_friend() {
     let node_a = spawn_node(
         dir_a.path(),
         store_a.clone(),
-        Arc::new(|_id, _name, _text| {}),
+        Arc::new(|_id, _name, _title, _text| {}),
     )
     .await;
     let (tx, rx) = std::sync::mpsc::channel();
     let node_b = spawn_node(
         dir_b.path(),
         store_b.clone(),
-        Arc::new(move |id, name, text| {
-            let _ = tx.send((id, name, text));
+        Arc::new(move |id, name, title, text| {
+            let _ = tx.send((id, name, title, text));
         }),
     )
     .await;
@@ -74,11 +74,13 @@ async fn chat_delivers_name_and_text_to_friend() {
     .await
     .expect("chat send failed");
 
-    let (from, name, text) = rx
+    let (from, name, title, text) = rx
         .recv_timeout(std::time::Duration::from_secs(10))
         .expect("chat handler never fired");
     assert_eq!(from, node_a.endpoint().id());
     assert_eq!(name, "alice");
+    // The sender derives the session title — the receiver shows it as-is.
+    assert_eq!(title, "shipping the update tonight");
     assert_eq!(text, "shipping the update tonight");
 
     node_a.shutdown().await.unwrap();
@@ -93,15 +95,15 @@ async fn chat_from_stranger_is_dropped() {
     let node_a = spawn_node(
         dir_a.path(),
         friend_store(),
-        Arc::new(|_id, _name, _text| {}),
+        Arc::new(|_id, _name, _title, _text| {}),
     )
     .await;
     let (tx, rx) = std::sync::mpsc::channel();
     let node_b = spawn_node(
         dir_b.path(),
         friend_store(),
-        Arc::new(move |id, name, text| {
-            let _ = tx.send((id, name, text));
+        Arc::new(move |id, name, title, text| {
+            let _ = tx.send((id, name, title, text));
         }),
     )
     .await;

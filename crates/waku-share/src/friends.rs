@@ -173,6 +173,10 @@ pub enum FriendsMessage {
         name: String,
         /// File or folder name being offered.
         file_name: String,
+        /// Sender-chosen display title — a generated summary or manual label.
+        /// `None` from older senders; the receiver shows `file_name` then.
+        #[serde(default)]
+        title: Option<String>,
         /// Declared byte size — the receiver renders progress against it.
         size: u64,
         note: Option<String>,
@@ -192,11 +196,16 @@ pub enum FriendsMessage {
     Ack,
     /// Liveness probe — presence is lazy (dial on demand), never heartbeated.
     Ping,
-    /// A chat message — the receiver materializes it as a session in their
-    /// Friends project, same as a delivered transfer's note.
+    /// A chat message — the receiver materializes it as a session in the
+    /// sender's friend project, same as a delivered transfer's note.
     Chat {
         /// Sender's display name.
         name: String,
+        /// Sender-chosen session title, derived from the text — what the
+        /// receiver's sidebar shows. Empty from older senders; the receiver
+        /// derives its own then.
+        #[serde(default)]
+        title: String,
         text: String,
     },
     /// The sender's full shared-repo set for us — replaces what we
@@ -283,6 +292,8 @@ pub struct OfferInfo {
     pub from: EndpointId,
     pub name: String,
     pub file_name: String,
+    /// Sender-chosen display title — `None` on offers from older senders.
+    pub title: Option<String>,
     pub size: u64,
     pub note: Option<String>,
     pub ticket: String,
@@ -295,9 +306,28 @@ pub type OfferHandler = Arc<dyn Fn(OfferInfo) + Send + Sync>;
 /// Fired when the receiver reports a finished, verified download.
 pub type DoneHandler = Arc<dyn Fn(EndpointId, String) + Send + Sync>;
 
-/// Callback the host app installs for incoming chat messages — `(sender,
-/// display name, text)`. Only fires for peers in the friend store.
-pub type ChatHandler = Arc<dyn Fn(EndpointId, String, String) + Send + Sync>;
+/// Fired on an incoming chat: peer, sender's display name, sender-chosen
+/// title (empty on older peers — derive one), and the message text. Only
+/// fires for peers in the friend store.
+pub type ChatHandler = Arc<dyn Fn(EndpointId, String, String, String) + Send + Sync>;
+
+/// A chat's sidebar title — the first non-empty line, capped. The sender
+/// derives and sends it; receivers derive their own from older peers.
+pub fn chat_title(text: &str) -> String {
+    const MAX: usize = 60;
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("message");
+    if first.chars().count() > MAX {
+        let mut title: String = first.chars().take(MAX).collect();
+        title.push('…');
+        title
+    } else {
+        first.to_string()
+    }
+}
 
 /// Fired when a friend sends their full shared-repo set — replaces what
 /// we recorded for that peer.
@@ -484,6 +514,7 @@ impl ProtocolHandler for FriendsProtocol {
             FriendsMessage::Offer {
                 name,
                 file_name,
+                title,
                 size,
                 note,
                 ticket,
@@ -502,6 +533,7 @@ impl ProtocolHandler for FriendsProtocol {
                         from: remote,
                         name,
                         file_name,
+                        title,
                         size,
                         note,
                         ticket,
@@ -522,10 +554,10 @@ impl ProtocolHandler for FriendsProtocol {
                     .map_err(accept_err)?;
                 send.finish()?;
             }
-            FriendsMessage::Chat { name, text } => {
+            FriendsMessage::Chat { name, title, text } => {
                 if self.touch_friend(&remote) {
                     if let Some(on_chat) = &self.on_chat {
-                        on_chat(remote, name, text);
+                        on_chat(remote, name, title, text);
                     }
                     write_message(&mut send, &FriendsMessage::Ack)
                         .await
@@ -748,6 +780,7 @@ pub async fn send_offer(
     addr: impl Into<EndpointAddr>,
     our_name: &str,
     file_name: &str,
+    title: Option<String>,
     size: u64,
     note: Option<String>,
     ticket: &str,
@@ -759,6 +792,7 @@ pub async fn send_offer(
         &FriendsMessage::Offer {
             name: our_name.to_string(),
             file_name: file_name.to_string(),
+            title,
             size,
             note,
             ticket: ticket.to_string(),
@@ -834,6 +868,7 @@ pub async fn send_chat(
         &mut send,
         &FriendsMessage::Chat {
             name: name.to_string(),
+            title: chat_title(text),
             text: text.to_string(),
         },
         MAX_CHAT_BYTES,

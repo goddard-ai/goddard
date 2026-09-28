@@ -435,7 +435,10 @@ function SessionMetadata({ item, nowSeconds, t }: { item: SessionItem; nowSecond
   const inWorktree = workspace?.kind === 'worktree' || workspace?.kind === 'newWorktree'
   return (
     <span className="flex w-full min-w-0 items-center gap-1.5 text-[11.5px] leading-[15px] text-[var(--text-tertiary)]">
-      <WakuIcon className="size-[11px] shrink-0" name="folder" />
+      <WakuIcon
+        className="size-[11px] shrink-0"
+        name={item.projectIsFriend ? 'userRound' : 'folder'}
+      />
       <span className="min-w-0 flex-1 truncate">{item.projectName}</span>
       {inWorktree && (
         <WakuIcon

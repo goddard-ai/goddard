@@ -6692,6 +6692,7 @@ impl Waku {
                             self.is_remote_project(project.id),
                             project.starred,
                             star_focuses[index].clone(),
+                            project.friend_peer_id.is_some(),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -6766,14 +6767,21 @@ impl Waku {
                             .px(px(4.0))
                             .child(
                                 list(list_state.clone(), move |index, _window, _cx| {
-                                    let Some((project_id, name, remote, starred, star_focus)) =
-                                        list_rows.get(index)
+                                    let Some((
+                                        project_id,
+                                        name,
+                                        remote,
+                                        starred,
+                                        star_focus,
+                                        friend,
+                                    )) = list_rows.get(index)
                                     else {
                                         return div().into_any_element();
                                     };
                                     let project_id = *project_id;
                                     let remote = *remote;
                                     let starred = *starred;
+                                    let friend = *friend;
                                     let star_focus = star_focus.clone();
                                     let selected = Some(project_id) == subject_project_id;
                                     let highlighted = highlight
@@ -6893,6 +6901,8 @@ impl Waku {
                                         .child(icon(
                                             if remote {
                                                 "icons/server.svg"
+                                            } else if friend {
+                                                "icons/user-round.svg"
                                             } else {
                                                 "icons/folder.svg"
                                             },

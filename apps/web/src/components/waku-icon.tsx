@@ -65,6 +65,7 @@ export const GODDARD_ICONS = {
   terminal: 'i-waku-terminal',
   terminalSquare: 'i-waku-terminal-square',
   trash: 'i-waku-trash',
+  userRound: 'i-waku-user-round',
   unplug: 'i-waku-unplug',
   wifi: 'i-waku-wifi',
   wrench: 'i-waku-wrench',

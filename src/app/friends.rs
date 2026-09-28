@@ -1034,7 +1034,8 @@ impl Waku {
         cx.notify();
     }
 
-    /// File picker → the send dialog's optional note → `SendFileToFriend`.
+    /// File picker → the send dialog's title and optional note →
+    /// `SendFileToFriend`.
     /// The daemon dials fresh regardless of the cached probe verdict.
     pub(super) fn pick_and_send_file(&self, node_id: String, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {

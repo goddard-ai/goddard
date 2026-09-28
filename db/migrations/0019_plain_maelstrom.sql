@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `friend_peer_id` text;

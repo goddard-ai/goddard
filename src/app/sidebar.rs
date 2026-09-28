@@ -3762,6 +3762,15 @@ impl Waku {
                 // the folder's open state.
                 "icons/folder-clock.svg"
             }
+            SidebarGroup::Project(project_id)
+                if self.state.projects.iter().any(|project| {
+                    project.id == project_id && project.friend_peer_id.is_some()
+                }) =>
+            {
+                // Friend-delivery projects name the sender — a person glyph
+                // instead of a folder.
+                "icons/user-round.svg"
+            }
             _ if collapsed => "icons/folder.svg",
             _ => "icons/folder-open.svg",
         };
@@ -4909,6 +4918,8 @@ impl Waku {
             "icons/server.svg"
         } else if project.is_some_and(Project::is_projectless) {
             "icons/chat.svg"
+        } else if project.is_some_and(|project| project.friend_peer_id.is_some()) {
+            "icons/user-round.svg"
         } else {
             "icons/folder.svg"
         };

@@ -5235,6 +5235,8 @@ friends.send_file_prompt:
   en: Choose a file or folder to send
 friends.send_dialog_title:
   en: "Send to %{name}"
+friends.send_dialog_title_field:
+  en: Title
 friends.send_dialog_message:
   en: Message
 friends.send_dialog_message_placeholder:

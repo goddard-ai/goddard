@@ -1105,6 +1105,11 @@ pub struct Project {
     /// unstarred projects in the sidebar's Project grouping.
     #[serde(default)]
     pub starred: bool,
+    /// A friend-delivery project: the peer's endpoint id string for the
+    /// friend whose chats and transfers materialize sessions here, with the
+    /// project named after them. `None` for ordinary projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub friend_peer_id: Option<String>,
 }
 
 /// Filesystem context a task runs in.
@@ -1224,6 +1229,7 @@ impl Project {
             created_at: unix_time(),
             temporary: false,
             starred: false,
+            friend_peer_id: None,
         }
     }
 

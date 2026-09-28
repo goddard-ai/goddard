@@ -28,6 +28,8 @@ export const projects = sqliteTable("projects", {
   temporary: integer("temporary", { mode: "boolean" }).notNull().default(false),
   /** User-marked priority: leads attention navigation and sidebar grouping. */
   starred: integer("starred", { mode: "boolean" }).notNull().default(false),
+  /** A friend-delivery project — the peer's endpoint id; named after the friend. */
+  friendPeerId: text("friend_peer_id"),
 });
 
 export const sessions = sqliteTable(

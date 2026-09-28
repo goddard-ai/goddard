@@ -37,6 +37,7 @@ pub(super) struct SendFileDialogState {
     path: PathBuf,
     file_name: String,
     is_dir: bool,
+    title: Entity<TextInput>,
     note: Entity<TextInput>,
     send_focus: FocusHandle,
     cancel_focus: FocusHandle,
@@ -55,6 +56,19 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let title = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .submit_on_enter()
+                .accessibility_label(tr!("friends.send_dialog_title_field"))
+                .placeholder(file_name.clone());
+            input.set_content(file_name.clone(), cx);
+            input
+        });
+        let title_focus = title.read(cx).focus();
         let note = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -62,22 +76,18 @@ impl Waku {
                 .accessibility_label(tr!("friends.send_dialog_message"))
                 .placeholder(tr!("friends.send_dialog_message_placeholder"))
         });
-        let note_focus = note.read(cx).focus();
         let subscription = cx.subscribe(&note, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Submit(_)) {
                 this.confirm_send_file_dialog(cx);
             }
         });
-        let file_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string());
         self.send_file_dialog = Some(SendFileDialogState {
             node_id,
             peer_name,
             is_dir: path.is_dir(),
-            path,
+            path: path.clone(),
             file_name,
+            title,
             note,
             send_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
@@ -88,7 +98,7 @@ impl Waku {
         // tree only after it has drawn. Focus it two frames later so typing
         // cannot fall through to the page beneath it.
         window.on_next_frame(move |window, _| {
-            window.on_next_frame(move |window, cx| window.focus(&note_focus, cx));
+            window.on_next_frame(move |window, cx| window.focus(&title_focus, cx));
         });
         cx.notify();
     }
@@ -98,10 +108,12 @@ impl Waku {
             return;
         };
         let note = dialog.note.read(cx).content().trim().to_owned();
+        let title = dialog.title.read(cx).content().trim().to_owned();
         self.friends_command(
             waku_client::Command::SendFileToFriend {
                 node_id: dialog.node_id.clone(),
                 path: dialog.path.clone(),
+                title: (!title.is_empty()).then_some(title),
                 note: (!note.is_empty()).then_some(note),
             },
             cx,
@@ -143,6 +155,7 @@ impl Waku {
         } else {
             "icons/file.svg"
         };
+        let title_field = dialog.title.clone();
         let note = dialog.note.clone();
 
         let send_row = render_send_file_action_row(
@@ -227,7 +240,15 @@ impl Waku {
             )
             .child(
                 div()
-                    .h(px(88.0))
+                    .h(px(38.0))
+                    .px(px(16.0))
+                    .text_size(sp(13.0))
+                    .text_color(theme.text)
+                    .child(title_field),
+            )
+            .child(
+                div()
+                    .h(px(76.0))
                     .px(px(16.0))
                     .py(px(10.0))
                     .text_size(sp(14.0))

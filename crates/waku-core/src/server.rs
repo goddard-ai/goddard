@@ -2170,7 +2170,9 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
         | Command::AgentRenameSelf { .. }
-        | Command::CancelQueuedPrompt { .. } => TaskCatalogAction::Changed,
+        | Command::CancelQueuedPrompt { .. }
+        // Renames the friend's delivery project, not just their card.
+        | Command::SetFriendNickname { .. } => TaskCatalogAction::Changed,
         _ => TaskCatalogAction::None,
     }
 }

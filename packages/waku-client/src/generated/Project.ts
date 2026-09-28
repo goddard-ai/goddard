@@ -23,4 +23,10 @@ temporary: boolean,
  * a seen one leads the drained idle rotation — and hoist above
  * unstarred projects in the sidebar's Project grouping.
  */
-starred: boolean, };
+starred: boolean,
+/**
+ * A friend-delivery project: the peer's endpoint id string for the
+ * friend whose chats and transfers materialize sessions here, with the
+ * project named after them. `None` for ordinary projects.
+ */
+friend_peer_id?: string | null, };

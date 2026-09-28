@@ -179,15 +179,25 @@ enum RuntimeEffect {
 /// progress) reach every subscribed client.
 pub type FriendsSink = Arc<dyn Fn(FriendsState) + Send + Sync>;
 
-/// Fired when an incoming transfer finishes and its files are on disk.
-/// The daemon creates the transfer's agent session from this hook and
-/// returns its id, which is recorded on the transfer for clients.
-pub type TransferHook = Arc<dyn Fn(&TransferInfo) -> Option<Uuid> + Send + Sync>;
+/// Fired when an incoming transfer finishes and its files are on disk —
+/// the transfer plus the peer's display name (nickname-aware). The daemon
+/// creates the transfer's agent session from this hook and returns its id,
+/// which is recorded on the transfer for clients.
+pub type TransferHook = Arc<dyn Fn(&TransferInfo, &str) -> Option<Uuid> + Send + Sync>;
 
-/// Fired when an incoming chat message arrives — `(peer name, text)`.
-/// The daemon creates the message's agent session from this hook and
-/// returns its id, recorded on the row like a transfer's.
-pub type ChatHook = Arc<dyn Fn(String, String) -> Option<Uuid> + Send + Sync>;
+/// An incoming chat resolved for session materialization: the peer's
+/// endpoint id, nickname-aware display name, sender-chosen title, and text.
+pub struct ChatDelivery {
+    pub peer_id: String,
+    pub peer_name: String,
+    pub title: String,
+    pub text: String,
+}
+
+/// Fired when an incoming chat message arrives. The daemon creates the
+/// message's agent session from this hook and returns its id, recorded on
+/// the row like a transfer's.
+pub type ChatHook = Arc<dyn Fn(ChatDelivery) -> Option<Uuid> + Send + Sync>;
 
 /// Fired when the share layer changed session/project state — the hub
 /// translates it into a `TaskStateChanged` bump for every client.
@@ -253,6 +263,7 @@ enum ShareCommand {
     SendFile {
         node_id: String,
         path: PathBuf,
+        title: Option<String>,
         note: Option<String>,
         reply: Sender<anyhow::Result<()>>,
     },
@@ -782,11 +793,13 @@ impl ShareService {
         &self,
         node_id: String,
         path: PathBuf,
+        title: Option<String>,
         note: Option<String>,
     ) -> anyhow::Result<()> {
         self.call(|reply| ShareCommand::SendFile {
             node_id,
             path,
+            title,
             note,
             reply,
         })
@@ -1081,24 +1094,6 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Transfer rows title a chat message by its first non-blank line — the
-/// full text rides the row's `note` and lands in the materialized session.
-fn chat_title(text: &str) -> String {
-    const MAX: usize = 60;
-    let first = text
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or("message");
-    if first.chars().count() > MAX {
-        let mut title: String = first.chars().take(MAX).collect();
-        title.push('…');
-        title
-    } else {
-        first.to_string()
-    }
-}
-
 /// `~/Documents/Goddard/From Friends` — the human-readable mirror of the
 /// real `transfers/<uuid>` folders. Links are cosmetic: the canonical path
 /// stays on the transfer, a missing or stale link costs nothing.
@@ -1132,7 +1127,7 @@ fn sync_transfer_link(base: &std::path::Path, peer: &str, transfer: &TransferInf
     let Some(dest_dir) = &transfer.dest_dir else {
         return;
     };
-    let payload = dest_dir.join(&transfer.title);
+    let payload = dest_dir.join(transfer.payload_name());
     let dest = if payload.symlink_metadata().is_ok() {
         payload
     } else {
@@ -2142,7 +2137,17 @@ fn run_runtime(
                                 direction: TransferDirection::Incoming,
                                 peer_id: offer.from.to_string(),
                                 peer_name: offer.name.clone(),
-                                title: offer.file_name.clone(),
+                                // Sender-chosen display title — the file
+                                // name on offers from older peers.
+                                title: offer
+                                    .title
+                                    .clone()
+                                    .filter(|title| !title.is_empty())
+                                    .unwrap_or_else(|| offer.file_name.clone()),
+                                file_name: Some(sanitize_link_component(
+                                    &offer.file_name,
+                                    "files",
+                                )),
                                 note: offer.note.clone(),
                                 status: TransferStatus::Transferring,
                                 bytes_done: 0,
@@ -2248,17 +2253,21 @@ fn run_runtime(
                             }
                             let transfer = s.transfers.iter().find(|t| t.id == id).cloned();
                             (
-                                transfer.filter(|t| t.status == TransferStatus::Done).zip(
-                                    s.transfer_hook.clone(),
-                                ),
+                                transfer
+                                    .filter(|t| t.status == TransferStatus::Done)
+                                    .and_then(|t| {
+                                        let peer_name =
+                                            resolved_peer_name(&s, &t.peer_id, &t.peer_name);
+                                        s.transfer_hook.clone().map(|h| (t, peer_name, h))
+                                    }),
                                 s.task_notifier.clone(),
                             )
                         };
-                        if let Some((transfer, _)) = &hook {
+                        if let Some((transfer, ..)) = &hook {
                             link_transfer(&state, transfer);
                         }
-                        if let Some((transfer, hook)) = hook {
-                            let session_id = hook(&transfer);
+                        if let Some((transfer, peer_name, hook)) = hook {
+                            let session_id = hook(&transfer, &peer_name);
                             if let Some(session_id) = session_id {
                                 let mut s = state.lock();
                                 if let Some(t) =
@@ -2433,38 +2442,55 @@ fn run_runtime(
             {
                 let state = state.clone();
                 let sink = sink.clone();
-                Arc::new(move |from: EndpointId, name: String, text: String| {
-                    let id = Uuid::new_v4();
-                    let (hook, notifier) = {
-                        let mut s = state.lock();
-                        s.transfers.push(TransferInfo {
-                            id,
-                            direction: TransferDirection::Incoming,
-                            peer_id: from.to_string(),
-                            peer_name: name.clone(),
-                            title: chat_title(&text),
-                            note: Some(text.clone()),
-                            status: TransferStatus::Done,
-                            bytes_done: 0,
-                            bytes_total: 0,
-                            dest_dir: None,
-                            session_id: None,
-                        });
-                        (s.chat_hook.clone(), s.task_notifier.clone())
-                    };
-                    if let Some(hook) = hook {
-                        if let Some(session_id) = hook(name, text) {
+                Arc::new(
+                    move |from: EndpointId, name: String, title: String, text: String| {
+                        let id = Uuid::new_v4();
+                        // Older peers send no title — derive the same one
+                        // their side would have.
+                        let title = if title.is_empty() {
+                            friends::chat_title(&text)
+                        } else {
+                            title
+                        };
+                        let (hook, notifier, peer_name) = {
                             let mut s = state.lock();
-                            if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
-                                t.session_id = Some(session_id);
+                            let peer_name =
+                                resolved_peer_name(&s, &from.to_string(), &name);
+                            s.transfers.push(TransferInfo {
+                                id,
+                                direction: TransferDirection::Incoming,
+                                peer_id: from.to_string(),
+                                peer_name: name.clone(),
+                                title: title.clone(),
+                                file_name: None,
+                                note: Some(text.clone()),
+                                status: TransferStatus::Done,
+                                bytes_done: 0,
+                                bytes_total: 0,
+                                dest_dir: None,
+                                session_id: None,
+                            });
+                            (s.chat_hook.clone(), s.task_notifier.clone(), peer_name)
+                        };
+                        if let Some(hook) = hook {
+                            if let Some(session_id) = hook(ChatDelivery {
+                                peer_id: from.to_string(),
+                                peer_name,
+                                title,
+                                text,
+                            }) {
+                                let mut s = state.lock();
+                                if let Some(t) = s.transfers.iter_mut().find(|t| t.id == id) {
+                                    t.session_id = Some(session_id);
+                                }
+                            }
+                            if let Some(notifier) = notifier {
+                                notifier();
                             }
                         }
-                        if let Some(notifier) = notifier {
-                            notifier();
-                        }
-                    }
-                    publish(&state, &sink);
-                })
+                        publish(&state, &sink);
+                    },
+                )
             },
         );
 
@@ -2697,6 +2723,7 @@ fn run_runtime(
                 ShareCommand::SendFile {
                     node_id,
                     path,
+                    title,
                     note,
                     reply,
                 } => {
@@ -2712,12 +2739,15 @@ fn run_runtime(
                         )
                         .await;
                         let (ticket, tag, size) = share_node.provide(&path).await?;
-                        let title = path
+                        let file_name = path
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_else(|| {
                                 if path.is_dir() { "folder" } else { "file" }.into()
                             });
+                        // The sender owns the display title — the dialog's
+                        // field, defaulting to the file name.
+                        let title = title.filter(|t| !t.trim().is_empty());
                         let ticket_str = ticket.to_string();
                         let transfer_id = Uuid::new_v4();
                         {
@@ -2736,7 +2766,8 @@ fn run_runtime(
                                 direction: TransferDirection::Outgoing,
                                 peer_id: node_id.clone(),
                                 peer_name,
-                                title: title.clone(),
+                                title: title.clone().unwrap_or_else(|| file_name.clone()),
+                                file_name: Some(file_name.clone()),
                                 note: note.clone(),
                                 status: TransferStatus::Transferring,
                                 bytes_done: 0,
@@ -2753,7 +2784,8 @@ fn run_runtime(
                                 share_node.endpoint(),
                                 id,
                                 &our_name,
-                                &title,
+                                &file_name,
+                                title,
                                 size,
                                 note,
                                 &ticket_str,
@@ -2835,7 +2867,8 @@ fn run_runtime(
                                 direction: TransferDirection::Outgoing,
                                 peer_id: node_id.clone(),
                                 peer_name,
-                                title: chat_title(&text),
+                                title: friends::chat_title(&text),
+                                file_name: None,
                                 note: Some(text.clone()),
                                 status: TransferStatus::Transferring,
                                 bytes_done: 0,

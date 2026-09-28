@@ -1414,7 +1414,7 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at, bookmark, temporary, starred FROM projects ORDER BY position")
+            .prepare("SELECT id, name, path, created_at, bookmark, temporary, starred, friend_peer_id FROM projects ORDER BY position")
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1426,12 +1426,13 @@ impl StateStore {
                     row.get::<_, Option<Vec<u8>>>(4)?,
                     row.get::<_, bool>(5)?,
                     row.get::<_, bool>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             })
             .map_err(to_io_error)?
             .filter_map(Result::ok)
             .filter_map(
-                |(id, name, path, created_at, bookmark, temporary, starred)| {
+                |(id, name, path, created_at, bookmark, temporary, starred, friend_peer_id)| {
                     Some(Project {
                         id: Uuid::parse_str(&id).ok()?,
                         name,
@@ -1440,6 +1441,7 @@ impl StateStore {
                         created_at: created_at as u64,
                         temporary,
                         starred,
+                        friend_peer_id,
                     })
                 },
             )
@@ -1886,7 +1888,8 @@ impl StateStore {
                             position as i64,
                             project.created_at as i64,
                             project.temporary,
-                            project.starred
+                            project.starred,
+                            project.friend_peer_id
                         ],
                     )
                     .map_err(to_io_error)?;
@@ -2544,8 +2547,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          runtime_event_cursor = excluded.runtime_event_cursor";
 
 const INSERT_PROJECT: &str =
-    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, friend_peer_id)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
@@ -2553,7 +2556,8 @@ const INSERT_PROJECT: &str =
          position   = excluded.position,
          created_at = excluded.created_at,
          temporary  = excluded.temporary,
-         starred    = excluded.starred";
+         starred    = excluded.starred,
+         friend_peer_id = excluded.friend_peer_id";
 
 /// The transcript, written alongside the list row it belongs to.
 const UPSERT_SESSION_DETAIL: &str = "INSERT INTO session_details(session_id, data)
@@ -3753,6 +3757,7 @@ mod tests {
             mode: crate::theme::ThemeMode::Light,
             ..ThemeSettings::default()
         };
+        state.projects[0].friend_peer_id = Some("peer-endpoint-id".into());
         state.language = AppLanguage::SimplifiedChinese;
         state.sidebar_visible = false;
         state.right_panel_visible = false;
@@ -3793,6 +3798,10 @@ mod tests {
         let mut restored = load_hydrated(&store_in(&directory));
         restored.apply_daemon_settings(daemon_settings);
         assert_eq!(restored.projects[0].name, "project");
+        assert_eq!(
+            restored.projects[0].friend_peer_id.as_deref(),
+            Some("peer-endpoint-id")
+        );
         assert_eq!(restored.sessions.len(), 1);
         assert_eq!(restored.sessions[0].model.as_deref(), Some("gpt-5.6-luna"));
         assert_eq!(restored.last_model.as_deref(), Some("gpt-5.6-luna"));

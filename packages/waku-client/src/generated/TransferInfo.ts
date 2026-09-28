@@ -8,9 +8,15 @@ export type TransferInfo = { id: string, direction: TransferDirection,
  */
 peerId: string, peerName: string,
 /**
- * Display title — file or folder name.
+ * Display title — sender-chosen; a file or folder name unless the
+ * sender supplied a summary title.
  */
 title: string,
+/**
+ * The delivered payload's real file or folder name — what it lands on
+ * disk as inside `dest_dir`. `None` for chats, which carry no payload.
+ */
+fileName?: string | null,
 /**
  * Optional note the sender attached to the offer.
  */

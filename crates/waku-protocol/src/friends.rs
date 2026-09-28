@@ -76,8 +76,13 @@ pub struct TransferInfo {
     /// Friend's endpoint id string.
     pub peer_id: String,
     pub peer_name: String,
-    /// Display title — file or folder name.
+    /// Display title — sender-chosen; a file or folder name unless the
+    /// sender supplied a summary title.
     pub title: String,
+    /// The delivered payload's real file or folder name — what it lands on
+    /// disk as inside `dest_dir`. `None` for chats, which carry no payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
     /// Optional note the sender attached to the offer.
     pub note: Option<String>,
     pub status: TransferStatus,
@@ -90,6 +95,14 @@ pub struct TransferInfo {
     /// transfer — clients reopen it from transfer history and badge it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<Uuid>,
+}
+
+impl TransferInfo {
+    /// The name the payload lands on disk as — `file_name` for transfers,
+    /// the display title for rows (like chats) that carry no payload.
+    pub fn payload_name(&self) -> &str {
+        self.file_name.as_deref().unwrap_or(&self.title)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
