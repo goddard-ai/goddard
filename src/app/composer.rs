@@ -2915,7 +2915,7 @@ impl Waku {
                 .child(icon("icons/target.svg", 10.5, color))
                 .child(div().max_w(px(220.0)).truncate().child(label))
                 .hover(|element| element.bg(theme.overlay))
-                .tooltip(Tooltip::text(objective))
+                .tooltip(Tooltip::text_wrapped(objective))
                 .on_click(move |_, _, cx| {
                     let _ = weak.update(cx, |this, cx| {
                         this.request_goal_dialog(session_id, None, false, cx);

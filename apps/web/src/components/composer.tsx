@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Popover } from '@base-ui/react/popover'
+import { Tooltip } from '@base-ui/react/tooltip'
 import {
   attachmentPromptToken,
   atomPayloadContent,
@@ -1494,20 +1495,33 @@ function GoalControl({
     ? goalUsageReadout(goal, liveElapsed)
     : null
   return (
-    <button
-      className={cn(
-        'flex h-6 items-center gap-1.5 rounded-md px-1.5 outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring',
-        goalStatusClass(goal.status),
-      )}
-      title={goal.objective}
-      type="button"
-      onClick={onOpen}
-    >
-      <WakuIcon className="size-[11px]" name="target" />
-      <span className="max-w-[220px] truncate">
-        {usage ? `${phrase} (${usage})` : phrase}
-      </span>
-    </button>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        className={cn(
+          'flex h-6 items-center gap-1.5 rounded-md px-1.5 outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring',
+          goalStatusClass(goal.status),
+        )}
+        type="button"
+        onClick={onOpen}
+      >
+        <WakuIcon className="size-[11px]" name="target" />
+        <span className="max-w-[220px] truncate">
+          {usage ? `${phrase} (${usage})` : phrase}
+        </span>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Positioner
+          className="z-[100] outline-none"
+          collisionPadding={8}
+          side="top"
+          sideOffset={4}
+        >
+          <Tooltip.Popup className="waku-popover-surface max-w-80 rounded-[10px] px-2.5 py-1.5 text-xs leading-normal whitespace-pre-wrap text-popover-foreground line-clamp-[10]">
+            {goal.objective}
+          </Tooltip.Popup>
+        </Tooltip.Positioner>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   )
 }
 

@@ -1,0 +1,1 @@
+- Hovering the goal chip in the composer now shows the goal wrapped in a compact card instead of one long line, so lengthy goals stay readable.

@@ -17,6 +17,7 @@ use crate::ui::shortcut::ShortcutHint;
 pub struct Tooltip {
     label: SharedString,
     shortcut: Option<ShortcutHint>,
+    wrap: bool,
 }
 
 impl Tooltip {
@@ -24,7 +25,16 @@ impl Tooltip {
         Self {
             label: label.into(),
             shortcut: None,
+            wrap: false,
         }
+    }
+
+    /// Wraps the label within a bounded width and clamps it to a few
+    /// lines — for longer content like a goal's full objective, where a
+    /// single line would spill across the screen.
+    pub fn wrap(mut self) -> Self {
+        self.wrap = true;
+        self
     }
 
     /// A shortcut hint rendered dim after the label.
@@ -52,6 +62,15 @@ impl Tooltip {
     ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
         let label = label.into();
         move |window, cx| Tooltip::new(label.clone()).build(window, cx)
+    }
+
+    /// `text` for longer content: wraps within a bounded width instead of
+    /// rendering one long line.
+    pub fn text_wrapped(
+        label: impl Into<SharedString>,
+    ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+        let label = label.into();
+        move |window, cx| Tooltip::new(label.clone()).wrap().build(window, cx)
     }
 
     /// `text` plus the action's resolved shortcut:
@@ -103,6 +122,9 @@ impl Render for Tooltip {
                 .text_size(sp(12.5))
                 .line_height(sp(15.0))
                 .text_color(theme.text_secondary)
+                .when(self.wrap, |element| {
+                    element.max_w(px(360.0)).line_clamp(10).text_ellipsis()
+                })
                 .child(self.label.clone())
                 .when_some(shortcut, |element, label| {
                     element.child(
