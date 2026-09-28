@@ -2022,7 +2022,8 @@ mod tests {
         configure_pi_computer_use_command(
             &mut command,
             Some((
-                &config,
+                config.mcp_server(),
+                Path::new("/Applications/Goddard.app/Resources/skills/SKILL.md"),
                 Path::new("/Applications/Goddard.app/Resources/computer-use/pi-extension.ts"),
             )),
         );

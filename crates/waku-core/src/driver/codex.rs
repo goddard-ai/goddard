@@ -3087,6 +3087,7 @@ fn is_visible_stderr_notice(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn codex_thread_lease_waits_for_the_previous_process_and_rejects_live_duplicates() {
@@ -3328,10 +3329,12 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                computer_use_runtime: None,
                 agent: None,
                 read_own_transcript: false,
                 subagents: None,
-                integrations: Vec::new(),
+                mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
                 provider_cursor: None,
             },
             events,

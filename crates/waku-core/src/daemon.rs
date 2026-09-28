@@ -9097,6 +9097,7 @@ mod tests {
                 driver: DriverHandle::from_control(capture.clone()),
                 last_active: std::time::Instant::now(),
                 resumable: false,
+                computer_use_available: false,
                 provider: ProviderKind::Devin,
                 cwd: root.join("repo"),
             },
