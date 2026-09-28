@@ -104,11 +104,7 @@ impl Waku {
         else {
             return;
         };
-        if daemon
-            .settings()
-            .eval
-            .is_none_or(|eval| eval.credential_missing())
-        {
+        if !daemon.settings().eval_ready() {
             return;
         }
         let Some(text) = self.composer_inline_atoms.iter().find_map(|atom| {

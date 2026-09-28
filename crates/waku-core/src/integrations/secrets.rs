@@ -14,18 +14,34 @@ const KEYCHAIN_SERVICE: &str = "ai.goddard.integrations";
 #[derive(Clone)]
 pub struct SecretStore {
     fallback_dir: PathBuf,
+    /// Read only on macOS, where the keychain path exists.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    use_keychain: bool,
 }
 
 impl SecretStore {
     pub fn new(data_dir: PathBuf) -> Self {
         Self {
             fallback_dir: data_dir.join("secrets"),
+            use_keychain: true,
+        }
+    }
+
+    /// A store confined to the file fallback — tests must not touch the
+    /// real keychain.
+    #[cfg(test)]
+    pub fn file_only(dir: PathBuf) -> Self {
+        Self {
+            fallback_dir: dir.join("secrets"),
+            use_keychain: false,
         }
     }
 
     pub fn read(&self, key: &str) -> Option<String> {
         #[cfg(target_os = "macos")]
-        if let Some(value) = keychain_read(key) {
+        if self.use_keychain
+            && let Some(value) = keychain_read(key)
+        {
             return Some(value);
         }
         let path = self.fallback_path(key);
@@ -34,7 +50,7 @@ impl SecretStore {
 
     pub fn store(&self, key: &str, value: &str) -> anyhow::Result<()> {
         #[cfg(target_os = "macos")]
-        if keychain_store(key, value).is_ok() {
+        if self.use_keychain && keychain_store(key, value).is_ok() {
             self.remove_fallback(key);
             return Ok(());
         }
@@ -43,7 +59,9 @@ impl SecretStore {
 
     pub fn remove(&self, key: &str) {
         #[cfg(target_os = "macos")]
-        keychain_remove(key);
+        if self.use_keychain {
+            keychain_remove(key);
+        }
         self.remove_fallback(key);
     }
 

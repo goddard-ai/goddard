@@ -126,7 +126,7 @@ pub fn review_action(eval: &EvalSettings, action: &PendingAction) -> ReviewVerdi
 
     let result = crate::eval::evaluate(eval, &state, &questions);
     let mut record = crate::eval::EvalDecisionRecord::empty("permission-review");
-    record.backend = Some(eval.backend);
+    record.backend = Some(eval.provider);
     record.state = Some(state);
     record.questions = Some(questions);
     match &result {
@@ -154,7 +154,7 @@ pub fn review_action(eval: &EvalSettings, action: &PendingAction) -> ReviewVerdi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use waku_protocol::eval::EvalBackend;
+    use waku_protocol::inference::InferenceProvider;
 
     #[test]
     fn request_body_carries_policy_context_and_the_exact_action() {
@@ -166,7 +166,7 @@ mod tests {
             detail: Some("Run shell command".into()),
         };
         let eval = EvalSettings {
-            backend: EvalBackend::TypeSafe,
+            provider: InferenceProvider::TypeSafe,
             typesafe_api_key: Some("key".into()),
             ..Default::default()
         };

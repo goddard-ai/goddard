@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::eval::EvalBackend;
+use crate::inference::InferenceProvider;
 use crate::model::ProviderKind;
 
 /// Difficulty tier for automatic model routing: easy, medium, or hard.
@@ -157,7 +157,7 @@ pub struct RouteDecision {
     /// "model-ineligible", "provider-ineligible", and friends.
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backend: Option<EvalBackend>,
+    pub backend: Option<InferenceProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval_latency_ms: Option<u64>,
 }

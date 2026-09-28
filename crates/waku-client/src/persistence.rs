@@ -349,6 +349,37 @@ impl VoiceBriefingTtsModel {
         }
     }
 
+    /// The provider's slug for this model — `None` where the provider does
+    /// not serve it, so a provider switch drops those rows from the picker.
+    /// OpenRouter's catalog shares the `google/*-tts` and `fish-audio/*`
+    /// slugs but spells Grok differently and carries no `openai/tts-*`.
+    pub fn model_id_for(
+        self,
+        provider: waku_protocol::inference::InferenceProvider,
+    ) -> Option<&'static str> {
+        use waku_protocol::inference::InferenceProvider;
+        match provider {
+            InferenceProvider::VercelGateway => self.model_id(),
+            InferenceProvider::OpenRouter => match self {
+                Self::OpenAi | Self::OpenAiHd => None,
+                Self::Grok => Some("x-ai/grok-voice-tts-1.0"),
+                Self::FishAudioS21ProFree => Some("fish-audio/s2.1-pro-free:free"),
+                _ => self.model_id(),
+            },
+            _ => None,
+        }
+    }
+
+    /// The selector rows for one provider — everything it serves, plus the
+    /// custom-model entry.
+    pub fn for_provider(
+        provider: waku_protocol::inference::InferenceProvider,
+    ) -> impl Iterator<Item = Self> {
+        Self::ALL
+            .into_iter()
+            .filter(move |model| model.is_custom() || model.model_id_for(provider).is_some())
+    }
+
     /// Model names are product names and stay untranslated.
     pub fn label(self) -> &'static str {
         match self {
@@ -364,6 +395,10 @@ impl VoiceBriefingTtsModel {
             Self::Custom => "Custom model",
         }
     }
+
+    pub fn is_custom(self) -> bool {
+        matches!(self, Self::Custom)
+    }
 }
 
 fn default_notification_enabled() -> bool {
@@ -374,6 +409,12 @@ fn default_notification_enabled() -> bool {
 /// ~45-second summary; the settings field accepts any chat slug.
 pub fn default_voice_briefing_summary_model() -> String {
     "google/gemini-3-flash".to_owned()
+}
+
+/// Briefings default to the Vercel AI Gateway — the provider the feature
+/// shipped on.
+fn default_voice_briefing_provider() -> waku_protocol::inference::InferenceProvider {
+    waku_protocol::inference::InferenceProvider::VercelGateway
 }
 
 fn default_sidebar_visibility() -> bool {
@@ -1227,10 +1268,15 @@ pub struct AppSettings {
     /// ~45-second "what happened / what you decide" briefing aloud.
     /// Defaults on in debug builds.
     pub voice_briefing_enabled: bool,
-    /// AI Gateway bearer the briefing's summarize and speech calls share —
-    /// a secret, app-local like the remote-host tokens.
+    /// Legacy briefing credential — moved into the daemon's inference
+    /// secret store under the Vercel provider at launch. Kept only so
+    /// documents written before the move still carry it into migration.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_gateway_key: String,
+    /// Which inference provider answers the briefing's summarize and speech
+    /// calls — must serve both `text` and `speech` contexts.
+    #[serde(default = "default_voice_briefing_provider")]
+    pub voice_briefing_provider: waku_protocol::inference::InferenceProvider,
     /// Gateway chat model that writes the spoken transcript.
     pub voice_briefing_summary_model: String,
     /// True when the summary selector is on its custom-model entry. Kept
@@ -1322,6 +1368,7 @@ impl Default for AppSettings {
             guided_reading_opacity: default_guided_reading_opacity(),
             voice_briefing_enabled: default_experiment_enabled(),
             voice_briefing_gateway_key: String::new(),
+            voice_briefing_provider: default_voice_briefing_provider(),
             voice_briefing_summary_model: default_voice_briefing_summary_model(),
             voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
@@ -1837,8 +1884,12 @@ pub struct PersistedState {
     pub voice_briefing_enabled: bool,
     /// AI Gateway bearer the briefing's summarize and speech calls share.
     /// App-local like the remote-host tokens.
+    /// Legacy briefing credential — migrates into the daemon's inference
+    /// secret store at launch; see the AppSettings twin.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_gateway_key: String,
+    #[serde(default = "default_voice_briefing_provider")]
+    pub voice_briefing_provider: waku_protocol::inference::InferenceProvider,
     /// Gateway chat model that writes the spoken transcript.
     #[serde(default = "default_voice_briefing_summary_model")]
     pub voice_briefing_summary_model: String,
@@ -1974,6 +2025,15 @@ pub struct PersistedState {
     /// `settings.json`.
     #[serde(skip)]
     pub eval: Option<waku_protocol::eval::EvalSettings>,
+    /// The shared inference-provider section: credential status flags and
+    /// non-secret provider config, daemon-owned and mirrored. Entries'
+    /// `api_key` slots are write-only — a client sets one to configure a
+    /// credential; the daemon stores the secret and never echoes it.
+    #[serde(skip)]
+    pub inference: std::collections::BTreeMap<
+        waku_protocol::inference::InferenceProvider,
+        waku_protocol::inference::InferenceProviderSettings,
+    >,
     /// The user's class-level routing map (provider/model/effort per task
     /// class). Daemon-owned; mirrored so the Jev page can read and edit it.
     #[serde(skip)]
@@ -2206,6 +2266,7 @@ impl PersistedState {
             guided_reading_opacity: default_guided_reading_opacity(),
             voice_briefing_enabled: default_experiment_enabled(),
             voice_briefing_gateway_key: String::new(),
+            voice_briefing_provider: default_voice_briefing_provider(),
             voice_briefing_summary_model: default_voice_briefing_summary_model(),
             voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
@@ -2250,6 +2311,7 @@ impl PersistedState {
             memory_models: Default::default(),
             title_models: Default::default(),
             eval: None,
+            inference: Default::default(),
             route_classes: Default::default(),
             provider_route_classes: Default::default(),
             auto_prompts: Vec::new(),
@@ -2504,6 +2566,7 @@ impl PersistedState {
             title_models: self.title_models.clone(),
             custom_commands: self.custom_commands.clone(),
             eval: self.eval.clone(),
+            inference: self.inference.clone(),
             route_classes: self.route_classes.clone(),
             provider_route_classes: self.provider_route_classes.clone(),
             auto_prompts: self.auto_prompts.clone(),
@@ -2538,6 +2601,7 @@ impl PersistedState {
         self.title_models = settings.title_models;
         self.custom_commands = settings.custom_commands;
         self.eval = settings.eval;
+        self.inference = settings.inference;
         self.route_classes = settings.route_classes;
         self.provider_route_classes = settings.provider_route_classes;
         self.auto_prompts = settings.auto_prompts;
@@ -2625,6 +2689,7 @@ impl PersistedState {
             guided_reading_opacity: self.guided_reading_opacity,
             voice_briefing_enabled: self.voice_briefing_enabled,
             voice_briefing_gateway_key: self.voice_briefing_gateway_key.clone(),
+            voice_briefing_provider: self.voice_briefing_provider,
             voice_briefing_summary_model: self.voice_briefing_summary_model.clone(),
             voice_briefing_summary_custom: self.voice_briefing_summary_custom,
             voice_briefing_tts_model: self.voice_briefing_tts_model,
@@ -2768,6 +2833,7 @@ impl PersistedState {
         self.guided_reading_opacity = settings.guided_reading_opacity.min(100);
         self.voice_briefing_enabled = settings.voice_briefing_enabled;
         self.voice_briefing_gateway_key = settings.voice_briefing_gateway_key;
+        self.voice_briefing_provider = settings.voice_briefing_provider;
         self.voice_briefing_summary_model = settings.voice_briefing_summary_model;
         self.voice_briefing_summary_custom = settings.voice_briefing_summary_custom;
         self.voice_briefing_tts_model = settings.voice_briefing_tts_model;

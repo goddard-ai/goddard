@@ -368,6 +368,14 @@ pub struct PersistedState {
     /// settings surface can read and edit it without duplicating secrets.
     #[serde(skip)]
     pub eval: Option<waku_protocol::eval::EvalSettings>,
+    /// The inference-provider section mirrored from the settings document —
+    /// credential flags and non-secret config; credentials themselves live
+    /// in the daemon's secret store.
+    #[serde(skip)]
+    pub inference: std::collections::BTreeMap<
+        waku_protocol::inference::InferenceProvider,
+        waku_protocol::inference::InferenceProviderSettings,
+    >,
     /// The user's class-level routing map (provider/model/effort per task
     /// class), mirrored from the settings document.
     #[serde(skip)]
@@ -501,6 +509,7 @@ impl PersistedState {
             memory_models: Default::default(),
             title_models: Default::default(),
             eval: None,
+            inference: Default::default(),
             route_classes: Default::default(),
             provider_route_classes: Default::default(),
             daemon_settings_extra: BTreeMap::new(),
@@ -657,6 +666,7 @@ impl PersistedState {
             memory_models: self.memory_models.clone(),
             title_models: self.title_models.clone(),
             eval: self.eval.clone(),
+            inference: self.inference.clone(),
             route_classes: self.route_classes.clone(),
             provider_route_classes: self.provider_route_classes.clone(),
             auto_prompts: Vec::new(),

@@ -75,6 +75,7 @@ pub mod grok_session;
 mod http_wire;
 pub mod i18n;
 pub mod identity;
+pub mod inference;
 pub mod integrations;
 pub mod issue_templates;
 pub mod issues;

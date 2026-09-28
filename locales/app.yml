@@ -892,7 +892,7 @@ experiments.integrations_title:
 experiments.integrations_description:
   en: A Settings → Integrations page for connecting official remote MCP servers — Linear, GitHub, Notion, Stripe, and more — once, and delivering them to every enabled agent through Goddard's local proxy.
 experiments.needs_eval_backend:
-  en: Runs on the evaluation backend — none is configured.
+  en: Runs on an eval-capable inference provider — none is configured.
 experiments.open_jev_settings:
   en: Open Jev settings
 experiments.phase_routing_title:
@@ -916,13 +916,13 @@ experiments.guided_reading_opacity:
 experiments.voice_briefing_title:
   en: Voice briefing
 experiments.voice_briefing_description:
-  en: Landing on a task whose latest reply is long speaks a ~45-second summary aloud — what the agent did, then any decision or action it needs from you. Runs on your AI Gateway key with the models below.
+  en: Landing on a task whose latest reply is long speaks a ~45-second summary aloud — what the agent did, then any decision or action it needs from you. Runs on your configured inference provider with the models below.
 experiments.voice_briefing_caption:
-  en: Both calls go through the AI Gateway — the summary model writes the transcript, the voice model speaks it. The key stays in this app's settings file.
-experiments.voice_briefing_key:
-  en: AI Gateway key
-experiments.voice_briefing_key_placeholder:
-  en: AI Gateway API key
+  en: Both calls go through the selected inference provider — the summary model writes the transcript, the voice model speaks it. Credentials live under Inference providers on the Providers page.
+experiments.voice_briefing_provider:
+  en: Provider
+experiments.voice_briefing_needs_key:
+  en: No credential stored for this provider — add one under Inference providers on the Providers page.
 experiments.voice_briefing_model:
   en: Summary model
 experiments.voice_briefing_model_placeholder:
@@ -1022,9 +1022,19 @@ status_markers.assumed:
 phase.planning:
   en: Planning
 routing.backend:
-  en: Evaluation backend
+  en: Evaluation provider
 routing.backend_description:
-  en: The service that classifies each task's first prompt. All three answer the same typed evaluation questions; only credentials differ.
+  en: The inference provider that classifies each task's first prompt. Each one answers the same typed evaluation questions; credentials come from Inference providers.
+routing.credential:
+  en: Credential
+routing.credential_configured:
+  en: Managed under Inference providers on the Providers page.
+routing.credential_missing_hint:
+  en: No credential stored for this provider — add one under Inference providers on the Providers page.
+routing.credential_ready:
+  en: Configured
+routing.credential_needed:
+  en: Missing
 routing.typesafe_key:
   en: TypeSafe API key
 routing.typesafe_key_description:
@@ -1840,6 +1850,41 @@ providers.update_label:
   en: Update
 providers.update_terminal_title:
   en: Update %{provider}
+
+inference.providers:
+  en: Inference providers
+inference.description:
+  en: API credentials for hosted inference — evaluation, text, and speech — shared by every feature that calls them
+inference.configured:
+  en: Configured
+inference.not_configured:
+  en: Not configured
+inference.key_configured:
+  en: key configured
+inference.no_key:
+  en: no key
+inference.api_key:
+  en: API key
+inference.api_key_description:
+  en: Paste a key, then Apply or press Return. Keys are stored in the system keychain — never in settings files.
+inference.api_key_stored_description:
+  en: A key is stored. Type a new one to replace it; the stored value is never shown.
+inference.openrouter_key:
+  en: OpenRouter API key
+inference.openrouter_key_placeholder:
+  en: sk-or-…
+inference.get_key:
+  en: Get a key
+inference.remove_key:
+  en: Remove stored key
+inference.apply_hint:
+  en: or press Return in a field
+inference.context_eval:
+  en: evaluation
+inference.context_text:
+  en: text
+inference.context_speech:
+  en: speech
 
 computer_use.allow_apps:
   en: Let Goddard use apps
@@ -2821,9 +2866,9 @@ provider_switch.working:
 provider_switch.failed:
   en: "Provider switch failed — %{error}"
 provider_switch.needs_eval_backend:
-  en: No Jev backend is configured — %{provider} will start with a bare transcript pointer instead of a reviewed index. Configure one in Settings → Jev.
+  en: No Jev provider is configured — %{provider} will start with a bare transcript pointer instead of a reviewed index. Configure one under Inference providers in Settings → Providers.
 provider_switch.needs_eval_backend_remote:
-  en: No Jev backend is configured on the remote host — %{provider} will start with a bare transcript pointer instead of a reviewed index.
+  en: No Jev provider is configured on the remote host — %{provider} will start with a bare transcript pointer instead of a reviewed index.
 sandbox.environment:
   en: Environment
 sandbox.this_mac:
@@ -2960,7 +3005,7 @@ models.auto_hint:
 models.auto_routed:
   en: "Auto (Jev) · %{model}"
 models.auto_missing_credential:
-  en: The selected Jev eval backend has no credential — routing falls back to the last used provider. Add one in Jev settings.
+  en: The selected Jev evaluation provider has no credential — routing falls back to the last used provider. Add one under Inference providers.
 models.favorite_hint:
   en: Star a model to keep it here
 models.loading:

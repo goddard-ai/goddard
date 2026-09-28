@@ -182,11 +182,13 @@ impl Waku {
             self.ensure_diagnostics(false, cx);
         }
         if page == SettingsPage::Jev {
-            // The page renders from the daemon's settings mirror, which may
+            self.load_eval_usage_stats(cx);
+        }
+        if matches!(page, SettingsPage::Jev | SettingsPage::Providers) {
+            // Both pages render from the daemon's settings mirror, which may
             // be missing on a first visit — warm it here rather than
             // mid-render.
-            self.seed_eval_inputs(cx);
-            self.load_eval_usage_stats(cx);
+            self.seed_inference_inputs(cx);
         }
         // The sidebar's search field holds real focus for the whole settings
         // visit, so landing on any page — from the sidebar, the palette, or a

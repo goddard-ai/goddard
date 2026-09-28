@@ -394,8 +394,17 @@ pub enum Command {
     /// Smoke-test an evaluation backend configuration for the settings
     /// pane. Carries the full settings so unsaved field edits can be tested;
     /// the daemon makes one minimal call and writes no decision log record.
+    /// Staged credential fields win over the stored credential; absent ones
+    /// hydrate from the secret store.
     TestEvalConnection {
         settings: EvalSettings,
+    },
+    /// Read one inference provider's credential out of the daemon's secret
+    /// store — the caller runs provider traffic itself (the native app's
+    /// voice briefings), so unlike `settings.inference` this returns the
+    /// value. Absent when unconfigured. Scoped agent credentials are refused.
+    GetInferenceCredential {
+        provider: crate::inference::InferenceProvider,
     },
     /// Aggregate the eval decision log's recorded token usage for the
     /// settings pane — totals plus a per-feature breakdown.
@@ -1363,6 +1372,11 @@ pub enum ResponsePayload {
     },
     Evaluation {
         evaluation: Evaluation,
+    },
+    /// The stored inference credential for `getInferenceCredential` — `None`
+    /// when the provider is unconfigured.
+    InferenceCredential {
+        credential: Option<String>,
     },
     EvalUsage {
         stats: EvalUsageStats,

@@ -24,9 +24,9 @@ use anyhow::{Context as _, anyhow, bail};
 use serde::Serialize;
 use serde_json::{Value, json};
 use waku_protocol::eval::{
-    EvalAnswer, EvalBackend, EvalQuestion, EvalSettings, EvalUsage, EvalUsageStats,
-    EvalUsageTotals, Evaluation,
+    EvalAnswer, EvalQuestion, EvalSettings, EvalUsage, EvalUsageStats, EvalUsageTotals, Evaluation,
 };
+use waku_protocol::inference::InferenceProvider;
 use waku_protocol::model::ProviderKind;
 use waku_protocol::routing::TaskClass;
 
@@ -64,7 +64,7 @@ pub struct EvalDecisionRecord {
     /// Which eval-driven feature made the call.
     pub feature: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub backend: Option<EvalBackend>,
+    pub backend: Option<InferenceProvider>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u64>,
     /// The versioned model id the backend reported, when it answered.
@@ -315,7 +315,7 @@ pub fn evaluate_with_timeout(
     // Cloudflare wraps the model output in `result`; the other backends answer
     // the envelope directly.
     let mut envelope = parsed.get("result").unwrap_or(&parsed).clone();
-    if settings.backend == EvalBackend::VercelGateway {
+    if settings.provider == InferenceProvider::VercelGateway {
         translate_vercel_envelope(&mut envelope);
     }
     let mut evaluation: Evaluation =
@@ -390,8 +390,8 @@ fn backend_request(
     state: &Value,
     questions: &BTreeMap<String, EvalQuestion>,
 ) -> anyhow::Result<(String, Vec<String>, Vec<u8>)> {
-    match settings.backend {
-        EvalBackend::TypeSafe => {
+    match settings.provider {
+        InferenceProvider::TypeSafe => {
             let key = required(&settings.typesafe_api_key, "TypeSafe API key")?;
             let body = json!({
                 "model": JEV_MODEL_ALIAS,
@@ -404,7 +404,7 @@ fn backend_request(
                 serde_json::to_vec(&body)?,
             ))
         }
-        EvalBackend::VercelGateway => {
+        InferenceProvider::VercelGateway => {
             let key = required(&settings.vercel_api_key, "Vercel AI Gateway credential")?;
             let mut headers = bearer_headers(key);
             // The evaluation endpoint's wire contract is versioned separately
@@ -441,7 +441,7 @@ fn backend_request(
                 serde_json::to_vec(&body)?,
             ))
         }
-        EvalBackend::Cloudflare => {
+        InferenceProvider::Cloudflare => {
             let account = required(&settings.cloudflare_account_id, "Cloudflare account id")?;
             let token = required(&settings.cloudflare_api_token, "Cloudflare API token")?;
             let body = json!({
@@ -456,6 +456,12 @@ fn backend_request(
                 bearer_headers(token),
                 serde_json::to_vec(&body)?,
             ))
+        }
+        InferenceProvider::OpenRouter => {
+            // OpenRouter serves text and speech contexts but has no
+            // evaluation endpoint — the pickers filter it out, so reaching
+            // this arm means a stale or hand-edited settings document.
+            bail!("OpenRouter does not answer evaluation calls")
         }
     }
 }
@@ -623,7 +629,7 @@ mod tests {
     #[test]
     fn missing_credential_names_the_field() {
         let settings = EvalSettings {
-            backend: EvalBackend::TypeSafe,
+            provider: InferenceProvider::TypeSafe,
             ..Default::default()
         };
         let error = backend_request(&settings, &json!({"task": "x"}), &BTreeMap::new())
@@ -635,7 +641,7 @@ mod tests {
     #[test]
     fn vercel_request_carries_evaluation_spec_headers() {
         let settings = EvalSettings {
-            backend: EvalBackend::VercelGateway,
+            provider: InferenceProvider::VercelGateway,
             vercel_api_key: Some("key".into()),
             vercel_team_id: Some("team_1".into()),
             ..Default::default()
@@ -808,7 +814,7 @@ mod tests {
     #[test]
     fn cloudflare_request_scopes_the_url_and_wraps_input() {
         let settings = EvalSettings {
-            backend: EvalBackend::Cloudflare,
+            provider: InferenceProvider::Cloudflare,
             cloudflare_account_id: Some("acct".into()),
             cloudflare_api_token: Some("tok".into()),
             ..Default::default()

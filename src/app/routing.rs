@@ -309,11 +309,7 @@ impl Waku {
         let Some(daemon) = self.daemons.daemon_for_session(session.id) else {
             return false;
         };
-        daemon
-            .settings()
-            .eval
-            .unwrap_or_default()
-            .credential_missing()
+        !daemon.settings().eval_ready()
     }
 
     /// The plan a first Auto submission carries into `prepare_submission`:
@@ -398,11 +394,7 @@ impl Waku {
         let daemon = self.daemons.daemon_for_session(session.id)?;
         // The eval runs on the session's daemon — its backend, not the local
         // mirror's, decides whether a turn evaluation can answer at all.
-        if daemon
-            .settings()
-            .eval
-            .is_none_or(|eval| eval.credential_missing())
-        {
+        if !daemon.settings().eval_ready() {
             return None;
         }
         let model = self.model_metadata_for_session(session)?;

@@ -81,7 +81,7 @@ pub fn route_task(
         let Some(eval_settings) = eval_settings else {
             break 'resolve default(vec!["eval-unconfigured"]);
         };
-        record.backend = Some(eval_settings.backend);
+        record.backend = Some(eval_settings.provider);
 
         let state = json!({ "task": prompt, "project": project });
         let questions = routing_questions();
@@ -147,7 +147,7 @@ pub fn route_task(
         class_confidence,
         phased,
         reason: reasons.join("+"),
-        backend: eval_settings.map(|settings| settings.backend),
+        backend: eval_settings.map(|settings| settings.provider),
         eval_latency_ms: Some(started.elapsed().as_millis() as u64),
     };
     record.complete(&decision);

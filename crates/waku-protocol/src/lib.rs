@@ -45,6 +45,7 @@ pub mod friends;
 pub mod git;
 pub mod i18n;
 pub mod identity;
+pub mod inference;
 pub mod integrations;
 pub mod migration;
 pub mod model;
@@ -72,10 +73,8 @@ pub use protocol::{
     Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady,
     DaemonSessionSample, DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ReplayCursor,
     Request, RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent,
-    ServerMessage,
-    SessionDetailTail, SubprocessLabelSample, TASK_LINK_PREFIX, WireComputerToolRequest,
-    WireDriverEvent,
-    WireDriverStartOptions, WireSessionOptions,
+    ServerMessage, SessionDetailTail, SubprocessLabelSample, TASK_LINK_PREFIX,
+    WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
 };
 pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;

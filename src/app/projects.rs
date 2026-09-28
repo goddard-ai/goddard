@@ -4189,7 +4189,7 @@ impl Waku {
             .state
             .eval
             .as_ref()
-            .is_some_and(|eval| !eval.credential_missing())
+            .is_some_and(|eval| eval.ready(&self.state.inference))
         {
             MEMORY_RANK_WINDOW
         } else {

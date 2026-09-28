@@ -69,12 +69,7 @@ impl Waku {
         let eval_missing = self
             .daemons
             .daemon_for_session(session_id)
-            .is_some_and(|daemon| {
-                daemon
-                    .settings()
-                    .eval
-                    .is_none_or(|eval| eval.credential_missing())
-            });
+            .is_some_and(|daemon| !daemon.settings().eval_ready());
         let eval_missing_remote =
             eval_missing && self.daemons.session_owner(session_id).is_remote();
         let switch_focus = cx.focus_handle();

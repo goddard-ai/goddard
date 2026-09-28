@@ -3,6 +3,8 @@ import type { AutoPromptRule } from "./AutoPromptRule";
 import type { ComputerAppGrant } from "./ComputerAppGrant";
 import type { CustomCommand } from "./CustomCommand";
 import type { EvalSettings } from "./EvalSettings";
+import type { InferenceProvider } from "./InferenceProvider";
+import type { InferenceProviderSettings } from "./InferenceProviderSettings";
 import type { IntegrationSetting } from "./IntegrationSetting";
 import type { ProviderKind } from "./ProviderKind";
 import type { RouteClassTarget } from "./RouteClassTarget";
@@ -44,11 +46,20 @@ custom_commands?: Array<CustomCommand>, disabled_providers: Array<ProviderKind>,
  */
 subagents_enabled: boolean, provider_binary_overrides: { [key in ProviderKind]?: string },
 /**
- * Hosted evaluation-model configuration (backend + BYOK credentials).
- * `None` means no eval feature can run — callers degrade to their
- * default path rather than erroring.
+ * Hosted evaluation-model configuration (provider pick only — the
+ * credentials it runs on live in `inference`). `None` means no eval
+ * feature can run — callers degrade to their default path rather than
+ * erroring.
  */
 eval?: EvalSettings | null,
+/**
+ * The shared inference providers — TypeSafe, the Vercel AI Gateway,
+ * Cloudflare Workers AI, OpenRouter — that eval-driven features and
+ * voice briefings draw on. Credentials never live in this document: each
+ * entry's `api_key` is a write-only slot the daemon moves into its
+ * secret store, and `credential_configured` reports the result.
+ */
+inference?: { [key in InferenceProvider]?: InferenceProviderSettings },
 /**
  * The user's model-routing map: which provider/model/effort each task
  * class starts on. Classes absent here leave routed sessions on their

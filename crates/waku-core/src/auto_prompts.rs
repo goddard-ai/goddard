@@ -132,7 +132,7 @@ impl AutoPromptService {
                 .filter(AutoPromptRule::valid_for_dispatch)
                 .collect();
             self.eligible.lock().remove(&session.id);
-            if rules.is_empty() || settings.eval.is_none_or(|eval| eval.credential_missing()) {
+            if rules.is_empty() || backend.resolved_eval().is_none() {
                 continue;
             }
             let session = session.clone();
@@ -200,7 +200,7 @@ impl AutoPromptService {
         let Some(backend) = self.backend.lock().upgrade() else {
             return;
         };
-        let Some(eval) = backend.auto_prompt_settings().eval else {
+        let Some(eval) = backend.resolved_eval() else {
             return;
         };
         let Some(events) = self.events.lock().clone() else {
@@ -224,7 +224,7 @@ impl AutoPromptService {
         let started = std::time::Instant::now();
         let result = crate::eval::evaluate(&eval, &state, &questions);
         let mut record = crate::eval::EvalDecisionRecord::empty("auto-prompt");
-        record.backend = Some(eval.backend);
+        record.backend = Some(eval.provider);
         record.latency_ms = Some(started.elapsed().as_millis() as u64);
         record.state = Some(state);
         record.questions = Some(questions);

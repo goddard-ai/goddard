@@ -13,6 +13,7 @@ use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
 use gpui::{ElementId, HighlightStyle, KeyBinding, StyledText, Svg, actions};
 use waku_protocol::auto_prompts::{AutoPromptQuestion, AutoPromptRule};
+use waku_protocol::inference::{InferenceContext, InferenceProvider};
 use waku_protocol::integrations::{IntegrationAuthKind, IntegrationAuthState};
 use waku_protocol::routing::{ALL_TASK_CLASSES, RouteClassTarget, TaskClass};
 
@@ -7011,7 +7012,7 @@ impl Waku {
                 .state
                 .eval
                 .as_ref()
-                .is_none_or(|eval| eval.credential_missing());
+                .is_none_or(|eval| !eval.ready(&self.state.inference));
         Some(
             div()
                 .min_h(px(66.0))
@@ -7337,7 +7338,7 @@ impl Waku {
         } else {
             // The Jev page reads the eval mirror — warm it rather than
             // waiting for the first frame to discover it is missing.
-            self.seed_eval_inputs(cx);
+            self.seed_inference_inputs(cx);
         }
         self.close_jev_page_if_unused();
         self.save();
@@ -7373,7 +7374,7 @@ impl Waku {
         if enabled {
             // The Jev page reads the eval mirror — warm it rather than
             // waiting for the first frame to discover it is missing.
-            self.seed_eval_inputs(cx);
+            self.seed_inference_inputs(cx);
         }
         self.save();
         cx.notify();
@@ -7437,9 +7438,10 @@ impl Waku {
         cx.notify();
     }
 
-    /// The voice briefing card's tuning block: the shared AI Gateway
-    /// credential, the summary model that writes the transcript, and which
-    /// TTS tier speaks it.
+    /// The voice briefing card's tuning block: which inference provider runs
+    /// the calls, the summary model that writes the transcript, and which
+    /// TTS tier speaks it. The credential itself lives on the Providers
+    /// page's inference card.
     fn voice_briefing_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let row = |label: String, control: AnyElement| {
             div()
@@ -7490,6 +7492,41 @@ impl Waku {
             },
         );
 
+        let provider = self.state.voice_briefing_provider;
+        let provider_ready = self
+            .state
+            .inference
+            .get(&provider)
+            .is_some_and(|entry| entry.credential_configured);
+        let provider_handle = self.menu_handle("voice-briefing-provider".to_owned(), cx);
+        let provider_weak = cx.entity().downgrade();
+        let provider_selector = dropdown_menu(
+            MenuChip::new("voice-briefing-provider")
+                .label(provider.display_name())
+                .outlined()
+                .selected(provider_handle.is_open())
+                .w(px(280.0))
+                .justify_between(),
+            "voice-briefing-provider-menu",
+            &provider_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                InferenceProvider::ALL
+                    .into_iter()
+                    .filter(|option| option.supports(InferenceContext::Speech))
+                    .map(|option| {
+                        let weak = provider_weak.clone();
+                        MenuItem::new(option.display_name(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_voice_briefing_provider(option, cx)
+                            });
+                        })
+                        .selected(option == provider)
+                    })
+                    .collect()
+            },
+        );
+
         let tts = self.state.voice_briefing_tts_model;
         let handle = self.menu_handle("voice-briefing-tts-model".to_owned(), cx);
         let tts_weak = cx.entity().downgrade();
@@ -7504,8 +7541,7 @@ impl Waku {
             &handle,
             MenuAlign::BelowRight,
             move |_| {
-                VoiceBriefingTtsModel::ALL
-                    .into_iter()
+                VoiceBriefingTtsModel::for_provider(provider)
                     .map(|option| {
                         let weak = tts_weak.clone();
                         MenuItem::new(option.label(), move |_, cx| {
@@ -7532,11 +7568,24 @@ impl Waku {
                     .child(tr!("experiments.voice_briefing_caption")),
             )
             .child(row(
-                tr!("experiments.voice_briefing_key"),
-                TextField::new("voice-briefing-key", self.voice_briefing_key_input.clone())
-                    .w(px(280.0))
-                    .into_any_element(),
+                tr!("experiments.voice_briefing_provider"),
+                provider_selector.into_any_element(),
             ))
+            .when(!provider_ready, |card| {
+                card.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(icon("icons/alert.svg", 12.0, theme.warning))
+                        .child(
+                            div()
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("experiments.voice_briefing_needs_key")),
+                        ),
+                )
+            })
             .child(row(
                 tr!("experiments.voice_briefing_model"),
                 summary_selector.into_any_element(),
@@ -7572,6 +7621,23 @@ impl Waku {
 
     fn set_voice_briefing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.voice_briefing_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_provider(&mut self, provider: InferenceProvider, cx: &mut Context<Self>) {
+        if self.state.voice_briefing_provider == provider {
+            return;
+        }
+        self.state.voice_briefing_provider = provider;
+        // A TTS pick the new provider cannot serve falls back to its first
+        // served model — the picker's own list does the same filtering.
+        let tts = self.state.voice_briefing_tts_model;
+        if !tts.is_custom() && tts.model_id_for(provider).is_none() {
+            self.state.voice_briefing_tts_model = VoiceBriefingTtsModel::for_provider(provider)
+                .find(|model| !model.is_custom())
+                .unwrap_or_default();
+        }
         self.save();
         cx.notify();
     }
@@ -7616,16 +7682,10 @@ impl Waku {
     }
 
     /// The briefing fields write straight through — they edit app state, not
-    /// a staged daemon document like the eval keys. A cleared built-in summary
-    /// restores the default, while a deliberately selected custom model may
-    /// stay empty until the user finishes entering its ID.
+    /// a staged daemon document. A cleared built-in summary restores the
+    /// default, while a deliberately selected custom model may stay empty
+    /// until the user finishes entering its ID.
     pub(super) fn save_voice_briefing_fields(&mut self, cx: &mut Context<Self>) {
-        self.state.voice_briefing_gateway_key = self
-            .voice_briefing_key_input
-            .read(cx)
-            .content()
-            .trim()
-            .to_owned();
         let model = self
             .voice_briefing_model_input
             .read(cx)
@@ -7962,21 +8022,30 @@ impl Waku {
     /// Fill the evaluation credential fields from the daemon's settings
     /// mirror, once. After that the fields own their contents until Apply —
     /// re-seeding on every settings broadcast would eat in-progress edits.
-    pub(super) fn seed_eval_inputs(&mut self, cx: &mut Context<Self>) {
-        if self.eval_inputs_seeded {
+    /// Warm the inference card's fields from the settings mirror: the
+    /// non-secret config seeds editable, while every credential field stays
+    /// empty — keys are write-only, so an input can only ever hold a
+    /// not-yet-applied value.
+    pub(super) fn seed_inference_inputs(&mut self, cx: &mut Context<Self>) {
+        if self.inference_inputs_seeded {
             return;
         }
-        self.eval_inputs_seeded = true;
-        let eval = self.state.eval.clone().unwrap_or_default();
+        self.inference_inputs_seeded = true;
+        let config = |provider: InferenceProvider, field: &str| {
+            self.state
+                .inference
+                .get(&provider)
+                .and_then(|entry| entry.config.get(field).cloned())
+        };
         for (input, value) in [
-            (&self.eval_typesafe_key_input, eval.typesafe_api_key),
-            (&self.eval_vercel_key_input, eval.vercel_api_key),
-            (&self.eval_vercel_team_input, eval.vercel_team_id),
             (
-                &self.eval_cloudflare_account_input,
-                eval.cloudflare_account_id,
+                &self.inference_vercel_team_input,
+                config(InferenceProvider::VercelGateway, "team_id"),
             ),
-            (&self.eval_cloudflare_token_input, eval.cloudflare_api_token),
+            (
+                &self.inference_cloudflare_account_input,
+                config(InferenceProvider::Cloudflare, "account_id"),
+            ),
         ] {
             if let Some(value) = value {
                 input.update(cx, |input, cx| input.set_content(value, cx));
@@ -7984,45 +8053,123 @@ impl Waku {
         }
     }
 
-    fn set_eval_backend(
-        &mut self,
-        backend: waku_protocol::eval::EvalBackend,
-        cx: &mut Context<Self>,
-    ) {
-        self.state.eval.get_or_insert_with(Default::default).backend = backend;
+    fn set_eval_provider(&mut self, provider: InferenceProvider, cx: &mut Context<Self>) {
+        self.state
+            .eval
+            .get_or_insert_with(Default::default)
+            .provider = provider;
         self.save();
         cx.notify();
     }
 
-    /// Whether any credential field differs from the mirror — the Apply
-    /// button's enabled state.
-    fn eval_credentials_dirty(&self, cx: &App) -> bool {
-        let eval = self.state.eval.clone().unwrap_or_default();
-        let content = |input: &Entity<TextInput>| {
-            let content = input.read(cx).content().trim().to_owned();
-            (!content.is_empty()).then_some(content)
+    /// Whether any inference field differs from the mirror — the Apply
+    /// button's enabled state. Credential fields are write-only: any typed
+    /// content is a pending write.
+    fn inference_fields_dirty(&self, cx: &App) -> bool {
+        let config = |provider: InferenceProvider, field: &str| {
+            self.state
+                .inference
+                .get(&provider)
+                .and_then(|entry| entry.config.get(field).cloned())
+                .unwrap_or_default()
         };
-        content(&self.eval_typesafe_key_input) != eval.typesafe_api_key
-            || content(&self.eval_vercel_key_input) != eval.vercel_api_key
-            || content(&self.eval_vercel_team_input) != eval.vercel_team_id
-            || content(&self.eval_cloudflare_account_input) != eval.cloudflare_account_id
-            || content(&self.eval_cloudflare_token_input) != eval.cloudflare_api_token
+        let content = |input: &Entity<TextInput>| input.read(cx).content().trim().to_owned();
+        !content(&self.inference_typesafe_key_input).is_empty()
+            || !content(&self.inference_vercel_key_input).is_empty()
+            || !content(&self.inference_cloudflare_token_input).is_empty()
+            || !content(&self.inference_openrouter_key_input).is_empty()
+            || content(&self.inference_vercel_team_input)
+                != config(InferenceProvider::VercelGateway, "team_id")
+            || content(&self.inference_cloudflare_account_input)
+                != config(InferenceProvider::Cloudflare, "account_id")
     }
 
-    /// Persist every credential field into the eval settings document — one
-    /// write so the daemon sees a consistent set. An empty field clears the
-    /// slot rather than storing whitespace.
-    pub(super) fn save_eval_credentials(&mut self, cx: &mut Context<Self>) {
+    /// Push the inference fields to the daemon — one write so it sees a
+    /// consistent set. Credentials stage only in the outgoing document:
+    /// `state.inference` never holds a key, so the app-state file can't
+    /// either. Typed keys ride the write-only `api_key` slot and clear from
+    /// their inputs once applied; config fields land in the provider's
+    /// `config` map, an empty one clearing it.
+    pub(super) fn save_inference_fields(&mut self, cx: &mut Context<Self>) {
         let content = |input: &Entity<TextInput>| {
             let content = input.read(cx).content().trim().to_owned();
             (!content.is_empty()).then_some(content)
         };
-        let eval = self.state.eval.get_or_insert_with(Default::default);
-        eval.typesafe_api_key = content(&self.eval_typesafe_key_input);
-        eval.vercel_api_key = content(&self.eval_vercel_key_input);
-        eval.vercel_team_id = content(&self.eval_vercel_team_input);
-        eval.cloudflare_account_id = content(&self.eval_cloudflare_account_input);
-        eval.cloudflare_api_token = content(&self.eval_cloudflare_token_input);
+        let config = |field: &str, input: &Entity<TextInput>| {
+            (field.to_owned(), input.read(cx).content().trim().to_owned())
+        };
+        self.state
+            .inference
+            .entry(InferenceProvider::VercelGateway)
+            .or_default()
+            .config = [config("team_id", &self.inference_vercel_team_input)]
+            .into_iter()
+            .filter(|(_, value)| !value.is_empty())
+            .collect();
+        self.state
+            .inference
+            .entry(InferenceProvider::Cloudflare)
+            .or_default()
+            .config = [config(
+            "account_id",
+            &self.inference_cloudflare_account_input,
+        )]
+        .into_iter()
+        .filter(|(_, value)| !value.is_empty())
+        .collect();
+
+        let mut document = self.state.daemon_settings();
+        for (provider, key) in [
+            (
+                InferenceProvider::TypeSafe,
+                content(&self.inference_typesafe_key_input),
+            ),
+            (
+                InferenceProvider::VercelGateway,
+                content(&self.inference_vercel_key_input),
+            ),
+            (
+                InferenceProvider::Cloudflare,
+                content(&self.inference_cloudflare_token_input),
+            ),
+            (
+                InferenceProvider::OpenRouter,
+                content(&self.inference_openrouter_key_input),
+            ),
+        ] {
+            if let Some(key) = key {
+                document.inference.entry(provider).or_default().api_key = Some(key);
+            }
+        }
+        if let Err(error) = self.daemon.update_settings(document) {
+            // The fields keep their contents so a retry only needs Apply.
+            self.show_toast(tr!("errors.save_local_state", error = error.to_string()));
+            cx.notify();
+            return;
+        }
+        for input in [
+            &self.inference_typesafe_key_input,
+            &self.inference_vercel_key_input,
+            &self.inference_cloudflare_token_input,
+            &self.inference_openrouter_key_input,
+        ] {
+            input.update(cx, |input, cx| input.set_content("", cx));
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// Drop the provider's stored credential — the write-only slot clears it
+    /// with an empty submit. Like `save_inference_fields`, the marker rides
+    /// the outgoing document only.
+    fn clear_inference_credential(&mut self, provider: InferenceProvider, cx: &mut Context<Self>) {
+        let mut document = self.state.daemon_settings();
+        document.inference.entry(provider).or_default().api_key = Some(String::new());
+        if let Err(error) = self.daemon.update_settings(document) {
+            self.show_toast(tr!("errors.save_local_state", error = error.to_string()));
+            cx.notify();
+            return;
+        }
         self.save();
         cx.notify();
     }
@@ -8036,17 +8183,20 @@ impl Waku {
         if self.eval_probe_pending {
             return;
         }
-        let content = |input: &Entity<TextInput>| {
+        // Staged (unsaved) field contents ride the probe — a key verifies
+        // before Apply persists it; blank fields hydrate from the store.
+        let staged = |input: &Entity<TextInput>| {
             let content = input.read(cx).content().trim().to_owned();
             (!content.is_empty()).then_some(content)
         };
+        let provider = self.state.eval.clone().unwrap_or_default().provider;
         let settings = waku_protocol::eval::EvalSettings {
-            backend: self.state.eval.clone().unwrap_or_default().backend,
-            typesafe_api_key: content(&self.eval_typesafe_key_input),
-            vercel_api_key: content(&self.eval_vercel_key_input),
-            vercel_team_id: content(&self.eval_vercel_team_input),
-            cloudflare_account_id: content(&self.eval_cloudflare_account_input),
-            cloudflare_api_token: content(&self.eval_cloudflare_token_input),
+            provider,
+            typesafe_api_key: staged(&self.inference_typesafe_key_input),
+            vercel_api_key: staged(&self.inference_vercel_key_input),
+            vercel_team_id: staged(&self.inference_vercel_team_input),
+            cloudflare_account_id: staged(&self.inference_cloudflare_account_input),
+            cloudflare_api_token: staged(&self.inference_cloudflare_token_input),
         };
         self.eval_probe_pending = true;
         self.eval_probe_result = None;
@@ -8118,12 +8268,13 @@ impl Waku {
     ) -> AnyElement {
         let weak = cx.entity().downgrade();
         let eval = self.state.eval.clone().unwrap_or_default();
-        let backend = eval.backend;
+        let backend = eval.provider;
+        let backend_ready = eval.ready(&self.state.inference);
 
         let backend_handle = self.menu_handle("eval-backend-selector", cx);
         let backend_selector = dropdown_menu(
             MenuChip::new("eval-backend-selector")
-                .label(eval_backend_label(backend))
+                .label(backend.display_name())
                 .outlined()
                 .selected(backend_handle.is_open())
                 .w(px(200.0))
@@ -8132,33 +8283,18 @@ impl Waku {
             &backend_handle,
             MenuAlign::BelowRight,
             move |_| {
-                [
-                    waku_protocol::eval::EvalBackend::TypeSafe,
-                    waku_protocol::eval::EvalBackend::VercelGateway,
-                    waku_protocol::eval::EvalBackend::Cloudflare,
-                ]
-                .into_iter()
-                .map(|option| {
-                    let weak = weak.clone();
-                    MenuItem::new(eval_backend_label(option), move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| this.set_eval_backend(option, cx));
+                InferenceProvider::ALL
+                    .into_iter()
+                    .filter(|option| option.supports(InferenceContext::Eval))
+                    .map(|option| {
+                        let weak = weak.clone();
+                        MenuItem::new(option.display_name(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| this.set_eval_provider(option, cx));
+                        })
+                        .selected(option == backend)
                     })
-                    .selected(option == backend)
-                })
-                .collect()
+                    .collect()
             },
-        );
-
-        let dirty = self.eval_credentials_dirty(cx);
-        let apply_button = settings_button(
-            "apply-eval-credentials",
-            tr!("daemon.apply"),
-            dirty,
-            false,
-            false,
-            theme,
-            cx,
-            |this, _, cx| this.save_eval_credentials(cx),
         );
 
         let pending = self.eval_probe_pending;
@@ -8189,74 +8325,41 @@ impl Waku {
         };
         let no_probe_status = probe_status.is_none();
 
-        let mut credential_rows: Vec<Option<AnyElement>> = match backend {
-            waku_protocol::eval::EvalBackend::TypeSafe => vec![settings_row(
-                "icons/key-round.svg",
-                tr!("routing.typesafe_key"),
-                tr!("routing.typesafe_key_description"),
-                TextField::new("eval-typesafe-key", self.eval_typesafe_key_input.clone())
-                    .w(px(300.0)),
+        let credential_rows = vec![
+            settings_row(
+                "icons/server.svg",
+                tr!("routing.backend"),
+                tr!("routing.backend_description"),
+                backend_selector,
                 theme,
                 search,
-            )],
-            waku_protocol::eval::EvalBackend::VercelGateway => vec![
-                settings_row(
-                    "icons/key-round.svg",
-                    tr!("routing.vercel_key"),
-                    tr!("routing.vercel_key_description"),
-                    TextField::new("eval-vercel-key", self.eval_vercel_key_input.clone())
-                        .w(px(300.0)),
-                    theme,
-                    search,
-                ),
-                settings_row(
-                    "icons/friends.svg",
-                    tr!("routing.vercel_team"),
-                    tr!("routing.vercel_team_description"),
-                    TextField::new("eval-vercel-team", self.eval_vercel_team_input.clone())
-                        .w(px(300.0)),
-                    theme,
-                    search,
-                ),
-            ],
-            waku_protocol::eval::EvalBackend::Cloudflare => vec![
-                settings_row(
-                    "icons/globe.svg",
-                    tr!("routing.cloudflare_account"),
-                    tr!("routing.cloudflare_account_description"),
-                    TextField::new(
-                        "eval-cloudflare-account",
-                        self.eval_cloudflare_account_input.clone(),
-                    )
-                    .w(px(300.0)),
-                    theme,
-                    search,
-                ),
-                settings_row(
-                    "icons/key-round.svg",
-                    tr!("routing.cloudflare_token"),
-                    tr!("routing.cloudflare_token_description"),
-                    TextField::new(
-                        "eval-cloudflare-token",
-                        self.eval_cloudflare_token_input.clone(),
-                    )
-                    .w(px(300.0)),
-                    theme,
-                    search,
-                ),
-            ],
-        };
-
-        let mut credential_rows_with_backend = vec![settings_row(
-            "icons/server.svg",
-            tr!("routing.backend"),
-            tr!("routing.backend_description"),
-            backend_selector,
-            theme,
-            search,
-        )];
-        credential_rows_with_backend.append(&mut credential_rows);
-        let credentials = settings_row_card(credential_rows_with_backend, theme).map(|card| {
+            ),
+            settings_row(
+                "icons/key-round.svg",
+                tr!("routing.credential"),
+                if backend_ready {
+                    tr!("routing.credential_configured")
+                } else {
+                    tr!("routing.credential_missing_hint")
+                },
+                div()
+                    .flex_none()
+                    .text_size(sp(12.0))
+                    .text_color(if backend_ready {
+                        theme.success
+                    } else {
+                        theme.warning
+                    })
+                    .child(if backend_ready {
+                        tr!("routing.credential_ready")
+                    } else {
+                        tr!("routing.credential_needed")
+                    }),
+                theme,
+                search,
+            ),
+        ];
+        let credentials = settings_row_card(credential_rows, theme).map(|card| {
             card.mt(px(15.0)).when(!search.active(), |card| {
                 card.child(
                     div()
@@ -8277,8 +8380,7 @@ impl Waku {
                             )
                         })
                         .when(no_probe_status, |row| row.child(div().flex_1()))
-                        .child(test_button)
-                        .child(apply_button),
+                        .child(test_button),
                 )
             })
         });
@@ -8464,7 +8566,7 @@ impl Waku {
             .state
             .eval
             .as_ref()
-            .is_none_or(|eval| eval.credential_missing());
+            .is_none_or(|eval| !eval.ready(&self.state.inference));
         let needs_credential = credential_missing
             && (mode != AutoModelRouting::Disabled
                 || self.state.status_markers_enabled
@@ -11490,6 +11592,19 @@ impl Waku {
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .child(self.render_coding_agents_card(search, cx))
+            .child(self.render_inference_providers_card(search, cx))
+            .into_any_element()
+    }
+
+    fn render_coding_agents_card(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let checking = self
             .provider_detection_remaining
@@ -11865,6 +11980,388 @@ impl Waku {
             )
             .child(rows)
             .into_any_element()
+    }
+
+    /// The inference providers card: one row per hosted inference service —
+    /// TypeSafe, the Vercel AI Gateway, Cloudflare Workers AI, OpenRouter —
+    /// whose credentials every generic-inference feature (Jev, voice
+    /// briefings, and what comes next) shares. Each row reports which
+    /// contexts the provider serves and whether a key is stored; the
+    /// expanded pane holds a write-only key field plus the provider's
+    /// non-secret config.
+    fn render_inference_providers_card(
+        &self,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+
+        let mut provider_rows: Vec<AnyElement> = Vec::new();
+        for provider in InferenceProvider::ALL {
+            let configured = self
+                .state
+                .inference
+                .get(&provider)
+                .is_some_and(|entry| entry.ready(provider));
+            let contexts = provider
+                .contexts()
+                .iter()
+                .map(|context| inference_context_label(*context))
+                .collect::<Vec<_>>()
+                .join("  \u{00b7}  ");
+            let detail_text = format!(
+                "{contexts}  \u{00b7}  {}",
+                if configured {
+                    tr!("inference.key_configured")
+                } else {
+                    tr!("inference.no_key")
+                }
+            );
+
+            let Some(matched) = search.matched(provider.display_name(), &detail_text) else {
+                continue;
+            };
+            let expanded = self.expanded_inference == Some(provider);
+            let expand_button = icon_button_tinted(
+                SharedString::from(format!("inference-expand-{}", provider.id())),
+                if expanded {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                theme,
+                theme.affordance_icon(),
+            )
+            .tab_index(0)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
+                this.toggle_inference_expanded(provider, cx);
+            });
+
+            let header = div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(11.0))
+                        .child(icon(
+                            inference_provider_icon(provider),
+                            14.0,
+                            theme.text_tertiary,
+                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .child(settings_search_text(
+                                    provider.display_name(),
+                                    matched.title_ranges.clone(),
+                                    theme,
+                                ))
+                                .child(
+                                    div()
+                                        .mt(px(2.0))
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_tertiary)
+                                        .truncate()
+                                        .child(settings_search_text(
+                                            detail_text,
+                                            matched.description_ranges.clone(),
+                                            theme,
+                                        )),
+                                ),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .text_size(sp(12.0))
+                                .text_color(if configured {
+                                    theme.success
+                                } else {
+                                    theme.text_ghost
+                                })
+                                .child(if configured {
+                                    tr!("inference.configured")
+                                } else {
+                                    tr!("inference.not_configured")
+                                }),
+                        )
+                        .child(expand_button),
+                );
+
+            provider_rows.push(
+                div()
+                    .py(px(11.0))
+                    .flex()
+                    .flex_col()
+                    .child(header)
+                    .when(expanded && !search.active(), |element| {
+                        element.child(self.render_inference_expanded(provider, theme, cx))
+                    })
+                    .into_any_element(),
+            );
+        }
+        let any_rows = !provider_rows.is_empty();
+        let last_row = provider_rows.len().saturating_sub(1);
+        let mut rows = div().mt(px(4.0)).flex().flex_col();
+        for (index, row) in provider_rows.into_iter().enumerate() {
+            rows = rows.child(
+                div()
+                    .when(index != last_row, |element| {
+                        element.border_b(hairline()).border_color(theme.separator)
+                    })
+                    .child(row),
+            );
+        }
+
+        let header = {
+            let title = tr!("inference.providers");
+            let description = tr!("inference.description");
+            search.matched(&title, &description).map(|matched| {
+                settings_row_label(
+                    "icons/zap.svg",
+                    settings_row_text(title, description, matched, theme),
+                    theme,
+                )
+            })
+        };
+        if search.active() && header.is_none() && !any_rows {
+            return div().into_any_element();
+        }
+
+        div()
+            .mt(px(15.0))
+            .w_full()
+            .px(px(20.0))
+            .py(px(14.0))
+            .rounded(px(16.0))
+            .bg(theme.raised)
+            .child(div().flex().items_start().gap(px(20.0)).children(header))
+            .child(rows)
+            .into_any_element()
+    }
+
+    /// The expanded inference row: the write-only credential field, the
+    /// provider's non-secret config, and Apply/Remove actions. Typed keys
+    /// never render back — `credential_configured` carries the state.
+    fn render_inference_expanded(
+        &self,
+        provider: InferenceProvider,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let entry = self.state.inference.get(&provider);
+        let configured = entry.is_some_and(|entry| entry.credential_configured);
+        let key_input = match provider {
+            InferenceProvider::TypeSafe => &self.inference_typesafe_key_input,
+            InferenceProvider::VercelGateway => &self.inference_vercel_key_input,
+            InferenceProvider::Cloudflare => &self.inference_cloudflare_token_input,
+            InferenceProvider::OpenRouter => &self.inference_openrouter_key_input,
+        };
+
+        let remove_key = configured.then(|| {
+            div()
+                .id(SharedString::from(format!(
+                    "inference-clear-{}",
+                    provider.id()
+                )))
+                .tab_index(0)
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .h(px(29.0))
+                .px(px(10.0))
+                .rounded(px(9.0))
+                .border(hairline())
+                .border_color(theme.border_strong)
+                .flex()
+                .flex_none()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .hover(|element| element.bg(theme.overlay))
+                .child(tr!("inference.remove_key"))
+                .on_activation(cx, move |this, _, cx| {
+                    this.clear_inference_credential(provider, cx);
+                })
+        });
+
+        let get_key = div()
+            .id(SharedString::from(format!(
+                "inference-docs-{}",
+                provider.id()
+            )))
+            .tab_index(0)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .h(px(29.0))
+            .px(px(10.0))
+            .rounded(px(9.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .hover(|element| element.bg(theme.overlay))
+            .child(icon("icons/external-link.svg", 11.0, theme.text_tertiary))
+            .child(tr!("inference.get_key"))
+            .on_activation(cx, move |_, _, cx| cx.open_url(provider.keys_url()));
+
+        let dirty = self.inference_fields_dirty(cx);
+        let apply = div()
+            .id(SharedString::from(format!(
+                "inference-apply-{}",
+                provider.id()
+            )))
+            .tab_index(0)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .h(px(29.0))
+            .px(px(10.0))
+            .rounded(px(9.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .flex()
+            .flex_none()
+            .items_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .opacity(if dirty { 1.0 } else { 0.5 })
+            .when(dirty, |element| {
+                element
+                    .hover(|element| element.bg(theme.overlay))
+                    .on_activation(cx, |this, _, cx| this.save_inference_fields(cx))
+            })
+            .child(tr!("daemon.apply"));
+
+        let mut pane = div()
+            .mt(px(10.0))
+            .pl(px(42.0))
+            .flex()
+            .flex_col()
+            .gap(px(5.0))
+            .child(
+                div()
+                    .mt(px(6.0))
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("inference.api_key")),
+            )
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(if configured {
+                        tr!("inference.api_key_stored_description")
+                    } else {
+                        tr!("inference.api_key_description")
+                    })),
+            )
+            .child(
+                div()
+                    .mt(px(3.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        TextField::new(
+                            SharedString::from(format!("inference-key-{}", provider.id())),
+                            key_input.clone(),
+                        )
+                        .flex_1()
+                        .max_w(px(430.0)),
+                    )
+                    .child(get_key)
+                    .when_some(remove_key, |element, button| element.child(button)),
+            );
+
+        for (field, input, label, description) in self.inference_config_fields(provider) {
+            pane = pane
+                .child(
+                    div()
+                        .mt(px(6.0))
+                        .text_size(sp(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .line_height(sp(15.0))
+                        .text_color(theme.text_tertiary)
+                        .child(description),
+                )
+                .child(
+                    div().mt(px(3.0)).flex().items_center().gap(px(8.0)).child(
+                        TextField::new(
+                            SharedString::from(format!("inference-{}-{}", provider.id(), field)),
+                            input.clone(),
+                        )
+                        .flex_1()
+                        .max_w(px(430.0)),
+                    ),
+                );
+        }
+
+        pane.child(
+            div()
+                .mt(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(apply)
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_ghost)
+                        .child(tr!("inference.apply_hint")),
+                ),
+        )
+    }
+
+    /// The non-secret config fields a provider edits here, paired with the
+    /// input entity and label/description for each.
+    fn inference_config_fields(
+        &self,
+        provider: InferenceProvider,
+    ) -> Vec<(&'static str, Entity<TextInput>, String, String)> {
+        match provider {
+            InferenceProvider::VercelGateway => vec![(
+                "team_id",
+                self.inference_vercel_team_input.clone(),
+                tr!("routing.vercel_team"),
+                tr!("routing.vercel_team_description"),
+            )],
+            InferenceProvider::Cloudflare => vec![(
+                "account_id",
+                self.inference_cloudflare_account_input.clone(),
+                tr!("routing.cloudflare_account"),
+                tr!("routing.cloudflare_account_description"),
+            )],
+            _ => Vec::new(),
+        }
+    }
+
+    fn toggle_inference_expanded(&mut self, provider: InferenceProvider, cx: &mut Context<Self>) {
+        if self.expanded_inference == Some(provider) {
+            self.expanded_inference = None;
+        } else {
+            self.expanded_inference = Some(provider);
+        }
+        cx.notify();
     }
 
     /// The expanded row's settings body: the binary override for this
@@ -14478,13 +14975,6 @@ fn eval_usage_label(totals: &waku_protocol::eval::EvalUsageTotals, theme: Theme)
 }
 
 /// Display label for an eval backend in the routing section's selector.
-fn eval_backend_label(backend: waku_protocol::eval::EvalBackend) -> &'static str {
-    match backend {
-        waku_protocol::eval::EvalBackend::TypeSafe => "TypeSafe",
-        waku_protocol::eval::EvalBackend::VercelGateway => "Vercel AI Gateway",
-        waku_protocol::eval::EvalBackend::Cloudflare => "Cloudflare Workers AI",
-    }
-}
 
 fn auto_prompt_question_editor(
     window: &mut Window,
@@ -14693,6 +15183,25 @@ fn detection_checked_label(elapsed: Duration) -> String {
         tr!("providers.checked_minutes_ago", count = seconds / 60)
     } else {
         tr!("providers.checked_hours_ago", count = seconds / 3600)
+    }
+}
+
+/// The localized noun for one inference context, joined into each provider
+/// row's capability list.
+fn inference_context_label(context: InferenceContext) -> String {
+    match context {
+        InferenceContext::Eval => tr!("inference.context_eval"),
+        InferenceContext::Text => tr!("inference.context_text"),
+        InferenceContext::Speech => tr!("inference.context_speech"),
+    }
+}
+
+fn inference_provider_icon(provider: InferenceProvider) -> &'static str {
+    match provider {
+        InferenceProvider::TypeSafe => "icons/provider-typesafe.svg",
+        InferenceProvider::VercelGateway => "icons/integration-vercel.svg",
+        InferenceProvider::Cloudflare => "icons/server.svg",
+        InferenceProvider::OpenRouter => "icons/globe.svg",
     }
 }
 

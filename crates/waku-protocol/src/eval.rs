@@ -9,27 +9,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-/// Which hosted service answers evaluation calls. All three speak the same
-/// question/answer contract; only the request envelope and credentials differ.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum EvalBackend {
-    /// TypeSafe's own API: `api.typesafe.ai/v1/systemone`, one API key.
-    #[default]
-    TypeSafe,
-    /// Vercel AI Gateway's evaluation endpoint, AI Gateway key or OIDC token.
-    VercelGateway,
-    /// Cloudflare Workers AI, account id + API token.
-    Cloudflare,
-}
+use crate::inference::{InferenceContext, InferenceProvider, InferenceProviderSettings};
 
 /// Bring-your-own-key evaluation configuration, stored in daemon settings.
-/// `None` fields mean that backend is not configured; the selected `backend`
-/// must have its credential present for a call to run.
+/// `provider` selects among the inference providers serving the `eval`
+/// context; credentials and non-secret provider config live in
+/// [`crate::settings::DaemonSettings::inference`].
+///
+/// The remaining `Option<String>` fields are write-only-in-effect staging
+/// slots, like [`InferenceProviderSettings::api_key`]: a client sends them
+/// (an unsaved credential staged for `testEvalConnection`, or a document
+/// written before the provider section existed) and the daemon's absorb
+/// pass moves them into the secret store and provider `config` before the
+/// document persists or broadcasts, so a received document always reads
+/// `None`. Internally the daemon hydrates them back from the store.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(default, rename_all = "camelCase")]
 pub struct EvalSettings {
-    pub backend: EvalBackend,
+    #[serde(alias = "backend")]
+    pub provider: InferenceProvider,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub typesafe_api_key: Option<String>,
     /// AI Gateway API key or a Vercel OIDC token; both take the same Bearer slot.
@@ -45,9 +43,10 @@ pub struct EvalSettings {
 }
 
 impl EvalSettings {
-    /// Whether the selected backend is missing the credential its requests
-    /// require — mirrors the `required` checks in waku-core's eval request
-    /// builder, so a feature can skip a call that can only fail.
+    /// Whether a hydrated settings object still lacks a field its provider's
+    /// requests require. Only meaningful after the daemon has hydrated the
+    /// staging slots from the secret store — a settings document as received
+    /// always reads missing.
     pub fn credential_missing(&self) -> bool {
         let missing = |value: &Option<String>| {
             value
@@ -56,13 +55,27 @@ impl EvalSettings {
                 .unwrap_or_default()
                 .is_empty()
         };
-        match self.backend {
-            EvalBackend::TypeSafe => missing(&self.typesafe_api_key),
-            EvalBackend::VercelGateway => missing(&self.vercel_api_key),
-            EvalBackend::Cloudflare => {
+        match self.provider {
+            InferenceProvider::TypeSafe => missing(&self.typesafe_api_key),
+            InferenceProvider::VercelGateway => missing(&self.vercel_api_key),
+            InferenceProvider::Cloudflare => {
                 missing(&self.cloudflare_account_id) || missing(&self.cloudflare_api_token)
             }
+            InferenceProvider::OpenRouter => true,
         }
+    }
+
+    /// Whether eval calls can run for the selected provider, judged from the
+    /// daemon-maintained provider section — the client-side counterpart of
+    /// `credential_missing`, which only sees hydrated values.
+    pub fn ready(
+        &self,
+        inference: &BTreeMap<InferenceProvider, InferenceProviderSettings>,
+    ) -> bool {
+        self.provider.supports(InferenceContext::Eval)
+            && inference
+                .get(&self.provider)
+                .is_some_and(|entry| entry.ready(self.provider))
     }
 }
 
@@ -195,19 +208,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn credential_missing_mirrors_each_backends_required_fields() {
+    fn credential_missing_mirrors_each_providers_required_fields() {
         let mut settings = EvalSettings::default();
         assert!(settings.credential_missing());
         settings.typesafe_api_key = Some("key".to_owned());
         assert!(!settings.credential_missing());
 
-        settings.backend = EvalBackend::VercelGateway;
+        settings.provider = InferenceProvider::VercelGateway;
         assert!(settings.credential_missing());
         settings.vercel_api_key = Some("key".to_owned());
         // The team id is a routing nicety, not a credential.
         assert!(!settings.credential_missing());
 
-        settings.backend = EvalBackend::Cloudflare;
+        settings.provider = InferenceProvider::Cloudflare;
         assert!(settings.credential_missing());
         settings.cloudflare_account_id = Some("account".to_owned());
         assert!(settings.credential_missing());
@@ -217,5 +230,78 @@ mod tests {
         // Whitespace alone does not count as configured.
         settings.cloudflare_api_token = Some("   ".to_owned());
         assert!(settings.credential_missing());
+
+        // OpenRouter cannot serve evaluations at all.
+        settings.provider = InferenceProvider::OpenRouter;
+        assert!(settings.credential_missing());
+    }
+
+    #[test]
+    fn staged_fields_serialize_for_the_daemon_and_backend_alias_reads() {
+        // A client's write path carries staged fields so a probe can test an
+        // unsaved key; a daemon-emitted document has already had them
+        // absorbed into the secret store and reads `None`.
+        let settings = EvalSettings {
+            provider: InferenceProvider::VercelGateway,
+            vercel_api_key: Some("key".to_owned()),
+            vercel_team_id: Some("team".to_owned()),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "provider": "vercelGateway",
+                "vercelApiKey": "key",
+                "vercelTeamId": "team",
+            })
+        );
+        let stored = EvalSettings {
+            provider: InferenceProvider::VercelGateway,
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&stored).unwrap(),
+            serde_json::json!({"provider": "vercelGateway"})
+        );
+
+        let parsed: EvalSettings =
+            serde_json::from_str(r#"{"backend": "cloudflare", "cloudflareApiToken": "t"}"#)
+                .unwrap();
+        assert_eq!(parsed.provider, InferenceProvider::Cloudflare);
+        assert_eq!(parsed.cloudflare_api_token.as_deref(), Some("t"));
+    }
+
+    #[test]
+    fn readiness_uses_the_provider_section() {
+        let settings = EvalSettings {
+            provider: InferenceProvider::Cloudflare,
+            ..Default::default()
+        };
+        let mut inference = BTreeMap::new();
+        assert!(!settings.ready(&inference));
+        inference.insert(
+            InferenceProvider::Cloudflare,
+            InferenceProviderSettings {
+                credential_configured: true,
+                config: BTreeMap::from([("account_id".to_owned(), "acct".to_owned())]),
+                ..Default::default()
+            },
+        );
+        assert!(settings.ready(&inference));
+
+        // A provider that cannot serve eval is never ready.
+        let settings = EvalSettings {
+            provider: InferenceProvider::OpenRouter,
+            ..Default::default()
+        };
+        inference.insert(
+            InferenceProvider::OpenRouter,
+            InferenceProviderSettings {
+                credential_configured: true,
+                ..Default::default()
+            },
+        );
+        assert!(!settings.ready(&inference));
     }
 }

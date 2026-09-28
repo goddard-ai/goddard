@@ -355,12 +355,7 @@ impl Waku {
             cx.notify();
             return;
         };
-        if daemon
-            .settings()
-            .eval
-            .as_ref()
-            .is_none_or(|eval| eval.credential_missing())
-        {
+        if !daemon.settings().eval_ready() {
             goal.status = ThreadGoalStatus::Paused;
             goal.managed_last_turn = Some(turn_id);
             self.state.mark_session_dirty(session_id);

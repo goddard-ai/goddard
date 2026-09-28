@@ -67,10 +67,9 @@ use crate::persistence::{
     DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource,
     PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage,
-    PersistedSidebarGroup, PersistedState, PersistedTranscriptScrollPosition,
-    PersistedWindowState, RecentModelUse,
-    SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore, TerminalLinkModifier,
-    UpdateChannel, VoiceBriefingSummaryModel, VoiceBriefingTtsModel,
+    PersistedSidebarGroup, PersistedState, PersistedTranscriptScrollPosition, PersistedWindowState,
+    RecentModelUse, SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore,
+    TerminalLinkModifier, UpdateChannel, VoiceBriefingSummaryModel, VoiceBriefingTtsModel,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
@@ -2203,18 +2202,24 @@ pub struct Waku {
     /// The mobile connect QR, encoded once when the user reveals it —
     /// `Some` is also the visibility flag, so frames only paint the matrix.
     daemon_qr: Option<std::sync::Arc<settings::DaemonQrCode>>,
-    /// The evaluation credentials editor's fields — one set per eval backend,
-    /// seeded from the daemon's settings mirror when the routing section
-    /// first shows. Secrets stay masked and never render elsewhere.
-    eval_typesafe_key_input: Entity<TextInput>,
-    eval_vercel_key_input: Entity<TextInput>,
-    eval_vercel_team_input: Entity<TextInput>,
-    eval_cloudflare_account_input: Entity<TextInput>,
-    eval_cloudflare_token_input: Entity<TextInput>,
-    eval_inputs_seeded: bool,
-    /// The voice briefing's settings fields, seeded from app state at
-    /// startup — the gateway key stays masked like every secret field.
-    voice_briefing_key_input: Entity<TextInput>,
+    /// The inference providers editor's fields — one credential slot per
+    /// provider plus Vercel's team id and Cloudflare's account id, seeded
+    /// from the daemon's settings mirror when the providers card first
+    /// shows. Keys are write-only — a submitted value moves into the
+    /// daemon's secret store and the field clears — so secrets stay masked
+    /// and never render elsewhere.
+    inference_typesafe_key_input: Entity<TextInput>,
+    inference_vercel_key_input: Entity<TextInput>,
+    inference_cloudflare_token_input: Entity<TextInput>,
+    inference_openrouter_key_input: Entity<TextInput>,
+    inference_vercel_team_input: Entity<TextInput>,
+    inference_cloudflare_account_input: Entity<TextInput>,
+    /// The inference provider whose settings row is expanded on the
+    /// Providers page.
+    expanded_inference: Option<waku_protocol::inference::InferenceProvider>,
+    inference_inputs_seeded: bool,
+    /// The voice briefing's model fields, seeded from app state at startup —
+    /// the provider's credential lives in the inference section, not here.
     voice_briefing_model_input: Entity<TextInput>,
     voice_briefing_tts_model_input: Entity<TextInput>,
     /// Replies already briefed this run, keyed by message id — landing on
@@ -4660,8 +4665,41 @@ impl Waku {
             );
         }
         state.apply_daemon_settings(daemon_settings);
+        // The briefing key predates the inference section: hand it to the
+        // daemon's secret store as the Vercel credential through the same
+        // write-only slot the settings pane uses, then drop the file copy.
+        let mut staged_key = false;
+        if !state.voice_briefing_gateway_key.trim().is_empty() {
+            state
+                .inference
+                .entry(waku_protocol::inference::InferenceProvider::VercelGateway)
+                .or_default()
+                .api_key = Some(state.voice_briefing_gateway_key.clone());
+            state.voice_briefing_gateway_key.clear();
+            staged_key = true;
+        }
         if let Err(error) = daemon.update_settings(state.daemon_settings()) {
             eprintln!("could not normalize daemon settings after migration: {error:#}");
+            // The daemon never saw the key — restore the legacy field and
+            // un-stage the slot so it can't persist into app state as
+            // plaintext, and the migration retries on next launch.
+            if staged_key {
+                if let Some(key) = state
+                    .inference
+                    .get_mut(&waku_protocol::inference::InferenceProvider::VercelGateway)
+                    .and_then(|entry| entry.api_key.take())
+                {
+                    state.voice_briefing_gateway_key = key;
+                }
+            }
+        } else if staged_key {
+            // The push landed — the write-only slot's work is done; the
+            // mirror re-fills `credential_configured` on the echo. Clearing
+            // matters: `api_key` serializes, so a surviving `Some` would
+            // write the key into the app-state file in plaintext.
+            for entry in state.inference.values_mut() {
+                entry.api_key = None;
+            }
         }
         crate::i18n::set_language(state.language);
         // Chrome text is authored in `sp` rems against the default UI font
@@ -4856,44 +4894,39 @@ impl Waku {
                         .placeholder(placeholder)
                 })
             };
-        let eval_typesafe_key_input = eval_secret_input(
+        let inference_typesafe_key_input = eval_secret_input(
             cx,
             tr!("routing.typesafe_key").into(),
             tr!("routing.typesafe_key_placeholder").into(),
         );
-        let eval_vercel_key_input = eval_secret_input(
+        let inference_vercel_key_input = eval_secret_input(
             cx,
             tr!("routing.vercel_key").into(),
             tr!("routing.vercel_key_placeholder").into(),
         );
-        let eval_cloudflare_token_input = eval_secret_input(
+        let inference_cloudflare_token_input = eval_secret_input(
             cx,
             tr!("routing.cloudflare_token").into(),
             tr!("routing.cloudflare_token_placeholder").into(),
         );
-        let eval_vercel_team_input = cx.new(|cx| {
+        let inference_openrouter_key_input = eval_secret_input(
+            cx,
+            tr!("inference.openrouter_key").into(),
+            tr!("inference.openrouter_key_placeholder").into(),
+        );
+        let inference_vercel_team_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .tab_index(0)
                 .select_all_on_focus_click()
                 .accessibility_label(tr!("routing.vercel_team"))
                 .placeholder(tr!("routing.optional"))
         });
-        let eval_cloudflare_account_input = cx.new(|cx| {
+        let inference_cloudflare_account_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .tab_index(0)
                 .select_all_on_focus_click()
                 .accessibility_label(tr!("routing.cloudflare_account"))
                 .placeholder(tr!("routing.cloudflare_account_placeholder"))
-        });
-        let voice_briefing_key_input = cx.new(|cx| {
-            let mut input = TextInput::new(window, cx)
-                .masked()
-                .tab_index(0)
-                .select_all_on_focus_click()
-                .accessibility_label(tr!("experiments.voice_briefing_key"))
-                .placeholder(tr!("experiments.voice_briefing_key_placeholder"));
-            input.set_content(state.voice_briefing_gateway_key.clone(), cx);
-            input
         });
         let voice_briefing_model_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
@@ -5882,29 +5915,27 @@ impl Waku {
             )
             .detach();
             for input in [
-                &eval_typesafe_key_input,
-                &eval_vercel_key_input,
-                &eval_vercel_team_input,
-                &eval_cloudflare_account_input,
-                &eval_cloudflare_token_input,
+                &inference_typesafe_key_input,
+                &inference_vercel_key_input,
+                &inference_cloudflare_token_input,
+                &inference_openrouter_key_input,
+                &inference_vercel_team_input,
+                &inference_cloudflare_account_input,
             ] {
                 cx.subscribe(
                     input,
                     |this: &mut Self, _, event: &InputEvent, cx| match event {
-                        InputEvent::Submit(_) => this.save_eval_credentials(cx),
+                        InputEvent::Submit(_) => this.save_inference_fields(cx),
                         InputEvent::Edited => cx.notify(),
                         _ => {}
                     },
                 )
                 .detach();
             }
-            // The briefing fields write straight through — they edit app
-            // state, not a staged daemon document like the eval keys.
-            for input in [
-                &voice_briefing_key_input,
-                &voice_briefing_model_input,
-                &voice_briefing_tts_model_input,
-            ] {
+            // The briefing model fields write straight through — they edit
+            // app state; the provider's credential lives in the inference
+            // section above.
+            for input in [&voice_briefing_model_input, &voice_briefing_tts_model_input] {
                 cx.subscribe(input, |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
                         this.save_voice_briefing_fields(cx);
@@ -6230,13 +6261,14 @@ impl Waku {
                 daemon_reconfigure_pending: false,
                 daemon_token_revealed: false,
                 daemon_qr: None,
-                eval_typesafe_key_input,
-                eval_vercel_key_input,
-                eval_vercel_team_input,
-                eval_cloudflare_account_input,
-                eval_cloudflare_token_input,
-                eval_inputs_seeded: false,
-                voice_briefing_key_input,
+                inference_typesafe_key_input,
+                inference_vercel_key_input,
+                inference_cloudflare_token_input,
+                inference_openrouter_key_input,
+                inference_vercel_team_input,
+                inference_cloudflare_account_input,
+                expanded_inference: None,
+                inference_inputs_seeded: false,
                 voice_briefing_model_input,
                 voice_briefing_tts_model_input,
                 briefed_messages: HashSet::new(),

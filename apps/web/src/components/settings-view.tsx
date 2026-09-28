@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import type {
   DaemonSettings,
+  InferenceProvider,
   Project,
   ProviderKind,
 } from '@waku/client'
@@ -155,6 +156,7 @@ export function SettingsView({
             {page === 'general' && <GeneralSettings />}
             {page === 'appearance' && <AppearanceSettings />}
             {page === 'providers' && <ProvidersSettings />}
+            {page === 'providers' && <InferenceProvidersSettings />}
             {page === 'usage' && <UsageSettings projects={projects} />}
             {page === 'daemon' && <DaemonSettings />}
           </div>
@@ -407,6 +409,274 @@ function ProvidersSettings() {
                   <p className="truncate text-[10px] text-[var(--text-ghost)]" title={providerProbeCaption(provider.command, probe, Boolean(settings.data.provider_binary_overrides?.[provider.id]), t)}>
                     {providerProbeCaption(provider.command, probe, Boolean(settings.data.provider_binary_overrides?.[provider.id]), t)}
                   </p>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+type InferenceProviderSpec = {
+  id: InferenceProvider
+  name: string
+  icon: WakuIconName
+  contexts: Array<'eval' | 'text' | 'speech'>
+  keysUrl: string
+  config: Array<{ field: string; labelKey: string; descriptionKey: string; placeholderKey: string }>
+}
+
+// Mirrors `InferenceProvider`'s static spec in waku-protocol — kept in sync
+// by hand the same way PROVIDERS mirrors ProviderKind.
+const INFERENCE_PROVIDERS: InferenceProviderSpec[] = [
+  {
+    id: 'typeSafe',
+    name: 'TypeSafe',
+    icon: 'sparkle',
+    contexts: ['eval'],
+    keysUrl: 'https://typesafe.ai',
+    config: [],
+  },
+  {
+    id: 'vercelGateway',
+    name: 'Vercel AI Gateway',
+    icon: 'zap',
+    contexts: ['eval', 'text', 'speech'],
+    keysUrl: 'https://vercel.com/docs/ai-gateway',
+    config: [
+      {
+        field: 'team_id',
+        labelKey: 'routing.vercel_team',
+        descriptionKey: 'routing.vercel_team_description',
+        placeholderKey: 'routing.optional',
+      },
+    ],
+  },
+  {
+    id: 'cloudflare',
+    name: 'Cloudflare Workers AI',
+    icon: 'server',
+    contexts: ['eval', 'text'],
+    keysUrl: 'https://developers.cloudflare.com/workers-ai/get-started/rest-api/',
+    config: [
+      {
+        field: 'account_id',
+        labelKey: 'routing.cloudflare_account',
+        descriptionKey: 'routing.cloudflare_account_description',
+        placeholderKey: 'routing.cloudflare_account_placeholder',
+      },
+    ],
+  },
+  {
+    id: 'openRouter',
+    name: 'OpenRouter',
+    icon: 'globe',
+    contexts: ['text', 'speech'],
+    keysUrl: 'https://openrouter.ai/settings/keys',
+    config: [],
+  },
+]
+
+const INFERENCE_CONTEXT_LABEL_KEY = {
+  eval: 'inference.context_eval',
+  text: 'inference.context_text',
+  speech: 'inference.context_speech',
+} as const
+
+function InferenceProvidersSettings() {
+  const { t } = useI18n()
+  const { client, config } = useDaemon()
+  const queryClient = useQueryClient()
+  const settings = useDaemonSettings()
+  const [expanded, setExpanded] = useState<InferenceProvider | null>(null)
+  const [drafts, setDrafts] = useState<Partial<Record<InferenceProvider, { key: string; config: Record<string, string> }>>>({})
+
+  async function apply(next: DaemonSettings) {
+    if (!client || !config) return
+    try {
+      await updateDaemonSettings(client, next)
+      queryClient.setQueryData(daemonKeys.settings(config.address), next)
+    } catch (error) {
+      toast.error(errorMessage(error))
+    }
+  }
+
+  function draftFor(provider: InferenceProvider) {
+    const entry = settings.data?.inference?.[provider]
+    return (
+      drafts[provider] ?? {
+        key: '',
+        config: { ...(entry?.config ?? {}) },
+      }
+    )
+  }
+
+  function dirty(provider: InferenceProvider) {
+    const draft = drafts[provider]
+    if (!draft) return false
+    if (draft.key.trim()) return true
+    const stored = settings.data?.inference?.[provider]?.config ?? {}
+    return Object.keys({ ...stored, ...draft.config }).some(
+      (field) => (draft.config[field] ?? '') !== (stored[field] ?? ''),
+    )
+  }
+
+  function applyProvider(provider: InferenceProvider) {
+    if (!settings.data) return
+    const draft = draftFor(provider)
+    const key = draft.key.trim()
+    const config = Object.fromEntries(
+      Object.entries(draft.config)
+        .map(([field, value]) => [field, value.trim()])
+        .filter(([, value]) => value !== ''),
+    )
+    const inference = { ...(settings.data.inference ?? {}) }
+    inference[provider] = {
+      // The daemon absorbs a non-empty key into its secret store; an empty
+      // string removes it. `null` leaves the stored credential untouched.
+      apiKey: key ? key : null,
+      credentialConfigured: settings.data.inference?.[provider]?.credentialConfigured ?? false,
+      config,
+    }
+    setDrafts((current) => ({ ...current, [provider]: { key: '', config } }))
+    void apply({ ...settings.data, inference })
+  }
+
+  function clearCredential(provider: InferenceProvider) {
+    if (!settings.data) return
+    const inference = { ...(settings.data.inference ?? {}) }
+    inference[provider] = {
+      ...inference[provider],
+      apiKey: '',
+      credentialConfigured: false,
+      config: inference[provider]?.config ?? {},
+    }
+    void apply({ ...settings.data, inference })
+  }
+
+  return (
+    <div className="mt-[15px] overflow-hidden rounded-[13px] bg-[var(--raised)] px-5 py-[14px]">
+      <div className="flex items-center gap-3">
+        <span className="grid w-5 shrink-0 place-items-center">
+          <WakuIcon className="size-4 text-[var(--text-tertiary)]" name="zap" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] font-medium">{t('inference.providers')}</div>
+          <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
+            {t('inference.description')}
+          </p>
+        </div>
+      </div>
+      <div className="mt-1 flex flex-col">
+        {INFERENCE_PROVIDERS.map((provider) => {
+          const entry = settings.data?.inference?.[provider.id]
+          const configured = Boolean(entry?.credentialConfigured)
+          const open = expanded === provider.id
+          const contexts = provider.contexts.map((context) => t(INFERENCE_CONTEXT_LABEL_KEY[context])).join('  ·  ')
+          const detail = `${contexts}  ·  ${configured ? t('inference.key_configured') : t('inference.no_key')}`
+          const draft = draftFor(provider.id)
+          return (
+            <div className="border-b last:border-0" key={provider.id}>
+              <div className="flex items-center gap-3 py-[11px]">
+                <span className="grid size-[30px] shrink-0 place-items-center rounded-[7px] bg-accent">
+                  <WakuIcon className="size-4 text-[var(--text-tertiary)]" name={provider.icon} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="truncate text-[12.5px] font-medium">{provider.name}</span>
+                  <span className="mt-[3px] block truncate text-[10.5px] text-[var(--text-tertiary)]" title={detail}>{detail}</span>
+                </span>
+                <span className={cn('text-[10.5px]', configured ? 'text-[var(--success)]' : 'text-[var(--text-ghost)]')}>
+                  {configured ? t('inference.configured') : t('inference.not_configured')}
+                </span>
+                <button
+                  aria-expanded={open}
+                  aria-label={t(open ? 'providers.hide_settings' : 'providers.show_settings', { provider: provider.name })}
+                  className="grid size-7 shrink-0 place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+                  type="button"
+                  onClick={() => setExpanded(open ? null : provider.id)}
+                >
+                  <WakuIcon className="size-2.5" name={open ? 'chevronDown' : 'chevronRight'} />
+                </button>
+              </div>
+              {open && (
+                <div className="mb-[11px] ml-[42px] flex flex-col gap-[5px]">
+                  <label className="text-[11.5px] font-medium">{t('inference.api_key')}</label>
+                  <p className="text-[10.5px] leading-[15px] text-[var(--text-tertiary)]">
+                    {configured ? t('inference.api_key_stored_description') : t('inference.api_key_description')}
+                  </p>
+                  <div className="mt-[3px] flex items-center gap-2">
+                    <Input
+                      autoComplete="off"
+                      className="h-[29px] max-w-[430px] flex-1 bg-[var(--inset)] font-mono text-[11px]"
+                      type="password"
+                      value={draft.key}
+                      onChange={(event) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [provider.id]: { ...draftFor(provider.id), key: event.target.value },
+                        }))
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return
+                        applyProvider(provider.id)
+                      }}
+                    />
+                    <a
+                      className="flex h-[29px] shrink-0 items-center gap-1.5 rounded-[7px] border border-input px-2.5 text-[10.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+                      href={provider.keysUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <WakuIcon className="size-[11px] text-[var(--text-tertiary)]" name="arrowUpRight" />
+                      {t('inference.get_key')}
+                    </a>
+                    {configured && (
+                      <button
+                        className="h-[29px] shrink-0 rounded-[7px] border border-input px-2.5 text-[10.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+                        type="button"
+                        onClick={() => clearCredential(provider.id)}
+                      >
+                        {t('inference.remove_key')}
+                      </button>
+                    )}
+                  </div>
+                  {provider.config.map((field) => (
+                    <div className="flex flex-col gap-[5px]" key={field.field}>
+                      <label className="mt-[6px] text-[11.5px] font-medium">{t(field.labelKey)}</label>
+                      <p className="text-[10.5px] leading-[15px] text-[var(--text-tertiary)]">{t(field.descriptionKey)}</p>
+                      <Input
+                        className="mt-[3px] h-[29px] max-w-[430px] flex-1 bg-[var(--inset)] font-mono text-[11px]"
+                        placeholder={t(field.placeholderKey)}
+                        value={draft.config[field.field] ?? ''}
+                        onChange={(event) =>
+                          setDrafts((current) => ({
+                            ...current,
+                            [provider.id]: {
+                              ...draftFor(provider.id),
+                              config: { ...draftFor(provider.id).config, [field.field]: event.target.value },
+                            },
+                          }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter') return
+                          applyProvider(provider.id)
+                        }}
+                      />
+                    </div>
+                  ))}
+                  <div className="mt-[6px] flex items-center gap-2">
+                    <button
+                      className="h-[29px] shrink-0 rounded-[7px] border border-input px-2.5 text-[10.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                      disabled={!dirty(provider.id)}
+                      type="button"
+                      onClick={() => applyProvider(provider.id)}
+                    >
+                      {t('daemon.apply')}
+                    </button>
+                    <span className="text-[10px] text-[var(--text-ghost)]">{t('inference.apply_hint')}</span>
+                  </div>
                 </div>
               )}
             </div>

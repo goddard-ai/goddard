@@ -7,10 +7,11 @@ pub mod deliver;
 mod http;
 mod oauth;
 mod proxy;
-mod secrets;
+pub(crate) mod secrets;
 mod service;
 
 pub use oauth::StoredCredential;
+pub(crate) use secrets::SecretStore;
 pub(crate) use service::Inner;
 pub use service::{IntegrationService, LaunchIntegration, Upstream};
 

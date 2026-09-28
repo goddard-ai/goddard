@@ -106,6 +106,9 @@ pub struct MemoryService {
     settings: Arc<DaemonSettingsStore>,
     task_state: Arc<Mutex<PersistedState>>,
     task_store: Arc<StateStore>,
+    /// The inference credential store `eval` resolutions read — the settings
+    /// document only carries the provider pick and configured flags.
+    secrets: crate::integrations::SecretStore,
     /// Projects with a worker running — one distillation at a time per
     /// project, since two writers on `LOG.txt` would interleave.
     in_flight: Mutex<HashSet<Uuid>>,
@@ -128,11 +131,13 @@ impl MemoryService {
         settings: Arc<DaemonSettingsStore>,
         task_state: Arc<Mutex<PersistedState>>,
         task_store: Arc<StateStore>,
+        secrets: crate::integrations::SecretStore,
     ) -> Arc<Self> {
         Arc::new(Self {
             settings,
             task_state,
             task_store,
+            secrets,
             in_flight: Mutex::new(HashSet::new()),
             pending: Mutex::new(HashSet::new()),
         })
@@ -232,10 +237,7 @@ impl MemoryService {
 
         let memory_md = read_memory(&store);
         let notes = rank_notes(
-            settings
-                .eval
-                .as_ref()
-                .filter(|eval| !eval.credential_missing()),
+            crate::inference::resolve_eval(&settings, &self.secrets).as_ref(),
             task,
             &read_log_lines(&store),
         );
@@ -367,10 +369,7 @@ impl MemoryService {
             .flat_map(|(_, slice)| slice.segments.iter().cloned())
             .collect();
         let kept = triage_segments(
-            settings
-                .eval
-                .as_ref()
-                .filter(|eval| !eval.credential_missing()),
+            crate::inference::resolve_eval(&settings, &self.secrets).as_ref(),
             &segments,
         );
         let excerpts = kept
@@ -1492,8 +1491,12 @@ mod tests {
         let incognito_id = incognito.id;
         state.push_session(incognito);
 
-        let service =
-            MemoryService::new(Arc::new(settings), Arc::new(Mutex::new(state)), task_store);
+        let service = MemoryService::new(
+            Arc::new(settings),
+            Arc::new(Mutex::new(state)),
+            task_store,
+            crate::integrations::SecretStore::file_only(root.join("secrets")),
+        );
         assert_eq!(service.prompt_with_memory(incognito_id, "do it"), "do it");
         assert!(
             service

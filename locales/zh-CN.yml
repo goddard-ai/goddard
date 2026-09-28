@@ -2190,8 +2190,6 @@ experiments.subagents_title: 子智能体
 experiments.voice_briefing_title: 语音简报
 experiments.voice_briefing_description: 打开最新回复较长的任务时，朗读约 45 秒的摘要 — 先讲智能体做了什么，再讲需要你做的决定或处理。使用你的 AI Gateway 密钥和下方模型运行。
 experiments.voice_briefing_caption: 两次调用都经过 AI Gateway — 摘要模型撰写文稿，语音模型负责朗读。密钥保存在本应用的设置文件中。
-experiments.voice_briefing_key: AI Gateway 密钥
-experiments.voice_briefing_key_placeholder: AI Gateway API 密钥
 experiments.voice_briefing_model: 摘要模型
 experiments.voice_briefing_model_placeholder: 服务商/模型 — 例如 google/gemini-3-flash
 experiments.voice_briefing_custom_model: 自定义模型

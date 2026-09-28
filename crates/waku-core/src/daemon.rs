@@ -53,14 +53,13 @@ const RESIDENT_TRANSCRIPT_WINDOW: usize = 24;
 /// call keeps the same timeout, decision-log record, and backend boundary.
 fn evaluate_with_feature(
     settings_store: &DaemonSettingsStore,
+    secrets: &crate::integrations::SecretStore,
     state: Value,
     questions: BTreeMap<String, EvalQuestion>,
     feature: &str,
     timeout_secs: Option<u64>,
 ) -> anyhow::Result<Evaluation> {
-    let settings = settings_store
-        .get()
-        .eval
+    let settings = crate::inference::resolve_eval(&settings_store.get(), secrets)
         .ok_or_else(|| anyhow!("no evaluation backend is configured"))?;
     let started = std::time::Instant::now();
     let timeout_secs = timeout_secs.unwrap_or(crate::eval::EVAL_TIMEOUT_SECS);
@@ -71,7 +70,7 @@ fn evaluate_with_feature(
     };
     let mut record = crate::eval::EvalDecisionRecord::empty("evaluate");
     record.feature = feature.to_owned();
-    record.backend = Some(settings.backend);
+    record.backend = Some(settings.provider);
     record.latency_ms = Some(started.elapsed().as_millis() as u64);
     record.model = result
         .as_ref()
@@ -392,6 +391,11 @@ pub struct WakuBackend {
     /// MCP integrations: catalog state, the credential store, and the local
     /// proxy agents reach through `goddard_<id>` server entries.
     integrations: crate::integrations::IntegrationService,
+    /// The inference providers' credential store — TypeSafe, the Vercel AI
+    /// Gateway, Cloudflare Workers AI, OpenRouter — keyed `inference/<id>`.
+    /// The settings document only ever carries write-only slots and the
+    /// `credential_configured` flags this store feeds.
+    inference_secrets: crate::integrations::SecretStore,
     task_store: Arc<StateStore>,
     task_state: Arc<Mutex<PersistedState>>,
     /// Project-memory scheduling and storage; sees every finished turn via
@@ -488,6 +492,17 @@ impl WakuBackend {
         // The proxy port is ephemeral: file providers' managed entries still
         // carry the previous daemon's address until this rewrites them.
         crate::integrations::deliver::sync_file_providers(&settings.get(), &integrations);
+        let inference_secrets = crate::integrations::SecretStore::new(data_dir.clone());
+        // Migrate documents written before the provider section existed —
+        // eval credentials move into the secret store, the provider config
+        // fields into `settings.inference`, and the flags rebuild. A no-op
+        // for current documents.
+        {
+            let mut document = settings.get();
+            if crate::inference::absorb(&mut document, &inference_secrets) {
+                settings.replace(document)?;
+            }
+        }
         let our_name = std::env::var("USER")
             .ok()
             .filter(|name| !name.is_empty())
@@ -514,10 +529,12 @@ impl WakuBackend {
                 settings.clone(),
                 task_state.clone(),
                 task_store.clone(),
+                inference_secrets.clone(),
             ),
             settings,
             wake: Mutex::new(None),
             integrations,
+            inference_secrets,
             task_store,
             task_state,
             removed_session_ids: Mutex::new(HashSet::new()),
@@ -1770,6 +1787,12 @@ impl Backend for WakuBackend {
                     settings.computer_use_enabled,
                     settings.computer_use_experiment_enabled,
                 );
+                let mut settings = settings;
+                // Inference credentials are write-only on the wire: move any
+                // submitted keys into the secret store and rebuild the
+                // `credential_configured` flags before the document persists
+                // or echoes back to clients.
+                crate::inference::absorb(&mut settings, &self.inference_secrets);
                 self.settings.replace(settings)?;
                 self.apply_wake_setting();
                 crate::integrations::deliver::sync_file_providers(
@@ -1975,15 +1998,35 @@ impl Backend for WakuBackend {
             } => Ok(ResponsePayload::Evaluation {
                 evaluation: evaluate_with_feature(
                     &self.settings,
+                    &self.inference_secrets,
                     state,
                     questions,
                     feature.as_deref().unwrap_or("evaluate"),
                     timeout_secs,
                 )?,
             }),
-            Command::TestEvalConnection { settings } => Ok(ResponsePayload::Evaluation {
-                evaluation: crate::eval::probe(&settings)?,
-            }),
+            Command::TestEvalConnection { settings } => {
+                // The probe's staged fields are unsaved edits — they win over
+                // the stored credential, which fills whatever the pane left
+                // blank.
+                let mut settings = settings;
+                crate::inference::hydrate_eval(
+                    &mut settings,
+                    &self.settings.get(),
+                    &self.inference_secrets,
+                );
+                Ok(ResponsePayload::Evaluation {
+                    evaluation: crate::eval::probe(&settings)?,
+                })
+            }
+            Command::GetInferenceCredential { provider } => {
+                Ok(ResponsePayload::InferenceCredential {
+                    credential: crate::inference::read_credential(
+                        &self.inference_secrets,
+                        provider,
+                    ),
+                })
+            }
             Command::RouteTask {
                 prompt,
                 project,
@@ -1991,8 +2034,9 @@ impl Backend for WakuBackend {
                 last_used,
             } => {
                 let settings = self.settings.get();
+                let eval = crate::inference::resolve_eval(&settings, &self.inference_secrets);
                 let run = crate::routing::route_task(
-                    settings.eval.as_ref(),
+                    eval.as_ref(),
                     &settings.route_classes,
                     &prompt,
                     project.as_deref(),
@@ -4353,15 +4397,12 @@ impl WakuBackend {
                 }
             }
         }
-        // Auto-mode permission review rides the same BYOK evaluation backend
-        // as routing. Unconfigured leaves each driver's ask-the-user path —
-        // a backend missing its credential would only fail closed there too,
-        // so it is withheld the same way rather than spending a doomed call
-        // and a decision-log row on every request.
-        options.eval = daemon_settings
-            .eval
-            .clone()
-            .filter(|eval| !eval.credential_missing());
+        // Auto-mode permission review rides the same credential-backed
+        // evaluation provider as routing. Unconfigured leaves each driver's
+        // ask-the-user path — a provider missing its credential would only
+        // fail closed there too, so it is withheld the same way rather than
+        // spending a doomed call and a decision-log row on every request.
+        options.eval = crate::inference::resolve_eval(&daemon_settings, &self.inference_secrets);
         // Keep one background index per local workspace warm so the agent's
         // first precise map request can return immediately. The index itself
         // stays out of the prompt unless the agent asks for it.
@@ -5170,6 +5211,13 @@ impl WakuBackend {
         self.settings.get()
     }
 
+    /// The configured eval backend with its credential hydrated — `None`
+    /// when the pick cannot serve evaluations or still lacks a field, so
+    /// eval-backed work degrades instead of spending a doomed call.
+    pub(crate) fn resolved_eval(&self) -> Option<waku_protocol::eval::EvalSettings> {
+        crate::inference::resolve_eval(&self.settings.get(), &self.inference_secrets)
+    }
+
     pub(crate) fn auto_prompt_turn_is_latest(&self, session_id: Uuid, turn_id: Uuid) -> bool {
         if self.agent.is_working(session_id) {
             return false;
@@ -5541,6 +5589,7 @@ impl WakuBackend {
         }
         let evaluation = evaluate_with_feature(
             &self.settings,
+            &self.inference_secrets,
             state,
             questions,
             "project-map",
@@ -5610,10 +5659,8 @@ impl WakuBackend {
         self.require_agent_tools()?;
         let settings = self.settings.get();
         let disabled = &settings.disabled_providers;
-        let auto_available = settings
-            .eval
-            .as_ref()
-            .is_some_and(|eval| !eval.credential_missing());
+        let auto_available =
+            crate::inference::resolve_eval(&settings, &self.inference_secrets).is_some();
         let mut options = {
             let state = self.task_state.lock();
             // Newest mutation per (provider, model), carrying the trait
@@ -5725,8 +5772,9 @@ impl WakuBackend {
                     effort: session.reasoning_effort.clone(),
                 })
         };
+        let eval = crate::inference::resolve_eval(&settings, &self.inference_secrets);
         let run = crate::routing::route_task(
-            settings.eval.as_ref(),
+            eval.as_ref(),
             &settings.route_classes,
             prompt,
             project.file_name().and_then(|name| name.to_str()),
@@ -6217,6 +6265,7 @@ fn handle_driver_command(
         | Command::ProbeComputerPermissions { .. }
         | Command::Evaluate { .. }
         | Command::TestEvalConnection { .. }
+        | Command::GetInferenceCredential { .. }
         | Command::RouteTask { .. }
         | Command::RecordRouteOverride { .. }
         | Command::RecordRouteClass { .. }
@@ -8962,6 +9011,7 @@ mod tests {
                 Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap()),
                 task_state,
                 task_store,
+                crate::integrations::SecretStore::new(root.to_path_buf()),
             ),
             Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
         );

@@ -48,11 +48,20 @@ pub struct DaemonSettings {
     pub subagents_enabled: bool,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
-    /// Hosted evaluation-model configuration (backend + BYOK credentials).
-    /// `None` means no eval feature can run — callers degrade to their
-    /// default path rather than erroring.
+    /// Hosted evaluation-model configuration (provider pick only — the
+    /// credentials it runs on live in `inference`). `None` means no eval
+    /// feature can run — callers degrade to their default path rather than
+    /// erroring.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval: Option<EvalSettings>,
+    /// The shared inference providers — TypeSafe, the Vercel AI Gateway,
+    /// Cloudflare Workers AI, OpenRouter — that eval-driven features and
+    /// voice briefings draw on. Credentials never live in this document: each
+    /// entry's `api_key` is a write-only slot the daemon moves into its
+    /// secret store, and `credential_configured` reports the result.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inference:
+        BTreeMap<crate::inference::InferenceProvider, crate::inference::InferenceProviderSettings>,
     /// The user's model-routing map: which provider/model/effort each task
     /// class starts on. Classes absent here leave routed sessions on their
     /// `last_used` default.
@@ -156,6 +165,7 @@ impl Default for DaemonSettings {
             subagents_enabled: default_experiment_enabled(),
             provider_binary_overrides: HashMap::new(),
             eval: None,
+            inference: BTreeMap::new(),
             route_classes: RouteClassMap::new(),
             provider_route_classes: ProviderRouteClassMap::new(),
             auto_prompts: crate::auto_prompts::default_rules(),
@@ -177,6 +187,15 @@ impl Default for DaemonSettings {
 }
 
 impl DaemonSettings {
+    /// Whether eval calls can run on the selected provider — it serves the
+    /// eval context and its credential plus required config are in place.
+    /// The client-side counterpart of the daemon's hydrated resolve.
+    pub fn eval_ready(&self) -> bool {
+        self.eval
+            .as_ref()
+            .is_some_and(|eval| eval.ready(&self.inference))
+    }
+
     pub fn default_path() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(std::env::temp_dir)

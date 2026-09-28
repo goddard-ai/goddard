@@ -2239,8 +2239,6 @@ experiments.subagents_title: サブエージェント
 experiments.voice_briefing_title: 音声ブリーフィング
 experiments.voice_briefing_description: 最新の返信が長いタスクを開くと、約45秒の要約を読み上げます — エージェントが行ったことと、あなたに必要な判断や対応を伝えます。AI Gateway キーと以下のモデルで実行されます。
 experiments.voice_briefing_caption: どちらの呼び出しも AI Gateway を経由します — 要約モデルが原稿を作成し、音声モデルがそれを読み上げます。キーはこのアプリの設定ファイルに保存されます。
-experiments.voice_briefing_key: AI Gateway キー
-experiments.voice_briefing_key_placeholder: AI Gateway API キー
 experiments.voice_briefing_model: 要約モデル
 experiments.voice_briefing_model_placeholder: プロバイダー/モデル — 例 google/gemini-3-flash
 experiments.voice_briefing_custom_model: カスタムモデル

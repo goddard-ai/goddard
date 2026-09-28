@@ -615,10 +615,7 @@ impl Waku {
         // Neither the eval backend nor the read surface is required to
         // switch: a missing backend degrades the index to a pointer, and a
         // daemon without `goddard-agent` falls back to the verbatim push.
-        let eval_available = daemon
-            .settings()
-            .eval
-            .is_some_and(|eval| !eval.credential_missing());
+        let eval_available = daemon.settings().eval_ready();
         let client = daemon.client();
         let cli_available = client.agent_cli_available();
         let suspended = session

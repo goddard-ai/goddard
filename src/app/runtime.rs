@@ -2417,9 +2417,9 @@ impl Waku {
             .collect();
         self.daemon.note_remote_settings(settings.clone());
         self.state.apply_daemon_settings(settings);
-        // Eval credentials ride the same document — the first settings
-        // broadcast is the earliest the editor can seed from.
-        self.seed_eval_inputs(cx);
+        // Inference-provider config rides the same document — the first
+        // settings broadcast is the earliest the editor can seed from.
+        self.seed_inference_inputs(cx);
         if let Some(name) = agent_added.first() {
             self.show_toast(tr!("commands.agent_added", name = name));
         }

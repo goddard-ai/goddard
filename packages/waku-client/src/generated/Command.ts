@@ -13,6 +13,7 @@ import type { EvalQuestion } from "./EvalQuestion";
 import type { EvalSettings } from "./EvalSettings";
 import type { FriendSyncAlertAction } from "./FriendSyncAlertAction";
 import type { GoalOperation } from "./GoalOperation";
+import type { InferenceProvider } from "./InferenceProvider";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { Project } from "./Project";
 import type { ProjectMapIntent } from "./ProjectMapIntent";
@@ -82,7 +83,7 @@ feature?: string | null,
  * callers (routing) leave it `None` for the default; long-context
  * callers such as provider-switch compaction pass a larger budget.
  */
-timeoutSecs?: number | null, } | { "type": "testEvalConnection", settings: EvalSettings, } | { "type": "loadEvalUsage" } | { "type": "routeTask", prompt: string,
+timeoutSecs?: number | null, } | { "type": "testEvalConnection", settings: EvalSettings, } | { "type": "getInferenceCredential", provider: InferenceProvider, } | { "type": "loadEvalUsage" } | { "type": "routeTask", prompt: string,
 /**
  * Lightweight project context for the classifier — the project
  * name only; filesystem drilling is deliberately out of scope.

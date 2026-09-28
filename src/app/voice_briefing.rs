@@ -1,8 +1,8 @@
 //! Voice briefing (experimental): landing on a task whose latest reply is
 //! long speaks a short "what happened / what you decide" summary aloud.
 //! A reply that settles off screen gets its clip built immediately — the
-//! selected gateway chat model writes a ~45-second plain-speech transcript
-//! and the chosen Gemini TTS tier voices it — so opening the task plays
+//! selected provider's chat model writes a ~45-second plain-speech transcript
+//! and the chosen TTS model voices it — so opening the task plays
 //! instantly instead of waiting on both calls. Sessions that settled
 //! before the clip cache existed still generate on arrival. Everything
 //! degrades quietly — no key, no model, a short reply, or a failed call
@@ -17,6 +17,8 @@ use futures::io::AsyncReadExt;
 use futures::{FutureExt, pin_mut};
 use serde_json::{Value, json};
 use uuid::Uuid;
+
+use waku_protocol::inference::InferenceProvider;
 
 use super::status_markers::tail_chars;
 use super::*;
@@ -33,6 +35,8 @@ const TRANSCRIPT_WORD_CAP: usize = 110;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CHAT_COMPLETIONS_URL: &str = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const SPEECH_URL: &str = "https://ai-gateway.vercel.sh/v4/ai/speech-model";
+const OPENROUTER_CHAT_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_SPEECH_URL: &str = "https://openrouter.ai/api/v1/audio/speech";
 /// The example voice ID used by the Fish Audio gateway models.
 const FISH_AUDIO_VOICE: &str = "933563129e564b19a115bedd57b7406a";
 /// Ready clips are a small cache, not a library — a ~45s audio clip is a few
@@ -98,7 +102,12 @@ impl Waku {
         if !self.state.voice_briefing_enabled {
             return None;
         }
-        if self.state.voice_briefing_gateway_key.trim().is_empty()
+        let provider = self.state.voice_briefing_provider;
+        if !self
+            .state
+            .inference
+            .get(&provider)
+            .is_some_and(|entry| entry.credential_configured)
             || self.state.voice_briefing_summary_model.trim().is_empty()
             || (self.state.voice_briefing_tts_model == VoiceBriefingTtsModel::Custom
                 && self.state.voice_briefing_tts_custom_model.trim().is_empty())
@@ -156,24 +165,48 @@ impl Waku {
             return;
         }
         self.briefing_pending.insert(message_id, play);
-        let key = self.state.voice_briefing_gateway_key.trim().to_owned();
+        let provider = self.state.voice_briefing_provider;
         let summary_model = self.state.voice_briefing_summary_model.trim().to_owned();
         let tts_model = self.state.voice_briefing_tts_model;
         let tts_model_id = match tts_model {
             VoiceBriefingTtsModel::Custom => {
                 self.state.voice_briefing_tts_custom_model.trim().to_owned()
             }
-            _ => tts_model.model_id().unwrap_or_default().to_owned(),
+            _ => tts_model
+                .model_id_for(provider)
+                .unwrap_or_default()
+                .to_owned(),
         };
         let http = cx.http_client();
+        let daemon = self.daemon.client();
         let executor = cx.background_executor().clone();
         let work = executor.spawn({
             let executor = executor.clone();
             async move {
-                let transcript = summarize(&http, &executor, &key, &summary_model, &response)
-                    .await
-                    .context("summary generation")?;
-                synthesize(&http, &executor, &key, &tts_model_id, &transcript)
+                // The credential lives in the daemon's secret store — the
+                // app's settings mirror only carries the configured flag.
+                let key = daemon
+                    .request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::GetInferenceCredential { provider },
+                    )
+                    .ok()
+                    .and_then(|payload| match payload {
+                        waku_client::ResponsePayload::InferenceCredential { credential } => {
+                            credential
+                        }
+                        _ => None,
+                    })
+                    .filter(|key| !key.trim().is_empty())
+                    .ok_or_else(|| {
+                        anyhow!("{} has no configured credential", provider.display_name())
+                    })?;
+                let transcript =
+                    summarize(&http, &executor, provider, &key, &summary_model, &response)
+                        .await
+                        .context("summary generation")?;
+                synthesize(&http, &executor, provider, &key, &tts_model_id, &transcript)
                     .await
                     .context("speech generation")
             }
@@ -224,12 +257,13 @@ impl Waku {
     }
 }
 
-/// Ask the configured chat model for the spoken transcript: what the reply
+/// Ask the provider's chat model for the spoken transcript: what the reply
 /// did and what it needs from the user, in plain sentences bounded to the
-/// word cap.
+/// word cap. Both endpoints answer the OpenAI chat-completions envelope.
 async fn summarize(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
+    provider: InferenceProvider,
     key: &str,
     model: &str,
     response: &str,
@@ -250,9 +284,37 @@ async fn summarize(
             {"role": "user", "content": response},
         ],
     });
-    let parsed = post_json(http, executor, CHAT_COMPLETIONS_URL, key, None, &body)
-        .await
-        .with_context(|| format!("summary gateway request for model {model}"))?;
+    let parsed = match provider {
+        InferenceProvider::VercelGateway => {
+            post_json(
+                http,
+                executor,
+                CHAT_COMPLETIONS_URL,
+                key,
+                provider,
+                None,
+                &body,
+            )
+            .await
+        }
+        InferenceProvider::OpenRouter => {
+            post_json(
+                http,
+                executor,
+                OPENROUTER_CHAT_URL,
+                key,
+                provider,
+                None,
+                &body,
+            )
+            .await
+        }
+        other => bail!(
+            "{} cannot write a briefing transcript",
+            other.display_name()
+        ),
+    }
+    .with_context(|| format!("summary gateway request for model {model}"))?;
     let transcript = parsed
         .pointer("/choices/0/message/content")
         .and_then(Value::as_str)
@@ -266,67 +328,107 @@ async fn summarize(
         .join(" "))
 }
 
-/// Voice the transcript through the gateway's speech endpoint, which
-/// answers a JSON envelope whose `audio` field is base64 audio.
+/// Voice the transcript through the provider's speech endpoint. Vercel
+/// answers a JSON envelope whose `audio` field is base64 audio; OpenRouter's
+/// OpenAI-compatible `/audio/speech` answers the raw byte stream.
 async fn synthesize(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
+    provider: InferenceProvider,
     key: &str,
     model_id: &str,
     text: &str,
 ) -> anyhow::Result<Vec<u8>> {
-    let (voice, output_format) = speech_parameters(model_id);
-    let body = json!({
-        "text": text,
-        "voice": voice,
-        "outputFormat": output_format,
-    });
-    let parsed = post_json(http, executor, SPEECH_URL, key, Some(model_id), &body)
-        .await
-        .with_context(|| format!("speech gateway request for model {model_id}"))?;
-    let audio = parsed
-        .get("audio")
-        .and_then(Value::as_str)
-        .filter(|audio| !audio.is_empty())
-        .ok_or_else(|| anyhow!("the speech model returned no audio"))?;
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD
-        .decode(audio)
-        .context("the speech model returned invalid audio")
+    match provider {
+        InferenceProvider::VercelGateway => {
+            let (voice, output_format) = speech_parameters(model_id);
+            let body = json!({
+                "text": text,
+                "voice": voice,
+                "outputFormat": output_format,
+            });
+            let parsed = post_json(
+                http,
+                executor,
+                SPEECH_URL,
+                key,
+                provider,
+                Some(model_id),
+                &body,
+            )
+            .await
+            .with_context(|| format!("speech gateway request for model {model_id}"))?;
+            let audio = parsed
+                .get("audio")
+                .and_then(Value::as_str)
+                .filter(|audio| !audio.is_empty())
+                .ok_or_else(|| anyhow!("the speech model returned no audio"))?;
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .decode(audio)
+                .context("the speech model returned invalid audio")
+        }
+        InferenceProvider::OpenRouter => {
+            let body = json!({
+                "model": model_id,
+                "input": text,
+                "voice": speech_parameters(model_id).0,
+                "response_format": "mp3",
+            });
+            post(
+                http,
+                executor,
+                OPENROUTER_SPEECH_URL,
+                key,
+                provider,
+                None,
+                &body,
+            )
+            .await
+            .with_context(|| format!("speech gateway request for model {model_id}"))
+        }
+        other => bail!("{} cannot voice a briefing", other.display_name()),
+    }
 }
 
 fn speech_parameters(model_id: &str) -> (&'static str, &'static str) {
     match model_id {
         "openai/tts-1" | "openai/tts-1-hd" => ("alloy", "mp3"),
-        "spacexai/grok-tts" => ("eve", "wav"),
+        // Grok voices its own names — "eve" on both spellings (Vercel's
+        // `spacexai/*` and OpenRouter's `x-ai/*`).
+        "spacexai/grok-tts" | "x-ai/grok-voice-tts-1.0" => ("eve", "wav"),
         "fish-audio/s1" | "fish-audio/s2-pro" | "fish-audio/s2.1-pro" => (FISH_AUDIO_VOICE, "mp3"),
-        "fish-audio/s2.1-pro-free" => (FISH_AUDIO_VOICE, "mp3"),
+        "fish-audio/s2.1-pro-free" | "fish-audio/s2.1-pro-free:free" => (FISH_AUDIO_VOICE, "mp3"),
         _ => ("Kore", "wav"),
     }
 }
 
-/// POST a JSON body with the gateway bearer and parse the JSON answer.
-/// `model_header` carries the speech endpoint's model and protocol headers;
-/// chat completions names its model in the body instead. The AI-SDK surface
-/// (`/v4/ai/*`) rejects calls without `ai-gateway-protocol-version` — the
-/// AI SDK sends it on every request, so it rides along here too. Non-2xx
-/// statuses fail with the code alone — error bodies can echo the request.
-async fn post_json(
+/// POST a JSON body with the provider bearer and return the raw answer.
+/// `model_header` carries the Vercel speech endpoint's model and protocol
+/// headers — the AI-SDK surface (`/v4/ai/*`) rejects calls without
+/// `ai-gateway-protocol-version`, so it rides along on every Vercel request
+/// while chat completions names its model in the body instead. OpenRouter
+/// takes the plain OpenAI envelope. Non-2xx statuses fail with the code
+/// alone — error bodies can echo the request.
+async fn post(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
     url: &str,
     key: &str,
+    provider: InferenceProvider,
     model_header: Option<&str>,
     body: &Value,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<Vec<u8>> {
     let mut request = gpui::http_client::Request::post(url)
         .header("authorization", format!("Bearer {key}"))
-        .header("ai-gateway-protocol-version", "0.0.1")
         .header("content-type", "application/json");
-    if let Some(model) = model_header {
-        request = request
-            .header("ai-speech-model-specification-version", "4")
-            .header("ai-model-id", model);
+    if provider == InferenceProvider::VercelGateway {
+        request = request.header("ai-gateway-protocol-version", "0.0.1");
+        if let Some(model) = model_header {
+            request = request
+                .header("ai-speech-model-specification-version", "4")
+                .header("ai-model-id", model);
+        }
     }
     let request = request.body(gpui::http_client::AsyncBody::from(serde_json::to_vec(
         body,
@@ -346,5 +448,20 @@ async fn post_json(
     if !status.is_success() {
         bail!("the gateway answered HTTP {status} for {url}");
     }
+    Ok(bytes)
+}
+
+/// The JSON half of `post` — every endpoint but OpenRouter speech answers a
+/// JSON envelope.
+async fn post_json(
+    http: &Arc<dyn gpui::http_client::HttpClient>,
+    executor: &gpui::BackgroundExecutor,
+    url: &str,
+    key: &str,
+    provider: InferenceProvider,
+    model_header: Option<&str>,
+    body: &Value,
+) -> anyhow::Result<Value> {
+    let bytes = post(http, executor, url, key, provider, model_header, body).await?;
     serde_json::from_slice(&bytes).context("the gateway returned invalid JSON")
 }

@@ -26,12 +26,7 @@ impl Waku {
         let Some(daemon) = self.daemon_for_session(session_id) else {
             return;
         };
-        if daemon
-            .settings()
-            .eval
-            .as_ref()
-            .is_none_or(|eval| eval.credential_missing())
-        {
+        if !daemon.settings().eval_ready() {
             return;
         }
         let Some(session) = self
