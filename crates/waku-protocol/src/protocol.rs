@@ -371,6 +371,11 @@ pub enum Command {
     LoadProviderSession {
         cursor: ProviderResumeCursor,
         cwd: PathBuf,
+        /// The catalog's last-activity stamp for this session. Providers whose
+        /// replayed updates carry no timestamps stamp imported turns and
+        /// messages with it instead of the epoch.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        updated_at: Option<u64>,
     },
     /// Run one hosted evaluation: `state` is the data under judgment and
     /// `questions` are the typed decisions the model answers about it. The
@@ -1665,6 +1670,7 @@ mod tests {
                 thread_id: "01900000-0000-7000-8000-000000000001".into(),
             },
             cwd: PathBuf::from("/tmp/project"),
+            updated_at: None,
         })
         .unwrap();
         assert_eq!(load["type"], "loadProviderSession");

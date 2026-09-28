@@ -3428,6 +3428,7 @@ impl StateStore {
         key: DaemonKey,
         cursor: ProviderResumeCursor,
         cwd: PathBuf,
+        updated_at: Option<u64>,
     ) -> impl FnOnce() -> io::Result<LoadedProviderSession> + Send + 'static {
         let daemon = self.daemons.supervisor(key);
         move || match daemon {
@@ -3436,7 +3437,11 @@ impl StateStore {
                 .request(
                     Uuid::nil(),
                     Uuid::nil(),
-                    Command::LoadProviderSession { cursor, cwd },
+                    Command::LoadProviderSession {
+                        cursor,
+                        cwd,
+                        updated_at,
+                    },
                 )
                 .map_err(to_io_error)?
             {

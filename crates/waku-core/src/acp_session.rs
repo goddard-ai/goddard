@@ -104,6 +104,19 @@ fn timestamp(value: Option<&str>) -> u64 {
         .unwrap_or_default()
 }
 
+/// The wall-clock stamp a provider attaches to a replayed update, when it
+/// exposes one. Devin stamps every `session/load` update under
+/// `_meta["cognition.ai/timestamp"]`; other providers may use a plain
+/// `_meta.timestamp`. Zero means the provider gave none.
+fn update_timestamp(update: &Value) -> Option<u64> {
+    let meta = update.get("_meta")?;
+    ["cognition.ai/timestamp", "timestamp"]
+        .into_iter()
+        .find_map(|key| meta.get(key).and_then(Value::as_str))
+        .map(|value| timestamp(Some(value)))
+        .filter(|at| *at > 0)
+}
+
 pub(crate) fn session_title(
     provider: ProviderKind,
     title: Option<&str>,
@@ -179,6 +192,21 @@ pub fn list_provider_sessions(
                             continue;
                         }
                         let updated_at = timestamp(session.updated_at.as_deref());
+                        // `session/list` carries no created field; providers
+                        // that know it publish it under `_meta` (Devin's
+                        // `cognition.ai/createdAt`). Missing reads as "as old
+                        // as the last activity" rather than as epoch.
+                        let created_at = session
+                            .meta
+                            .as_ref()
+                            .and_then(|meta| {
+                                ["cognition.ai/createdAt", "createdAt"]
+                                    .into_iter()
+                                    .find_map(|key| meta.get(key).and_then(Value::as_str))
+                            })
+                            .map(|value| timestamp(Some(value)))
+                            .filter(|at| *at > 0)
+                            .unwrap_or(updated_at);
                         found.push(ProviderSessionSummary {
                             cursor: ProviderResumeCursor::from_session_id(
                                 provider,
@@ -187,7 +215,7 @@ pub fn list_provider_sessions(
                             title: session_title(provider, session.title.as_deref(), &session_id),
                             cwd: session.cwd,
                             cwd_missing: false,
-                            created_at: updated_at,
+                            created_at,
                             updated_at,
                         });
                     }
@@ -225,12 +253,18 @@ pub fn list_provider_sessions(
 }
 
 /// Replays the provider's user-visible transcript through ACP `session/load`.
+///
+/// `fallback_timestamp` dates turns and messages the provider's replay leaves
+/// unstamped — the catalog's last-activity stamp when the client knows it.
+/// Without either source the import time applies, so no row ever shows the
+/// epoch.
 pub fn provider_session_history(
     provider: ProviderKind,
     binary: &Path,
     cwd: &Path,
     session_id: &str,
     visible_turn_limit: usize,
+    fallback_timestamp: Option<u64>,
 ) -> anyhow::Result<ProviderSessionHistory> {
     if session_id.trim().is_empty() || visible_turn_limit == 0 {
         return Ok(ProviderSessionHistory::default());
@@ -287,16 +321,24 @@ pub fn provider_session_history(
     .with_context(|| format!("{} could not replay the session", provider.display_name()))?;
 
     let updates = std::mem::take(&mut *updates.lock());
-    let mut history = history_from_updates(provider, &updates);
+    let mut history = history_from_updates(provider, &updates, fallback_timestamp);
     retain_recent_messages(&mut history, visible_turn_limit);
     Ok(history)
 }
 
-fn history_from_updates(provider: ProviderKind, updates: &[Value]) -> ProviderSessionHistory {
+fn history_from_updates(
+    provider: ProviderKind,
+    updates: &[Value],
+    fallback_timestamp: Option<u64>,
+) -> ProviderSessionHistory {
     let mut history = ProviderSessionHistory::default();
     let mut saw_agent_activity = true;
+    let fallback = fallback_timestamp
+        .filter(|at| *at > 0)
+        .unwrap_or_else(crate::model::unix_time);
 
     for update in updates {
+        let at = update_timestamp(update);
         let kind = update.get("sessionUpdate").and_then(Value::as_str);
         if kind == Some("user_message_chunk") {
             let Some(text) = update
@@ -314,19 +356,22 @@ fn history_from_updates(provider: ProviderKind, updates: &[Value]) -> ProviderSe
                     status: TurnStatus::Completed,
                     provider_turn_started: true,
                     provider_resume_at: None,
-                    started_at: 0,
-                    completed_at: Some(0),
+                    started_at: at.unwrap_or(fallback),
+                    completed_at: None,
                     checkpoint: None,
                 });
-                history
-                    .messages
-                    .push(Message::new_for_turn(MessageRole::User, text, turn_id));
+                let mut message = Message::new_for_turn(MessageRole::User, text, turn_id);
+                message.created_at = at.unwrap_or(fallback);
+                history.messages.push(message);
                 saw_agent_activity = false;
             } else if let Some(message) = history.messages.last_mut().filter(|message| {
                 message.role == MessageRole::User
                     && message.turn_id == history.turns.last().map(|turn| turn.id)
             }) {
                 message.content.push_str(text);
+            }
+            if let (Some(at), Some(turn)) = (at, history.turns.last_mut()) {
+                turn.completed_at = Some(turn.completed_at.unwrap_or(0).max(at));
             }
             continue;
         }
@@ -342,6 +387,9 @@ fn history_from_updates(provider: ProviderKind, updates: &[Value]) -> ProviderSe
             )
         ) {
             saw_agent_activity = true;
+            if let (Some(at), Some(turn)) = (at, history.turns.last_mut()) {
+                turn.completed_at = Some(turn.completed_at.unwrap_or(0).max(at));
+            }
         }
         if kind != Some("agent_message_chunk") {
             continue;
@@ -366,10 +414,18 @@ fn history_from_updates(provider: ProviderKind, updates: &[Value]) -> ProviderSe
         }) {
             message.content.push_str(text);
         } else {
-            history
-                .messages
-                .push(Message::new_for_turn(MessageRole::Assistant, text, turn_id));
+            let mut message = Message::new_for_turn(MessageRole::Assistant, text, turn_id);
+            message.created_at = at.unwrap_or(fallback);
+            history.messages.push(message);
         }
+    }
+    for turn in &mut history.turns {
+        turn.completed_at = Some(
+            turn.completed_at
+                .filter(|at| *at > 0)
+                .unwrap_or(turn.started_at)
+                .max(turn.started_at),
+        );
     }
     history
 }
@@ -425,6 +481,7 @@ mod tests {
                 json!({"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"two"}}),
                 json!({"sessionUpdate":"tool_call","toolCallId":"call-2","title":"bash"}),
             ],
+            None,
         );
 
         assert_eq!(history.turns.len(), 2);
@@ -463,10 +520,73 @@ mod tests {
                 json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"part 1"}}),
                 json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" + part 2"}}),
             ],
+            None,
         );
 
         assert_eq!(history.turns.len(), 1);
         assert_eq!(history.messages[0].content, "hello world");
         assert_eq!(history.messages[1].content, "part 1 + part 2");
+    }
+
+    #[test]
+    fn stamps_replayed_turns_and_messages_with_provider_timestamps() {
+        let history = history_from_updates(
+            ProviderKind::Devin,
+            &[
+                json!({"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"one"},
+                    "_meta":{"cognition.ai/timestamp":"2026-09-28T18:17:15.948067+00:00"}}),
+                json!({"sessionUpdate":"tool_call","toolCallId":"call-1","title":"read",
+                    "_meta":{"cognition.ai/timestamp":"2026-09-28T18:18:28.769930+00:00"}}),
+                json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"},
+                    "_meta":{"cognition.ai/timestamp":"2026-09-28T18:19:35.759347+00:00"}}),
+                json!({"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"two"},
+                    "_meta":{"cognition.ai/timestamp":"2026-09-28T18:20:46.611494+00:00"}}),
+            ],
+            None,
+        );
+
+        let started = timestamp(Some("2026-09-28T18:17:15.948067+00:00"));
+        let finished = timestamp(Some("2026-09-28T18:19:35.759347+00:00"));
+        assert_eq!(history.turns[0].started_at, started);
+        assert_eq!(history.turns[0].completed_at, Some(finished));
+        assert_eq!(history.messages[0].created_at, started);
+        assert_eq!(history.messages[1].created_at, finished);
+        assert_eq!(
+            history.turns[1].started_at,
+            timestamp(Some("2026-09-28T18:20:46.611494+00:00"))
+        );
+        assert_eq!(
+            history.turns[1].completed_at,
+            Some(history.turns[1].started_at)
+        );
+    }
+
+    #[test]
+    fn unstamped_updates_fall_back_to_the_catalog_timestamp() {
+        let history = history_from_updates(
+            ProviderKind::Goose,
+            &[
+                json!({"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"one"}}),
+                json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}),
+            ],
+            Some(1_700_000_000),
+        );
+
+        assert_eq!(history.turns[0].started_at, 1_700_000_000);
+        assert_eq!(history.turns[0].completed_at, Some(1_700_000_000));
+        assert_eq!(history.messages[0].created_at, 1_700_000_000);
+        assert_eq!(history.messages[1].created_at, 1_700_000_000);
+    }
+
+    #[test]
+    fn unstamped_updates_without_a_fallback_never_report_the_epoch() {
+        let history = history_from_updates(
+            ProviderKind::Goose,
+            &[json!({"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"one"}})],
+            None,
+        );
+
+        assert!(history.turns[0].started_at > 0);
+        assert!(history.turns[0].completed_at.unwrap() > 0);
     }
 }

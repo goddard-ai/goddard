@@ -2518,7 +2518,11 @@ impl Backend for WakuBackend {
                     status: catalog.status,
                 })
             }
-            Command::LoadProviderSession { cursor, cwd } => {
+            Command::LoadProviderSession {
+                cursor,
+                cwd,
+                updated_at,
+            } => {
                 // Preserve every native turn shell for exact provider turn
                 // numbering, but bound imported display text to recent turns.
                 const VISIBLE_TURN_LIMIT: usize = 100;
@@ -2582,6 +2586,7 @@ impl Backend for WakuBackend {
                             &cwd,
                             session_id,
                             VISIBLE_TURN_LIMIT,
+                            updated_at,
                         )?
                     }
                     ProviderResumeCursor::Muse { session_id, .. } => {

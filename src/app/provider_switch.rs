@@ -630,9 +630,10 @@ impl Waku {
             .workspace_path_for_session(session)
             .map(Path::to_path_buf)
             .unwrap_or_default();
-        let history_probe = suspended
-            .clone()
-            .map(|entry| self.store.provider_session_history(key, entry.cursor, cwd));
+        let history_probe = suspended.clone().map(|entry| {
+            self.store
+                .provider_session_history(key, entry.cursor, cwd, None)
+        });
         let items = context_items(session);
         let from = session.provider;
         let was_suspended = suspended.is_some();

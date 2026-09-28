@@ -4494,9 +4494,12 @@ impl Waku {
             .wrapping_add(1);
         let generation = self.command_palette.provider_session_generation;
         let cursor = summary.cursor.clone();
-        let fetch = self
-            .store
-            .provider_session_history(key, cursor.clone(), summary.cwd.clone());
+        let fetch = self.store.provider_session_history(
+            key,
+            cursor.clone(),
+            summary.cwd.clone(),
+            Some(summary.updated_at),
+        );
         let window_handle = window.window_handle();
         cx.notify();
 

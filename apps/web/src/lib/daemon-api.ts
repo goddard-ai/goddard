@@ -160,6 +160,7 @@ export async function loadProviderSessionHistory(
       type: 'loadProviderSession',
       cursor: summary.cursor,
       cwd: summary.cwd,
+      updatedAt: summary.updated_at || null,
     }),
     'providerSessionHistory',
   )

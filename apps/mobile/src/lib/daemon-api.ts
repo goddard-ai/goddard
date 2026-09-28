@@ -175,6 +175,7 @@ export async function loadProviderSessionHistory(
 ): Promise<{ history: ProviderSessionHistory; resolvedCwd: string | null | undefined }> {
   const response = expectResponse(await client.request({
     type: 'loadProviderSession', cursor: summary.cursor, cwd: summary.cwd,
+    updatedAt: summary.updated_at || null,
   }), 'providerSessionHistory');
   return { history: response.history, resolvedCwd: response.resolvedCwd };
 }

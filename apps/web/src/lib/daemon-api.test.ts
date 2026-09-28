@@ -351,7 +351,7 @@ describe('provider session resume', () => {
     await expect(loadProviderSessionHistory(client, summary)).resolves.toEqual({ history, resolvedCwd: undefined })
     expect(commands).toEqual([
       { type: 'listProviderSessions', provider: 'claude', limit: 250 },
-      { type: 'loadProviderSession', cursor: summary.cursor, cwd: '/srv/waku' },
+      { type: 'loadProviderSession', cursor: summary.cursor, cwd: '/srv/waku', updatedAt: 200 },
     ])
   })
 

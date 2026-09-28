@@ -71,7 +71,13 @@ sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "typ
  * Which sessions the search scans; absent means active tasks, so
  * pre-scope clients keep their palette behavior.
  */
-scope: SessionMessageSearchScope, } | { "type": "listProviderSessions", provider: ProviderKind, limit: number, } | { "type": "loadProviderSession", cursor: ProviderResumeCursor, cwd: string, } | { "type": "evaluate", state: unknown, questions: { [key in string]: EvalQuestion },
+scope: SessionMessageSearchScope, } | { "type": "listProviderSessions", provider: ProviderKind, limit: number, } | { "type": "loadProviderSession", cursor: ProviderResumeCursor, cwd: string,
+/**
+ * The catalog's last-activity stamp for this session. Providers whose
+ * replayed updates carry no timestamps stamp imported turns and
+ * messages with it instead of the epoch.
+ */
+updatedAt?: number | null, } | { "type": "evaluate", state: unknown, questions: { [key in string]: EvalQuestion },
 /**
  * Which eval-driven feature made the call, recorded on the decision
  * log record. `None` — every caller before this field existed —
