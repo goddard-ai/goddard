@@ -4041,12 +4041,31 @@ mod tests {
         });
         cx.run_until_parked();
 
+        // PTY creation completes on the background executor. Windows CI can
+        // park before that worker has scheduled its reply, so wait for the
+        // session to arrive instead of assuming one pump is enough.
+        let session_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while view.read_with(cx, |view, _| view.session.is_none() && view.error.is_none()) {
+            assert!(
+                std::time::Instant::now() < session_deadline,
+                "terminal session did not start within five seconds"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+            cx.run_until_parked();
+        }
+        cx.run_until_parked();
+
         let (bounds, cell_height, rows) = view.read_with(cx, |view, _| {
             let bounds = view
                 .grid_bounds
                 .get()
                 .expect("grid bounds are recorded during prepaint");
-            let session = view.session.as_ref().expect("session spawned");
+            let session = view.session.as_ref().unwrap_or_else(|| {
+                panic!(
+                    "terminal session failed to start: {}",
+                    view.error.as_deref().unwrap_or("unknown startup error")
+                )
+            });
             (bounds, session.cell_size.1, session.grid_size.1)
         });
         // Rows paint at the device-pixel-snapped pitch; the cell height used
