@@ -14,7 +14,7 @@
 use std::ops::Range;
 use std::sync::LazyLock;
 
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 
 /// CommonMark only recognizes angle-bracket autolinks. Transcript content is
@@ -254,10 +254,11 @@ pub fn parse_with_soft_breaks_as_newlines(
     source: &str,
     soft_breaks_as_newlines: bool,
 ) -> BlockTree {
-    let events = Parser::new_ext(source, options())
+    let mut events = Parser::new_ext(source, options())
         .into_offset_iter()
         .collect::<Vec<_>>();
     let Some((repaired, repairs)) = super::escape::repair_code_spans(source, &events) else {
+        restore_blockquote_whitespace(source, &mut events);
         return tree_from_events(&events, soft_breaks_as_newlines);
     };
     // Reparse the repaired source, then map every event range back into the
@@ -265,10 +266,15 @@ pub fn parse_with_soft_breaks_as_newlines(
     let mut events = Parser::new_ext(&repaired, options())
         .into_offset_iter()
         .collect::<Vec<_>>();
+    restore_blockquote_whitespace(&repaired, &mut events);
     for (_, range) in &mut events {
         range.start = super::escape::original_offset(&repairs, range.start);
         range.end = super::escape::original_offset(&repairs, range.end);
     }
+    let events = events
+        .into_iter()
+        .map(|(event, range)| (event.into_static(), range))
+        .collect::<Vec<_>>();
     tree_from_events(&events, soft_breaks_as_newlines)
 }
 
@@ -355,6 +361,102 @@ fn heading_level(level: HeadingLevel) -> u8 {
         HeadingLevel::H5 => 5,
         HeadingLevel::H6 => 6,
     }
+}
+
+/// Re-attach whitespace CommonMark drops between a quoted line's `>` markers
+/// and the text after them. The marker is `>` plus one optional separating
+/// space; further indentation is quoted content, and the transcript favours
+/// source fidelity over the spec's insignificant-whitespace rule — `>   x`
+/// keeps two leading spaces. Each recovery is a synthetic `Text` event ahead
+/// of the line's first inline event, so runs and copy both see it.
+fn restore_blockquote_whitespace(source: &str, events: &mut Vec<(Event<'_>, Range<usize>)>) {
+    /// The innermost open block container's role — paragraphs and (tight)
+    /// list items are the places an inline event can begin a quoted line.
+    #[derive(Clone, Copy)]
+    enum Role {
+        Paragraph,
+        Item,
+        Other,
+    }
+    // One entry per open `Start` tag: `Some` for block containers, `None` for
+    // inline spans so the innermost block stays findable.
+    let mut stack: Vec<Option<Role>> = Vec::new();
+    let mut quote_depth = 0usize;
+    let mut restored = Vec::with_capacity(events.len());
+    for (event, range) in std::mem::take(events) {
+        // Inline events that can open a quoted line's text. Block-starting
+        // events are excluded — whitespace belongs inside the paragraph, and
+        // a run ahead of an image or display math would become a stray
+        // whitespace-only paragraph.
+        let candidate = quote_depth > 0
+            && matches!(
+                stack.iter().rev().find_map(|role| *role),
+                Some(Role::Paragraph | Role::Item)
+            )
+            && matches!(
+                event,
+                Event::Text(_)
+                    | Event::Code(_)
+                    | Event::InlineMath(_)
+                    | Event::Html(_)
+                    | Event::InlineHtml(_)
+                    | Event::FootnoteReference(_)
+                    | Event::TaskListMarker(_)
+                    | Event::Start(
+                        Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Link { .. }
+                    )
+            );
+        if candidate && let Some((whitespace, span)) = quoted_lead(source, range.start) {
+            restored.push((Event::Text(whitespace.into()), span));
+        }
+        match &event {
+            Event::Start(Tag::BlockQuote(_)) => quote_depth += 1,
+            Event::End(TagEnd::BlockQuote(_)) => quote_depth = quote_depth.saturating_sub(1),
+            _ => {}
+        }
+        match &event {
+            Event::Start(tag) => stack.push(match tag {
+                Tag::Paragraph => Some(Role::Paragraph),
+                Tag::Item => Some(Role::Item),
+                tag if is_block_tag(tag)
+                    || matches!(tag, Tag::TableHead | Tag::TableRow | Tag::TableCell) =>
+                {
+                    Some(Role::Other)
+                }
+                _ => None,
+            }),
+            Event::End(_) => {
+                stack.pop();
+            }
+            _ => {}
+        }
+        restored.push((event, range));
+    }
+    *events = restored;
+}
+
+/// Whitespace a quoted line's `>` markers consumed past the one separating
+/// space — the span between the line's final `>` and the event at `at`.
+/// `None` when the last `>` is followed by at most its allowed space, and
+/// when the line prefix is not entirely container markers — mid-line text
+/// like `a >   b` must not look like quoting.
+fn quoted_lead(source: &str, at: usize) -> Option<(String, Range<usize>)> {
+    let line_start = source[..at].rfind('\n').map_or(0, |index| index + 1);
+    let prefix = &source[line_start..at];
+    let prefix = match super::highlight::list_item(prefix) {
+        Some(item) => &prefix[item.marker_end..],
+        None => prefix,
+    };
+    let quote = super::highlight::blockquote(prefix)?;
+    if quote.body_start != prefix.len() {
+        return None;
+    }
+    let tail = &prefix[prefix[..quote.marker_end].rfind('>')? + 1..];
+    if tail.len() < 2 {
+        return None;
+    }
+    let whitespace = &tail[1..];
+    Some((whitespace.to_owned(), at - whitespace.len()..at))
 }
 
 /// Consume a `Start(tag)` and everything through its matching `End`. Unknown
@@ -1146,6 +1248,88 @@ mod tests {
             matches!(&tree.blocks[1].block, Block::DisplayMath { latex } if latex == r"\frac{1}{2}")
         );
         assert_eq!(paragraph_text(&tree.blocks[2].block), " done");
+    }
+
+    #[test]
+    fn blockquote_restores_whitespace_past_the_marker() {
+        // One space after `>` is the marker's separator; anything further is
+        // quoted indentation the renderer keeps.
+        let tree = parse(">   a\n> b\n>>    c");
+        let Block::BlockQuote { children } = &tree.blocks[0].block else {
+            panic!("{tree:?}")
+        };
+        assert_eq!(paragraph_text(&children[0]), "  a b");
+        let Block::BlockQuote { children } = &children[1] else {
+            panic!("{children:?}")
+        };
+        assert_eq!(paragraph_text(&children[0]), "   c");
+
+        // Soft breaks still render as line breaks for prompts.
+        let tree = parse_with_soft_breaks_as_newlines("> a\n>   b", true);
+        let Block::BlockQuote { children } = &tree.blocks[0].block else {
+            panic!("{tree:?}")
+        };
+        assert_eq!(paragraph_text(&children[0]), "a\n  b");
+    }
+
+    #[test]
+    fn blockquote_whitespace_stays_out_of_code_and_markerless_lines() {
+        // Four spaces still open an indented code block; its text is literal.
+        let tree = parse(">     code");
+        let Block::BlockQuote { children } = &tree.blocks[0].block else {
+            panic!("{tree:?}")
+        };
+        assert!(matches!(&children[0], Block::CodeBlock { code, .. } if code == "code"));
+
+        // Fenced code keeps its own whitespace and gains nothing.
+        let tree = parse("> ```\n>   code\n> ```");
+        let Block::BlockQuote { children } = &tree.blocks[0].block else {
+            panic!("{tree:?}")
+        };
+        assert!(matches!(&children[0], Block::CodeBlock { code, .. } if code == "  code"));
+
+        // Lazy continuation lines carry no `>`, so nothing is restored.
+        let tree = parse("> a\n   b");
+        let Block::BlockQuote { children } = &tree.blocks[0].block else {
+            panic!("{tree:?}")
+        };
+        assert_eq!(paragraph_text(&children[0]), "a b");
+    }
+
+    #[test]
+    fn blockquote_whitespace_precedes_inline_spans() {
+        let tree = parse(">   **b** and [l](https://x)");
+        let Block::BlockQuote { children } = &tree.blocks[0].block else {
+            panic!("{tree:?}")
+        };
+        let Block::Paragraph { runs } = &children[0] else {
+            panic!("{children:?}")
+        };
+        assert_eq!(runs[0].text, "  ");
+        assert!(!runs[0].style.bold);
+        assert!(runs.iter().any(|run| run.text == "b" && run.style.bold));
+        assert!(runs.iter().any(|run| run.style.link.is_some()));
+
+        let tree = parse(">   `x`");
+        let Block::BlockQuote { children } = &tree.blocks[0].block else {
+            panic!("{tree:?}")
+        };
+        let Block::Paragraph { runs } = &children[0] else {
+            panic!("{children:?}")
+        };
+        assert_eq!(runs[0].text, "  ");
+        assert!(runs.iter().any(|run| run.text == "x" && run.style.code));
+    }
+
+    #[test]
+    fn blockquote_midline_gt_is_text_not_a_marker() {
+        // `a >   b` keeps its literal spacing — the `>` is text, not a quote
+        // marker, so nothing is recovered ahead of the emphasis.
+        let tree = parse("> a >   **b**");
+        let Block::BlockQuote { children } = &tree.blocks[0].block else {
+            panic!("{tree:?}")
+        };
+        assert_eq!(paragraph_text(&children[0]), "a >   b");
     }
 
     #[test]

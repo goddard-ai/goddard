@@ -14,6 +14,7 @@ import { PreviewableImage } from '@/components/image-preview'
 import { Button } from '@/components/ui/button'
 import { FileTypeIcon, WakuIcon, type WakuIconName } from '@/components/waku-icon'
 import { readAttachmentImage } from '@/lib/attachments'
+import { markdownBlockquoteIndentPlugin } from '@/lib/markdown-blockquote-indent'
 import { useDaemon } from '@/lib/daemon-context'
 import { activitiesForBlock } from '@/lib/event-reducer'
 import { useI18n, type AppLocale } from '@/lib/i18n'
@@ -1501,8 +1502,8 @@ function Markdown({
     <div className={cn('markdown min-w-0', compact && '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0')}>
       <ReactMarkdown
         remarkPlugins={preserveSoftBreaks
-          ? [remarkGfm, remarkSoftBreaksAsLineBreaks]
-          : [remarkGfm]}
+          ? [remarkGfm, markdownBlockquoteIndentPlugin(text), remarkSoftBreaksAsLineBreaks]
+          : [remarkGfm, markdownBlockquoteIndentPlugin(text)]}
         rehypePlugins={chunks.length ? [markdownVeilPlugin(chunks, now)] : []}
         components={{
           a: ({ children, href, ...props }) => (
