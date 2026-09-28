@@ -58,6 +58,7 @@ export const GODDARD_ICONS = {
   settings: 'i-waku-settings',
   sparkle: 'i-waku-sparkle',
   star: 'i-waku-star',
+  friends: 'i-waku-friends',
   starFilled: 'i-waku-star-filled',
   stop: 'i-waku-stop',
   target: 'i-waku-target',

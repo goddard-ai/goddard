@@ -155,7 +155,7 @@ function AppNavigator() {
       .map((session) => ({
         id: session.id,
         title: displaySessionTitle(session),
-        subtitle: projectNames.get(session.project_id) ?? "",
+        subtitle: session.friend_peer_name ?? projectNames.get(session.project_id) ?? "",
       }));
   }, [taskState.data]);
   const recentsKey = recents.map((item) => `${item.id}:${item.title}`).join("|");

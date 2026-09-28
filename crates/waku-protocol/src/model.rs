@@ -1105,11 +1105,23 @@ pub struct Project {
     /// unstarred projects in the sidebar's Project grouping.
     #[serde(default)]
     pub starred: bool,
-    /// A friend-delivery project: the peer's endpoint id string for the
-    /// friend whose chats and transfers materialize sessions here, with the
-    /// project named after them. `None` for ordinary projects.
+    /// Legacy peer marker for per-friend delivery projects created before
+    /// friend sessions were pooled. New pooled projects use `kind`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub friend_peer_id: Option<String>,
+    /// A non-ordinary project role — `None` for user projects. Marker
+    /// rather than name so special projects carry their meaning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ProjectKind>,
+}
+
+/// Special project roles. `Friends` is the pooled friend-deliveries
+/// project — chats and transfers from friends materialize sessions
+/// here, grouped under one "Friends" header.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectKind {
+    Friends,
 }
 
 /// Filesystem context a task runs in.
@@ -1230,7 +1242,13 @@ impl Project {
             temporary: false,
             starred: false,
             friend_peer_id: None,
+            kind: None,
         }
+    }
+
+    /// Whether this is the pooled friend-deliveries project.
+    pub fn is_friends(&self) -> bool {
+        self.kind == Some(ProjectKind::Friends)
     }
 
     pub fn is_projectless(&self) -> bool {
@@ -1595,6 +1613,14 @@ pub struct AgentSession {
     /// the old checkout's paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_moved_from: Option<PathBuf>,
+    /// The friend whose chat or transfer created this session — endpoint id
+    /// plus their display name, refreshed on nickname changes and later
+    /// deliveries. `None` for ordinary tasks; the sidebar's row label shows
+    /// the person icon and this name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub friend_peer_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub friend_peer_name: Option<String>,
     /// The workspace move the session has not yet told the provider about.
     /// Unlike `workspace_moved_from` it records the destination explicitly —
     /// a project switch's `Local` target has no path of its own — and wins
@@ -1819,6 +1845,8 @@ impl AgentSession {
             project_id,
             workspace: SessionWorkspace::Local,
             workspace_moved_from: None,
+            friend_peer_id: None,
+            friend_peer_name: None,
             workspace_move: None,
             side_chat_of: None,
             provider,
@@ -1872,6 +1900,9 @@ impl AgentSession {
             title: self.title.clone(),
             auto_title: self.auto_title.clone(),
             project_id: self.project_id,
+            // List columns: rows label the sending friend without hydrating.
+            friend_peer_id: self.friend_peer_id.clone(),
+            friend_peer_name: self.friend_peer_name.clone(),
             // A list column, not detail: rows render worktree badges and
             // branch labels from it before the session is ever opened.
             workspace: self.workspace.clone(),

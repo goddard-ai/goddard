@@ -6692,7 +6692,7 @@ impl Waku {
                             self.is_remote_project(project.id),
                             project.starred,
                             star_focuses[index].clone(),
-                            project.friend_peer_id.is_some(),
+                            project.is_friends() || project.friend_peer_id.is_some(),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -6902,7 +6902,7 @@ impl Waku {
                                             if remote {
                                                 "icons/server.svg"
                                             } else if friend {
-                                                "icons/user-round.svg"
+                                                "icons/friends.svg"
                                             } else {
                                                 "icons/folder.svg"
                                             },

@@ -28,8 +28,10 @@ export const projects = sqliteTable("projects", {
   temporary: integer("temporary", { mode: "boolean" }).notNull().default(false),
   /** User-marked priority: leads attention navigation and sidebar grouping. */
   starred: integer("starred", { mode: "boolean" }).notNull().default(false),
-  /** A friend-delivery project — the peer's endpoint id; named after the friend. */
+  /** Legacy peer marker for pre-pooling friend projects. */
   friendPeerId: text("friend_peer_id"),
+  /** A non-ordinary project role — "friends" marks the pooled friend-deliveries project. */
+  kind: text("kind"),
 });
 
 export const sessions = sqliteTable(
@@ -71,6 +73,13 @@ export const sessions = sqliteTable(
      * tasks. Side chats stay out of task lists and die with their parent.
      */
     sideChatOf: text("side_chat_of"),
+    /**
+     * The friend whose chat or transfer created this session — endpoint id
+     * and display name, duplicated from `session_details.data` so sidebar
+     * rows label the sender without hydrating. NULL for ordinary tasks.
+     */
+    friendPeerId: text("friend_peer_id"),
+    friendPeerName: text("friend_peer_name"),
     /** Per-task grant for the owning agent to change this task's title. */
     agentRenameAllowed: integer("agent_rename_allowed", { mode: "boolean" }).notNull().default(false),
     /**

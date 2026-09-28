@@ -1,1 +1,1 @@
-- Files, folders, and chats from friends now group by sender in the sidebar — a person icon and the friend's name instead of the shared "Friends" folder — and the send dialog gets an editable title field.
+- Friend-delivered chats, files, and folders now share the Friends group; each task shows its sender, and file senders can set a display title.

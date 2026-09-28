@@ -1414,7 +1414,7 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at, bookmark, temporary, starred, friend_peer_id FROM projects ORDER BY position")
+            .prepare("SELECT id, name, path, created_at, bookmark, temporary, starred, friend_peer_id, kind FROM projects ORDER BY position")
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1427,12 +1427,13 @@ impl StateStore {
                     row.get::<_, bool>(5)?,
                     row.get::<_, bool>(6)?,
                     row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             })
             .map_err(to_io_error)?
             .filter_map(Result::ok)
             .filter_map(
-                |(id, name, path, created_at, bookmark, temporary, starred, friend_peer_id)| {
+                |(id, name, path, created_at, bookmark, temporary, starred, friend_peer_id, kind)| {
                     Some(Project {
                         id: Uuid::parse_str(&id).ok()?,
                         name,
@@ -1442,6 +1443,9 @@ impl StateStore {
                         temporary,
                         starred,
                         friend_peer_id,
+                        kind: kind.and_then(|tag| {
+                            serde_json::from_value(serde_json::Value::String(tag)).ok()
+                        }),
                     })
                 },
             )
@@ -1456,7 +1460,8 @@ impl StateStore {
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
-                        agent_rename_allowed, runtime_event_cursor
+                        agent_rename_allowed, runtime_event_cursor,
+                        friend_peer_id, friend_peer_name
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1483,6 +1488,8 @@ impl StateStore {
                     row.get::<_, Option<String>>(16)?,
                     row.get::<_, bool>(17)?,
                     row.get::<_, Option<String>>(18)?,
+                    row.get::<_, Option<String>>(19)?,
+                    row.get::<_, Option<String>>(20)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1889,7 +1896,10 @@ impl StateStore {
                             project.created_at as i64,
                             project.temporary,
                             project.starred,
-                            project.friend_peer_id
+                            project.friend_peer_id,
+                            project.kind.map_or(rusqlite::types::Value::Null, |kind| {
+                                rusqlite::types::Value::Text(tag_of(kind))
+                            })
                         ],
                     )
                     .map_err(to_io_error)?;
@@ -2049,6 +2059,8 @@ type SessionColumns = (
     Option<String>,
     bool,
     Option<String>,
+    Option<String>,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2077,6 +2089,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         side_chat_of,
         agent_rename_allowed,
         runtime_event_cursor,
+        friend_peer_id,
+        friend_peer_name,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -2100,6 +2114,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         // Same duplication story as `workspace`: the daemon's side-chat
         // cascade and launch environment need it without a hydrate.
         side_chat_of: side_chat_of.and_then(|id| Uuid::parse_str(&id).ok()),
+        friend_peer_id,
+        friend_peer_name,
         agent_rename_allowed,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
         model,
@@ -2524,8 +2540,9 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
-         agent_rename_allowed, runtime_event_cursor
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+         agent_rename_allowed, runtime_event_cursor,
+         friend_peer_id, friend_peer_name
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -2544,11 +2561,13 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          workspace     = excluded.workspace,
          side_chat_of  = excluded.side_chat_of,
          agent_rename_allowed = excluded.agent_rename_allowed,
-         runtime_event_cursor = excluded.runtime_event_cursor";
+         runtime_event_cursor = excluded.runtime_event_cursor,
+         friend_peer_id = excluded.friend_peer_id,
+         friend_peer_name = excluded.friend_peer_name";
 
 const INSERT_PROJECT: &str =
-    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, friend_peer_id)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, friend_peer_id, kind)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
@@ -2557,7 +2576,8 @@ const INSERT_PROJECT: &str =
          created_at = excluded.created_at,
          temporary  = excluded.temporary,
          starred    = excluded.starred,
-         friend_peer_id = excluded.friend_peer_id";
+         friend_peer_id = excluded.friend_peer_id,
+         kind       = excluded.kind";
 
 /// The transcript, written alongside the list row it belongs to.
 const UPSERT_SESSION_DETAIL: &str = "INSERT INTO session_details(session_id, data)
@@ -2621,6 +2641,14 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .as_ref()
             .and_then(|cursor| serde_json::to_string(cursor).ok())
             .map_or(Value::Null, Value::Text),
+        session
+            .friend_peer_id
+            .clone()
+            .map_or(Value::Null, Value::Text),
+        session
+            .friend_peer_name
+            .clone()
+            .map_or(Value::Null, Value::Text),
     ]
 }
 
@@ -2635,8 +2663,8 @@ fn normalize_computer_app_grants(grants: &mut Vec<ComputerAppGrant>) {
 mod tests {
     use super::*;
     use crate::model::{
-        ActivityItem, ActivityKind, FavoriteModel, MessageRole, ReasoningBlock, TranscriptBlock,
-        TranscriptNoticeStatus,
+        ActivityItem, ActivityKind, FavoriteModel, MessageRole, ProjectKind, ReasoningBlock,
+        TranscriptBlock, TranscriptNoticeStatus,
     };
     use base64::Engine as _;
 
@@ -3758,6 +3786,9 @@ mod tests {
             ..ThemeSettings::default()
         };
         state.projects[0].friend_peer_id = Some("peer-endpoint-id".into());
+        state.projects[0].kind = Some(ProjectKind::Friends);
+        state.sessions[0].friend_peer_id = Some("peer-endpoint-id".into());
+        state.sessions[0].friend_peer_name = Some("maya".into());
         state.language = AppLanguage::SimplifiedChinese;
         state.sidebar_visible = false;
         state.right_panel_visible = false;
@@ -3801,6 +3832,15 @@ mod tests {
         assert_eq!(
             restored.projects[0].friend_peer_id.as_deref(),
             Some("peer-endpoint-id")
+        );
+        assert!(restored.projects[0].is_friends());
+        assert_eq!(
+            restored.sessions[0].friend_peer_id.as_deref(),
+            Some("peer-endpoint-id")
+        );
+        assert_eq!(
+            restored.sessions[0].friend_peer_name.as_deref(),
+            Some("maya")
         );
         assert_eq!(restored.sessions.len(), 1);
         assert_eq!(restored.sessions[0].model.as_deref(), Some("gpt-5.6-luna"));

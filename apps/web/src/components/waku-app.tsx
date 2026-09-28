@@ -308,7 +308,10 @@ export function WakuApp() {
     const project = defaultNewTaskProject(
       currentProject,
       draftProject,
-      taskState.data?.projects.find((item) => item.name !== 'Friends' && item.friend_peer_id == null),
+      taskState.data?.projects.find(
+        (item) =>
+          item.name !== 'Friends' && item.kind !== 'friends' && item.friend_peer_id == null,
+      ),
     )
     setDisplayed(null)
     setNewTaskMode(true)
@@ -402,7 +405,10 @@ export function WakuApp() {
         : undefined
       const project = defaultNewTaskProject(
         taskState.data.projects.find((item) => item.id === rememberedProjectId),
-        taskState.data.projects.find((item) => item.name !== 'Friends' && item.friend_peer_id == null),
+        taskState.data.projects.find(
+          (item) =>
+            item.name !== 'Friends' && item.kind !== 'friends' && item.friend_peer_id == null,
+        ),
       )
       if (!project) {
         setDraft(null)
@@ -632,7 +638,10 @@ export function WakuApp() {
       : preferred ?? defaultNewTaskProject(
         currentProject,
         draftProject,
-        taskState.data?.projects.find((item) => item.name !== 'Friends' && item.friend_peer_id == null),
+        taskState.data?.projects.find(
+          (item) =>
+            item.name !== 'Friends' && item.kind !== 'friends' && item.friend_peer_id == null,
+        ),
       ) ?? undefined
     if (newTaskMode && draft) forgetRightPanelSession(draft.id)
     const nextDraft = project
@@ -1288,7 +1297,13 @@ export function WakuApp() {
 }
 
 function defaultNewTaskProject(...projects: Array<Project | null | undefined>) {
-  return projects.find((project) => project && project.name !== 'Friends' && project.friend_peer_id == null) ?? null
+  return projects.find(
+    (project) =>
+      project &&
+      project.name !== 'Friends' &&
+      project.kind !== 'friends' &&
+      project.friend_peer_id == null,
+  ) ?? null
 }
 
 function readSidebarWidth(): number {

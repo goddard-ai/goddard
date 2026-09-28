@@ -437,9 +437,9 @@ function SessionMetadata({ item, nowSeconds, t }: { item: SessionItem; nowSecond
     <span className="flex w-full min-w-0 items-center gap-1.5 text-[11.5px] leading-[15px] text-[var(--text-tertiary)]">
       <WakuIcon
         className="size-[11px] shrink-0"
-        name={item.projectIsFriend ? 'userRound' : 'folder'}
+        name={item.friendName ? 'userRound' : item.projectIsFriend ? 'friends' : 'folder'}
       />
-      <span className="min-w-0 flex-1 truncate">{item.projectName}</span>
+      <span className="min-w-0 flex-1 truncate">{item.friendName ?? item.projectName}</span>
       {inWorktree && (
         <WakuIcon
           className={cn(

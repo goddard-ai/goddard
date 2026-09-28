@@ -19,8 +19,8 @@ use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     AgentAskOutcome, AgentModelOption, AgentProjectMapResult, AgentSession, AgentSessionSearchHit,
-    Checkpoint, CheckpointStatus, DriverEvent, PermissionOption, Project, ProjectMapIntent,
-    ProjectMapRanking, ProviderKind, ProviderModelOption, ProviderResumeCursor,
+    Checkpoint, CheckpointStatus, DriverEvent, PermissionOption, Project, ProjectKind,
+    ProjectMapIntent, ProjectMapRanking, ProviderKind, ProviderModelOption, ProviderResumeCursor,
     ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace, TurnStatus, UserInputQuestion,
     detail_prefix_signature,
 };
@@ -1262,7 +1262,8 @@ fn create_transfer_session(
         bail!("incoming transfer completed without a destination");
     };
     let mut state = task_state.lock();
-    let project_id = friend_project_id(&mut state, share_dir, &transfer.peer_id, peer_name);
+    let project_id = friends_project_id(&mut state, share_dir);
+    rename_friend_sessions(&mut state, &transfer.peer_id, peer_name);
     // Transfer sessions are unconditionally sandboxed (received files never
     // reach the host fs), so the provider must be one the sandbox can run —
     // fall back to Claude rather than minting a session that can never start.
@@ -1272,9 +1273,10 @@ fn create_transfer_session(
         ProviderKind::Claude
     };
     let mut session = state.new_session(project_id, provider);
-    // The sender owns the title — their display name is already the
-    // project the session files under.
+    // The sender owns the title; the row labels them by name.
     session.title = transfer.title.clone();
+    session.friend_peer_id = Some(transfer.peer_id.clone());
+    session.friend_peer_name = Some(peer_name.to_owned());
     // The receipt is a notification, not a prompt awaiting a reply — a
     // provider turn holds the assistant messages so they render like an
     // agent reply (bot style), not a sent bubble. The sender's note rides
@@ -1380,32 +1382,26 @@ fn transfer_manifest_entries(dir: &Path) -> (Vec<crate::model::TransferManifestE
     (entries, entry_count)
 }
 
-/// The friend's project transfer and chat sessions live in — one project
-/// per peer, named after them, so the sidebar groups their deliveries by
-/// sender. Found by the stored peer id or registered on first delivery;
-/// the name tracks the friend's current display name. All friend projects
-/// share the share dir as their path — the sessions' cwd.
-fn friend_project_id(
-    state: &mut PersistedState,
-    share_dir: &Path,
-    peer_id: &str,
-    peer_name: &str,
-) -> Uuid {
+/// The pooled "Friends" project transfer and chat sessions live in —
+/// marked so the sidebar shows the friends glyph instead of a folder.
+/// Found by the marker, or a legacy project at the share dir gets
+/// adopted; registered on first delivery.
+fn friends_project_id(state: &mut PersistedState, share_dir: &Path) -> Uuid {
     match state
         .projects
         .iter_mut()
-        .find(|project| project.friend_peer_id.as_deref() == Some(peer_id))
+        .find(|project| project.is_friends() || project.path == share_dir)
     {
         Some(project) => {
-            if project.name != peer_name {
-                project.name = peer_name.to_owned();
-            }
+            project.name = "Friends".to_owned();
+            project.kind = Some(ProjectKind::Friends);
+            project.friend_peer_id = None;
             project.id
         }
         None => {
             let mut project = Project::from_path(share_dir.to_path_buf());
-            project.name = peer_name.to_owned();
-            project.friend_peer_id = Some(peer_id.to_owned());
+            project.name = "Friends".to_owned();
+            project.kind = Some(ProjectKind::Friends);
             let id = project.id;
             state.projects.push(project);
             id
@@ -1413,8 +1409,25 @@ fn friend_project_id(
     }
 }
 
+/// Refresh a friend's display name across their delivered sessions —
+/// called on each delivery and when a nickname changes so the row label
+/// follows the name the user knows them by. Returns whether anything
+/// changed.
+fn rename_friend_sessions(state: &mut PersistedState, peer_id: &str, name: &str) -> bool {
+    let mut changed = false;
+    for session in state.sessions.iter_mut() {
+        if session.friend_peer_id.as_deref() == Some(peer_id)
+            && session.friend_peer_name.as_deref() != Some(name)
+        {
+            session.friend_peer_name = Some(name.to_owned());
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// An incoming chat message materializes like a delivered transfer — a
-/// session in the sender's friend project with the text rendered as an
+/// session in the pooled Friends project with the text rendered as an
 /// agent reply and the sender's title. There is nothing to trust or hand
 /// off, so unlike a transfer it is neither quarantined nor sandboxed —
 /// just an idle chat.
@@ -1425,14 +1438,12 @@ fn create_chat_session(
     delivery: &crate::share::ChatDelivery,
 ) -> anyhow::Result<Uuid> {
     let mut state = task_state.lock();
-    let project_id = friend_project_id(
-        &mut state,
-        share_dir,
-        &delivery.peer_id,
-        &delivery.peer_name,
-    );
+    let project_id = friends_project_id(&mut state, share_dir);
+    rename_friend_sessions(&mut state, &delivery.peer_id, &delivery.peer_name);
     let mut session = state.new_session(project_id, state.last_provider);
     session.title = delivery.title.clone();
+    session.friend_peer_id = Some(delivery.peer_id.clone());
+    session.friend_peer_name = Some(delivery.peer_name.clone());
     session.begin_provider_turn();
     session.push_message(crate::model::MessageRole::Assistant, delivery.text.clone());
     session.finish_active_turn(TurnStatus::Completed);
@@ -1708,7 +1719,7 @@ impl Backend for WakuBackend {
             }
             Command::SetFriendNickname { node_id, nickname } => {
                 self.share.set_friend_nickname(node_id.clone(), nickname)?;
-                self.rename_friend_project(&node_id)?;
+                self.rename_friend_sessions(&node_id)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::ShareProjectWithFriend {
@@ -3362,10 +3373,10 @@ enum ReviewMove {
 }
 
 impl WakuBackend {
-    /// Rename a friend's delivery project to their current display name —
-    /// called when a nickname changes so the sidebar group keeps showing
-    /// the name the user knows them by. Deliveries do the same inline.
-    fn rename_friend_project(&self, node_id: &str) -> anyhow::Result<()> {
+    /// Refresh a friend's name on their delivered sessions — called when
+    /// a nickname changes so the sidebar row keeps showing the name the
+    /// user knows them by. Deliveries do the same inline.
+    fn rename_friend_sessions(&self, node_id: &str) -> anyhow::Result<()> {
         let name = self
             .share
             .state()
@@ -3383,14 +3394,7 @@ impl WakuBackend {
             return Ok(());
         };
         let mut state = self.task_state.lock();
-        let mut changed = false;
-        for project in state.projects.iter_mut() {
-            if project.friend_peer_id.as_deref() == Some(node_id) && project.name != name {
-                project.name = name.clone();
-                changed = true;
-            }
-        }
-        if changed {
+        if rename_friend_sessions(&mut state, node_id, &name) {
             self.task_store.save(&mut state)?;
         }
         Ok(())
@@ -7847,9 +7851,9 @@ mod tests {
             let project = state
                 .projects
                 .iter()
-                .find(|project| project.friend_peer_id.as_deref() == Some("peer"))
-                .expect("a friend project for the sending peer");
-            assert_eq!(project.name, "maya");
+                .find(|project| project.is_friends())
+                .expect("the pooled Friends project");
+            assert_eq!(project.name, "Friends");
             assert_eq!(project.path, share_dir);
             let session = state
                 .sessions
@@ -7868,6 +7872,8 @@ mod tests {
             assert!(session.can_choose_model(ProviderKind::Claude));
             assert_eq!(session.project_id, project.id);
             assert_eq!(session.title, "new season mockups");
+            assert_eq!(session.friend_peer_id.as_deref(), Some("peer"));
+            assert_eq!(session.friend_peer_name.as_deref(), Some("maya"));
             let receipt = &session.turns[0];
             assert_eq!(receipt.status, crate::model::TurnStatus::Completed);
             // Note and receipt are assistant messages — bot-style blocks,
@@ -7930,7 +7936,7 @@ mod tests {
             create_transfer_session(&task_state, &store, &share_dir, &second, "maya").unwrap();
         {
             let state = task_state.lock();
-            // The same peer reuses its friend project — one group per sender.
+            // Every sender pools into the one Friends project.
             assert_eq!(
                 state
                     .projects
@@ -8015,13 +8021,23 @@ mod tests {
             .iter()
             .find(|session| session.id == session_id)
             .expect("the message's session");
-        let project = state
+        let project_id = state
             .projects
             .iter()
-            .find(|project| project.friend_peer_id.as_deref() == Some("peer"))
-            .expect("a friend project for the sending peer");
-        assert_eq!(project.name, "maya");
-        assert_eq!(session.project_id, project.id);
+            .find(|project| project.is_friends())
+            .expect("the pooled Friends project")
+            .id;
+        assert_eq!(
+            state
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .map(|project| project.name.as_str()),
+            Some("Friends")
+        );
+        assert_eq!(session.project_id, project_id);
+        assert_eq!(session.friend_peer_id.as_deref(), Some("peer"));
+        assert_eq!(session.friend_peer_name.as_deref(), Some("maya"));
         // The sender owns the title — it names what was sent, not the peer.
         assert_eq!(session.title, "shipping the update tonight");
         assert_eq!(session.status, SessionStatus::Idle);
@@ -8041,7 +8057,7 @@ mod tests {
         drop(state);
 
         // A second message reuses the same friend project; a different
-        // sender gets their own.
+        // sender still lands in the same Friends project.
         create_chat_session(
             &task_state,
             &store,
@@ -8066,24 +8082,35 @@ mod tests {
             },
         )
         .unwrap();
-        let state = task_state.lock();
-        assert_eq!(
-            state
-                .projects
+        {
+            let state = task_state.lock();
+            assert_eq!(
+                state
+                    .projects
+                    .iter()
+                    .filter(|project| project.is_friends())
+                    .count(),
+                1
+            );
+            assert_eq!(
+                state
+                    .projects
+                    .iter()
+                    .filter(|project| project.path == share_dir)
+                    .count(),
+                1
+            );
+            let kai = state
+                .sessions
                 .iter()
-                .filter(|project| project.path == share_dir)
-                .count(),
-            2
-        );
-        let kai = state
-            .projects
-            .iter()
-            .find(|project| project.friend_peer_id.as_deref() == Some("peer-2"))
-            .expect("a second friend project");
-        assert_eq!(kai.name, "kai");
-        drop(state);
+                .find(|session| session.friend_peer_id.as_deref() == Some("peer-2"))
+                .expect("kai's session");
+            assert_eq!(kai.friend_peer_name.as_deref(), Some("kai"));
+            assert_eq!(kai.project_id, project_id);
+        }
 
-        // A display-name change on the next delivery renames the project.
+        // A display-name change on the next delivery relabels the
+        // sender's earlier sessions too.
         create_chat_session(
             &task_state,
             &store,
@@ -8096,15 +8123,15 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(
-            task_state
-                .lock()
-                .projects
+        let state = task_state.lock();
+        assert!(
+            state
+                .sessions
                 .iter()
-                .find(|project| project.friend_peer_id.as_deref() == Some("peer"))
-                .map(|project| project.name.as_str()),
-            Some("maya r.")
+                .filter(|session| session.friend_peer_id.as_deref() == Some("peer"))
+                .all(|session| session.friend_peer_name.as_deref() == Some("maya r."))
         );
+        drop(state);
 
         std::fs::remove_dir_all(root).ok();
     }

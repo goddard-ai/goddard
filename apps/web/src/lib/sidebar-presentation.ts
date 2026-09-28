@@ -6,7 +6,9 @@ export type DateGroup = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'mor
 export interface SessionItem {
   session: AgentSession
   projectName: string
-  /** The project is a friend-delivery group — the row shows a person icon. */
+  /** Sender's display name for friend-delivered sessions — the row shows a person icon and this name. */
+  friendName: string | null
+  /** The project is a friend-delivery group. */
   projectIsFriend: boolean
   timestamp: number
 }
@@ -77,7 +79,7 @@ export function groupSessions(
     projectDisplayName(project, projectlessName),
   ]))
   const friendProjects = new Set(
-    projects.filter((project) => project.friend_peer_id != null).map((project) => project.id),
+    projects.filter((project) => project.kind === 'friends' || project.friend_peer_id != null).map((project) => project.id),
   )
   const grouped = new Map<DateGroup, SessionItem[]>()
   const started = sessions
@@ -89,6 +91,7 @@ export function groupSessions(
     items.push({
       session,
       projectName: projectNames.get(session.project_id) ?? unknownProject,
+      friendName: session.friend_peer_name ?? null,
       projectIsFriend: friendProjects.has(session.project_id),
       timestamp: sessionTimestamp(session),
     })

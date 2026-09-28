@@ -124,6 +124,7 @@ export type { PlanUsage } from "./PlanUsage";
 export type { PlanWindow } from "./PlanWindow";
 export type { PricingStatus } from "./PricingStatus";
 export type { Project } from "./Project";
+export type { ProjectKind } from "./ProjectKind";
 export type { ProjectMapIntent } from "./ProjectMapIntent";
 export type { ProjectMapRanking } from "./ProjectMapRanking";
 export type { ProjectSlice } from "./ProjectSlice";

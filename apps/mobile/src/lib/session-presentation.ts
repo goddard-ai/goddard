@@ -147,7 +147,10 @@ export function groupSessions(
     const items = grouped.get(id) ?? [];
     items.push({
       session,
-      projectName: projectNames.get(session.project_id) || 'Unknown project',
+      // Friend deliveries label the sender, not the pooled project.
+      projectName:
+        session.friend_peer_name ??
+        (projectNames.get(session.project_id) || 'Unknown project'),
       timestamp: sessionTimestamp(session),
     });
     grouped.set(id, items);

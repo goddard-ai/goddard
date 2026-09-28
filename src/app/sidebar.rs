@@ -3763,12 +3763,21 @@ impl Waku {
                 "icons/folder-clock.svg"
             }
             SidebarGroup::Project(project_id)
+                if self
+                    .state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == project_id && project.is_friends()) =>
+            {
+                // The pooled friend-deliveries group — the friends glyph
+                // instead of a folder; each row names its sender.
+                "icons/friends.svg"
+            }
+            SidebarGroup::Project(project_id)
                 if self.state.projects.iter().any(|project| {
                     project.id == project_id && project.friend_peer_id.is_some()
                 }) =>
             {
-                // Friend-delivery projects name the sender — a person glyph
-                // instead of a folder.
                 "icons/user-round.svg"
             }
             _ if collapsed => "icons/folder.svg",
@@ -4854,7 +4863,12 @@ impl Waku {
             .iter()
             .find(|project| project.id == session.project_id);
         let pinned = session.pinned_at.is_some();
-        let detail_label = if grouped_by_project {
+        // A friend delivery labels its sender under the title — in any
+        // grouping, ahead of the project name or branch the slot would
+        // otherwise show.
+        let detail_label = if let Some(name) = session.friend_peer_name.as_deref() {
+            Some(SharedString::from(name.to_owned()))
+        } else if grouped_by_project {
             persisted_sidebar_branch_label(&session.workspace)
                 .map(|branch| SharedString::from(branch.to_owned()))
                 .or_else(|| {
@@ -4912,12 +4926,16 @@ impl Waku {
         } else {
             None
         };
-        let detail_icon = if grouped_by_project {
+        let detail_icon = if session.friend_peer_id.is_some() {
+            "icons/user-round.svg"
+        } else if grouped_by_project {
             "icons/git-branch.svg"
         } else if session_remote {
             "icons/server.svg"
         } else if project.is_some_and(Project::is_projectless) {
             "icons/chat.svg"
+        } else if project.is_some_and(Project::is_friends) {
+            "icons/friends.svg"
         } else if project.is_some_and(|project| project.friend_peer_id.is_some()) {
             "icons/user-round.svg"
         } else {

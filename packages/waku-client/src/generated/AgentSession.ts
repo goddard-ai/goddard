@@ -41,6 +41,13 @@ workspace?: SessionWorkspace,
  */
 workspace_moved_from?: string | null,
 /**
+ * The friend whose chat or transfer created this session — endpoint id
+ * plus their display name, refreshed on nickname changes and later
+ * deliveries. `None` for ordinary tasks; the sidebar's row label shows
+ * the person icon and this name.
+ */
+friend_peer_id?: string | null, friend_peer_name?: string | null,
+/**
  * The workspace move the session has not yet told the provider about.
  * Unlike `workspace_moved_from` it records the destination explicitly —
  * a project switch's `Local` target has no path of its own — and wins
