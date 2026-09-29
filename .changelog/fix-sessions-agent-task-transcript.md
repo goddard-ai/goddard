@@ -1,0 +1,1 @@
+- Tasks an agent or automation created no longer open to a bare prompt: a turn that finished before you first opened the task now loads its full transcript.

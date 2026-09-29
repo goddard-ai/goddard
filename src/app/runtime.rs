@@ -83,7 +83,11 @@ pub(super) fn start_driver(
         request.options,
         event_tx,
     )?;
-    Ok(PreparedDriver { handle, events })
+    Ok(PreparedDriver {
+        handle,
+        events,
+        hydrated_session: None,
+    })
 }
 
 /// What a remote connect attempt produced: the supervisor plus, for ssh
@@ -182,15 +186,31 @@ pub(super) struct SshPrompt {
     pub input: Option<Entity<crate::input::TextInput>>,
 }
 
-/// Attaches without hydrating the session: the replay cursor arrives with
-/// the session list, and the full transcript loads only when a client opens
-/// it — one runtime reconnect must not pay a hydration per session.
+/// Attaches to the session's runtime, hydrating a skeleton first when asked:
+/// replayed and live events write transcript detail that only a loaded
+/// session can persist — a skeleton's accumulation is wiped by the first
+/// selection's hydration, so detail must arrive before the event stream.
+/// Non-skeleton attaches stay cheap: the replay cursor arrives with the
+/// session list, and one runtime reconnect must not pay a hydration per
+/// session.
 fn attach_driver(
     daemon: waku_client::DaemonSupervisor,
     session_id: Uuid,
     replay_cursor: Option<RuntimeEventCursor>,
+    hydrate: bool,
     event_wake: smol::channel::Sender<()>,
 ) -> anyhow::Result<Option<PreparedDriver>> {
+    let hydrated_session = if hydrate {
+        waku_client::persistence::hydrate_session(&daemon, session_id)?
+    } else {
+        None
+    };
+    // The hydrated detail's stored cursor supersedes the skeleton's: it is
+    // the baseline the arriving events will actually extend.
+    let replay_cursor = hydrated_session
+        .as_ref()
+        .and_then(|session| session.runtime_event_cursor)
+        .or(replay_cursor);
     let client = daemon.client();
     let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
     let waku_client::ResponsePayload::SessionRuntime {
@@ -215,7 +235,11 @@ fn attach_driver(
         replay_cursor,
         event_tx,
     )?;
-    Ok(Some(PreparedDriver { handle, events }))
+    Ok(Some(PreparedDriver {
+        handle,
+        events,
+        hydrated_session,
+    }))
 }
 
 fn load_remote_task_state(
@@ -2610,16 +2634,26 @@ impl Waku {
             return;
         };
         let event_wake = self.event_wake_tx.clone();
-        let replay_cursor = self
+        let (replay_cursor, hydrate) = self
             .state
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .and_then(|session| session.runtime_event_cursor);
+            .map(|session| {
+                (
+                    session.runtime_event_cursor,
+                    // An incognito row owns no stored detail to fetch — its
+                    // transcript lives in this process only.
+                    !session.detail_loaded && !session.incognito,
+                )
+            })
+            .unwrap_or((None, false));
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { attach_driver(daemon, session_id, replay_cursor, event_wake) })
+                .spawn(async move {
+                    attach_driver(daemon, session_id, replay_cursor, hydrate, event_wake)
+                })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
                 waku.finish_runtime_attachment(session_id, result, cx);
@@ -6070,6 +6104,17 @@ impl Waku {
         // A fresh driver is not mid-drain of a cancelled turn; clear any
         // entry the replaced runtime left behind.
         self.cancel_drains.remove(&session_id);
+        // The attached runtime's replayed and live events write onto the
+        // session in place: its stored detail must land while the row is
+        // still a skeleton, or everything the stream rebuilds stays
+        // unpersistable and the next hydration discards it. A row already
+        // hydrated by a racing load keeps its newer copy.
+        if let Some(hydrated) = prepared.hydrated_session
+            && let Some(existing) = self.state.session_mut(session_id)
+            && !existing.detail_loaded
+        {
+            *existing = hydrated;
+        }
         let handle = prepared.handle.clone();
         self.runtimes.insert(
             session_id,

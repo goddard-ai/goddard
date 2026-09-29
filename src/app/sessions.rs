@@ -569,7 +569,12 @@ impl Waku {
                             .iter_mut()
                             .find(|existing| existing.id == session_id)
                         {
-                            *existing = session;
+                            // A runtime attach can hydrate the same session
+                            // first; its copy already carries the live
+                            // events this older stored snapshot would erase.
+                            if !existing.detail_loaded {
+                                *existing = session;
+                            }
                             true
                         } else {
                             false

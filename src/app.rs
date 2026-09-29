@@ -990,6 +990,10 @@ struct DriverStartRequest {
 struct PreparedDriver {
     handle: DriverHandle,
     events: Receiver<DriverEvent>,
+    /// Stored session detail fetched while attaching to a skeleton's runtime:
+    /// driver events are transcript writes, so the detail has to land before
+    /// they do or what they build is never persistable.
+    hydrated_session: Option<AgentSession>,
 }
 
 /// One daemon's catalog contribution to the merged project/session lists,
