@@ -1,0 +1,1 @@
+- Only remind a task to commit after an empty land when its checkout has uncommitted changes.

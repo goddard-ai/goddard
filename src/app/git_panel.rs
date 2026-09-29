@@ -1814,12 +1814,42 @@ impl Waku {
     }
 
     /// The `auto_commit_reminder_on_land` follow-up to an `AlreadyLanded`
-    /// outcome: the base holding every commit usually means the task's work
-    /// is still uncommitted in the checkout. When the owning session's last
-    /// message already names a commit the reminder would be noise —
-    /// otherwise send the commit prompt, queued behind a running turn like
-    /// any follow-up.
+    /// outcome. Check the checkout on its owning daemon before prompting:
+    /// an empty land alone does not mean there are uncommitted changes.
     fn remind_land_session_to_commit(&mut self, workspace: &Path, cx: &mut Context<Self>) {
+        let Some(client) = self.workspace_client_for_path(workspace) else {
+            return;
+        };
+        let workspace = workspace.to_path_buf();
+        cx.spawn(async move |waku, cx| {
+            let status_workspace = workspace.clone();
+            let status = cx
+                .background_executor()
+                .spawn(async move {
+                    client
+                        .request(WorkspaceOperation::InspectCheckoutStatus {
+                            cwd: status_workspace,
+                            base: None,
+                        })
+                        .await
+                })
+                .await;
+            if !matches!(
+                status,
+                Ok(WorkspaceResult::CheckoutStatus {
+                    status: Some(status)
+                }) if status.uncommitted_changes
+            ) {
+                return;
+            }
+            let _ = waku.update(cx, |waku, cx| {
+                waku.remind_dirty_land_session_to_commit(&workspace, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn remind_dirty_land_session_to_commit(&mut self, workspace: &Path, cx: &mut Context<Self>) {
         let Some(session_id) = self.land_workspace_session(workspace) else {
             return;
         };
