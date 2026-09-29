@@ -954,9 +954,42 @@ fn render_work_item_ref_chips(
     for item in refs {
         let url = item.url.clone();
         let key_url = item.url.clone();
-        let kind_icon = match item.kind {
-            waku_client::WorkItemKind::Issue => "icons/info.svg",
-            waku_client::WorkItemKind::PullRequest => "icons/git-pull-request-arrow.svg",
+        // The state glyph doubles as the kind marker — GitHub's own
+        // issue/PR glyphs encode both.
+        let (kind_icon, kind_color) = match item.kind {
+            waku_client::WorkItemKind::Issue => {
+                let state = match item.state {
+                    crate::composer_complete::ComposerWorkItemState::Closed => {
+                        sidebar::SidebarIssueState::Closed
+                    }
+                    crate::composer_complete::ComposerWorkItemState::NotPlanned => {
+                        sidebar::SidebarIssueState::NotPlanned
+                    }
+                    _ => sidebar::SidebarIssueState::Open,
+                };
+                (
+                    sidebar::sidebar_issue_icon(state),
+                    sidebar::sidebar_issue_color(theme, state),
+                )
+            }
+            waku_client::WorkItemKind::PullRequest => {
+                let state = match item.state {
+                    crate::composer_complete::ComposerWorkItemState::Draft => {
+                        sidebar::SidebarPullRequestState::Draft
+                    }
+                    crate::composer_complete::ComposerWorkItemState::Merged => {
+                        sidebar::SidebarPullRequestState::Merged
+                    }
+                    crate::composer_complete::ComposerWorkItemState::Closed => {
+                        sidebar::SidebarPullRequestState::Closed
+                    }
+                    _ => sidebar::SidebarPullRequestState::Open,
+                };
+                (
+                    sidebar::sidebar_pull_request_icon(state),
+                    sidebar::sidebar_pull_request_color(theme, state),
+                )
+            }
         };
         let chip = div()
             .id(SharedString::from(format!(
@@ -980,7 +1013,7 @@ fn render_work_item_ref_chips(
             .hover(|element| element.bg(theme.overlay))
             .tooltip(Tooltip::text(format!("#{} — {}", item.number, item.title)))
             .child(icon("icons/github.svg", 11.0, theme.text_tertiary))
-            .child(icon(kind_icon, 10.0, theme.text_ghost))
+            .child(icon(kind_icon, 10.0, kind_color))
             .child(
                 div()
                     .flex_none()

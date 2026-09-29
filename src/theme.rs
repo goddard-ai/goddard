@@ -348,6 +348,10 @@ pub struct Theme {
     pub warning: Hsla,
     pub success: Hsla,
     pub favorite: Hsla,
+    /// GitHub's "done" purple — merged pull requests and completed issues.
+    /// Each scheme's own violet (the ANSI magenta slot), so the tint stays
+    /// on-palette outside the GitHub themes.
+    pub done: Hsla,
     pub danger: Hsla,
     pub danger_soft: Hsla,
 
@@ -396,6 +400,7 @@ struct ThemeSpec {
     warning: u32,
     success: u32,
     favorite: u32,
+    done: u32,
     danger: u32,
 
     syntax: SyntaxColors,
@@ -530,6 +535,7 @@ impl Theme {
             warning: rgb(spec.warning).into(),
             success: rgb(spec.success).into(),
             favorite: rgb(spec.favorite).into(),
+            done: rgb(spec.done).into(),
             danger,
             danger_soft: danger.opacity(0.10),
 
@@ -572,6 +578,7 @@ impl Theme {
             warning: 0xE0B36A,
             success: 0x62C987,
             favorite: 0xEAB308,
+            done: 0xB294BB,
             danger: 0xE2726A,
 
             syntax: SyntaxColors {
@@ -625,6 +632,7 @@ impl Theme {
             warning: 0xA66B20,
             success: 0x2F8F52,
             favorite: 0xCA8A04,
+            done: 0x8959A8,
             danger: 0xC64A42,
 
             syntax: SyntaxColors {
@@ -678,6 +686,7 @@ impl Theme {
             warning: 0xFABD2F,
             success: 0xB8BB26,
             favorite: 0xFABD2F,
+            done: 0xB16286,
             danger: 0xFB4934,
 
             syntax: SyntaxColors {
@@ -729,6 +738,7 @@ impl Theme {
             warning: 0xB57614,
             success: 0x79740E,
             favorite: 0xD79921,
+            done: 0x8F3F71,
             danger: 0x9D0006,
 
             syntax: SyntaxColors {
@@ -781,6 +791,7 @@ impl Theme {
             warning: 0xDBBC7F,
             success: 0xA7C080,
             favorite: 0xDBBC7F,
+            done: 0xD699B6,
             danger: 0xE67E80,
 
             syntax: SyntaxColors {
@@ -831,6 +842,7 @@ impl Theme {
             warning: 0xDFA000,
             success: 0x8DA101,
             favorite: 0xDFA000,
+            done: 0xDF69BA,
             danger: 0xF85552,
 
             syntax: SyntaxColors {
@@ -885,6 +897,7 @@ impl Theme {
             warning: 0xE98A00,
             success: 0x6F894E,
             favorite: 0xDE9800,
+            done: 0x624C83,
             danger: 0xC84053,
 
             syntax: SyntaxColors {
@@ -938,6 +951,7 @@ impl Theme {
             warning: 0xDFAF8F,
             success: 0x7F9F7F,
             favorite: 0xF0DFAF,
+            done: 0xDC8CC3,
             danger: 0xCC9393,
 
             syntax: SyntaxColors {
@@ -993,6 +1007,7 @@ impl Theme {
             warning: 0xFFFAC2,
             success: 0x5DE4C7,
             favorite: 0xFFFAC2,
+            done: 0xF087BD,
             danger: 0xD0679D,
 
             syntax: SyntaxColors {
@@ -1046,6 +1061,7 @@ impl Theme {
             warning: 0x9A6700,
             success: 0x1A7F37,
             favorite: 0xBF8700,
+            done: 0x8250DF,
             danger: 0xCF222E,
 
             syntax: SyntaxColors {
@@ -1097,6 +1113,7 @@ impl Theme {
             warning: 0xD29922,
             success: 0x3FB950,
             favorite: 0xE3B341,
+            done: 0xA371F7,
             danger: 0xF85149,
 
             syntax: SyntaxColors {
@@ -1153,6 +1170,7 @@ impl Theme {
             warning: 0xFFB86C,
             success: 0x50FA7B,
             favorite: 0xF1FA8C,
+            done: 0xBD93F9,
             danger: 0xFF5555,
 
             syntax: SyntaxColors {
@@ -1206,6 +1224,7 @@ impl Theme {
             warning: 0xEA9D34,
             success: 0x286983,
             favorite: 0xEA9D34,
+            done: 0x907AA9,
             danger: 0xB4637A,
 
             syntax: SyntaxColors {
@@ -1257,6 +1276,7 @@ impl Theme {
             warning: 0xF6C177,
             success: 0x3E8FB0,
             favorite: 0xF6C177,
+            done: 0xC4A7E7,
             danger: 0xEB6F92,
 
             syntax: SyntaxColors {
@@ -1311,6 +1331,7 @@ impl Theme {
             warning: 0xDCA561,
             success: 0x98BB6C,
             favorite: 0xE6C384,
+            done: 0x938AA9,
             danger: 0xC34043,
 
             syntax: SyntaxColors {
@@ -1364,6 +1385,7 @@ impl Theme {
             warning: 0xE98A00,
             success: 0x6E915F,
             favorite: 0xDE9800,
+            done: 0x624C83,
             danger: 0xD7474B,
 
             syntax: SyntaxColors {
@@ -1420,6 +1442,7 @@ impl Theme {
             warning: 0xFFB454,
             success: 0x70BF56,
             favorite: 0xF5C56E,
+            done: 0xD0A1FF,
             danger: 0xF49090,
 
             syntax: SyntaxColors {
@@ -1472,6 +1495,7 @@ impl Theme {
             warning: 0x855700,
             success: 0x226414,
             favorite: 0x8A6000,
+            done: 0x8A3090,
             danger: 0xB03434,
 
             syntax: SyntaxColors {

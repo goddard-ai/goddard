@@ -1129,7 +1129,7 @@ impl RightPanelSurface {
             Self::Browser(_) => "icons/globe.svg",
             Self::Terminal(_) => "icons/terminal.svg",
             Self::BackgroundWork { key, .. } => work_kind_icon(key.kind),
-            Self::PullRequest { .. } => "icons/git-pull-request-arrow.svg",
+            Self::PullRequest { .. } => "icons/git-pull-request.svg",
             Self::Files => "icons/folder.svg",
             Self::Diff => "icons/file-diff.svg",
             Self::File(path) | Self::FileAtRef { path, .. } => file_icon_for_path(path),

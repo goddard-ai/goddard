@@ -101,6 +101,7 @@ export type { IntegrationSnapshot } from "./IntegrationSnapshot";
 export type { IntegrationVariantInfo } from "./IntegrationVariantInfo";
 export type { IssueDetail } from "./IssueDetail";
 export type { IssueState } from "./IssueState";
+export type { IssueStateReason } from "./IssueStateReason";
 export type { IssueSummary } from "./IssueSummary";
 export type { IssueTemplate } from "./IssueTemplate";
 export type { IssueTemplateKind } from "./IssueTemplateKind";

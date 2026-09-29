@@ -725,6 +725,7 @@ github.pr_closed: 已关闭
 github.pr_merged: 已合并
 github.issue_open: 开放
 github.issue_closed: 已关闭
+github.issue_not_planned: 未计划
 github.no_description: 无描述。
 github.unknown_author: 未知用户
 github.comments: 评论

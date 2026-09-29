@@ -15,7 +15,7 @@ use std::rc::Rc;
 use super::*;
 use crate::ui::ActivationExt;
 use waku_client::{
-    GitHubAvailability, GitHubRepoRef, IssueDetail, IssueState, IssueSummary, PullRequestCheck,
+    GitHubAvailability, GitHubRepoRef, IssueDetail, IssueSummary, PullRequestCheck,
     PullRequestCommit, PullRequestDetail, PullRequestState, PullRequestSummary, WorkItemComment,
     WorkItemQueryState,
 };
@@ -717,15 +717,14 @@ impl Waku {
                 GitHubItemDetail::PullRequest(pr) => {
                     sidebar::sidebar_pull_request_icon(sidebar::pull_request_class(&pr.summary))
                 }
-                GitHubItemDetail::Issue(issue) => match issue.summary.state {
-                    IssueState::Open => "icons/info.svg",
-                    IssueState::Closed => "icons/check.svg",
-                },
+                GitHubItemDetail::Issue(issue) => {
+                    sidebar::sidebar_issue_icon(sidebar::issue_class(&issue.summary))
+                }
             };
         }
         match detail.kind {
-            GitHubItemKind::PullRequest => "icons/git-pull-request-arrow.svg",
-            GitHubItemKind::Issue => "icons/info.svg",
+            GitHubItemKind::PullRequest => "icons/git-pull-request.svg",
+            GitHubItemKind::Issue => "icons/circle-dot.svg",
         }
     }
 
@@ -1644,18 +1643,9 @@ impl Waku {
                 (
                     summary.title.clone(),
                     summary.url.clone(),
-                    match summary.state {
-                        IssueState::Open => "icons/info.svg",
-                        IssueState::Closed => "icons/check.svg",
-                    },
-                    match summary.state {
-                        IssueState::Open => theme.success,
-                        IssueState::Closed => theme.text_secondary,
-                    },
-                    match summary.state {
-                        IssueState::Open => tr!("github.issue_open"),
-                        IssueState::Closed => tr!("github.issue_closed"),
-                    },
+                    sidebar::sidebar_issue_icon(sidebar::issue_class(summary)),
+                    sidebar::sidebar_issue_color(&theme, sidebar::issue_class(summary)),
+                    sidebar::sidebar_issue_state_label(sidebar::issue_class(summary)),
                     summary.author.clone(),
                     github_issue_meta(summary),
                     issue.body.clone(),
@@ -2160,10 +2150,11 @@ fn github_pull_request_row(pr: &PullRequestSummary, theme: &Theme) -> Div {
 }
 
 fn github_issue_row(issue: &IssueSummary, theme: &Theme) -> Div {
-    let (icon_path, color) = match issue.state {
-        IssueState::Open => ("icons/info.svg", theme.success),
-        IssueState::Closed => ("icons/check.svg", theme.text_secondary),
-    };
+    let state = sidebar::issue_class(issue);
+    let (icon_path, color) = (
+        sidebar::sidebar_issue_icon(state),
+        sidebar::sidebar_issue_color(theme, state),
+    );
     let mut meta: Vec<String> = Vec::new();
     if let Some(author) = &issue.author {
         meta.push(author.clone());

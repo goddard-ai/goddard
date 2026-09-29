@@ -2095,7 +2095,7 @@ impl Waku {
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_github_issue"),
-                "icons/github.svg",
+                "icons/circle-dot.svg",
                 None,
                 PaletteAction::CreateGitHubIssue,
                 "new create file github issue bug report ticket template",

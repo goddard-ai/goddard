@@ -662,10 +662,56 @@ pub(super) fn sidebar_pull_request_badge(
 
 pub(super) fn sidebar_pull_request_icon(state: SidebarPullRequestState) -> &'static str {
     match state {
-        SidebarPullRequestState::Open => "icons/git-pull-request-arrow.svg",
+        SidebarPullRequestState::Open => "icons/git-pull-request.svg",
         SidebarPullRequestState::Draft => "icons/git-pull-request-draft.svg",
         SidebarPullRequestState::Merged => "icons/git-merge.svg",
         SidebarPullRequestState::Closed => "icons/git-pull-request-closed.svg",
+    }
+}
+
+/// The state an issue badge reports. GitHub splits `Closed` on
+/// `stateReason`: completed issues get the done purple, not-planned ones
+/// the muted circle-slash.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SidebarIssueState {
+    Open,
+    Closed,
+    NotPlanned,
+}
+
+pub(super) fn issue_class(entry: &waku_client::IssueSummary) -> SidebarIssueState {
+    match (entry.state, entry.state_reason) {
+        (waku_client::IssueState::Open, _) => SidebarIssueState::Open,
+        (waku_client::IssueState::Closed, Some(waku_client::IssueStateReason::NotPlanned)) => {
+            SidebarIssueState::NotPlanned
+        }
+        (waku_client::IssueState::Closed, _) => SidebarIssueState::Closed,
+    }
+}
+
+/// The glyphs track GitHub's octicons: `circle-dot` for open,
+/// `circle-check` for a completed close, `ban` for not-planned.
+pub(super) fn sidebar_issue_icon(state: SidebarIssueState) -> &'static str {
+    match state {
+        SidebarIssueState::Open => "icons/circle-dot.svg",
+        SidebarIssueState::Closed => "icons/circle-check.svg",
+        SidebarIssueState::NotPlanned => "icons/ban.svg",
+    }
+}
+
+pub(super) fn sidebar_issue_color(theme: &Theme, state: SidebarIssueState) -> Hsla {
+    match state {
+        SidebarIssueState::Open => theme.success,
+        SidebarIssueState::Closed => theme.done,
+        SidebarIssueState::NotPlanned => theme.text_tertiary,
+    }
+}
+
+pub(super) fn sidebar_issue_state_label(state: SidebarIssueState) -> String {
+    match state {
+        SidebarIssueState::Open => tr!("github.issue_open"),
+        SidebarIssueState::Closed => tr!("github.issue_closed"),
+        SidebarIssueState::NotPlanned => tr!("github.issue_not_planned"),
     }
 }
 
@@ -683,7 +729,7 @@ pub(super) fn sidebar_pull_request_color(theme: &Theme, state: SidebarPullReques
     match state {
         SidebarPullRequestState::Open => theme.success,
         SidebarPullRequestState::Draft => theme.text_tertiary,
-        SidebarPullRequestState::Merged => theme.info,
+        SidebarPullRequestState::Merged => theme.done,
         SidebarPullRequestState::Closed => theme.danger,
     }
 }
@@ -740,7 +786,7 @@ pub(super) fn sidebar_review_decision_icon(
 ) -> &'static str {
     match decision {
         waku_client::PullRequestReviewDecision::Approved => "icons/check.svg",
-        waku_client::PullRequestReviewDecision::ChangesRequested => "icons/alert.svg",
+        waku_client::PullRequestReviewDecision::ChangesRequested => "icons/file-diff.svg",
         waku_client::PullRequestReviewDecision::ReviewRequired => "icons/eye.svg",
     }
 }
@@ -751,8 +797,8 @@ pub(super) fn sidebar_review_decision_color(
 ) -> Hsla {
     match decision {
         waku_client::PullRequestReviewDecision::Approved => theme.success,
-        waku_client::PullRequestReviewDecision::ChangesRequested => theme.warning,
-        waku_client::PullRequestReviewDecision::ReviewRequired => theme.text_secondary,
+        waku_client::PullRequestReviewDecision::ChangesRequested => theme.danger,
+        waku_client::PullRequestReviewDecision::ReviewRequired => theme.warning,
     }
 }
 

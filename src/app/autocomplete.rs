@@ -1575,15 +1575,25 @@ impl Waku {
                 // state — color only reinforces it, matching the sidebar
                 // badge's accessibility rule.
                 let (icon_path, icon_color, state_label) = match item.kind {
-                    WorkItemKind::Issue => match item.state {
-                        ComposerWorkItemState::Open => {
-                            ("icons/info.svg", theme.success, tr!("github.issue_open"))
-                        }
-                        _ => ("icons/check.svg", theme.info, tr!("github.issue_closed")),
-                    },
+                    WorkItemKind::Issue => {
+                        let state = match item.state {
+                            ComposerWorkItemState::Closed => sidebar::SidebarIssueState::Closed,
+                            ComposerWorkItemState::NotPlanned => {
+                                sidebar::SidebarIssueState::NotPlanned
+                            }
+                            _ => sidebar::SidebarIssueState::Open,
+                        };
+                        (
+                            sidebar::sidebar_issue_icon(state),
+                            sidebar::sidebar_issue_color(theme, state),
+                            sidebar::sidebar_issue_state_label(state),
+                        )
+                    }
                     WorkItemKind::PullRequest => {
                         let state = match item.state {
-                            ComposerWorkItemState::Open => sidebar::SidebarPullRequestState::Open,
+                            ComposerWorkItemState::Open | ComposerWorkItemState::NotPlanned => {
+                                sidebar::SidebarPullRequestState::Open
+                            }
                             ComposerWorkItemState::Draft => sidebar::SidebarPullRequestState::Draft,
                             ComposerWorkItemState::Merged => {
                                 sidebar::SidebarPullRequestState::Merged

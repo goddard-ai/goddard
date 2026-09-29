@@ -178,7 +178,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "git-branch",
     "git-commit-horizontal",
     "git-merge",
-    "git-pull-request-arrow",
+    "git-pull-request",
     "git-pull-request-closed",
     "git-pull-request-draft",
     "goddard-logo",

@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use waku_protocol::workspace::{
-    CreateIssueInput, IssueDetail, IssueState, IssueSummary, WorkItemQueryState,
+    CreateIssueInput, IssueDetail, IssueState, IssueStateReason, IssueSummary, WorkItemQueryState,
 };
 
 use crate::github::{
@@ -17,7 +17,8 @@ use crate::github::{
 };
 
 const ISSUE_LIST_LIMIT: &str = "100";
-const ISSUE_FIELDS: &str = "number,title,url,state,author,labels,assignees,createdAt,updatedAt";
+const ISSUE_FIELDS: &str =
+    "number,title,url,state,stateReason,author,labels,assignees,createdAt,updatedAt";
 
 /// Repo-wide issue list for the GitHub browser. `query` forwards to
 /// `gh issue list --search`.
@@ -137,6 +138,11 @@ struct GhIssue {
     title: String,
     url: String,
     state: String,
+    /// `gh` emits "" (or omits the key) for open issues without a reopen
+    /// history — anything unrecognized stays `None` rather than failing
+    /// the row.
+    #[serde(default)]
+    state_reason: Option<String>,
     #[serde(default)]
     author: Option<GhUser>,
     #[serde(default)]
@@ -164,13 +170,26 @@ impl GhIssue {
         }
     }
 
+    /// `gh` reports `""` or `null` for a reason that does not apply — only
+    /// the documented closed reasons map.
+    fn into_state_reason(&self) -> Option<IssueStateReason> {
+        match self.state_reason.as_deref() {
+            Some("COMPLETED") => Some(IssueStateReason::Completed),
+            Some("NOT_PLANNED") => Some(IssueStateReason::NotPlanned),
+            Some("REOPENED") => Some(IssueStateReason::Reopened),
+            _ => None,
+        }
+    }
+
     fn into_summary(self) -> Option<IssueSummary> {
         let state = self.into_state()?;
+        let state_reason = self.into_state_reason();
         Some(IssueSummary {
             number: self.number,
             title: self.title,
             url: self.url,
             state,
+            state_reason,
             author: self.author.map(|author| author.login),
             labels: self.labels.into_iter().map(|label| label.name).collect(),
             assignees: self
@@ -187,12 +206,14 @@ impl GhIssue {
     /// the UI can render state as unknown rather than losing the thread.
     fn into_detail(self) -> Option<IssueDetail> {
         let state = self.into_state().unwrap_or(IssueState::Open);
+        let state_reason = self.into_state_reason();
         Some(IssueDetail {
             summary: IssueSummary {
                 number: self.number,
                 title: self.title,
                 url: self.url,
                 state,
+                state_reason,
                 author: self.author.map(|author| author.login),
                 labels: self.labels.into_iter().map(|label| label.name).collect(),
                 assignees: self
@@ -221,17 +242,25 @@ mod tests {
     fn gh_issue_rows_map_to_summaries() {
         let json = br#"[
             {"number": 12, "title": "flake", "url": "https://github.com/o/r/issues/12",
-             "state": "OPEN", "author": {"login": "sam"},
+             "state": "OPEN", "stateReason": "", "author": {"login": "sam"},
              "labels": [{"name": "bug"}], "assignees": [{"login": "sam"}],
              "createdAt": "2026-09-08T00:00:00Z", "updatedAt": "2026-09-10T00:00:00Z"},
             {"number": 13, "title": "unknown state", "url": "https://github.com/o/r/issues/13",
-             "state": "TRIAGED"}
+             "state": "TRIAGED"},
+            {"number": 14, "title": "wontfix", "url": "https://github.com/o/r/issues/14",
+             "state": "CLOSED", "stateReason": "NOT_PLANNED"}
         ]"#;
         let rows: Vec<GhIssue> = serde_json::from_slice(json).unwrap();
         let summaries: Vec<_> = rows.into_iter().filter_map(GhIssue::into_summary).collect();
-        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries.len(), 2);
         assert_eq!(summaries[0].state, IssueState::Open);
+        assert_eq!(summaries[0].state_reason, None);
         assert_eq!(summaries[0].author.as_deref(), Some("sam"));
+        assert_eq!(summaries[1].state, IssueState::Closed);
+        assert_eq!(
+            summaries[1].state_reason,
+            Some(IssueStateReason::NotPlanned)
+        );
         assert_eq!(summaries[0].labels, ["bug"]);
         assert_eq!(summaries[0].assignees, ["sam"]);
     }

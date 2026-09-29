@@ -3905,7 +3905,7 @@ impl Waku {
                             cx.open_url(&url);
                         },
                     )
-                    .icon("icons/git-pull-request-arrow.svg"),
+                    .icon("icons/git-pull-request.svg"),
                 );
             }
 

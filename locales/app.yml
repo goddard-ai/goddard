@@ -2281,6 +2281,8 @@ github.issue_open:
   en: Open
 github.issue_closed:
   en: Closed
+github.issue_not_planned:
+  en: Not planned
 github.no_description:
   en: No description.
 github.unknown_author:

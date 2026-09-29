@@ -217,8 +217,8 @@ pub(super) fn pull_request_key(url: &str) -> Option<(String, u64)> {
 /// surfaces; the inbox's icons only name the kind.
 fn subject_icon(kind: NotificationSubjectType) -> &'static str {
     match kind {
-        NotificationSubjectType::PullRequest => "icons/git-pull-request-arrow.svg",
-        NotificationSubjectType::Issue => "icons/info.svg",
+        NotificationSubjectType::PullRequest => "icons/git-pull-request.svg",
+        NotificationSubjectType::Issue => "icons/circle-dot.svg",
         NotificationSubjectType::Discussion => "icons/chat.svg",
         NotificationSubjectType::Release => "icons/package.svg",
         NotificationSubjectType::Commit => "icons/git-commit-horizontal.svg",

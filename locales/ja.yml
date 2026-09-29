@@ -735,6 +735,7 @@ github.pr_closed: クローズ済み
 github.pr_merged: マージ済み
 github.issue_open: オープン
 github.issue_closed: クローズ済み
+github.issue_not_planned: 計画外
 github.no_description: 説明はありません。
 github.unknown_author: 不明
 github.comments: コメント

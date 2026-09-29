@@ -7,7 +7,7 @@ use nucleo_matcher::{Matcher, Utf32Str};
 pub use waku_protocol::composer::{CommandScope, FileEntry, SlashCommand};
 use waku_protocol::model::{ProviderKind, ProviderModelOption, ReportedCommand};
 use waku_protocol::workspace::{
-    IssueState, IssueSummary, PullRequestState, PullRequestSummary, WorkItemKind,
+    IssueState, IssueStateReason, IssueSummary, PullRequestState, PullRequestSummary, WorkItemKind,
 };
 
 pub const FILTER_CAP: usize = 64;
@@ -444,6 +444,8 @@ pub struct ComposerWorkItem {
 pub enum ComposerWorkItemState {
     Open,
     Closed,
+    /// Closed with `stateReason: NOT_PLANNED` — issues only.
+    NotPlanned,
     Merged,
     Draft,
 }
@@ -455,9 +457,12 @@ impl ComposerWorkItem {
             number: issue.number,
             title: issue.title,
             url: issue.url,
-            state: match issue.state {
-                IssueState::Open => ComposerWorkItemState::Open,
-                IssueState::Closed => ComposerWorkItemState::Closed,
+            state: match (issue.state, issue.state_reason) {
+                (IssueState::Open, _) => ComposerWorkItemState::Open,
+                (IssueState::Closed, Some(IssueStateReason::NotPlanned)) => {
+                    ComposerWorkItemState::NotPlanned
+                }
+                (IssueState::Closed, _) => ComposerWorkItemState::Closed,
             },
             author: issue.author,
             updated_at: issue.updated_at,
@@ -884,6 +889,7 @@ mod tests {
             title: title.into(),
             url: format!("https://github.com/o/r/issues/{number}"),
             state: IssueState::Open,
+            state_reason: None,
             author: None,
             labels: Vec::new(),
             assignees: Vec::new(),

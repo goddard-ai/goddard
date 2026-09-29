@@ -1417,7 +1417,7 @@ impl Waku {
             "implement-plan" => Some(("icons/compass.svg", tr!("suggestions.implement_plan"))),
             "whats-next" => Some(("icons/circle-help.svg", tr!("suggestions.whats_next"))),
             "address-review" => Some((
-                "icons/git-pull-request-arrow.svg",
+                "icons/git-pull-request.svg",
                 tr!("suggestions.address_review"),
             )),
             "fix-ci" => Some(("icons/wrench.svg", tr!("suggestions.fix_ci"))),

@@ -166,6 +166,18 @@ pub enum IssueState {
     Closed,
 }
 
+/// Why the host says an issue closed: `NotPlanned` renders as the muted
+/// circle-slash rather than the done glyph. `Reopened` travels for
+/// completeness — clients render it as open. Absent means the host did not
+/// say, which reads as an ordinary close.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum IssueStateReason {
+    Completed,
+    NotPlanned,
+    Reopened,
+}
+
 /// One issue as the GitHub browser's list reads it.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -174,6 +186,8 @@ pub struct IssueSummary {
     pub title: String,
     pub url: String,
     pub state: IssueState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_reason: Option<IssueStateReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     #[serde(default)]
