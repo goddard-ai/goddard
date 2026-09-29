@@ -1,0 +1,1 @@
+- The transcript’s **Failed** marker now requires an unresolved error that leaves requested work incomplete; recovered tool errors no longer mark a successful turn as failed.

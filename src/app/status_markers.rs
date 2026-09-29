@@ -370,12 +370,14 @@ const FLAG_MARKERS: &[StatusMarker] = &[
         label_key: "status_markers.failed",
         icon: "icons/x-bold.svg",
         tone: MarkerTone::Danger,
-        threshold: 0.45,
-        instructions: "Did the turn fail — a reported error, a tool failure that \
-            ended the work, or the assistant saying it could not complete the \
-            request? `toolErrors` lists the calls that went wrong. Judge this \
-            independently of the ending: a tidy closing reply can still sit on \
-            unrecovered errors.",
+        threshold: 0.65,
+        instructions: "Did the turn leave requested work incomplete because an \
+            error remained unresolved — for example, the assistant could not \
+            complete the request or a failed tool call stopped the work? A failed \
+            call alone does not mean the turn failed: check `toolErrors` against \
+            later successful retries or workarounds and the closing `response`. \
+            Do not mark a recovered error when the requested work was completed, \
+            unless a separate unresolved error remains.",
     },
     StatusMarker {
         id: "blocked",
@@ -548,8 +550,12 @@ fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
         ),
         (
             FAILURE_QUESTION,
-            "If `failed` is true, are there repairable errors still \
-                unresolved? Otherwise choose `other`.",
+            "If `failed` is true, did an error remain unresolved at the end of \
+                the turn and leave requested work incomplete? Cross-check \
+                `toolErrors` against later successful retries or workarounds and \
+                the closing `response`. A failed tool call by itself is not an \
+                unresolved error; choose `other` when the agent recovered and \
+                completed the requested work, unless a separate error remains.",
             FAILURE_MARKERS,
         ),
         (
