@@ -6399,6 +6399,8 @@ mod tests {
             created_at: 0,
             temporary: false,
             starred: false,
+            friend_peer_id: None,
+            kind: None,
         };
         let ordinary = Project {
             id: Uuid::from_u128(2),
@@ -6408,6 +6410,8 @@ mod tests {
             created_at: 0,
             temporary: false,
             starred: false,
+            friend_peer_id: None,
+            kind: None,
         };
 
         assert!(sidebar_project_is_projectless(&projectless, Some(root)));

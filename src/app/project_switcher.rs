@@ -946,6 +946,8 @@ mod tests {
                 created_at: index,
                 temporary: false,
                 starred: false,
+                friend_peer_id: None,
+                kind: None,
             })
             .collect::<Vec<_>>();
         projects[0].name = "Forgotten Orchard".into();
@@ -980,6 +982,8 @@ mod tests {
             created_at,
             temporary: false,
             starred: false,
+            friend_peer_id: None,
+            kind: None,
         };
         let current = project(0);
         let recent = (0..12).map(|_| project(0)).collect::<Vec<_>>();
@@ -1012,6 +1016,8 @@ mod tests {
             created_at,
             temporary: false,
             starred: false,
+            friend_peer_id: None,
+            kind: None,
         };
         let current = project(10);
         let recent = [project(20), project(30)];
@@ -1051,6 +1057,8 @@ mod tests {
             created_at,
             temporary: false,
             starred: false,
+            friend_peer_id: None,
+            kind: None,
         };
         let first = projectless("first", 10);
         let second = projectless("second", 20);
@@ -1062,6 +1070,8 @@ mod tests {
             created_at: 30,
             temporary: false,
             starred: false,
+            friend_peer_id: None,
+            kind: None,
         };
         let projects = vec![first.clone(), second.clone(), ordinary.clone()];
 
