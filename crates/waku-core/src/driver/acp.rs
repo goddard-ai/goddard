@@ -35,8 +35,9 @@ use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
 use crate::model::{
-    ActivityKind, DriverEvent, PermissionOption, ProviderKind, ProviderModel, ProviderModelOption,
-    ProviderResumeCursor, RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
+    ActivityItem, ActivityKind, DriverEvent, PermissionOption, ProviderKind, ProviderModel,
+    ProviderModelOption, ProviderResumeCursor, RuntimeMode, UserInputAnswer, UserInputOption,
+    UserInputQuestion,
 };
 use waku_protocol::model_catalog::{
     PackedModelSelection, normalize_reasoning_effort, packed_suffix_has, resolve_packed_model,
@@ -778,6 +779,7 @@ async fn run_sdk_connection(
                 let grok_title_home = grok_title_home.clone();
                 let title_refresh = title_refresh.clone();
                 let first_prompt = first_prompt.clone();
+                let stream_state = stream_state.clone();
                 async move |notification: UntypedMessage, _connection| {
                     // Devin reports every agent-run stop with its own cause
                     // (`complete`, `cancelled`, external reasons); kept so
@@ -788,6 +790,14 @@ async fn run_sdk_connection(
                             notification.params().get("cause").and_then(Value::as_str)
                     {
                         prompt_requests.lock().note_agent_stop(cause);
+                    }
+                    if notification.method() == "_x.ai/session/update" {
+                        handle_xai_session_update(
+                            notification.params(),
+                            &prompt_requests,
+                            &stream_state,
+                            &events,
+                        );
                     }
                     if notification.method() == "_x.ai/session/prompt_complete" {
                         if let Some(session_id) = finish_xai_prompt_complete(
@@ -2294,6 +2304,21 @@ fn finish_xai_prompt_complete(
         return None;
     };
     let prompt_id = params.get("promptId").and_then(Value::as_str);
+    let stop_reason_text = ["stopReason", "stop_reason"]
+        .into_iter()
+        .find_map(|key| params.get(key).and_then(Value::as_str));
+    // Grok ends a provider-side failure with `stopReason` values outside the
+    // ACP enum (`rate_limit` for a spent quota). Recorded as the batch's stop
+    // cause, they fail the turn the same way Devin's external causes do
+    // instead of falling through to a clean `end_turn`.
+    if let Some(cause) = stop_reason_text.filter(|cause| {
+        !matches!(
+            *cause,
+            "end_turn" | "cancelled" | "max_tokens" | "max_turn_requests" | "refusal"
+        )
+    }) {
+        prompt_requests.lock().note_agent_stop(cause);
+    }
     let Some(settle) = prompt_requests
         .lock()
         .settle_extension(session_id, prompt_id)
@@ -2301,7 +2326,7 @@ fn finish_xai_prompt_complete(
         return None;
     };
 
-    let stop_reason = match params.get("stopReason").and_then(Value::as_str) {
+    let stop_reason = match stop_reason_text {
         Some("cancelled") => StopReason::Cancelled,
         Some("max_tokens") => StopReason::MaxTokens,
         Some("max_turn_requests") => StopReason::MaxTurnRequests,
@@ -2310,6 +2335,175 @@ fn finish_xai_prompt_complete(
     };
     finish_prompt(Ok(PromptResponse::new(stop_reason)), None, settle, events)
         .then(|| session_id.to_owned())
+}
+
+/// Grok's `_x.ai/session/update` extension stream mirrors the typed
+/// `session/update` channel with lifecycle records stock ACP cannot express:
+/// inference retry state, per-turn completion verdicts, and the spawn/finish
+/// of background subagents. The turn's real outcome lives here — a turn that
+/// died on the provider's side reports `stop_reason: "rate_limit"`, not
+/// `end_turn`.
+fn handle_xai_session_update(
+    params: &Value,
+    prompt_requests: &Mutex<PendingPrompts>,
+    state: &Mutex<AcpStreamState>,
+    events: &impl DriverEventSink,
+) {
+    let Some(update) = params.get("update") else {
+        return;
+    };
+    match update.get("sessionUpdate").and_then(Value::as_str) {
+        Some("retry_state") => xai_retry_state(
+            params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .unwrap_or("xai"),
+            update,
+            events,
+        ),
+        Some("turn_completed") => {
+            if let Some(cause) = update
+                .get("stop_reason")
+                .and_then(Value::as_str)
+                .filter(|cause| *cause != "end_turn")
+            {
+                prompt_requests.lock().note_agent_stop(cause);
+            }
+        }
+        Some("subagent_spawned") => {
+            if let Some(id) = update.get("subagent_id").and_then(Value::as_str)
+                && let Some(title) = update.get("description").and_then(Value::as_str)
+            {
+                state
+                    .lock()
+                    .xai_subagents
+                    .entry(id.to_owned())
+                    .or_default()
+                    .title = Some(title.to_owned());
+            }
+        }
+        Some("subagent_finished") => xai_subagent_finished(update, state, events),
+        _ => {}
+    }
+}
+
+/// One row, upserted per session: a retry that escalates must not stack
+/// rows. `exhausted` is terminal — the row fails and the reason surfaces as
+/// an error ahead of the turn's own failure.
+fn xai_retry_state(session_id: &str, update: &Value, events: &impl DriverEventSink) {
+    let reason = update.get("reason").and_then(Value::as_str);
+    let detail = match (
+        update.get("attempt").and_then(Value::as_u64),
+        update.get("max_retries").and_then(Value::as_u64),
+        reason,
+    ) {
+        (Some(attempt), Some(max), Some(reason)) => Some(truncate(
+            &format!("Attempt {attempt} of {max}: {reason}"),
+            400,
+        )),
+        (_, _, Some(reason)) => Some(truncate(reason, 400)),
+        _ => None,
+    };
+    let source_id = format!("xai-retry:{session_id}");
+    match update.get("type").and_then(Value::as_str) {
+        Some("retrying") => {
+            let (title, title_i18n) = localized!("activity.provider_retrying");
+            let mut item =
+                ActivityItem::new(Some(source_id), ActivityKind::Tool, title, detail, false);
+            item.title_i18n = Some(title_i18n);
+            let _ = events.send(DriverEvent::RichActivity(item));
+        }
+        Some("exhausted") => {
+            let (title, title_i18n) = localized!("activity.provider_retry_exhausted");
+            let mut item =
+                ActivityItem::new(Some(source_id), ActivityKind::Tool, title, detail, true)
+                    .with_failed(true);
+            item.title_i18n = Some(title_i18n);
+            let _ = events.send(DriverEvent::RichActivity(item));
+            if let Some(reason) = reason {
+                let _ = events.send(DriverEvent::Error(truncate(reason, 400)));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn xai_subagent_finished(
+    update: &Value,
+    state: &Mutex<AcpStreamState>,
+    events: &impl DriverEventSink,
+) {
+    let success = update
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            matches!(
+                update.get("status").and_then(Value::as_str),
+                Some("completed" | "success" | "succeeded")
+            )
+        });
+    let subagent_id = update.get("subagent_id").and_then(Value::as_str);
+    let tracked = subagent_id.and_then(|id| state.lock().xai_subagents.remove(id));
+    if success {
+        return;
+    }
+    let detail = update
+        .get("error")
+        .and_then(Value::as_str)
+        .map(|error| truncate(&xai_error_message(error), 400));
+    let item = ActivityItem::new(
+        tracked
+            .as_ref()
+            .and_then(|tracked| tracked.call_id.clone())
+            .or_else(|| subagent_id.map(|id| format!("xai-subagent:{id}"))),
+        ActivityKind::Tool,
+        tracked
+            .and_then(|tracked| tracked.title)
+            .unwrap_or_else(|| "Subagent".to_owned()),
+        detail,
+        true,
+    )
+    .with_failed(true);
+    let _ = events.send(DriverEvent::RichActivity(item));
+}
+
+/// A spawn call's output names its background subagent (`subagent_id:
+/// <uuid>`) — the only place the typed stream ties a `toolCallId` to the id
+/// Grok's lifecycle updates key on.
+fn find_subagent_id(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => text
+            .split("subagent_id:")
+            .nth(1)?
+            .split_whitespace()
+            .next()
+            .map(|id| {
+                id.trim_matches(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                    .to_owned()
+            })
+            .filter(|id| !id.is_empty()),
+        Value::Array(items) => items.iter().find_map(find_subagent_id),
+        Value::Object(map) => map.values().find_map(find_subagent_id),
+        _ => None,
+    }
+}
+
+/// Grok wraps a terminal failure as `Session error: <kind>: {json}` — the
+/// displayable sentence is the embedded `message`.
+fn xai_error_message(error: &str) -> String {
+    let text = error.trim();
+    let Some(start) = text.find('{') else {
+        return text.to_owned();
+    };
+    serde_json::from_str::<Value>(&text[start..])
+        .ok()
+        .and_then(|value| {
+            value
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| text.to_owned())
 }
 
 fn start_grok_title_refresh(
@@ -3008,10 +3202,22 @@ struct AcpStreamState {
     /// Agent ids whose completion already arrived, mapped to their success,
     /// so a subagent call that surfaces late still settles at once.
     subagent_finished: HashMap<String, bool>,
+    /// Grok's `_x.ai/session/update` stream reports background subagents by
+    /// id; the typed stream ties a `toolCallId` to that id only inside the
+    /// spawn call's `subagent_id: <id>` output text. Keeping the link — and
+    /// the row's title — lets `subagent_finished` settle the spawn row
+    /// instead of leaving it looking completed.
+    xai_subagents: HashMap<String, XaiSubagent>,
     /// Whether the running turn has produced anything visible. A turn that
     /// ends having produced nothing is the shape a swallowed provider error
     /// takes, which is what makes a native failure worth looking up.
     produced_content: bool,
+}
+
+#[derive(Default)]
+struct XaiSubagent {
+    call_id: Option<String>,
+    title: Option<String>,
 }
 
 /// Pull the agent's explanation out of a permission request's tool call.
@@ -3155,6 +3361,17 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
             .and_then(Value::as_str)
             .or_else(|| wire_title.filter(|title| title.starts_with("mcp__"))),
     );
+    // Grok names a spawned background subagent inside the spawn call's output
+    // (`subagent_id: <uuid>`); the `_x.ai/session/update` stream keys its
+    // lifecycle records by that id, so keep the id→call link for
+    // `subagent_finished`.
+    if let Some(subagent_id) = output.and_then(find_subagent_id)
+        && let Some(id) = id.as_ref()
+    {
+        let entry = state.xai_subagents.entry(subagent_id).or_default();
+        entry.call_id = Some(id.clone());
+        entry.title = Some(item.title.clone());
+    }
     let _ = events.send(DriverEvent::RichActivity(item));
 
     // `subagent_completed` is keyed by the agent id, not the calls it owned —
@@ -4086,6 +4303,168 @@ mod tests {
         ));
         assert!(settle_prompt_request(&requests, &request_id, false).is_none());
         assert!(event_rx.try_recv().is_err());
+    }
+
+    /// Grok ends a rate-limited turn with `stopReason: "rate_limit"` — outside
+    /// the ACP enum, but still a provider failure, not a clean `end_turn`.
+    #[test]
+    fn xai_prompt_complete_fails_on_a_provider_stop_reason() {
+        let requests = Mutex::new(PendingPrompts::default());
+        requests.lock().insert(
+            RequestId::Str("sdk-request".into()),
+            Some("waku-prompt".into()),
+            "grok-session".into(),
+        );
+        let (events, event_rx) = crate::driver::test_event_channel();
+
+        // The title refresh is gated on a clean finish; a failed settle
+        // returns no session id.
+        assert_eq!(
+            finish_xai_prompt_complete(
+                &json!({
+                    "sessionId": "grok-session",
+                    "promptId": "waku-prompt",
+                    "stopReason": "rate_limit"
+                }),
+                &requests,
+                &events,
+            ),
+            None
+        );
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnFinished {
+                success: false,
+                summary: Some(_),
+                summary_i18n: Some(_),
+            }
+        ));
+    }
+
+    /// Grok reports the turn's real stop reason on its extension stream before
+    /// the settle arrives; `end_turn` in `prompt_complete` then still fails.
+    #[test]
+    fn xai_turn_completed_records_the_real_stop_cause() {
+        let requests = Mutex::new(PendingPrompts::default());
+        let request_id = RequestId::Str("sdk-request".into());
+        requests
+            .lock()
+            .insert(request_id.clone(), None, "grok-session".into());
+        let state = Mutex::new(AcpStreamState::default());
+        let (events, _event_rx) = crate::driver::test_event_channel();
+
+        handle_xai_session_update(
+            &json!({
+                "sessionId": "grok-session",
+                "update": {"sessionUpdate": "turn_completed", "stop_reason": "rate_limit"}
+            }),
+            &requests,
+            &state,
+            &events,
+        );
+
+        let settle = settle_prompt_request(&requests, &request_id, true).unwrap();
+        assert_eq!(settle.stop_cause.as_deref(), Some("rate_limit"));
+        let (events, event_rx) = crate::driver::test_event_channel();
+        assert!(!finish_prompt(
+            Ok(PromptResponse::new(StopReason::EndTurn)),
+            None,
+            settle,
+            &events
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnFinished {
+                success: false,
+                summary: Some(_),
+                ..
+            }
+        ));
+    }
+
+    /// An exhausted Grok retry fails its upserted row and reports the
+    /// provider's reason ahead of the turn's own failure.
+    #[test]
+    fn xai_retry_state_exhausted_fails_and_reports_the_reason() {
+        let requests = Mutex::new(PendingPrompts::default());
+        let state = Mutex::new(AcpStreamState::default());
+        let (events, event_rx) = crate::driver::test_event_channel();
+
+        handle_xai_session_update(
+            &json!({
+                "sessionId": "grok-session",
+                "update": {
+                    "sessionUpdate": "retry_state",
+                    "type": "exhausted",
+                    "attempts": 0,
+                    "reason": "API error (status 429): free usage exhausted",
+                    "is_rate_limited": true
+                }
+            }),
+            &requests,
+            &state,
+            &events,
+        );
+
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::RichActivity(ref item)
+                if item.failed && item.complete && item.source_id.as_deref() == Some("xai-retry:grok-session")
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::Error(message) if message.contains("429")
+        ));
+    }
+
+    /// A failed Grok subagent settles its spawn row instead of leaving it
+    /// looking completed.
+    #[test]
+    fn xai_subagent_finished_fails_the_spawn_row() {
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let mut state = AcpStreamState::default();
+        tool_activity(
+            &json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call-1",
+                "status": "completed",
+                "title": "Review overlay primitives",
+                "rawOutput": {
+                    "type": "Text",
+                    "text": "Subagent started in background.\nsubagent_id: sub-1\ndescription: Review overlay primitives"
+                }
+            }),
+            &events,
+            &mut state,
+        );
+        let _ = event_rx.try_recv();
+        assert!(state.xai_subagents.contains_key("sub-1"));
+
+        let requests = Mutex::new(PendingPrompts::default());
+        let state = Mutex::new(state);
+        handle_xai_session_update(
+            &json!({
+                "sessionId": "grok-session",
+                "update": {
+                    "sessionUpdate": "subagent_finished",
+                    "subagent_id": "sub-1",
+                    "status": "failed",
+                    "error": "Session error: Rate limited: {\"message\": \"429 free usage exhausted\"}"
+                }
+            }),
+            &requests,
+            &state,
+            &events,
+        );
+
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::RichActivity(ref item)
+                if item.failed
+                    && item.complete
+                    && item.source_id.as_deref() == Some("call-1")
+                    && item.detail.as_deref() == Some("429 free usage exhausted")
+        ));
     }
 
     /// Kimi ends a failed turn with `end_turn` and no content at all, so the

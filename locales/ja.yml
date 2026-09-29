@@ -992,6 +992,7 @@ activity.compacting_context: コンテキストを圧縮中
 activity.compacted_context: コンテキストを圧縮しました
 activity.compaction_failed: コンテキストの圧縮に失敗しました
 activity.provider_retrying: リクエストを再試行中
+activity.provider_retry_exhausted: 再試行が尽きました
 activity.background_shell: バックグラウンドシェル
 
 mode.supervised: 監督モード

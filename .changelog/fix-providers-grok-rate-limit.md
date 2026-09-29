@@ -1,0 +1,1 @@
+- Tasks running on Grok Build now show when the provider rate-limits or runs out of free usage — retries get a live status row, and a spent quota fails the turn with Grok's message instead of ending it looking completed

@@ -978,6 +978,7 @@ activity.compacting_context: 正在压缩上下文
 activity.compacted_context: 已压缩上下文
 activity.compaction_failed: 上下文压缩失败
 activity.provider_retrying: 正在重试请求
+activity.provider_retry_exhausted: 重试次数已用尽
 activity.background_shell: 后台 shell
 mode.supervised: 监督
 mode.auto_accept_edits: 自动接受修改
