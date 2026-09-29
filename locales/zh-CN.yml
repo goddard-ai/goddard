@@ -520,6 +520,7 @@ input.worktree_name: 工作树名称
 input.detected_automatically: 自动检测
 input.filter_projects: 筛选项目
 input.search_or_enter_address: 搜索或输入网址
+input.search_projects: 搜索项目
 input.find: 查找
 input.replace: 替换
 input.go_to_line: 行号或 行:列
@@ -570,6 +571,23 @@ providers.binary_path_description: Goddard 用于启动 %{provider} 的可执行
 providers.checked_just_now: 刚刚检查过
 providers.checked_minutes_ago: "%{count} 分钟前检查过"
 providers.checked_hours_ago: "%{count} 小时前检查过"
+inference.providers: 推理服务商
+inference.description: 托管式推理服务的 API 凭据 — 用于评估、文本和语音，由所有使用它们的功能共享
+inference.configured: 已配置
+inference.not_configured: 未配置
+inference.key_configured: 已配置密钥
+inference.no_key: 无密钥
+inference.api_key: API 密钥
+inference.api_key_description: 粘贴密钥后点击“应用”或按 Return。密钥保存在系统钥匙串中，绝不会存入设置文件。
+inference.api_key_stored_description: 已保存密钥。输入新密钥即可替换；保存的值不会显示。
+inference.openrouter_key: OpenRouter API 密钥
+inference.openrouter_key_placeholder: sk-or-…
+inference.get_key: 获取密钥
+inference.remove_key: 移除已保存的密钥
+inference.apply_hint: 或在输入框中按 Return
+inference.context_eval: 评估
+inference.context_text: 文本
+inference.context_speech: 语音
 computer_use.allow_apps: 允许 Goddard 操作其他应用
 computer_use.availability: Codex、OpenCode、OpenCode 2、Grok 和 Pi 支持电脑操作功能
 computer_use.macos_access: macOS 权限
@@ -773,6 +791,7 @@ project.relocated: "%{name} 已跟随重命名后的文件夹"
 project.relocated_to: 已重新定位到 %{path}
 
 projects.title: 项目
+projects.none_found: 未找到项目
 activity.tab: 活动
 activity.filter: 筛选活动
 activity.releases: 发布版本
@@ -2210,8 +2229,10 @@ experiments.sidebar_dock_title: 侧边栏操作坞
 experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。Claude Code、OpenCode、GitHub Copilot 和 Pi 完全支持；Codex 和 OpenCode 2 仅提供建议；其他服务商保持禁用。只有提供工具策略的服务商会强制执行只读助手。对开启后启动的会话生效。
 experiments.subagents_title: 子智能体
 experiments.voice_briefing_title: 语音简报
-experiments.voice_briefing_description: 打开最新回复较长的任务时，朗读约 45 秒的摘要 — 先讲智能体做了什么，再讲需要你做的决定或处理。使用你的 AI Gateway 密钥和下方模型运行。
-experiments.voice_briefing_caption: 两次调用都经过 AI Gateway — 摘要模型撰写文稿，语音模型负责朗读。密钥保存在本应用的设置文件中。
+experiments.voice_briefing_description: 打开最新回复较长的任务时，会朗读约 45 秒的摘要 — 说明智能体做了什么，以及需要你作出的决定或采取的行动。使用已配置的推理服务商和下方模型运行。
+experiments.voice_briefing_caption: 两次调用都通过所选的推理服务商 — 摘要模型生成文稿，语音模型将其朗读。凭据位于“服务商”页面的“推理服务商”下。
+experiments.voice_briefing_provider: 服务商
+experiments.voice_briefing_needs_key: 此服务商尚未保存凭据 — 请前往“服务商”页面的“推理服务商”添加。
 experiments.voice_briefing_model: 摘要模型
 experiments.voice_briefing_model_placeholder: 服务商/模型 — 例如 google/gemini-3-flash
 experiments.voice_briefing_custom_model: 自定义模型
@@ -2494,7 +2515,7 @@ right_panel.side_chat: 侧聊
 right_panel.side_chat_unavailable: 侧聊不可用
 right_panel.side_chat_unavailable_description: 该聊天已随其父任务删除，或已在此标签页中关闭
 routing.backend: 评估后端
-routing.backend_description: 对每个任务首条提示词进行分类的服务。三者回答同一套类型化评估问题，仅凭据不同。
+routing.backend_description: 对每个任务首条提示词进行分类的服务。每个后端都会回答同一套类型化评估问题；凭据由“推理服务商”提供。
 routing.class_hard: 困难
 routing.class_hard_description: 微妙、高风险或长周期的工作 — 路由到最强的组合。
 routing.class_medium: 中等
@@ -2510,6 +2531,11 @@ routing.cloudflare_token_description: 上述账户的 Workers AI 限定令牌。
 routing.cloudflare_token_placeholder: Cloudflare API 令牌
 routing.connection_failed: "连接失败：%{error}"
 routing.connection_ok: 已连接 — %{model} 在 %{latency} 毫秒内应答
+routing.credential: 凭据
+routing.credential_configured: 在“服务商”页面的“推理服务商”下管理。
+routing.credential_missing_hint: 此服务商尚未保存凭据 — 请前往“服务商”页面的“推理服务商”添加。
+routing.credential_ready: 已配置
+routing.credential_needed: 缺少
 routing.feature_auto_prompt_description: 判断已完成的轮次是否自动发送后续提示
 routing.feature_auto_prompt_preview_description: 对当前任务试运行自动提示规则
 routing.feature_managed_goal: 托管目标
@@ -2574,6 +2600,8 @@ routing.vercel_team: 团队 ID（可选）
 routing.vercel_team_description: 当你的网关限定在 Vercel 团队时，作为 x-vercel-ai-gateway-team 发送。
 routing.feature_title_quality: 任务标题
 routing.feature_title_quality_description: 检查自动生成的任务标题是否含混或冗杂。
+routing.feature_project_map: 项目地图
+routing.feature_project_map_description: 根据智能体的源查询，对已索引代码的候选项进行排序。
 session.agy_ended: Antigravity 会话已结束
 session.agy_relaunch: 重新启动会话
 session.marked_unread: 任务已标记为未读

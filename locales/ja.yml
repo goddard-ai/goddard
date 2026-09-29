@@ -523,6 +523,7 @@ input.worktree_name: ワークツリー名
 input.detected_automatically: 自動検出
 input.filter_projects: プロジェクトを絞り込む
 input.search_or_enter_address: 検索またはアドレスを入力
+input.search_projects: プロジェクトを検索
 input.find: 検索
 input.replace: 置換
 input.go_to_line: 行番号または 行:列
@@ -576,6 +577,23 @@ providers.binary_path_description: Goddard が %{provider} の起動に使用す
 providers.checked_just_now: たった今確認済み
 providers.checked_minutes_ago: "%{count} 分前に確認済み"
 providers.checked_hours_ago: "%{count} 時間前に確認済み"
+inference.providers: 推論プロバイダー
+inference.description: ホスト型推論サービスの API 認証情報 — 評価、テキスト、音声に使われ、利用するすべての機能で共有されます
+inference.configured: 設定済み
+inference.not_configured: 未設定
+inference.key_configured: キー設定済み
+inference.no_key: キーなし
+inference.api_key: API キー
+inference.api_key_description: キーを貼り付けて「適用」をクリックするか、Return キーを押します。キーはシステムキーチェーンに保存され、設定ファイルには保存されません。
+inference.api_key_stored_description: キーが保存されています。新しいキーを入力すると置き換わります。保存済みの値は表示されません。
+inference.openrouter_key: OpenRouter API キー
+inference.openrouter_key_placeholder: sk-or-…
+inference.get_key: キーを取得
+inference.remove_key: 保存済みのキーを削除
+inference.apply_hint: または入力欄で Return キーを押す
+inference.context_eval: 評価
+inference.context_text: テキスト
+inference.context_speech: 音声
 
 computer_use.allow_apps: Goddard にアプリの操作を許可
 computer_use.availability: コンピュータ操作は Codex、OpenCode、OpenCode 2、Grok、Pi で利用できます
@@ -783,6 +801,7 @@ project.relocated: "%{name} は名前が変更されたフォルダを追跡し�
 project.relocated_to: "%{path} に移動しました"
 
 projects.title: プロジェクト
+projects.none_found: プロジェクトが見つかりません
 activity.tab: アクティビティ
 activity.filter: アクティビティを絞り込み
 activity.releases: リリース
@@ -2259,8 +2278,10 @@ experiments.sidebar_dock_title: サイドバードック
 experiments.subagents_description: セッションが実行を名前付きサブエージェントに委任できるようにします。Claude Code、OpenCode、GitHub Copilot、Pi は完全対応、Codex と OpenCode 2 は助言のみ、それ以外のプロバイダーでは無効です。読み取り専用ヘルパーの強制は、ツールポリシーを提供するプロバイダーに限られます。有効化後に開始したセッションに適用されます。
 experiments.subagents_title: サブエージェント
 experiments.voice_briefing_title: 音声ブリーフィング
-experiments.voice_briefing_description: 最新の返信が長いタスクを開くと、約45秒の要約を読み上げます — エージェントが行ったことと、あなたに必要な判断や対応を伝えます。AI Gateway キーと以下のモデルで実行されます。
-experiments.voice_briefing_caption: どちらの呼び出しも AI Gateway を経由します — 要約モデルが原稿を作成し、音声モデルがそれを読み上げます。キーはこのアプリの設定ファイルに保存されます。
+experiments.voice_briefing_description: 最新の返信が長いタスクを開くと、約45秒の要約を読み上げます — エージェントが行ったことと、あなたに必要な判断や対応を伝えます。設定済みの推論プロバイダーと下のモデルを使います。
+experiments.voice_briefing_caption: どちらの呼び出しも選択した推論プロバイダーを経由します — 要約モデルが原稿を作成し、音声モデルが読み上げます。認証情報は「プロバイダー」ページの「推論プロバイダー」にあります。
+experiments.voice_briefing_provider: プロバイダー
+experiments.voice_briefing_needs_key: このプロバイダーの認証情報は保存されていません — 「プロバイダー」ページの「推論プロバイダー」で追加してください。
 experiments.voice_briefing_model: 要約モデル
 experiments.voice_briefing_model_placeholder: プロバイダー/モデル — 例 google/gemini-3-flash
 experiments.voice_briefing_custom_model: カスタムモデル
@@ -2543,7 +2564,7 @@ right_panel.side_chat: サイドチャット
 right_panel.side_chat_unavailable: サイドチャットを利用できません
 right_panel.side_chat_unavailable_description: チャットは親タスクとともに削除されたか、このタブから閉じられました
 routing.backend: 評価バックエンド
-routing.backend_description: 各タスクの最初のプロンプトを分類するサービスです。3 つとも同じ型付きの評価質問に回答します。違いは認証情報だけです。
+routing.backend_description: 各タスクの最初のプロンプトを分類するサービスです。どのバックエンドも同じ型付きの評価質問に回答し、認証情報は「推論プロバイダー」から取得します。
 routing.class_hard: 難しい
 routing.class_hard_description: 繊細で重要度が高い、または長期の作業 — 最強の組み合わせに振り分けます。
 routing.class_medium: 中程度
@@ -2559,6 +2580,11 @@ routing.cloudflare_token_description: 上のアカウントの Workers AI スコ
 routing.cloudflare_token_placeholder: Cloudflare API トークン
 routing.connection_failed: "接続に失敗しました：%{error}"
 routing.connection_ok: "接続しました — %{model} が %{latency} ms で応答"
+routing.credential: 認証情報
+routing.credential_configured: 「プロバイダー」ページの「推論プロバイダー」で管理します。
+routing.credential_missing_hint: このプロバイダーの認証情報は保存されていません — 「プロバイダー」ページの「推論プロバイダー」で追加してください。
+routing.credential_ready: 設定済み
+routing.credential_needed: 未設定
 routing.feature_auto_prompt_description: 完了したターンが自動フォローアップを送信すべきか判断します
 routing.feature_auto_prompt_preview_description: このタスクに対して自動プロンプトルールを試行します
 routing.feature_managed_goal: 管理対象の目標
@@ -2623,6 +2649,8 @@ routing.vercel_team: チーム ID（任意）
 routing.vercel_team_description: ゲートウェイが Vercel チームにスコープされている場合、x-vercel-ai-gateway-team として送信されます。
 routing.feature_title_quality: タスクタイトル
 routing.feature_title_quality_description: 自動生成されたタスクタイトルが分かりにくい、または冗長かどうかを確認します。
+routing.feature_project_map: プロジェクトマップ
+routing.feature_project_map_description: エージェントのソースクエリに照らして、インデックス済みコードの候補を順位付けします。
 session.agy_ended: Antigravity セッションは終了しました
 session.agy_relaunch: セッションを再起動
 session.marked_unread: タスクを未読にしました
