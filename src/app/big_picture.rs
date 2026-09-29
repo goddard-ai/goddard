@@ -1528,6 +1528,7 @@ impl Waku {
                             show_response_token_speed: false,
                             assistant_message_action: None,
                             user_message_action: None,
+                            voice_briefing: None,
                             user_message_viewport: None,
                             user_message_expanded: false,
                             user_message_expand_focus: None,

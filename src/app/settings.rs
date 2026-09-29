@@ -7616,11 +7616,93 @@ impl Waku {
                     .into_any_element(),
                 ))
             })
+            .child(row(
+                tr!("experiments.voice_briefing_instructions"),
+                TextField::new(
+                    "voice-briefing-instructions",
+                    self.voice_briefing_instructions_input.clone(),
+                )
+                .w(px(280.0))
+                .into_any_element(),
+            ))
+            .child(row(
+                tr!("experiments.voice_briefing_autoplay"),
+                toggle_switch(
+                    "voice-briefing-autoplay",
+                    self.state.voice_briefing_autoplay,
+                    false,
+                    theme,
+                    cx,
+                    move |this, _, cx| {
+                        this.set_voice_briefing_autoplay(!this.state.voice_briefing_autoplay, cx)
+                    },
+                )
+                .into_any_element(),
+            ))
+            .child(row(
+                tr!("experiments.voice_briefing_gate"),
+                toggle_switch(
+                    "voice-briefing-gate",
+                    self.state.voice_briefing_gate_enabled,
+                    false,
+                    theme,
+                    cx,
+                    move |this, _, cx| {
+                        this.set_voice_briefing_gate_enabled(
+                            !this.state.voice_briefing_gate_enabled,
+                            cx,
+                        )
+                    },
+                )
+                .into_any_element(),
+            ))
+            .when(self.state.voice_briefing_gate_enabled, |card| {
+                card.child(row(
+                    tr!("experiments.voice_briefing_gate_instructions"),
+                    TextField::new(
+                        "voice-briefing-gate-instructions",
+                        self.voice_briefing_gate_instructions_input.clone(),
+                    )
+                    .w(px(280.0))
+                    .into_any_element(),
+                ))
+            })
+            .when(
+                self.state.voice_briefing_gate_enabled
+                    && !self.daemon.settings().eval_ready(),
+                |card| {
+                    card.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(icon("icons/alert.svg", 12.0, theme.warning))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("experiments.voice_briefing_gate_needs_eval")),
+                            ),
+                    )
+                },
+            )
             .into_any_element()
     }
 
     fn set_voice_briefing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.voice_briefing_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_autoplay(&mut self, autoplay: bool, cx: &mut Context<Self>) {
+        self.state.voice_briefing_autoplay = autoplay;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_gate_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.voice_briefing_gate_enabled = enabled;
         self.save();
         cx.notify();
     }
@@ -7708,6 +7790,18 @@ impl Waku {
         }
         self.state.voice_briefing_tts_custom_model = self
             .voice_briefing_tts_model_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        self.state.voice_briefing_summary_instructions = self
+            .voice_briefing_instructions_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        self.state.voice_briefing_gate_instructions = self
+            .voice_briefing_gate_instructions_input
             .read(cx)
             .content()
             .trim()
@@ -14883,6 +14977,7 @@ fn eval_feature_label(feature: &str) -> String {
         "auto-prompt-suggest" => tr!("auto_prompts.suggest"),
         "auto-prompt-preview" => tr!("auto_prompts.try_task"),
         "managed-goal" => tr!("routing.feature_managed_goal"),
+        "voice-briefing-gate" => tr!("routing.feature_voice_briefing_gate"),
         _ => return feature.to_owned(),
     }
 }
@@ -14911,6 +15006,7 @@ fn eval_feature_description(feature: &str) -> Option<String> {
         "auto-prompt-suggest" => tr!("routing.feature_auto_prompt_suggest_description"),
         "auto-prompt-preview" => tr!("routing.feature_auto_prompt_preview_description"),
         "managed-goal" => tr!("routing.feature_managed_goal_description"),
+        "voice-briefing-gate" => tr!("routing.feature_voice_briefing_gate_description"),
         _ => return None,
     })
 }

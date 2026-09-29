@@ -1289,6 +1289,21 @@ pub struct AppSettings {
     /// Gateway model ID used when the TTS selector is set to Custom.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_tts_custom_model: String,
+    /// Extra guidance folded into the transcript writer's prompt.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_briefing_summary_instructions: String,
+    /// Play the finished clip as soon as its task is opened. Off leaves
+    /// generation to the response footer's on-demand button — nothing
+    /// prefetches.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub voice_briefing_autoplay: bool,
+    /// Let Jev decide whether an automatic briefing is worth generating.
+    /// Eval failures fail open — the briefing still runs.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub voice_briefing_gate_enabled: bool,
+    /// The gate question's user criteria, appended to the default prompt.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_briefing_gate_instructions: String,
     /// Saved remote daemons connected alongside the local one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote_hosts: Vec<RemoteHost>,
@@ -1373,6 +1388,10 @@ impl Default for AppSettings {
             voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             voice_briefing_tts_custom_model: String::new(),
+            voice_briefing_summary_instructions: String::new(),
+            voice_briefing_autoplay: false,
+            voice_briefing_gate_enabled: false,
+            voice_briefing_gate_instructions: String::new(),
             remote_hosts: Vec::new(),
         }
     }
@@ -1899,6 +1918,14 @@ pub struct PersistedState {
     pub voice_briefing_tts_model: VoiceBriefingTtsModel,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_tts_custom_model: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_briefing_summary_instructions: String,
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub voice_briefing_autoplay: bool,
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub voice_briefing_gate_enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_briefing_gate_instructions: String,
     /// Whether the user has confirmed the Experiments page's warning
     /// interstitial. Gates the page's toggles, not the flags themselves —
     /// an experiment already on stays on.
@@ -2271,6 +2298,10 @@ impl PersistedState {
             voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             voice_briefing_tts_custom_model: String::new(),
+            voice_briefing_summary_instructions: String::new(),
+            voice_briefing_autoplay: false,
+            voice_briefing_gate_enabled: false,
+            voice_briefing_gate_instructions: String::new(),
             experiments_warning_acknowledged: false,
             remote_hosts: Vec::new(),
             sidebar_visible: true,
@@ -2694,6 +2725,10 @@ impl PersistedState {
             voice_briefing_summary_custom: self.voice_briefing_summary_custom,
             voice_briefing_tts_model: self.voice_briefing_tts_model,
             voice_briefing_tts_custom_model: self.voice_briefing_tts_custom_model.clone(),
+            voice_briefing_summary_instructions: self.voice_briefing_summary_instructions.clone(),
+            voice_briefing_autoplay: self.voice_briefing_autoplay,
+            voice_briefing_gate_enabled: self.voice_briefing_gate_enabled,
+            voice_briefing_gate_instructions: self.voice_briefing_gate_instructions.clone(),
             remote_hosts: self.remote_hosts.clone(),
         }
     }
@@ -2838,6 +2873,10 @@ impl PersistedState {
         self.voice_briefing_summary_custom = settings.voice_briefing_summary_custom;
         self.voice_briefing_tts_model = settings.voice_briefing_tts_model;
         self.voice_briefing_tts_custom_model = settings.voice_briefing_tts_custom_model;
+        self.voice_briefing_summary_instructions = settings.voice_briefing_summary_instructions;
+        self.voice_briefing_autoplay = settings.voice_briefing_autoplay;
+        self.voice_briefing_gate_enabled = settings.voice_briefing_gate_enabled;
+        self.voice_briefing_gate_instructions = settings.voice_briefing_gate_instructions;
         self.remote_hosts = settings.remote_hosts;
     }
 

@@ -339,6 +339,10 @@ command_palette.undo_archive:
   en: Undo last archive
 command_palette.undo_archive_count:
   en: "%{count} tasks"
+command_palette.generate_voice_briefing:
+  en: Generate voice briefing for last turn
+command_palette.cancel_voice_briefing:
+  en: Cancel voice briefing generation
 command_palette.show_sidebar:
   en: Show sidebar
 command_palette.hide_sidebar:
@@ -933,6 +937,20 @@ experiments.voice_briefing_custom_model_placeholder:
   en: provider/model — e.g. openai/tts-1
 experiments.voice_briefing_tts:
   en: Voice model
+experiments.voice_briefing_instructions:
+  en: Summary instructions
+experiments.voice_briefing_instructions_placeholder:
+  en: "e.g. name the files that changed"
+experiments.voice_briefing_autoplay:
+  en: Automatic playback
+experiments.voice_briefing_gate:
+  en: Jev gate
+experiments.voice_briefing_gate_instructions:
+  en: Gate criteria
+experiments.voice_briefing_gate_placeholder:
+  en: "e.g. only when the reply needs a decision"
+experiments.voice_briefing_gate_needs_eval:
+  en: No eval backend is configured — the gate never runs, so every briefing generates. Set one up on the Jev page.
 experiments.memory_title:
   en: Project memory
 experiments.composer_drafts_title:
@@ -1185,6 +1203,10 @@ routing.feature_managed_goal:
   en: Managed goal
 routing.feature_managed_goal_description:
   en: Decides whether the active goal is complete, should continue, or needs your input
+routing.feature_voice_briefing_gate:
+  en: Voice briefing gate
+routing.feature_voice_briefing_gate_description:
+  en: Whether a settled reply warrants a spoken briefing
 jev.tab_suggestions:
   en: Suggestions
 jev.tab_automation:
@@ -2580,6 +2602,12 @@ session.reverting_message:
   en: Reverting message…
 session.reverting_message_title:
   en: Reverting Message…
+session.voice_briefing_generate:
+  en: Generate voice briefing
+session.voice_briefing_generating:
+  en: Briefing…
+session.voice_briefing_cancel:
+  en: Cancel voice briefing
 
 time.yesterday_at:
   en: Yesterday %{time}

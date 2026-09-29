@@ -228,6 +228,8 @@ enum PaletteAction {
     },
     SyncBranch,
     CompactContext,
+    GenerateVoiceBriefing,
+    CancelVoiceBriefing,
     ToggleUsage,
     CheckForUpdates,
     CollapseSidebarGroups,
@@ -2394,6 +2396,43 @@ impl Waku {
                 "compact compress context window tokens reduce shrink summarize",
                 next(),
             ));
+        }
+
+        // Voice briefing commands track the selected task: cancel surfaces
+        // while a pipeline is in flight, generate once a settled reply
+        // exists and nothing is already running for it.
+        if let Some(session_id) = self.state.selected_session {
+            let in_flight = self.session_briefing_in_flight(session_id);
+            if !in_flight.is_empty() {
+                commands.push(CommandPaletteItem::command(
+                    display_section(PaletteSection::Suggested),
+                    tr!("command_palette.cancel_voice_briefing"),
+                    "icons/ban.svg",
+                    None,
+                    PaletteAction::CancelVoiceBriefing,
+                    "cancel stop voice briefing audio summary speech generation",
+                    next(),
+                ));
+            } else if self.state.voice_briefing_enabled
+                && self
+                    .state
+                    .inference
+                    .get(&self.state.voice_briefing_provider)
+                    .is_some_and(|entry| entry.credential_configured)
+                && self
+                    .voice_briefing_last_reply(session_id)
+                    .is_some()
+            {
+                commands.push(CommandPaletteItem::command(
+                    display_section(PaletteSection::Suggested),
+                    tr!("command_palette.generate_voice_briefing"),
+                    "icons/headphones.svg",
+                    None,
+                    PaletteAction::GenerateVoiceBriefing,
+                    "generate voice briefing audio summary speech listen read aloud last reply",
+                    next(),
+                ));
+            }
         }
 
         if self
@@ -4832,6 +4871,20 @@ impl Waku {
                 self.settings_page = None;
                 if let Some(session_id) = self.composer_session_id() {
                     self.compact_session(session_id, cx);
+                }
+            }
+            PaletteAction::GenerateVoiceBriefing => {
+                if let Some(session_id) = self.state.selected_session
+                    && let Some(message_id) = self.voice_briefing_last_reply(session_id)
+                {
+                    self.request_voice_briefing(message_id, cx);
+                }
+            }
+            PaletteAction::CancelVoiceBriefing => {
+                if let Some(session_id) = self.state.selected_session {
+                    for message_id in self.session_briefing_in_flight(session_id) {
+                        self.cancel_voice_briefing(message_id, cx);
+                    }
                 }
             }
             PaletteAction::RunCustomCommand(command_id) => {

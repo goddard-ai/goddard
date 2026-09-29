@@ -2245,10 +2245,13 @@ pub struct Waku {
     /// Providers page.
     expanded_inference: Option<waku_protocol::inference::InferenceProvider>,
     inference_inputs_seeded: bool,
-    /// The voice briefing's model fields, seeded from app state at startup —
-    /// the provider's credential lives in the inference section, not here.
+    /// The voice briefing's model and instruction fields, seeded from app
+    /// state at startup — the provider's credential lives in the inference
+    /// section, not here.
     voice_briefing_model_input: Entity<TextInput>,
     voice_briefing_tts_model_input: Entity<TextInput>,
+    voice_briefing_instructions_input: Entity<TextInput>,
+    voice_briefing_gate_instructions_input: Entity<TextInput>,
     /// Replies already briefed this run, keyed by message id — landing on
     /// the same task twice replays nothing.
     briefed_messages: HashSet<Uuid>,
@@ -2261,6 +2264,9 @@ pub struct Waku {
     /// Pipelines in flight per reply message; the bool marks an activation
     /// waiting on the clip, which plays the moment it lands.
     briefing_pending: HashMap<Uuid, bool>,
+    /// Replies whose Jev gate eval is still deciding — same play flag.
+    /// Cancel removes the entry so the answer lands on nothing.
+    briefing_gate_pending: HashMap<Uuid, bool>,
     /// The Jev page's "Test connection" probe — `Some` once a run answers,
     /// `Ok` carrying the answering model id and round-trip latency.
     /// Runtime-only; re-run after edits rather than cleared per keystroke.
@@ -5023,6 +5029,24 @@ impl Waku {
             input.set_content(state.voice_briefing_tts_custom_model.clone(), cx);
             input
         });
+        let voice_briefing_instructions_input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("experiments.voice_briefing_instructions"))
+                .placeholder(tr!("experiments.voice_briefing_instructions_placeholder"));
+            input.set_content(state.voice_briefing_summary_instructions.clone(), cx);
+            input
+        });
+        let voice_briefing_gate_instructions_input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("experiments.voice_briefing_gate_instructions"))
+                .placeholder(tr!("experiments.voice_briefing_gate_placeholder"));
+            input.set_content(state.voice_briefing_gate_instructions.clone(), cx);
+            input
+        });
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .tab_index(0)
@@ -6013,7 +6037,12 @@ impl Waku {
             // The briefing model fields write straight through — they edit
             // app state; the provider's credential lives in the inference
             // section above.
-            for input in [&voice_briefing_model_input, &voice_briefing_tts_model_input] {
+            for input in [
+                &voice_briefing_model_input,
+                &voice_briefing_tts_model_input,
+                &voice_briefing_instructions_input,
+                &voice_briefing_gate_instructions_input,
+            ] {
                 cx.subscribe(input, |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
                         this.save_voice_briefing_fields(cx);
@@ -6349,10 +6378,13 @@ impl Waku {
                 inference_inputs_seeded: false,
                 voice_briefing_model_input,
                 voice_briefing_tts_model_input,
+                voice_briefing_instructions_input,
+                voice_briefing_gate_instructions_input,
                 briefed_messages: HashSet::new(),
                 briefing_clips: HashMap::new(),
                 briefing_clip_order: VecDeque::new(),
                 briefing_pending: HashMap::new(),
+                briefing_gate_pending: HashMap::new(),
                 eval_probe_pending: false,
                 eval_probe_result: None,
                 eval_usage_stats: None,

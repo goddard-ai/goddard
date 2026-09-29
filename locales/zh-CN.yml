@@ -196,6 +196,8 @@ command_palette.go_to_next_unread_completion: 前往下一个未读完成的任�
 command_palette.mark_all_tasks_read: 将所有任务标记为已读
 command_palette.undo_archive: 撤销上次归档
 command_palette.undo_archive_count: "%{count} 个任务"
+command_palette.generate_voice_briefing: 为上一轮生成语音简报
+command_palette.cancel_voice_briefing: 取消语音简报生成
 command_palette.show_sidebar: 显示侧边栏
 command_palette.hide_sidebar: 隐藏侧边栏
 command_palette.show_right_panel: 显示右侧面板
@@ -851,6 +853,9 @@ session.revert_to_here: 回退到这里
 session.revert_to_here_title: 回退到这里
 session.reverting_message: 正在回退消息…
 session.reverting_message_title: 正在回退消息…
+session.voice_briefing_generate: 生成语音简报
+session.voice_briefing_generating: 简报生成中…
+session.voice_briefing_cancel: 取消语音简报
 time.yesterday_at: 昨天 %{time}
 time.weekday_at: "%{weekday} %{time}"
 time.date_at: "%{month}月%{day}日 %{time}"
@@ -2210,6 +2215,13 @@ experiments.voice_briefing_model_placeholder: 服务商/模型 — 例如 google
 experiments.voice_briefing_custom_model: 自定义模型
 experiments.voice_briefing_custom_model_placeholder: 服务商/模型 — 例如 openai/tts-1
 experiments.voice_briefing_tts: 语音模型
+experiments.voice_briefing_instructions: 摘要说明
+experiments.voice_briefing_instructions_placeholder: "例如：说出改动的文件名"
+experiments.voice_briefing_autoplay: 自动播放
+experiments.voice_briefing_gate: Jev 门控
+experiments.voice_briefing_gate_instructions: 门控条件
+experiments.voice_briefing_gate_placeholder: "例如：仅在回复需要你决策时"
+experiments.voice_briefing_gate_needs_eval: 未配置评估后端——门控不会运行，因此每次都会生成简报。请在 Jev 页面设置。
 friends.a_friend: 一位好友
 friends.abort_sync: 中止
 friends.accept: 接受
@@ -2500,6 +2512,8 @@ routing.feature_auto_prompt_description: 判断已完成的轮次是否自动发
 routing.feature_auto_prompt_preview_description: 对当前任务试运行自动提示规则
 routing.feature_managed_goal: 托管目标
 routing.feature_managed_goal_description: 判断当前目标是否已完成、应继续进行，或需要你的输入
+routing.feature_voice_briefing_gate: 语音简报门控
+routing.feature_voice_briefing_gate_description: 判断已完成的回复是否值得语音播报
 routing.feature_auto_prompt_suggest_description: 为自动提示编辑器建议问题权重和阈值
 routing.feature_evaluate: 评估调用
 routing.feature_evaluate_description: 未标记功能标签的调用

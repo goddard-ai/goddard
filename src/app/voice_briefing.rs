@@ -1,13 +1,16 @@
-//! Voice briefing (experimental): landing on a task whose latest reply is
-//! long speaks a short "what happened / what you decide" summary aloud.
-//! A reply that settles off screen gets its clip built immediately — the
-//! selected provider's chat model writes a ~45-second plain-speech transcript
-//! and the chosen TTS model voices it — so opening the task plays
-//! instantly instead of waiting on both calls. Sessions that settled
-//! before the clip cache existed still generate on arrival. Everything
+//! Voice briefing (experimental): a settled reply gets a short "what
+//! happened / what you decide" summary voiced aloud. With automatic
+//! playback on, a reply that settles off screen gets its clip built
+//! immediately — the selected provider's chat model writes a ~45-second
+//! plain-speech transcript and the chosen TTS model voices it — so
+//! opening the task plays instantly instead of waiting on both calls,
+//! optionally after a Jev gate decides the reply is worth hearing. With
+//! it off nothing generates on its own; the response footer's headphones
+//! button or the command palette builds the clip on demand. Everything
 //! degrades quietly — no key, no model, a short reply, or a failed call
 //! all leave the transcript as the only surface.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,6 +21,7 @@ use futures::{FutureExt, pin_mut};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 use waku_protocol::inference::InferenceProvider;
 
 use super::status_markers::tail_chars;
@@ -48,30 +52,45 @@ const BRIEFING_PENDING_CAP: usize = 4;
 /// The dedupe set is a bound, not a history: past this it clears and a
 /// revisit can brief again.
 const BRIEFED_MESSAGES_CAP: usize = 256;
+/// The automatic path's Jev gate: one Noul on the settled turn decides
+/// whether the briefing is worth generating.
+const GATE_FEATURE: &str = "voice-briefing-gate";
+const GATE_QUESTION: &str = "brief";
+const GATE_THRESHOLD: f64 = 0.5;
 
 impl Waku {
     /// The settle-side half: a reply that finishes off screen gets its
-    /// clip built now, so landing on the task plays instantly.
+    /// clip built now, so landing on the task plays instantly. Runs only
+    /// under automatic playback — manual mode leaves generation to the
+    /// footer's on-demand button.
     pub(super) fn prefetch_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.state.selected_session == Some(session_id) {
+        if !self.state.voice_briefing_autoplay
+            || self.state.selected_session == Some(session_id)
+        {
             return;
         }
-        let Some((message_id, response)) = self.voice_briefing_candidate(session_id) else {
+        let Some((message_id, turn_id, response)) = self.voice_briefing_candidate(session_id)
+        else {
             return;
         };
         if self.briefed_messages.contains(&message_id)
             || self.briefing_clips.contains_key(&message_id)
             || self.briefing_pending.contains_key(&message_id)
+            || self.briefing_gate_pending.contains_key(&message_id)
         {
             return;
         }
-        self.start_voice_briefing(message_id, response, false, cx);
+        self.queue_voice_briefing(session_id, message_id, turn_id, response, false, cx);
     }
 
     /// The activation-side half: play the clip if it is ready, ride a
     /// prefetch already in flight, or build it on arrival.
     pub(super) fn maybe_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let Some((message_id, response)) = self.voice_briefing_candidate(session_id) else {
+        if !self.state.voice_briefing_autoplay {
+            return;
+        }
+        let Some((message_id, turn_id, response)) = self.voice_briefing_candidate(session_id)
+        else {
             return;
         };
         if self.briefed_messages.contains(&message_id) {
@@ -85,20 +104,27 @@ impl Waku {
             }
             return;
         }
-        if let Some(play) = self.briefing_pending.get_mut(&message_id) {
+        if let Some(play) = self
+            .briefing_pending
+            .get_mut(&message_id)
+            .or(self.briefing_gate_pending.get_mut(&message_id))
+        {
             // A prefetch for this reply is already running — flag it to
             // play the moment it lands rather than starting a second.
             *play = true;
             return;
         }
-        self.start_voice_briefing(message_id, response, true, cx);
+        self.queue_voice_briefing(session_id, message_id, turn_id, response, true, cx);
     }
 
     /// Shared gate: experiment on, key and model set, the session settled
     /// enough that its latest reply is final, and that reply long enough
-    /// to be worth hearing. Returns the message id and the tail excerpt
-    /// the summarizer sees.
-    fn voice_briefing_candidate(&self, session_id: Uuid) -> Option<(Uuid, String)> {
+    /// to be worth hearing. Returns the message id, its turn id for the
+    /// Jev gate's state, and the tail excerpt the summarizer sees.
+    fn voice_briefing_candidate(
+        &self,
+        session_id: Uuid,
+    ) -> Option<(Uuid, Option<Uuid>, String)> {
         if !self.state.voice_briefing_enabled {
             return None;
         }
@@ -138,6 +164,7 @@ impl Waku {
         }
         Some((
             message.id,
+            message.turn_id,
             tail_chars(message.visible_content(), RESPONSE_INPUT_CHARS),
         ))
     }
@@ -149,6 +176,229 @@ impl Waku {
             self.briefed_messages.clear();
         }
         self.briefed_messages.insert(message_id);
+    }
+
+    /// The automatic path's Jev gate: when enabled and evaluable, a `Noul`
+    /// on the turn decides whether the reply is worth a spoken briefing
+    /// before either gateway call runs. Anything that keeps the gate from
+    /// answering — unconfigured backend, a turn the state builder can't
+    /// see, a failed or missing answer — fails open and the briefing
+    /// generates; only a confident "no" suppresses it.
+    fn queue_voice_briefing(
+        &mut self,
+        session_id: Uuid,
+        message_id: Uuid,
+        turn_id: Option<Uuid>,
+        response: String,
+        play: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.voice_briefing_gate_enabled
+            && self.briefing_gate_pending.len() < BRIEFING_PENDING_CAP
+            && let Some((daemon, state)) = self.voice_briefing_gate_request(session_id, turn_id)
+        {
+            let custom = self.state.voice_briefing_gate_instructions.trim().to_owned();
+            let instructions = if custom.is_empty() {
+                "Should the user proactively hear a short spoken briefing when they return \
+                 to this task? Answer true when the turn's reply warrants the interruption \
+                 — a decision only the user can make, a failure or surprise worth flagging \
+                 — and false when it is routine or self-explanatory."
+                    .to_owned()
+            } else {
+                format!(
+                    "Should the user proactively hear a short spoken briefing when they \
+                     return to this task? Apply these criteria from the user: {custom}"
+                )
+            };
+            let questions = BTreeMap::from([(
+                GATE_QUESTION.to_owned(),
+                EvalQuestion::Noul {
+                    instructions,
+                    criteria: None,
+                },
+            )]);
+            self.briefing_gate_pending.insert(message_id, play);
+            cx.notify();
+            let work = cx.background_executor().spawn(async move {
+                daemon
+                    .client()
+                    .request(
+                        Uuid::nil(),
+                        session_id,
+                        waku_client::Command::Evaluate {
+                            state,
+                            questions,
+                            feature: Some(GATE_FEATURE.to_owned()),
+                            timeout_secs: None,
+                        },
+                    )
+                    .ok()
+                    .and_then(|payload| match payload {
+                        waku_client::ResponsePayload::Evaluation { evaluation } => evaluation
+                            .answers
+                            .get(GATE_QUESTION)
+                            .and_then(|answer| match answer {
+                                EvalAnswer::Noul { noul } => Some(*noul >= GATE_THRESHOLD),
+                                _ => None,
+                            }),
+                        _ => None,
+                    })
+                    .unwrap_or(true)
+            });
+            cx.spawn(async move |this, cx| {
+                let approved = work.await;
+                let _ = this.update(cx, |this, cx| {
+                    // A cancel that landed mid-eval drops the entry — the
+                    // answer, whatever it was, goes nowhere.
+                    let Some(play) = this.briefing_gate_pending.remove(&message_id) else {
+                        return;
+                    };
+                    if approved {
+                        this.start_voice_briefing(message_id, response, play, cx);
+                    } else {
+                        // The gate said no — treat the reply as settled so
+                        // arrivals don't re-ask the same question.
+                        this.mark_briefed(message_id);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+            return;
+        }
+        self.start_voice_briefing(message_id, response, play, cx);
+    }
+
+    /// The daemon and turn state the gate needs, or `None` when eval cannot
+    /// run — the caller fails open and briefs without asking.
+    fn voice_briefing_gate_request(
+        &self,
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+    ) -> Option<(waku_client::DaemonSupervisor, Value)> {
+        let daemon = self.daemon_for_session(session_id)?;
+        if !daemon.settings().eval_ready() {
+            return None;
+        }
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        let state = status_markers::turn_eval_state(session, turn_id?, None);
+        Some((daemon, state))
+    }
+
+    /// The footer's headphones button and the palette command: generate —
+    /// or replay — one reply's briefing on demand. Autoplay, the Jev gate,
+    /// and the length floor don't apply; an explicit click is its own
+    /// judgment. The experiment flag still gates the feature.
+    pub(super) fn request_voice_briefing(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
+        if !self.state.voice_briefing_enabled {
+            return;
+        }
+        // A gate eval in flight loses to the click — generate directly.
+        self.briefing_gate_pending.remove(&message_id);
+        if let Some(play) = self.briefing_pending.get_mut(&message_id) {
+            *play = true;
+            return;
+        }
+        if self.briefing_clips.contains_key(&message_id) {
+            let started = self.briefing_clips.get(&message_id).is_some_and(|bytes| {
+                crate::platform::play_briefing_audio(bytes, self.state.completion_sound_volume)
+            });
+            if started {
+                self.mark_briefed(message_id);
+            } else {
+                self.show_toast(tr!("errors.voice_briefing_playback"));
+            }
+            return;
+        }
+        let Some(response) = self
+            .state
+            .sessions
+            .iter()
+            .flat_map(|session| session.messages.iter())
+            .find(|message| {
+                message.id == message_id
+                    && message.role == MessageRole::Assistant
+                    && !message.streaming
+            })
+            .map(|message| tail_chars(message.visible_content(), RESPONSE_INPUT_CHARS))
+            .filter(|response| !response.is_empty())
+        else {
+            return;
+        };
+        self.start_voice_briefing(message_id, response, true, cx);
+    }
+
+    /// Drop a briefing in flight — gate eval or generation — and treat the
+    /// reply as heard so the automatic path does not re-arm it.
+    pub(super) fn cancel_voice_briefing(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
+        let removed = self.briefing_pending.remove(&message_id).is_some()
+            | self.briefing_gate_pending.remove(&message_id).is_some();
+        if removed {
+            self.mark_briefed(message_id);
+            cx.notify();
+        }
+    }
+
+    /// Whether a reply's clip is being decided or generated — the footer
+    /// reads this to show the cancellable indicator.
+    pub(super) fn voice_briefing_in_flight(&self, message_id: Uuid) -> bool {
+        self.briefing_pending.contains_key(&message_id)
+            || self.briefing_gate_pending.contains_key(&message_id)
+    }
+
+    /// The selected task's latest settled reply, for the palette's
+    /// "last turn" generate — any assistant message qualifies regardless
+    /// of length.
+    pub(super) fn voice_briefing_last_reply(&self, session_id: Uuid) -> Option<Uuid> {
+        self.state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::Assistant && !message.streaming)
+            .map(|message| message.id)
+    }
+
+    /// What the response footer shows for one reply: the always-visible
+    /// cancellable indicator while its clip is being decided or generated,
+    /// the on-demand headphones button while manual mode is armed —
+    /// experiment on, autoplay off, provider credential configured.
+    pub(super) fn message_voice_briefing_footer(
+        &self,
+        message_id: Uuid,
+    ) -> Option<VoiceBriefingFooter> {
+        if self.voice_briefing_in_flight(message_id) {
+            return Some(VoiceBriefingFooter::Generating);
+        }
+        let provider = self.state.voice_briefing_provider;
+        let armed = self.state.voice_briefing_enabled
+            && !self.state.voice_briefing_autoplay
+            && self
+                .state
+                .inference
+                .get(&provider)
+                .is_some_and(|entry| entry.credential_configured);
+        armed.then_some(VoiceBriefingFooter::Generate)
+    }
+
+    /// Briefing pipelines — decided or generating — that belong to this
+    /// session's transcript, for the palette's cancel command.
+    pub(super) fn session_briefing_in_flight(&self, session_id: Uuid) -> Vec<Uuid> {
+        self.state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .into_iter()
+            .flat_map(|session| session.messages.iter())
+            .map(|message| message.id)
+            .filter(|message_id| self.voice_briefing_in_flight(*message_id))
+            .collect()
     }
 
     /// Run the summarize → speak pipeline for one reply. `play` decides
@@ -165,8 +415,10 @@ impl Waku {
             return;
         }
         self.briefing_pending.insert(message_id, play);
+        cx.notify();
         let provider = self.state.voice_briefing_provider;
         let summary_model = self.state.voice_briefing_summary_model.trim().to_owned();
+        let instructions = self.state.voice_briefing_summary_instructions.trim().to_owned();
         let tts_model = self.state.voice_briefing_tts_model;
         let tts_model_id = match tts_model {
             VoiceBriefingTtsModel::Custom => {
@@ -202,10 +454,17 @@ impl Waku {
                     .ok_or_else(|| {
                         anyhow!("{} has no configured credential", provider.display_name())
                     })?;
-                let transcript =
-                    summarize(&http, &executor, provider, &key, &summary_model, &response)
-                        .await
-                        .context("summary generation")?;
+                let transcript = summarize(
+                    &http,
+                    &executor,
+                    provider,
+                    &key,
+                    &summary_model,
+                    &instructions,
+                    &response,
+                )
+                .await
+                .context("summary generation")?;
                 synthesize(&http, &executor, provider, &key, &tts_model_id, &transcript)
                     .await
                     .context("speech generation")
@@ -213,8 +472,12 @@ impl Waku {
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;
-            let _ = this.update(cx, |this, _| {
-                let play = this.briefing_pending.remove(&message_id).unwrap_or(false);
+            let _ = this.update(cx, |this, cx| {
+                // A cancel that landed mid-pipeline already dropped the
+                // entry — discard the clip rather than caching it.
+                let Some(play) = this.briefing_pending.remove(&message_id) else {
+                    return;
+                };
                 match result {
                     Ok(bytes) => {
                         this.briefing_clips.insert(message_id, bytes);
@@ -251,6 +514,7 @@ impl Waku {
                         }
                     }
                 }
+                cx.notify();
             });
         })
         .detach();
@@ -266,20 +530,26 @@ async fn summarize(
     provider: InferenceProvider,
     key: &str,
     model: &str,
+    instructions: &str,
     response: &str,
 ) -> anyhow::Result<String> {
+    let mut system = format!(
+        "You write a short spoken briefing for a user returning to an agent \
+         coding session. Given the agent's latest reply, say what it did and \
+         how it ended, then state plainly any decision or action the user \
+         needs to take. Plain spoken sentences only — no markdown, lists, or \
+         code. At most {TRANSCRIPT_WORD_CAP} words. Output only the transcript."
+    );
+    if !instructions.is_empty() {
+        system.push_str("\n\nAdditional instructions from the user: ");
+        system.push_str(instructions);
+    }
     let body = json!({
         "model": model,
         "messages": [
             {
                 "role": "system",
-                "content": format!(
-                    "You write a short spoken briefing for a user returning to an agent \
-                     coding session. Given the agent's latest reply, say what it did and \
-                     how it ended, then state plainly any decision or action the user \
-                     needs to take. Plain spoken sentences only — no markdown, lists, or \
-                     code. At most {TRANSCRIPT_WORD_CAP} words. Output only the transcript."
-                ),
+                "content": system,
             },
             {"role": "user", "content": response},
         ],

@@ -1840,6 +1840,7 @@ impl Waku {
                             show_response_token_speed: self.state.show_response_token_speed,
                             assistant_message_action,
                             user_message_action,
+                            voice_briefing: self.message_voice_briefing_footer(message.id),
                             user_message_viewport: user_message_viewport.as_ref(),
                             user_message_expanded,
                             user_message_expand_focus,
@@ -2100,6 +2101,7 @@ impl Waku {
                 false,
                 action,
                 None,
+                self.message_voice_briefing_footer(message.id),
                 cx.entity().downgrade(),
             ))
             .into_any_element()

@@ -202,6 +202,16 @@ impl Waku {
     }
 }
 
+/// The response footer's voice-briefing affordance. `Generate` is the
+/// on-demand headphones button that sits beside copy while automatic
+/// playback is off; `Generating` is the spinner + label at the front of
+/// the footer — visible without hover — that cancels on click.
+#[derive(Clone, Copy)]
+pub(super) enum VoiceBriefingFooter {
+    Generate,
+    Generating,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_message_footer(
     theme: &Theme,
@@ -215,6 +225,7 @@ pub(super) fn render_message_footer(
     align_right: bool,
     assistant_message_action: Option<AssistantMessageAction>,
     user_message_action: Option<UserMessageAction>,
+    voice_briefing: Option<VoiceBriefingFooter>,
     waku: gpui::WeakEntity<Waku>,
 ) -> AnyElement {
     let theme = *theme;
@@ -266,6 +277,10 @@ pub(super) fn render_message_footer(
                 this.show_message_copied(message_id, cx);
             });
         });
+    // The in-flight indicator is always visible — it carries state the
+    // footer otherwise only reveals on hover.
+    let force_visible =
+        force_visible || matches!(voice_briefing, Some(VoiceBriefingFooter::Generating));
     let mut footer = div()
         .w_full()
         .h(px(27.0))
@@ -280,10 +295,63 @@ pub(super) fn render_message_footer(
         .when(!align_right, |element| element.ml(-px(7.0)))
         .when(align_right, |element| element.justify_end());
 
+    if let Some(VoiceBriefingFooter::Generating) = voice_briefing {
+        let cancel_waku = waku.clone();
+        footer = footer.child(
+            div()
+                .id(SharedString::from(format!("voice-briefing-pending-{message_id}")))
+                .h(px(27.0))
+                .px(px(6.0))
+                .rounded(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .cursor_default()
+                .hover(|element| element.bg(theme.overlay_strong))
+                .child(motion::spin(icon("icons/loader-circle.svg", 14.0, footer_color)))
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(footer_color)
+                        .child(tr!("session.voice_briefing_generating")),
+                )
+                .tooltip(Tooltip::text(tr_cow!("session.voice_briefing_cancel")))
+                .on_click(move |_, _, cx| {
+                    let _ = cancel_waku.update(cx, |this, cx| {
+                        this.cancel_voice_briefing(message_id, cx);
+                    });
+                }),
+        );
+    }
+
     if align_right {
         footer = footer.child(timestamp).child(copy_button);
     } else {
         footer = footer.child(copy_button);
+        if let Some(VoiceBriefingFooter::Generate) = voice_briefing {
+            let brief_waku = waku.clone();
+            footer = footer.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "voice-briefing-generate-{message_id}"
+                    )))
+                    .w(px(27.0))
+                    .h(px(27.0))
+                    .rounded(px(10.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .hover(|element| element.bg(theme.overlay_strong))
+                    .child(icon("icons/headphones.svg", 14.0, footer_color))
+                    .tooltip(Tooltip::text(tr_cow!("session.voice_briefing_generate")))
+                    .on_click(move |_, _, cx| {
+                        let _ = brief_waku.update(cx, |this, cx| {
+                            this.request_voice_briefing(message_id, cx);
+                        });
+                    }),
+            );
+        }
         if let Some(action) = assistant_message_action {
             let fork_waku = waku.clone();
             let fork_icon = if action.preparing {
@@ -367,6 +435,9 @@ pub(super) struct MessageRender<'a> {
     pub(super) show_response_token_speed: bool,
     pub(super) assistant_message_action: Option<AssistantMessageAction>,
     pub(super) user_message_action: Option<UserMessageAction>,
+    /// The footer's briefing affordance for this reply — `None` outside the
+    /// main transcript and on user messages.
+    pub(super) voice_briefing: Option<VoiceBriefingFooter>,
     pub(super) user_message_viewport: Option<&'a UserMessageScrollViewport>,
     /// Whether the prompt's height cap is lifted, and the focus handle its
     /// "Show more" button tracks. Only meaningful for user messages.
@@ -1070,6 +1141,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         show_response_token_speed,
         assistant_message_action,
         user_message_action,
+        voice_briefing,
         user_message_viewport,
         user_message_expanded,
         user_message_expand_focus,
@@ -1487,6 +1559,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     true,
                     None,
                     user_message_action,
+                    None,
                     waku.clone(),
                 ));
             }
@@ -1539,6 +1612,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                         false,
                         assistant_message_action,
                         None,
+                        voice_briefing,
                         waku.clone(),
                     ));
                 }

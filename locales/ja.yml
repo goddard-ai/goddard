@@ -197,6 +197,8 @@ command_palette.go_to_next_unread_completion: 次の未読の完了タスクへ�
 command_palette.mark_all_tasks_read: すべてのタスクを既読にする
 command_palette.undo_archive: 直前のアーカイブを元に戻す
 command_palette.undo_archive_count: "%{count} 件のタスク"
+command_palette.generate_voice_briefing: 前のターンの音声ブリーフィングを生成
+command_palette.cancel_voice_briefing: 音声ブリーフィングの生成をキャンセル
 command_palette.show_sidebar: サイドバーを表示
 command_palette.hide_sidebar: サイドバーを隠す
 command_palette.show_right_panel: 右パネルを表示
@@ -863,6 +865,9 @@ session.revert_to_here: ここまで戻す
 session.revert_to_here_title: ここまで戻す
 session.reverting_message: メッセージを戻しています…
 session.reverting_message_title: メッセージを戻しています…
+session.voice_briefing_generate: 音声ブリーフィングを生成
+session.voice_briefing_generating: ブリーフィング生成中…
+session.voice_briefing_cancel: 音声ブリーフィングをキャンセル
 
 time.yesterday_at: 昨日 %{time}
 time.weekday_at: "%{weekday} %{time}"
@@ -2259,6 +2264,13 @@ experiments.voice_briefing_model_placeholder: プロバイダー/モデル — �
 experiments.voice_briefing_custom_model: カスタムモデル
 experiments.voice_briefing_custom_model_placeholder: プロバイダー/モデル — 例 openai/tts-1
 experiments.voice_briefing_tts: 音声モデル
+experiments.voice_briefing_instructions: 要約の指示
+experiments.voice_briefing_instructions_placeholder: "例：変更したファイル名を伝える"
+experiments.voice_briefing_autoplay: 自動再生
+experiments.voice_briefing_gate: Jev ゲート
+experiments.voice_briefing_gate_instructions: ゲート条件
+experiments.voice_briefing_gate_placeholder: "例：返信が判断を必要とする場合のみ"
+experiments.voice_briefing_gate_needs_eval: 評価バックエンドが未設定です — ゲートは実行されず、毎回ブリーフィングが生成されます。Jev ページで設定してください。
 friends.a_friend: フレンド
 friends.abort_sync: 中止
 friends.accept: 承認
@@ -2549,6 +2561,8 @@ routing.feature_auto_prompt_description: 完了したターンが自動フォロ
 routing.feature_auto_prompt_preview_description: このタスクに対して自動プロンプトルールを試行します
 routing.feature_managed_goal: 管理対象の目標
 routing.feature_managed_goal_description: 現在の目標が完了したか、続行すべきか、ユーザーの入力が必要かを判断します
+routing.feature_voice_briefing_gate: 音声ブリーフィングゲート
+routing.feature_voice_briefing_gate_description: 完了した返信が音声ブリーフィングに値するかを判断します
 routing.feature_auto_prompt_suggest_description: 自動プロンプトエディタの質問の重みとしきい値を提案します
 routing.feature_evaluate: 評価呼び出し
 routing.feature_evaluate_description: 機能タグなしで記録された呼び出し
