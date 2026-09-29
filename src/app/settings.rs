@@ -15298,8 +15298,8 @@ fn inference_provider_icon(provider: InferenceProvider) -> &'static str {
     match provider {
         InferenceProvider::TypeSafe => "icons/provider-typesafe.svg",
         InferenceProvider::VercelGateway => "icons/integration-vercel.svg",
-        InferenceProvider::Cloudflare => "icons/server.svg",
-        InferenceProvider::OpenRouter => "icons/globe.svg",
+        InferenceProvider::Cloudflare => "icons/provider-cloudflare.svg",
+        InferenceProvider::OpenRouter => "icons/provider-openrouter.svg",
     }
 }
 
