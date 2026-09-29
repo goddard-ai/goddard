@@ -383,10 +383,13 @@ const FLAG_MARKERS: &[StatusMarker] = &[
         icon: "icons/ban.svg",
         tone: MarkerTone::Danger,
         threshold: 0.45,
-        instructions: "Was the assistant unable to proceed without something \
-            outside its control — a missing permission, credential, file, tool, \
-            or environment resource? `toolErrors` output tails surface those \
-            failures.",
+        instructions: "At the end of this turn, does an unresolved obstacle \
+            outside the assistant's control still prevent it from finishing the \
+            requested work or making useful progress — for example, a missing \
+            permission, credential, file, tool, or environment resource? Count \
+            only barriers that remain unresolved; an issue the assistant fixed \
+            or worked around does not count, even if it appears in `toolErrors`. \
+            If the requested work is complete, do not mark it blocked.",
     },
     StatusMarker {
         id: "unverified",
@@ -821,6 +824,7 @@ fn cleared_subtype(
 fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)> {
     let mut cleared: Vec<(&'static StatusMarker, f64)> = Vec::new();
     let mut work_free_ending = false;
+    let mut complete_ending = false;
     if let Some(EvalAnswer::Choice {
         choice,
         probabilities,
@@ -830,6 +834,7 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
     {
         let winner = probabilities.get(choice).copied().unwrap_or(0.0);
         if winner >= marker.threshold {
+            complete_ending = marker.id == "complete";
             work_free_ending = matches!(marker.id, "answered" | "nothing-to-do" | "aligned");
             let subtype = match marker.id {
                 "awaiting-input" => cleared_subtype(evaluation, INPUT_QUESTION, INPUT_MARKERS),
@@ -847,6 +852,11 @@ fn cleared_markers(evaluation: &Evaluation) -> Vec<(&'static StatusMarker, f64)>
         }
     }
     for marker in FLAG_MARKERS {
+        // A cleared `complete` ending means no requested work remains for a
+        // missing prerequisite to block.
+        if marker.id == "blocked" && complete_ending {
+            continue;
+        }
         // `unverified` presupposes the turn made changes — an ending that
         // asserts no work happened makes the flag meaningless.
         if marker.id == "unverified" && work_free_ending {
