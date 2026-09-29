@@ -1,0 +1,1 @@
+- The GitHub notification inbox now joins ⌘[ / ⌘] back-and-forward history like the other main-column pages — opening it records the surface it covered so back returns to it, and closing it leaves a hop that forward (or back) can replay.

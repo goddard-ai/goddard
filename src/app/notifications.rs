@@ -731,9 +731,21 @@ impl Waku {
         .detach();
     }
 
-    /// The page's open/close — same "claims the main area" contract as the
-    /// Projects page.
+    /// Open the page as a navigation destination; back returns to whatever
+    /// the main column showed before.
     pub(super) fn open_inbox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.state.github_enabled {
+            return;
+        }
+        self.session_navigation
+            .visit(self.navigation_location(), NavigationLocation::Inbox);
+        self.show_inbox(window, cx);
+    }
+
+    /// Put the page on screen — same "claims the main area" contract as the
+    /// Projects page. Recording the move is the caller's job: opens `visit`,
+    /// back/forward restores `go_back`/`go_forward`.
+    pub(super) fn show_inbox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.state.github_enabled {
             return;
         }
@@ -765,7 +777,16 @@ impl Waku {
     }
 
     pub(super) fn close_inbox(&mut self, cx: &mut Context<Self>) {
+        if !self.notifications.open {
+            return;
+        }
         self.notifications.open = false;
+        // Closing is a location change too: the surface underneath comes
+        // back, and back returns to the inbox.
+        if let Some(location) = self.navigation_location() {
+            self.session_navigation
+                .visit(Some(NavigationLocation::Inbox), location);
+        }
         self.sync_right_panel_owner(cx);
         cx.notify();
     }

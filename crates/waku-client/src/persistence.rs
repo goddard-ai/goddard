@@ -888,6 +888,7 @@ pub enum PersistedNavigationLocation {
     ProjectsPage(Uuid),
     DraftsPage,
     AutomationsPage,
+    Inbox,
 }
 
 /// A collapsible sidebar section the user folded — mirrors

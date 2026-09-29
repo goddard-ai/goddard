@@ -1538,9 +1538,9 @@ struct ComputerUsePreview {
 }
 
 /// One spot back/forward history can point at. A task transcript, a
-/// full-width terminal, and the Projects page share the main column, so
-/// they share the one history; the page entry remembers which project it
-/// was scoped to.
+/// full-width terminal, and the pages (Projects, Drafts, Automations,
+/// Inbox) share the main column, so they share the one history; the
+/// Projects entry remembers which project it was scoped to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NavigationLocation {
     Task(Uuid),
@@ -1548,6 +1548,7 @@ enum NavigationLocation {
     ProjectsPage(Uuid),
     DraftsPage,
     AutomationsPage,
+    Inbox,
     /// The settings overlay. It never enters `back` — the surface it
     /// opened over holds that slot — but leaving settings through back
     /// parks it on `forward` so the hop can be replayed.
@@ -1758,6 +1759,7 @@ fn persisted_location(location: NavigationLocation) -> Option<PersistedNavigatio
         NavigationLocation::ProjectsPage(id) => Some(PersistedNavigationLocation::ProjectsPage(id)),
         NavigationLocation::DraftsPage => Some(PersistedNavigationLocation::DraftsPage),
         NavigationLocation::AutomationsPage => Some(PersistedNavigationLocation::AutomationsPage),
+        NavigationLocation::Inbox => Some(PersistedNavigationLocation::Inbox),
         NavigationLocation::Terminal(_) | NavigationLocation::Settings => None,
     }
 }

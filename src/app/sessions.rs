@@ -914,6 +914,10 @@ impl Waku {
                 .state
                 .automations_enabled
                 .then_some(NavigationLocation::AutomationsPage),
+            PersistedNavigationLocation::Inbox => self
+                .state
+                .github_enabled
+                .then_some(NavigationLocation::Inbox),
         };
         self.session_navigation.back = self
             .state
@@ -1006,7 +1010,7 @@ impl Waku {
             self.show_automations_page(window, cx);
         }
         if self.state.inbox_open {
-            self.open_inbox(window, cx);
+            self.show_inbox(window, cx);
         }
         if let Some(project_id) = projects_page {
             self.show_projects_page(project_id, window, cx);
@@ -3197,9 +3201,9 @@ impl Waku {
     }
 
     /// Where the main column's back/forward history currently sits — the
-    /// Projects and Drafts pages while one claims the column, then the
-    /// selected task's transcript, then the full-width terminal that
-    /// parked it.
+    /// Projects, Drafts, Automations, and Inbox pages while one claims the
+    /// column, then the selected task's transcript, then the full-width
+    /// terminal that parked it.
     pub(super) fn navigation_location(&self) -> Option<NavigationLocation> {
         if self.automations_page {
             Some(NavigationLocation::AutomationsPage)
@@ -3207,6 +3211,8 @@ impl Waku {
             Some(NavigationLocation::DraftsPage)
         } else if let Some(project_id) = self.projects_page {
             Some(NavigationLocation::ProjectsPage(project_id))
+        } else if self.notifications.open {
+            Some(NavigationLocation::Inbox)
         } else if let Some(session_id) = self.state.selected_session {
             Some(NavigationLocation::Task(session_id))
         } else {
@@ -3235,6 +3241,7 @@ impl Waku {
         projects: &[Project],
         projects_page_enabled: bool,
         automations_enabled: bool,
+        github_enabled: bool,
         stack: &mut Vec<NavigationLocation>,
     ) {
         loop {
@@ -3246,6 +3253,8 @@ impl Waku {
                         })) => {}
                 Some(NavigationLocation::AutomationsPage) if automations_enabled => break,
                 Some(NavigationLocation::AutomationsPage) => {}
+                Some(NavigationLocation::Inbox) if github_enabled => break,
+                Some(NavigationLocation::Inbox) => {}
                 _ => break,
             }
             stack.pop();
@@ -3292,6 +3301,7 @@ impl Waku {
             &self.state.projects,
             self.state.projects_page_enabled,
             self.state.automations_enabled,
+            self.state.github_enabled,
             &mut self.session_navigation.back,
         );
         let Some(current) = self.navigation_location() else {
@@ -3321,6 +3331,10 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_automations_page(window, cx);
             }
+            Some(NavigationLocation::Inbox) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_inbox(window, cx);
+            }
             // The settings overlay never enters `back` — the surface it
             // opened over holds that slot.
             Some(NavigationLocation::Settings) | None => {}
@@ -3345,6 +3359,7 @@ impl Waku {
             &self.state.projects,
             self.state.projects_page_enabled,
             self.state.automations_enabled,
+            self.state.github_enabled,
             &mut self.session_navigation.forward,
         );
         let Some(current) = self.navigation_location() else {
@@ -3373,6 +3388,10 @@ impl Waku {
             Some(NavigationLocation::AutomationsPage) => {
                 let _ = self.session_navigation.go_forward(current);
                 self.show_automations_page(window, cx);
+            }
+            Some(NavigationLocation::Inbox) => {
+                let _ = self.session_navigation.go_forward(current);
+                self.show_inbox(window, cx);
             }
             Some(NavigationLocation::Settings) => {
                 // Back out of settings parked the departing pane on the

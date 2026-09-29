@@ -969,6 +969,7 @@ impl Waku {
             &self.state.projects,
             self.state.projects_page_enabled,
             self.state.automations_enabled,
+            self.state.github_enabled,
             &mut self.session_navigation.back,
         );
         // Switching terminals stacks each one on the history; fold them
@@ -1003,6 +1004,10 @@ impl Waku {
             Some(NavigationLocation::AutomationsPage) => {
                 let _ = self.session_navigation.go_back(current);
                 self.show_automations_page(window, cx);
+            }
+            Some(NavigationLocation::Inbox) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_inbox(window, cx);
             }
             Some(NavigationLocation::Settings) | None => {}
         }
@@ -1145,6 +1150,7 @@ impl Waku {
                 &self.state.projects,
                 self.state.projects_page_enabled,
                 self.state.automations_enabled,
+                self.state.github_enabled,
                 &mut self.session_navigation.back,
             );
             let current = NavigationLocation::Terminal(terminal_id);
@@ -1258,6 +1264,7 @@ impl Waku {
                         NavigationLocation::AutomationsPage => {
                             this.show_automations_page(window, cx);
                         }
+                        NavigationLocation::Inbox => this.show_inbox(window, cx),
                         NavigationLocation::Settings => {}
                     });
                 });
