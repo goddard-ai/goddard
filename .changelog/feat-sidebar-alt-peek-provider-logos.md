@@ -1,0 +1,1 @@
+- Holding Option over the task list now shows each task's provider logo next to its model name instead of a generic sparkle icon.
