@@ -7,6 +7,7 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
+use base64::Engine as _;
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use subtle::ConstantTimeEq as _;
@@ -382,6 +383,35 @@ impl EventSink {
         self.hub.end_runtime(self.session_id, Some(self.runtime_id));
     }
 
+    /// The connection that carried this request — a terminal channel's
+    /// events route to it exclusively once claimed.
+    pub fn source_subscriber_id(&self) -> u64 {
+        self.source_subscriber_id
+    }
+
+    /// Restrict this sink's channel to the requesting connection and replay
+    /// `tail` — the PTY's retained output bytes — to it first. A terminal
+    /// command arriving from a different connection reclaims the channel,
+    /// which is how a reconnecting client reattaches.
+    pub fn claim_terminal_channel(&self, tail: Vec<u8>) {
+        self.hub.claim_terminal(
+            self.session_id,
+            self.runtime_id,
+            self.source_subscriber_id,
+            tail,
+        );
+    }
+
+    pub fn release_terminal_channel(&self, session_id: Uuid) {
+        self.hub.release_terminal(session_id);
+    }
+
+    /// The connection currently owning a terminal channel, when it has been
+    /// claimed — `Some(u64::MAX)`-less `None` also covers unclaimed channels.
+    pub fn terminal_channel_owner(&self, session_id: Uuid) -> Option<u64> {
+        self.hub.terminal_owner(session_id)
+    }
+
     /// Emit the runtime-ended signal clients already understand. Used
     /// before `end_session_runtime` on teardown paths with no provider
     /// process left to report its own exit — idle eviction, forced
@@ -456,6 +486,11 @@ struct HubState {
     next_subscriber_id: u64,
     task_state_revision: u64,
     subscribers: HashMap<u64, Subscriber>,
+    /// Terminal channels route events to the connection that owns the PTY
+    /// rather than every subscriber — raw terminal bytes stay private to the
+    /// client that opened them. Ownership moves when another connection
+    /// claims the channel (a reconnect replacing a dead subscriber).
+    terminal_owners: HashMap<Uuid, u64>,
     active_runtimes: HashMap<Uuid, Uuid>,
     next_sequences: HashMap<(Uuid, Uuid), u64>,
     journal: HashMap<(Uuid, Uuid), VecDeque<SequencedEvent>>,
@@ -635,7 +670,76 @@ impl Hub {
                 journal.pop_front();
             }
         }
-        Self::broadcast(&mut state, &ServerMessage::Event(event), None);
+        let message = ServerMessage::Event(event);
+        if let Some(&owner) = state.terminal_owners.get(&session_id) {
+            Self::deliver(&mut state, owner, &message);
+        } else {
+            Self::broadcast(&mut state, &message, None);
+        }
+    }
+
+    /// Deliver `message` to one subscriber only, kicking it if its bounded
+    /// queue is full — the same policy `broadcast` applies per subscriber.
+    fn deliver(state: &mut HubState, subscriber_id: u64, message: &ServerMessage) {
+        let Some(subscriber) = state.subscribers.get(&subscriber_id) else {
+            return;
+        };
+        if !subscriber.accepts(message) {
+            return;
+        }
+        let overwhelmed = subscriber.messages.len() >= MAX_QUEUED_MESSAGES_PER_SUBSCRIBER
+            || subscriber.messages.try_send(message.clone()).is_err();
+        if overwhelmed {
+            let kicked = subscriber.kicked.clone();
+            state.subscribers.remove(&subscriber_id);
+            state
+                .terminal_owners
+                .retain(|_, owner| *owner != subscriber_id);
+            let _ = kicked.send(());
+        }
+    }
+
+    /// Restrict a terminal channel's events to `subscriber` and first push it
+    /// the PTY's retained output tail, so a reconnected client repaints its
+    /// screen instead of resuming mid-stream.
+    fn claim_terminal(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        subscriber_id: u64,
+        tail: Vec<u8>,
+    ) {
+        let mut state = self.state.lock();
+        state.terminal_owners.insert(session_id, subscriber_id);
+        if tail.is_empty() {
+            return;
+        }
+        let sequence = state
+            .next_sequences
+            .entry((session_id, runtime_id))
+            .or_default();
+        *sequence = sequence.saturating_add(1);
+        let event = SequencedEvent {
+            session_id,
+            runtime_id,
+            epoch: self.epoch,
+            sequence: *sequence,
+            event: WireDriverEvent::new(
+                "terminalOutput",
+                serde_json::json!({
+                    "data": base64::engine::general_purpose::STANDARD.encode(tail)
+                }),
+            ),
+        };
+        Self::deliver(&mut state, subscriber_id, &ServerMessage::Event(event));
+    }
+
+    fn release_terminal(&self, session_id: Uuid) {
+        self.state.lock().terminal_owners.remove(&session_id);
+    }
+
+    fn terminal_owner(&self, session_id: Uuid) -> Option<u64> {
+        self.state.lock().terminal_owners.get(&session_id).copied()
     }
 
     fn subscribe(&self, resume_from: &[ReplayCursor], subscriber: Subscriber) -> u64 {
@@ -679,7 +783,11 @@ impl Hub {
     }
 
     fn unsubscribe(&self, subscriber_id: u64) {
-        self.state.lock().subscribers.remove(&subscriber_id);
+        let mut state = self.state.lock();
+        state.subscribers.remove(&subscriber_id);
+        state
+            .terminal_owners
+            .retain(|_, owner| *owner != subscriber_id);
     }
 
     /// Sends `message` to every subscriber except `skip`, dropping any whose
@@ -701,6 +809,9 @@ impl Hub {
         }
         for (subscriber_id, kicked) in overwhelmed {
             state.subscribers.remove(&subscriber_id);
+            state
+                .terminal_owners
+                .retain(|_, owner| *owner != subscriber_id);
             let _ = kicked.send(());
         }
     }
@@ -2383,8 +2494,6 @@ mod tests {
     #[cfg(unix)]
     use crate::settings::DaemonSettingsStore;
     use crate::{DaemonSettings, WireDriverStartOptions};
-    #[cfg(unix)]
-    use base64::Engine as _;
     use crossbeam_channel::{RecvTimeoutError, bounded};
     use serde_json::json;
     use std::path::PathBuf;
@@ -4041,6 +4150,132 @@ mod tests {
     #[test]
     fn websocket_terminal_round_trip_streams_input_and_output() {
         websocket_terminal_round_trip(false);
+    }
+
+    /// Terminal bytes are private to the connection that opened the PTY: a
+    /// second client subscribed to the same channel hears nothing until it
+    /// issues a terminal command, which claims the channel and replays the
+    /// retained output tail to the claimant.
+    #[cfg(unix)]
+    #[test]
+    fn terminal_output_stays_with_the_owning_connection() {
+        let root = std::env::temp_dir().join(format!("waku-terminal-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap()
+        .with_terminal_shell(terminal_test_shell(
+            "while IFS= read -r line; do printf 'received:%s\\n' \"$line\"; done",
+        ));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        let owner = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let bystander = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let terminal_id = Uuid::new_v4();
+        let owned = owner.subscribe(terminal_id, terminal_id);
+        let tapped = bystander.subscribe(terminal_id, terminal_id);
+        assert!(matches!(
+            owner
+                .request(
+                    terminal_id,
+                    terminal_id,
+                    Command::OpenTerminal {
+                        cwd: root.clone(),
+                        cols: 80,
+                        rows: 24,
+                        owner: None,
+                    },
+                )
+                .unwrap(),
+            ResponsePayload::Ack
+        ));
+        owner
+            .request(
+                terminal_id,
+                terminal_id,
+                Command::WriteTerminal {
+                    data: b"first\n".to_vec(),
+                },
+            )
+            .unwrap();
+        terminal_output_until(&owned, b"received:first");
+        // The whole exchange — open, write, output — stayed on the owner's
+        // connection; the bystander's identical subscription got nothing.
+        assert!(
+            tapped.recv_timeout(Duration::from_millis(500)).is_err(),
+            "a second connection received terminal events it never claimed"
+        );
+
+        // A terminal command from another connection claims the channel:
+        // ownership moves and the claim answers with the retained tail.
+        assert!(matches!(
+            bystander
+                .request(
+                    terminal_id,
+                    terminal_id,
+                    Command::ResizeTerminal { cols: 80, rows: 24 },
+                )
+                .unwrap(),
+            ResponsePayload::Ack
+        ));
+        let repainted = terminal_output_until(&tapped, b"received:first");
+        assert!(
+            !repainted.is_empty(),
+            "the claim did not replay the terminal's output tail"
+        );
+        bystander
+            .request(
+                terminal_id,
+                terminal_id,
+                Command::WriteTerminal {
+                    data: b"second\n".to_vec(),
+                },
+            )
+            .unwrap();
+        terminal_output_until(&tapped, b"received:second");
+        // The former owner stays silent once the channel moves.
+        while owned.recv_timeout(Duration::from_millis(300)).is_ok() {}
+        bystander
+            .request(
+                terminal_id,
+                terminal_id,
+                Command::WriteTerminal {
+                    data: b"third\n".to_vec(),
+                },
+            )
+            .unwrap();
+        terminal_output_until(&tapped, b"received:third");
+        assert!(
+            owned.recv_timeout(Duration::from_millis(500)).is_err(),
+            "the previous owner still received terminal events after the claim"
+        );
+
+        bystander
+            .request(terminal_id, terminal_id, Command::CloseTerminal)
+            .unwrap();
+        owner.shutdown();
+        bystander.shutdown();
+        shutdown.store(true, Ordering::Release);
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

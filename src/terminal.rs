@@ -22,6 +22,7 @@ use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::tty::{self, Shell};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
 use anyhow::{Context as _, Result};
+use base64::Engine as _;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
     AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
@@ -39,6 +40,7 @@ use gpui::prelude::FluentBuilder;
 use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::scrollbar::{self, ScrollbarState};
+use uuid::Uuid;
 
 /// Fallback advance width, used only until the font has been measured.
 const TERMINAL_CELL_WIDTH: f32 = 7.8;
@@ -288,10 +290,78 @@ pub enum TerminalLaunch {
     Program { program: PathBuf, args: Vec<String> },
 }
 
+/// Where a terminal's bytes and resizes go: the local PTY's event loop, or
+/// a daemon-hosted PTY on a remote host reached through its client channel.
+#[derive(Clone)]
+enum TerminalIo {
+    Local(EventLoopSender),
+    Remote(RemoteTerminalIo),
+}
+
+/// A remote terminal's channel on the host's daemon — `session_id`/
+/// `runtime_id` are the same client-chosen terminal id, matching the web
+/// client's convention.
+#[derive(Clone)]
+struct RemoteTerminalIo {
+    /// The live daemon connection — the pump thread swaps it when the
+    /// supervisor hands over a reconnected client, so input always targets
+    /// the socket that can still reach the PTY.
+    client: Arc<std::sync::RwLock<waku_client::DaemonClient>>,
+    channel_id: Uuid,
+}
+
+impl RemoteTerminalIo {
+    fn notify(&self, command: waku_client::Command) {
+        let Ok(client) = self.client.read() else {
+            return;
+        };
+        let _ = client.notify(self.channel_id, self.channel_id, command);
+    }
+}
+
+impl TerminalIo {
+    fn write(&self, bytes: Cow<'static, [u8]>) {
+        if bytes.is_empty() {
+            return;
+        }
+        match self {
+            TerminalIo::Local(sender) => {
+                let _ = sender.send(Msg::Input(bytes));
+            }
+            TerminalIo::Remote(io) => io.notify(waku_client::Command::WriteTerminal {
+                data: bytes.into_owned(),
+            }),
+        }
+    }
+
+    fn resize(&self, size: WindowSize) {
+        match self {
+            TerminalIo::Local(sender) => {
+                let _ = sender.send(Msg::Resize(size));
+            }
+            TerminalIo::Remote(io) => io.notify(waku_client::Command::ResizeTerminal {
+                cols: size.num_cols,
+                rows: size.num_lines,
+            }),
+        }
+    }
+
+    fn shutdown(&self) {
+        match self {
+            TerminalIo::Local(sender) => {
+                let _ = sender.send(Msg::Shutdown);
+            }
+            // The remote PTY is the daemon's to kill — without this the
+            // shell would linger until its owning task or workspace is swept.
+            TerminalIo::Remote(io) => io.notify(waku_client::Command::CloseTerminal),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct TerminalEventProxy {
     dirty: Arc<AtomicBool>,
-    sender: Arc<OnceLock<EventLoopSender>>,
+    io: Arc<OnceLock<TerminalIo>>,
     ui_events: Sender<TerminalUiEvent>,
     window_size: Arc<Mutex<WindowSize>>,
     /// Palette OSC replies run on the PTY thread; `snapshot` refreshes this
@@ -301,8 +371,8 @@ struct TerminalEventProxy {
 
 impl TerminalEventProxy {
     fn write_pty(&self, bytes: impl Into<Cow<'static, [u8]>>) {
-        if let Some(sender) = self.sender.get() {
-            let _ = sender.send(Msg::Input(bytes.into()));
+        if let Some(io) = self.io.get() {
+            io.write(bytes.into());
         }
     }
 }
@@ -380,9 +450,202 @@ impl Dimensions for TerminalDimensions {
     }
 }
 
+/// The emulator half every terminal session shares — grid, proxy, and the
+/// channels the view drains — independent of whether the PTY underneath is
+/// a local spawn or a daemon channel on a remote host.
+struct EmulatorParts {
+    term: Arc<FairMutex<Term<TerminalEventProxy>>>,
+    proxy: TerminalEventProxy,
+    dirty: Arc<AtomicBool>,
+    ui_events: Receiver<TerminalUiEvent>,
+    ui_events_sender: Sender<TerminalUiEvent>,
+    window_size: Arc<Mutex<WindowSize>>,
+    palette: Arc<Mutex<Theme>>,
+    url_regex: RegexSearch,
+    io: Arc<OnceLock<TerminalIo>>,
+}
+
+impl EmulatorParts {
+    fn new(columns: usize, rows: usize) -> Result<Self> {
+        let window_size = WindowSize {
+            num_lines: rows.min(u16::MAX as usize) as u16,
+            num_cols: columns.min(u16::MAX as usize) as u16,
+            cell_width: TERMINAL_CELL_WIDTH.round() as u16,
+            cell_height: TERMINAL_CELL_HEIGHT.round() as u16,
+        };
+        let shared_window_size = Arc::new(Mutex::new(window_size));
+        let dirty = Arc::new(AtomicBool::new(true));
+        let io = Arc::new(OnceLock::new());
+        let palette = Arc::new(Mutex::new(Theme::dark()));
+        let (ui_events_sender, ui_events) = unbounded();
+        let url_regex = RegexSearch::new(TERMINAL_LINK_REGEX)
+            .map_err(|error| anyhow::anyhow!("compile terminal link regex: {error}"))?;
+        let proxy = TerminalEventProxy {
+            dirty: dirty.clone(),
+            io: io.clone(),
+            ui_events: ui_events_sender.clone(),
+            window_size: shared_window_size.clone(),
+            palette: palette.clone(),
+        };
+        let config = Config {
+            scrolling_history: TERMINAL_SCROLLBACK_LINES,
+            ..Default::default()
+        };
+        let dimensions = TerminalDimensions { columns, rows };
+        let term = Arc::new(FairMutex::new(Term::new(
+            config,
+            &dimensions,
+            proxy.clone(),
+        )));
+        Ok(Self {
+            term,
+            proxy,
+            dirty,
+            ui_events,
+            ui_events_sender,
+            window_size: shared_window_size,
+            palette,
+            url_regex,
+            io,
+        })
+    }
+}
+
+/// The daemon side of a remote terminal: subscribes to the terminal's
+/// channel, feeds `terminalOutput` bytes into the local emulator grid, and
+/// after a reconnect resets the grid and reclaims the channel — the daemon
+/// answers the claim with its retained output tail, repainting the screen.
+fn remote_terminal_pump(
+    daemon: waku_client::DaemonSupervisor,
+    remote: RemoteTerminalIo,
+    mut events: Receiver<waku_client::SequencedEvent>,
+    term: Arc<FairMutex<Term<TerminalEventProxy>>>,
+    proxy: TerminalEventProxy,
+    dirty: Arc<AtomicBool>,
+    ui_events: Sender<TerminalUiEvent>,
+    window_size: Arc<Mutex<WindowSize>>,
+    stop: Receiver<()>,
+) -> Result<()> {
+    let channel_id = remote.channel_id;
+    let client_updates = daemon.subscribe_clients();
+    std::thread::Builder::new()
+        .name(format!("goddard-remote-terminal-{channel_id}"))
+        .spawn(move || {
+            let mut client = match remote.client.read() {
+                Ok(client) => client.clone(),
+                Err(_) => return,
+            };
+            let mut processor: alacritty_terminal::vte::ansi::Processor =
+                alacritty_terminal::vte::ansi::Processor::new();
+            'connection: loop {
+                let disconnected = loop {
+                    crossbeam_channel::select! {
+                        recv(events) -> sequenced => {
+                            let Ok(sequenced) = sequenced else {
+                                // The subscription's sender is gone — the
+                                // connection died. Wait for a replacement.
+                                break true;
+                            };
+                            let kind = sequenced.event.kind.as_str();
+                            match kind {
+                                "terminalOutput" => {
+                                    let Some(data) = sequenced.event.payload["data"].as_str()
+                                    else {
+                                        continue;
+                                    };
+                                    let Ok(bytes) = base64::engine::general_purpose::STANDARD
+                                        .decode(data)
+                                    else {
+                                        continue;
+                                    };
+                                    processor.advance(&mut *term.lock(), &bytes);
+                                    dirty.store(true, Ordering::Release);
+                                }
+                                "terminalExited" | "terminalError" => {
+                                    let _ = ui_events.send(TerminalUiEvent::Exited(None));
+                                    dirty.store(true, Ordering::Release);
+                                    return;
+                                }
+                                _ => {}
+                            }
+                        }
+                        recv(client_updates) -> replacement => {
+                            let Ok(replacement) = replacement else {
+                                return;
+                            };
+                            if !client.same_connection(&replacement) {
+                                client = replacement;
+                                break false;
+                            }
+                        }
+                        recv(stop) -> _ => return,
+                    }
+                };
+                if disconnected {
+                    // Park until the supervisor's next connection arrives;
+                    // resubscribing on a dead client would just fail again.
+                    loop {
+                        crossbeam_channel::select! {
+                            recv(client_updates) -> replacement => {
+                                let Ok(replacement) = replacement else {
+                                    return;
+                                };
+                                if !client.same_connection(&replacement) {
+                                    client = replacement;
+                                    break;
+                                }
+                            }
+                            recv(stop) -> _ => return,
+                        }
+                    }
+                }
+                // Reattach: a fresh subscription on the new connection, a
+                // blank grid so the replayed tail repaints instead of
+                // doubling, and a resize that both fixes drift and reclaims
+                // the channel for this subscriber.
+                client.unsubscribe(channel_id, channel_id);
+                events = client.subscribe(channel_id, channel_id);
+                let size = *window_size.lock();
+                *term.lock() = Term::new(
+                    Config {
+                        scrolling_history: TERMINAL_SCROLLBACK_LINES,
+                        ..Default::default()
+                    },
+                    &TerminalDimensions {
+                        columns: size.num_cols.max(1) as usize,
+                        rows: size.num_lines.max(1) as usize,
+                    },
+                    proxy.clone(),
+                );
+                dirty.store(true, Ordering::Release);
+                let reclaimed = client.request(
+                    channel_id,
+                    channel_id,
+                    waku_client::Command::ResizeTerminal {
+                        cols: size.num_cols,
+                        rows: size.num_lines,
+                    },
+                );
+                if reclaimed.is_err() {
+                    // The daemon no longer has the PTY — a restart swept it —
+                    // so there is nothing left to reattach to.
+                    let _ = ui_events.send(TerminalUiEvent::Exited(None));
+                    dirty.store(true, Ordering::Release);
+                    return;
+                }
+                if let Ok(mut slot) = remote.client.write() {
+                    *slot = client.clone();
+                }
+                continue 'connection;
+            }
+        })
+        .context("start remote terminal pump")?;
+    Ok(())
+}
+
 struct TerminalSession {
     term: Arc<FairMutex<Term<TerminalEventProxy>>>,
-    sender: EventLoopSender,
+    io: TerminalIo,
     dirty: Arc<AtomicBool>,
     ui_events: Receiver<TerminalUiEvent>,
     window_size: Arc<Mutex<WindowSize>>,
@@ -395,6 +658,10 @@ struct TerminalSession {
     /// Grid lines — scrollback plus screen — already scanned for a localhost
     /// URL, so each output line is considered once.
     localhost_scan_watermark: usize,
+    /// Stops a remote terminal's event pump on drop — the pump outlives the
+    /// session through its Arc clones, and a daemon that never comes back
+    /// would otherwise park the thread forever.
+    pump_stop: Option<Sender<()>>,
 }
 
 impl TerminalSession {
@@ -412,31 +679,9 @@ impl TerminalSession {
             cell_width: TERMINAL_CELL_WIDTH.round() as u16,
             cell_height: TERMINAL_CELL_HEIGHT.round() as u16,
         };
-        let shared_window_size = Arc::new(Mutex::new(window_size));
-        let dirty = Arc::new(AtomicBool::new(true));
-        let sender_slot = Arc::new(OnceLock::new());
-        let palette = Arc::new(Mutex::new(Theme::dark()));
-        let (ui_event_tx, ui_events) = unbounded();
-        let url_regex = RegexSearch::new(TERMINAL_LINK_REGEX)
-            .map_err(|error| anyhow::anyhow!("compile terminal link regex: {error}"))?;
-        let proxy = TerminalEventProxy {
-            dirty: dirty.clone(),
-            sender: sender_slot.clone(),
-            ui_events: ui_event_tx,
-            window_size: shared_window_size.clone(),
-            palette: palette.clone(),
-        };
-
-        let config = Config {
-            scrolling_history: TERMINAL_SCROLLBACK_LINES,
-            ..Default::default()
-        };
-        let dimensions = TerminalDimensions { columns, rows };
-        let term = Arc::new(FairMutex::new(Term::new(
-            config,
-            &dimensions,
-            proxy.clone(),
-        )));
+        let parts = EmulatorParts::new(columns, rows)?;
+        let term = parts.term.clone();
+        let proxy = parts.proxy.clone();
 
         let (shell, startup_line, shell_integration, program_args) = match launch {
             TerminalLaunch::Shell => {
@@ -507,37 +752,103 @@ impl TerminalSession {
         let event_loop = EventLoop::new(term.clone(), proxy, pty, false, false)
             .context("create Alacritty PTY event loop")?;
         let sender = event_loop.channel();
-        sender_slot
-            .set(sender.clone())
-            .map_err(|_| anyhow::anyhow!("initialize Alacritty PTY sender"))?;
+        let io = TerminalIo::Local(sender);
+        parts
+            .io
+            .set(io.clone())
+            .map_err(|_| anyhow::anyhow!("initialize terminal I/O"))?;
         event_loop.spawn();
 
         // The command line lands in the PTY's input queue ahead of whatever
         // the shell prints while starting up, so it runs as the first input
         // the interactive shell reads — the same effect as typing it.
         if let Some(startup_line) = startup_line {
-            let _ = sender.send(Msg::Input(format!("{startup_line}\n").into_bytes().into()));
+            io.write(format!("{startup_line}\n").into_bytes().into());
         }
 
         Ok(Self {
-            term,
-            sender,
-            dirty,
-            ui_events,
-            window_size: shared_window_size,
+            term: parts.term,
+            io,
+            dirty: parts.dirty,
+            ui_events: parts.ui_events,
+            window_size: parts.window_size,
             grid_size: (columns, rows),
             cell_size: (TERMINAL_CELL_WIDTH, TERMINAL_CELL_HEIGHT),
-            palette,
-            url_regex,
+            palette: parts.palette,
+            url_regex: parts.url_regex,
             localhost_scan_watermark: 0,
+            pump_stop: None,
+        })
+    }
+
+    /// A terminal whose PTY runs on a remote host's daemon. The emulator
+    /// grid stays local — `terminalOutput` events feed it — while input,
+    /// resizes, and close ride the daemon channel named by `channel_id`.
+    fn remote(
+        daemon: &waku_client::DaemonSupervisor,
+        channel_id: Uuid,
+        working_directory: &Path,
+        owner: Option<Uuid>,
+        columns: usize,
+        rows: usize,
+    ) -> Result<Self> {
+        let columns = columns.max(TERMINAL_MIN_COLUMNS);
+        let rows = rows.max(TERMINAL_MIN_ROWS);
+        let parts = EmulatorParts::new(columns, rows)?;
+        let client = daemon.client();
+        let events = client.subscribe(channel_id, channel_id);
+        let initial_size = *parts.window_size.lock();
+        client
+            .request(
+                channel_id,
+                channel_id,
+                waku_client::Command::OpenTerminal {
+                    cwd: working_directory.to_path_buf(),
+                    cols: initial_size.num_cols,
+                    rows: initial_size.num_lines,
+                    owner,
+                },
+            )
+            .context("open terminal on the remote host")?;
+        let remote = RemoteTerminalIo {
+            client: Arc::new(std::sync::RwLock::new(client)),
+            channel_id,
+        };
+        let io = TerminalIo::Remote(remote.clone());
+        parts
+            .io
+            .set(io.clone())
+            .map_err(|_| anyhow::anyhow!("initialize terminal I/O"))?;
+        let (pump_stop, stop) = unbounded();
+        remote_terminal_pump(
+            daemon.clone(),
+            remote,
+            events,
+            parts.term.clone(),
+            parts.proxy.clone(),
+            parts.dirty.clone(),
+            parts.ui_events_sender.clone(),
+            parts.window_size.clone(),
+            stop,
+        )?;
+
+        Ok(Self {
+            term: parts.term,
+            io,
+            dirty: parts.dirty,
+            ui_events: parts.ui_events,
+            window_size: parts.window_size,
+            grid_size: (columns, rows),
+            cell_size: (TERMINAL_CELL_WIDTH, TERMINAL_CELL_HEIGHT),
+            palette: parts.palette,
+            url_regex: parts.url_regex,
+            localhost_scan_watermark: 0,
+            pump_stop: Some(pump_stop),
         })
     }
 
     fn write(&self, bytes: impl Into<Cow<'static, [u8]>>) {
-        let bytes = bytes.into();
-        if !bytes.is_empty() {
-            let _ = self.sender.send(Msg::Input(bytes));
-        }
+        self.io.write(bytes.into());
     }
 
     fn resize(&mut self, columns: usize, rows: usize, cell_width: f32, cell_height: f32) {
@@ -558,7 +869,7 @@ impl TerminalSession {
             cell_height: cell_height.round() as u16,
         };
         *self.window_size.lock() = size;
-        let _ = self.sender.send(Msg::Resize(size));
+        self.io.resize(size);
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -745,7 +1056,10 @@ impl TerminalSession {
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        let _ = self.sender.send(Msg::Shutdown);
+        if let Some(stop) = &self.pump_stop {
+            let _ = stop.send(());
+        }
+        self.io.shutdown();
     }
 }
 
@@ -1202,46 +1516,11 @@ impl TerminalView {
             .to_owned();
         let runs_a_command = matches!(launch, TerminalLaunch::CustomCommand(_));
         let terminal_cwd = working_directory.clone();
-        cx.spawn(async move |this, cx| {
-            let started = cx
-                .background_executor()
-                .spawn(async move { TerminalSession::new(&terminal_cwd, &launch, 52, 36) })
-                .await;
-            if this
-                .update(cx, |this, cx| {
-                    match started {
-                        Ok(session) => this.session = Some(session),
-                        Err(error) => {
-                            this.error = Some(error.to_string());
-                            // A command that never launched still owns a
-                            // pending run — resolve it so its toast isn't
-                            // pinned forever.
-                            cx.emit(TerminalViewEvent::CommandFinished(None));
-                        }
-                    }
-                    cx.notify();
-                })
-                .is_err()
-            {
-                return;
-            }
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(24))
-                    .await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.poll(cx) {
-                            cx.notify();
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
+        Self::spawn_session(
+            cx.background_executor()
+                .spawn(async move { TerminalSession::new(&terminal_cwd, &launch, 52, 36) }),
+            cx,
+        );
 
         let context_menu = ContextMenuHandle::new(cx);
         let cursor_blink = cx.new(|_| TerminalCursorBlink::new());
@@ -1281,6 +1560,110 @@ impl TerminalView {
             context_menu,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// A terminal whose PTY runs on a remote host's daemon — the shell
+    /// opens where the session's workspace lives, and the emulator here
+    /// renders what the daemon streams back. `daemon` is `None` when the
+    /// host is unreachable, which surfaces as a spawn error.
+    pub fn remote(
+        daemon: Option<waku_client::DaemonSupervisor>,
+        terminal_id: Uuid,
+        working_directory: PathBuf,
+        owner: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let default_title = tr!("right_panel.terminal");
+        let shell_name = "ssh".to_owned();
+        let terminal_cwd = working_directory.clone();
+        Self::spawn_session(
+            cx.background_executor().spawn(async move {
+                let Some(daemon) = daemon else {
+                    anyhow::bail!("the remote host is not connected");
+                };
+                TerminalSession::remote(&daemon, terminal_id, &terminal_cwd, owner, 52, 36)
+            }),
+            cx,
+        );
+
+        let context_menu = ContextMenuHandle::new(cx);
+        let cursor_blink = cx.new(|_| TerminalCursorBlink::new());
+        let subscriptions = vec![cx.observe(&cursor_blink, |_, _, cx| cx.notify())];
+
+        Self {
+            session: None,
+            command_bar: None,
+            error: None,
+            focus_handle: cx.focus_handle(),
+            title: default_title.clone(),
+            default_title,
+            custom_title: None,
+            spawn_directory: working_directory.clone(),
+            working_directory,
+            shell_name,
+            command_running: false,
+            command_began_seen: false,
+            last_command_exit: None,
+            last_command_started_at: None,
+            exited: false,
+            scroll_accumulator: 0.0,
+            panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
+            embedded: false,
+            measured_cell_width: None,
+            scrollbar_state: ScrollbarState::new(),
+            grid_bounds: Rc::new(Cell::new(None)),
+            selecting: false,
+            link_gesture: None,
+            last_mouse_cell: None,
+            hovered_link: None,
+            reported_localhost_urls: HashSet::new(),
+            cursor_blink,
+            cursor_focus_tracking_started: false,
+            context_menu,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    /// Run the session spawn off the UI thread, install the result, then
+    /// keep draining its UI events — shared by local and remote launches.
+    fn spawn_session(spawn: Task<Result<TerminalSession>>, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let started = spawn.await;
+            if this
+                .update(cx, |this, cx| {
+                    match started {
+                        Ok(session) => this.session = Some(session),
+                        Err(error) => {
+                            this.error = Some(error.to_string());
+                            // A command that never launched still owns a
+                            // pending run — resolve it so its toast isn't
+                            // pinned forever.
+                            cx.emit(TerminalViewEvent::CommandFinished(None));
+                        }
+                    }
+                    cx.notify();
+                })
+                .is_err()
+            {
+                return;
+            }
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(24))
+                    .await;
+                if this
+                    .update(cx, |this, cx| {
+                        if this.poll(cx) {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     /// A terminal embedded in another surface rather than filling the right

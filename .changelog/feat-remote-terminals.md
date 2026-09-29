@@ -1,0 +1,1 @@
+- Terminals opened on a remote host's workspace now run on that host over its daemon connection — SSH and socket remotes both work — instead of refusing to open. The tab renders locally, resizes propagate to the remote PTY, and a dropped connection reattaches to the still-running shell with its recent screen restored.

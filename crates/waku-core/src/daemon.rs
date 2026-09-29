@@ -383,6 +383,10 @@ pub struct WakuBackend {
     managed_goal_claims: Mutex<HashMap<(Uuid, Uuid), HashSet<Uuid>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
     terminals: Arc<Mutex<HashMap<Uuid, TerminalEntry>>>,
+    /// The hub's event source once `serve` installs it — terminal-channel
+    /// owner bookkeeping needs it outside request dispatch (orphan sweeps).
+    /// `detached` until then, so tests never need a live hub.
+    event_source: Mutex<EventSink>,
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
     settings: Arc<DaemonSettingsStore>,
@@ -524,6 +528,7 @@ impl WakuBackend {
             managed_goal_claims: Mutex::new(HashMap::new()),
             repo_maps: Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
             terminals: Arc::new(Mutex::new(HashMap::new())),
+            event_source: Mutex::new(EventSink::detached()),
             #[cfg(all(test, unix))]
             terminal_shell: None,
             memory: crate::memory::MemoryService::new(
@@ -980,6 +985,10 @@ impl WakuBackend {
             })
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
+        let events = self.event_source.lock();
+        for id in &orphaned {
+            events.release_terminal_channel(*id);
+        }
         orphaned
             .into_iter()
             .filter_map(|id| terminals.remove(&id).map(|entry| entry.terminal))
@@ -1506,6 +1515,7 @@ impl Backend for WakuBackend {
     }
 
     fn set_event_source(&self, events: EventSink) {
+        *self.event_source.lock() = events.clone();
         self.automations.set_event_source(events.clone());
         self.auto_prompts.set_event_source(events.clone());
         // The reaper starts with the event hub: retiring a runtime needs a
@@ -2803,18 +2813,28 @@ impl Backend for WakuBackend {
                 rows,
                 owner,
             } => {
-                let terminal = self.open_terminal(&cwd, cols, rows, events)?;
-                let previous = self.terminals.lock().insert(
-                    session_id,
-                    TerminalEntry {
-                        runtime_id,
-                        owner,
-                        cwd,
-                        terminal,
-                    },
-                );
-                drop_detached(previous);
-                Ok(ResponsePayload::Ack)
+                // Claim before spawning so the shell's startup output can
+                // never broadcast to subscribers that didn't open it.
+                events.claim_terminal_channel(Vec::new());
+                match self.open_terminal(&cwd, cols, rows, events.clone()) {
+                    Ok(terminal) => {
+                        let previous = self.terminals.lock().insert(
+                            session_id,
+                            TerminalEntry {
+                                runtime_id,
+                                owner,
+                                cwd,
+                                terminal,
+                            },
+                        );
+                        drop_detached(previous);
+                        Ok(ResponsePayload::Ack)
+                    }
+                    Err(error) => {
+                        events.release_terminal_channel(session_id);
+                        Err(error)
+                    }
+                }
             }
             Command::WriteTerminal { data } => {
                 let terminals = self.terminals.lock();
@@ -2826,6 +2846,10 @@ impl Backend for WakuBackend {
                         "daemon terminal {session_id} belongs to runtime {}, not {runtime_id}",
                         entry.runtime_id
                     );
+                }
+                if events.terminal_channel_owner(session_id) != Some(events.source_subscriber_id())
+                {
+                    events.claim_terminal_channel(entry.terminal.take_tail());
                 }
                 entry.terminal.write(data)?;
                 Ok(ResponsePayload::Ack)
@@ -2840,6 +2864,10 @@ impl Backend for WakuBackend {
                         "daemon terminal {session_id} belongs to runtime {}, not {runtime_id}",
                         entry.runtime_id
                     );
+                }
+                if events.terminal_channel_owner(session_id) != Some(events.source_subscriber_id())
+                {
+                    events.claim_terminal_channel(entry.terminal.take_tail());
                 }
                 entry.terminal.resize(cols, rows);
                 Ok(ResponsePayload::Ack)
@@ -2857,6 +2885,7 @@ impl Backend for WakuBackend {
                     }
                     terminals.remove(&session_id)
                 };
+                events.release_terminal_channel(session_id);
                 drop_detached(removed.map(|entry| entry.terminal));
                 Ok(ResponsePayload::Ack)
             }

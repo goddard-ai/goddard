@@ -398,7 +398,18 @@ impl Waku {
             .or_else(|| command.cloned().map(TerminalLaunch::CustomCommand))
             .unwrap_or(TerminalLaunch::Shell);
         let close_on_exit = command.is_some_and(|command| command.close_on_success);
-        let view = cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
+        let view = if self.is_remote_path(&working_directory) {
+            let daemon = self.daemon_for_path(&working_directory);
+            let owner = self
+                .terminal_records
+                .get(&terminal_id)
+                .and_then(|record| record.session);
+            cx.new(|cx| {
+                TerminalView::remote(daemon, terminal_id, working_directory.clone(), owner, cx)
+            })
+        } else {
+            cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx))
+        };
         cx.subscribe(&view, move |this, view, event: &TerminalViewEvent, cx| {
             match event {
                 // The PTY exiting retires whatever surface held it — a
@@ -631,8 +642,12 @@ impl Waku {
         launch: Option<TerminalLaunch>,
         cx: &mut Context<Self>,
     ) -> Option<Uuid> {
-        // A desktop PTY can only open on a local working directory.
-        if self.is_remote_path(&working_directory) {
+        // A remote working directory hosts a plain shell on that host's
+        // daemon; commands and program launches carry local paths and
+        // scripts, so they stay local-only.
+        if self.is_remote_path(&working_directory)
+            && !matches!(launch, None | Some(TerminalLaunch::Shell))
+        {
             return None;
         }
         let session = session.filter(|session_id| {
@@ -869,12 +884,9 @@ impl Waku {
     ) -> Option<FocusHandle> {
         let record = self.terminal_records.get(&terminal_id)?;
         if !self.right_panel_terminals.contains_key(&terminal_id) {
-            let working_directory = self.terminal_spawn_directory(record);
-            let Some(working_directory) =
-                working_directory.filter(|directory| !self.is_remote_path(directory))
-            else {
-                return None;
-            };
+            // Remote directories spawn through their host's daemon; a
+            // disconnected host surfaces as the view's spawn error.
+            let working_directory = self.terminal_spawn_directory(record)?;
             self.spawn_terminal_entity(terminal_id, working_directory, cx);
         }
         if record_visit {

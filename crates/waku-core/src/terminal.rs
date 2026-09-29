@@ -35,11 +35,16 @@ mod platform {
     const MIN_COLUMNS: u16 = 2;
     const MIN_ROWS: u16 = 1;
     const SHELL_SHUTDOWN_GRACE: Duration = Duration::from_millis(250);
+    /// Recent output kept for a reconnecting client to repaint from. Bounded
+    /// so a chatty PTY cannot pin unbounded transcript bytes in daemon
+    /// memory — the same reason output events are ephemeral, not journaled.
+    const OUTPUT_TAIL_BYTES: usize = 256 * 1024;
 
     pub struct DaemonTerminal {
         pty: Arc<Mutex<tty::Pty>>,
         stopped: Arc<AtomicBool>,
         reader: Option<JoinHandle<()>>,
+        tail: Arc<Mutex<Vec<u8>>>,
     }
 
     impl DaemonTerminal {
@@ -95,8 +100,10 @@ mod platform {
             let mut output = pty.file().try_clone().context("clone terminal output")?;
             let pty = Arc::new(Mutex::new(pty));
             let stopped = Arc::new(AtomicBool::new(false));
+            let tail = Arc::new(Mutex::new(Vec::new()));
             let reader_pty = pty.clone();
             let reader_stopped = stopped.clone();
+            let reader_tail = tail.clone();
             let reader = std::thread::Builder::new()
                 .name("goddard-daemon-terminal-output".into())
                 .spawn(move || {
@@ -113,6 +120,12 @@ mod platform {
                             Ok(read) => {
                                 let data = base64::engine::general_purpose::STANDARD
                                     .encode(&buffer[..read]);
+                                {
+                                    let mut tail = reader_tail.lock();
+                                    tail.extend_from_slice(&buffer[..read]);
+                                    let excess = tail.len().saturating_sub(OUTPUT_TAIL_BYTES);
+                                    tail.drain(..excess);
+                                }
                                 let _ = events.send_ephemeral(WireDriverEvent::new(
                                     "terminalOutput",
                                     json!({ "data": data }),
@@ -158,6 +171,7 @@ mod platform {
                 pty,
                 stopped,
                 reader: Some(reader),
+                tail,
             })
         }
 
@@ -180,6 +194,12 @@ mod platform {
         /// subtree to this terminal through it.
         pub fn child_pid(&self) -> u32 {
             self.pty.lock().child().id()
+        }
+
+        /// Drain the retained output tail — replayed to a client claiming
+        /// the channel after a reconnect so its fresh emulator repaints.
+        pub fn take_tail(&self) -> Vec<u8> {
+            std::mem::take(&mut *self.tail.lock())
         }
     }
 
@@ -266,6 +286,10 @@ impl DaemonTerminal {
     }
 
     pub fn resize(&self, _cols: u16, _rows: u16) {}
+
+    pub fn take_tail(&self) -> Vec<u8> {
+        Vec::new()
+    }
 
     pub fn child_pid(&self) -> u32 {
         0
