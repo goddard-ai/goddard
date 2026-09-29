@@ -1,6 +1,7 @@
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
 use gpui::{KeyBinding, actions};
 
+use super::composer::project_picker_order;
 use super::*;
 use crate::ui::shortcut::ShortcutHint;
 use waku_client::friends::TransferStatus;
@@ -5930,7 +5931,6 @@ impl Waku {
                         ),
                 );
         }
-        let selected_project_id = self.state.selected_project;
         let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
         let project_name = self
             .selected_project()
@@ -5942,77 +5942,9 @@ impl Waku {
                 }
             })
             .unwrap_or_else(|| tr!("project.your_project"));
-        let project_options = self
-            .state
-            .projects
-            .iter()
-            .filter(|project| !project.is_projectless())
-            .filter(|project| Some(project.id) == selected_project_id)
-            .chain(
-                self.state
-                    .projects
-                    .iter()
-                    .filter(|project| !project.is_projectless())
-                    .filter(|project| Some(project.id) != selected_project_id),
-            )
-            .map(|project| (project.id, project.display_name(), project.starred))
-            .collect::<Vec<_>>();
-        let weak = cx.entity().downgrade();
-        let handle = self.menu_handle("empty-state-project", cx);
+        let project_selector =
+            self.render_new_task_project_picker(project_name, projectless_selected, cx);
         let sync_notice = self.render_sync_notice(cx);
-        let project_selector = dropdown_menu(
-            ProjectNameSelector::new("empty-state-project", project_name)
-                .selected(handle.is_open()),
-            "empty-state-project-menu",
-            &handle,
-            MenuAlign::BelowLeft,
-            move |_| {
-                let mut items = project_options
-                    .clone()
-                    .into_iter()
-                    .map(|(project_id, project_name, starred)| {
-                        let weak = weak.clone();
-                        let star_weak = weak.clone();
-                        MenuItem::new(project_name, move |_, cx| {
-                            if Some(project_id) == selected_project_id {
-                                return;
-                            }
-                            let _ = weak.update(cx, |this, cx| this.select_project(project_id, cx));
-                        })
-                        .selected(Some(project_id) == selected_project_id)
-                        .star(starred, move |_, cx| {
-                            let _ = star_weak.update(cx, |this, cx| {
-                                this.toggle_project_starred(project_id, cx);
-                            });
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                if !items.is_empty() {
-                    items.push(MenuItem::Separator);
-                }
-                let add_project_weak = weak.clone();
-                items.push(
-                    MenuItem::new(tr!("project.new_project"), move |_, cx| {
-                        let _ = add_project_weak.update(cx, |this, cx| this.add_project(cx));
-                    })
-                    .icon("icons/folder-new.svg")
-                    .shortcut_action(&NewProject),
-                );
-                let projectless_weak = weak.clone();
-                items.push(
-                    MenuItem::new(tr!("project.no_project"), move |_, cx| {
-                        let _ = projectless_weak.update(cx, |this, cx| {
-                            if !this.selected_project().is_some_and(Project::is_projectless) {
-                                this.create_projectless_session(cx);
-                            }
-                        });
-                    })
-                    .icon("icons/x.svg")
-                    .selected(projectless_selected),
-                );
-                items
-            },
-        );
         div()
             .flex_1()
             .flex()
@@ -6050,6 +5982,412 @@ impl Waku {
                     .when_some(sync_notice, |element, notice| element.child(notice)),
             )
     }
+
+    fn render_new_task_project_picker(
+        &mut self,
+        project_name: String,
+        projectless_selected: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected_project_id = self.state.selected_project;
+        let weak = cx.entity().downgrade();
+        let search = self.project_search.clone();
+        let search_focus = search.read(cx).focus_handle(cx);
+        let handle = {
+            let toggle_weak = weak.clone();
+            let reset_search = search.clone();
+            let picker_focus = search_focus.clone();
+            self.menu_handle_with("empty-state-project", cx, move |open, window, cx| {
+                let _ = toggle_weak.update(cx, |this, cx| {
+                    if open {
+                        this.project_picker_highlight = None;
+                        reset_search.update(cx, |input, cx| input.clear(cx));
+                    } else {
+                        let focus = this.composer_focus(cx);
+                        window.focus(&focus, cx);
+                    }
+                    cx.notify();
+                });
+                if open {
+                    window.on_next_frame({
+                        let picker_focus = picker_focus.clone();
+                        move |window, _| {
+                            window.on_next_frame(move |window, cx| window.focus(&picker_focus, cx));
+                        }
+                    });
+                }
+            })
+        };
+
+        let normalized_query = search.read(cx).content().trim().to_ascii_lowercase();
+        let tokens = normalized_query.split_whitespace().collect::<Vec<_>>();
+        let home = self.home_directory.as_deref();
+        let mut projects = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .filter(|project| {
+                if tokens.is_empty() {
+                    return true;
+                }
+                let text = format!(
+                    "{} {}",
+                    project.display_name(),
+                    settings::abbreviate_home_path(&project.path, home)
+                )
+                .to_ascii_lowercase();
+                tokens.iter().all(|token| text.contains(token))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        project_picker_order(&mut projects, &self.state.sessions, selected_project_id);
+        let rows = projects
+            .iter()
+            .map(|project| {
+                (
+                    project.id,
+                    SharedString::from(project.display_name()),
+                    self.is_remote_project(project.id),
+                    project.starred,
+                    project.is_friends() || project.friend_peer_id.is_some(),
+                    self.transcript_control_focus(
+                        format!("project-picker-star-{}", project.id),
+                        cx,
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let actions = Rc::new(
+            rows.iter()
+                .map(|(project_id, ..)| ProjectPickerAction::Project(*project_id))
+                .chain(std::iter::once(ProjectPickerAction::NewProject))
+                .chain(std::iter::once(ProjectPickerAction::NoProject))
+                .collect::<Vec<_>>(),
+        );
+        let highlight = self
+            .project_picker_highlight
+            .filter(|index| *index < actions.len());
+        let list_state = self.project_picker_list_state.clone();
+        if handle.is_open() {
+            self.sync_project_picker_rows(&rows.iter().map(|(id, ..)| *id).collect::<Vec<_>>());
+        }
+        let trigger = ProjectNameSelector::new("empty-state-project", project_name)
+            .selected(handle.is_open());
+        let list_rows = Rc::new(rows);
+        let new_project_weak = weak.clone();
+        let no_project_weak = weak.clone();
+        popover(
+            trigger,
+            &handle,
+            MenuAlign::BelowLeft,
+            move |popover, _window, cx| {
+                let theme = Theme::current(cx);
+                let list = render_new_task_project_rows(
+                    list_rows.clone(),
+                    actions.clone(),
+                    highlight,
+                    selected_project_id,
+                    list_state.clone(),
+                    weak.clone(),
+                    popover.clone(),
+                    cx,
+                );
+                let next_actions = actions.clone();
+                let previous_actions = actions.clone();
+                let confirm_actions = actions.clone();
+                let confirm_popover = popover.clone();
+                let next_weak = weak.clone();
+                let previous_weak = weak.clone();
+                let confirm_weak = weak.clone();
+                let new_project_popover = popover.clone();
+                let no_project_popover = popover.clone();
+                let new_project_weak = new_project_weak.clone();
+                let no_project_weak = no_project_weak.clone();
+                let new_project_highlighted = highlight.and_then(|index| actions.get(index))
+                    == Some(&ProjectPickerAction::NewProject);
+                let no_project_highlighted = highlight.and_then(|index| actions.get(index))
+                    == Some(&ProjectPickerAction::NoProject);
+                let new_project_row = div()
+                    .id("project-picker-new-project")
+                    .mx(px(4.0))
+                    .h(px(PICKER_ROW_HEIGHT))
+                    .px(px(8.0))
+                    .rounded(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .cursor_default()
+                    .when(new_project_highlighted, |element| {
+                        element.bg(theme.overlay_strong)
+                    })
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(icon("icons/folder-new.svg", 12.0, theme.text_secondary))
+                    .child(tr!("project.new_project"))
+                    .on_click(move |_, window, cx| {
+                        new_project_popover.close(window, cx);
+                        let _ = new_project_weak.update(cx, |this, cx| this.add_project(cx));
+                        window.refresh();
+                    });
+                let no_project_row = div()
+                    .id("project-picker-no-project")
+                    .mx(px(4.0))
+                    .h(px(PICKER_ROW_HEIGHT))
+                    .px(px(8.0))
+                    .rounded(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .cursor_default()
+                    .when(no_project_highlighted, |element| {
+                        element.bg(theme.overlay_strong)
+                    })
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(icon("icons/x.svg", 12.0, theme.text_secondary))
+                    .child(tr!("project.no_project"))
+                    .when(projectless_selected, |element| {
+                        element.child(icon("icons/check.svg", 11.0, theme.text_secondary))
+                    })
+                    .on_click(move |_, window, cx| {
+                        no_project_popover.close(window, cx);
+                        let _ = no_project_weak.update(cx, |this, cx| {
+                            this.create_projectless_session_from_composer(cx);
+                        });
+                        window.refresh();
+                    });
+                div()
+                    .w(px(360.0))
+                    .max_h(px(420.0))
+                    .rounded(px(16.0))
+                    .overflow_hidden()
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .bg(theme.raised)
+                    .shadow_lg()
+                    .flex()
+                    .flex_col()
+                    .on_action(move |_: &SelectNextEntry, _, cx| {
+                        let _ = next_weak.update(cx, |this, cx| {
+                            this.move_project_picker_highlight("down", &next_actions, cx);
+                        });
+                    })
+                    .on_action(move |_: &SelectPreviousEntry, _, cx| {
+                        let _ = previous_weak.update(cx, |this, cx| {
+                            this.move_project_picker_highlight("up", &previous_actions, cx);
+                        });
+                    })
+                    .on_action(move |_: &ConfirmEntry, window, cx| {
+                        let should_close = confirm_weak
+                            .update(cx, |this, cx| {
+                                this.confirm_project_picker_action(&confirm_actions, window, cx)
+                            })
+                            .unwrap_or(false);
+                        if should_close {
+                            confirm_popover.close(window, cx);
+                            window.refresh();
+                        }
+                    })
+                    .child(
+                        div()
+                            .h(px(52.0))
+                            .px(px(12.0))
+                            .pt(px(10.0))
+                            .pb(px(8.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h(px(34.0))
+                                    .px(px(10.0))
+                                    .rounded(px(11.0))
+                                    .bg(theme.surface)
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(icon("icons/search.svg", 15.0, theme.text_secondary))
+                                    .child(div().flex_1().min_w_0().child(search.clone())),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .px(px(14.0))
+                            .pt(px(3.0))
+                            .pb(px(7.0))
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("projects.title")),
+                    )
+                    .child(list)
+                    .child(
+                        div()
+                            .mx(px(6.0))
+                            .my(px(4.0))
+                            .h(hairline())
+                            .bg(theme.separator),
+                    )
+                    .child(new_project_row)
+                    .child(no_project_row)
+                    .child(div().h(px(4.0)))
+                    .into_any_element()
+            },
+        )
+    }
+}
+
+fn render_new_task_project_rows(
+    rows: Rc<Vec<(Uuid, SharedString, bool, bool, bool, FocusHandle)>>,
+    actions: Rc<Vec<ProjectPickerAction>>,
+    highlight: Option<usize>,
+    selected_project_id: Option<Uuid>,
+    list_state: ListState,
+    weak: WeakEntity<Waku>,
+    popover: ContextMenuHandle,
+    cx: &App,
+) -> AnyElement {
+    if rows.is_empty() {
+        return div()
+            .id("project-picker-list-empty")
+            .h(px(64.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(sp(12.5))
+            .text_color(Theme::current(cx).text_ghost)
+            .child(tr!("projects.none_found"))
+            .into_any_element();
+    }
+
+    let height = (rows.len() as f32 * PICKER_ROW_HEIGHT).min(260.0);
+    div()
+        .id("project-picker-list")
+        .w_full()
+        .h(px(height))
+        .flex_none()
+        .px(px(4.0))
+        .child(
+            list(list_state, move |index, _window, cx| {
+                let Some((project_id, name, remote, starred, friend, star_focus)) = rows.get(index)
+                else {
+                    return div().into_any_element();
+                };
+                let project_id = *project_id;
+                let selected = Some(project_id) == selected_project_id;
+                let highlighted = highlight
+                    .and_then(|index| actions.get(index))
+                    .is_some_and(|action| {
+                        matches!(action, ProjectPickerAction::Project(id) if *id == project_id)
+                    });
+                let theme = Theme::current(cx);
+                let row_weak = weak.clone();
+                let row_popover = popover.clone();
+                let star_weak = weak.clone();
+                let star_key_weak = weak.clone();
+                let star_focus = star_focus.clone();
+                div()
+                    .id(SharedString::from(format!("project-row-{project_id}")))
+                    .w_full()
+                    .h(px(PICKER_ROW_HEIGHT))
+                    .px(px(8.0))
+                    .rounded(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .cursor_default()
+                    .when(highlighted, |element| element.bg(theme.overlay_strong))
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(icon(
+                        if *remote {
+                            "icons/server.svg"
+                        } else if *friend {
+                            "icons/friends.svg"
+                        } else {
+                            "icons/folder.svg"
+                        },
+                        12.0,
+                        theme.text,
+                    ))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text)
+                            .child(name.clone()),
+                    )
+                    .when(selected, |element| {
+                        element.child(icon("icons/check.svg", 11.0, theme.text_secondary))
+                    })
+                    .child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "project-picker-star-{project_id}"
+                            )))
+                            .flex_none()
+                            .size(px(20.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .track_focus(&star_focus)
+                            .tab_index(0)
+                            .focus_visible(|element| element.bg(theme.focus_highlight()))
+                            .hover(|element| element.bg(theme.overlay_strong))
+                            .tooltip(Tooltip::text(if *starred {
+                                tr!("common.unstar")
+                            } else {
+                                tr!("common.star")
+                            }))
+                            .child(icon(
+                                if *starred {
+                                    "icons/star-filled.svg"
+                                } else {
+                                    "icons/star.svg"
+                                },
+                                12.0,
+                                if *starred {
+                                    theme.favorite
+                                } else {
+                                    theme.text_ghost
+                                },
+                            ))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                let _ = star_weak.update(cx, |this, cx| {
+                                    this.toggle_project_starred(project_id, cx);
+                                });
+                            })
+                            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    cx.stop_propagation();
+                                    let _ = star_key_weak.update(cx, |this, cx| {
+                                        this.toggle_project_starred(project_id, cx);
+                                    });
+                                }
+                            }),
+                    )
+                    .on_click(move |_, window, cx| {
+                        if Some(project_id) != selected_project_id {
+                            let _ = row_weak.update(cx, |this, cx| {
+                                this.select_project_from_composer(project_id, window, cx);
+                            });
+                        }
+                        row_popover.close(window, cx);
+                        window.refresh();
+                    })
+                    .into_any_element()
+            })
+            .size_full(),
+        )
+        .into_any_element()
 }
 
 fn localized_session_title(session: &AgentSession) -> String {
