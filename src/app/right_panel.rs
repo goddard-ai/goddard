@@ -6344,7 +6344,8 @@ impl Waku {
                                 element.paint(window, cx);
                             }
                         },
-                    ))
+                    )
+                    .size_full())
                     .into_any_element()
             }
             Some(Err(error)) => message(error).into_any_element(),

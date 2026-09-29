@@ -1,0 +1,1 @@
+- Fixed image files opening to a blank pane in the file viewer — photos, icons, and SVGs now preview again, still with ⌘+scroll zoom and vertical panning.

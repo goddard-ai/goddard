@@ -577,6 +577,72 @@ mod tests {
         ));
     }
 
+    /// Regression test for the blank file-image preview: a bare `canvas` has
+    /// an auto height, so inside a `size_full` column it collapsed to zero
+    /// bounds and the image never painted. The viewport must size it.
+    #[gpui::test]
+    fn svg_render_image_resolves_through_canvas_prepaint(cx: &mut gpui::TestAppContext) {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct Probe {
+            image: Arc<gpui::Image>,
+            outcomes: Rc<RefCell<Vec<(f32, f32, bool)>>>,
+        }
+        impl gpui::Render for Probe {
+            fn render(
+                &mut self,
+                _window: &mut gpui::Window,
+                _cx: &mut gpui::Context<Self>,
+            ) -> impl gpui::IntoElement {
+                let image = self.image.clone();
+                let outcomes = self.outcomes.clone();
+                gpui::div().size_full().child(
+                    gpui::canvas(
+                        move |bounds, window, cx| {
+                            outcomes.borrow_mut().push((
+                                f32::from(bounds.size.width),
+                                f32::from(bounds.size.height),
+                                image.clone().use_render_image(window, cx).is_some(),
+                            ));
+                        },
+                        |_, _, _window, _cx| {},
+                    )
+                    .size_full(),
+                )
+            }
+        }
+
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/icons/friends.svg"
+        ))
+        .unwrap();
+        let outcomes = Rc::new(RefCell::new(Vec::new()));
+        let (_view, cx) = cx.add_window_view(|_, _| Probe {
+            image: Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, bytes)),
+            outcomes: outcomes.clone(),
+        });
+        for _ in 0..5 {
+            cx.run_until_parked();
+            cx.update(|window, _| window.refresh());
+        }
+        cx.run_until_parked();
+
+        assert!(
+            outcomes.borrow().iter().all(|(width, height, _)| {
+                *width > 0.0 && *height > 0.0
+            }),
+            "canvas bounds collapsed: {:?}",
+            outcomes.borrow()
+        );
+        assert!(
+            outcomes.borrow().last().map(|r| r.2) == Some(true),
+            "(width, height, render_ready) across draws: {:?}",
+            outcomes.borrow()
+        );
+    }
+
     #[test]
     fn remote_image_cache_honors_the_byte_budget() {
         let mut cache = RemoteImageCache::new();
