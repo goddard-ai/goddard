@@ -1,0 +1,1 @@
+- The suggested-action chip no longer offers "Keep going" after turns that finished cleanly — it could only appear where there was nothing to continue. Turns that genuinely stopped mid-work still get the option through the "Needs continuation" status chip.

@@ -159,7 +159,6 @@ pub(super) fn canned_prompt_id(
 /// `other` are outcomes, session lifecycle picks are better left to the
 /// sidebar, and `revert`/`terminal-command` stay manual in v1.
 pub(super) const ACTIONABLE_SUGGESTIONS: &[&str] = &[
-    "keep-going",
     "run-tests",
     "fix-errors",
     "commit-changes",
@@ -204,7 +203,6 @@ pub(super) fn suggested_action_title(action: &str) -> Option<String> {
 
 /// Commit remains review-gated because its dispatcher opens the commit dialog.
 pub(super) const AUTOMATIC_ACTIONS: &[&str] = &[
-    "keep-going",
     "run-tests",
     "fix-errors",
     "commit-changes",
@@ -243,7 +241,6 @@ const SUGGESTION_MIN_MARGIN: f64 = 0.15;
 /// gate relaxes while the mode is on. Review-style picks and outcome-only
 /// candidates keep the standard bar — eager, not indiscriminate.
 pub(super) const MOVE_FAST_ACTIONS: &[&str] = &[
-    "keep-going",
     "run-tests",
     "fix-errors",
     "commit-changes",
@@ -507,7 +504,11 @@ fn checkout_on_default_branch(snapshot: &BranchSnapshot) -> bool {
 /// writing their own message — so `other` stays honest about genuinely
 /// unenumerated moves. `open_pr` is the caller's verdict that the
 /// session's branch could still produce one — not on the default branch,
-/// no open PR already standing.
+/// no open PR already standing. `keep-going` is deliberately absent: a
+/// continuation-worthy turn produces the status row's own chip, which
+/// reserves the suggestion slot — a prediction could only render where
+/// the status verdict saw nothing to continue, and the prediction log
+/// showed it missing there ~99% of the time.
 fn next_action_candidates(
     session: &AgentSession,
     turn_id: Uuid,
@@ -524,7 +525,6 @@ fn next_action_candidates(
         .flat_map(|block| block.activities.iter())
         .any(|activity| activity.failed);
     let mut candidates: Vec<(&'static str, &'static str)> = vec![
-        ("keep-going", "Tell the agent to keep going"),
         ("whats-next", "Ask the agent what to do next"),
         ("archive", "Archive this session"),
         ("new-task", "Start a new task"),
@@ -1825,11 +1825,12 @@ mod tests {
             "push",
             "revert",
             "fix-errors",
+            // The status row owns continuation — see `next_action_candidates`.
+            "keep-going",
         ] {
             assert!(!ids.contains(&gated), "unexpected candidate: {gated}");
         }
         for always in [
-            "keep-going",
             "whats-next",
             "archive",
             "new-task",
