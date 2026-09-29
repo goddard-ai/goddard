@@ -64,13 +64,14 @@ pub fn init(cx: &mut App) {
 /// settle a native tooltip gives before it shows.
 const ANNOTATION_HOVER_DELAY: Duration = Duration::from_millis(400);
 
-/// Which live set an annotation belongs to — the transcript's painted store
-/// or a right-panel file editor's own list, keyed by its workspace-relative
-/// path.
+/// Which live set an annotation belongs to — the transcript's painted store,
+/// a right-panel file editor's own list, keyed by its workspace-relative
+/// path, or a side chat lane's store, keyed by its session.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum AnnotationTarget {
     Transcript,
     File(String),
+    SideChat(Uuid),
 }
 
 /// The open comment editor. `is_new` marks an annotation Enter/Escape has not
@@ -195,6 +196,32 @@ pub(super) fn annotation_display_content(annotations: &[TranscriptAnnotation]) -
         .join("\n")
 }
 
+/// The shared "is this selection annotatable" walk — spans entirely inside
+/// one assistant message row of `session`, keyed by the row prefix the
+/// surface paints (`message-` on the transcript, `side-chat-message-` in a
+/// lane).
+fn annotatable_selection_in(
+    selection: &TranscriptSelection,
+    session: &AgentSession,
+    row_prefix: &str,
+) -> Option<(Uuid, Vec<Span>)> {
+    let selection = selection.selection.borrow();
+    if selection.is_dragging() || selection.is_empty() {
+        return None;
+    }
+    let spans = selection.spans();
+    let first_row = spans.first()?.key.row.clone();
+    let message_id = Uuid::parse_str(first_row.strip_prefix(row_prefix)?).ok()?;
+    if !spans.iter().all(|span| span.key.row == first_row) {
+        return None;
+    }
+    let message = session
+        .messages
+        .iter()
+        .find(|message| message.id == message_id)?;
+    (message.role == MessageRole::Assistant).then(|| (message_id, spans.to_vec()))
+}
+
 /// What the sent user bubble shows: each annotated passage as a quote block
 /// with its comment, then the typed text — the transport's annotation
 /// context without the "Annotation N" labels.
@@ -230,22 +257,24 @@ impl Waku {
     /// Reasoning, tool output, user messages and cross-row selections all fail
     /// the row-key or role check.
     fn annotatable_selection(&self) -> Option<(Uuid, Vec<Span>)> {
-        let selection = self.transcript_selection.selection.borrow();
-        if selection.is_dragging() || selection.is_empty() {
-            return None;
-        }
-        let spans = selection.spans();
-        let first_row = spans.first()?.key.row.clone();
-        let message_id = Uuid::parse_str(first_row.strip_prefix("message-")?).ok()?;
-        if !spans.iter().all(|span| span.key.row == first_row) {
-            return None;
-        }
         let session = self.selected_session()?;
-        let message = session
-            .messages
+        annotatable_selection_in(&self.transcript_selection, session, "message-")
+    }
+
+    /// The lane's `annotatable_selection`: its own selection registry and
+    /// its own session's messages, keyed by the `side-chat-message-` row
+    /// prefix the rows are built with.
+    fn annotatable_side_chat_selection(&self, session_id: Uuid) -> Option<(Uuid, Vec<Span>)> {
+        let selection = self
+            .side_chat_views
+            .get(&session_id)
+            .map(|view| view.selection.clone())?;
+        let session = self
+            .state
+            .sessions
             .iter()
-            .find(|message| message.id == message_id)?;
-        (message.role == MessageRole::Assistant).then(|| (message_id, spans.to_vec()))
+            .find(|session| session.id == session_id)?;
+        annotatable_selection_in(&selection, session, "side-chat-message-")
     }
 
     /// The file editor's settled selection when it can be annotated:
@@ -261,8 +290,9 @@ impl Waku {
         Some(range)
     }
 
-    /// The live annotation set for `target` — the transcript's painted store
-    /// or one file editor's own list. `None` once the file's editor is gone.
+    /// The live annotation set for `target` — the transcript's painted store,
+    /// one file editor's own list, or a side chat lane's. `None` once the
+    /// file's editor or the lane is gone.
     fn annotation_store(&self, target: &AnnotationTarget) -> Option<Rc<RefCell<Annotations>>> {
         match target {
             AnnotationTarget::Transcript => Some(self.transcript_selection.annotations.clone()),
@@ -270,6 +300,10 @@ impl Waku {
                 .right_panel_file_editors
                 .get(path)
                 .map(|editor| editor.annotations.clone()),
+            AnnotationTarget::SideChat(session_id) => self
+                .side_chat_views
+                .get(session_id)
+                .map(|view| view.selection.annotations.clone()),
         }
     }
 
@@ -523,11 +557,259 @@ impl Waku {
                 return;
             }
         }
+        // A side chat lane's settled selection annotates to its own
+        // composer — the chord reaches it through the panel's key context.
+        if let Some(session_id) = self.visible_side_chat_id()
+            && self.annotatable_side_chat_selection(session_id).is_some()
+        {
+            self.annotate_side_chat_selection(session_id, window, cx);
+            return;
+        }
         if self.annotatable_selection().is_some() {
             self.annotate_selection(window, cx);
         } else {
             self.focus_composer_action(&FocusComposer, window, cx);
         }
+    }
+
+    /// The side chat whose lane is on screen right now — the only one an
+    /// annotation gesture or a stray keystroke can name. A tab that's
+    /// active under a closed panel cannot claim anything.
+    pub(super) fn visible_side_chat_id(&self) -> Option<Uuid> {
+        if !self.right_panel_visible {
+            return None;
+        }
+        match self.active_right_panel_surface() {
+            Some(RightPanelSurface::SideChat(session_id)) => Some(*session_id),
+            _ => None,
+        }
+    }
+
+    /// Whether the lane has staged annotations — part of its composer's
+    /// "is there anything to send" check.
+    pub(super) fn side_chat_has_annotations(&self, session_id: Uuid) -> bool {
+        self.side_chat_views
+            .get(&session_id)
+            .is_some_and(|view| !view.selection.annotations.borrow().items.is_empty())
+    }
+
+    /// First on-screen glyph rect for `spans` in the lane's registry — the
+    /// anchor for its "Add to chat" pill and hover tooltip.
+    fn side_chat_spans_anchor(&self, session_id: Uuid, spans: &[Span]) -> Option<Bounds<Pixels>> {
+        let view = self.side_chat_views.get(&session_id)?;
+        self.spans_anchor_in(&view.selection, view.rows.viewport_bounds(), spans)
+    }
+
+    /// Bounding box of every on-screen glyph rect for `spans` in the lane —
+    /// the anchor for the comment editor, which sits below the whole
+    /// selection.
+    fn side_chat_spans_anchor_union(
+        &self,
+        session_id: Uuid,
+        spans: &[Span],
+    ) -> Option<Bounds<Pixels>> {
+        let view = self.side_chat_views.get(&session_id)?;
+        self.spans_anchor_union_in(&view.selection, view.rows.viewport_bounds(), spans)
+    }
+
+    /// The lane's annotation tooltip anchor — first visible glyph rect of
+    /// `annotation_id`'s spans.
+    fn side_chat_annotation_anchor(
+        &self,
+        session_id: Uuid,
+        annotation_id: u64,
+    ) -> Option<Bounds<Pixels>> {
+        let view = self.side_chat_views.get(&session_id)?;
+        let annotation = view
+            .selection
+            .annotations
+            .borrow()
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?
+            .clone();
+        self.side_chat_spans_anchor(session_id, &annotation.spans)
+    }
+
+    /// The lane's editor anchor — the union of the annotation's visible
+    /// glyph rects.
+    fn side_chat_annotation_editor_anchor(
+        &self,
+        session_id: Uuid,
+        annotation_id: u64,
+    ) -> Option<Bounds<Pixels>> {
+        let view = self.side_chat_views.get(&session_id)?;
+        let annotation = view
+            .selection
+            .annotations
+            .borrow()
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?
+            .clone();
+        self.side_chat_spans_anchor_union(session_id, &annotation.spans)
+    }
+
+    /// First on-screen glyph rect of a citation's range in the lane — the
+    /// anchor for its tooltip.
+    fn side_chat_annotation_ref_anchor(
+        &self,
+        session_id: Uuid,
+        key: &TextKey,
+        range: &Range<usize>,
+    ) -> Option<Bounds<Pixels>> {
+        let view = self.side_chat_views.get(&session_id)?;
+        let registry = view.selection.registry.borrow();
+        let entry = registry.entries().iter().find(|entry| entry.key == *key)?;
+        if entry.geometry.is_missing() {
+            return None;
+        }
+        let viewport = view.rows.viewport_bounds();
+        text_range_bounds(&entry.geometry, range)
+            .into_iter()
+            .find(|rect| rect.bottom() > viewport.top() && rect.top() < viewport.bottom())
+    }
+
+    /// The lane's citation set — `annotation_ref_set`'s walk against the
+    /// chat's own session, with no memo: only visible rows ask.
+    pub(super) fn side_chat_annotation_ref_set(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+    ) -> Option<Rc<Vec<TranscriptAnnotation>>> {
+        let sets = self.sent_annotations.get(&session_id)?;
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        let mut current = None;
+        for message in &session.messages {
+            if message.role == MessageRole::User {
+                if let Some((_, set)) = sets.iter().find(|(id, _)| *id == message.id) {
+                    current = Some(set.clone());
+                }
+            } else if message.role == MessageRole::Assistant && message.id == message_id {
+                return current;
+            }
+        }
+        None
+    }
+
+    /// Drain the lane's staged annotations for a submission — the same
+    /// drain `submission_with_attachments` performs on the transcript's set.
+    /// Clears an editor or hover that was open on this lane's highlights.
+    pub(super) fn drain_side_chat_annotations(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Vec<TranscriptAnnotation> {
+        let Some(store) = self
+            .side_chat_views
+            .get(&session_id)
+            .map(|view| view.selection.annotations.clone())
+        else {
+            return Vec::new();
+        };
+        let items = {
+            let mut annotations = store.borrow_mut();
+            annotations.editing = None;
+            annotations.hovered = None;
+            std::mem::take(&mut annotations.items)
+        };
+        if !items.is_empty() {
+            if self
+                .annotation_editor
+                .as_ref()
+                .is_some_and(|editor| editor.target == AnnotationTarget::SideChat(session_id))
+            {
+                self.annotation_editor = None;
+            }
+            if self
+                .annotation_hover
+                .as_ref()
+                .is_some_and(|hover| hover.target == AnnotationTarget::SideChat(session_id))
+            {
+                self.annotation_hover = None;
+            }
+            cx.notify();
+        }
+        items
+    }
+
+    /// Drop lane annotations whose message no longer renders — a rewind
+    /// removes it from the chat's session entirely. Runs once per panel
+    /// frame, only when the store is non-empty.
+    pub(super) fn prune_side_chat_annotations(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(store) = self
+            .side_chat_views
+            .get(&session_id)
+            .map(|view| view.selection.annotations.clone())
+        else {
+            return;
+        };
+        let pruned = {
+            let mut annotations = store.borrow_mut();
+            if annotations.items.is_empty() {
+                return;
+            }
+            let before = annotations.items.len();
+            if let Some(session) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+            {
+                annotations.items.retain(|annotation| {
+                    session.messages.iter().any(|message| {
+                        message.id == annotation.message_id
+                            && message.role == MessageRole::Assistant
+                    })
+                });
+            } else {
+                annotations.items.clear();
+            }
+            annotations.items.len() != before
+        };
+        if pruned {
+            // An editor open on a pruned highlight closes, like the
+            // transcript's prune — the store lookup the general pass does
+            // already covers this lane through `annotation_store`.
+            cx.notify();
+        }
+    }
+
+    /// The lane's annotation chip clear: drop its staged highlights and
+    /// close an editor that was open on them.
+    fn clear_side_chat_annotations(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(editor) = self
+            .annotation_editor
+            .take_if(|editor| editor.target == AnnotationTarget::SideChat(session_id))
+        {
+            let focus = editor
+                .previous_focus
+                .unwrap_or_else(|| self.composer_focus(cx));
+            window.focus(&focus, cx);
+        }
+        if self
+            .annotation_hover
+            .as_ref()
+            .is_some_and(|hover| hover.target == AnnotationTarget::SideChat(session_id))
+        {
+            self.annotation_hover = None;
+        }
+        if let Some(view) = self.side_chat_views.get(&session_id) {
+            let mut annotations = view.selection.annotations.borrow_mut();
+            annotations.items.clear();
+            annotations.hovered = None;
+            annotations.editing = None;
+        }
+        cx.notify();
     }
 
     /// The visible file editor is focused and holding a selection — the case
@@ -574,6 +856,45 @@ impl Waku {
         if let Some(editor) = self.annotation_editor.as_mut() {
             editor.previous_focus = Some(composer_focus);
         }
+    }
+
+    /// The lane's `annotate_selection`: the chat's own store, its own
+    /// selection, and its own composer as the editor's focus hand-back.
+    fn annotate_side_chat_selection(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((message_id, spans)) = self.annotatable_side_chat_selection(session_id) else {
+            return;
+        };
+        let Some(view) = self.side_chat_views.get(&session_id) else {
+            return;
+        };
+        let store = view.selection.clone();
+        let id = self.annotation_next_id;
+        self.annotation_next_id = self.annotation_next_id.wrapping_add(1);
+        {
+            let mut annotations = store.annotations.borrow_mut();
+            annotations.items.push(TranscriptAnnotation {
+                id,
+                message_id,
+                spans,
+                comment: String::new(),
+                file: None,
+            });
+            annotations.hovered = None;
+        }
+        store.selection.borrow_mut().clear();
+        self.annotation_hover = None;
+        self.open_annotation_editor(id, true, AnnotationTarget::SideChat(session_id), window, cx);
+        if let Some(editor) = self.annotation_editor.as_mut()
+            && let Some(chat) = self.side_chat_composers.get(&session_id)
+        {
+            editor.previous_focus = Some(chat.composer.read(cx).focus());
+        }
+        cx.notify();
     }
 
     /// The file-editor counterpart of [`Self::annotate_selection`]: the
@@ -1395,6 +1716,138 @@ impl Waku {
         Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
     }
 
+    /// The lane's "Add to chat" pill — the same control the transcript
+    /// offers, anchored to the lane's own settled selection.
+    pub(super) fn render_side_chat_annotation_offer(
+        &self,
+        session_id: Uuid,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (_, spans) = self.annotatable_side_chat_selection(session_id)?;
+        let anchor = self.side_chat_spans_anchor(session_id, &spans)?;
+        // Resolve the chord as if the lane's transcript area were focused —
+        // the panel carries the same Transcript context the main one does.
+        let shortcut_label =
+            ShortcutHint::action_in(&AddToChat, &self.transcript_focus).resolve(window, cx);
+        let button = self.add_to_chat_button(
+            "side-chat-annotation-add-to-chat",
+            "side-chat-annotation-add-to-chat",
+            shortcut_label,
+            cx,
+            move |this, window, cx| this.annotate_side_chat_selection(session_id, window, cx),
+        );
+        Some(
+            deferred(FloatingSurface::new(
+                motion::surface_enter("annotate-side-chat-selection-enter", button)
+                    .into_any_element(),
+                anchor,
+                MenuAlign::AboveLeft,
+                px(6.0),
+                px(8.0),
+            ))
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
+    /// The lane's floating comment editor — the shared card, anchored to the
+    /// chat selection's visible extent.
+    pub(super) fn render_side_chat_annotation_editor(
+        &self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let editor = self.annotation_editor.as_ref()?;
+        if editor.target != AnnotationTarget::SideChat(session_id) {
+            return None;
+        }
+        let anchor = self.side_chat_annotation_editor_anchor(session_id, editor.annotation_id)?;
+        Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
+    }
+
+    /// The lane's comment tooltip after the hover delay over a confirmed
+    /// annotation.
+    pub(super) fn render_side_chat_annotation_tooltip(
+        &self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let hover = self.annotation_hover.as_ref().filter(|hover| {
+            hover.visible && hover.target == AnnotationTarget::SideChat(session_id)
+        })?;
+        if self
+            .annotation_editor
+            .as_ref()
+            .is_some_and(|editor| editor.annotation_id == hover.id)
+        {
+            return None;
+        }
+        let comment = self.side_chat_views.get(&session_id).and_then(|view| {
+            view.selection
+                .annotations
+                .borrow()
+                .items
+                .iter()
+                .find(|annotation| annotation.id == hover.id)
+                .map(|annotation| annotation.comment.clone())
+        })?;
+        if comment.trim().is_empty() {
+            return None;
+        }
+        let anchor = self.side_chat_annotation_anchor(session_id, hover.id)?;
+        Some(self.annotation_tooltip_card(anchor, comment, cx))
+    }
+
+    /// The lane's citation tooltip — the sent-set entry the `Annotation N`
+    /// label under the pointer refers to.
+    pub(super) fn render_side_chat_annotation_ref_tooltip(
+        &self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let hover = self
+            .annotation_ref_hover
+            .as_ref()
+            .filter(|hover| hover.visible)?;
+        let message_id = Uuid::parse_str(hover.key.row.strip_prefix("side-chat-message-")?).ok()?;
+        let set = self.side_chat_annotation_ref_set(session_id, message_id)?;
+        let annotation = set.get(hover.index - 1)?;
+        let anchor = self.side_chat_annotation_ref_anchor(session_id, &hover.key, &hover.range)?;
+        let theme = Theme::current(cx);
+        let quote = annotation_quote_preview(annotation);
+        let comment = annotation.comment.trim().to_owned();
+        let card = div()
+            .max_w(px(320.0))
+            .px(px(7.0))
+            .py(px(4.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.raised)
+            .shadow_md()
+            .text_size(sp(12.5))
+            .line_height(sp(15.0))
+            .flex()
+            .flex_col()
+            .gap(px(3.0))
+            .child(div().text_color(theme.text_tertiary).child(quote))
+            .when(!comment.is_empty(), |card| {
+                card.child(div().text_color(theme.text_secondary).child(comment))
+            });
+        Some(
+            deferred(FloatingSurface::new(
+                card.into_any_element(),
+                anchor,
+                MenuAlign::AboveLeft,
+                px(6.0),
+                px(8.0),
+            ))
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
     /// The same floating comment editor over a file annotation, anchored
     /// below its visible extent in the editor.
     pub(super) fn render_file_annotation_editor(
@@ -1612,11 +2065,23 @@ impl Waku {
         )
     }
 
-    /// The composer's "N annotations" chip — transcript and file annotations
-    /// counted together — with an always-visible clear-all control: tabbable,
-    /// focus-ringed, activating on Enter or Space.
-    pub(super) fn render_annotation_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let count = self.annotation_count();
+    /// The composer's "N annotations" chip for `surface` — the transcript
+    /// and file stores counted together on the main card, the lane's own
+    /// store on a side chat — with an always-visible clear-all control:
+    /// tabbable, focus-ringed, activating on Enter or Space.
+    pub(super) fn render_annotation_chip_for(
+        &self,
+        surface: &composer::ComposerCard,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let count = match surface {
+            composer::ComposerCard::Main => self.annotation_count(),
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .side_chat_views
+                .get(session_id)
+                .map(|view| view.selection.annotations.borrow().items.len())
+                .unwrap_or(0),
+        };
         if count == 0 {
             return None;
         }
@@ -1626,7 +2091,16 @@ impl Waku {
         } else {
             tr!("annotations.count_many", count = count)
         };
-        let clear_focus = self.transcript_control_focus("annotation-clear-all", cx);
+        let focus_key = match surface {
+            composer::ComposerCard::Main => "annotation-clear-all",
+            composer::ComposerCard::SideChat { .. } => "side-chat-annotation-clear-all",
+        };
+        let element_id = match surface {
+            composer::ComposerCard::Main => "annotation-clear-all",
+            composer::ComposerCard::SideChat { .. } => "side-chat-annotation-clear-all",
+        };
+        let surface = surface.clone();
+        let clear_focus = self.transcript_control_focus(focus_key, cx);
         Some(
             div()
                 .px(px(14.0))
@@ -1650,7 +2124,7 @@ impl Waku {
                         .child(label)
                         .child(
                             div()
-                                .id("annotation-clear-all")
+                                .id(element_id)
                                 .track_focus(&clear_focus)
                                 .tab_index(0)
                                 .size(px(18.0))
@@ -1663,8 +2137,13 @@ impl Waku {
                                 .hover(|element| element.bg(theme.overlay_strong))
                                 .child(icon("icons/x.svg", 10.0, theme.text_tertiary))
                                 .tooltip(Tooltip::text(tr!("annotations.remove_all")))
-                                .on_activation(cx, |this, window, cx| {
-                                    this.clear_annotations(window, cx);
+                                .on_activation(cx, move |this, window, cx| match &surface {
+                                    composer::ComposerCard::Main => {
+                                        this.clear_annotations(window, cx)
+                                    }
+                                    composer::ComposerCard::SideChat { session_id, .. } => {
+                                        this.clear_side_chat_annotations(*session_id, window, cx)
+                                    }
                                 }),
                         ),
                 )
@@ -1681,16 +2160,21 @@ impl Waku {
     /// prepaints a region hitbox whose id gates them so a floating surface
     /// covering the region doesn't trigger hovers or presses on the
     /// highlights beneath it.
-    fn install_annotation_input(
+    /// The press/hover/click state writes under `target` so several live
+    /// listener sets — transcript and side-chat lanes — share the single
+    /// `annotation_press`/`annotation_hover` slots without cross-talk.
+    pub(super) fn install_annotation_input(
         region: HitboxId,
         window: &mut Window,
         _cx: &mut App,
         selection: &TranscriptSelection,
         waku: &WeakEntity<Waku>,
+        target: AnnotationTarget,
     ) {
         window.on_mouse_event({
             let selection = selection.clone();
             let waku = waku.clone();
+            let target = target.clone();
             move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble
                     || event.button != MouseButton::Left
@@ -1703,7 +2187,7 @@ impl Waku {
                         this.annotation_press = Some(AnnotationPress {
                             id,
                             position: event.position,
-                            target: AnnotationTarget::Transcript,
+                            target: target.clone(),
                         });
                     });
                 } else if let Some(hit) =
@@ -1728,6 +2212,7 @@ impl Waku {
         window.on_mouse_event({
             let selection = selection.clone();
             let waku = waku.clone();
+            let target = target.clone();
             move |event: &MouseMoveEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble || event.dragging() || !region.is_hovered(window)
                 {
@@ -1782,10 +2267,7 @@ impl Waku {
                 };
                 if changed {
                     let _ = waku.update(cx, |this, cx| {
-                        this.annotation_hover_changed(
-                            hit.map(|id| (id, AnnotationTarget::Transcript)),
-                            cx,
-                        );
+                        this.annotation_hover_changed(hit.map(|id| (id, target.clone())), cx);
                         this.annotation_ref_hover_changed(ref_hit, cx);
                         this.transcript_commit_hover_changed(commit_hit, cx);
                     });
@@ -1798,6 +2280,7 @@ impl Waku {
             let selection = selection.clone();
             let waku = waku.clone();
             move |event: &MouseUpEvent, phase, window, cx| {
+                let target = target.clone();
                 if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
                     return;
                 }
@@ -1833,7 +2316,7 @@ impl Waku {
                 let press = waku
                     .update(cx, |this, _| {
                         this.annotation_press
-                            .take_if(|press| press.target == AnnotationTarget::Transcript)
+                            .take_if(|press| press.target == target)
                     })
                     .ok()
                     .flatten();
@@ -1863,13 +2346,7 @@ impl Waku {
                 }
                 drop(settled);
                 let _ = waku.update(cx, |this, cx| {
-                    this.open_annotation_editor(
-                        press.id,
-                        false,
-                        AnnotationTarget::Transcript,
-                        window,
-                        cx,
-                    )
+                    this.open_annotation_editor(press.id, false, target.clone(), window, cx)
                 });
             }
         });
@@ -2196,7 +2673,14 @@ impl Waku {
         canvas(
             |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
             move |_, region, window, cx| {
-                Self::install_annotation_input(region, window, cx, &selection, &waku)
+                Self::install_annotation_input(
+                    region,
+                    window,
+                    cx,
+                    &selection,
+                    &waku,
+                    AnnotationTarget::Transcript,
+                )
             },
         )
         .absolute()

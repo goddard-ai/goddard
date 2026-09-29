@@ -3201,8 +3201,8 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<ComposerInput> {
-        if let Some(composer) = self.side_chat_composers.get(&session_id) {
-            return composer.clone();
+        if let Some(chat) = self.side_chat_composers.get(&session_id) {
+            return chat.composer.clone();
         }
         let composer = cx.new(|cx| {
             ComposerInput::new(window, cx)
@@ -3216,7 +3216,13 @@ impl Waku {
             &composer,
             move |this: &mut Self, _, event: &ComposerEvent, cx| match event {
                 ComposerEvent::Submit(prompt) => {
-                    if prompt.trim().is_empty() {
+                    let empty_draft = prompt.trim().is_empty()
+                        && this
+                            .side_chat_composers
+                            .get(&session_id)
+                            .is_none_or(|chat| chat.atoms.is_empty())
+                        && !this.side_chat_has_annotations(session_id);
+                    if empty_draft {
                         // Same affordance as the session column's empty
                         // Enter over a stopped turn.
                         this.continue_interrupted_session_to(session_id, cx);
@@ -3225,18 +3231,70 @@ impl Waku {
                     }
                 }
                 ComposerEvent::SubmitSteer(prompt) => {
-                    this.steer_session_submission(
-                        session_id,
-                        ComposerSubmission::plain(prompt.clone()),
-                        cx,
-                    );
+                    let empty_draft = prompt.trim().is_empty()
+                        && this
+                            .side_chat_composers
+                            .get(&session_id)
+                            .is_none_or(|chat| chat.atoms.is_empty())
+                        && !this.side_chat_has_annotations(session_id);
+                    if !empty_draft
+                        && let Some(submission) =
+                            this.side_chat_submission(session_id, prompt.clone(), cx)
+                    {
+                        this.steer_session_submission(session_id, submission, cx);
+                    }
+                }
+                ComposerEvent::Edited => cx.notify(),
+                ComposerEvent::BackspaceOnEmpty => {
+                    // Chat idiom: pop the last staged atom, the way the
+                    // session column pops attachments and atoms.
+                    if let Some(chat) = this.side_chat_composers.get_mut(&session_id)
+                        && chat.atoms.pop().is_some()
+                    {
+                        this.sync_side_chat_atoms(session_id, cx);
+                        cx.notify();
+                    }
+                }
+                ComposerEvent::InlineAtomActivated(marker) => {
+                    this.activate_side_chat_atom(session_id, *marker, cx);
                 }
                 _ => {}
             },
         )
         .detach();
-        self.side_chat_composers
-            .insert(session_id, composer.clone());
+        // Every splice the field applies can move or delete the markers the
+        // chat's atoms anchor to — the same contract the session column's
+        // composer keeps.
+        cx.subscribe(
+            &composer,
+            move |this: &mut Self, _, event: &ComposerSplice, cx| {
+                this.remap_side_chat_atoms(session_id, event, cx);
+            },
+        )
+        .detach();
+        // A large paste folds into the field as a marker chip; the text
+        // stays beside the composer as an atom until submit.
+        cx.subscribe(
+            &composer,
+            move |this: &mut Self, _, event: &ComposerTextPaste, cx| {
+                this.stage_side_chat_pasted_text(session_id, event.0.clone(), cx);
+            },
+        )
+        .detach();
+        self.side_chat_composers.insert(
+            session_id,
+            SideChatComposer {
+                composer: composer.clone(),
+                autocomplete: autocomplete::AutocompleteUi::new(),
+                atoms: Vec::new(),
+                commands: Rc::new(Vec::new()),
+                command_key: None,
+                commands_loading: false,
+                files: Rc::new(Vec::new()),
+                file_key: None,
+                files_loading: false,
+            },
+        );
         composer
     }
 
@@ -3268,6 +3326,8 @@ impl Waku {
         };
         self.ensure_session_loaded(session_id, cx);
         let composer = self.ensure_side_chat_composer(session_id, window, cx);
+        self.refresh_side_chat_sources(session_id, cx);
+        self.prune_side_chat_annotations(session_id, cx);
         let pending_side_chat_focus = if self
             .right_panel_pending_side_chat_focus
             .take_if(|pending| *pending == session_id)
@@ -3282,22 +3342,30 @@ impl Waku {
         // appends keep position, a refold re-measures, and the tail re-measures
         // while the session works so fresh text is never clipped.
         let pending_turn = self.blocked_checkpoint_turn(session.id);
+        // The transcript's resolved-commit set is shared so SHAs underline
+        // and hit-test in the lane the way they do in the session column.
+        let resolved_commits = self.transcript_selection.resolved_commits.clone();
         let view = self
             .side_chat_views
             .entry(session_id)
-            .or_insert_with(|| SideChatView {
-                rows: {
-                    let rows = ListState::new(0, ListAlignment::Bottom, px(2048.0));
-                    rows.set_scroll_handler(|_, window, _| window.refresh());
-                    rows
-                },
-                scrollbar: ScrollbarState::new(),
-                kinds: (0, Rc::new(Vec::new())),
-                response_footers: HashMap::new(),
-                expanded_turns: HashSet::new(),
-                expanded_activity_blocks: HashMap::new(),
-                expanded_changed_files: HashSet::new(),
-                hovered_response_turn: None,
+            .or_insert_with(move || {
+                let mut selection = TranscriptSelection::default();
+                selection.resolved_commits = resolved_commits;
+                SideChatView {
+                    rows: {
+                        let rows = ListState::new(0, ListAlignment::Bottom, px(2048.0));
+                        rows.set_scroll_handler(|_, window, _| window.refresh());
+                        rows
+                    },
+                    scrollbar: ScrollbarState::new(),
+                    kinds: (0, Rc::new(Vec::new())),
+                    response_footers: HashMap::new(),
+                    expanded_turns: HashSet::new(),
+                    expanded_activity_blocks: HashMap::new(),
+                    expanded_changed_files: HashSet::new(),
+                    hovered_response_turn: None,
+                    selection,
+                }
             });
         let expanded_turns = view.expanded_turns.clone();
         let fingerprint = transcript_rows_fingerprint(&session, &expanded_turns, pending_turn);
@@ -3353,9 +3421,22 @@ impl Waku {
         }
         let rows_state = view.rows.clone();
         let scrollbar = view.scrollbar.clone();
-        let entity = cx.entity().downgrade();
+        let selection = view.selection.clone();
+        let selection_input = selection.clone();
+        let annotation_selection = selection.clone();
+        let waku = cx.entity().downgrade();
+        let entity = waku.clone();
+        let annotation_offer = self.render_side_chat_annotation_offer(session_id, window, cx);
+        let annotation_editor = self.render_side_chat_annotation_editor(session_id, cx);
+        let annotation_tooltip = self.render_side_chat_annotation_tooltip(session_id, cx);
+        let annotation_ref_tooltip = self.render_side_chat_annotation_ref_tooltip(session_id, cx);
         let workspace_footer =
             self.render_side_chat_workspace_footer(session_id, composer.clone(), cx);
+        // The lane is a transcript surface: clicks hand the region a
+        // programmatic focus so ⌘L's Transcript-context binding reaches
+        // `add_to_chat` here the way it does in the session column.
+        let lane_focus = self.transcript_control_focus(format!("side-chat-{session_id}"), cx);
+        let lane_focus_click = lane_focus.clone();
         let panel = div()
             .flex_1()
             .min_h_0()
@@ -3366,6 +3447,16 @@ impl Waku {
                     .flex_1()
                     .min_h_0()
                     .relative()
+                    .key_context("Transcript")
+                    .track_focus(&lane_focus)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |_, _, window, cx| window.focus(&lane_focus_click, cx)),
+                    )
+                    // Painted before any row, so the frame's registry holds
+                    // exactly the lane's visible text, in order — the same
+                    // contract the transcript's reset keeps.
+                    .child(md::render::frame_reset(selection))
                     .child(
                         list(rows_state.clone(), move |index, window, cx| {
                             entity
@@ -3389,7 +3480,55 @@ impl Waku {
                         scrollbar::FadeEdge::Bottom,
                         theme.surface,
                     ))
-                    .child(scrollbar::vertical(&rows_state, &scrollbar)),
+                    .child(scrollbar::vertical(&rows_state, &scrollbar))
+                    .child(
+                        canvas(
+                            |bounds, window, _| {
+                                window.insert_hitbox(bounds, HitboxBehavior::Normal).id
+                            },
+                            move |_, region, window, _| {
+                                // ⌥-click/drag annotates through the same
+                                // `AddToChat` settle the transcript arms.
+                                md::render::install_selection_input(
+                                    region,
+                                    window,
+                                    &selection_input,
+                                    Some(Box::new(AddToChat)),
+                                )
+                            },
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    )
+                    // Annotation hit-tests paint after the selection's
+                    // listeners, the same ordering the transcript keeps.
+                    .child(
+                        canvas(
+                            |bounds, window, _| {
+                                window.insert_hitbox(bounds, HitboxBehavior::Normal).id
+                            },
+                            move |_, region, window, cx| {
+                                Self::install_annotation_input(
+                                    region,
+                                    window,
+                                    cx,
+                                    &annotation_selection,
+                                    &waku,
+                                    annotations::AnnotationTarget::SideChat(session_id),
+                                )
+                            },
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    )
+                    .children(annotation_offer)
+                    .children(annotation_editor)
+                    .children(annotation_tooltip)
+                    .children(annotation_ref_tooltip),
             )
             .child(
                 div()
@@ -3809,16 +3948,30 @@ impl Waku {
                             MarkdownMetrics::BODY
                         });
                     let animate_streaming = message.streaming && !cx.reduce_motion();
-                    let ctx = self
+                    let selection = self
+                        .side_chat_views
+                        .get(&session_id)
+                        .map(|view| view.selection.clone())
+                        .unwrap_or_default();
+                    let mut ctx = self
                         .markdown_ctx(
                             format!("side-chat-message-{}", message.id),
                             &palette,
                             metrics,
                             animate_streaming,
                             Some(session.id),
+                            &selection,
                             cx,
                         )
                         .with_context_menu(menu.clone());
+                    // Replies may cite their prompt's annotations as
+                    // "Annotation N" — the chat's own sent set bounds the
+                    // affordance, like the transcript's.
+                    if message.role == MessageRole::Assistant
+                        && let Some(set) = self.side_chat_annotation_ref_set(session.id, message.id)
+                    {
+                        ctx = ctx.with_annotation_labels(set.len());
+                    }
                     let work_item_refs = (message.role == MessageRole::User)
                         .then(|| {
                             self.work_item_refs_for_content(

@@ -272,8 +272,10 @@ pub(super) enum ComposerSubmitAction {
 
 /// Which composer a card wraps — and how its chip row behaves. The
 /// session column's field is fully interactive; a side chat's panel copy
-/// renders the same card bound to the chat's own session, inert except
-/// for the model pickers while the chat has not started — there is no
+/// renders the same card bound to the chat's own session and input —
+/// full typing, autocomplete, atoms, and drops, minus the main-only
+/// chrome (Big Picture chip, attachments, the pasted-text editor). Its
+/// model pickers also stay live until the chat starts: there is no
 /// provider conversation to preserve yet, so provider, model, effort,
 /// and preset stay pickable until the first prompt locks the posture the
 /// chat launches with.
@@ -2949,79 +2951,111 @@ impl Waku {
         self.big_picture.target().or(self.state.selected_session)
     }
 
-    /// Stage a task dragged from the sidebar as an inline session atom —
-    /// the marker splices in at the caret so the reference holds its place
-    /// in the prompt like a mention. Dropping a task onto the composer that
-    /// already addresses it is a no-op, as is dropping one already staged.
-    pub(super) fn stage_session_reference(
+    /// Stage a task dragged from the sidebar as an inline session atom on
+    /// `surface`'s field — the marker splices in at the caret so the
+    /// reference holds its place in the prompt like a mention. Dropping a
+    /// task onto the composer that already addresses it is a no-op, as is
+    /// dropping one already staged.
+    pub(super) fn stage_session_reference_for(
         &mut self,
+        surface: &ComposerCard,
         session_id: Uuid,
         title: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.session_atom_allowed(session_id) {
+        if !self.surface_session_atom_allowed(surface, session_id) {
             return;
         }
-        let marker = self
-            .composer
-            .update(cx, |composer, cx| composer.insert_inline_marker(cx));
-        self.record_session_atom(session_id, title, marker, cx);
-        let focus = self.composer.read(cx).focus();
+        let composer = self.surface_composer(surface);
+        let marker = composer.update(cx, |composer, cx| composer.insert_inline_marker(cx));
+        self.record_session_atom_for(surface, session_id, title, marker, cx);
+        let focus = composer.read(cx).focus();
         window.focus(&focus, cx);
         cx.notify();
-    }
-
-    /// The dedupe/target guards every session-atom entry point shares —
-    /// dropping the session the composer already addresses is a no-op, as
-    /// is one already staged as an atom or a legacy attachment.
-    pub(super) fn session_atom_allowed(&self, session_id: Uuid) -> bool {
-        self.composer_target_session() != Some(session_id)
-            && !self
-                .composer_inline_atoms
-                .iter()
-                .any(|atom| atom.session_id() == Some(session_id))
-            && !self
-                .composer_attachments
-                .iter()
-                .any(|attachment| attachment.session_id == Some(session_id))
-    }
-
-    /// Record the atom a freshly seated `marker` stands for.
-    pub(super) fn record_session_atom(
-        &mut self,
-        session_id: Uuid,
-        title: &str,
-        marker: usize,
-        cx: &mut Context<Self>,
-    ) {
-        self.composer_inline_atoms.push(ComposerInlineAtom {
-            marker,
-            revision: Uuid::new_v4(),
-            paste_category: None,
-            kind: ComposerAtomKind::SessionRef {
-                session_id,
-                title: SharedString::from(title.to_owned()),
-            },
-        });
-        self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
-        self.sync_inline_atoms(cx);
-        self.schedule_composer_draft_save(cx);
     }
 
     /// Push the atoms into the field, in marker order — the painted text
     /// substitutes each [`INLINE_ATOM_MARKER`] for its atom's chip.
     pub(super) fn sync_inline_atoms(&mut self, cx: &mut Context<Self>) {
-        let atoms = self
-            .composer_inline_atoms
-            .iter()
-            .map(|atom| crate::input::InlineAtom {
-                label: SharedString::from(atom.label()),
-                icon: Some(atom.icon()),
-            })
-            .collect();
+        let atoms = inline_atom_paints(&self.composer_inline_atoms);
         self.composer
             .update(cx, |composer, cx| composer.set_inline_atoms(atoms, cx));
+    }
+
+    /// The lane's version of [`Self::sync_inline_atoms`].
+    pub(super) fn sync_side_chat_atoms(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
+            return;
+        };
+        let painted = inline_atom_paints(&chat.atoms);
+        chat.composer
+            .update(cx, |composer, cx| composer.set_inline_atoms(painted, cx));
+    }
+
+    /// A fold-in paste into a side chat's field: the text lives as an atom
+    /// until submit — a lane draft takes no daemon blob hop.
+    pub(super) fn stage_side_chat_pasted_text(
+        &mut self,
+        session_id: Uuid,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
+            return;
+        };
+        let marker = chat
+            .composer
+            .update(cx, |composer, cx| composer.insert_inline_marker(cx));
+        chat.atoms.push(ComposerInlineAtom {
+            marker,
+            revision: Uuid::new_v4(),
+            paste_category: None,
+            kind: ComposerAtomKind::PastedText(text),
+        });
+        chat.atoms.sort_by_key(|atom| atom.marker);
+        self.sync_side_chat_atoms(session_id, cx);
+        cx.notify();
+    }
+
+    /// Double-click on a lane atom: a session reference opens its task; a
+    /// folded paste has no lane editor, so the caret placement stands.
+    pub(super) fn activate_side_chat_atom(
+        &mut self,
+        session_id: Uuid,
+        marker: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let kind = self
+            .side_chat_composers
+            .get(&session_id)
+            .and_then(|chat| chat.atoms.iter().find(|atom| atom.marker == marker))
+            .map(|atom| atom.kind.clone());
+        if let Some(ComposerAtomKind::SessionRef {
+            session_id: target, ..
+        }) = kind
+        {
+            self.select_session(target, cx);
+        }
+        cx.notify();
+    }
+
+    /// The lane's remap: each splice can move or drop the markers the chat's
+    /// atoms anchor to.
+    pub(super) fn remap_side_chat_atoms(
+        &mut self,
+        session_id: Uuid,
+        splice: &ComposerSplice,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
+            return;
+        };
+        if chat.atoms.is_empty() {
+            return;
+        }
+        let composer = chat.composer.clone();
+        remap_atoms_for_splice(&composer, &mut chat.atoms, splice, cx);
     }
 
     fn stage_attachment_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> bool {
@@ -3489,46 +3523,21 @@ impl Waku {
         if self.composer_inline_atoms.is_empty() {
             return;
         }
-        let positions: Vec<usize> = self
-            .composer
-            .read(cx)
-            .content(cx)
-            .match_indices(INLINE_ATOM_MARKER)
-            .map(|(index, _)| index)
-            .collect();
-        let markers = self
-            .composer_inline_atoms
-            .iter()
-            .map(|atom| atom.marker)
-            .collect::<Vec<_>>();
-        let seats = remap_marker_seats(&markers, &positions, &splice.0.removed, splice.0.inserted);
-        // Keep the open paste editor on its atom's new seat; a splice that
-        // deleted the marker closes the editor.
-        if let Some(editor) = self.pasted_text_editor.as_mut() {
-            let seat = self
-                .composer_inline_atoms
+        // Capture the open paste editor's pre-filter seat — a splice that
+        // deleted its marker closes the editor.
+        let editor_seat = self.pasted_text_editor.as_ref().and_then(|editor| {
+            self.composer_inline_atoms
                 .iter()
                 .position(|atom| atom.marker == editor.marker)
-                .and_then(|index| seats.get(index).copied().flatten());
-            match seat {
+        });
+        let composer = self.composer.clone();
+        let seats = remap_atoms_for_splice(&composer, &mut self.composer_inline_atoms, splice, cx);
+        if let Some(editor) = self.pasted_text_editor.as_mut() {
+            match editor_seat.and_then(|index| seats.get(index).copied().flatten()) {
                 Some(marker) => editor.marker = marker,
                 None => self.pasted_text_editor = None,
             }
         }
-        let mut atoms = std::mem::take(&mut self.composer_inline_atoms);
-        atoms = atoms
-            .into_iter()
-            .zip(seats)
-            .filter_map(|(mut atom, seat)| {
-                seat.map(|marker| {
-                    atom.marker = marker;
-                    atom
-                })
-            })
-            .collect();
-        atoms.sort_by_key(|atom| atom.marker);
-        self.composer_inline_atoms = atoms;
-        self.sync_inline_atoms(cx);
     }
 
     /// The text and attachment presentation accepted from the composer. The
@@ -3646,6 +3655,9 @@ impl Waku {
                 }
             });
         self.discard_current_composer_draft(cx);
+        // The session column's field becomes the composer later typing and
+        // outside-Enter aim at — the last place a message actually went out.
+        self.last_sent_composer = None;
         Some(ComposerSubmission {
             prompt: submission,
             display_content,
@@ -3736,6 +3748,17 @@ impl Waku {
         true
     }
 
+    /// The `/` catalog a submission resolves against — a side chat
+    /// composer's own mirror, the selected session's index otherwise.
+    pub(super) fn submission_catalog(&self, session: &AgentSession) -> Rc<Vec<SlashCommand>> {
+        if session.is_side_chat()
+            && let Some(chat) = self.side_chat_composers.get(&session.id)
+        {
+            return chat.commands.clone();
+        }
+        self.slash_command_index.clone()
+    }
+
     /// Ask the provider to compact `session_id`'s context — the shared entry
     /// point for `/compact`, the usage panel's compact action, and the
     /// command palette. Compaction is never queued behind live work and
@@ -3763,7 +3786,7 @@ impl Waku {
         // providers count unconditionally — their RPC exists whether or not
         // discovery has landed yet.
         if !session.provider.supports_compact()
-            && !crate::composer_complete::has_compact_path(&self.slash_command_index)
+            && !crate::composer_complete::has_compact_path(&self.submission_catalog(session))
         {
             return;
         }
@@ -3810,11 +3833,11 @@ impl Waku {
         true
     }
 
-    /// A side chat prompt's one routing rule — `/side` stays reserved
-    /// even inside a side chat since it cannot nest one, and the text
-    /// must not reach the provider as a literal prompt. Both of the
-    /// composer's submit routes (Enter and the card's send button)
-    /// funnel through here so the reservation holds for each.
+    /// A side chat prompt's routing: `/side` stays reserved since a lane
+    /// cannot nest one, session-scoped Waku commands execute against the
+    /// chat's own session, and the rest becomes a submission carrying the
+    /// lane's atoms and annotations. Both of the composer's submit routes
+    /// (Enter and the card's send button) funnel through here.
     pub(super) fn submit_side_chat_prompt(
         &mut self,
         session_id: Uuid,
@@ -3825,7 +3848,262 @@ impl Waku {
             self.show_toast(tr!("side_chat.no_nesting"));
             return;
         }
-        self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
+        if self.execute_side_chat_composer_command(session_id, &prompt, cx) {
+            return;
+        }
+        if let Some(submission) = self.side_chat_submission(session_id, prompt, cx) {
+            self.submit_composer_submission_to(session_id, submission, cx);
+        }
+    }
+
+    /// The lane's `submission_with_attachments`: the chat's atoms splice to
+    /// their payloads, its staged annotations fold in as the header, and the
+    /// stored prompt keeps the typed slash form — the transport resolves
+    /// against the chat's own catalog in `submit_submission_for_session`.
+    pub(super) fn side_chat_submission(
+        &mut self,
+        session_id: Uuid,
+        prompt: String,
+        cx: &mut Context<Self>,
+    ) -> Option<ComposerSubmission> {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+        else {
+            return None;
+        };
+        let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
+            return None;
+        };
+        let atoms = std::mem::take(&mut chat.atoms);
+        let commands = chat.commands.clone();
+        chat.composer
+            .update(cx, |composer, cx| composer.set_inline_atoms(Vec::new(), cx));
+        let annotations = self.drain_side_chat_annotations(session_id, cx);
+        // Markers splice back to their atoms in place — pasted text and
+        // session tokens.
+        let body = splice_inline_atoms(&prompt, &atoms);
+        let submission = if !body.trim().is_empty() {
+            // Resolve command syntax while the body's leading `/` is still
+            // visible — the annotation header would hide it from the
+            // transport-boundary resolver.
+            if annotations.is_empty() {
+                format!("{}{}", annotation_prompt_prefix(&annotations), body)
+            } else {
+                let resolved = crate::composer_complete::resolved_submission(
+                    session.provider,
+                    &body,
+                    &commands,
+                )
+                .unwrap_or_else(|| body.clone());
+                format!("{}{}", annotation_prompt_prefix(&annotations), resolved)
+            }
+        } else if !annotations.is_empty() {
+            annotation_prompt_prefix(&annotations).trim_end().to_owned()
+        } else {
+            // The atoms the caller's splice remap may have dropped go back —
+            // an empty outcome must not swallow a staged draft.
+            if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                chat.atoms = atoms;
+                self.sync_side_chat_atoms(session_id, cx);
+            }
+            return None;
+        };
+        // Presentation splits like the session column's: the bubble keeps
+        // the composer's chip rendering while titles and a restored draft
+        // keep the user's own words.
+        let typed_content = text_without_atom_markers(&prompt);
+        let typed = typed_content.trim();
+        let human_content = (!annotations.is_empty() || !atoms.is_empty()).then(|| {
+            if typed.is_empty() {
+                annotation_display_content(&annotations)
+            } else {
+                typed.to_owned()
+            }
+        });
+        let display_content = (!annotations.is_empty() || !atoms.is_empty()).then(|| {
+            let typed = if atoms.is_empty() {
+                body.clone()
+            } else {
+                atom_display_content(&prompt, &atoms)
+            };
+            if annotations.is_empty() {
+                typed
+            } else {
+                annotation_bubble_content(&annotations, &typed)
+            }
+        });
+        // The lane becomes the composer later typing and outside-Enter aim
+        // at — the last place a message actually went out.
+        self.last_sent_composer = Some(session_id);
+        Some(ComposerSubmission {
+            prompt: submission,
+            display_content,
+            human_content,
+            attachments: Vec::new(),
+            message_atoms: atoms.iter().map(ComposerInlineAtom::message_atom).collect(),
+            atoms,
+            annotations,
+            hidden: false,
+        })
+    }
+
+    /// The lane's reserved-command executor: session-scoped commands
+    /// retarget to the chat's session — compact, rename, goal, fast — while
+    /// the Waku commands hidden from its popup refuse rather than leak a
+    /// literal `/word` to the provider.
+    pub(super) fn execute_side_chat_composer_command(
+        &mut self,
+        session_id: Uuid,
+        prompt: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.intercept_side_chat_reserved(prompt)
+            || self.execute_side_chat_compact(session_id, prompt, cx)
+            || self.execute_side_chat_rename(session_id, prompt, cx)
+            || self.execute_side_chat_goal(session_id, prompt, cx)
+            || self.execute_side_chat_fast(session_id, prompt, cx)
+    }
+
+    /// Reserved Waku commands that do not apply inside a lane — the popup
+    /// hides them, and a typed one still refuses so it cannot reach the
+    /// provider as a literal prompt.
+    fn intercept_side_chat_reserved(&mut self, prompt: &str) -> bool {
+        let prompt = prompt.trim_start();
+        let Some(token) = prompt.strip_prefix('/') else {
+            return false;
+        };
+        let name = token.split_whitespace().next().unwrap_or("");
+        if autocomplete::SIDE_CHAT_HIDDEN_COMMANDS.contains(&name) {
+            self.show_toast(tr!("side_chat.command_unavailable"));
+            return true;
+        }
+        false
+    }
+
+    /// `/compact` in a lane — the same control path as the session
+    /// column's, aimed at the chat's session.
+    fn execute_side_chat_compact(
+        &mut self,
+        session_id: Uuid,
+        prompt: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(chat) = self.side_chat_composers.get(&session_id) else {
+            return false;
+        };
+        if !crate::composer_complete::is_compact_submission(prompt, &chat.commands) {
+            return false;
+        }
+        chat.composer.update(cx, |input, cx| input.clear(cx));
+        self.compact_session(session_id, cx);
+        true
+    }
+
+    /// `/rename <title>` in a lane retitles the chat's own session. A bare
+    /// `/rename` stays a provider submission — the same pass-through the
+    /// session column keeps.
+    fn execute_side_chat_rename(
+        &mut self,
+        session_id: Uuid,
+        prompt: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(title) = crate::composer_complete::parse_rename_submission(prompt) else {
+            return false;
+        };
+        let Some(title) = title else {
+            return false;
+        };
+        let Some(chat) = self.side_chat_composers.get(&session_id) else {
+            return true;
+        };
+        chat.composer.update(cx, |input, cx| input.clear(cx));
+        if self
+            .state
+            .session_mut(session_id)
+            .is_some_and(|session| session.set_title(title))
+        {
+            self.save();
+            cx.notify();
+        }
+        true
+    }
+
+    /// `/goal` in a lane — the chat's session and command catalog, the same
+    /// dialogs and operations.
+    fn execute_side_chat_goal(
+        &mut self,
+        session_id: Uuid,
+        prompt: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(chat) = self.side_chat_composers.get(&session_id) else {
+            return false;
+        };
+        let composer = chat.composer.clone();
+        let commands = chat.commands.clone();
+        self.execute_goal_composer_command_for(session_id, prompt, composer, commands, cx)
+    }
+
+    /// `/fast` in a lane retunes the chat's own session — the picker's
+    /// service-tier write with the lane's catalog deciding the toggle.
+    fn execute_side_chat_fast(
+        &mut self,
+        session_id: Uuid,
+        prompt: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return false;
+        };
+        let Some(commands) = self
+            .side_chat_composers
+            .get(&session_id)
+            .map(|chat| chat.commands.clone())
+        else {
+            return false;
+        };
+        if !crate::composer_complete::is_fast_mode_toggle_submission(
+            session.provider,
+            prompt,
+            &commands,
+        ) {
+            return false;
+        }
+        let Some(next_tier) = self.model_metadata_for_session(session).and_then(|model| {
+            crate::composer_complete::toggled_fast_service_tier(
+                session.service_tier.as_deref(),
+                &model.service_tiers,
+            )
+        }) else {
+            return true;
+        };
+        let enabled = next_tier != "default";
+        let Some(chat) = self.side_chat_composers.get(&session_id) else {
+            return true;
+        };
+        chat.composer.update(cx, |input, cx| input.clear(cx));
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.service_tier = Some(next_tier.clone());
+        }
+        self.state.last_service_tier = Some(next_tier);
+        self.apply_session_options(session_id, cx);
+        self.show_success_toast(tr!(if enabled {
+            "commands.fast_enabled"
+        } else {
+            "commands.fast_disabled"
+        }));
+        cx.notify();
+        true
     }
 
     /// Start a separate, read-only challenge of the current task. The side
@@ -3944,20 +4222,44 @@ impl Waku {
     /// against the session's cached goal; mutations go to the app-server and
     /// echo back as `GoalUpdated` events.
     fn execute_goal_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        let Some(session_id) = self.composer_session().map(|session| session.id) else {
+            return false;
+        };
+        self.execute_goal_composer_command_for(
+            session_id,
+            prompt,
+            self.composer.clone(),
+            self.slash_command_index.clone(),
+            cx,
+        )
+    }
+
+    /// The shared half of `/goal` — the composer card the command empties
+    /// and the catalog it parses against ride with the surface.
+    fn execute_goal_composer_command_for(
+        &mut self,
+        session_id: Uuid,
+        prompt: &str,
+        composer: Entity<ComposerInput>,
+        commands: Rc<Vec<SlashCommand>>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         use crate::composer_complete::GoalCommand;
         use crate::model::{GoalOperation, ThreadGoalStatus};
-        let Some((session_id, command, current_goal)) =
-            self.composer_session().and_then(|session| {
-                let command = crate::composer_complete::parse_goal_submission(
-                    session.provider,
-                    prompt,
-                    &self.slash_command_index,
-                )?;
-                Some((session.id, command, session.thread_goal.clone()))
-            })
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
         else {
             return false;
         };
+        let Some(command) =
+            crate::composer_complete::parse_goal_submission(session.provider, prompt, &commands)
+        else {
+            return false;
+        };
+        let current_goal = session.thread_goal.clone();
         match command {
             GoalCommand::Show | GoalCommand::Edit => {
                 self.request_goal_dialog(session_id, None, false, cx);
@@ -4006,7 +4308,7 @@ impl Waku {
                 }
             },
         }
-        self.composer.update(cx, |input, cx| input.clear(cx));
+        composer.update(cx, |input, cx| input.clear(cx));
         cx.notify();
         true
     }
@@ -4041,14 +4343,21 @@ impl Waku {
         true
     }
 
+    /// Put a failed submission's draft back where it was typed — the lane's
+    /// composer for a side chat, the session column's otherwise.
     pub(super) fn restore_composer_submission(
         &mut self,
+        session_id: Uuid,
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
         if submission.hidden {
             // The continue nudge was never the user's draft; a failed send
             // leaves the composer as it was rather than revealing it.
+            return;
+        }
+        if self.side_chat_composers.contains_key(&session_id) {
+            self.restore_side_chat_submission(session_id, submission, cx);
             return;
         }
         self.composer_attachments = submission
@@ -4108,6 +4417,46 @@ impl Waku {
         self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
         self.sync_inline_atoms(cx);
         self.schedule_composer_draft_save(cx);
+        cx.notify();
+    }
+
+    /// The lane's restore: the chat's field, atoms, and annotation store get
+    /// their draft back. Called only when the lane's composer still exists.
+    fn restore_side_chat_submission(
+        &mut self,
+        session_id: Uuid,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        if !submission.annotations.is_empty()
+            && let Some(view) = self.side_chat_views.get(&session_id)
+        {
+            view.selection
+                .annotations
+                .borrow_mut()
+                .items
+                .extend(submission.annotations);
+        }
+        // Same contract as the main restore — payloads, never chip markup.
+        let content = submission.human_content.unwrap_or_else(|| {
+            submission
+                .display_content
+                .map(|display| atom_payload_content(&display, &submission.message_atoms))
+                .unwrap_or(submission.prompt)
+        });
+        let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
+            return;
+        };
+        chat.composer
+            .update(cx, |input, cx| input.set_content(content, cx));
+        for atom in submission.atoms {
+            let marker = chat
+                .composer
+                .update(cx, |composer, cx| composer.insert_inline_marker(cx));
+            chat.atoms.push(ComposerInlineAtom { marker, ..atom });
+        }
+        chat.atoms.sort_by_key(|atom| atom.marker);
+        self.sync_side_chat_atoms(session_id, cx);
         cx.notify();
     }
 
@@ -5294,16 +5643,26 @@ impl Waku {
         // Stop — while a response fork has no abandon path at all.
         let preparing = session
             .is_some_and(|session| self.response_fork_preparations.contains_key(&session.id));
+        // Atoms and staged annotations count as draft on either surface —
+        // attachments stay main-only.
+        let (atom_count, annotation_count) = match surface {
+            ComposerCard::Main => (
+                self.composer_inline_atoms.len(),
+                self.transcript_selection.annotations.borrow().items.len(),
+            ),
+            ComposerCard::SideChat { session_id, .. } => (
+                self.side_chat_composers
+                    .get(session_id)
+                    .map_or(0, |chat| chat.atoms.len()),
+                self.side_chat_views
+                    .get(session_id)
+                    .map_or(0, |view| view.selection.annotations.borrow().items.len()),
+            ),
+        };
         let has_draft = !composer.read(cx).content(cx).trim().is_empty()
-            || (interactive
-                && (!self.composer_attachments.is_empty()
-                    || !self.composer_inline_atoms.is_empty()
-                    || !self
-                        .transcript_selection
-                        .annotations
-                        .borrow()
-                        .items
-                        .is_empty()));
+            || atom_count != 0
+            || annotation_count != 0
+            || (interactive && !self.composer_attachments.is_empty());
         // A typed draft always means Send — the continue affordance exists
         // only while the composer is completely empty.
         let submit_action = self.composer_submit_action_for(session, preparing, has_draft);
@@ -5319,14 +5678,11 @@ impl Waku {
         // Continue needs no draft — an interrupted session is exactly what
         // makes it available — but it still needs a provider to run.
         let can_continue = !no_providers;
-        let (autocomplete, autocomplete_actionable) = if interactive {
-            match self.render_composer_autocomplete(window, cx) {
+        let (autocomplete, autocomplete_actionable) =
+            match self.render_composer_autocomplete_for(surface, window, cx) {
                 Some((element, actionable)) => (Some(element), actionable),
                 None => (None, false),
-            }
-        } else {
-            (None, false)
-        };
+            };
         let autocomplete_loading = autocomplete.is_some() && !autocomplete_actionable;
         // Files dragged in from the OS light the card up as a drop target and
         // stage as attachment chips. The wash arrives pre-blended because a
@@ -5351,11 +5707,23 @@ impl Waku {
             // scroll viewport, via `padding_x`) rather than on the card,
             // so the field's overlay scrollbar can hug the card's edge.
             .py(px(10.0))
+            .drag_over::<SidebarSessionDrag>(move |style, _, _, _| {
+                style.bg(drop_wash).border_color(drop_ring)
+            })
+            .on_drop({
+                let surface = surface.clone();
+                cx.listener(move |this, drag: &SidebarSessionDrag, window, cx| {
+                    this.stage_session_reference_for(
+                        &surface,
+                        drag.session_id,
+                        &drag.title,
+                        window,
+                        cx,
+                    );
+                })
+            })
             .when(interactive, |card| {
                 card.drag_over::<ExternalPaths>(move |style, _, _, _| {
-                    style.bg(drop_wash).border_color(drop_ring)
-                })
-                .drag_over::<SidebarSessionDrag>(move |style, _, _, _| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
                 // The same highlight when the drag is anywhere over the
@@ -5366,45 +5734,52 @@ impl Waku {
                 .group_drag_over::<SidebarSessionDrag>(SESSION_DROP_GROUP, move |style| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
-                .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                    this.stage_dropped_files(paths, window, cx);
-                }))
                 .on_drop(cx.listener(
-                    |this, drag: &SidebarSessionDrag, window, cx| {
-                        this.stage_session_reference(drag.session_id, &drag.title, window, cx);
+                    |this, paths: &ExternalPaths, window, cx| {
+                        this.stage_dropped_files(paths, window, cx);
                     },
                 ))
             })
             // Anchor for the bounds probe the autocomplete popup aligns to.
             .relative()
-            .when(interactive, |card| {
-                card.child(super::autocomplete::composer_card_bounds_probe(
-                    self.composer_autocomplete.card_bounds_cell(),
-                ))
-            })
+            .when_some(
+                self.surface_ui(surface).map(|ui| ui.card_bounds_cell()),
+                |card, cell| card.child(super::autocomplete::composer_card_bounds_probe(cell)),
+            )
             // Only while the popup has selectable rows: the key context
             // routes arrows, `enter`, `tab` and `escape` here as actions,
             // out from under the focused field. The loading state takes
             // only Escape, so it can dismiss without swallowing input.
             .when(autocomplete_actionable, |card| {
+                let surface = surface.clone();
                 card.key_context("ComposerAutocomplete")
-                    .on_action(cx.listener(|this, _: &SelectNextEntry, window, cx| {
-                        this.move_autocomplete_highlight("down", window, cx);
+                    .on_action(cx.listener({
+                        let surface = surface.clone();
+                        move |this, _: &SelectNextEntry, window, cx| {
+                            this.move_autocomplete_highlight(&surface, "down", window, cx);
+                        }
                     }))
-                    .on_action(cx.listener(|this, _: &SelectPreviousEntry, window, cx| {
-                        this.move_autocomplete_highlight("up", window, cx);
+                    .on_action(cx.listener({
+                        let surface = surface.clone();
+                        move |this, _: &SelectPreviousEntry, window, cx| {
+                            this.move_autocomplete_highlight(&surface, "up", window, cx);
+                        }
                     }))
-                    .on_action(cx.listener(|this, _: &ConfirmEntry, window, cx| {
-                        this.accept_autocomplete(None, window, cx);
+                    .on_action(cx.listener({
+                        let surface = surface.clone();
+                        move |this, _: &ConfirmEntry, window, cx| {
+                            this.accept_autocomplete(&surface, None, window, cx);
+                        }
                     }))
-                    .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
-                        this.dismiss_autocomplete(cx);
+                    .on_action(cx.listener(move |this, _: &DismissMenu, _, cx| {
+                        this.dismiss_autocomplete(&surface, cx);
                     }))
             })
             .when(autocomplete_loading, |card| {
+                let surface = surface.clone();
                 card.key_context("ComposerAutocompleteLoading")
-                    .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
-                        this.dismiss_autocomplete(cx);
+                    .on_action(cx.listener(move |this, _: &DismissMenu, _, cx| {
+                        this.dismiss_autocomplete(&surface, cx);
                     }))
             })
             .children(autocomplete)
@@ -5414,8 +5789,8 @@ impl Waku {
                     .when(!self.composer_attachments.is_empty(), |card| {
                         card.child(self.render_composer_attachments(cx))
                     })
-                    .children(self.render_annotation_chip(cx))
             })
+            .children(self.render_annotation_chip_for(surface, cx))
             .child(div().pt(px(2.0)).child(composer))
             // The paste chip's floating editor, anchored below the
             // atom's painted label.
@@ -5653,7 +6028,13 @@ impl Waku {
                 composer,
             } => {
                 let prompt = composer.read(cx).content(cx).to_owned();
-                if prompt.trim().is_empty() {
+                if prompt.trim().is_empty()
+                    && self
+                        .side_chat_composers
+                        .get(session_id)
+                        .is_none_or(|chat| chat.atoms.is_empty())
+                    && !self.side_chat_has_annotations(*session_id)
+                {
                     return;
                 }
                 composer.update(cx, |input, cx| input.clear(cx));
@@ -8068,6 +8449,56 @@ pub(super) fn remap_marker_seats(
     for index in suffix {
         seats[index] = positions.next();
     }
+    seats
+}
+
+/// The painted labels one field shows for `atoms`, in marker order —
+/// the shape every composer's `set_inline_atoms` wants.
+fn inline_atom_paints(atoms: &[ComposerInlineAtom]) -> Vec<crate::input::InlineAtom> {
+    atoms
+        .iter()
+        .map(|atom| crate::input::InlineAtom {
+            label: SharedString::from(atom.label()),
+            icon: Some(atom.icon()),
+        })
+        .collect()
+}
+
+/// The shared half of [`Waku::remap_inline_atoms`] and
+/// [`Waku::remap_side_chat_atoms`]: after `splice`, re-seat each atom's
+/// marker against `composer`'s content — see [`remap_marker_seats`] for the
+/// seating rules — drop the atoms whose markers left the text, and push the
+/// painted labels back into the field. Returns every input atom's new seat,
+/// aligned with its pre-filter position, so a caller tracking one atom —
+/// the open paste editor — can follow it.
+fn remap_atoms_for_splice(
+    composer: &Entity<ComposerInput>,
+    atoms: &mut Vec<ComposerInlineAtom>,
+    splice: &ComposerSplice,
+    cx: &mut Context<Waku>,
+) -> Vec<Option<usize>> {
+    let positions: Vec<usize> = composer
+        .read(cx)
+        .content(cx)
+        .match_indices(INLINE_ATOM_MARKER)
+        .map(|(index, _)| index)
+        .collect();
+    let markers = atoms.iter().map(|atom| atom.marker).collect::<Vec<_>>();
+    let seats = remap_marker_seats(&markers, &positions, &splice.0.removed, splice.0.inserted);
+    let mut live: Vec<ComposerInlineAtom> = std::mem::take(atoms)
+        .into_iter()
+        .zip(seats.iter())
+        .filter_map(|(mut atom, seat)| {
+            seat.map(|marker| {
+                atom.marker = marker;
+                atom
+            })
+        })
+        .collect();
+    live.sort_by_key(|atom| atom.marker);
+    *atoms = live;
+    let painted = inline_atom_paints(atoms);
+    composer.update(cx, |composer, cx| composer.set_inline_atoms(painted, cx));
     seats
 }
 

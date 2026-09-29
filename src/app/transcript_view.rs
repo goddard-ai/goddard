@@ -687,6 +687,18 @@ impl Waku {
                     })
                     .flatten()
             })
+            .or_else(|| {
+                // The visible lane's registry — its rows paint into a
+                // separate selection state from the session column's.
+                self.active_right_panel_surface()
+                    .and_then(|surface| match surface {
+                        RightPanelSurface::SideChat(session_id) => {
+                            self.side_chat_views.get(session_id)
+                        }
+                        _ => None,
+                    })
+                    .and_then(|view| view.selection.selection.borrow().selected_text())
+            })
             .or_else(|| self.toast_selection.selection.borrow().selected_text())
             .or_else(|| self.skills_selection.selection.borrow().selected_text())
             .or_else(|| {
@@ -1552,7 +1564,8 @@ impl Waku {
     /// scoped to the row, so a virtualized remount recreates the same keys and
     /// an in-progress selection survives scrolling. `session` is the task the
     /// row belongs to — a side chat's own id, not the selected parent's — so
-    /// the code-block run control lands in the right workspace.
+    /// the code-block run control lands in the right workspace. `selection`
+    /// is the surface's own registry — the transcript's, or a side chat's.
     pub(super) fn markdown_ctx<'a>(
         &self,
         row: String,
@@ -1560,9 +1573,10 @@ impl Waku {
         metrics: MarkdownMetrics,
         animate_streaming: bool,
         session: Option<Uuid>,
+        selection: &TranscriptSelection,
         cx: &App,
     ) -> MarkdownCtx<'a> {
-        let ctx = MarkdownCtx::new(row, palette, metrics, self.transcript_selection.clone())
+        let ctx = MarkdownCtx::new(row, palette, metrics, selection.clone())
             .with_families(crate::fonts::current(cx))
             .with_math_enabled(self.state.render_math)
             .with_guided_reading(self.guided_reading())
@@ -1737,6 +1751,7 @@ impl Waku {
                             metrics,
                             animate_streaming,
                             self.state.selected_session,
+                            &self.transcript_selection,
                             cx,
                         )
                         .with_context_menu(menu.clone())
@@ -3616,6 +3631,7 @@ impl Waku {
                         self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
                         reasoning_live && !cx.reduce_motion(),
                         Some(session_id),
+                        &self.transcript_selection,
                         cx,
                     )
                     .with_standalone_context_menu(
@@ -3723,6 +3739,7 @@ impl Waku {
                     self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
                     false,
                     Some(session_id),
+                    &self.transcript_selection,
                     cx,
                 );
                 let (mono_size, mono_line) = self.activity_mono_text();

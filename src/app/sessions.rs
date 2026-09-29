@@ -3712,7 +3712,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
-        let focus_handle = self.composer_focus(cx);
+        let focus_handle = self.typing_target_composer(cx).read(cx).focus();
         window.focus(&focus_handle, cx);
         cx.notify();
     }
@@ -3773,12 +3773,29 @@ impl Waku {
         }) {
             return;
         }
-        let focus = self.composer_focus(cx);
+        let composer = self.typing_target_composer(cx);
+        let focus = composer.read(cx).focus();
         window.focus(&focus, cx);
         let text = text.to_owned();
-        self.composer
-            .update(cx, |composer, cx| composer.insert_text(&text, cx));
+        composer.update(cx, |composer, cx| composer.insert_text(&text, cx));
         cx.stop_propagation();
+    }
+
+    /// Which composer a stray keystroke belongs to — the visible lane's
+    /// field while it holds a draft or was the last composer a message went
+    /// out from, the session column's otherwise.
+    fn typing_target_composer(&self, cx: &App) -> Entity<ComposerInput> {
+        if let Some(session_id) = self.visible_side_chat_id()
+            && let Some(chat) = self.side_chat_composers.get(&session_id)
+        {
+            let has_draft = !chat.composer.read(cx).content(cx).trim().is_empty()
+                || !chat.atoms.is_empty()
+                || self.side_chat_has_annotations(session_id);
+            if has_draft || self.last_sent_composer == Some(session_id) {
+                return chat.composer.clone();
+            }
+        }
+        self.composer.clone()
     }
 
     /// Enter outside the composer. The field's own binding claims it while
@@ -3844,6 +3861,37 @@ impl Waku {
                 .any(|owned| context.contains(owned))
         }) {
             return;
+        }
+        // A lane that would take the keystroke by the typing rule takes
+        // Enter too: its draft submits (⌘⏎ steers), an empty field fires
+        // the stopped-turn Continue affordance — never the session
+        // column's draft on its behalf.
+        if let Some(session_id) = self.visible_side_chat_id()
+            && let Some(chat) = self.side_chat_composers.get(&session_id)
+        {
+            let has_draft = !chat.composer.read(cx).content(cx).trim().is_empty()
+                || !chat.atoms.is_empty()
+                || self.side_chat_has_annotations(session_id);
+            if has_draft || self.last_sent_composer == Some(session_id) {
+                if has_draft {
+                    let prompt = chat.composer.read(cx).content(cx).trim().to_owned();
+                    if !prompt.is_empty() {
+                        chat.composer.update(cx, |composer, cx| composer.clear(cx));
+                    }
+                    if steer {
+                        if let Some(submission) = self.side_chat_submission(session_id, prompt, cx)
+                        {
+                            self.steer_session_submission(session_id, submission, cx);
+                        }
+                    } else {
+                        self.submit_side_chat_prompt(session_id, prompt, cx);
+                    }
+                } else {
+                    self.continue_interrupted_session_to(session_id, cx);
+                }
+                cx.stop_propagation();
+                return;
+            }
         }
         let session = self.composer_session();
         let preparing = session.is_some_and(|session| {
@@ -5595,7 +5643,7 @@ impl Waku {
             }
             self.splice_transcript_rows_after_visibility_change(&previous_kinds);
             if let Some((_, _, submission)) = resend {
-                self.restore_composer_submission(submission, cx);
+                self.restore_composer_submission(session_id, submission, cx);
             }
         }
         self.drain_pending_workspace_cleanups(cx);

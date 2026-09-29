@@ -139,7 +139,7 @@ impl Waku {
                         if signed_in {
                             this.submit_submission_for_session(session_id, submission, cx);
                         } else {
-                            this.restore_composer_submission(submission, cx);
+                            this.restore_composer_submission(session_id, submission, cx);
                             this.show_toast(tr!(
                                 "sandbox.sign_in_incomplete",
                                 provider = provider.display_name()

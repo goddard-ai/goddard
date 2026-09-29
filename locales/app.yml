@@ -3833,6 +3833,8 @@ side_chat.no_task:
   en: No task to side chat with
 side_chat.no_nesting:
   en: Side chats cannot spawn their own side chats
+side_chat.command_unavailable:
+  en: That command isn't available in a side chat
 side_chat.placeholder:
   en: Message the side chat…
 terminal.localhost_detected:

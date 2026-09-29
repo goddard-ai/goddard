@@ -828,7 +828,9 @@ enum RightPanelSurface {
 }
 
 /// One side-chat tab's render state — a bottom-pinned row list, its scrollbar,
-/// fingerprinted row-kind cache, and transcript disclosure state.
+/// fingerprinted row-kind cache, and transcript disclosure state. `selection`
+/// is the lane's own text-selection registry: sharing the transcript's would
+/// file the chat's annotations under whatever task is selected.
 struct SideChatView {
     rows: ListState,
     scrollbar: Rc<ScrollbarState>,
@@ -838,6 +840,27 @@ struct SideChatView {
     expanded_activity_blocks: HashMap<usize, bool>,
     expanded_changed_files: HashSet<Uuid>,
     hovered_response_turn: Option<Uuid>,
+    selection: TranscriptSelection,
+}
+
+/// One side chat's composer-side state: its input and the draft state the
+/// main composer keeps as flat `Waku` fields — staged inline atoms, the
+/// autocomplete popup, and the command/file indexes mirrored for the chat's
+/// own provider and workspace.
+struct SideChatComposer {
+    composer: Entity<ComposerInput>,
+    autocomplete: autocomplete::AutocompleteUi,
+    atoms: Vec<composer::ComposerInlineAtom>,
+    /// The drawn command index and the `(provider, workspace, binary)` key it
+    /// was filtered for — the same contract `slash_command_index` and
+    /// `slash_command_index_key` keep for the selected session.
+    commands: Rc<Vec<SlashCommand>>,
+    command_key: Option<(ProviderKind, PathBuf, Option<String>)>,
+    commands_loading: bool,
+    /// The drawn `@` file index and the workspace it lists.
+    files: Rc<Vec<FileEntry>>,
+    file_key: Option<PathBuf>,
+    files_loading: bool,
 }
 
 /// The closed sidebar's left-edge hover peek: the real sidebar pane mounted
@@ -2596,6 +2619,11 @@ pub struct Waku {
     /// in the next submission. Purely view state: drafts capture their text
     /// inline instead.
     composer_inline_atoms: Vec<composer::ComposerInlineAtom>,
+    /// The composer a prompt last went out from: `None` is the session
+    /// column's field, `Some` a side chat's panel composer. Type-to-focus and
+    /// Enter-outside-composer prefer that field while its draft or recency
+    /// still stands.
+    last_sent_composer: Option<Uuid>,
     /// Window-modal expansion of an image attachment. The path is already
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
@@ -3071,7 +3099,7 @@ pub struct Waku {
     /// cache, and its composer. Keyed by the side chat's own session id;
     /// entries die when the tab — and the session — is closed.
     side_chat_views: HashMap<Uuid, SideChatView>,
-    side_chat_composers: HashMap<Uuid, Entity<ComposerInput>>,
+    side_chat_composers: HashMap<Uuid, SideChatComposer>,
     /// A freshly opened side-chat tab's composer takes focus on its first
     /// rendered frame, like the terminal and browser pending-focus flags.
     right_panel_pending_side_chat_focus: Option<Uuid>,
@@ -6464,6 +6492,7 @@ impl Waku {
                 composer_autocomplete: autocomplete::AutocompleteUi::new(),
                 composer_attachments,
                 composer_inline_atoms: Vec::new(),
+                last_sent_composer: None,
                 image_preview: None,
                 image_preview_generation: 0,
                 remote_images: RefCell::new(image_preview::RemoteImageCache::new()),

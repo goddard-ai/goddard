@@ -3160,7 +3160,7 @@ impl Waku {
             .unwrap_or_default()
         {
             if self.state.selected_session == Some(session_id) {
-                self.restore_composer_submission(submission, cx);
+                self.restore_composer_submission(session_id, submission, cx);
                 continue;
             }
             if submission.hidden {
@@ -6283,11 +6283,11 @@ impl Waku {
             .find(|session| session.id == session_id)
             .cloned()
         else {
-            self.restore_composer_submission(submission, cx);
+            self.restore_composer_submission(session_id, submission, cx);
             return;
         };
         if self.response_fork_preparations.contains_key(&session.id) {
-            self.restore_composer_submission(submission, cx);
+            self.restore_composer_submission(session_id, submission, cx);
             return;
         }
         if !submission.hidden {
@@ -6341,7 +6341,7 @@ impl Waku {
             .find(|session| session.id == session_id)
             .cloned()
         else {
-            self.restore_composer_submission(submission, cx);
+            self.restore_composer_submission(session_id, submission, cx);
             return;
         };
         if !session.is_busy() {
@@ -6359,7 +6359,11 @@ impl Waku {
             .map(Path::to_path_buf);
         let provider_prompt = self.expand_work_item_references(
             workspace_path.as_deref(),
-            &self.resolve_skill_submission(session.provider, &submission.prompt),
+            &self.resolve_skill_submission(
+                session.provider,
+                &submission.prompt,
+                &self.submission_catalog(&session),
+            ),
         );
         if let Some(runtime) = self.runtimes.get_mut(&session.id) {
             runtime.driver.steer(provider_prompt, false);
@@ -6380,23 +6384,28 @@ impl Waku {
 
     /// Resolve presentation-preserving composer syntax immediately before a
     /// prompt crosses into a provider transport.
+    /// Provider syntax resolution at the transport seam, against the
+    /// catalog the submitting composer actually drew from — a side chat's
+    /// own index, the selected session's otherwise.
     pub(super) fn resolve_provider_submission(
         &self,
         provider: ProviderKind,
         prompt: &str,
+        catalog: &[SlashCommand],
     ) -> String {
-        crate::composer_complete::resolved_submission(provider, prompt, &self.slash_command_index)
+        crate::composer_complete::resolved_submission(provider, prompt, catalog)
             .unwrap_or_else(|| prompt.to_owned())
     }
 
     /// Resolve only provider-native skill syntax for a live steering message.
-    fn resolve_skill_submission(&self, provider: ProviderKind, prompt: &str) -> String {
-        crate::composer_complete::resolved_skill_submission(
-            provider,
-            prompt,
-            &self.slash_command_index,
-        )
-        .unwrap_or_else(|| prompt.to_owned())
+    fn resolve_skill_submission(
+        &self,
+        provider: ProviderKind,
+        prompt: &str,
+        catalog: &[SlashCommand],
+    ) -> String {
+        crate::composer_complete::resolved_skill_submission(provider, prompt, catalog)
+            .unwrap_or_else(|| prompt.to_owned())
     }
 
     /// Rewrite the prompt's `#N` mentions as self-contained GitHub references
@@ -6554,7 +6563,7 @@ impl Waku {
             .queued_annotations
             .remove(&message_id)
             .unwrap_or_default();
-        self.restore_composer_submission(submission, cx);
+        self.restore_composer_submission(session_id, submission, cx);
         let focus_handle = self.composer_focus(cx);
         window.focus(&focus_handle, cx);
         self.save();
@@ -6776,7 +6785,7 @@ impl Waku {
             .cloned()
         else {
             if selected {
-                self.restore_composer_submission(submission, cx);
+                self.restore_composer_submission(session_id, submission, cx);
                 self.show_toast(tr!("errors.prepare_task_project_not_found"));
             }
             cx.notify();
@@ -6791,7 +6800,7 @@ impl Waku {
         if !projectless && !self.is_remote_project(project_id) && !project.path.is_dir() {
             self.missing_projects.insert(project_id);
             if selected {
-                self.restore_composer_submission(submission, cx);
+                self.restore_composer_submission(session_id, submission, cx);
             }
             self.show_toast_with_tone(
                 tr!(
@@ -7066,7 +7075,7 @@ impl Waku {
                         self.transcript_anchor_following.set(false);
                     }
                     self.splice_transcript_rows_after_visibility_change(&previous_kinds);
-                    self.restore_composer_submission(submission, cx);
+                    self.restore_composer_submission(session_id, submission, cx);
                     self.show_toast(tr!("errors.create_worktree", error = error));
                 }
                 cx.notify();
@@ -7251,10 +7260,13 @@ impl Waku {
         // `#` mentions resolve here too, into titled GitHub links.
         // `submission` must stay whole: a sandbox sign-in gate failure
         // stashes it for the post-login resubmit.
+        let catalog = session
+            .map(|session| self.submission_catalog(session))
+            .unwrap_or_else(|| self.slash_command_index.clone());
         let prompt = submission.prompt.clone();
         let driver_prompt = self.expand_work_item_references(
             workspace_path.as_deref(),
-            &self.resolve_provider_submission(provider, &prompt),
+            &self.resolve_provider_submission(provider, &prompt, &catalog),
         );
         // The turn and its user message landed at accept time. Their ids go
         // with the prompt so every other client attached to the runtime

@@ -75,7 +75,7 @@ impl Waku {
         // not exist on this machine.
         if self.daemon.is_remote() {
             if selected {
-                self.restore_composer_submission(submission, cx);
+                self.restore_composer_submission(session.id, submission, cx);
                 self.show_toast(tr!(
                     "errors.provider_terminal_sessions_local_only",
                     provider = ProviderKind::Antigravity.display_name()
@@ -95,7 +95,7 @@ impl Waku {
             .cloned()
         else {
             if selected {
-                self.restore_composer_submission(submission, cx);
+                self.restore_composer_submission(session.id, submission, cx);
                 self.show_toast(tr!("errors.prepare_task_project_not_found"));
             }
             cx.notify();
@@ -178,7 +178,7 @@ impl Waku {
                     }
                 }
                 if selected {
-                    self.restore_composer_submission(submission, cx);
+                    self.restore_composer_submission(session_id, submission, cx);
                     self.show_toast(tr!("errors.create_worktree", error = error));
                 }
                 cx.notify();
@@ -212,7 +212,11 @@ impl Waku {
         if selected && let Some(warning) = lfs_warning {
             self.show_toast(warning);
         }
-        let prompt = self.resolve_provider_submission(ProviderKind::Antigravity, &prompt);
+        let prompt = self.resolve_provider_submission(
+            ProviderKind::Antigravity,
+            &prompt,
+            self.slash_command_index.as_slice(),
+        );
         let spawned = self.spawn_agy_terminal(session_id, AgyLaunchKind::Prompt(prompt), cx);
         if let Some(session) = self.state.session_mut(session_id) {
             // A launch that never produced a terminal is a failed start, not

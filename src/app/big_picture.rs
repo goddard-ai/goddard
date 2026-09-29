@@ -1955,7 +1955,13 @@ impl Waku {
             }))
             .on_drop(
                 cx.listener(|this, drag: &composer::SidebarSessionDrag, window, cx| {
-                    this.stage_session_reference(drag.session_id, &drag.title, window, cx);
+                    this.stage_session_reference_for(
+                        &composer::ComposerCard::Main,
+                        drag.session_id,
+                        &drag.title,
+                        window,
+                        cx,
+                    );
                 }),
             )
             // The blurred frame snapshot paints first; the scrim dims it.

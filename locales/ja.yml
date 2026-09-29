@@ -2816,6 +2816,7 @@ shortcuts.view_unarchived_task: アーカイブ解除したタスクを表示
 shortcuts.word_back: 前の単語へ移動
 shortcuts.word_forward: 次の単語へ移動
 side_chat.no_nesting: サイドチャットは独自のサイドチャットを作れません
+side_chat.command_unavailable: そのコマンドはサイドチャットでは使えません
 side_chat.no_task: サイドチャットするタスクがありません
 side_chat.placeholder: サイドチャットにメッセージ…
 sidebar.automations: オートメーション

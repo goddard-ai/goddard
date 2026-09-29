@@ -1,0 +1,1 @@
+- Typing with no composer focused now lands in an open side chat when it was the last composer you sent from or it has an unsent draft, instead of always going to the main task's composer.

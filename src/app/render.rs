@@ -812,7 +812,8 @@ impl Render for Waku {
                             }))
                             .on_drop(cx.listener(
                                 |this, drag: &composer::SidebarSessionDrag, window, cx| {
-                                    this.stage_session_reference(
+                                    this.stage_session_reference_for(
+                                        &composer::ComposerCard::Main,
                                         drag.session_id,
                                         &drag.title,
                                         window,

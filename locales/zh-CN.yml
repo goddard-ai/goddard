@@ -2767,6 +2767,7 @@ shortcuts.view_unarchived_task: 查看取消归档的任务
 shortcuts.word_back: 移到上一个单词
 shortcuts.word_forward: 移到下一个单词
 side_chat.no_nesting: 侧聊不能再派生侧聊
+side_chat.command_unavailable: 该命令在侧聊中不可用
 side_chat.no_task: 没有可进行侧聊的任务
 side_chat.placeholder: 给侧聊发消息…
 sidebar.automations: 自动化

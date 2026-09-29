@@ -117,6 +117,23 @@ pub(super) struct WorkItemMentions {
     pub generation: u64,
 }
 
+/// Commands the popup offers that a side chat cannot run: `/side` cannot
+/// nest, `/incognito` is draft-scoped, `/land` belongs to a task's own
+/// workspace, and `/resume` answers a global picker, not a session.
+pub(super) const SIDE_CHAT_HIDDEN_COMMANDS: &[&str] = &["side", "incognito", "land", "resume"];
+
+/// The Waku-scope `/goal` entry injected into every composer command list
+/// when the provider's own catalog doesn't claim the name.
+fn waku_goal_command() -> SlashCommand {
+    SlashCommand {
+        name: "goal".to_owned(),
+        description: tr!("goal.title"),
+        scope: composer_complete::CommandScope::Waku,
+        argument_hint: Some("<description>".to_owned()),
+        template: None,
+    }
+}
+
 /// Filter results for one (kind, query, source index) — the popup's rows are
 /// recomputed on a keystroke, not on every frame the caret blinks.
 struct ResultsMemo {
@@ -127,6 +144,10 @@ struct ResultsMemo {
     /// Whether `/incognito` was offered — the draft-only command is filtered
     /// out once the composer session has started, so it keys the memo too.
     incognito_offered: bool,
+    /// Which composer these rows belong to — a side chat's session id, or
+    /// `None` for the session column's composer. Indexes differ per surface,
+    /// so rows must never carry across.
+    chat: Option<Uuid>,
     rows: Rc<Vec<AutocompleteRow>>,
 }
 
@@ -175,6 +196,144 @@ impl AutocompleteUi {
 }
 
 impl Waku {
+    /// The popup state `surface`'s composer draws from — the session column's
+    /// one, or the per-chat copy stored with its composer.
+    pub(super) fn surface_ui(&self, surface: &composer::ComposerCard) -> Option<&AutocompleteUi> {
+        match surface {
+            composer::ComposerCard::Main => Some(&self.composer_autocomplete),
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .side_chat_composers
+                .get(session_id)
+                .map(|chat| &chat.autocomplete),
+        }
+    }
+
+    /// The field `surface` edits — the session column's composer or the
+    /// chat's panel copy.
+    pub(super) fn surface_composer(
+        &self,
+        surface: &composer::ComposerCard,
+    ) -> Entity<ComposerInput> {
+        match surface {
+            composer::ComposerCard::Main => self.composer.clone(),
+            composer::ComposerCard::SideChat { composer, .. } => composer.clone(),
+        }
+    }
+
+    /// The project `surface`'s mention pool is scoped to.
+    pub(super) fn surface_project_id(&self, surface: &composer::ComposerCard) -> Option<Uuid> {
+        match surface {
+            composer::ComposerCard::Main => self.composer_project_id(),
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == *session_id)
+                .map(|session| session.project_id),
+        }
+    }
+
+    /// The workspace `surface`'s `@`/`#` indexes describe — the chat's own
+    /// session's, never the selected task's.
+    pub(super) fn surface_workspace(&self, surface: &composer::ComposerCard) -> Option<&Path> {
+        match surface {
+            composer::ComposerCard::Main => self.selected_workspace_path(),
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == *session_id)
+                .and_then(|session| self.workspace_path_for_session(session)),
+        }
+    }
+
+    /// `surface`'s drawn `/` index — the selected session's mirror or the
+    /// chat's own.
+    pub(super) fn surface_commands(
+        &self,
+        surface: &composer::ComposerCard,
+    ) -> Rc<Vec<SlashCommand>> {
+        match surface {
+            composer::ComposerCard::Main => self.slash_command_index.clone(),
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .side_chat_composers
+                .get(session_id)
+                .map(|chat| chat.commands.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(super) fn surface_files(&self, surface: &composer::ComposerCard) -> Rc<Vec<FileEntry>> {
+        match surface {
+            composer::ComposerCard::Main => self.mention_file_index.clone(),
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .side_chat_composers
+                .get(session_id)
+                .map(|chat| chat.files.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(super) fn surface_commands_loading(&self, surface: &composer::ComposerCard) -> bool {
+        match surface {
+            composer::ComposerCard::Main => self.slash_command_index_loading,
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .side_chat_composers
+                .get(session_id)
+                .is_some_and(|chat| chat.commands_loading),
+        }
+    }
+
+    pub(super) fn surface_files_loading(&self, surface: &composer::ComposerCard) -> bool {
+        match surface {
+            composer::ComposerCard::Main => self.mention_file_index_loading,
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .side_chat_composers
+                .get(session_id)
+                .is_some_and(|chat| chat.files_loading),
+        }
+    }
+
+    /// The atoms staged into `surface`'s field — session references and
+    /// folded pastes awaiting the next submission.
+    pub(super) fn surface_atoms(
+        &self,
+        surface: &composer::ComposerCard,
+    ) -> &[composer::ComposerInlineAtom] {
+        match surface {
+            composer::ComposerCard::Main => &self.composer_inline_atoms,
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .side_chat_composers
+                .get(session_id)
+                .map_or(&[][..], |chat| chat.atoms.as_slice()),
+        }
+    }
+
+    /// The dedupe/target guards every session-atom entry point shares —
+    /// dropping the session the composer already addresses is a no-op, as
+    /// is one already staged as an atom or (on the main composer) a legacy
+    /// attachment.
+    pub(super) fn surface_session_atom_allowed(
+        &self,
+        surface: &composer::ComposerCard,
+        session_id: Uuid,
+    ) -> bool {
+        let target = match surface {
+            composer::ComposerCard::Main => self.composer_target_session(),
+            composer::ComposerCard::SideChat { session_id, .. } => Some(*session_id),
+        };
+        target != Some(session_id)
+            && !self
+                .surface_atoms(surface)
+                .iter()
+                .any(|atom| atom.session_id() == Some(session_id))
+            && (matches!(surface, composer::ComposerCard::SideChat { .. })
+                || !self
+                    .composer_attachments
+                    .iter()
+                    .any(|attachment| attachment.session_id == Some(session_id)))
+    }
+
     /// Refresh the drawn command and file indexes for the selected session.
     ///
     /// A cache hit lands immediately; a miss starts discovery on the
@@ -208,13 +367,7 @@ impl Waku {
             Query::Ready(commands) => {
                 let mut merged = composer_complete::merge_reported_commands(&commands, &reported);
                 if !merged.iter().any(|command| command.name == "goal") {
-                    merged.push(SlashCommand {
-                        name: "goal".to_owned(),
-                        description: tr!("goal.title"),
-                        scope: composer_complete::CommandScope::Waku,
-                        argument_hint: Some("<description>".to_owned()),
-                        template: None,
-                    });
+                    merged.push(waku_goal_command());
                 }
                 self.slash_command_index = Rc::new(merged);
                 self.slash_command_index_key = Some(command_key);
@@ -235,38 +388,17 @@ impl Waku {
                     self.slash_command_index = Rc::new(Vec::new());
                     self.slash_command_index_key = None;
                 }
-                let path = project_path.clone();
-                let Some(workspace) = self.workspace_client_for_path(&path) else {
+                if self.workspace_client_for_path(&project_path).is_none() {
                     self.slash_command_index_loading = false;
                     return;
-                };
-                cx.spawn(async move |waku, cx| {
-                    let commands = cx
-                        .background_executor()
-                        .spawn(async move {
-                            match workspace.request(
-                                waku_client::WorkspaceOperation::DiscoverSlashCommands {
-                                    provider,
-                                    project_root: path,
-                                    binary_override,
-                                },
-                            ) {
-                                Ok(waku_client::WorkspaceResult::SlashCommands { commands }) => {
-                                    commands
-                                }
-                                Ok(_) | Err(_) => Vec::new(),
-                            }
-                        })
-                        .await;
-                    waku.update(cx, |waku, cx| {
-                        if waku.slash_commands.fulfill(token, commands) {
-                            waku.refresh_composer_sources(cx);
-                            cx.notify();
-                        }
-                    })
-                    .ok();
-                })
-                .detach();
+                }
+                self.fetch_slash_commands(
+                    token,
+                    provider,
+                    project_path.clone(),
+                    binary_override,
+                    cx,
+                );
             }
         }
 
@@ -306,6 +438,163 @@ impl Waku {
         // So does the palette's Prompts section — keep an open palette's
         // results in step with late-arriving discovery.
         self.refresh_open_command_palette(cx);
+    }
+
+    /// Run the daemon's command discovery for `token`'s key on the
+    /// background executor; the fulfill re-runs the selected session's
+    /// mirror, and each side chat's refresh reads the cache on its next
+    /// frame.
+    fn fetch_slash_commands(
+        &mut self,
+        token: crate::query::FetchToken<(ProviderKind, PathBuf, Option<String>)>,
+        provider: ProviderKind,
+        project_path: PathBuf,
+        binary_override: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self.workspace_client_for_path(&project_path) else {
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let commands = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace.request(
+                        waku_client::WorkspaceOperation::DiscoverSlashCommands {
+                            provider,
+                            project_root: project_path,
+                            binary_override,
+                        },
+                    ) {
+                        Ok(waku_client::WorkspaceResult::SlashCommands { commands }) => commands,
+                        Ok(_) | Err(_) => Vec::new(),
+                    }
+                })
+                .await;
+            waku.update(cx, |waku, cx| {
+                if waku.slash_commands.fulfill(token, commands) {
+                    waku.refresh_composer_sources(cx);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// `refresh_composer_sources` for a side chat's own provider and
+    /// workspace: the lane's mirrors fill from the same caches and the same
+    /// background fetches, keyed by the chat's session — never the selected
+    /// task's.
+    pub(super) fn refresh_side_chat_sources(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let provider = session.provider;
+        let reported = session.available_commands.clone();
+        let Some(project_path) = self
+            .workspace_path_for_session(session)
+            .map(std::path::Path::to_path_buf)
+        else {
+            if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                chat.commands = Rc::new(Vec::new());
+                chat.command_key = None;
+                chat.commands_loading = false;
+                chat.files = Rc::new(Vec::new());
+                chat.file_key = None;
+                chat.files_loading = false;
+            }
+            return;
+        };
+        let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
+        let command_key = (provider, project_path.clone(), binary_override.clone());
+        match self.slash_commands.read(&command_key) {
+            Query::Ready(commands) => {
+                let mut merged = composer_complete::merge_reported_commands(&commands, &reported);
+                if !merged.iter().any(|command| command.name == "goal") {
+                    merged.push(waku_goal_command());
+                }
+                if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                    chat.commands = Rc::new(merged);
+                    chat.command_key = Some(command_key);
+                    chat.commands_loading = false;
+                }
+            }
+            Query::Pending => {
+                if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                    chat.commands_loading = true;
+                    if chat.command_key.as_ref() != Some(&command_key) {
+                        chat.commands = Rc::new(Vec::new());
+                        chat.command_key = None;
+                    }
+                }
+            }
+            Query::Missing(token) => {
+                if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                    chat.commands_loading = true;
+                    // A scan for this exact key is in flight; anything drawn
+                    // meanwhile must not be another provider's list.
+                    if chat.command_key.as_ref() != Some(&command_key) {
+                        chat.commands = Rc::new(Vec::new());
+                        chat.command_key = None;
+                    }
+                }
+                if self.workspace_client_for_path(&project_path).is_none() {
+                    if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                        chat.commands_loading = false;
+                    }
+                } else {
+                    self.fetch_slash_commands(
+                        token,
+                        provider,
+                        project_path.clone(),
+                        binary_override.clone(),
+                        cx,
+                    );
+                }
+            }
+        }
+
+        match self.mention_files.read(&project_path) {
+            Query::Ready(files) => {
+                if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                    chat.files = files.as_ref().clone().into();
+                    chat.file_key = Some(project_path);
+                    chat.files_loading = false;
+                }
+            }
+            Query::Pending => {
+                if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                    chat.files_loading = true;
+                    if chat.file_key.as_ref() != Some(&project_path) {
+                        chat.files = Rc::new(Vec::new());
+                        chat.file_key = None;
+                    }
+                }
+            }
+            Query::Missing(token) => {
+                if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                    chat.files_loading = true;
+                    if chat.file_key.as_ref() != Some(&project_path) {
+                        chat.files = Rc::new(Vec::new());
+                        chat.file_key = None;
+                    }
+                }
+                if self.workspace_client_for_path(&project_path).is_none() {
+                    if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
+                        chat.files_loading = false;
+                    }
+                    self.mention_files.abandon(token);
+                    return;
+                }
+                self.fetch_mention_files(token, project_path, cx);
+            }
+        }
     }
 
     /// Run the daemon's file listing for `root`, claiming `token`'s fetch.
@@ -366,11 +655,17 @@ impl Waku {
         self.refresh_composer_sources(cx);
     }
 
-    /// The trigger under the composer's caret, reconciled with the popup's
-    /// cross-frame state. `None` while the composer is unfocused, the token is
+    /// The trigger under `surface`'s caret, reconciled with that composer's
+    /// popup state. `None` while its field is unfocused, the token is
     /// dismissed, or there is nothing to complete.
-    fn composer_trigger(&self, window: &Window, cx: &App) -> Option<Trigger> {
-        let input = self.composer.read(cx);
+    fn composer_trigger_for(
+        &self,
+        surface: &composer::ComposerCard,
+        window: &Window,
+        cx: &App,
+    ) -> Option<Trigger> {
+        let ui = self.surface_ui(surface)?;
+        let input = self.surface_composer(surface).read(cx);
         let trigger = if input.focus().is_focused(window) {
             composer_complete::detect_trigger(input.content(cx), input.cursor(cx))
         } else {
@@ -379,7 +674,6 @@ impl Waku {
         let trigger = trigger.filter(|trigger| {
             !matches!(trigger.kind, TriggerKind::WorkItem) || self.state.github_enabled
         });
-        let ui = &self.composer_autocomplete;
         if *ui.token.borrow() != trigger {
             *ui.token.borrow_mut() = trigger.clone();
             // A different token renumbers the rows: the keyboard cursor and a
@@ -414,8 +708,11 @@ impl Waku {
     /// started, unarchived, not side chats, in the composer's own project,
     /// minus the session the composer addresses and any already staged.
     /// Recent activity first.
-    fn mentionable_sessions(&self) -> Vec<ComposerSessionRef> {
-        let project = self.composer_project_id();
+    fn mentionable_sessions_for(
+        &self,
+        surface: &composer::ComposerCard,
+    ) -> Vec<ComposerSessionRef> {
+        let project = self.surface_project_id(surface);
         let project_name = |session: &AgentSession| {
             self.state
                 .projects
@@ -430,7 +727,8 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| {
-                session_mention_candidate(session, project) && self.session_atom_allowed(session.id)
+                session_mention_candidate(session, project)
+                    && self.surface_session_atom_allowed(surface, session.id)
             })
             .collect();
         sessions.sort_by_key(|session| {
@@ -450,16 +748,22 @@ impl Waku {
     /// offerable set and the exclusions — so a session title edit or a
     /// freshly staged atom invalidates the memo the way a new file index
     /// does.
-    fn session_mention_fingerprint(&self) -> usize {
+    fn session_mention_fingerprint_for(&self, surface: &composer::ComposerCard) -> usize {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.composer_target_session().hash(&mut hasher);
-        let project = self.composer_project_id();
+        let target = match surface {
+            composer::ComposerCard::Main => self.composer_target_session(),
+            composer::ComposerCard::SideChat { session_id, .. } => Some(*session_id),
+        };
+        target.hash(&mut hasher);
+        let project = self.surface_project_id(surface);
         project.hash(&mut hasher);
-        for atom in &self.composer_inline_atoms {
+        for atom in self.surface_atoms(surface) {
             atom.session_id().hash(&mut hasher);
         }
-        for attachment in &self.composer_attachments {
-            attachment.session_id.hash(&mut hasher);
+        if matches!(surface, composer::ComposerCard::Main) {
+            for attachment in &self.composer_attachments {
+                attachment.session_id.hash(&mut hasher);
+            }
         }
         for session in &self.state.sessions {
             if session_mention_candidate(session, project) {
@@ -472,18 +776,28 @@ impl Waku {
 
     /// The filtered rows for `trigger`, shared by the popup body, the keyboard
     /// cursor and `enter` so an index always means the same row everywhere.
-    fn autocomplete_rows(&self, trigger: &Trigger) -> Rc<Vec<AutocompleteRow>> {
+    fn autocomplete_rows_for(
+        &self,
+        surface: &composer::ComposerCard,
+        trigger: &Trigger,
+    ) -> Rc<Vec<AutocompleteRow>> {
+        let chat = match surface {
+            composer::ComposerCard::Main => None,
+            composer::ComposerCard::SideChat { session_id, .. } => Some(*session_id),
+        };
         let work_item_items = match trigger.kind {
             TriggerKind::WorkItem => self
-                .selected_workspace_path()
+                .surface_workspace(surface)
                 .and_then(|path| self.work_item_mentions.get(path))
                 .map(|state| state.items.clone()),
             _ => None,
         };
+        let commands = self.surface_commands(surface);
+        let files = self.surface_files(surface);
         let source = match trigger.kind {
-            TriggerKind::Command => Rc::as_ptr(&self.slash_command_index) as usize,
+            TriggerKind::Command => Rc::as_ptr(&commands) as usize,
             TriggerKind::File => {
-                Rc::as_ptr(&self.mention_file_index) as usize ^ self.session_mention_fingerprint()
+                Rc::as_ptr(&files) as usize ^ self.session_mention_fingerprint_for(surface)
             }
             // `0` while no fetch has landed — a fresh `Rc` per call would
             // defeat the memo.
@@ -493,37 +807,45 @@ impl Waku {
                 .unwrap_or(0),
         };
         // `/incognito` only exists on drafts — a started session's boundary
-        // is fixed at creation.
-        let incognito_offered = self
-            .composer_session()
-            .is_none_or(|session| !session.has_started());
+        // is fixed at creation. Side chats never offer it: the command is
+        // draft-scoped and the chat is already a session.
+        let incognito_offered = matches!(surface, composer::ComposerCard::Main)
+            && self
+                .composer_session()
+                .is_none_or(|session| !session.has_started());
+        let Some(ui) = self.surface_ui(surface) else {
+            return Rc::new(Vec::new());
+        };
         {
-            let memo = self.composer_autocomplete.results.borrow();
+            let memo = ui.results.borrow();
             if let Some(memo) = memo.as_ref().filter(|memo| {
                 memo.kind == trigger.kind
                     && memo.query == trigger.query
                     && memo.source == source
                     && memo.incognito_offered == incognito_offered
+                    && memo.chat == chat
             }) {
                 return memo.rows.clone();
             }
         }
-        let mut matcher = self.composer_autocomplete.matcher.borrow_mut();
+        let mut matcher = ui.matcher.borrow_mut();
         let rows = match trigger.kind {
-            TriggerKind::Command => composer_complete::filter_commands(
-                &self.slash_command_index,
-                &trigger.query,
-                &mut matcher,
-            )
-            .into_iter()
-            .filter(|scored| incognito_offered || scored.item.name != "incognito")
-            .map(AutocompleteRow::Command)
-            .collect::<Vec<_>>(),
+            TriggerKind::Command => {
+                composer_complete::filter_commands(&commands, &trigger.query, &mut matcher)
+                    .into_iter()
+                    .filter(|scored| incognito_offered || scored.item.name != "incognito")
+                    .filter(|scored| {
+                        chat.is_none()
+                            || !SIDE_CHAT_HIDDEN_COMMANDS.contains(&scored.item.name.as_str())
+                    })
+                    .map(AutocompleteRow::Command)
+                    .collect::<Vec<_>>()
+            }
             TriggerKind::File => {
                 // Session mentions lead: a title match names a task the user
                 // is thinking about, while a broad query still leaves files
                 // reachable below the cap.
-                let sessions = self.mentionable_sessions();
+                let sessions = self.mentionable_sessions_for(surface);
                 let titles = sessions
                     .iter()
                     .map(|session| session.title.as_str())
@@ -542,13 +864,9 @@ impl Waku {
                     })
                 })
                 .chain(
-                    composer_complete::filter_files(
-                        &self.mention_file_index,
-                        &trigger.query,
-                        &mut matcher,
-                    )
-                    .into_iter()
-                    .map(AutocompleteRow::File),
+                    composer_complete::filter_files(&files, &trigger.query, &mut matcher)
+                        .into_iter()
+                        .map(AutocompleteRow::File),
                 )
                 .collect()
             }
@@ -566,11 +884,12 @@ impl Waku {
             .collect(),
         };
         let rows = Rc::new(rows);
-        *self.composer_autocomplete.results.borrow_mut() = Some(ResultsMemo {
+        *ui.results.borrow_mut() = Some(ResultsMemo {
             kind: trigger.kind,
             query: trigger.query.clone(),
             source,
             incognito_offered,
+            chat,
             rows: rows.clone(),
         });
         rows
@@ -578,15 +897,18 @@ impl Waku {
 
     pub(super) fn move_autocomplete_highlight(
         &mut self,
+        surface: &composer::ComposerCard,
         key: &str,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(trigger) = self.composer_trigger(window, cx) else {
+        let Some(trigger) = self.composer_trigger_for(surface, window, cx) else {
             return;
         };
-        let rows = self.autocomplete_rows(&trigger);
-        let ui = &self.composer_autocomplete;
+        let rows = self.autocomplete_rows_for(surface, &trigger);
+        let Some(ui) = self.surface_ui(surface) else {
+            return;
+        };
         let current = ui.highlight.get().min(rows.len().saturating_sub(1));
         let Some(next) = next_picker_highlight(Some(current), rows.len(), key) else {
             return;
@@ -601,33 +923,34 @@ impl Waku {
     /// defaults to the first row so `enter` works the moment the popup opens.
     pub(super) fn accept_autocomplete(
         &mut self,
+        surface: &composer::ComposerCard,
         index: Option<usize>,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(trigger) = self.composer_trigger(window, cx) else {
+        let Some(trigger) = self.composer_trigger_for(surface, window, cx) else {
             return;
         };
-        let rows = self.autocomplete_rows(&trigger);
+        let rows = self.autocomplete_rows_for(surface, &trigger);
         let index = index.unwrap_or_else(|| {
-            self.composer_autocomplete
-                .highlight
-                .get()
-                .min(rows.len().saturating_sub(1))
+            self.surface_ui(surface)
+                .map(|ui| ui.highlight.get().min(rows.len().saturating_sub(1)))
+                .unwrap_or(0)
         });
         let Some(row) = rows.get(index) else {
             return;
         };
+        let composer = self.surface_composer(surface);
         // A session row splices the marker over the trigger token directly —
         // one splice, so the atom's recorded seat is the post-splice position
         // the remap keeps.
         if let AutocompleteRow::Session(scored) = row {
             let session = scored.item.clone();
-            if self.session_atom_allowed(session.id) {
-                let marker = self.composer.update(cx, |input, cx| {
+            if self.surface_session_atom_allowed(surface, session.id) {
+                let marker = composer.update(cx, |input, cx| {
                     input.insert_inline_marker_at(trigger.range.clone(), cx)
                 });
-                self.record_session_atom(session.id, &session.title, marker, cx);
+                self.record_session_atom_for(surface, session.id, &session.title, marker, cx);
             }
             cx.notify();
             return;
@@ -645,20 +968,81 @@ impl Waku {
             AutocompleteRow::Session(_) => unreachable!(),
         };
         if matches!(row, AutocompleteRow::Command(_)) {
-            let mut submission = self.composer.read(cx).content(cx).to_owned();
+            let mut submission = composer.read(cx).content(cx).to_owned();
             submission.replace_range(trigger.range.clone(), &insert);
-            if self.execute_local_composer_command(&submission, cx) {
+            if self.execute_composer_command_for(surface, &submission, cx) {
                 return;
             }
         }
-        self.composer.update(cx, |input, cx| {
+        composer.update(cx, |input, cx| {
             input.replace_range(trigger.range.clone(), &insert, cx);
         });
         cx.notify();
     }
 
-    pub(super) fn dismiss_autocomplete(&mut self, cx: &mut Context<Self>) {
-        self.composer_autocomplete.dismissed.set(true);
+    /// Record the atom a freshly seated `marker` stands for, in `surface`'s
+    /// staged set — painted order follows the marker offsets.
+    pub(super) fn record_session_atom_for(
+        &mut self,
+        surface: &composer::ComposerCard,
+        session_id: Uuid,
+        title: &str,
+        marker: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let atom = composer::ComposerInlineAtom {
+            marker,
+            revision: Uuid::new_v4(),
+            paste_category: None,
+            kind: composer::ComposerAtomKind::SessionRef {
+                session_id,
+                title: SharedString::from(title.to_owned()),
+            },
+        };
+        match surface {
+            composer::ComposerCard::Main => {
+                self.composer_inline_atoms.push(atom);
+                self.composer_inline_atoms.sort_by_key(|atom| atom.marker);
+                self.sync_inline_atoms(cx);
+                self.schedule_composer_draft_save(cx);
+            }
+            composer::ComposerCard::SideChat {
+                session_id: chat, ..
+            } => {
+                if let Some(state) = self.side_chat_composers.get_mut(chat) {
+                    state.atoms.push(atom);
+                    state.atoms.sort_by_key(|atom| atom.marker);
+                }
+                self.sync_side_chat_atoms(*chat, cx);
+            }
+        }
+    }
+
+    /// The reserved-command executor for `surface`'s accepted `/` row or a
+    /// typed submission: the session column's full set, or the side chat's
+    /// session-scoped subset.
+    fn execute_composer_command_for(
+        &mut self,
+        surface: &composer::ComposerCard,
+        prompt: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match surface {
+            composer::ComposerCard::Main => self.execute_local_composer_command(prompt, cx),
+            composer::ComposerCard::SideChat { session_id, .. } => {
+                self.execute_side_chat_composer_command(*session_id, prompt, cx)
+            }
+        }
+    }
+
+    pub(super) fn dismiss_autocomplete(
+        &mut self,
+        surface: &composer::ComposerCard,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ui) = self.surface_ui(surface) {
+            ui.dismissed.set(true);
+        }
         cx.notify();
     }
 
@@ -666,12 +1050,17 @@ impl Waku {
     /// keystroke burst is one search rather than one per character. Safe to
     /// call from the render path: the timer only arms work that lands through
     /// `start_work_item_search` on the background executor.
-    fn schedule_work_item_search(&self, trigger: &Trigger, cx: &mut Context<Self>) {
+    fn schedule_work_item_search(
+        &self,
+        surface: &composer::ComposerCard,
+        trigger: &Trigger,
+        cx: &mut Context<Self>,
+    ) {
         if trigger.kind != TriggerKind::WorkItem {
             return;
         }
         let Some(path) = self
-            .selected_workspace_path()
+            .surface_workspace(surface)
             .map(std::path::Path::to_path_buf)
         else {
             return;
@@ -682,7 +1071,9 @@ impl Waku {
         }) {
             return;
         }
-        let ui = &self.composer_autocomplete;
+        let Some(ui) = self.surface_ui(surface) else {
+            return;
+        };
         let pending = (path.clone(), trigger.query.clone());
         if ui.work_item_scheduled.borrow().as_ref() == Some(&pending) {
             return;
@@ -691,15 +1082,19 @@ impl Waku {
         let debounce = ui.work_item_debounce.get().wrapping_add(1);
         ui.work_item_debounce.set(debounce);
         let query = trigger.query.clone();
+        let surface = surface.clone();
         cx.spawn(async move |waku, cx| {
             cx.background_executor()
                 .timer(WORK_ITEM_SEARCH_DEBOUNCE)
                 .await;
             waku.update(cx, |waku, cx| {
-                if waku.composer_autocomplete.work_item_debounce.get() != debounce {
+                let Some(ui) = waku.surface_ui(&surface) else {
+                    return;
+                };
+                if ui.work_item_debounce.get() != debounce {
                     return;
                 }
-                *waku.composer_autocomplete.work_item_scheduled.borrow_mut() = None;
+                *ui.work_item_scheduled.borrow_mut() = None;
                 waku.start_work_item_search(path, query, cx);
             })
             .ok();
@@ -872,22 +1267,25 @@ impl Waku {
             .collect()
     }
 
-    /// The popup, anchored above the composer card, or `None` when idle.
+    /// The popup, anchored above `surface`'s composer card, or `None` when
+    /// idle.
     ///
     /// Reads only the prefetched indexes — discovery never runs on a frame.
-    pub(super) fn render_composer_autocomplete(
+    pub(super) fn render_composer_autocomplete_for(
         &self,
+        surface: &composer::ComposerCard,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<(AnyElement, bool)> {
-        let trigger = self.composer_trigger(window, cx)?;
-        self.schedule_work_item_search(&trigger, cx);
-        let rows = self.autocomplete_rows(&trigger);
+        let ui = self.surface_ui(surface)?;
+        let trigger = self.composer_trigger_for(surface, window, cx)?;
+        self.schedule_work_item_search(surface, &trigger, cx);
+        let rows = self.autocomplete_rows_for(surface, &trigger);
         let (loading, hint) = match trigger.kind {
-            TriggerKind::Command => (self.slash_command_index_loading, None),
-            TriggerKind::File => (self.mention_file_index_loading, None),
+            TriggerKind::Command => (self.surface_commands_loading(surface), None),
+            TriggerKind::File => (self.surface_files_loading(surface), None),
             TriggerKind::WorkItem => {
-                let workspace = self.selected_workspace_path();
+                let workspace = self.surface_workspace(surface);
                 let state = workspace.and_then(|path| self.work_item_mentions.get(path));
                 let hint = if workspace.is_none() {
                     // A projectless session has no remote to search.
@@ -916,20 +1314,16 @@ impl Waku {
         }
         // The probe records during paint, so the first frame a composer ever
         // draws has no bounds yet; the popup appears one frame later.
-        let card_bounds = self.composer_autocomplete.card_bounds.get()?;
+        let card_bounds = ui.card_bounds.get()?;
         let theme = Theme::current(cx);
-        let highlight = self
-            .composer_autocomplete
-            .highlight
-            .get()
-            .min(rows.len().saturating_sub(1));
+        let highlight = ui.highlight.get().min(rows.len().saturating_sub(1));
 
         let mut list = div()
             .id("composer-autocomplete-list")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .track_scroll(&self.composer_autocomplete.scroll)
+            .track_scroll(&ui.scroll)
             .p(px(4.0));
         if rows.is_empty() {
             let row = div()
@@ -956,12 +1350,15 @@ impl Waku {
             });
         } else {
             for (index, row) in rows.iter().enumerate() {
-                list = list
-                    .child(self.render_autocomplete_row(index, row, highlight, &theme, window, cx));
+                list =
+                    list.child(self.render_autocomplete_row(
+                        surface, index, row, highlight, &theme, window, cx,
+                    ));
             }
         }
 
         let anchor = point(card_bounds.origin.x, card_bounds.origin.y - px(6.0));
+        let dismiss_surface = surface.clone();
         Some((
             deferred(
                 anchored()
@@ -982,8 +1379,8 @@ impl Waku {
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                this.dismiss_autocomplete(cx);
+                            .on_mouse_down_out(cx.listener(move |this, _, _, cx| {
+                                this.dismiss_autocomplete(&dismiss_surface, cx);
                             }))
                             .child(list),
                     )),
@@ -996,6 +1393,7 @@ impl Waku {
 
     fn render_autocomplete_row(
         &self,
+        surface: &composer::ComposerCard,
         index: usize,
         row: &AutocompleteRow,
         highlight: usize,
@@ -1005,6 +1403,7 @@ impl Waku {
     ) -> AnyElement {
         let highlighted = highlight == index;
         let font = window.text_style().font();
+        let surface = surface.clone();
         let base = div()
             .id(index)
             .h(px(30.0))
@@ -1019,7 +1418,7 @@ impl Waku {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, window, cx| {
-                    this.accept_autocomplete(Some(index), window, cx);
+                    this.accept_autocomplete(&surface, Some(index), window, cx);
                 }),
             );
         match row {
@@ -1308,8 +1707,8 @@ mod tests {
     fn the_autocomplete_render_path_does_no_filesystem_work() {
         let source = include_str!("./autocomplete.rs");
         let start = source
-            .find("\n    fn composer_trigger(")
-            .expect("composer_trigger must exist");
+            .find("\n    fn composer_trigger_for(")
+            .expect("composer_trigger_for must exist");
         let end = source
             .find("\n/// The probe recording")
             .expect("probe marker must exist");
