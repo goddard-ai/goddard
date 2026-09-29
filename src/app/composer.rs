@@ -7071,6 +7071,12 @@ impl Waku {
                             project.id,
                             SharedString::from(project.display_name()),
                             self.is_remote_project(project.id),
+                            match self.daemons.project_owner(project.id) {
+                                waku_client::DaemonKey::Remote(host) => {
+                                    self.remote_host_name(host).map(SharedString::from)
+                                }
+                                waku_client::DaemonKey::Local => None,
+                            },
                             project.starred,
                             star_focuses[index].clone(),
                             project.is_friends() || project.friend_peer_id.is_some(),
@@ -7152,6 +7158,7 @@ impl Waku {
                                         project_id,
                                         name,
                                         remote,
+                                        host_alias,
                                         starred,
                                         star_focus,
                                         friend,
@@ -7161,6 +7168,7 @@ impl Waku {
                                     };
                                     let project_id = *project_id;
                                     let remote = *remote;
+                                    let host_alias = host_alias.clone();
                                     let starred = *starred;
                                     let friend = *friend;
                                     let star_focus = star_focus.clone();
@@ -7249,7 +7257,7 @@ impl Waku {
                                                             .then_some(index + 1)
                                                     };
                                                     if let Some(target) = target {
-                                                        window.focus(&key_rows[target].4, cx);
+                                                        window.focus(&key_rows[target].5, cx);
                                                         key_list.scroll_to_reveal_item(target);
                                                     } else {
                                                         window.focus(&key_field, cx);
@@ -7294,11 +7302,27 @@ impl Waku {
                                             div()
                                                 .min_w_0()
                                                 .flex_1()
-                                                .truncate()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(4.0))
                                                 .text_size(sp(12.5))
                                                 .line_height(sp(15.0))
                                                 .text_color(theme.text)
-                                                .child(name.clone()),
+                                                .child(
+                                                    div()
+                                                        .min_w_0()
+                                                        .flex_1()
+                                                        .truncate()
+                                                        .child(name.clone()),
+                                                )
+                                                .when_some(host_alias, |element, alias| {
+                                                    element.child(
+                                                        div()
+                                                            .flex_none()
+                                                            .text_color(theme.text_tertiary)
+                                                            .child(format!("· {alias}")),
+                                                    )
+                                                }),
                                         )
                                         .when(selected, |element| {
                                             element.child(icon(

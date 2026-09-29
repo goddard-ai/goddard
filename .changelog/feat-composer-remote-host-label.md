@@ -1,0 +1,1 @@
+- In the composer’s project picker, remote projects now show their host alias after the project name.
