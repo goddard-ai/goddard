@@ -837,13 +837,6 @@ impl Waku {
         self.state.drafts_page = self.drafts_page;
         self.state.automations_page = self.automations_page;
         self.state.inbox_open = self.notifications.open;
-        self.state.fullscreen_surface =
-            self.fullscreen_surface
-                .clone()
-                .and_then(|(surface, detail)| {
-                    persisted_panel_surface(&surface)
-                        .map(|surface| PersistedFullscreenSurface { surface, detail })
-                });
         let mut panels: HashMap<Uuid, PersistedRightPanelState> = self
             .right_panel_states
             .iter()
@@ -864,6 +857,7 @@ impl Waku {
                         state.diff_selected_file,
                         &state.diff_expanded_paths,
                         state.diff_source,
+                        &state.fullscreen,
                     ),
                 ))
             })
@@ -885,6 +879,7 @@ impl Waku {
                     self.right_panel_diff_selected_file,
                     &self.right_panel_diff_expanded_paths,
                     self.right_panel_diff_source,
+                    &self.fullscreen_surface,
                 ),
             );
         }
@@ -1000,23 +995,6 @@ impl Waku {
                 self.scroll_to_transcript_landing(landing, cx);
             }
         }
-        // After `restore_right_panel_state`, which clears any fullscreen — a
-        // surface swap starts docked — so a persisted one is reinstated here.
-        // A side chat that died with its parent restores nothing.
-        self.fullscreen_surface = self.state.fullscreen_surface.clone().and_then(|persisted| {
-            let surface = panel_surface_from_persisted(&persisted.surface);
-            if let RightPanelSurface::SideChat(id) = surface {
-                let alive = self
-                    .state
-                    .sessions
-                    .iter()
-                    .any(|session| session.id == id && session.is_side_chat());
-                if !alive {
-                    return None;
-                }
-            }
-            Some((surface, persisted.detail))
-        });
         // Page restores ride the open paths so their side effects — the
         // Terminals fold, the strip owner swap, search focus — land the same
         // as a click. Settings stays last: it overlays whichever page sits

@@ -1294,6 +1294,10 @@ struct RightPanelSessionState {
     git_panel: Option<git_panel::GitPanelState>,
     /// The open commit view parked with the panel.
     git_panel_commit_diff: Option<git_panel::GitPanelCommitDiff>,
+    /// The surface this strip had maximized over the window when it parked,
+    /// if one was — the file path shown at entry rides alongside, matching
+    /// the live `Waku::fullscreen_surface` tuple.
+    fullscreen: Option<(RightPanelSurface, Option<String>)>,
 }
 
 /// The files half of a panel strip parked while a different root is on
@@ -1337,11 +1341,22 @@ impl RightPanelSessionState {
             git_panel_open: false,
             git_panel: None,
             git_panel_commit_diff: None,
+            fullscreen: None,
         }
     }
 
     fn take_or_closed(states: &mut HashMap<RightPanelOwner, Self>, owner: RightPanelOwner) -> Self {
         states.remove(&owner).unwrap_or_else(|| Self::empty(false))
+    }
+
+    /// The maximized layer renders the strip's active surface — a parked
+    /// entry whose surface left the strip can never cover it again.
+    fn drop_dead_fullscreen(&mut self) {
+        if let Some((surface, _)) = &self.fullscreen
+            && !self.surfaces.contains(surface)
+        {
+            self.fullscreen = None;
+        }
     }
 }
 
@@ -1929,6 +1944,7 @@ fn persist_right_panel_state(
     diff_selected_file: Option<usize>,
     diff_expanded_paths: &HashSet<String>,
     diff_source: ReviewDiffSource,
+    fullscreen: &Option<(RightPanelSurface, Option<String>)>,
 ) -> PersistedRightPanelState {
     let mut kept = Vec::new();
     let mut remap = vec![None; surfaces.len()];
@@ -1949,6 +1965,12 @@ fn persist_right_panel_state(
         diff_selected_file,
         diff_expanded_paths: diff_expanded_paths.clone(),
         diff_source: Some(persisted_diff_source(diff_source)),
+        fullscreen: fullscreen.as_ref().and_then(|(surface, detail)| {
+            persisted_panel_surface(surface).map(|surface| PersistedFullscreenSurface {
+                surface,
+                detail: detail.clone(),
+            })
+        }),
     }
 }
 
@@ -1975,6 +1997,23 @@ fn right_panel_state_from_persisted(state: &PersistedRightPanelState) -> RightPa
     if let Some(source) = state.diff_source {
         restored.diff_source = diff_source_from_persisted(source);
     }
+    // The maximized layer covers the strip's active surface — the flag
+    // restores only while the surface it names is still that tab.
+    restored.fullscreen = state
+        .fullscreen
+        .as_ref()
+        .map(|persisted| {
+            (
+                panel_surface_from_persisted(&persisted.surface),
+                persisted.detail.clone(),
+            )
+        })
+        .filter(|(surface, _)| {
+            restored
+                .active_surface
+                .and_then(|index| restored.surfaces.get(index))
+                == Some(surface)
+        });
     restored
 }
 
@@ -3080,9 +3119,11 @@ pub struct Waku {
     /// the pane's content delegate included.
     sidebar_dock_motion: Cell<SidebarDockMotion>,
     /// The right-panel surface currently maximized over the window, if any —
-    /// runtime-only; the docked layout it covers comes back exactly as it
-    /// was. The path of the file shown at entry rides alongside so a
-    /// Files-surface reselection also ends the mode.
+    /// the docked layout it covers comes back exactly as it was. The flag
+    /// is part of the live strip and parks with it on an owner swap, so a
+    /// task remembers its maximized view. The path of the file shown at
+    /// entry rides alongside so a Files-surface reselection also ends the
+    /// mode.
     fullscreen_surface: Option<(RightPanelSurface, Option<String>)>,
     /// The slide animating the fullscreen layer's width in or out, if any.
     panel_fullscreen_slide: Option<motion::WidthTween>,

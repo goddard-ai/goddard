@@ -2430,13 +2430,17 @@ impl Waku {
             git_panel_open,
             git_panel,
             git_panel_commit_diff,
+            // The maximized surface is this strip's too — it parks with the
+            // owner instead of ending on the swap.
+            fullscreen: self.fullscreen_surface.take(),
         }
     }
 
     fn replace_active_right_panel_state(&mut self, state: RightPanelSessionState) {
-        // Fullscreen belonged to the session's surfaces being swapped out;
-        // even a restored session showing the same path starts docked.
-        self.fullscreen_surface = None;
+        // The incoming owner's remembered maximized surface takes over —
+        // usually none. A stale entry, like a tab that closed while parked,
+        // is reconciled per frame in `settle_panel_slides`.
+        self.fullscreen_surface = state.fullscreen;
         self.panel_fullscreen_slide = None;
         self.right_panel_visible = state.visible;
         if state.visible {
@@ -2503,6 +2507,7 @@ impl Waku {
                     None => 0,
                 })
             };
+            state.drop_dead_fullscreen();
         }
     }
 
@@ -2970,6 +2975,7 @@ impl Waku {
                     None => 0,
                 })
             };
+            state.drop_dead_fullscreen();
         }
     }
 
@@ -6577,8 +6583,8 @@ impl Waku {
     }
 
     /// Cover the window with the active right-panel surface, or dock it back.
-    /// Runtime-only: nothing persists, and every other way the surface goes
-    /// away (tab close, surface switch, panel hide, session swap) is
+    /// The flag parks with the owner's strip on a swap, and every other way
+    /// the surface goes away (tab close, surface switch, panel hide) is
     /// reconciled per frame in `settle_panel_slides`.
     fn toggle_panel_fullscreen(&mut self, cx: &mut Context<Self>) {
         let entering = self.fullscreen_surface.is_none();

@@ -367,6 +367,7 @@ impl Waku {
                     None => 0,
                 })
             };
+            state.drop_dead_fullscreen();
             if state.last_focused_terminal == Some(terminal_id) {
                 state.last_focused_terminal = None;
             }
@@ -1183,6 +1184,7 @@ impl Waku {
                         std::cmp::Ordering::Less => active.min(state.surfaces.len() - 1),
                     })
                 });
+                state.drop_dead_fullscreen();
                 break;
             }
             self.drop_terminal(terminal_id, cx);

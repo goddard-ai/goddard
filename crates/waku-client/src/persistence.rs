@@ -1031,6 +1031,13 @@ pub struct PersistedRightPanelState {
     pub diff_expanded_paths: HashSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff_source: Option<PersistedDiffSource>,
+    /// The surface maximized over the window when the strip parked, if one
+    /// was — replaced the top-level `fullscreen_surface`, which only the
+    /// strip live at quit could use. Surfaces that cannot persist
+    /// (terminals, browsers, background work) drop the flag instead of
+    /// dangling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fullscreen: Option<PersistedFullscreenSurface>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1606,7 +1613,10 @@ struct AppState {
     /// Parked right-panel state per task, plus the selected task's live one.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Read-only compatibility field for saves written while the maximized
+    /// surface was global — `apply_app_state` moves it onto the selected
+    /// task's strip. New saves omit it.
+    #[serde(default, skip_serializing)]
     fullscreen_surface: Option<PersistedFullscreenSurface>,
     /// Drafts parked from a composer via "Create draft", newest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1996,8 +2006,6 @@ pub struct PersistedState {
     /// Parked right-panel state per task, plus the selected task's live one.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fullscreen_surface: Option<PersistedFullscreenSurface>,
     /// Drafts parked from a composer via "Create draft", newest first.
     /// App-local — they persist through `AppState`, not the daemon.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2325,7 +2333,6 @@ impl PersistedState {
             automations_page: false,
             inbox_open: false,
             right_panel_sessions: HashMap::new(),
-            fullscreen_surface: None,
             saved_drafts: Vec::new(),
             computer_use_enabled: false,
             computer_use_experiment_enabled: default_experiment_enabled(),
@@ -2777,7 +2784,7 @@ impl PersistedState {
             automations_page: self.automations_page,
             inbox_open: self.inbox_open,
             right_panel_sessions: self.right_panel_sessions.clone(),
-            fullscreen_surface: self.fullscreen_surface.clone(),
+            fullscreen_surface: None,
             saved_drafts: self.saved_drafts.clone(),
         }
     }
@@ -2940,7 +2947,19 @@ impl PersistedState {
                 .or_default()
                 .git_panel_open = true;
         }
-        self.fullscreen_surface = app_state.fullscreen_surface;
+        // The maximized surface persisted globally too; it belonged to the
+        // task that was selected, so it lands on that strip. A per-task
+        // flag already parked there — impossible outside a hand-edited
+        // file — wins.
+        if let Some(fullscreen) = app_state.fullscreen_surface
+            && let Some(selected) = self.selected_session
+        {
+            self.right_panel_sessions
+                .entry(selected)
+                .or_default()
+                .fullscreen
+                .get_or_insert(fullscreen);
+        }
         self.saved_drafts = app_state.saved_drafts;
     }
 

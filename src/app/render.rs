@@ -152,11 +152,13 @@ impl Waku {
             self.panel_fullscreen_slide = None;
         }
         // Fullscreen belongs to the right-panel tab it was opened on: the
-        // tab closing, another surface or file taking its place, the panel
-        // hiding, or a session swap all end it. Each of those notifies the
-        // root, so reconciling once per frame covers them without every
-        // caller remembering to clear the flag — and ends without a slide,
-        // since the surface it animated to is already gone.
+        // tab closing, another surface or file taking its place, or the
+        // panel hiding all end it — a session swap instead parks it with
+        // the outgoing owner's strip in `sync_right_panel_owner`. Each of
+        // those notifies the root, so reconciling once per frame covers
+        // them without every caller remembering to clear the flag — and
+        // ends without a slide, since the surface it animated to is
+        // already gone.
         if let Some((surface, path)) = &self.fullscreen_surface
             && (!self.right_panel_visible
                 || self.active_right_panel_surface() != Some(surface)
