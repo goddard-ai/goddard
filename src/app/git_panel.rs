@@ -1826,12 +1826,10 @@ impl Waku {
             let status = cx
                 .background_executor()
                 .spawn(async move {
-                    client
-                        .request(WorkspaceOperation::InspectCheckoutStatus {
-                            cwd: status_workspace,
-                            base: None,
-                        })
-                        .await
+                    client.request(WorkspaceOperation::InspectCheckoutStatus {
+                        cwd: status_workspace,
+                        base: None,
+                    })
                 })
                 .await;
             if !matches!(
