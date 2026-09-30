@@ -23,6 +23,8 @@
 
 Read the doc before working in its area:
 
+- [.agents/docs/testing.md](.agents/docs/testing.md) — choosing, maintaining,
+  and verifying tests
 - [.agents/docs/performance.md](.agents/docs/performance.md) — render paths,
   row builders, streaming, the event pump
 - [.agents/docs/accessibility.md](.agents/docs/accessibility.md) — controls,
