@@ -1776,6 +1776,15 @@ pub struct AgentSession {
     pub turns: Vec<AgentTurn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_messages: Vec<QueuedMessage>,
+    /// The archive-retention sweep stripped this session's stored activity
+    /// payloads: transcript rows keep their kind, title and status, but tool
+    /// `output`/`arguments`, `detail`, `reasoning`, `file_changes` diffs and
+    /// `image_urls` are gone. Clients echo the flag back through saves; the
+    /// daemon honors it on merge so a hydrated pre-prune copy cannot
+    /// resurrect the stripped text, and clears it when the session is
+    /// unarchived so new work accrues payloads again.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub details_pruned: bool,
     /// Whether the transcript has been read from the database.
     ///
     /// Startup loads only the columns the session list needs, so a session
@@ -1891,6 +1900,7 @@ impl AgentSession {
             transcript_blocks: Vec::new(),
             turns: Vec::new(),
             queued_messages: Vec::new(),
+            details_pruned: false,
         }
     }
 
@@ -1964,6 +1974,7 @@ impl AgentSession {
             transcript_blocks: Vec::new(),
             turns: Vec::new(),
             queued_messages: Vec::new(),
+            details_pruned: false,
             detail_loaded: false,
         }
     }
@@ -1981,6 +1992,29 @@ impl AgentSession {
 
     pub fn is_busy(&self) -> bool {
         self.status.is_busy()
+    }
+
+    /// Strips every transcript activity's heavyweight payload fields —
+    /// tool `output`/`arguments`, `detail`, streamed `reasoning`, inline
+    /// `file_changes` diffs and `image_urls` — leaving each row's skeleton
+    /// (kind, title, status, changed-file list) so an old archived
+    /// transcript still reads as a timeline of what the agent did. Marks
+    /// the session `details_pruned`; idempotent.
+    pub fn prune_transcript_payloads(&mut self) {
+        for block in &mut self.transcript_blocks {
+            for activity in &mut block.activities {
+                activity.detail = None;
+                activity.arguments = None;
+                activity.output = None;
+                activity.output_truncated = false;
+                activity.image_urls.clear();
+                activity.reasoning = None;
+                for change in &mut activity.file_changes {
+                    change.diff = None;
+                }
+            }
+        }
+        self.details_pruned = true;
     }
 
     /// Whether this session is a side chat bound to a parent task — hidden

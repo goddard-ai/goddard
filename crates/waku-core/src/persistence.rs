@@ -1759,6 +1759,95 @@ impl StateStore {
         Ok(Some(checkpoint.clone()))
     }
 
+    /// Rewrites up to `limit` session detail rows whose archive is older than
+    /// `archived_before`: each keeps its activity skeletons (kind, title,
+    /// status, changed-file list) while tool output, arguments, reasoning,
+    /// inline diffs and images are stripped, and the row is marked
+    /// `details_pruned` so later sweeps skip it without parsing. Returns the
+    /// number of rows rewritten — the caller keeps scheduling batches while
+    /// it stays nonzero.
+    ///
+    /// Runs under the storage lock like a save rather than on a private
+    /// connection, so the batch transaction never races the writer
+    /// `write_batch` holds. `limit` bounds the lock hold: detail blobs run
+    /// hundreds of kilobytes, so a small batch parses and re-serializes in
+    /// the tens of milliseconds.
+    ///
+    /// The `instr` pre-filter skips rows already carrying the flag without
+    /// parsing them — a stray `"details_pruned"` literal inside retained
+    /// tool text can hide a row from pruning, which the full archive purge
+    /// still collects at the outer retention window.
+    pub fn prune_archived_session_details(
+        &self,
+        archived_before: u64,
+        limit: usize,
+    ) -> io::Result<usize> {
+        let mut guard = self.storage.lock();
+        if guard.is_none() {
+            *guard = Some(Storage {
+                connection: self.open()?,
+                persisted_sessions: HashSet::new(),
+                written_messages: HashMap::new(),
+                terminal_checkpoints: HashMap::new(),
+                saved_projects: 0,
+                saved_app_settings: 0,
+                saved_app_state: 0,
+            });
+        }
+        let storage = guard.as_mut().expect("storage opened above");
+        let transaction = storage
+            .connection
+            .unchecked_transaction()
+            .map_err(to_io_error)?;
+        let rows: Vec<(String, String)> = transaction
+            .prepare(
+                "SELECT detail.session_id, detail.data FROM session_details AS detail
+                 INNER JOIN sessions ON sessions.id = detail.session_id
+                 WHERE sessions.archived_at IS NOT NULL
+                   AND sessions.archived_at < ?1
+                   AND instr(detail.data, '\"details_pruned\"') = 0
+                 ORDER BY sessions.archived_at
+                 LIMIT ?2",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map(params![archived_before as i64, limit as i64], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect()
+            })
+            .map_err(to_io_error)?;
+
+        let mut pruned = 0;
+        for (session_id, data) in rows {
+            let Ok(mut session) = serde_json::from_str::<AgentSession>(&data) else {
+                continue;
+            };
+            if session.details_pruned {
+                continue;
+            }
+            session.prune_transcript_payloads();
+            // `session_data` keeps the stored shape — `messages` belongs to
+            // its own table and must not round-trip into the blob.
+            let data = session_data(&session)?;
+            // The EXISTS re-check keeps a session unarchived between the
+            // scan and this write from losing payloads it is using again.
+            pruned += transaction
+                .execute(
+                    "UPDATE session_details SET data = ?2
+                     WHERE session_id = ?1
+                       AND EXISTS (SELECT 1 FROM sessions
+                                   WHERE id = ?1
+                                     AND archived_at IS NOT NULL
+                                     AND archived_at < ?3)",
+                    params![session_id, data, archived_before as i64],
+                )
+                .map_err(to_io_error)?;
+        }
+        transaction.commit().map_err(to_io_error)?;
+        Ok(pruned)
+    }
+
     /// Persists whatever the app marked as changed, so a streaming turn writes
     /// one session row and a selection change writes no rows at all.
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
@@ -2157,6 +2246,9 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         transcript_blocks: Vec::new(),
         turns: Vec::new(),
         queued_messages: Vec::new(),
+        // The flag lives in the detail blob a skeleton stands in for, so a
+        // list row cannot know it — false is a placeholder, not a claim.
+        details_pruned: false,
         detail_loaded: false,
         // Stored rows are always ordinary sessions — incognito ones never
         // reach the store, so nothing persisted can deserialize as one.
@@ -2190,6 +2282,7 @@ pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSess
     session.quarantined = stored.quarantined;
     session.environment = stored_environment;
     session.messages = stored.messages;
+    session.details_pruned = stored.details_pruned;
     session.detail_loaded = true;
 }
 
@@ -4865,6 +4958,133 @@ mod tests {
             "an unarchived session leaves the archived scope"
         );
 
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn archive_prune_strips_payloads_but_keeps_activity_skeletons() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let old_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("work");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions[0].transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: None,
+            activities: vec![
+                ActivityItem::from_reasoning(
+                    ReasoningBlock {
+                        content: "long chain of thought".into(),
+                        started_at_ms: 0,
+                        finished_at_ms: 1,
+                    },
+                    true,
+                ),
+                {
+                    let mut tool = ActivityItem::new(
+                        Some("tool-1".into()),
+                        ActivityKind::Tool,
+                        "Ran tests",
+                        Some("first error line".into()),
+                        true,
+                    );
+                    tool.arguments = Some("{\"cmd\":\"cargo test\"}".into());
+                    tool.output = Some("pages of output".into());
+                    tool.output_truncated = true;
+                    tool.file_changes.push(crate::model::ActivityFileChange {
+                        path: "src/main.rs".into(),
+                        additions: Some(3),
+                        deletions: Some(1),
+                        status: None,
+                        diff: Some("@@ -1 +1 @@".into()),
+                    });
+                    tool
+                },
+            ],
+        });
+        let mut recent = state.new_session(state.projects[0].id, ProviderKind::Codex);
+        let recent_id = recent.id;
+        recent.begin_turn("recent");
+        recent.finish_active_turn(crate::model::TurnStatus::Completed);
+        recent.transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: None,
+            activities: vec![
+                ActivityItem::new(None, ActivityKind::Tool, "Kept output", None, true)
+                    .with_output(Some("still here".into())),
+            ],
+        });
+        state.sessions.push(recent);
+        let mut active = state.new_session(state.projects[0].id, ProviderKind::Codex);
+        let active_id = active.id;
+        active.begin_turn("active");
+        active.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions.push(active);
+        state.session_mut(old_id).unwrap().archived_at = Some(1_000_000);
+        state.session_mut(recent_id).unwrap().archived_at = Some(crate::model::unix_time());
+        store.save(&mut state).unwrap();
+
+        let cutoff = crate::model::unix_time() - 7 * 24 * 60 * 60;
+        assert_eq!(store.prune_archived_session_details(cutoff, 8).unwrap(), 1);
+        // A second sweep finds nothing eligible.
+        assert_eq!(store.prune_archived_session_details(cutoff, 8).unwrap(), 0);
+
+        // The stored blob dropped the payloads and carries the marker.
+        let connection = Connection::open(directory.join("app.db")).unwrap();
+        let data: String = connection
+            .query_row(
+                "SELECT data FROM session_details WHERE session_id = ?1",
+                params![old_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(connection);
+        assert!(!data.contains("pages of output"));
+        assert!(!data.contains("long chain of thought"));
+        assert!(data.contains("\"details_pruned\":true"));
+        assert!(
+            !data.contains("\"messages\""),
+            "the blob stays message-free"
+        );
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        let old = restored
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == old_id)
+            .unwrap();
+        reopened.hydrate(old).unwrap();
+        assert!(old.details_pruned);
+        let activities = &old.transcript_blocks[0].activities;
+        assert_eq!(activities.len(), 2, "skeleton rows survive the prune");
+        assert!(activities[0].reasoning.is_none());
+        let tool = &activities[1];
+        assert_eq!(tool.title, "Ran tests");
+        assert_eq!(tool.source_id.as_deref(), Some("tool-1"));
+        assert!(tool.complete);
+        assert!(tool.detail.is_none());
+        assert!(tool.arguments.is_none());
+        assert!(tool.output.is_none());
+        assert!(!tool.output_truncated);
+        assert_eq!(tool.file_changes[0].path, "src/main.rs");
+        assert!(tool.file_changes[0].diff.is_none());
+        // The messages table is untouched by the detail prune.
+        assert!(!old.messages.is_empty());
+
+        let recent = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == recent_id)
+            .unwrap();
+        assert!(!recent.details_pruned);
+        let active = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == active_id)
+            .unwrap();
+        assert!(!active.details_pruned);
         fs::remove_dir_all(directory).ok();
     }
 

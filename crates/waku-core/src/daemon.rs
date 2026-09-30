@@ -177,6 +177,18 @@ const AGENT_SEARCH_DEFAULT_LIMIT: usize = 20;
 /// timer, so this bounds retention without scheduling exact deletions.
 const ARCHIVED_SESSION_RETENTION_SECONDS: u64 = 30 * 24 * 60 * 60;
 
+/// How long an archived task keeps its full transcript detail, in seconds.
+/// Past this window [`WakuBackend::start_archive_detail_prune`] rewrites the
+/// stored session so activities survive only as skeletons — kind, title and
+/// status stay, while tool output, arguments, reasoning, diffs and images
+/// go. Messages are a separate table and are never pruned.
+const ARCHIVED_DETAIL_RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
+
+/// Detail rows rewritten per prune batch. Bound so a batch transaction
+/// holds the shared storage lock for tens of milliseconds, not seconds —
+/// the sweep drains its backlog over repeated batches instead.
+const ARCHIVE_PRUNE_BATCH: usize = 8;
+
 /// How long a projectless project may sit in the catalog without a task.
 /// Clients that provision a workspace ahead of the first prompt — mobile
 /// and web save the project row, then submit — need the row to survive the
@@ -424,6 +436,9 @@ pub struct WakuBackend {
     /// Serializes cold-start of a stored task's runtime so two agent prompts
     /// cannot race to spawn it.
     runtime_start_locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+    /// Whether an archive-detail prune sweep is running on its own thread.
+    /// `LoadTaskState` retriggers the sweep; the flag keeps one in flight.
+    archive_detail_prune_running: Arc<std::sync::atomic::AtomicBool>,
     /// Guards spawning the idle-runtime reaper — `set_event_source` may be
     /// installed more than once in tests that bind two servers to one
     /// backend.
@@ -552,6 +567,7 @@ impl WakuBackend {
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             agent: Arc::new(crate::agent::AgentState::default()),
             runtime_start_locks: Mutex::new(HashMap::new()),
+            archive_detail_prune_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             idle_reaper_started: std::sync::atomic::AtomicBool::new(false),
             daemon_address: Arc::new(Mutex::new(None)),
             exposed_port: Arc::new(Mutex::new(None)),
@@ -572,6 +588,7 @@ impl WakuBackend {
             auto_prompts,
         };
         backend.purge_expired_archived_sessions();
+        backend.start_archive_detail_prune();
         backend.install_link_handlers();
         {
             let task_state = backend.task_state.clone();
@@ -1219,6 +1236,41 @@ impl WakuBackend {
             }
             let _ = self.remove_session(session_id);
         }
+    }
+
+    /// Strips heavyweight transcript payloads from detail rows archived past
+    /// [`ARCHIVED_DETAIL_RETENTION_SECONDS`]. Scheduled from the same places
+    /// as the full archive purge — startup and every `LoadTaskState` — but
+    /// runs on its own thread in small committed batches: parsing and
+    /// rewriting hundreds of megabytes of session JSON is far too slow for
+    /// the request path that triggers it.
+    fn start_archive_detail_prune(&self) {
+        use std::sync::atomic::Ordering;
+        if self
+            .archive_detail_prune_running
+            .swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+        let store = Arc::clone(&self.task_store);
+        let running = Arc::clone(&self.archive_detail_prune_running);
+        let _ = std::thread::Builder::new()
+            .name("waku-archive-prune".to_owned())
+            .spawn(move || {
+                let cutoff =
+                    crate::model::unix_time().saturating_sub(ARCHIVED_DETAIL_RETENTION_SECONDS);
+                loop {
+                    match store.prune_archived_session_details(cutoff, ARCHIVE_PRUNE_BATCH) {
+                        Ok(0) => break,
+                        Ok(_) => std::thread::yield_now(),
+                        Err(error) => {
+                            eprintln!("archive detail prune failed: {error:#}");
+                            break;
+                        }
+                    }
+                }
+                running.store(false, Ordering::Release);
+            });
     }
 }
 
@@ -2160,6 +2212,7 @@ impl Backend for WakuBackend {
             }
             Command::LoadTaskState => {
                 self.purge_expired_archived_sessions();
+                self.start_archive_detail_prune();
                 let state = self.task_state.lock();
                 Ok(ResponsePayload::TaskState {
                     projects: state.projects.clone(),
@@ -2270,6 +2323,7 @@ impl Backend for WakuBackend {
                         } else {
                             preserve_daemon_checkpoints(existing, &mut session);
                             preserve_daemon_queued_messages(existing, &mut session);
+                            honor_details_pruned(existing, &mut session);
                             *existing = session;
                             true
                         }
@@ -3261,6 +3315,21 @@ fn splice_session_tail(
             session.transcript_blocks = base.transcript_blocks;
         }
         _ => degrade_tail_session(session),
+    }
+}
+
+/// Keeps a full-detail save from resurrecting payloads an archive-detail
+/// prune stripped: a client that hydrated the session before the sweep can
+/// still hold them, and adopting its detail verbatim would write them back.
+/// Unarchiving clears the marker instead — a live session accrues payloads
+/// again from that point on.
+fn honor_details_pruned(existing: &AgentSession, incoming: &mut AgentSession) {
+    if incoming.archived_at.is_some() {
+        if existing.details_pruned || incoming.details_pruned {
+            incoming.prune_transcript_payloads();
+        }
+    } else {
+        incoming.details_pruned = false;
     }
 }
 
@@ -7229,7 +7298,7 @@ fn record_provider_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::MessageRole;
+    use crate::model::{ActivityItem, MessageRole, TranscriptBlock};
 
     fn detailed_session() -> AgentSession {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
@@ -7342,6 +7411,47 @@ mod tests {
 
         assert!(wire.detail_loaded);
         assert_eq!(wire.messages.len(), session.messages.len());
+    }
+
+    #[test]
+    fn a_save_cannot_resurrect_pruned_archive_payloads() {
+        let mut existing = detailed_session();
+        existing.archived_at = Some(1);
+        existing.transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: None,
+            activities: vec![ActivityItem::new(
+                None,
+                crate::model::ActivityKind::Tool,
+                "Ran tests",
+                None,
+                true,
+            )],
+        });
+        existing.details_pruned = true;
+
+        // The client hydrated before the sweep: its copy still carries the
+        // stripped payloads.
+        let mut incoming = existing.clone();
+        incoming.details_pruned = false;
+        incoming.transcript_blocks[0].activities[0].output = Some("big output".into());
+
+        honor_details_pruned(&existing, &mut incoming);
+        assert!(incoming.details_pruned);
+        assert!(incoming.transcript_blocks[0].activities[0].output.is_none());
+
+        // Unarchiving clears the marker so new work keeps its payloads.
+        let mut unarchived = existing.clone();
+        unarchived.archived_at = None;
+        unarchived.transcript_blocks[0].activities[0].output = Some("fresh".into());
+        honor_details_pruned(&existing, &mut unarchived);
+        assert!(!unarchived.details_pruned);
+        assert_eq!(
+            unarchived.transcript_blocks[0].activities[0]
+                .output
+                .as_deref(),
+            Some("fresh")
+        );
     }
 
     #[test]

@@ -212,6 +212,16 @@ provider_session_id?: string | null,
  */
 messages: Array<Message>, transcript_blocks: Array<TranscriptBlock>, turns: Array<AgentTurn>, queued_messages?: Array<QueuedMessage>,
 /**
+ * The archive-retention sweep stripped this session's stored activity
+ * payloads: transcript rows keep their kind, title and status, but tool
+ * `output`/`arguments`, `detail`, `reasoning`, `file_changes` diffs and
+ * `image_urls` are gone. Clients echo the flag back through saves; the
+ * daemon honors it on merge so a hydrated pre-prune copy cannot
+ * resurrect the stripped text, and clears it when the session is
+ * unarchived so new work accrues payloads again.
+ */
+details_pruned?: boolean,
+/**
  * Whether the transcript has been read from the database.
  *
  * Startup loads only the columns the session list needs, so a session
