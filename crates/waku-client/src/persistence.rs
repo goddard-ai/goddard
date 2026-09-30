@@ -83,6 +83,51 @@ pub enum SidebarProjectOrdering {
     Manual,
 }
 
+/// One entry in the sidebar's manual project-group order. Project UUIDs keep
+/// their original serialized form; Chats uses a reserved string entry.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SidebarProjectOrderEntry {
+    Project(Uuid),
+    Chats,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SidebarProjectOrderEntryRepr {
+    Project(Uuid),
+    Chats(SidebarProjectOrderMarker),
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum SidebarProjectOrderMarker {
+    Chats,
+}
+
+impl Serialize for SidebarProjectOrderEntry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Project(project_id) => project_id.serialize(serializer),
+            Self::Chats => SidebarProjectOrderMarker::Chats.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SidebarProjectOrderEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match SidebarProjectOrderEntryRepr::deserialize(deserializer)? {
+            SidebarProjectOrderEntryRepr::Project(project_id) => Ok(Self::Project(project_id)),
+            SidebarProjectOrderEntryRepr::Chats(_) => Ok(Self::Chats),
+        }
+    }
+}
+
 /// The color the sidebar's draft preview line wears.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1575,7 +1620,7 @@ struct AppState {
     #[serde(default)]
     sidebar_project_ordering: SidebarProjectOrdering,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    sidebar_project_order: Vec<Uuid>,
+    sidebar_project_order: Vec<SidebarProjectOrderEntry>,
     /// Sidebar sections the user folded, kept sorted for stable file bytes.
     /// Deliberately not `skip_serializing_if`: an empty list means "expanded
     /// everything", which must not fall back to the launch defaults.
@@ -1967,7 +2012,7 @@ pub struct PersistedState {
     #[serde(default)]
     pub sidebar_project_ordering: SidebarProjectOrdering,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sidebar_project_order: Vec<Uuid>,
+    pub sidebar_project_order: Vec<SidebarProjectOrderEntry>,
     /// Sidebar sections the user folded, kept sorted for stable file bytes.
     /// Deliberately not `skip_serializing_if`: an empty list means "expanded
     /// everything", which must not fall back to the launch defaults.

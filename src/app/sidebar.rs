@@ -5,12 +5,13 @@ use super::composer::project_picker_order;
 use super::*;
 use crate::ui::shortcut::ShortcutHint;
 use waku_client::friends::TransferStatus;
+use waku_client::persistence::SidebarProjectOrderEntry;
 
 actions!(waku_sidebar, [CancelSessionRename]);
 
 #[derive(Clone)]
 struct SidebarProjectDrag {
-    project_id: Uuid,
+    entry: SidebarProjectOrderEntry,
     title: SharedString,
 }
 
@@ -512,8 +513,8 @@ fn project_sidebar_groups(
         groups.push((SidebarGroup::Projectless, projectless_sessions));
     }
     // Starred projects hoist above the rest — a stable sort, so first-seen
-    // order keeps describing recency inside each half. "Chats" stays
-    // at the foot either way.
+    // order keeps describing recency inside each half. Chats starts at the
+    // foot in the recent order.
     groups.sort_by_key(|(group, _)| match group {
         SidebarGroup::Project(id) if starred.contains(id) => 0,
         SidebarGroup::Projectless => 2,
@@ -525,21 +526,50 @@ fn project_sidebar_groups(
 fn order_project_sidebar_groups_manually(
     groups: &mut [(SidebarGroup, Vec<Uuid>)],
     starred: &HashSet<Uuid>,
-    project_order: &[Uuid],
+    project_order: &[SidebarProjectOrderEntry],
 ) {
     let positions = project_order
         .iter()
         .enumerate()
-        .map(|(index, project_id)| (*project_id, index))
+        .map(|(index, entry)| (*entry, index))
         .collect::<HashMap<_, _>>();
     groups.sort_by_key(|(group, _)| match group {
         SidebarGroup::Project(project_id) => (
             usize::from(!starred.contains(project_id)),
-            positions.get(project_id).copied().unwrap_or(usize::MAX),
+            positions
+                .get(&SidebarProjectOrderEntry::Project(*project_id))
+                .copied()
+                .unwrap_or(usize::MAX),
         ),
-        SidebarGroup::Projectless => (2, 0),
+        SidebarGroup::Projectless => (
+            1,
+            positions
+                .get(&SidebarProjectOrderEntry::Chats)
+                .copied()
+                .unwrap_or(usize::MAX),
+        ),
         _ => (0, usize::MAX),
     });
+}
+
+fn sidebar_project_order_entry(group: SidebarGroup) -> Option<SidebarProjectOrderEntry> {
+    match group {
+        SidebarGroup::Project(project_id) => Some(SidebarProjectOrderEntry::Project(project_id)),
+        SidebarGroup::Projectless => Some(SidebarProjectOrderEntry::Chats),
+        _ => None,
+    }
+}
+
+fn sidebar_project_order_entry_is_starred(
+    entry: SidebarProjectOrderEntry,
+    projects: &[Project],
+) -> bool {
+    match entry {
+        SidebarProjectOrderEntry::Project(project_id) => projects
+            .iter()
+            .any(|project| project.id == project_id && project.starred),
+        SidebarProjectOrderEntry::Chats => false,
+    }
 }
 
 /// A project group's fold keeps two tails: live sessions past the default
@@ -3326,8 +3356,13 @@ impl Waku {
                 fingerprint = mix_uuid(fingerprint, project.id);
                 fingerprint = mix(fingerprint, u64::from(project.starred));
             }
-            for project_id in &self.state.sidebar_project_order {
-                fingerprint = mix_uuid(fingerprint, *project_id);
+            for entry in &self.state.sidebar_project_order {
+                fingerprint = match entry {
+                    SidebarProjectOrderEntry::Project(project_id) => {
+                        mix_uuid(mix(fingerprint, 1), *project_id)
+                    }
+                    SidebarProjectOrderEntry::Chats => mix(fingerprint, 2),
+                };
             }
             // A map has no stable iteration order; combine order-independently.
             let revealed =
@@ -4040,11 +4075,8 @@ impl Waku {
         // gap, and regular label weight; every other group keeps the
         // section-header styling.
         let action_row = group == SidebarGroup::Terminals;
-        let project_id = match group {
-            SidebarGroup::Project(project_id) => Some(project_id),
-            _ => None,
-        };
-        let reorderable_project = project_id.is_some()
+        let order_entry = sidebar_project_order_entry(group);
+        let reorderable_group = order_entry.is_some()
             && self.state.sidebar_grouping == SidebarGrouping::Project
             && self.state.sidebar_project_ordering == SidebarProjectOrdering::Manual;
         let reorder_weak = cx.entity().downgrade();
@@ -4070,7 +4102,7 @@ impl Waku {
         .w_full()
         .rounded(px(8.0))
         .cursor_default()
-        .when(reorderable_project, |element| {
+        .when(reorderable_group, |element| {
             element.tooltip(Tooltip::text(tr!("sidebar.project_reorder_hint")))
         })
         .when(action_row, |element| {
@@ -4211,13 +4243,13 @@ impl Waku {
         .when(first, |element| {
             element.child(self.render_sidebar_header_actions(cx))
         })
-        .when(reorderable_project, |element| {
-            let project_id = project_id.expect("reorderable project has an id");
+        .when(reorderable_group, |element| {
+            let entry = order_entry.expect("reorderable group has an order entry");
             let drop_weak = reorder_weak;
             element
                 .on_drag(
                     SidebarProjectDrag {
-                        project_id,
+                        entry,
                         title: drag_title.clone(),
                     },
                     |drag, _, _, cx| {
@@ -4229,7 +4261,7 @@ impl Waku {
                 .drag_over::<SidebarProjectDrag>(move |style, _, _, _| style.bg(drop_highlight))
                 .on_drop(move |drag: &SidebarProjectDrag, _, cx| {
                     let _ = drop_weak.update(cx, |this, cx| {
-                        this.move_sidebar_project(drag.project_id, project_id, false, cx);
+                        this.move_sidebar_project_group(drag.entry, entry, false, cx);
                     });
                 })
         })
@@ -4254,15 +4286,15 @@ impl Waku {
                     this.toggle_sidebar_group(group, window, cx);
                     cx.stop_propagation();
                 }
-                "up" if reorderable_project && event.keystroke.modifiers.alt => {
-                    if let Some(project_id) = project_id {
-                        this.move_sidebar_project_by_keyboard(project_id, -1, cx);
+                "up" if reorderable_group && event.keystroke.modifiers.alt => {
+                    if let Some(entry) = order_entry {
+                        this.move_sidebar_project_group_by_keyboard(entry, -1, cx);
                     }
                     cx.stop_propagation();
                 }
-                "down" if reorderable_project && event.keystroke.modifiers.alt => {
-                    if let Some(project_id) = project_id {
-                        this.move_sidebar_project_by_keyboard(project_id, 1, cx);
+                "down" if reorderable_group && event.keystroke.modifiers.alt => {
+                    if let Some(entry) = order_entry {
+                        this.move_sidebar_project_group_by_keyboard(entry, 1, cx);
                     }
                     cx.stop_propagation();
                 }
@@ -4476,7 +4508,7 @@ impl Waku {
                 .sidebar_rows_cached(Local::now().date_naive())
                 .iter()
                 .filter_map(|row| match row {
-                    SidebarRow::Header(SidebarGroup::Project(project_id)) => Some(*project_id),
+                    SidebarRow::Header(group) => sidebar_project_order_entry(*group),
                     _ => None,
                 })
                 .collect();
@@ -4491,10 +4523,10 @@ impl Waku {
         cx.notify();
     }
 
-    fn move_sidebar_project(
+    fn move_sidebar_project_group(
         &mut self,
-        moving: Uuid,
-        target: Uuid,
+        moving: SidebarProjectOrderEntry,
+        target: SidebarProjectOrderEntry,
         after: bool,
         cx: &mut Context<Self>,
     ) {
@@ -4504,12 +4536,8 @@ impl Waku {
         {
             return;
         }
-        let is_starred = |project_id| {
-            self.state
-                .projects
-                .iter()
-                .any(|project| project.id == project_id && project.starred)
-        };
+        let is_starred =
+            |entry| sidebar_project_order_entry_is_starred(entry, &self.state.projects);
         if is_starred(moving) != is_starred(target) {
             return;
         }
@@ -4533,46 +4561,37 @@ impl Waku {
         cx.notify();
     }
 
-    fn move_sidebar_project_by_keyboard(
+    fn move_sidebar_project_group_by_keyboard(
         &mut self,
-        project_id: Uuid,
+        entry: SidebarProjectOrderEntry,
         direction: isize,
         cx: &mut Context<Self>,
     ) {
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
-        let project_ids = rows
+        let entries = rows
             .iter()
             .filter_map(|row| match row {
-                SidebarRow::Header(SidebarGroup::Project(project_id)) => Some(*project_id),
+                SidebarRow::Header(group) => sidebar_project_order_entry(*group),
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let Some(index) = project_ids
-            .iter()
-            .position(|candidate| *candidate == project_id)
-        else {
+        let Some(index) = entries.iter().position(|candidate| *candidate == entry) else {
             return;
         };
-        let moving_is_starred = self
-            .state
-            .projects
-            .iter()
-            .any(|project| project.id == project_id && project.starred);
+        let moving_is_starred = sidebar_project_order_entry_is_starred(entry, &self.state.projects);
         let target = if direction < 0 {
-            project_ids[..index].iter().rev().find(|candidate| {
-                self.state.projects.iter().any(|project| {
-                    project.id == **candidate && project.starred == moving_is_starred
-                })
+            entries[..index].iter().rev().find(|candidate| {
+                sidebar_project_order_entry_is_starred(**candidate, &self.state.projects)
+                    == moving_is_starred
             })
         } else {
-            project_ids[index + 1..].iter().find(|candidate| {
-                self.state.projects.iter().any(|project| {
-                    project.id == **candidate && project.starred == moving_is_starred
-                })
+            entries[index + 1..].iter().find(|candidate| {
+                sidebar_project_order_entry_is_starred(**candidate, &self.state.projects)
+                    == moving_is_starred
             })
         };
         if let Some(target) = target {
-            self.move_sidebar_project(project_id, *target, direction > 0, cx);
+            self.move_sidebar_project_group(entry, *target, direction > 0, cx);
         }
     }
 
