@@ -739,6 +739,26 @@ struct RequestDispatcher {
     exposure: OnceLock<Arc<ExposureControl>>,
 }
 
+/// Whether an event belongs in the replay journal. Per-token deltas,
+/// background-output chunks, and terminal frames are live-only volume — a
+/// subscriber that missed them reconciles from the session snapshot, the
+/// same contract local emitters already follow through
+/// [`EventSink::send_ephemeral`].
+fn wire_event_is_replayable(event: &WireDriverEvent) -> bool {
+    match event.kind.as_str() {
+        "textDelta" | "reasoningDelta" | "terminalOutput" | "terminalExited" | "terminalError"
+        | "sandboxSetup" => false,
+        "backgroundWork" => {
+            event
+                .payload
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                != Some("outputDelta")
+        }
+        _ => true,
+    }
+}
+
 impl Hub {
     fn event_sink(self: &Arc<Self>, session_id: Uuid, runtime_id: Uuid) -> EventSink {
         EventSink {
@@ -1104,13 +1124,15 @@ impl Hub {
                 .journal
                 .retain(|(session, _), _| *session != event.session_id);
         }
-        let journal = state
-            .journal
-            .entry((event.session_id, event.runtime_id))
-            .or_default();
-        journal.push_back(event.clone());
-        while journal.len() > MAX_REPLAY_EVENTS_PER_SESSION {
-            journal.pop_front();
+        if wire_event_is_replayable(&event.event) {
+            let journal = state
+                .journal
+                .entry((event.session_id, event.runtime_id))
+                .or_default();
+            journal.push_back(event.clone());
+            while journal.len() > MAX_REPLAY_EVENTS_PER_SESSION {
+                journal.pop_front();
+            }
         }
         Self::broadcast(&mut state, &ServerMessage::Event(event), None);
     }

@@ -19,10 +19,10 @@ use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     AgentAskOutcome, AgentModelOption, AgentProjectMapResult, AgentSession, AgentSessionSearchHit,
-    Checkpoint, CheckpointStatus, DriverEvent, PermissionOption, Project, ProjectKind,
-    ProjectMapIntent, ProjectMapRanking, ProviderKind, ProviderModelOption, ProviderResumeCursor,
-    ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace, TurnStatus, UserInputQuestion,
-    detail_prefix_signature,
+    BackgroundWorkEvent, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption, Project,
+    ProjectKind, ProjectMapIntent, ProjectMapRanking, ProviderKind, ProviderModelOption,
+    ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace,
+    TurnStatus, UserInputQuestion, detail_prefix_signature,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -6709,13 +6709,29 @@ fn forward_driver_events(
         ) {
             memory.note_session_activity(session_id);
         }
+        // Per-token deltas and streaming process output never enter the
+        // replay journal: journaled they saturated each runtime's 2048-event
+        // window and could leave a reconnecting client's bounded queue at
+        // the subscriber cap — one broadcast short of a silent kick. A
+        // subscriber that missed them reconciles from the session snapshot.
+        let ephemeral = matches!(
+            &event,
+            DriverEvent::TextDelta(_)
+                | DriverEvent::ReasoningDelta(_)
+                | DriverEvent::BackgroundWork(BackgroundWorkEvent::OutputDelta { .. })
+        );
         let wire = event_to_wire(event).unwrap_or_else(|error| {
             WireDriverEvent::new(
                 "error",
                 Value::String(format!("could not encode daemon event: {error}")),
             )
         });
-        if events.send(wire).is_err() {
+        let delivered = if ephemeral {
+            events.send_ephemeral(wire)
+        } else {
+            events.send(wire)
+        };
+        if delivered.is_err() {
             break;
         }
         if drains_queue {
@@ -9257,6 +9273,79 @@ mod tests {
 
         assert!(sessions.lock().is_empty());
         assert_eq!(events.journaled_event_count(session_id), 0);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Per-token deltas and process-output chunks stream live but never
+    /// journal: under heavy fan-out the journaled flood could saturate a
+    /// reconnecting client's bounded queue and get it kicked on the next
+    /// broadcast. Turn boundaries still journal, so replay keeps structure.
+    #[test]
+    fn streaming_deltas_do_not_enter_the_replay_journal() {
+        let root = std::env::temp_dir().join(format!("waku-deltas-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let events = EventSink::detached().begin_session_runtime(session_id, runtime_id);
+        let (wake, _wakes) = smol::channel::bounded(1);
+        let (driver_events, event_receiver) = driver::event_channel(wake);
+        let driver = DriverHandle::from_control(Arc::new(IdleDriver));
+        let sessions = Arc::new(Mutex::new(HashMap::from([(
+            session_id,
+            RuntimeEntry {
+                runtime_id,
+                driver: driver.clone(),
+                last_active: std::time::Instant::now(),
+                resumable: true,
+                computer_use_available: false,
+                provider: ProviderKind::Claude,
+                cwd: PathBuf::new(),
+            },
+        )])));
+        driver_events
+            .send(DriverEvent::TextDelta("streamed".into()))
+            .unwrap();
+        driver_events
+            .send(DriverEvent::ReasoningDelta("thought".into()))
+            .unwrap();
+        driver_events
+            .send(DriverEvent::BackgroundWork(
+                BackgroundWorkEvent::OutputDelta {
+                    key: crate::model::BackgroundWorkKey::new(
+                        crate::model::BackgroundWorkKind::Process,
+                        "proc-1",
+                    ),
+                    delta: "chunk".into(),
+                },
+            ))
+            .unwrap();
+        driver_events.send(DriverEvent::TurnStarted).unwrap();
+        drop(driver_events);
+
+        let task_state = Arc::new(Mutex::new(PersistedState::empty()));
+        let task_store = Arc::new(StateStore::daemon(root.join("app.db")));
+        forward_driver_events(
+            session_id,
+            runtime_id,
+            event_receiver,
+            events.clone(),
+            driver,
+            Arc::new(crate::agent::AgentState::default()),
+            task_state.clone(),
+            task_store.clone(),
+            sessions.clone(),
+            Arc::new(AutomationService::open(root.join("automations.json")).unwrap()),
+            Arc::new(AutoPromptService::open(root.join("auto-prompts.json")).unwrap()),
+            crate::memory::MemoryService::new(
+                Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap()),
+                task_state,
+                task_store,
+                crate::integrations::SecretStore::new(root.to_path_buf()),
+            ),
+            Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
+        );
+
+        assert_eq!(events.journaled_event_count(session_id), 1);
         std::fs::remove_dir_all(&root).ok();
     }
 
