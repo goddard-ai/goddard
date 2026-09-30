@@ -1723,7 +1723,7 @@ impl Waku {
         let row = self
             .render_sidebar_action_row(
                 "sidebar-inbox",
-                "icons/bell.svg",
+                "icons/inbox.svg",
                 tr!("sidebar.inbox"),
                 ShortcutHint::action(&ToggleInboxPage),
                 window,
