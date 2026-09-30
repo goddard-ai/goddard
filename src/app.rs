@@ -69,8 +69,9 @@ use crate::persistence::{
     PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage,
     PersistedSidebarGroup, PersistedState, PersistedTranscriptScrollPosition, PersistedWindowState,
-    RecentModelUse, SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering, StateStore,
-    TerminalLinkModifier, UpdateChannel, VoiceBriefingSummaryModel, VoiceBriefingTtsModel,
+    RecentModelUse, SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering,
+    SidebarProjectOrdering, StateStore, TerminalLinkModifier, UpdateChannel,
+    VoiceBriefingSummaryModel, VoiceBriefingTtsModel,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};

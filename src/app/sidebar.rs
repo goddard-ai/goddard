@@ -8,6 +8,37 @@ use waku_client::friends::TransferStatus;
 
 actions!(waku_sidebar, [CancelSessionRename]);
 
+#[derive(Clone)]
+struct SidebarProjectDrag {
+    project_id: Uuid,
+    title: SharedString,
+}
+
+struct SidebarProjectDragView {
+    title: SharedString,
+}
+
+impl gpui::Render for SidebarProjectDragView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        div()
+            .h(px(24.0))
+            .pl(px(6.0))
+            .pr(px(10.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.composer)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .child(icon("icons/folder.svg", 11.0, theme.text_tertiary))
+            .child(self.title.clone())
+    }
+}
+
 pub(super) const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
 
@@ -150,6 +181,13 @@ fn sidebar_ordering_label(ordering: SidebarOrdering) -> String {
     match ordering {
         SidebarOrdering::LastUpdated => tr!("sidebar.ordering_last_updated"),
         SidebarOrdering::LastCreated => tr!("sidebar.ordering_last_created"),
+    }
+}
+
+fn sidebar_project_ordering_label(ordering: SidebarProjectOrdering) -> String {
+    match ordering {
+        SidebarProjectOrdering::Recent => tr!("sidebar.project_order_recent"),
+        SidebarProjectOrdering::Manual => tr!("sidebar.project_order_manual"),
     }
 }
 
@@ -488,6 +526,26 @@ fn project_sidebar_groups(
         _ => 1,
     });
     groups
+}
+
+fn order_project_sidebar_groups_manually(
+    groups: &mut [(SidebarGroup, Vec<Uuid>)],
+    starred: &HashSet<Uuid>,
+    project_order: &[Uuid],
+) {
+    let positions = project_order
+        .iter()
+        .enumerate()
+        .map(|(index, project_id)| (*project_id, index))
+        .collect::<HashMap<_, _>>();
+    groups.sort_by_key(|(group, _)| match group {
+        SidebarGroup::Project(project_id) => (
+            usize::from(!starred.contains(project_id)),
+            positions.get(project_id).copied().unwrap_or(usize::MAX),
+        ),
+        SidebarGroup::Projectless => (2, 0),
+        _ => (0, usize::MAX),
+    });
 }
 
 /// A project group's fold keeps two tails: live sessions past the default
@@ -1366,6 +1424,7 @@ impl Waku {
         let weak = cx.entity().downgrade();
         let grouping = self.state.sidebar_grouping;
         let ordering = self.state.sidebar_ordering;
+        let project_ordering = self.state.sidebar_project_ordering;
         let options = dropdown_menu(
             div()
                 .id("sidebar-options")
@@ -1389,7 +1448,39 @@ impl Waku {
                 let new_project_weak = weak.clone();
                 let grouping_weak = weak.clone();
                 let ordering_weak = weak.clone();
-                vec![
+                let project_order_item = (grouping == SidebarGrouping::Project).then(|| {
+                    let recent_weak = weak.clone();
+                    let manual_weak = weak.clone();
+                    MenuItem::submenu_with_value(
+                        tr!("sidebar.project_order"),
+                        sidebar_project_ordering_label(project_ordering),
+                        move |_| {
+                            let recent_weak = recent_weak.clone();
+                            let manual_weak = manual_weak.clone();
+                            vec![
+                                MenuItem::new(tr!("sidebar.project_order_recent"), move |_, cx| {
+                                    let _ = recent_weak.update(cx, |this, cx| {
+                                        this.set_sidebar_project_ordering(
+                                            SidebarProjectOrdering::Recent,
+                                            cx,
+                                        );
+                                    });
+                                })
+                                .selected(project_ordering == SidebarProjectOrdering::Recent),
+                                MenuItem::new(tr!("sidebar.project_order_manual"), move |_, cx| {
+                                    let _ = manual_weak.update(cx, |this, cx| {
+                                        this.set_sidebar_project_ordering(
+                                            SidebarProjectOrdering::Manual,
+                                            cx,
+                                        );
+                                    });
+                                })
+                                .selected(project_ordering == SidebarProjectOrdering::Manual),
+                            ]
+                        },
+                    )
+                });
+                let mut items = vec![
                     MenuItem::new(tr!("project.new_project"), move |_, cx| {
                         let _ = new_project_weak.update(cx, |this, cx| {
                             this.add_project(cx);
@@ -1419,41 +1510,33 @@ impl Waku {
                             ]
                         },
                     ),
-                    MenuItem::submenu_with_value(
-                        tr!("sidebar.ordering"),
-                        sidebar_ordering_label(ordering),
-                        move |_| {
-                            let updated_weak = ordering_weak.clone();
-                            let created_weak = ordering_weak.clone();
-                            vec![
-                                MenuItem::new(
-                                    tr!("sidebar.ordering_last_updated"),
-                                    move |_, cx| {
-                                        let _ = updated_weak.update(cx, |this, cx| {
-                                            this.set_sidebar_ordering(
-                                                SidebarOrdering::LastUpdated,
-                                                cx,
-                                            );
-                                        });
-                                    },
-                                )
-                                .selected(ordering == SidebarOrdering::LastUpdated),
-                                MenuItem::new(
-                                    tr!("sidebar.ordering_last_created"),
-                                    move |_, cx| {
-                                        let _ = created_weak.update(cx, |this, cx| {
-                                            this.set_sidebar_ordering(
-                                                SidebarOrdering::LastCreated,
-                                                cx,
-                                            );
-                                        });
-                                    },
-                                )
-                                .selected(ordering == SidebarOrdering::LastCreated),
-                            ]
-                        },
-                    ),
-                ]
+                ];
+                if let Some(project_order_item) = project_order_item {
+                    items.push(project_order_item);
+                }
+                items.push(MenuItem::submenu_with_value(
+                    tr!("sidebar.ordering"),
+                    sidebar_ordering_label(ordering),
+                    move |_| {
+                        let updated_weak = ordering_weak.clone();
+                        let created_weak = ordering_weak.clone();
+                        vec![
+                            MenuItem::new(tr!("sidebar.ordering_last_updated"), move |_, cx| {
+                                let _ = updated_weak.update(cx, |this, cx| {
+                                    this.set_sidebar_ordering(SidebarOrdering::LastUpdated, cx);
+                                });
+                            })
+                            .selected(ordering == SidebarOrdering::LastUpdated),
+                            MenuItem::new(tr!("sidebar.ordering_last_created"), move |_, cx| {
+                                let _ = created_weak.update(cx, |this, cx| {
+                                    this.set_sidebar_ordering(SidebarOrdering::LastCreated, cx);
+                                });
+                            })
+                            .selected(ordering == SidebarOrdering::LastCreated),
+                        ]
+                    },
+                ));
+                items
             },
         );
 
@@ -2998,11 +3081,17 @@ impl Waku {
                     })
                     .map(|project| project.id)
                     .collect::<HashSet<_>>();
-                for (group, sessions) in project_sidebar_groups(
-                    &sorted_sessions,
-                    &projectless_project_ids,
-                    &sessions::starred_project_ids(&self.state.projects),
-                ) {
+                let starred = sessions::starred_project_ids(&self.state.projects);
+                let mut project_groups =
+                    project_sidebar_groups(&sorted_sessions, &projectless_project_ids, &starred);
+                if self.state.sidebar_project_ordering == SidebarProjectOrdering::Manual {
+                    order_project_sidebar_groups_manually(
+                        &mut project_groups,
+                        &starred,
+                        &self.state.sidebar_project_order,
+                    );
+                }
+                for (group, sessions) in project_groups {
                     let Some(position) = sessions
                         .iter()
                         .filter(|id| dormant_set.contains(id))
@@ -3197,6 +3286,13 @@ impl Waku {
                 SidebarOrdering::LastCreated => 2,
             },
         );
+        fingerprint = mix(
+            fingerprint,
+            match self.state.sidebar_project_ordering {
+                SidebarProjectOrdering::Recent => 1,
+                SidebarProjectOrdering::Manual => 2,
+            },
+        );
         fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.sidebar_phase_groups));
@@ -3242,6 +3338,9 @@ impl Waku {
             for project in &self.state.projects {
                 fingerprint = mix_uuid(fingerprint, project.id);
                 fingerprint = mix(fingerprint, u64::from(project.starred));
+            }
+            for project_id in &self.state.sidebar_project_order {
+                fingerprint = mix_uuid(fingerprint, *project_id);
             }
             // A map has no stable iteration order; combine order-independently.
             let revealed =
@@ -3957,6 +4056,16 @@ impl Waku {
         // gap, and regular label weight; every other group keeps the
         // section-header styling.
         let action_row = group == SidebarGroup::Terminals;
+        let project_id = match group {
+            SidebarGroup::Project(project_id) => Some(project_id),
+            _ => None,
+        };
+        let reorderable_project = project_id.is_some()
+            && self.state.sidebar_grouping == SidebarGrouping::Project
+            && self.state.sidebar_project_ordering == SidebarProjectOrdering::Manual;
+        let reorder_weak = cx.entity().downgrade();
+        let drag_title = SharedString::from(label.clone());
+        let drop_highlight = theme.overlay_strong;
         let header = session_group_header(
             &theme,
             if action_row {
@@ -3977,6 +4086,9 @@ impl Waku {
         .w_full()
         .rounded(px(8.0))
         .cursor_default()
+        .when(reorderable_project, |element| {
+            element.tooltip(Tooltip::text(tr!("sidebar.project_reorder_hint")))
+        })
         .when(action_row, |element| {
             element
                 .px(px(4.0))
@@ -4115,6 +4227,28 @@ impl Waku {
         .when(first, |element| {
             element.child(self.render_sidebar_header_actions(cx))
         })
+        .when(reorderable_project, |element| {
+            let project_id = project_id.expect("reorderable project has an id");
+            let drop_weak = reorder_weak;
+            element
+                .on_drag(
+                    SidebarProjectDrag {
+                        project_id,
+                        title: drag_title.clone(),
+                    },
+                    |drag, _, _, cx| {
+                        cx.new(|_| SidebarProjectDragView {
+                            title: drag.title.clone(),
+                        })
+                    },
+                )
+                .drag_over::<SidebarProjectDrag>(move |style, _, _, _| style.bg(drop_highlight))
+                .on_drop(move |drag: &SidebarProjectDrag, _, cx| {
+                    let _ = drop_weak.update(cx, |this, cx| {
+                        this.move_sidebar_project(drag.project_id, project_id, false, cx);
+                    });
+                })
+        })
         .on_click(cx.listener(move |this, _, window, cx| {
             this.toggle_sidebar_group(group, window, cx);
         }))
@@ -4134,6 +4268,18 @@ impl Waku {
                 }
                 "right" if collapsed => {
                     this.toggle_sidebar_group(group, window, cx);
+                    cx.stop_propagation();
+                }
+                "up" if reorderable_project && event.keystroke.modifiers.alt => {
+                    if let Some(project_id) = project_id {
+                        this.move_sidebar_project_by_keyboard(project_id, -1, cx);
+                    }
+                    cx.stop_propagation();
+                }
+                "down" if reorderable_project && event.keystroke.modifiers.alt => {
+                    if let Some(project_id) = project_id {
+                        this.move_sidebar_project_by_keyboard(project_id, 1, cx);
+                    }
                     cx.stop_propagation();
                 }
                 _ => {}
@@ -4330,6 +4476,120 @@ impl Waku {
         });
         self.save();
         cx.notify();
+    }
+
+    fn set_sidebar_project_ordering(
+        &mut self,
+        ordering: SidebarProjectOrdering,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.sidebar_project_ordering == ordering {
+            return;
+        }
+        if ordering == SidebarProjectOrdering::Manual && self.state.sidebar_project_order.is_empty()
+        {
+            self.state.sidebar_project_order = self
+                .sidebar_rows_cached(Local::now().date_naive())
+                .iter()
+                .filter_map(|row| match row {
+                    SidebarRow::Header(SidebarGroup::Project(project_id)) => Some(*project_id),
+                    _ => None,
+                })
+                .collect();
+        }
+        self.state.sidebar_project_ordering = ordering;
+        self.sidebar_rows_fingerprint.set(None);
+        self.sidebar_list_state.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: Pixels::ZERO,
+        });
+        self.save();
+        cx.notify();
+    }
+
+    fn move_sidebar_project(
+        &mut self,
+        moving: Uuid,
+        target: Uuid,
+        after: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if moving == target
+            || self.state.sidebar_grouping != SidebarGrouping::Project
+            || self.state.sidebar_project_ordering != SidebarProjectOrdering::Manual
+        {
+            return;
+        }
+        let is_starred = |project_id| {
+            self.state
+                .projects
+                .iter()
+                .any(|project| project.id == project_id && project.starred)
+        };
+        if is_starred(moving) != is_starred(target) {
+            return;
+        }
+
+        let mut order = self.state.sidebar_project_order.clone();
+        if !order.contains(&target) {
+            order.push(target);
+        }
+        order.retain(|project_id| *project_id != moving);
+        let target_index = order
+            .iter()
+            .position(|project_id| *project_id == target)
+            .unwrap_or(order.len());
+        order.insert(target_index + usize::from(after), moving);
+        if order == self.state.sidebar_project_order {
+            return;
+        }
+        self.state.sidebar_project_order = order;
+        self.sidebar_rows_fingerprint.set(None);
+        self.save();
+        cx.notify();
+    }
+
+    fn move_sidebar_project_by_keyboard(
+        &mut self,
+        project_id: Uuid,
+        direction: isize,
+        cx: &mut Context<Self>,
+    ) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let project_ids = rows
+            .iter()
+            .filter_map(|row| match row {
+                SidebarRow::Header(SidebarGroup::Project(project_id)) => Some(*project_id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let Some(index) = project_ids
+            .iter()
+            .position(|candidate| *candidate == project_id)
+        else {
+            return;
+        };
+        let moving_is_starred = self
+            .state
+            .projects
+            .iter()
+            .any(|project| project.id == project_id && project.starred);
+        let target = if direction < 0 {
+            project_ids[..index].iter().rev().find(|candidate| {
+                self.state.projects.iter().any(|project| {
+                    project.id == **candidate && project.starred == moving_is_starred
+                })
+            })
+        } else {
+            project_ids[index + 1..].iter().find(|candidate| {
+                self.state.projects.iter().any(|project| {
+                    project.id == **candidate && project.starred == moving_is_starred
+                })
+            })
+        };
+        if let Some(target) = target {
+            self.move_sidebar_project(project_id, *target, direction > 0, cx);
+        }
     }
 
     fn set_sidebar_ordering(&mut self, ordering: SidebarOrdering, cx: &mut Context<Self>) {

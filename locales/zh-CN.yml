@@ -670,6 +670,10 @@ sidebar.options: 侧边栏选项
 sidebar.grouping: 分组
 sidebar.grouping_project: 项目
 sidebar.grouping_date: 日期
+sidebar.project_order: 项目排序
+sidebar.project_order_recent: 最近的任务
+sidebar.project_order_manual: 手动
+sidebar.project_reorder_hint: 在已加星标或未加星标的项目中拖动以重新排序。聚焦时按 Alt+↑ 或 Alt+↓ 移动项目。
 sidebar.ordering: 排序
 sidebar.ordering_last_updated: 最近更新
 sidebar.ordering_last_created: 最近创建

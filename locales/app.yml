@@ -2082,6 +2082,14 @@ sidebar.grouping_project:
   en: Project
 sidebar.grouping_date:
   en: Date
+sidebar.project_order:
+  en: Project order
+sidebar.project_order_recent:
+  en: Recent tasks
+sidebar.project_order_manual:
+  en: Manual
+sidebar.project_reorder_hint:
+  en: Drag to reorder within starred or unstarred projects. With focus, use Alt+Up or Alt+Down to move.
 sidebar.ordering:
   en: Ordering
 sidebar.ordering_last_updated:

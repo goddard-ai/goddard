@@ -72,6 +72,17 @@ pub enum SidebarOrdering {
     LastCreated,
 }
 
+/// How project groups are ordered when task history is grouped by project.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidebarProjectOrdering {
+    /// Projects follow the task ordering selected in sidebar options; starred projects stay first.
+    #[default]
+    Recent,
+    /// The order chosen by the user in the sidebar.
+    Manual,
+}
+
 /// The color the sidebar's draft preview line wears.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1566,6 +1577,10 @@ struct AppState {
     sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     sidebar_ordering: SidebarOrdering,
+    #[serde(default)]
+    sidebar_project_ordering: SidebarProjectOrdering,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sidebar_project_order: Vec<Uuid>,
     /// Sidebar sections the user folded, kept sorted for stable file bytes.
     /// Deliberately not `skip_serializing_if`: an empty list means "expanded
     /// everything", which must not fall back to the launch defaults.
@@ -1956,6 +1971,10 @@ pub struct PersistedState {
     pub sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     pub sidebar_ordering: SidebarOrdering,
+    #[serde(default)]
+    pub sidebar_project_ordering: SidebarProjectOrdering,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sidebar_project_order: Vec<Uuid>,
     /// Sidebar sections the user folded, kept sorted for stable file bytes.
     /// Deliberately not `skip_serializing_if`: an empty list means "expanded
     /// everything", which must not fall back to the launch defaults.
@@ -2318,6 +2337,8 @@ impl PersistedState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_grouping: SidebarGrouping::Date,
             sidebar_ordering: SidebarOrdering::LastUpdated,
+            sidebar_project_ordering: SidebarProjectOrdering::Recent,
+            sidebar_project_order: Vec::new(),
             sidebar_collapsed_groups: default_sidebar_collapsed_groups(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             git_panel_width: DEFAULT_GIT_PANEL_WIDTH,
@@ -2770,6 +2791,8 @@ impl PersistedState {
             sidebar_width: self.sidebar_width,
             sidebar_grouping: self.sidebar_grouping,
             sidebar_ordering: self.sidebar_ordering,
+            sidebar_project_ordering: self.sidebar_project_ordering,
+            sidebar_project_order: self.sidebar_project_order.clone(),
             sidebar_collapsed_groups: self.sidebar_collapsed_groups.clone(),
             right_panel_width: self.right_panel_width,
             git_panel_width: Some(self.git_panel_width),
@@ -2915,6 +2938,8 @@ impl PersistedState {
         self.sidebar_width = app_state.sidebar_width;
         self.sidebar_grouping = app_state.sidebar_grouping;
         self.sidebar_ordering = app_state.sidebar_ordering;
+        self.sidebar_project_ordering = app_state.sidebar_project_ordering;
+        self.sidebar_project_order = app_state.sidebar_project_order;
         self.sidebar_collapsed_groups = app_state.sidebar_collapsed_groups;
         self.right_panel_width = app_state.right_panel_width;
         // Pre-split state files have no Git panel width of their own; the

@@ -680,6 +680,10 @@ sidebar.options: サイドバーオプション
 sidebar.grouping: グループ化
 sidebar.grouping_project: プロジェクト
 sidebar.grouping_date: 日付
+sidebar.project_order: プロジェクトの順序
+sidebar.project_order_recent: 最近のタスク
+sidebar.project_order_manual: 手動
+sidebar.project_reorder_hint: ピン留め済みまたは未ピン留めのプロジェクト内でドラッグして並べ替えます。フォーカス中に Alt+↑ / Alt+↓ で移動できます。
 sidebar.ordering: 並び順
 sidebar.ordering_last_updated: 最終更新
 sidebar.ordering_last_created: 作成日
