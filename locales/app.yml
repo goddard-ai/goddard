@@ -511,6 +511,16 @@ settings.general:
   en: General
 settings.appearance:
   en: Appearance
+settings.guided_reading_title:
+  en: Guided reading
+settings.guided_reading_description:
+  en: Bold the leading letters of each word in transcript prose to guide the eye. Applies to Latin-script prose only; code, math, and monospace text are untouched.
+settings.guided_reading_fixation:
+  en: Fixation
+settings.guided_reading_saccade:
+  en: Saccade
+settings.guided_reading_opacity:
+  en: Opacity
 settings.providers:
   en: Providers
 settings.usage:
@@ -526,7 +536,7 @@ settings.terminal:
 settings.general_keywords:
   en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme agents agent tools permissions environment sandbox qa review train
 settings.appearance_keywords:
-  en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel preview math latex formula expression markdown file rendered source transcript content token speed tokens per second rate footer
+  en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel preview math latex formula expression markdown file rendered source transcript content token speed tokens per second rate footer guided reading fixation saccade opacity
 settings.terminal_keywords:
   en: terminal shell console font size text monospace link modifier command option alt ctrl click open mouse mode program vim htop copy select selection clipboard paste
 settings.providers_keywords:
@@ -909,16 +919,6 @@ experiments.sidebar_dock_title:
   en: Sidebar dock
 experiments.sidebar_dock_description:
   en: A quick-action dock that rises above the sidebar footer on hover — inbox, archive, keyboard shortcuts, and settings one click away.
-experiments.guided_reading_title:
-  en: Guided reading
-experiments.guided_reading_description:
-  en: Bold the leading letters of each word in transcript prose to guide the eye. Applies to Latin-script prose only; code, math, and monospace text are untouched.
-experiments.guided_reading_fixation:
-  en: Fixation
-experiments.guided_reading_saccade:
-  en: Saccade
-experiments.guided_reading_opacity:
-  en: Opacity
 experiments.voice_briefing_title:
   en: Voice briefing
 experiments.voice_briefing_description:

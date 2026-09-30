@@ -5443,17 +5443,6 @@ impl Waku {
                 eval_backed: false,
                 tuning: None,
             },
-            ExperimentDef {
-                group: ExperimentGroup::Surfaces,
-                id: "guided-reading-experiment-toggle",
-                icon: "icons/book-open.svg",
-                title_key: "experiments.guided_reading_title",
-                description_key: "experiments.guided_reading_description",
-                enabled: self.state.guided_reading_enabled,
-                set: Self::set_guided_reading_enabled,
-                eval_backed: false,
-                tuning: Some(Self::guided_reading_tuning),
-            },
         ];
         let groups = ExperimentGroup::ALL.into_iter().filter_map(|group| {
             let cards: Vec<AnyElement> = experiments
@@ -7055,8 +7044,8 @@ impl Waku {
         )
     }
 
-    /// The Guided reading experiment's three parameters: fixation 1–5,
-    /// saccade 10–50 in tens, opacity 0–100.
+    /// Guided reading's three parameters: fixation 1–5, saccade 10–50 in
+    /// tens, opacity 0–100.
     /// Fixation and saccade change shaped widths, so their commits remeasure
     /// like a font-size change; opacity is paint-only.
     fn guided_reading_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -7127,24 +7116,24 @@ impl Waku {
             .flex_col()
             .gap(px(8.0))
             .child(row(
-                tr!("experiments.guided_reading_fixation"),
+                tr!("settings.guided_reading_fixation"),
                 fixation_slider,
                 format!("{}", fixation_shown.round() as i32 + 1),
             ))
             .child(row(
-                tr!("experiments.guided_reading_saccade"),
+                tr!("settings.guided_reading_saccade"),
                 saccade_slider,
                 format!("{}", (saccade_shown.round() as i32 + 1) * 10),
             ))
             .child(row(
-                tr!("experiments.guided_reading_opacity"),
+                tr!("settings.guided_reading_opacity"),
                 opacity_slider,
                 format!("{}%", opacity_shown.round() as i32),
             ))
             .into_any_element()
     }
 
-    /// The renderer's guided-reading parameters while the experiment is on.
+    /// The renderer's guided-reading parameters while the setting is enabled.
     pub(super) fn guided_reading(&self) -> Option<md::render::GuidedReading> {
         self.state
             .guided_reading_enabled
@@ -10728,6 +10717,43 @@ impl Waku {
             ),
         ]);
 
+        let guided_reading_row = settings_row(
+            "icons/book-open.svg",
+            tr!("settings.guided_reading_title"),
+            tr!("settings.guided_reading_description"),
+            toggle_switch(
+                "guided-reading-toggle",
+                self.state.guided_reading_enabled,
+                false,
+                theme,
+                cx,
+                {
+                    let enabled = self.state.guided_reading_enabled;
+                    move |this, _, cx| this.set_guided_reading_enabled(!enabled, cx)
+                },
+            ),
+            theme,
+            search,
+        )
+        .map(|row| {
+            let mut children = vec![row];
+            if self.state.guided_reading_enabled {
+                children.push(
+                    div()
+                        .px(px(20.0))
+                        .pb(px(10.0))
+                        .child(self.guided_reading_tuning(theme, cx))
+                        .into_any_element(),
+                );
+            }
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .children(children)
+                .into_any_element()
+        });
+
         // Rendered-content prefs get their own labeled card under the theme
         // card rather than joining its hairline-separated rows.
         let transcript_card = settings_row_card(
@@ -10786,6 +10812,7 @@ impl Waku {
                     theme,
                     search,
                 ),
+                guided_reading_row,
             ],
             theme,
         );

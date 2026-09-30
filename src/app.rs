@@ -3444,7 +3444,7 @@ pub struct Waku {
     sidebar_transparency_slider: Rc<SliderState>,
     /// The border-intensity slider's in-flight drag, same reason.
     border_intensity_slider: Rc<SliderState>,
-    /// The Guided reading experiment's three in-flight slider drags —
+    /// Guided reading's three in-flight slider drags —
     /// fixation, saccade, opacity — same reason.
     guided_reading_fixation_slider: Rc<SliderState>,
     guided_reading_saccade_slider: Rc<SliderState>,

@@ -1269,8 +1269,7 @@ pub struct AppSettings {
     /// Experimental: the quick-action dock that rises above the sidebar
     /// footer on hover. Defaults on in debug builds.
     pub sidebar_dock_enabled: bool,
-    /// Experimental: transcript prose shapes word-leading graphemes semibold
-    /// — the "guided reading" emphasis. Defaults on in debug builds.
+    /// Guided reading emphasizes word-leading graphemes in transcript prose.
     pub guided_reading_enabled: bool,
     /// How much of each word is emphasized: 1–5 mapping to ~20–60% of the
     /// word's graphemes.
@@ -1392,7 +1391,7 @@ impl Default for AppSettings {
             disabled_suggested_actions: BTreeSet::new(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
-            guided_reading_enabled: default_experiment_enabled(),
+            guided_reading_enabled: false,
             guided_reading_fixation: default_guided_reading_fixation(),
             guided_reading_saccade: default_guided_reading_saccade(),
             guided_reading_opacity: default_guided_reading_opacity(),
@@ -1907,7 +1906,7 @@ pub struct PersistedState {
     pub automations_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub sidebar_dock_enabled: bool,
-    #[serde(default = "default_experiment_enabled")]
+    #[serde(default)]
     pub guided_reading_enabled: bool,
     #[serde(default = "default_guided_reading_fixation")]
     pub guided_reading_fixation: u8,
@@ -2308,7 +2307,7 @@ impl PersistedState {
             disabled_suggested_actions: BTreeSet::new(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
-            guided_reading_enabled: default_experiment_enabled(),
+            guided_reading_enabled: false,
             guided_reading_fixation: default_guided_reading_fixation(),
             guided_reading_saccade: default_guided_reading_saccade(),
             guided_reading_opacity: default_guided_reading_opacity(),
