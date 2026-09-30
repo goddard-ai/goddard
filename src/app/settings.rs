@@ -1969,26 +1969,8 @@ impl Waku {
                 theme,
                 search,
             ),
-            setting_card(
-                "icons/compass.svg",
-                tr!("settings.sidebar_phase_groups"),
-                tr!("settings.sidebar_phase_groups_description"),
-                toggle_switch(
-                    "sidebar-phase-groups-toggle",
-                    self.state.sidebar_phase_groups,
-                    false,
-                    theme,
-                    cx,
-                    {
-                        let enabled = self.state.sidebar_phase_groups;
-                        move |this, _, cx| this.set_sidebar_phase_groups(!enabled, cx)
-                    },
-                ),
-                theme,
-                search,
-            ),
             self.state
-                .sidebar_phase_groups
+                .phase_routing_enabled
                 .then(|| {
                     setting_card(
                         "icons/eye-off.svg",
@@ -11502,12 +11484,6 @@ impl Waku {
             return;
         }
         self.state.sidebar_composer_drafts = enabled;
-        self.save();
-        cx.notify();
-    }
-
-    fn set_sidebar_phase_groups(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.state.sidebar_phase_groups = enabled;
         self.save();
         cx.notify();
     }

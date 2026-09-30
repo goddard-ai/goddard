@@ -1155,9 +1155,6 @@ pub struct AppSettings {
     /// Show a task's unsent composer draft on its own line under the sidebar
     /// row's title.
     pub sidebar_composer_drafts: bool,
-    /// Hoist recently active Planning tasks above date groups.
-    #[serde(default)]
-    pub sidebar_phase_groups: bool,
     #[serde(default)]
     pub sidebar_hide_phase_labels: bool,
     /// The color the sidebar's draft preview line wears.
@@ -1362,7 +1359,6 @@ impl Default for AppSettings {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             sidebar_composer_drafts: false,
-            sidebar_phase_groups: false,
             sidebar_hide_phase_labels: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
@@ -1817,8 +1813,6 @@ pub struct PersistedState {
     /// the sidebar row's title.
     #[serde(default)]
     pub sidebar_composer_drafts: bool,
-    #[serde(default)]
-    pub sidebar_phase_groups: bool,
     #[serde(default)]
     pub sidebar_hide_phase_labels: bool,
     /// The color the sidebar's draft preview line wears.
@@ -2281,7 +2275,6 @@ impl PersistedState {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             sidebar_composer_drafts: false,
-            sidebar_phase_groups: false,
             sidebar_hide_phase_labels: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
@@ -2707,7 +2700,6 @@ impl PersistedState {
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
-            sidebar_phase_groups: self.sidebar_phase_groups,
             sidebar_hide_phase_labels: self.sidebar_hide_phase_labels,
             sidebar_draft_preview_color: self.sidebar_draft_preview_color,
             dormant_after_days: self.dormant_after_days,
@@ -2851,7 +2843,6 @@ impl PersistedState {
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
-        self.sidebar_phase_groups = settings.sidebar_phase_groups;
         self.sidebar_hide_phase_labels = settings.sidebar_hide_phase_labels;
         self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
         self.dormant_after_days = settings.dormant_after_days;
@@ -4447,23 +4438,19 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_phase_options_default_off_and_persist_as_settings() {
+    fn sidebar_phase_labels_default_off_and_persist_as_settings() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
-        assert!(!defaults.sidebar_phase_groups);
         assert!(!defaults.sidebar_hide_phase_labels);
         assert!(!defaults.phase_routing_enabled);
         let mut state = PersistedState::empty();
         assert!(!state.phase_routing_enabled);
-        state.sidebar_phase_groups = true;
         state.sidebar_hide_phase_labels = true;
         state.phase_routing_enabled = true;
         let settings = serde_json::to_value(state.app_settings()).unwrap();
-        assert_eq!(settings["sidebar_phase_groups"], true);
         assert_eq!(settings["sidebar_hide_phase_labels"], true);
         assert_eq!(settings["phase_routing_enabled"], true);
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
-        assert!(restored.sidebar_phase_groups);
         assert!(restored.sidebar_hide_phase_labels);
         assert!(restored.phase_routing_enabled);
     }

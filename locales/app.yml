@@ -1649,14 +1649,10 @@ settings.sidebar_composer_drafts:
   en: Sidebar draft previews
 settings.sidebar_composer_drafts_description:
   en: Show a task's unsent composer draft under its title in the sidebar
-settings.sidebar_phase_groups:
-  en: Group recent Planning tasks
-settings.sidebar_phase_groups_description:
-  en: Move tasks still planning and active in the last 30 minutes above Today in Date view
 settings.sidebar_hide_phase_labels:
   en: Hide Planning chips on task rows
 settings.sidebar_hide_phase_labels_description:
-  en: Keep Planning in the title bar and group header without repeating it on task rows
+  en: Keep Planning in the title bar without repeating it on task rows
 settings.sidebar_draft_preview_color:
   en: Draft preview color
 settings.sidebar_draft_preview_color_description:

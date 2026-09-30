@@ -481,17 +481,11 @@ fn date_sidebar_groups(sessions: &[&AgentSession], today: NaiveDate) -> [Vec<Uui
     grouped_sessions
 }
 
-fn recent_planning_session(session: &AgentSession, now: u64) -> bool {
-    session.phase == Some(waku_protocol::routing::SessionPhase::Planning)
-        && now.saturating_sub(session.updated_at) < 30 * 60
-}
-
 fn sidebar_phase_marker_visible(
     phase_classification_enabled: bool,
     hide_phase_labels: bool,
-    grouped_recent_planning: bool,
 ) -> bool {
-    phase_classification_enabled && !(hide_phase_labels || grouped_recent_planning)
+    phase_classification_enabled && !hide_phase_labels
 }
 
 fn project_sidebar_groups(
@@ -3295,7 +3289,6 @@ impl Waku {
         );
         fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
-        fingerprint = mix(fingerprint, u64::from(self.state.sidebar_phase_groups));
         fingerprint = mix(fingerprint, u64::from(self.state.phase_routing_enabled));
         fingerprint = mix_uuid(
             fingerprint,
@@ -3323,12 +3316,6 @@ impl Waku {
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
             fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
             fingerprint = mix(fingerprint, u64::from(session.incognito));
-            if self.state.sidebar_phase_groups {
-                fingerprint = mix(
-                    fingerprint,
-                    u64::from(recent_planning_session(session, now)),
-                );
-            }
             fingerprint = mix(
                 fingerprint,
                 u64::from(session_dormant(session, now, dormant_threshold)),
@@ -3509,20 +3496,6 @@ impl Waku {
                     .map(|session| session.id)
                     .collect::<Vec<_>>();
                 sorted_sessions.retain(|session| !dormant_set.contains(&session.id));
-                if self.state.sidebar_phase_groups {
-                    let group = SidebarGroup::Planning;
-                    let ids = sorted_sessions
-                        .iter()
-                        .filter(|session| recent_planning_session(session, now))
-                        .map(|session| session.id)
-                        .collect::<Vec<_>>();
-                    let collapsed = self.sidebar_collapsed_groups.contains(&group);
-                    append_sidebar_group_rows(&mut rows, group, &ids, collapsed, None);
-                    if collapsed && !ids.is_empty() {
-                        collapsed_members.insert(group, ids);
-                    }
-                    sorted_sessions.retain(|session| !recent_planning_session(session, now));
-                }
                 let grouped_sessions = date_sidebar_groups(&sorted_sessions, today);
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
@@ -5391,16 +5364,6 @@ impl Waku {
         // The status line is shared: an unsent draft outranks the phase
         // marker — it is user-owned text — while the marker still shows on
         // the selected row, which never carries a draft preview.
-        // A recent, unpinned Planning task in Date view already inherits its
-        // phase from the Planning group header, so do not repeat the chip on
-        // that row. Older or otherwise ungrouped Planning tasks still follow
-        // the explicit hide-label setting.
-        let dormant = self.session_dormant_now(session);
-        let grouped_recent_planning = self.state.sidebar_phase_groups
-            && self.state.sidebar_grouping == SidebarGrouping::Date
-            && session.pinned_at.is_none()
-            && !dormant
-            && recent_planning_session(session, unix_time());
         let phase_marker = draft_preview
             .is_none()
             .then(|| {
@@ -5408,7 +5371,6 @@ impl Waku {
                     sidebar_phase_marker_visible(
                         self.phase_classification_enabled(),
                         self.state.sidebar_hide_phase_labels,
-                        grouped_recent_planning,
                     ),
                     session,
                 )
@@ -6920,25 +6882,6 @@ mod tests {
     }
 
     #[test]
-    fn recent_planning_group_expires_at_thirty_minutes() {
-        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        session.phase = Some(waku_protocol::routing::SessionPhase::Planning);
-        session.updated_at = 100;
-        assert!(recent_planning_session(&session, 100 + 30 * 60 - 1));
-        assert!(!recent_planning_session(&session, 100 + 30 * 60));
-        session.phase = Some(waku_protocol::routing::SessionPhase::Executing);
-        session.updated_at = 200;
-        assert!(!recent_planning_session(&session, 200));
-    }
-
-    #[test]
-    fn recent_planning_group_hides_redundant_sidebar_marker() {
-        assert!(!sidebar_phase_marker_visible(true, false, true));
-        assert!(!sidebar_phase_marker_visible(true, true, false));
-        assert!(sidebar_phase_marker_visible(true, false, false));
-        assert!(!sidebar_phase_marker_visible(false, false, false));
-    }
-
     #[test]
     fn date_groups_follow_last_updated_under_last_created_ordering() {
         use chrono::TimeZone;

@@ -19,7 +19,7 @@ pub(super) fn sidebar_phase_marker(
 
 impl Waku {
     pub(super) fn phase_classification_enabled(&self) -> bool {
-        self.state.sidebar_phase_groups || self.state.phase_routing_enabled
+        self.state.phase_routing_enabled
     }
 
     /// Track observed activity without evaluation calls or model changes.
