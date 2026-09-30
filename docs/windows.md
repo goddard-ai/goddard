@@ -1,146 +1,100 @@
 # Goddard on Windows
 
+Install Goddard for your user account, or use the portable build without an
+installer.
+
 ## Install
 
-Download `Goddard-<version>-x86_64-Setup.exe` (or the `aarch64` installer on an
-Arm device) from the [latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest)
-and run it. It installs per-user into `%LOCALAPPDATA%\Programs\Goddard`, so it never asks for
-administrator rights — which is also what lets Goddard update itself later
-without a UAC prompt.
+1. Open the [latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest).
+2. Download `Goddard-<version>-x86_64-Setup.exe`, or the
+   `Goddard-<version>-aarch64-Setup.exe` installer for an Arm device.
+   `<version>` is the release number shown in the asset name.
+3. Run the installer and launch Goddard. It installs into
+   `%LOCALAPPDATA%\Programs\Goddard` without administrator rights.
+4. Install and sign in to a coding-agent CLI, then check
+   **Settings → Providers** in Goddard.
 
-`https://github.com/goddard-ai/goddard/releases/latest/download/latest-windows.txt`
-names the current version if you want to script the download.
+You need Windows 10 version 1809 or newer, an x86_64 or Arm64 machine, and a
+Direct3D 11 driver supporting feature level 11_0 or newer. No separate Visual
+C++ redistributable is required.
 
-### Portable
+Windows may show a SmartScreen warning for an unsigned release. Check that
+it came from the project's GitHub release before choosing **More info → Run
+anyway**.
 
-`Goddard-<version>-<target>.zip` is the same build without an installer. Unpack it
-anywhere and run `goddard.exe`.
+## Portable installation
 
-**Keep the installation folder intact.** Goddard launches its daemon and
-Computer Use helpers from this directory and loads the bundled SDK DLL and
-`resources/` files. Moving `goddard.exe` out on its own leaves those unavailable.
-A shortcut is fine.
+Download the `.zip` ending in `x86_64-pc-windows-msvc.zip`, or
+`aarch64-pc-windows-msvc.zip` for Arm64, from the same release. Extract it into
+a folder you own and run `goddard.exe`.
 
-A portable copy still updates itself: the updater passes the running
-directory to the installer, so it replaces that copy in place rather than
-creating a second install.
-
-Goddard expects:
-
-- **Windows 10 version 1809 or newer**, or Windows 11.
-- **A Direct3D 11 driver at feature level 11_0 or newer.** GPUI renders
-  through DirectX and falls back to the Microsoft Basic Render Driver, so it
-  can run in a VM — see Troubleshooting if the window comes up black.
-- **x86_64 or aarch64.**
-
-Nothing else: Goddard links the C runtime statically, so there is no Visual C++
-redistributable to install first. That matters most on Arm devices, which
-rarely have the arm64 redistributable already.
-
-SmartScreen may warn about an unrecognized publisher on first launch when the
-release was not code-signed. Choose **More info → Run anyway**.
+Keep the extracted folder intact. Goddard needs its companion executables,
+libraries, and `resources/` folder. Create a shortcut if you want to launch
+it elsewhere; do not move just `goddard.exe`.
 
 ## Updating
 
-Goddard updates itself. It checks once per launch, and an available update
-appears in the sidebar footer; clicking it downloads the installer, verifies
-its signature, and runs it. Goddard closes, is replaced in place, and reopens.
-Turn the check off in **Settings → General → Automatic updates** — **Check for
-Updates…** in the app menu still works either way.
+Goddard checks for updates at launch. An available update appears in the
+sidebar footer. You can also choose **Check for Updates** from the app menu,
+or disable launch checks under **Settings → General → Automatic updates**.
 
-Updates are the same signed feed macOS uses, with one appcast per
-architecture:
+Updates are verified before installation. Goddard closes, installs the update,
+and reopens. Portable copies update in their existing folder. Downloading and
+running the latest installer is also a way to update manually.
 
-- `https://github.com/goddard-ai/goddard/releases/latest/download/appcast-windows-x86_64.xml`
-- `https://github.com/goddard-ai/goddard/releases/latest/download/appcast-windows-aarch64.xml`
+## Your data
 
-Every installer carries an EdDSA signature, and Goddard refuses one that does not
-verify against the public key built into it — so a compromised mirror or a
-tampered download cannot install anything. The preference itself lives in
-`%LOCALAPPDATA%\Goddard\updater.json`.
+Application files and saved task data are separate:
 
-## Where Goddard keeps its data
-
-| What | Path |
+| Data | Location |
 | --- | --- |
-| Tasks, sessions, transcripts | `%LOCALAPPDATA%\Goddard\app.db` |
-| Attachments and blobs | `%LOCALAPPDATA%\Goddard\blobs` |
-| Settings | `%USERPROFILE%\.goddard\app.json` |
+| Tasks and transcripts | `%LOCALAPPDATA%\Goddard\app.db` |
+| Attachments | `%LOCALAPPDATA%\Goddard\blobs` |
+| App settings | `%USERPROFILE%\.goddard\app.json` |
 
-Unpacking a new release over the old directory leaves all of it untouched.
+Updating or uninstalling the application does not delete these files or your
+project folders. Quit Goddard before copying its data for a backup.
 
-## Agent CLIs
+## Terminal and browser
 
-Goddard detects the provider CLIs on `PATH` and, because a fresh `PATH` may
-predate an install, also looks in the usual per-user prefixes:
-`%APPDATA%\npm`, `%USERPROFILE%\.bun\bin`, `%USERPROFILE%\.cargo\bin`,
-`%USERPROFILE%\scoop\shims`, and `%LOCALAPPDATA%\Microsoft\WindowsApps`.
+The integrated terminal uses PowerShell 7 when installed, then Windows
+PowerShell, then the system command shell. Use Ctrl+Shift+C and Ctrl+Shift+V
+for terminal copy and paste; Ctrl+C stays available to interrupt a command.
 
-Bare names resolve through `PATHEXT`, so the `claude.cmd` shim npm installs is
-found the same way `claude` would be in a shell. Nothing is spawned with a
-console window attached.
+The Browser panel uses Microsoft WebView2. It is included with Windows 11;
+on Windows 10, check that the WebView2 Runtime is installed. The desktop
+interface itself is rendered with GPUI.
 
-If a CLI is installed but not detected, set its path explicitly in
-**Settings → Providers**.
+The browser currently has no load-progress bar, its developer tools can be
+opened but not closed from Goddard, and pen, touch, and file drops into a page
+are not supported.
 
-## Terminal
+## Computer use
 
-The built-in terminal opens PowerShell 7 (`pwsh.exe`) when it is installed,
-then Windows PowerShell, then whatever `COMSPEC` names. Ctrl+Shift+C and
-Ctrl+Shift+V copy and paste so Ctrl+C stays available to the shell.
-
-## Browser
-
-The right panel's Browser tab runs on WebView2, which is in-box on Windows 11
-and evergreen-installed on Windows 10. Navigation, devtools, downloads, and
-pop-up handling behave as they do on macOS.
-
-Goddard hosts it in *visual* mode rather than as a child window: the page renders
-into a DirectComposition visual that GPUI hands out between its own content
-and its overlay plane, so menus, tooltips and dialogs composite above a live
-page instead of hiding it. That is also why the browser needs a working
-composition path — see the black-window note under Troubleshooting.
-
-Differences worth knowing:
-
-- **No load progress in the toolbar.** WebView2 reports no equivalent of
-  WebKit's `estimatedProgress`, so the bar stays empty while a page loads.
-- **Devtools open but do not toggle.** WebView2 offers no way to ask whether
-  its devtools window is open, or to close it, so the shortcut only opens and
-  refocuses it.
-- **Pen, touch and dragging files into the page are not wired up.** Visual
-  hosting delivers no input of its own; Goddard forwards mouse, wheel, cursor and
-  focus, and leaves `SendPointerInput` and the external drop target for later.
-  Keyboard and IME are unaffected — those still reach the page directly once
-  it holds focus.
-
-## Computer Use
-
-Debug builds expose Computer Use for supported providers through the bundled
-Cua Driver SDK. It operates within the current interactive Windows desktop;
-elevated apps and secure desktops retain Windows restrictions. See
-[Computer Use](computer-use.md) for the runtime, packaging, and validation.
-
-## What is not available yet
-
-- **Terminals over the daemon's browser client.** The desktop terminal works;
-  a remote browser client connected to a Windows daemon cannot open one.
+Computer use is experimental and operates within your current desktop.
+Windows can restrict access to elevated apps and secure desktops. See
+[Computer use](computer-use.md) for setup and permissions.
 
 ## Troubleshooting
 
-**The window opens black, or the app exits at startup.** Goddard needs a working
-Direct3D 11 device. Update the GPU driver; in a VM, enable 3D acceleration.
+**The window is black, or the app exits at startup.** Update your graphics
+driver. In a virtual machine, enable 3D acceleration and check that a
+Direct3D 11 device is available.
 
-**A provider is listed as not installed.** Open a new PowerShell window and run
-the CLI by name. If the shell cannot find it either, the install did not put a
-shim on `PATH`. If the shell finds it but Goddard does not, set the binary path in
-**Settings → Providers** and file an issue with the install method.
+**A provider is shown as not installed.** Open a new PowerShell window and
+run the CLI by name. If it is missing there too, finish installing it and
+check its `PATH` setup. If PowerShell can run it but Goddard cannot, set its
+binary path in **Settings → Providers**.
 
-**Git-backed features do nothing.** Goddard shells out to `git`. Install Git for
-Windows and make sure `git --version` works in a new terminal.
+**Git features do not work.** Install Git for Windows and check that
+`git --version` works in a new terminal.
 
-**The update never arrives.** Goddard reaches the feed with the `curl.exe` in
-System32; a proxy or filter that blocks GitHub Releases blocks updates too.
-**Check for Updates…** reports the reason, where the once-per-launch check
-stays quiet. Downloading the installer by hand and running it is always
-equivalent.
+**Updates do not arrive.** A proxy or network filter blocking GitHub Releases
+can block updates. Use **Check for Updates** to see the error, or download
+the installer from the latest release manually.
+
+## Uninstalling
+
+For an installed copy, use **Settings → Apps** in Windows. For a portable
+copy, delete its extracted application folder. Task data and settings are
+stored separately; removing the app does not remove your projects.

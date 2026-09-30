@@ -1,6 +1,6 @@
 //! The Diagnostics page's backing data: one normalized feed over the app's
 //! reported-error journal and the daemon's forensic logs — the on-disk
-//! signals `docs/daemon-diagnostics.md` catalogs, read for the interface.
+//! signals `.agents/docs/daemon-diagnostics.md` catalogs, read for the interface.
 //!
 //! Writing happens in `record_app_error`, reached by every error toast; the
 //! page itself only reads, merging the three files at load time so no

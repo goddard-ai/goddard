@@ -1,38 +1,8 @@
 # Changelog
 
-All notable changes to Goddard — desktop app and everything shared. Changes
-only a mobile-app user would notice live in
-[CHANGELOG.mobile.md](CHANGELOG.mobile.md) instead. This file is the
-**source of truth for the release
-notes shown in the in-app updater**: [`scripts/release.ts`](scripts/release.ts)
-extracts the section whose heading matches the version being released
-(`MARKETING_VERSION`) and publishes it next to the update, so Sparkle shows it in
-the update prompt.
-
-Format follows [Keep a Changelog](https://keepachangelog.com). Don't edit this
-file directly for pending changes — add a `.changelog/<prefix>-<slug>.md`
-fragment per change (one bullet per file) so parallel work never conflicts
-here. The required prefix picks the release-notes section: `highlight-` for
-headline features, `feat-` for other features, `exp-` for experimental
-opt-ins (emitted under `### Experiments` with a bold `[Experimental]` marker;
-experiments are never highlights), `fix-` for bugs that existed in a released
-version. A non-highlight fragment may tag a topic group as a second segment —
-`feat-<group>-<slug>.md` — and grouped bullets nest under a `- **Group**`
-parent inside their `###` section; the group vocabulary and its emitted
-order live in [`scripts/changelog.ts`](scripts/changelog.ts), and a group
-used by a single fragment folds back into the flat tail. Every `highlight-`
-fragment must embed a screenshot or
-recording — `![](media/<slug>.{png,gif,mp4,mov})` with the asset at
-`.changelog/media/<slug>.<ext>` — which collect moves to
-`assets/release-notes/<version>/` and rewrites in the emitted section. At
-release time `bun run changelog` folds every fragment into a `## [<version>]`
-section for the version in `Cargo.toml`, grouped under `### Highlights`,
-`### Features`, `### Experiments`, and `### Fixed`; preview the fold with
-`bun ./scripts/changelog.ts check`.
-
-Write release notes for the final product users receive, not the development
-history. When a feature is still unreleased, fold its fixes and refinements into
-the original feature bullet instead of adding separate entries for them.
+Release notes for Goddard Desktop and features shared across clients.
+Changes specific to the mobile app are in
+[the mobile changelog](CHANGELOG.mobile.md).
 
 ## [0.13.0]
 

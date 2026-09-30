@@ -1,20 +1,21 @@
-# Goddard Wiki
+# Goddard user guide
 
-Everything a user might want to know about Goddard: what it is, what it does,
-how it works, and whether it fits the way you want to work.
+Use this guide to choose an agent, start tasks, give feedback, and review
+changes. For installation, see the [README](README.md#install),
+[Linux guide](docs/linux.md), or [Windows guide](docs/windows.md).
 
 ## What is Goddard?
 
 Goddard is a fast, native desktop app for working with local coding agents.
 Instead of living inside one agent's terminal UI, you run **Claude Code, Codex,
-Cursor, OpenCode, and nine other agent CLIs** side by side from one interface —
+Cursor, OpenCode, and other agent CLIs** side by side from one interface —
 each task gets a real transcript, a diff view, a terminal, a file browser, and
 Git tooling, while the agent CLI does the actual work underneath.
 
-It is written in Rust on top of [GPUI](https://github.com/zed-industries/zed)
-(the framework that powers the Zed editor), which is why it stays smooth on
-long transcripts and high-refresh displays where Electron and web clients tend
-to stutter.
+It is written in Rust on top of [GPUI](https://gpui.rs/)
+(the framework that powers the Zed editor). GPU rendering and virtualized
+transcripts help keep the interface responsive without a browser engine
+rendering the desktop interface.
 
 **Goddard is not an agent.** It does not have its own model or subscription.
 It drives the agent CLIs you already have installed and authenticated, over
@@ -28,7 +29,6 @@ Cursor, or other agent subscription is what you pay with.
 | Price | Free, open source (GPL v3) |
 | Account required | No Goddard account. You sign in through each agent's own CLI |
 | Platforms | macOS (signed `.dmg`), Linux (install script, Wayland + X11), Windows (per-user installer or portable zip) |
-| Download size | ~80 MB |
 | Where is my data | Locally on your machine — no Goddard cloud service |
 | Languages | English, Japanese, Simplified Chinese |
 | Updates | Automatic, cryptographically signed, with rollback on Linux |
@@ -58,52 +58,13 @@ Cursor, or other agent subscription is what you pay with.
 - Rely on a specific agent's IDE extension features (inline completions in an
   editor, etc.) — Goddard is a task-and-transcript app, not a code editor.
 
-## Recently shipped
-
-The app is under heavy development — the last four days alone landed ~220
-commits. Highlights, grouped by area:
-
-- **GitHub:** an in-app pull-request and issue browser per project, PR state
-  with check/review status on sidebar rows, and starting a task straight from
-  a PR or issue (including "fix failing checks").
-- **Git and worktrees:** a Git panel (stage, commit, push, sync with
-  rebase-or-merge), moving a local task into a named worktree, worktree state
-  preserved across archiving, and a sync notice when a new task's checkout
-  trails upstream.
-- **Terminals:** a sidebar Terminals group with repo-named rows, live cwd and
-  command status from shell integration, ⌘J focus, ⌘⇧K scrollback clear, a
-  separate terminal font size, and ⌘K palette access even from the terminal.
-- **Composer:** Markdown highlighting with list continuation and ordered-list
-  renumbering, file drops anywhere in the session column, transcript
-  annotations (⌘L or ⌥-click), an empty-prompt Continue for interrupted
-  turns, and per-row queued follow-ups.
-- **Navigation:** Big Picture (⌘0), ⌘1–9 sidebar jumps with hold-to-reveal
-  chips, Ctrl+Tab task switching with status glyphs, a ⌘N project switcher in
-  New Task drafts, ⌘⌥-arrow turn navigation, ⌘D to the next unread
-  completion, ⌘⇧D mark-unread-and-next, and optional three-finger swipe.
-- **Transcript:** clipped long prompts with Show more, shift-click selection
-  extension, changed-file cards that open files and preview diffs on hover,
-  and "Annotation N" citation resolution.
-- **Customization:** sixteen new theme palettes (Gruvbox, Everforest,
-  Kanagawa, Zenburn, Poimandres, GitHub light/dark, Dracula, Rosé Pine
-  Dawn/Moon, Kansō Zen/Pearl, Warm Burnout light/dark), split light/dark
-  theme slots with a
-  match-system toggle, UI and code font pickers, a completion-sound picker
-  with audition and volume, and a sidebar-transparency toggle.
-- **Providers and daemon:** Devin CLI support, install/sign-in actions on the
-  Providers page, the `goddard-agent` agent-tools setting, and daemon resilience
-  (unresponsive-daemon detection, provider-process guarding, automatic
-  remote-session reconnect).
-- **Polish:** menus and dialogs that reveal from their anchor, shortcut hints
-  on tooltips and menu items, an in-app shortcut cheatsheet, smoothed
-  (squircle) corners throughout, and ⌘H to hide on macOS.
-
 ## Getting started
 
 ### Install
 
-- **macOS:** download the signed `.dmg` from [goddardai.org](https://goddardai.org). It
-  updates itself.
+- **macOS:** download the `.dmg` from the
+  [latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest),
+  open it, and drag Goddard to Applications.
 - **Linux:** `curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh` — installs into
   `~/.local` without root, adds an applications-menu entry, and keeps itself
   updated. Requires glibc 2.35+ (Ubuntu 22.04, Debian 12, Fedora 36 or newer),
@@ -125,35 +86,28 @@ right in the app.
 
 ## Supported agents
 
-Thirteen providers are wired in behind one shared interface:
+Goddard supports Claude Code, Codex, Cursor, Devin, OpenCode, and other agent
+CLIs. **Settings → Providers** shows the providers available in your build,
+with installation and sign-in help.
 
-| Provider | CLI command | Mid-turn steering | Interactive approvals | Rewind & branch | Model picker | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude` | yes | yes | yes | fixed catalog | |
-| Codex CLI | `codex` | yes | yes | yes | yes | Goals, `/fast`, Computer Use |
-| Cursor CLI | `cursor-agent` | yes | yes | yes | yes | |
-| Devin CLI | `devin` | yes (transport) | yes | no | yes | |
-| DeepSeek Harness | `dsh` | — | — | — | yes | Agent presets: Standard, Code, Minimal, Creator |
-| Fx | `fx` | no | yes | no | yes | Vercel's agent |
-| Grok Build | `grok` | yes | yes | yes | yes + effort | |
-| Kimi Code | `kimi` | yes (transport) | yes | no | yes | |
-| Amp | `amp` | yes | no | yes | no (modes) | Full access only |
-| OpenCode | `opencode` | yes | yes | yes | yes + effort | |
-| OpenCode 2 | `opencode2` | yes | yes | yes | yes + effort | |
-| Pi | `pi` | yes | no | yes | yes | Full access only (Pi has no permission system) |
-| Oh My Pi | `omp` | yes | runs `--yolo` | yes | yes | Full access only |
-
-What that means in practice: whatever is running underneath, you get the same
-transcript, the same permission prompts, the same model picker, and the same
-rewind/fork controls — with per-provider gaps surfaced honestly instead of
-silently emulated.
+Each provider has its own model catalog and capabilities. Steering, interactive
+approvals, rewind, and fork are available where the provider supports them.
+Some providers offer only full access, so check the task's access controls
+before starting work.
 
 ### Resuming sessions from the terminal
 
 Conversations you started directly in an agent CLI are not stranded. The
 command palette's **Resume…** (or the `/resume` slash command) lists sessions
 each provider has on disk and imports them into Goddard with full session
-continuity, across every provider.
+continuity where the provider supports session import.
+
+### Switching providers within a task
+
+Switch providers between turns to continue the same task with another agent.
+For long conversations, Goddard gives the new agent a compact history index
+so it can read the turns it needs on demand. Returning to an earlier provider
+can resume its previous session with the intervening context.
 
 ## Core concepts
 
@@ -213,10 +167,6 @@ is told its working directory changed.
 - **Right panel:** tabbed surfaces — Review (diff), Files, Terminal, Browser —
   plus panels for background work and environment info. Any tab can maximize
   to fill the window, and Markdown files get a fullscreen reading mode.
-- **Big Picture (⌘0):** an overlay of the tasks most worth a glance — waiting
-  on input, unread completions, running work — each with a live tail of its
-  transcript and a docked composer you can reply from without leaving the
-  overlay.
 - An **unseen-completion bell** in the top bar collects finished turns you
   haven't looked at yet.
 
@@ -357,6 +307,9 @@ stalled, usage-limited, budget-exhausted, and complete.
 
 ## Git integration
 
+The Git panel is experimental; enable it under **Settings → Experiments**
+to use the commit, sync, and landing controls described below.
+
 - **Git panel:** changed files with stage/unstage, commit list, unpushed
   markers, push, and **Sync changes** — `git pull --rebase` by default, or
   merge if you prefer (a setting). Rebase/merge conflicts surface with an
@@ -364,9 +317,7 @@ stalled, usage-limited, budget-exhausted, and complete.
   conflict to the agent.
 - **Commit dialog:** Commit, Commit and push, or Push, with an
   include-unstaged toggle. Write your own subject or leave it empty and
-  Goddard generates one — by running the session's own agent CLI once,
-  headlessly, pinned to that provider's cheapest tier (Claude → Haiku, Codex →
-  gpt-5.6-luna) so generation stays fast and nearly free.
+  Goddard generates one through the task's provider.
 - **Branch picker:** search, switch, and create branches, with "checked out in
   another worktree" marked.
 - **Review surface:** diff the last turn, any turn, uncommitted/staged/
@@ -376,6 +327,9 @@ stalled, usage-limited, budget-exhausted, and complete.
   panel alongside its Task ID and agent CLI thread ID (both copyable).
 
 ## GitHub integration
+
+Enable the GitHub experiment under **Settings → Experiments** and sign in
+to `gh` on the machine running your agents.
 
 For projects backed by a GitHub repo, a **GitHub** entry in the sidebar opens
 a pull-request and issue browser in place of the transcript — state filters,
@@ -465,8 +419,8 @@ carried by color alone. One honest limitation: GPUI does not yet expose a
 screen-reader tree, so VoiceOver and equivalents are not supported.
 
 **Settings → General:** automatic updates, anonymous usage-data sharing
-(off by default — and prompts, responses, project names, and file paths are
-never collected even when on), LaTeX math rendering, Markdown preview,
+(prompts, responses, project names, and file paths are
+never collected), LaTeX math rendering, Markdown preview,
 open-at-last-prompt, sync-with-merge, three-finger swipe navigation, sidebar
 shortcut tags, and a completion sound (with volume) that plays when a task
 you're not viewing finishes.
@@ -510,56 +464,34 @@ queued, since the task isn't done waiting on you. The sidebar marks unseen
 completions as unread until you look at them, and those unread stamps survive
 restarts.
 
-## Architecture: daemon, web, and mobile
+## Remote work and delegation
 
-Goddard Desktop is an RPC client of **`goddard-daemon`**, a standalone process
-that owns task data, transcripts, attachments, provider processes, and all
-filesystem/Git operations. The desktop keeps only presentation state. That
-split is what makes the other clients possible:
+Goddard's daemon runs the agents and owns workspace files. Desktop, web, and
+mobile clients can connect to a daemon on another machine, so you can direct
+work on a host you control. That host must stay on for its agents to run.
 
-- **Expose the daemon** (Settings → Daemon): the managed daemon can listen on
-  a fixed port beyond loopback with an explicit allowlist of browser origins
-  and a stable authentication token. The token grants full control — treat it
-  like a password, and use `wss://` through a trusted TLS proxy outside a
-  private network.
-- **Goddard Web** is a browser client that connects to an exposed daemon over
-  that authenticated WebSocket — same tasks, transcripts, diffs, and
-  permissions, rendered in the browser. It includes a **daemon-host file
-  picker**, so you can browse the remote machine's folders to open a project
-  or attach files to a prompt.
-- **Goddard Mobile** (iOS/Android, Expo) connects to one or more remote
-  daemons the same way; tokens are stored in the device keychain.
-- **Agent tools** (daemon setting): sessions can get a session-scoped
-  `goddard-agent` command that lets one agent create tasks and send messages to
-  other tasks — agent-to-agent delegation, marked in the target transcript.
-- The desktop can also **connect to an externally managed daemon** (headless
-  host, VM, container): files, diffs, Git, skills, usage, and attachments all
-  work over RPC. Two things still need a local daemon on the desktop: picking
-  a project folder on the remote host (the web client's daemon file picker
-  covers this case) and PTY terminals.
-- The connection is built to fail well: an unresponsive daemon is detected and
-  retried with backoff, remote sessions reconnect automatically after
-  interruptions, provider processes are guarded against daemon death, and
-  daemon failures surface in the UI where they would otherwise cause silent
-  damage.
+**Settings → Daemon** controls remote access. Keep the authentication token
+private, allow only the browser origins you need, and use a trusted encrypted
+connection outside a private network.
+
+With agent tools enabled and your permission, agents can spin off new tasks
+and send messages to existing tasks. Each new task has its own transcript;
+messages sent by an agent are attributed in the target task.
+
+Use `/side` to open a separate chat alongside a task, or `/side <prompt>` to
+start with a question. Side chats can inspect the parent conversation without
+adding their own discussion to the main transcript.
 
 ## Privacy and data storage
 
-- **Local by default.** Projects, conversations, settings, and attachments
-  live on your machine. There is no Goddard account and no required remote
-  service.
-- On macOS/Linux, app state lives under `~/.goddard/` (`app.json` for settings;
-  projectless workspaces under `~/.goddard/projects/`, their zipped archives
-  under `~/.goddard/archives/`); daemon provider and Computer Use settings in
-  `~/.goddard/settings.json`. On Windows, task data is
-  `%LOCALAPPDATA%\Goddard\app.db`, blobs alongside it, settings in
-  `%USERPROFILE%\.goddard\app.json`.
-- Optional anonymous analytics cover feature usage and reliability only — the
-  toggle is off by default and prompts, responses, project names, and file
-  paths are never included.
-- Goddard holds **no provider API keys**. Authentication is whatever each
-  agent CLI does for itself; even commit-message generation and title
-  generation go through the CLI binary rather than a Goddard-held key.
+Projects, task history, settings, and attachments are stored on your machine,
+or on a daemon host you control. There is no required Goddard account or cloud
+sync service. Your coding agents still send requests to their own providers.
+
+Optional inference features such as Jev and voice briefings use the services
+you configure. Anonymous product analytics can be controlled under
+**Settings → General**; prompts, responses, project names, and file paths are
+not included in those analytics.
 
 ## Updates
 
@@ -574,15 +506,13 @@ same Ed25519/EdDSA release signature before installing:
 - **Windows:** downloads and runs the verified installer, which replaces the
   app in place (including portable installs).
 
-## Computer Use (experimental)
+## Computer use (experimental)
 
-Debug builds can give supported providers (Codex, OpenCode, OpenCode 2, Grok,
-Pi) desktop control through the bundled Cua Driver SDK: agents get `js`/`js_reset`
-REPL tools that can observe windows, move the cursor, click, and type — with a
-live preview in the app. On macOS it requires Screen Recording and
-Accessibility grants to a separate, isolated helper process; grants can be
-scoped per-task or always-allowed per app. It is a development-only feature —
-release builds clamp the flag before any driver starts.
+Supported agents can observe and interact with local apps after you enable
+computer use and approve access. The feature has its own permissions, separate
+from the task's ordinary coding-agent access mode. Follow the
+[computer-use guide](docs/computer-use.md) for setup, platform limits, and
+troubleshooting.
 
 ## Keyboard shortcut reference
 
@@ -595,7 +525,6 @@ in-app shortcuts dialog — resolved from the live keymap — is authoritative.
 | New project | ⌘O |
 | Command palette | ⌘K |
 | File finder | ⌘P |
-| Big Picture | ⌘0 |
 | Jump to task 1–9 | ⌘1–⌘9 (hold ⌘ to see the chips) |
 | Navigate back / forward | ⌘[ / ⌘] |
 | Previous / next turn | ⌘⌥↑ / ⌘⌥↓ |
@@ -633,7 +562,7 @@ in-app shortcuts dialog — resolved from the live keymap — is authoritative.
 | Embedded browser | WebKit | — | WebView2 (no load-progress bar; devtools open-only; no pen/touch/file-drop yet) |
 | Integrated terminal | login shell | login shell | PowerShell 7 → Windows PowerShell → COMSPEC |
 | In-app updates | Sparkle | signed, with rollback | signed installer |
-| Computer Use | debug builds | debug builds | debug builds |
+| Computer use | experimental | experimental | experimental |
 | Remote-daemon terminal for browser clients | yes | yes | not yet |
 | Three-finger swipe navigation | yes | — | — |
 
@@ -684,14 +613,14 @@ No — it drives them. You need at least one agent CLI installed and signed in.
 Goddard replaces each CLI's terminal interface with a shared native one.
 
 **Is it native or another Electron shell?**
-Native down to the frame — Rust on GPUI, the GPU-accelerated framework behind
-Zed. No Electron, instant launch, and scrolling that holds up on a 120 Hz
-display through long transcripts.
+The desktop interface is written in Rust with GPUI and rendered on the GPU.
+It is not WebView-based; the separate Browser panel uses a platform WebView
+when you open a website.
 
 **How is it different from an editor with AI built in?**
-An editor with AI ties you to one provider inside one editor. Goddard sits
-alongside your existing setup and runs the agents you already subscribe to —
-you pick the best tool per task, not the one bundled in.
+Goddard focuses on directing tasks across agents and projects, reviewing their
+changes, and keeping parallel work isolated. Use it alongside your preferred
+editor and choose a provider for each task.
 
 **Do my agent's own config still work — MCP servers, hooks, AGENTS.md?**
 Yes. Goddard launches the real CLI through its native session protocol, so the
@@ -699,7 +628,7 @@ agent loads its own configuration, MCP servers, hooks, skills, and project
 instructions exactly as if you'd run it in a terminal.
 
 **Do I pay Goddard anything?**
-No. It's free (~80 MB download) and GPL-licensed. "Bring your own
+No. It's free and GPL-licensed. "Bring your own
 subscription" is literal — there's no bundled plan or markup, and your agent
 provider bills exactly as if you used the CLI directly. Your existing plans,
 rate limits, and API keys apply unchanged.
@@ -714,10 +643,8 @@ window is closed to another task, and the daemon keeps sessions resumable, but
 they still need your machine (or your daemon host) to be on.
 
 **If I quit Goddard, do I lose my sessions?**
-No. Tasks, transcripts, drafts, and queued follow-ups are persisted locally
-and reopen where you left them. Idle provider processes are reaped after
-about 30 minutes, but that's invisible — the next prompt resumes the native
-session.
+No. Tasks and transcripts are saved so you can reopen them. Resume behavior
+depends on the provider; quitting can interrupt work that is still running.
 
 **Can I use it on a server/headless machine?**
 Yes: run `goddard-daemon` on the host, expose it with `--allow-non-loopback`, an
@@ -735,8 +662,8 @@ Yes — that's the core design. Independent tasks run simultaneously, each in
 its own workspace or worktree, and keep streaming in the background.
 
 **Can one agent talk to another?**
-With the daemon's Agent Tools setting enabled, sessions get a `goddard-agent`
-command that can create tasks and send messages to other tasks.
+With Agent Tools enabled and your permission, agents can create new tasks
+and send messages to existing tasks.
 
 **Can I import a session I started in the terminal?**
 Yes — command palette → Resume… lists resumable CLI sessions per provider.
@@ -752,8 +679,9 @@ before a turn; Fork copies a session at any point. Both use provider-native
 mechanisms where they exist.
 
 **Does it work offline?**
-The app does; your agent's model calls obviously don't. Everything except the
-provider round-trip is local.
+You can browse saved tasks and local files offline. Hosted agent models,
+GitHub workflows, updates, and configured inference services need a network
+connection.
 
 **Can I export or back up my data?**
 There's no built-in export tool — but there's also no lock-in. Everything is
@@ -764,17 +692,17 @@ on Windows. Provider transcripts also remain in each CLI's own session store
 
 **Can I open multiple windows?**
 No — Goddard is a single-window app by design. Parallel work lives in
-sidebar tasks, ⌘1–9 jumps, the Ctrl+Tab switcher, and Big Picture (⌘0)
-rather than separate windows. Window size, position, and display are restored
-across launches.
+sidebar tasks and the task switcher. Window size, position, and display are
+restored across launches.
 
 **Can I customize the keybindings?**
 Not yet — the keymap is fixed (and compiled), so there's no rebinding UI or
 config file today. Themes, fonts, and sizes are the customization surface.
 
 **Is there telemetry?**
-Optional, anonymous, off by default — feature-usage and reliability data only,
-never prompt/response content, project names, or file paths.
+Anonymous feature-usage and reliability analytics can be disabled under
+Settings → General. They do not include prompts, responses, project names,
+or file paths.
 
 **Which permission mode should I use?**
 Supervised if you want to approve every action; Auto-accept edits to let file
@@ -784,5 +712,5 @@ hands-off runs (required for Pi, Oh My Pi, and Amp).
 
 **How do I report a bug or contribute?**
 The project is open source (GPL-3.0) on GitHub — open an issue there, or join
-the Discord linked from the site's menu. See CONTRIBUTING.md for the
-development workflow.
+the Discord linked from the site's menu. See [Contributing](CONTRIBUTING.md)
+for the development workflow.

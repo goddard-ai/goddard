@@ -75,7 +75,7 @@ const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const CURSOR_BLINK_PAUSE: Duration = Duration::from_millis(300);
 
 /// The full table, with the AppKit selector each chord answers to, is in
-/// `docs/text-field-keys.md`.
+/// `.agents/docs/text-field-keys.md`.
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, Some("TextInput")),

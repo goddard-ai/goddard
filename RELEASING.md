@@ -49,11 +49,9 @@ The release runs on [Bun](https://bun.sh) and needs
 Updates are signed with an ed25519 key; the private half stays in the login
 keychain and the public half ships in Info.plist as `SUPublicEDKey`.
 
-**This Mac already has the key** — Goddard signs with the same default-account
-Sparkle key as kero, and the matching public key is already in Info.plist.
-Nothing to do.
-
-On a fresh machine, restore the key from the password-manager backup with the
+Use the existing release signing key; generating a replacement would prevent
+installed clients from trusting updates. On a fresh machine, restore the key
+from the maintainers' backup with the
 Sparkle tools (they land in `~/Library/Caches/goddard-build/sparkle/<version>/bin`
 after any build, or download the release from
 [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases)):
@@ -116,12 +114,16 @@ All release prep lands on `dev`; `main` only ever fast-forwards to it, so it
 never carries a commit `dev` lacks. The one exception is publishing the draft
 GitHub release at the end — that stays a human's click.
 
-1. **Rebase `dev` onto `main`** so its commits replay on top of any hotfixes:
+1. **Check the branch relationship** before preparing the release:
    ```sh
-   git checkout dev && git rebase main
+   git fetch origin
+   git merge-base --is-ancestor origin/main dev
    ```
-   Rebasing rewrites `dev`'s SHAs — check for `refs/notes/qa` approvals first,
-   since they bind to commit SHAs and a rewrite orphans them.
+   A zero exit status means `dev` contains the current published branch.
+   If it fails, reconcile the branches before continuing. Keep `dev` in its
+   own worktree, and preserve every commit through the newest QA approval:
+   approvals under `refs/notes/qa` bind to commit SHAs and are lost if those
+   commits are rewritten.
 2. **Audit the changelog** — review the feature and fix commits since the last
    release tag:
    ```sh
@@ -188,9 +190,10 @@ GitHub release at the end — that stays a human's click.
    This creates the `## [<version>]` section for the Cargo version in each
    changelog that has fragments and deletes the consumed ones. Before committing
    or tagging, review the new desktop and mobile sections as complete release
-   notes using the [changelog writing guidance](.agents/docs/changelog.md#write-for-the-reader).
-   Remove unexplained jargon, combine related entries, and check each claim
-   against what actually ships. Commit the reviewed notes with the version bump
+   notes. Describe what users can do or which problem is fixed, name the
+   relevant screen, and include opt-in requirements or limits. Remove
+   unexplained jargon, combine related entries, and check each claim against
+   what actually ships. Commit the reviewed notes with the version bump
    (`chore: release v<version>`).
 7. **Promote `dev` to `main`** — `dev` is a shared branch, so commits can land
    after the audit. Re-check the delta first, and give any new arrival the same
@@ -413,7 +416,7 @@ next.
 
 ## Notes
 
-- **Two artifacts per release:** the notarized `.dmg` (what people download)
+- **macOS release artifacts:** the notarized `.dmg` (what people download)
   and a `.zip` (what Sparkle installs, plus `.delta` files against recent
   builds). Only the zip family appears in the appcast; point download buttons
   at the DMG.
