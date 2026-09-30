@@ -69,13 +69,40 @@ Long transcripts are virtualized so rendering work stays proportional to
 what is visible. Filesystem, Git, and provider operations run off the UI
 thread, keeping agent work from blocking the interface.
 
-## Get started
+## Install
 
-1. Download Goddard from [GitHub Releases](https://github.com/goddard-ai/goddard/releases).
-   See the installation guides for [Linux](docs/linux.md) and
-   [Windows](docs/windows.md).
-2. Install and sign in to at least one supported agent CLI.
-3. Open Goddard, check **Settings → Providers**, and start a task in your
+### macOS
+
+Download the `.dmg` from the
+[latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest).
+Open it and drag Goddard to Applications, then launch Goddard.
+
+### Linux
+
+Run this command to install the latest release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh
+```
+
+The installer selects your architecture, installs into `~/.local` without
+root, and adds Goddard to your applications menu. Requires glibc 2.35+, a
+working Vulkan or OpenGL driver, and x86_64 or aarch64. See the
+[Linux guide](docs/linux.md) for more options.
+
+### Windows
+
+Download and run `Goddard-<version>-x86_64-Setup.exe` from the
+[latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest),
+or choose `Goddard-<version>-aarch64-Setup.exe` for an Arm device.
+Installation is per-user and needs no administrator rights.
+Requires Windows 10 version 1809 or newer.
+See the [Windows guide](docs/windows.md) for portable installation.
+
+## Start your first task
+
+1. Install and sign in to at least one supported agent CLI.
+2. Open Goddard, check **Settings → Providers**, and start a task in your
    project folder or a new worktree.
 
 Goddard uses the agent CLIs you install and authenticate. No Goddard account
