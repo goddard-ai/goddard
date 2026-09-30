@@ -24,9 +24,14 @@ use waku_protocol::{DaemonChildKind, DaemonChildSample, DaemonSessionSample, Dae
 /// One sample per minute keeps the process-table walk cheap while catching
 /// growth between turns; eviction leaks move on hour timescales anyway.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
-/// ~512 KB at ~150 bytes a line is several days of minute-cadence samples;
-/// the tail rewrite keeps the freshest half. The panic log shares the cap.
-const STATS_FILE_CAP: u64 = 512 * 1024;
+/// Session rows are the line's bulk once hundreds of tasks accumulate — the
+/// leak signal lives in the heaviest sessions, so disk lines keep only the
+/// top rows by resident bytes and count the rest in `sessions_omitted`.
+const STATS_SESSION_ROWS: usize = 16;
+/// ~16 MB at ~10–20 KB a line (the counter maps dominate once sessions are
+/// capped) is roughly a day of minute-cadence samples; the tail rewrite
+/// keeps the freshest half. The panic log shares the cap.
+const STATS_FILE_CAP: u64 = 16 * 1024 * 1024;
 const STATS_FILE_NAME: &str = "daemon-stats.jsonl";
 const PANIC_FILE_NAME: &str = "daemon-panics.jsonl";
 
@@ -90,6 +95,58 @@ struct StatsLine {
     sample: DaemonStatsSample,
     #[serde(default)]
     shutdown: bool,
+    /// Resident/running session rows dropped to keep the line small — the
+    /// full sample still answers `getDaemonStats`; this is disk-only.
+    #[serde(default, skip_serializing_if = "no_sessions_omitted")]
+    sessions_omitted: u32,
+}
+
+fn no_sessions_omitted(count: &u32) -> bool {
+    *count == 0
+}
+
+/// The sample as written to disk: session rows sorted by resident size and
+/// capped at `STATS_SESSION_ROWS`, plus how many were dropped. The in-memory
+/// `latest` keeps the full list.
+fn sample_for_disk(sample: &DaemonStatsSample) -> (DaemonStatsSample, u32) {
+    let mut trimmed = sample.clone();
+    let omitted = trimmed.sessions.len().saturating_sub(STATS_SESSION_ROWS);
+    if omitted > 0 {
+        trimmed
+            .sessions
+            .sort_by(|a, b| b.resident_bytes.cmp(&a.resident_bytes));
+        trimmed.sessions.truncate(STATS_SESSION_ROWS);
+    }
+    (trimmed, omitted as u32)
+}
+
+fn write_sample(
+    path: &Path,
+    boot: &str,
+    sample: &DaemonStatsSample,
+    shutdown: bool,
+) -> std::io::Result<()> {
+    write_sample_capped(path, boot, sample, shutdown, STATS_FILE_CAP)
+}
+
+fn write_sample_capped(
+    path: &Path,
+    boot: &str,
+    sample: &DaemonStatsSample,
+    shutdown: bool,
+    cap: u64,
+) -> std::io::Result<()> {
+    let (sample, sessions_omitted) = sample_for_disk(sample);
+    append_json_line(
+        path,
+        &StatsLine {
+            boot: boot.to_owned(),
+            sample,
+            shutdown,
+            sessions_omitted,
+        },
+        cap,
+    )
 }
 
 impl DaemonStats {
@@ -142,14 +199,7 @@ impl DaemonStats {
                 loop {
                     let sample = stats.current_sample();
                     stats.state.lock().latest = Some(sample.clone());
-                    let _ = append_json_line(
-                        &path,
-                        &StatsLine {
-                            boot: boot.clone(),
-                            sample,
-                            shutdown: false,
-                        },
-                    );
+                    let _ = write_sample(&path, &boot, &sample, false);
                     std::thread::sleep(SAMPLE_INTERVAL);
                 }
             });
@@ -159,14 +209,7 @@ impl DaemonStats {
     /// The next boot reads its absence as an abnormal death — jetsam and
     /// SIGKILL leave no chance to write it.
     pub fn mark_clean_shutdown(&self) {
-        let _ = append_json_line(
-            &self.path,
-            &StatsLine {
-                boot: self.boot.clone(),
-                sample: self.current_sample(),
-                shutdown: true,
-            },
-        );
+        let _ = write_sample(&self.path, &self.boot, &self.current_sample(), true);
     }
 
     fn current_sample(&self) -> DaemonStatsSample {
@@ -238,16 +281,17 @@ pub fn install_panic_log(data_dir: &Path) {
                 "location": location,
                 "message": message,
             }),
+            STATS_FILE_CAP,
         );
         default(info);
     }));
 }
 
-fn append_json_line(path: &Path, line: &impl Serialize) -> std::io::Result<()> {
+fn append_json_line(path: &Path, line: &impl Serialize, cap: u64) -> std::io::Result<()> {
     let line = serde_json::to_string(line).map_err(std::io::Error::other)?;
     let mut line = line.into_bytes();
     line.push(b'\n');
-    crate::fs_ext::append_capped(path, &line, STATS_FILE_CAP)
+    crate::fs_ext::append_capped(path, &line, cap)
 }
 
 /// One process-table row: parent, resident size, and the process name
@@ -551,15 +595,83 @@ mod tests {
     }
 
     fn append(path: &Path, boot: &str, sample: &DaemonStatsSample, shutdown: bool) {
-        append_json_line(
-            path,
-            &StatsLine {
-                boot: boot.to_owned(),
-                sample: sample.clone(),
-                shutdown,
-            },
-        )
-        .unwrap();
+        write_sample_capped(path, boot, sample, shutdown, u64::MAX).unwrap();
+    }
+
+    fn session_row(resident_bytes: u64) -> DaemonSessionSample {
+        DaemonSessionSample {
+            id: Uuid::new_v4(),
+            title: String::new(),
+            provider: ProviderKind::Codex,
+            status: waku_protocol::model::SessionStatus::Idle,
+            detail_loaded: true,
+            running: false,
+            resident_messages: 0,
+            resident_activities: 0,
+            resident_bytes,
+        }
+    }
+
+    #[test]
+    fn disk_lines_keep_only_the_heaviest_sessions() {
+        let dir = std::env::temp_dir().join(format!("waku-stats-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(STATS_FILE_NAME);
+        let mut sample = DaemonStatsSample {
+            at: 100,
+            daemon_rss_mb: Some(200),
+            children_rss_mb: Some(0),
+            runtimes: 0,
+            terminals: 0,
+            children: Vec::new(),
+            sessions_total: 0,
+            sessions: Vec::new(),
+            subprocesses: Default::default(),
+            request_pools: Default::default(),
+        };
+        let heaviest = (0..STATS_SESSION_ROWS + 5)
+            .map(|index| session_row((index + 1) as u64))
+            .collect::<Vec<_>>();
+        sample.sessions = heaviest.clone();
+        append(&path, "boot-a", &sample, false);
+
+        let bytes = std::fs::read(&path).unwrap();
+        let line: StatsLine = serde_json::from_slice(&bytes[..bytes.len() - 1]).unwrap();
+        assert_eq!(line.sessions_omitted, 5);
+        assert_eq!(line.sample.sessions.len(), STATS_SESSION_ROWS);
+        // The kept rows are the heaviest, sorted by resident size.
+        let expected = heaviest[STATS_SESSION_ROWS + 4].resident_bytes;
+        assert_eq!(line.sample.sessions[0].resident_bytes, expected);
+        assert_eq!(
+            line.sample.sessions[STATS_SESSION_ROWS - 1].resident_bytes,
+            heaviest[5].resident_bytes
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn disk_lines_omit_the_counter_when_no_sessions_drop() {
+        let dir = std::env::temp_dir().join(format!("waku-stats-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(STATS_FILE_NAME);
+        let sample = DaemonStatsSample {
+            at: 100,
+            daemon_rss_mb: Some(200),
+            children_rss_mb: Some(0),
+            runtimes: 0,
+            terminals: 0,
+            children: Vec::new(),
+            sessions_total: 0,
+            sessions: vec![session_row(1)],
+            subprocesses: Default::default(),
+            request_pools: Default::default(),
+        };
+        append(&path, "boot-a", &sample, false);
+
+        let bytes = std::fs::read(&path).unwrap();
+        let line = String::from_utf8(bytes).unwrap();
+        assert!(!line.contains("sessions_omitted"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -638,20 +750,22 @@ mod tests {
             subprocesses: Default::default(),
             request_pools: Default::default(),
         };
+        let cap = 4 * 1024;
         let line_len = serde_json::to_string(&StatsLine {
             boot: "boot".into(),
             sample: sample.clone(),
             shutdown: false,
+            sessions_omitted: 0,
         })
         .unwrap()
         .len()
             + 1;
-        let lines_to_overflow = (STATS_FILE_CAP as usize / line_len) + 2;
+        let lines_to_overflow = (cap as usize / line_len) + 2;
         for _ in 0..lines_to_overflow {
-            append(&path, "boot", &sample, false);
+            write_sample_capped(&path, "boot", &sample, false, cap).unwrap();
         }
         let kept = std::fs::read(&path).unwrap();
-        assert!(kept.len() as u64 <= STATS_FILE_CAP);
+        assert!(kept.len() as u64 <= cap);
         // Every retained line still parses — the cut landed on a boundary.
         let parsed = kept
             .split(|byte| *byte == b'\n')
