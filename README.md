@@ -17,8 +17,9 @@ machine you control.
 ## Features
 
 - **Agent choice and continuity.** Work with multiple providers, resume
-  conversations started in their CLIs, and switch providers with a context
-  handoff.
+  conversations started in their CLIs, and switch providers mid-task. For
+  long conversations, a compact history index lets the new agent read the
+  turns it needs on demand, keeping handoff context small.
 - **Isolated parallel work.** Run independent tasks across projects, with
   separate Git worktrees when you need to keep their changes apart.
 - **Feedback while agents work.** Steer active turns, queue follow-ups, and
@@ -30,8 +31,8 @@ machine you control.
   unread completions. Jump to the next unread reply or search across task
   history from the command palette.
 - **Side chats and delegation.** Explore a question in a separate chat
-  alongside the main task. Enable agent tools to let agents create tasks and
-  send messages between them.
+  alongside the main task. With agent tools enabled and your permission,
+  agents can spin off new tasks and send messages to existing tasks.
 - **Usage visibility.** Track context consumption, supported providers'
   account limits, and cost and token breakdowns by project and model.
 
