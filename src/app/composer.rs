@@ -4768,14 +4768,23 @@ impl Waku {
             .bg(theme.inset)
             .flex()
             .items_center()
-            .gap(px(4.0))
+            .gap(px(10.0))
             .track_focus(menu.trigger_focus_handle())
             .tab_index(0)
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when_some(preview, |element, preview| {
                 element.tooltip(pasted_text_tooltip(preview))
             })
-            .child(icon("icons/file.svg", 11.0, theme.text_tertiary))
+            .child(
+                div()
+                    .w(px(16.0))
+                    .h(px(16.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon("icons/file.svg", 14.0, theme.text_tertiary)),
+            )
             .child(
                 div()
                     .min_w_0()
