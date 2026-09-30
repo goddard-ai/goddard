@@ -835,6 +835,7 @@ impl Waku {
         session.provider_cursor = resumed_cursor;
         session.provider_session_id = None;
         session.model = model;
+        session.pending_model_switch = None;
         session.reasoning_effort = effort;
         session.service_tier = service_tier;
         session.context_window = context_window;

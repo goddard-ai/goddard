@@ -120,6 +120,7 @@ export type { NotificationThread } from "./NotificationThread";
 export type { PairRequestInfo } from "./PairRequestInfo";
 export type { PairedClientInfo } from "./PairedClientInfo";
 export type { PairingState } from "./PairingState";
+export type { PendingModelSwitch } from "./PendingModelSwitch";
 export type { PlanResetCredits } from "./PlanResetCredits";
 export type { PlanUsage } from "./PlanUsage";
 export type { PlanWindow } from "./PlanWindow";

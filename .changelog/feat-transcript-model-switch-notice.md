@@ -1,1 +1,1 @@
-- See a transcript notice when you switch models in an existing session, including a reminder that the prompt cache usually cannot be reused across models and the change may cost more.
+- After submitting a prompt with a newly selected model in an existing session, see a notice immediately after the prompt with the model change and a reminder that the prompt cache usually cannot be reused across models, which can increase cost.

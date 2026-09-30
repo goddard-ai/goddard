@@ -2,6 +2,7 @@
 import type { AgentTurn } from "./AgentTurn";
 import type { ContextUsage } from "./ContextUsage";
 import type { Message } from "./Message";
+import type { PendingModelSwitch } from "./PendingModelSwitch";
 import type { ProviderKind } from "./ProviderKind";
 import type { ProviderResumeCursor } from "./ProviderResumeCursor";
 import type { QueuedMessage } from "./QueuedMessage";
@@ -62,7 +63,12 @@ workspace_move?: WorkspaceMove | null,
  * parent's right panel, and deleted when the parent is archived or
  * removed.
  */
-side_chat_of?: string | null, provider: ProviderKind, model?: string | null, runtime_mode: RuntimeMode,
+side_chat_of?: string | null, provider: ProviderKind, model?: string | null,
+/**
+ * A same-provider model change to note after this session's next visible
+ * user prompt. Kept pending so choosing a model alone doesn't add a row.
+ */
+pending_model_switch?: PendingModelSwitch | null, runtime_mode: RuntimeMode,
 /**
  * Where the task's work runs — this Mac, the sandbox VM, or the
  * provider's hosted cloud. Fixed when the session boots — a started

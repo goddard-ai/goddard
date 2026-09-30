@@ -4534,22 +4534,21 @@ impl Waku {
             session.reasoning_effort.clone_from(&effort);
             session.service_tier.clone_from(&service_tier);
             session.context_window.clone_from(&context_window);
-            if !provider_changed
-                && session_locked
+            if provider_changed {
+                session.pending_model_switch = None;
+            } else if session_locked
                 && let Some(previous_model) = previous_model
                 && previous_model != model
             {
-                session.push_notice_message(
-                    MessageRole::System,
-                    tr!(
-                        "transcript.model_switched",
-                        from = previous_model,
-                        to = model.clone()
-                    ),
-                    TranscriptNotice::Status {
-                        kind: TranscriptNoticeStatus::ModelSwitched,
-                    },
-                );
+                let from = session
+                    .pending_model_switch
+                    .as_ref()
+                    .map(|pending| pending.from.clone())
+                    .unwrap_or(previous_model);
+                session.pending_model_switch = (from != model).then(|| PendingModelSwitch {
+                    from,
+                    to: model.clone(),
+                });
             }
             self.state.last_provider = provider;
             self.state.last_auto_route = false;

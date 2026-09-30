@@ -6944,7 +6944,14 @@ impl Waku {
                         session_id,
                         turn_id,
                     }),
-                    session.messages.last().map(|message| message.id),
+                    session
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|message| {
+                            message.turn_id == Some(turn_id) && message.role == MessageRole::User
+                        })
+                        .map(|message| message.id),
                     Some(turn_id),
                 )
             } else {

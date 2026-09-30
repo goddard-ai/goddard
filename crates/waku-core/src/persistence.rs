@@ -2119,6 +2119,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         agent_rename_allowed,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
         model,
+        pending_model_switch: None,
         // Hydration replaces these; the list never reads them.
         runtime_mode: RuntimeMode::default(),
         environment: crate::model::SessionEnvironment::Local,

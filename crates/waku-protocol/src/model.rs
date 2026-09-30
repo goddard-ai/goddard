@@ -1638,6 +1638,10 @@ pub struct AgentSession {
     pub provider: ProviderKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// A same-provider model change to note after this session's next visible
+    /// user prompt. Kept pending so choosing a model alone doesn't add a row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_model_switch: Option<PendingModelSwitch>,
     pub runtime_mode: RuntimeMode,
     /// Where the task's work runs — this Mac, the sandbox VM, or the
     /// provider's hosted cloud. Fixed when the session boots — a started
@@ -1851,6 +1855,7 @@ impl AgentSession {
             side_chat_of: None,
             provider,
             model: None,
+            pending_model_switch: None,
             runtime_mode: RuntimeMode::default(),
             environment: SessionEnvironment::Local,
             sandboxed: false,
@@ -1913,6 +1918,7 @@ impl AgentSession {
             side_chat_of: self.side_chat_of,
             provider: self.provider,
             model: self.model.clone(),
+            pending_model_switch: self.pending_model_switch.clone(),
             runtime_mode: RuntimeMode::default(),
             environment: self.environment(),
             sandboxed: false,
@@ -2563,6 +2569,19 @@ impl AgentSession {
         );
         prompt.hidden = hidden;
         self.messages.push(prompt);
+        if !hidden && let Some(switch) = self.pending_model_switch.take() {
+            self.push_notice_message(
+                MessageRole::System,
+                tr!(
+                    "transcript.model_switched",
+                    from = switch.from,
+                    to = switch.to
+                ),
+                TranscriptNotice::Status {
+                    kind: TranscriptNoticeStatus::ModelSwitched,
+                },
+            );
+        }
         self.last_reply_at = Some(now);
         id
     }
@@ -3118,6 +3137,14 @@ pub enum TranscriptNoticeStatus {
     ProjectSwitched,
     /// The user changed models within the same provider.
     ModelSwitched,
+}
+
+/// Model IDs staged at selection time and added to the transcript only when
+/// the user submits the next visible prompt.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+pub struct PendingModelSwitch {
+    pub from: String,
+    pub to: String,
 }
 
 /// A position in the persisted transcript: how many `messages` and
