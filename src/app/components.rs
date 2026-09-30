@@ -1610,7 +1610,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             // for a reply the turn never produced; the kind's leading icon
             // keeps them from reading as agent prose.
             if let Some(TranscriptNotice::Status { kind }) = &message.notice {
-                status_notice_row(*kind, &content, theme, ctx)
+                status_notice_row(*kind, &content, message_id, theme, ctx)
             } else if let Some(notice @ TranscriptNotice::TransferReceived { .. }) = &message.notice
             {
                 transfer_notice_row(theme, message_id, notice, transfer_notice.as_ref(), &waku)
@@ -1745,6 +1745,7 @@ fn status_notice_icon(status: TranscriptNoticeStatus) -> &'static str {
 fn status_notice_row(
     status: TranscriptNoticeStatus,
     content: &str,
+    message_id: Uuid,
     theme: &Theme,
     ctx: &MarkdownCtx,
 ) -> Div {
@@ -1764,6 +1765,28 @@ fn status_notice_row(
             theme.text_tertiary,
             ctx,
         ))
+        .when(status == TranscriptNoticeStatus::ModelSwitched, |row| {
+            row.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "model-switch-cache-info-{message_id}"
+                    )))
+                    .tab_index(0)
+                    .flex_none()
+                    .h(px(20.0))
+                    .min_w(px(20.0))
+                    .px(px(3.0))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .child(icon("icons/info.svg", 12.0, theme.text_tertiary))
+                    .tooltip(crate::ui::tooltip::Tooltip::text(tr!(
+                        "transcript.model_switched_cache_tooltip"
+                    ))),
+            )
+        })
 }
 
 /// How many commits an expanded landed notice lists before folding the rest

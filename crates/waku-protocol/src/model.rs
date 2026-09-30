@@ -2608,8 +2608,8 @@ impl AgentSession {
                 MessageRole::System,
                 tr!(
                     "transcript.model_switched",
-                    from = switch.from,
-                    to = switch.to
+                    from = model_switch_display_name(&switch.from),
+                    to = model_switch_display_name(&switch.to)
                 ),
                 TranscriptNotice::Status {
                     kind: TranscriptNoticeStatus::ModelSwitched,
@@ -3179,6 +3179,45 @@ pub enum TranscriptNoticeStatus {
 pub struct PendingModelSwitch {
     pub from: String,
     pub to: String,
+}
+
+/// Turn a model ID into a compact label for the transcript's switch notice.
+/// Provider-qualified IDs use the final path segment, and GPT variants keep
+/// the version attached to the family while separating the model suffix.
+fn model_switch_display_name(model: &str) -> String {
+    let model = model.rsplit('/').next().unwrap_or(model);
+    let parts = model
+        .split(['-', '_'])
+        .filter(|part| !part.is_empty())
+        .map(|part| match part.to_ascii_lowercase().as_str() {
+            "gpt" => "GPT".to_owned(),
+            "ai" => "AI".to_owned(),
+            "xai" => "xAI".to_owned(),
+            _ if part
+                .chars()
+                .all(|char| char.is_ascii_digit() || char == '.') =>
+            {
+                part.to_owned()
+            }
+            _ => {
+                let mut chars = part.chars();
+                chars.next().map_or_else(String::new, |first| {
+                    first.to_uppercase().collect::<String>() + chars.as_str()
+                })
+            }
+        })
+        .collect::<Vec<_>>();
+    if parts.first().is_some_and(|part| part == "GPT") {
+        if let Some((version, suffix)) = parts[1..].split_first() {
+            format!("GPT-{version} {}", suffix.join(" "))
+                .trim_end()
+                .to_owned()
+        } else {
+            "GPT".to_owned()
+        }
+    } else {
+        parts.join(" ")
+    }
 }
 
 /// A position in the persisted transcript: how many `messages` and

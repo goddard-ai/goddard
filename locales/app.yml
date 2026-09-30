@@ -4547,7 +4547,9 @@ transcript.provider_switched:
 transcript.provider_switched_restarted:
   en: "Switched provider — %{from} → %{to}; the earlier %{to} session could not be resumed, so a new one was seeded with the full history"
 transcript.model_switched:
-  en: "Switched model — %{from} → %{to}. The prompt cache usually can't be reused across models, which can increase cost."
+  en: "Switched model: %{from} → %{to}"
+transcript.model_switched_cache_tooltip:
+  en: "The prompt cache usually can't be reused across models, which can increase cost."
 transcript.show_more_commits:
   en: Show %{count} more commits
 transcript.show_fewer_commits:
