@@ -2104,6 +2104,8 @@ sidebar.terminals:
   en: Terminals
 sidebar.dormant:
   en: Dormant
+sidebar.chats:
+  en: Chats
 sidebar.yesterday:
   en: Yesterday
 sidebar.this_week:

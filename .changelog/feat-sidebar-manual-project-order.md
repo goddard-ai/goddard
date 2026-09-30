@@ -1,1 +1,1 @@
-- In Sidebar options, choose Grouping → Project and Project order → Manual to arrange groups within the starred and unstarred sections by dragging; Alt+Up/Down also moves the focused group, and the order is saved.
+- In Sidebar options, choose Grouping → Project and Project order → Manual to arrange groups within the starred and unstarred sections by dragging; Alt+Up/Down also moves the focused group, and the order is saved. Tasks without a project appear in the final Chats group with a chat bubble icon.

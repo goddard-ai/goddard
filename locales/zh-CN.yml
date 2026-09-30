@@ -687,6 +687,7 @@ sidebar.show_dormant: 显示休眠任务
 sidebar.pinned: 已置顶
 sidebar.terminals: 终端
 sidebar.dormant: 休眠
+sidebar.chats: 聊天
 sidebar.yesterday: 昨天
 sidebar.this_week: 本周
 sidebar.this_month: 本月

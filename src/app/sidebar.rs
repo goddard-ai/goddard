@@ -512,7 +512,7 @@ fn project_sidebar_groups(
         groups.push((SidebarGroup::Projectless, projectless_sessions));
     }
     // Starred projects hoist above the rest — a stable sort, so first-seen
-    // order keeps describing recency inside each half. "No project" stays
+    // order keeps describing recency inside each half. "Chats" stays
     // at the foot either way.
     groups.sort_by_key(|(group, _)| match group {
         SidebarGroup::Project(id) if starred.contains(id) => 0,
@@ -3869,9 +3869,19 @@ impl Waku {
             group,
             SidebarGroup::Project(_) | SidebarGroup::Projectless | SidebarGroup::Terminals
         );
+        let project_is_projectless = match group {
+            SidebarGroup::Project(project_id) => self
+                .state
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .is_some_and(Project::is_projectless),
+            _ => false,
+        };
         let group_icon = match group {
             SidebarGroup::Projectless => "icons/chat.svg",
             SidebarGroup::Terminals => "icons/terminal-prompt.svg",
+            SidebarGroup::Project(_) if project_is_projectless => "icons/chat.svg",
             SidebarGroup::Project(project_id)
                 if self
                     .state
@@ -3911,6 +3921,7 @@ impl Waku {
             SidebarGroup::Dormant => tr!("sidebar.dormant"),
             SidebarGroup::Planning => tr!("phase.planning"),
             SidebarGroup::Date(group) => group.label(),
+            SidebarGroup::Project(_) if project_is_projectless => tr!("sidebar.chats"),
             SidebarGroup::Project(project_id) => self
                 .state
                 .projects
@@ -3918,7 +3929,7 @@ impl Waku {
                 .find(|project| project.id == project_id)
                 .map(Project::display_name)
                 .unwrap_or_else(|| tr!("project.no_project_name")),
-            SidebarGroup::Projectless => tr!("project.chat"),
+            SidebarGroup::Projectless => tr!("sidebar.chats"),
         };
         let folder_missing =
             matches!(group, SidebarGroup::Project(id) if self.missing_projects.contains(&id));

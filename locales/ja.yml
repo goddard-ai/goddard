@@ -697,6 +697,7 @@ sidebar.show_dormant: 休眠タスクを表示
 sidebar.pinned: ピン留め
 sidebar.terminals: ターミナル
 sidebar.dormant: 休眠
+sidebar.chats: チャット
 sidebar.yesterday: 昨日
 sidebar.this_week: 今週
 sidebar.this_month: 今月
