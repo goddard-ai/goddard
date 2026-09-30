@@ -1,8 +1,8 @@
 //! Phase-aware model routing: a session's lifecycle is tracked as
 //! `Planning` → `Executing`; only Planning is shown in session chrome.
 //! Auto-routed sessions whose intake judged the task plan-worthy
-//! also retune the live model at the boundary — planning on the user's
-//! hardest-class target, implementation one class tier below.
+//! can retune the live model at the boundary — Hard planning may hand
+//! implementation to Medium, while ordinary planning keeps its class.
 //!
 //! The transition is deliberately cheap: every streamed tool event runs
 //! through [`ActivityItem::phase_signal`], so reads, searches, and plan

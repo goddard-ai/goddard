@@ -9,10 +9,9 @@ import type { TaskClass } from "./TaskClass";
  */
 export type RouteDecision = { target: RouteTarget, class?: TaskClass | null,
 /**
- * The class whose map entry supplied the target — `class` normally,
- * the hard entry for a phased start, or the answered class when that
- * entry was unmapped and the task's own supplied it. Absent when no
- * class routed (fallbacks).
+ * The class whose map entry supplied the target. Older phased starts
+ * may have applied Hard regardless of the answered class. Absent when
+ * no class routed (fallbacks).
  */
 appliedClass?: TaskClass | null,
 /**
@@ -20,9 +19,9 @@ appliedClass?: TaskClass | null,
  */
 classConfidence?: number | null,
 /**
- * The intake evaluation judged this task worth a planning phase: it
- * started on the hardest-class entry and may downshift a class tier
- * once planning ends. `false` when the eval skipped the question.
+ * The intake evaluation judged this task worth a planning phase.
+ * Planning keeps the task's difficulty tier; Hard may downshift to
+ * Medium once planning ends. `false` when the eval skipped the question.
  */
 phased?: boolean,
 /**

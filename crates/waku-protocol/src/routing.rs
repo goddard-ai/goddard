@@ -18,14 +18,14 @@ use crate::model::ProviderKind;
 )]
 #[serde(rename_all = "camelCase")]
 pub enum TaskClass {
-    /// Mechanical, low-risk, or single-step work.
+    /// Clearly mechanical, low-risk work requiring little judgment.
     #[serde(rename = "easy", alias = "routine")]
     Routine,
     /// The default: ordinary tasks that benefit from a solid model.
     #[default]
     #[serde(rename = "medium", alias = "general")]
     General,
-    /// Subtle, high-stakes, or long-horizon work where mistakes are costly.
+    /// Unusually demanding reasoning or high-stakes decisions.
     #[serde(rename = "hard", alias = "demanding")]
     Demanding,
 }
@@ -44,12 +44,12 @@ impl TaskClass {
         }
     }
 
-    /// The tier a task drops to once its plan exists — planning absorbed the
-    /// hard reasoning, so implementation runs one class cheaper.
+    /// Hard planning may hand implementation to the workhorse model;
+    /// ordinary planning keeps Medium rather than assuming the work is Easy.
     pub fn implementation_class(&self) -> TaskClass {
         match self {
             TaskClass::Demanding => TaskClass::General,
-            TaskClass::General | TaskClass::Routine => TaskClass::Routine,
+            TaskClass::General | TaskClass::Routine => *self,
         }
     }
 }
@@ -138,18 +138,17 @@ pub struct RouteDecision {
     pub target: RouteTarget,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class: Option<TaskClass>,
-    /// The class whose map entry supplied the target — `class` normally,
-    /// the hard entry for a phased start, or the answered class when that
-    /// entry was unmapped and the task's own supplied it. Absent when no
-    /// class routed (fallbacks).
+    /// The class whose map entry supplied the target. Older phased starts
+    /// may have applied Hard regardless of the answered class. Absent when
+    /// no class routed (fallbacks).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_class: Option<TaskClass>,
     /// Confidence the backend reported for the class answer, 0–1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class_confidence: Option<f64>,
-    /// The intake evaluation judged this task worth a planning phase: it
-    /// started on the hardest-class entry and may downshift a class tier
-    /// once planning ends. `false` when the eval skipped the question.
+    /// The intake evaluation judged this task worth a planning phase.
+    /// Planning keeps the task's difficulty tier; Hard may downshift to
+    /// Medium once planning ends. `false` when the eval skipped the question.
     #[serde(default, skip_serializing_if = "crate::model::is_false")]
     pub phased: bool,
     /// Why this target won: "class-map", "class-unmapped",
@@ -160,4 +159,25 @@ pub struct RouteDecision {
     pub backend: Option<InferenceProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval_latency_ms: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routine_planning_does_not_demote_the_workhorse_model() {
+        assert_eq!(
+            TaskClass::General.implementation_class(),
+            TaskClass::General
+        );
+        assert_eq!(
+            TaskClass::Routine.implementation_class(),
+            TaskClass::Routine
+        );
+        assert_eq!(
+            TaskClass::Demanding.implementation_class(),
+            TaskClass::General
+        );
+    }
 }

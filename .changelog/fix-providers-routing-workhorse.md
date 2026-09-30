@@ -1,0 +1,1 @@
+- Auto model routing keeps ordinary exploration and planning on your Medium model preference, reserving Easy for clearly mechanical work and Hard for unusually demanding tasks.

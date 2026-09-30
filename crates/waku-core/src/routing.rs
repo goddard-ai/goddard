@@ -27,10 +27,13 @@ pub struct RouteRun {
     pub record: EvalDecisionRecord,
 }
 
-const CLASS_INSTRUCTIONS: &str = "How difficult is this task? easy is mechanical, low-risk, or \
-single-step work where a fast cheap model suffices. hard is subtle, high-stakes, or long-horizon \
-work where mistakes are costly. medium is the middle — pick it when the task is ordinary or the \
-choice is unclear.";
+const CLASS_INSTRUCTIONS: &str = "Which model tier does this task require? medium is the user's \
+workhorse and the default for ordinary engineering: exploration, debugging, code review, planning, \
+and feature implementation, including multi-step work. Choose easy only for clearly mechanical, \
+low-risk work with an obvious approach and little judgment. Choose hard only for unusually \
+demanding reasoning, subtle interacting constraints, or high-stakes decisions where an ordinary \
+capable model is unlikely to be reliable. Needing exploration, a plan, or multiple steps does not \
+by itself warrant hard. When the evidence for either extreme is unclear, choose medium.";
 
 /// The class answer must clear this confidence before it routes; below it
 /// the session keeps the default route.
@@ -54,6 +57,30 @@ pub fn route_task(
     project: Option<&str>,
     candidates: &[RouteCandidate],
     last_used: Option<&RouteTarget>,
+) -> RouteRun {
+    route_task_with_evaluator(
+        eval_settings,
+        classes,
+        prompt,
+        project,
+        candidates,
+        last_used,
+        crate::eval::evaluate,
+    )
+}
+
+fn route_task_with_evaluator(
+    eval_settings: Option<&EvalSettings>,
+    classes: &RouteClassMap,
+    prompt: &str,
+    project: Option<&str>,
+    candidates: &[RouteCandidate],
+    last_used: Option<&RouteTarget>,
+    evaluate: impl FnOnce(
+        &EvalSettings,
+        &Value,
+        &BTreeMap<String, EvalQuestion>,
+    ) -> anyhow::Result<Evaluation>,
 ) -> RouteRun {
     let started = Instant::now();
     let mut record = EvalDecisionRecord::empty("route");
@@ -88,7 +115,7 @@ pub fn route_task(
         record.state = Some(state.clone());
         record.questions = Some(questions.clone());
 
-        let evaluation = match crate::eval::evaluate(eval_settings, &state, &questions) {
+        let evaluation = match evaluate(eval_settings, &state, &questions) {
             Ok(evaluation) => evaluation,
             Err(error) => {
                 record.error = Some(error.to_string());
@@ -116,23 +143,13 @@ pub fn route_task(
             evaluation.answers.get("needs_planning"),
             Some(EvalAnswer::Noul { noul }) if *noul >= MIN_PLANNING_PROBABILITY
         );
-        // A plan-worthy task starts on the hardest-class entry whatever its
-        // own class — the planning phase is what the frontier model is for,
-        // and the boundary downshift pays the spend back. An unmapped hard
-        // entry falls back to the task's own class entry.
-        let start_class = if phased { TaskClass::Demanding } else { class };
-        let applied = classes
-            .get(&start_class)
-            .map(|entry| (start_class, entry))
-            .or_else(|| classes.get(&class).map(|entry| (class, entry)));
-        match applied {
-            Some((entry_class, entry)) => {
+        // Planning is a workflow decision, not evidence that the work
+        // requires the Hard model. Let the difficulty answer own the tier.
+        match classes.get(&class) {
+            Some(entry) => {
                 let (target, note) = resolve_entry(entry, candidates, last_used);
-                class_applied = Some(entry_class);
+                class_applied = Some(class);
                 let mut reasons = vec!["class-map"];
-                if entry_class != class {
-                    reasons.push("phase-planning");
-                }
                 reasons.extend(note);
                 (target, reasons)
             }
@@ -165,15 +182,15 @@ pub fn routing_questions() -> BTreeMap<String, EvalQuestion> {
                 criteria: BTreeMap::from([
                     (
                         "easy".to_owned(),
-                        Some("mechanical, low-risk, or single-step work".to_owned()),
+                        Some("clearly mechanical, low-risk work with little judgment".to_owned()),
                     ),
                     (
                         "medium".to_owned(),
-                        Some("ordinary work; the default".to_owned()),
+                        Some("the workhorse default: ordinary engineering, exploration, debugging, planning, and implementation".to_owned()),
                     ),
                     (
                         "hard".to_owned(),
-                        Some("subtle, high-stakes, or long-horizon work".to_owned()),
+                        Some("unusually demanding reasoning or high-stakes decisions beyond ordinary engineering".to_owned()),
                     ),
                 ]),
             },
@@ -322,6 +339,102 @@ mod tests {
 
     fn classes(pairs: &[(TaskClass, RouteClassTarget)]) -> RouteClassMap {
         pairs.iter().cloned().collect()
+    }
+
+    fn evaluation(class: TaskClass, confidence: f64, planning: f64) -> Evaluation {
+        Evaluation {
+            model: "test-evaluator".into(),
+            answers: BTreeMap::from([
+                (
+                    "class".into(),
+                    EvalAnswer::Choice {
+                        choice: class.id().into(),
+                        confidence: Some(confidence),
+                        probabilities: BTreeMap::from([(class.id().into(), confidence)]),
+                    },
+                ),
+                ("needs_planning".into(), EvalAnswer::Noul { noul: planning }),
+            ]),
+            usage: Default::default(),
+            latency_ms: 1,
+            provider_metadata: None,
+        }
+    }
+
+    #[test]
+    fn planning_keeps_the_class_model_and_logs_that_class() {
+        let classes = classes(&[
+            (
+                TaskClass::Routine,
+                entry(ProviderKind::Codex, Some("easy-model"), None),
+            ),
+            (
+                TaskClass::General,
+                entry(ProviderKind::Codex, Some("workhorse-model"), Some("medium")),
+            ),
+            (
+                TaskClass::Demanding,
+                entry(ProviderKind::Codex, Some("hard-model"), Some("high")),
+            ),
+        ]);
+        let candidates = [candidate(
+            ProviderKind::Codex,
+            &["easy-model", "workhorse-model", "hard-model"],
+        )];
+        for class in waku_protocol::routing::ALL_TASK_CLASSES {
+            for planning in [0.0, 0.99] {
+                let run = route_task_with_evaluator(
+                    Some(&EvalSettings::default()),
+                    &classes,
+                    "explore the code, plan the change, and implement it",
+                    None,
+                    &candidates,
+                    None,
+                    |_, _, _| Ok(evaluation(class, 0.9, planning)),
+                );
+                let expected = classes.get(&class).unwrap();
+                assert_eq!(run.decision.target.model, expected.model);
+                assert_eq!(run.decision.target.effort, expected.effort);
+                assert_eq!(run.decision.class, Some(class));
+                assert_eq!(run.decision.applied_class, Some(class));
+                assert_eq!(run.decision.phased, planning >= MIN_PLANNING_PROBABILITY);
+                assert_eq!(run.decision.reason, "class-map");
+                let logged = serde_json::to_value(&run.record).unwrap();
+                assert_eq!(logged["class"], class.id());
+                assert_eq!(logged["appliedClass"], class.id());
+                assert_eq!(logged["reason"], "class-map");
+            }
+        }
+    }
+
+    #[test]
+    fn unmapped_medium_planning_does_not_borrow_the_hard_model() {
+        let classes = classes(&[(
+            TaskClass::Demanding,
+            entry(ProviderKind::Codex, Some("hard-model"), Some("high")),
+        )]);
+        let candidates = [candidate(
+            ProviderKind::Codex,
+            &["workhorse-model", "hard-model"],
+        )];
+        let last_used = RouteTarget {
+            provider: ProviderKind::Codex,
+            model: Some("workhorse-model".into()),
+            effort: Some("medium".into()),
+        };
+        let run = route_task_with_evaluator(
+            Some(&EvalSettings::default()),
+            &classes,
+            "plan an ordinary feature",
+            None,
+            &candidates,
+            Some(&last_used),
+            |_, _, _| Ok(evaluation(TaskClass::General, 0.9, 0.99)),
+        );
+        assert_eq!(run.decision.target, last_used);
+        assert!(run.decision.phased);
+        assert_eq!(run.decision.applied_class, None);
+        assert_eq!(run.decision.reason, "class-unmapped");
     }
 
     #[test]
