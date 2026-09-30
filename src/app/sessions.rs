@@ -1527,7 +1527,7 @@ impl Waku {
                 keyboard_options::KeyboardOptionChoice::new(
                     tr!("workspace.local"),
                     None,
-                    None,
+                    Some("icons/local.svg"),
                     current.is_local(),
                     true,
                     keyboard_options::KeyboardOptionAction::Workspace(SessionWorkspace::Local),
@@ -1537,7 +1537,7 @@ impl Waku {
                 keyboard_options::KeyboardOptionChoice::new(
                     tr!("workspace.new_worktree"),
                     None,
-                    Some("icons/git-branch.svg"),
+                    Some("icons/fork.svg"),
                     matches!(&current, SessionWorkspace::NewWorktree { .. }),
                     true,
                     keyboard_options::KeyboardOptionAction::Workspace(
@@ -1556,7 +1556,7 @@ impl Waku {
                 keyboard_options::KeyboardOptionChoice::new(
                     label,
                     None,
-                    Some("icons/git-branch.svg"),
+                    Some("icons/fork.svg"),
                     true,
                     true,
                     keyboard_options::KeyboardOptionAction::Workspace(current.clone()),
