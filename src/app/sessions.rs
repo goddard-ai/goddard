@@ -2017,6 +2017,7 @@ impl Waku {
             _ => None,
         }) else {
             if busy {
+                let focus_new_dialog = self.archive_dialog.is_none();
                 let focus = self.open_archive_dialog(
                     session_id,
                     crate::git_commit::ArchivePreview::default(),
@@ -2026,9 +2027,11 @@ impl Waku {
                 );
                 // Like the other deferred surfaces, focus lands two frames
                 // after the modal joins the dispatch tree.
-                window.on_next_frame(move |window, _| {
-                    window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-                });
+                if focus_new_dialog {
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                    });
+                }
             } else if !busy {
                 self.finish_archive_session(session_id, landing_row, window, cx);
             }
@@ -2082,9 +2085,12 @@ impl Waku {
                         .is_some_and(|session| session.is_busy());
                     let preview = preview.unwrap_or_default();
                     if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
+                        // Queued warnings must not reset the current modal's
+                        // keyboard choice when another preview finishes.
+                        let focus_new_dialog = waku.archive_dialog.is_none();
                         let focus =
                             waku.open_archive_dialog(session_id, preview, busy, landing_row, cx);
-                        Some(focus)
+                        Some((focus, focus_new_dialog))
                     } else {
                         None
                     }
@@ -2092,13 +2098,14 @@ impl Waku {
                 .unwrap_or(None);
             let _ = window_handle.update(cx, move |_, window, cx| {
                 match finish {
-                    Some(focus) => {
+                    Some((focus, true)) => {
                         // Like the other deferred surfaces, focus lands two
                         // frames after the modal joins the dispatch tree.
                         window.on_next_frame(move |window, _| {
                             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
                         });
                     }
+                    Some((_, false)) => {}
                     None => {
                         let _ = waku.update(cx, |waku, cx| {
                             waku.finish_archive_session(session_id, landing_row, window, cx)
@@ -2361,8 +2368,9 @@ impl Waku {
                         .is_some_and(|session| session.is_busy());
                     let preview = preview.unwrap_or_default();
                     if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
+                        let focus_new_dialog = waku.archive_dialog.is_none();
                         let focus = waku.open_dormant_dialog(session_id, preview, busy, cx);
-                        Some(focus)
+                        Some((focus, focus_new_dialog))
                     } else {
                         None
                     }
@@ -2370,13 +2378,14 @@ impl Waku {
                 .unwrap_or(None);
             let _ = window_handle.update(cx, move |_, window, cx| {
                 match finish {
-                    Some(focus) => {
+                    Some((focus, true)) => {
                         // Like the other deferred surfaces, focus lands two
                         // frames after the modal joins the dispatch tree.
                         window.on_next_frame(move |window, _| {
                             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
                         });
                     }
+                    Some((_, false)) => {}
                     None => {
                         let _ =
                             waku.update(cx, |waku, cx| waku.finish_sweep_session(session_id, cx));
