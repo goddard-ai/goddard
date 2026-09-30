@@ -1913,12 +1913,13 @@ impl Backend for WakuBackend {
                 discover_models,
                 probe_version,
             } => {
-                // Bare detection probes double as the manual-refresh path, so
-                // they may re-capture the shell environment; model discovery
-                // and version probes only ensure it exists.
                 if discover_models || probe_version {
                     ensure_shell_environment();
-                } else {
+                }
+                // The Codex CLI can be updated while its daemon stays open.
+                // Refresh its shell lookup at the normal cadence so the next
+                // model or version probe can resolve the newly installed CLI.
+                if (!discover_models && !probe_version) || provider == ProviderKind::Codex {
                     crate::command_env::refresh_shell_environment_if_stale();
                 }
                 let mut probe = match binary_override.as_deref() {
