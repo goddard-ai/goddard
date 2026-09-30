@@ -3584,7 +3584,7 @@ impl Waku {
     }
 
     /// ⌘-click: toggle `session_id` in the multi-selection without making it
-    /// the active surface. Creating the set seeds it with the active session —
+    /// the active surface. Creating the set seeds it with the active task —
     /// ⌘-click extends the current selection rather than replacing it, like
     /// Finder — so the viewed task joins the batch until ⌘-clicked back out,
     /// when its row falls back to the neutral active highlight. The clicked
@@ -3592,8 +3592,11 @@ impl Waku {
     /// it — matching Finder's pivot.
     fn toggle_sidebar_multi_selection(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.sidebar_multi_selection.is_empty()
-            && let Some(active) = self.state.selected_session
-            && active != session_id
+            && let Some(active) = sidebar_multi_selection_seed(
+                &self.state.sessions,
+                self.state.selected_session,
+                session_id,
+            )
         {
             self.sidebar_multi_selection.insert(active);
         }
@@ -4642,7 +4645,15 @@ impl Waku {
                             },
                             move |_, cx| {
                                 let _ = pin_waku.update(cx, |waku, cx| {
-                                    waku.set_sessions_pinned(&pin_targets, !all_pinned, cx)
+                                    waku.set_sessions_pinned(&pin_targets, !all_pinned, cx);
+                                    // The menu click clears selection in capture phase.
+                                    // Keep the batch selected so the next menu can undo it.
+                                    if batch {
+                                        waku.sidebar_multi_selection
+                                            .extend(pin_targets.iter().copied());
+                                        waku.sidebar_multi_selection_anchor = Some(session_id);
+                                        cx.notify();
+                                    }
                                 });
                             },
                         )
@@ -6399,6 +6410,19 @@ fn localized_session_title(session: &AgentSession) -> String {
     }
 }
 
+fn sidebar_multi_selection_seed(
+    sessions: &[AgentSession],
+    selected_session: Option<Uuid>,
+    clicked_session: Uuid,
+) -> Option<Uuid> {
+    selected_session.filter(|active| {
+        *active != clicked_session
+            && sessions.iter().any(|session| {
+                session.id == *active && session.has_started() && session.archived_at.is_none()
+            })
+    })
+}
+
 pub(super) fn sidebar_session_selected(
     selected_session: Option<Uuid>,
     pending_session: Option<Uuid>,
@@ -6973,6 +6997,41 @@ mod tests {
             .unwrap();
         assert_eq!(badge.number, 4);
         assert_eq!(badge.others, 1);
+    }
+
+    #[test]
+    fn sidebar_multi_selection_skips_unstarted_and_archived_active_tasks() {
+        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let clicked = Uuid::new_v4();
+        assert_eq!(
+            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
+            None
+        );
+
+        active.begin_turn("Started task");
+        active.archived_at = Some(1);
+        assert_eq!(
+            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
+            None
+        );
+    }
+
+    #[test]
+    fn sidebar_multi_selection_seeds_a_started_active_task_once() {
+        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        active.begin_turn("Started task");
+        assert_eq!(
+            sidebar_multi_selection_seed(
+                std::slice::from_ref(&active),
+                Some(active.id),
+                Uuid::new_v4()
+            ),
+            Some(active.id)
+        );
+        assert_eq!(
+            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), active.id),
+            None
+        );
     }
 
     #[test]
