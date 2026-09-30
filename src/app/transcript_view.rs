@@ -60,11 +60,10 @@ const NEW_CONTENT_DOT_SIZE: f32 = 7.0;
 const NEW_CONTENT_DOT_GAP: f32 = 12.0;
 /// The first scroll gesture dismisses the marker over this long.
 const NEW_CONTENT_DOT_FADE: Duration = Duration::from_millis(150);
-/// Space kept below the last transcript row so the suggestion chip floating
-/// above the composer lane — an 8px lift plus its 24px height — clears the
-/// response footer instead of overlapping it. Reserved whether or not a
-/// suggestion is showing: a conditional inset would shift the transcript
-/// every time a chip lands or clears.
+/// Space kept below the last transcript row for floating composer chips:
+/// their 8px inset, 24px height, and 8px clearance. The same offset lifts the
+/// jump button above them when status markers or suggestions are visible.
+/// Reserved whether or not a chip is showing so the transcript never shifts.
 const TRANSCRIPT_SUGGESTION_CLEARANCE: f32 = 40.0;
 
 #[derive(Clone, Debug)]
@@ -325,48 +324,6 @@ impl Waku {
         .unwrap_or_else(|| self.transcript_scroll_to_bottom_visible.get());
         self.transcript_scroll_to_bottom_visible
             .set(scroll_to_bottom_visible);
-        let scroll_to_bottom = scroll_to_bottom_visible.then(|| {
-            let theme = Theme::current(cx);
-            let focus = self.transcript_control_focus("transcript-scroll-to-bottom", cx);
-            div()
-                .id("transcript-scroll-to-bottom-layer")
-                .absolute()
-                .left_0()
-                .bottom(px(8.0))
-                .w_full()
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .id("transcript-scroll-to-bottom")
-                        .track_focus(&focus)
-                        .tab_index(0)
-                        .size(px(32.0))
-                        .rounded_full()
-                        .border(hairline())
-                        .border_color(theme.border_strong)
-                        .bg(theme.composer)
-                        .shadow_xs()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .cursor_default()
-                        .focus_visible(|style| style.bg(theme.focus_highlight()))
-                        .hover(|style| style.bg(theme.raised))
-                        .active(|style| style.bg(theme.overlay_strong))
-                        .child(icon("icons/arrow-down.svg", 16.0, theme.text))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.scroll_transcript_to_bottom(cx);
-                            cx.stop_propagation();
-                        }))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.scroll_transcript_to_bottom(cx);
-                                cx.stop_propagation();
-                            }
-                        })),
-                )
-        });
         const NAVIGATION_RAIL_ENABLED: bool = true;
         let navigation_rail_fits = navigation_rail_fits_width(chat_viewport_width);
         let navigation_rail = NAVIGATION_RAIL_ENABLED.then(|| {
@@ -412,6 +369,53 @@ impl Waku {
         let transcript_focus = self.transcript_focus.clone();
         let theme = Theme::current(cx);
         let status_marker_float = self.render_floating_status_markers(&transcript_rows, &theme, cx);
+        let floating_chip_row_visible =
+            status_marker_float.is_some() || self.action_suggestion_row_visible();
+        let scroll_to_bottom = scroll_to_bottom_visible.then(|| {
+            let focus = self.transcript_control_focus("transcript-scroll-to-bottom", cx);
+            div()
+                .id("transcript-scroll-to-bottom-layer")
+                .absolute()
+                .left_0()
+                .bottom(if floating_chip_row_visible {
+                    px(TRANSCRIPT_SUGGESTION_CLEARANCE)
+                } else {
+                    px(8.0)
+                })
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .id("transcript-scroll-to-bottom")
+                        .track_focus(&focus)
+                        .tab_index(0)
+                        .size(px(32.0))
+                        .rounded_full()
+                        .border(hairline())
+                        .border_color(theme.border_strong)
+                        .bg(theme.composer)
+                        .shadow_xs()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .hover(|style| style.bg(theme.raised))
+                        .active(|style| style.bg(theme.overlay_strong))
+                        .child(icon("icons/arrow-down.svg", 16.0, theme.text))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.scroll_transcript_to_bottom(cx);
+                            cx.stop_propagation();
+                        }))
+                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.scroll_transcript_to_bottom(cx);
+                                cx.stop_propagation();
+                            }
+                        })),
+                )
+        });
         div()
             .flex_1()
             .min_h_0()
