@@ -19,9 +19,8 @@ appliedClass?: TaskClass | null,
  */
 classConfidence?: number | null,
 /**
- * The intake evaluation judged this task worth a planning phase.
- * Planning keeps the task's difficulty tier; Hard may downshift to
- * Medium once planning ends. `false` when the eval skipped the question.
+ * Legacy intake planning verdict, retained for old persisted sessions.
+ * Current routing does not set or consult this field.
  */
 phased?: boolean,
 /**

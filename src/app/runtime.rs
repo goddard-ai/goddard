@@ -525,13 +525,12 @@ pub(super) fn prepare_submission(
         .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error))
     };
 
-    // A routed session's turn-level effort check rides the same boundary as
-    // the first turn's full route: one bounded daemon round trip, answered
-    // before the prompt goes out so the driver can retune first.
+    // Batch Auto effort and optional model handoff judgments in one bounded
+    // daemon round trip before the next prompt reaches its driver.
     if turn_route.is_some() {
         SubmissionStage::Routing.report(&stage);
     }
-    let turn_effort = turn_route.and_then(routing::TurnRoutePlan::evaluate);
+    let turn_route = turn_route.and_then(routing::TurnRoutePlan::evaluate);
 
     // Process startup can synchronously resolve executables, bind sockets,
     // and spawn children. It belongs behind the same animated preparation
@@ -561,7 +560,7 @@ pub(super) fn prepare_submission(
         worktree_restored,
         driver,
         route_decision,
-        turn_effort,
+        turn_route,
     })
 }
 
@@ -6040,7 +6039,7 @@ impl Waku {
             worktree_restored,
             driver,
             route_decision: _,
-            turn_effort: _,
+            turn_route: _,
         } = prepared;
         if !self
             .state
@@ -6889,10 +6888,9 @@ impl Waku {
                 )
             }
         });
-        // A started session that came through Auto keeps its model but
-        // re-decides effort every turn: the same evaluation call, scoped to
-        // the effort ladder, applied only when confident. Hidden nudges are
-        // not user input and skip the check.
+        // Auto tasks may adjust effort and, when enabled and actionable,
+        // hand off between Hard and Medium using the settled context plus
+        // the next request. Hidden internal nudges skip the judgment.
         let turn_route = (self.runtimes.contains_key(&session_id) && !hidden)
             .then(|| self.route_turn_plan_for_session(session, submission.human_prompt()))
             .flatten();
@@ -7134,7 +7132,7 @@ impl Waku {
             worktree_restored,
             driver: prepared_driver,
             route_decision,
-            turn_effort,
+            turn_route,
         } = prepared;
         // The turn began at accept time; it must still be the untouched one
         // this preparation belongs to. The guard above already discarded
@@ -7326,34 +7324,8 @@ impl Waku {
         let mut failed_to_start = false;
         match driver {
             Ok(driver) => {
-                // A routed session's per-turn effort answer lands ahead of
-                // its prompt: the session records it and the live driver
-                // retunes, so the turn runs at the effort Jev chose. A driver
-                // that cannot retune keeps the previous effort — a per-turn
-                // hint is never worth a restart.
-                if let Some(effort) = turn_effort {
-                    let previous = self
-                        .state
-                        .session_mut(session_id)
-                        .map(|session| {
-                            let previous = session.reasoning_effort.clone();
-                            session.reasoning_effort = Some(effort);
-                            session.updated_at = unix_time();
-                            previous
-                        })
-                        .flatten();
-                    let applied = self
-                        .state
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == session_id)
-                        .map(|session| self.session_options(session))
-                        .is_some_and(|options| driver.apply_options(options));
-                    if !applied {
-                        if let Some(session) = self.state.session_mut(session_id) {
-                            session.reasoning_effort = previous;
-                        }
-                    }
+                if let Some(decision) = turn_route {
+                    self.apply_turn_route_decision(session_id, decision, &driver, cx);
                 }
                 // A provider switch stages the compacted context the new
                 // provider needs; it precedes every other one-shot note so
@@ -7546,7 +7518,6 @@ impl Waku {
             | self.drain_title_quality_events(cx)
             | self.drain_action_prediction_events(cx)
             | self.drain_inbox_suggestion_events(cx)
-            | self.drain_phase_eval_events(cx)
         {
             cx.notify();
         }

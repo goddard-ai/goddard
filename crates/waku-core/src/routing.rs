@@ -39,15 +39,6 @@ by itself warrant hard. When the evidence for either extreme is unclear, choose 
 /// the session keeps the default route.
 const MIN_CLASS_CONFIDENCE: f64 = 0.55;
 
-const NEEDS_PLANNING_INSTRUCTIONS: &str = "Does this task warrant a distinct planning phase — \
-exploring unfamiliar code, weighing approaches, or decomposing work — before implementation? \
-Answer high for ambiguous, multi-step, or design-sensitive tasks; low for mechanical or \
-single-step work whose approach is already obvious.";
-
-/// The planning answer must clear this probability before the session is
-/// marked phased; below it the task runs its class target end to end.
-const MIN_PLANNING_PROBABILITY: f64 = 0.6;
-
 /// Route one new-session submission. Never fails hard: every degraded path
 /// still returns a usable target with the reason recorded.
 pub fn route_task(
@@ -89,10 +80,6 @@ fn route_task_with_evaluator(
     let mut class_answered: Option<TaskClass> = None;
     let mut class_applied: Option<TaskClass> = None;
     let mut class_confidence: Option<f64> = None;
-    // Whether the task earned a planning phase — applied onto whichever
-    // resolution path ran, including fallbacks that skip the eval entirely.
-    let mut phased = false;
-
     let (target, reasons) = 'resolve: {
         if candidates.is_empty() {
             break 'resolve (
@@ -139,12 +126,6 @@ fn route_task_with_evaluator(
             break 'resolve default(vec!["low-class-confidence"]);
         }
 
-        phased = matches!(
-            evaluation.answers.get("needs_planning"),
-            Some(EvalAnswer::Noul { noul }) if *noul >= MIN_PLANNING_PROBABILITY
-        );
-        // Planning is a workflow decision, not evidence that the work
-        // requires the Hard model. Let the difficulty answer own the tier.
         match classes.get(&class) {
             Some(entry) => {
                 let (target, note) = resolve_entry(entry, candidates, last_used);
@@ -162,7 +143,7 @@ fn route_task_with_evaluator(
         class: class_answered,
         applied_class: class_applied,
         class_confidence,
-        phased,
+        phased: false,
         reason: reasons.join("+"),
         backend: eval_settings.map(|settings| settings.provider),
         eval_latency_ms: Some(started.elapsed().as_millis() as u64),
@@ -174,35 +155,17 @@ fn route_task_with_evaluator(
 /// The question every route asks, shared so the decision log can reconstruct
 /// exactly what the classifier saw.
 pub fn routing_questions() -> BTreeMap<String, EvalQuestion> {
-    BTreeMap::from([
-        (
-            "class".to_owned(),
-            EvalQuestion::Choice {
-                instructions: CLASS_INSTRUCTIONS.to_owned(),
-                criteria: BTreeMap::from([
-                    (
-                        "easy".to_owned(),
-                        Some("clearly mechanical, low-risk work with little judgment".to_owned()),
-                    ),
-                    (
-                        "medium".to_owned(),
-                        Some("the workhorse default: ordinary engineering, exploration, debugging, planning, and implementation".to_owned()),
-                    ),
-                    (
-                        "hard".to_owned(),
-                        Some("unusually demanding reasoning or high-stakes decisions beyond ordinary engineering".to_owned()),
-                    ),
-                ]),
-            },
-        ),
-        (
-            "needs_planning".to_owned(),
-            EvalQuestion::Noul {
-                instructions: NEEDS_PLANNING_INSTRUCTIONS.to_owned(),
-                criteria: None,
-            },
-        ),
-    ])
+    BTreeMap::from([(
+        "class".to_owned(),
+        EvalQuestion::Choice {
+            instructions: CLASS_INSTRUCTIONS.to_owned(),
+            criteria: BTreeMap::from([
+                ("easy".to_owned(), Some("clearly mechanical, low-risk work with little judgment".to_owned())),
+                ("medium".to_owned(), Some("the workhorse default: ordinary engineering, exploration, debugging, planning, and implementation".to_owned())),
+                ("hard".to_owned(), Some("unusually demanding reasoning or high-stakes decisions beyond ordinary engineering".to_owned())),
+            ]),
+        },
+    )])
 }
 
 fn choice_answer(evaluation: &Evaluation, key: &str) -> Option<(String, Option<f64>)> {
@@ -362,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn planning_keeps_the_class_model_and_logs_that_class() {
+    fn legacy_planning_answers_do_not_change_the_class_model() {
         let classes = classes(&[
             (
                 TaskClass::Routine,
@@ -397,7 +360,7 @@ mod tests {
                 assert_eq!(run.decision.target.effort, expected.effort);
                 assert_eq!(run.decision.class, Some(class));
                 assert_eq!(run.decision.applied_class, Some(class));
-                assert_eq!(run.decision.phased, planning >= MIN_PLANNING_PROBABILITY);
+                assert!(!run.decision.phased);
                 assert_eq!(run.decision.reason, "class-map");
                 let logged = serde_json::to_value(&run.record).unwrap();
                 assert_eq!(logged["class"], class.id());
@@ -432,9 +395,18 @@ mod tests {
             |_, _, _| Ok(evaluation(TaskClass::General, 0.9, 0.99)),
         );
         assert_eq!(run.decision.target, last_used);
-        assert!(run.decision.phased);
+        assert!(!run.decision.phased);
         assert_eq!(run.decision.applied_class, None);
         assert_eq!(run.decision.reason, "class-unmapped");
+    }
+
+    #[test]
+    fn intake_only_asks_for_difficulty() {
+        let questions = routing_questions();
+        assert_eq!(
+            questions.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["class"]
+        );
     }
 
     #[test]

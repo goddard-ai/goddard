@@ -964,12 +964,6 @@ impl Waku {
                         summary.clone(),
                         cx,
                     );
-                    self.note_turn_finished_for_phase_eval(
-                        session_id,
-                        finished_turn_id,
-                        summary.clone(),
-                        cx,
-                    );
                     self.check_session_title_quality(
                         session_id,
                         finished_turn_id,

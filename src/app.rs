@@ -934,10 +934,8 @@ struct PreparedSubmission {
     /// starts and on route-RPC failures (which fall back to the draft's own
     /// provider).
     route_decision: Option<waku_protocol::routing::RouteDecision>,
-    /// A routed session's per-turn effort answer — `Some` when Jev moved the
-    /// session off its current effort with enough confidence. Applied ahead
-    /// of the prompt so the live driver retunes first.
-    turn_effort: Option<String>,
+    /// A confident Auto routing adjustment, applied before the next prompt.
+    turn_route: Option<routing::TurnRouteDecision>,
 }
 
 /// Which stage of `prepare_submission` an in-flight submission is in. The
@@ -2793,15 +2791,9 @@ pub struct Waku {
     status_marker_in_flight: HashSet<Uuid>,
     status_marker_tx: Sender<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     status_marker_events: Receiver<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
-    /// Sessions with a phase evaluation in flight — keyed by session, not
-    /// turn, because the answer moves the session's model and only the
-    /// freshest verdict matters.
     title_quality_in_flight: HashSet<Uuid>,
     title_quality_tx: Sender<(Uuid, String, Option<String>)>,
     title_quality_events: Receiver<(Uuid, String, Option<String>)>,
-    phase_eval_in_flight: HashSet<Uuid>,
-    phase_eval_tx: Sender<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
-    phase_eval_events: Receiver<(Uuid, Result<waku_protocol::eval::Evaluation, String>)>,
     /// The action journal's in-memory tail — the `recentActions` prior each
     /// prediction's state carries. The file is the durable record.
     action_journal: VecDeque<action_predictions::JournalRecord>,
@@ -5372,7 +5364,6 @@ impl Waku {
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
         let (title_quality_tx, title_quality_events) = unbounded();
-        let (phase_eval_tx, phase_eval_events) = unbounded();
         let (action_prediction_tx, action_prediction_events) = unbounded();
         let (inbox_suggestion_tx, inbox_suggestion_events) = unbounded();
         #[cfg(target_os = "macos")]
@@ -6609,9 +6600,6 @@ impl Waku {
                 title_quality_in_flight: HashSet::new(),
                 title_quality_tx,
                 title_quality_events,
-                phase_eval_in_flight: HashSet::new(),
-                phase_eval_tx,
-                phase_eval_events,
                 action_journal: action_predictions::load_action_journal(),
                 pending_action_predictions: Vec::new(),
                 action_suggestion: None,

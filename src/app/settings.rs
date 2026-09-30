@@ -7367,9 +7367,6 @@ impl Waku {
 
     fn set_phase_routing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.phase_routing_enabled = enabled;
-        if !enabled {
-            self.phase_eval_in_flight.clear();
-        }
         self.close_jev_page_if_unused();
         if enabled {
             // The Jev page reads the eval mirror — warm it rather than
@@ -14964,6 +14961,7 @@ fn eval_feature_label(feature: &str) -> String {
         "route" => tr!("routing.feature_route"),
         "route-effort" => tr!("routing.feature_route_effort"),
         "route-phase" => tr!("routing.feature_route_phase"),
+        "route-handoff" => tr!("routing.feature_route_handoff"),
         "route-class-suggest" => tr!("routing.feature_route_class_suggest"),
         "next-action" => tr!("jev.suggested_actions_title"),
         "inbox-action" => tr!("routing.feature_inbox_action"),
@@ -14993,6 +14991,7 @@ fn eval_feature_description(feature: &str) -> Option<String> {
         "route" => tr!("routing.feature_route_description"),
         "route-effort" => tr!("routing.feature_route_effort_description"),
         "route-phase" => tr!("routing.feature_route_phase_description"),
+        "route-handoff" => tr!("routing.feature_route_handoff_description"),
         "route-class-suggest" => tr!("routing.feature_route_class_suggest_description"),
         "next-action" => tr!("routing.feature_next_action_description"),
         "inbox-action" => tr!("routing.feature_inbox_action_description"),

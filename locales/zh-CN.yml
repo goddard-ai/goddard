@@ -2217,8 +2217,8 @@ experiments.memory_models_caption: 用于将各服务商已完成的会话提炼
 experiments.memory_model_default: 服务商默认值
 experiments.needs_eval_backend: 使用评估后端 — 尚未配置。
 experiments.open_jev_settings: 打开 Jev 设置
-experiments.phase_routing_description: 评估模型判定需要规划阶段的自动路由任务，先用最强档模型启动，待工具流或评估模型判定规划结束后降一档切换模型 — 实现停滞时会切回。侧边栏任务行显示当前阶段。
-experiments.phase_routing_title: 分阶段路由
+experiments.phase_routing_description: 对于以 Hard 启动的自动路由任务，根据上一轮上下文和下一次请求，在同一提供商的不同 Hard 与 Medium 模型之间选择。不确定时保持当前模型。
+experiments.phase_routing_title: 自适应模型交接
 experiments.projects_page_description: 按 ⌘⇧P 打开每个项目的页面，列出其工作树、分支、issue 和拉取请求，⌘⌥1–4 可直接跳转到对应标签页。
 experiments.projects_page_title: 项目页面
 experiments.review_queue_description: 在项目页面新增“审查”标签页，按从旧到新列出审查分支的提议提交，支持逐个批准、拒绝并回退，以及为已批准的范围启动发布任务。分支名可在“设置 → 守护进程”中配置，默认为 dev。
@@ -2900,3 +2900,9 @@ keyboard_options.fast: 快速
 keyboard_options.keyboard_hint: ↑ ↓ 移动 · Enter 选择 · Esc 关闭
 settings.starred_idle_before_unseen: 跳转时星标任务优先
 settings.starred_idle_before_unseen_description: "%{keys} 会先访问星标项目中已查看的空闲任务，再前往其他项目的未读完成"
+
+routing.feature_route_handoff: 模型交接
+
+routing.feature_route_handoff_description: 结合已结束轮次的上下文和下一次请求，判断以 Hard 启动的自动任务能否使用 Medium，或是否需要重新使用 Hard；同时评估推理投入度
+
+transcript.model_handoff: 自动路由已从 %{from} 切换到 %{to}。

@@ -900,9 +900,9 @@ experiments.needs_eval_backend:
 experiments.open_jev_settings:
   en: Open Jev settings
 experiments.phase_routing_title:
-  en: Phase-aware routing
+  en: Adaptive model handoffs
 experiments.phase_routing_description:
-  en: Auto-routed tasks the evaluator judges plan-worthy start on your hardest-class model, then downshift one class tier once the tool stream or the evaluator says planning ended — and climb back if implementation stalls. A Planning marker appears in session chrome until planning ends.
+  en: For Auto tasks that started on Hard, use the previous turn and your next request to choose between distinct Hard and Medium models on the same provider. Uncertain answers keep the current model.
 experiments.sidebar_dock_title:
   en: Sidebar dock
 experiments.sidebar_dock_description:
@@ -5837,3 +5837,10 @@ settings.starred_idle_before_unseen:
   en: Starred tasks first when jumping
 settings.starred_idle_before_unseen_description:
   en: "%{keys} visits a starred project's seen tasks before unread completions in other projects"
+
+routing.feature_route_handoff:
+  en: Model handoffs
+routing.feature_route_handoff_description:
+  en: Uses settled context and the next request to judge whether a Hard-started Auto task can use Medium or needs Hard again; batches the effort check
+transcript.model_handoff:
+  en: Auto routing switched from %{from} to %{to}.

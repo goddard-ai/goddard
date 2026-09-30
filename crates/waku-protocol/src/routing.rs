@@ -43,33 +43,22 @@ impl TaskClass {
             TaskClass::Demanding => "hard",
         }
     }
-
-    /// Hard planning may hand implementation to the workhorse model;
-    /// ordinary planning keeps Medium rather than assuming the work is Easy.
-    pub fn implementation_class(&self) -> TaskClass {
-        match self {
-            TaskClass::Demanding => TaskClass::General,
-            TaskClass::General | TaskClass::Routine => *self,
-        }
-    }
 }
 
-/// Where a task sits in a plan-then-execute lifecycle. Phase routing derives
-/// it from the tool stream and settle evaluations — descriptive session
-/// state the provider is never told about.
+/// Where a task sits in a plan-then-execute lifecycle, derived from the
+/// tool stream. Descriptive session state the provider is never told about.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum SessionPhase {
     /// Reads, searches, and plan tools only so far — no durable edits.
     Planning,
-    /// The task committed to implementation: a real file change ran, or an
-    /// evaluation judged planning done.
+    /// The task committed to implementation: a real file change ran.
     Executing,
 }
 
 /// What one streamed activity says about the planning→implementation
 /// boundary. The classifier is deliberately conservative: ambiguous work
-/// waits for the turn-settle evaluation rather than flipping on a guess.
+/// keeps the existing phase rather than flipping on a guess.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PhaseSignal {
     /// A durable edit to a non-doc path — unambiguous execution. Flips
@@ -146,9 +135,8 @@ pub struct RouteDecision {
     /// Confidence the backend reported for the class answer, 0–1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class_confidence: Option<f64>,
-    /// The intake evaluation judged this task worth a planning phase.
-    /// Planning keeps the task's difficulty tier; Hard may downshift to
-    /// Medium once planning ends. `false` when the eval skipped the question.
+    /// Legacy intake planning verdict, retained for old persisted sessions.
+    /// Current routing does not set or consult this field.
     #[serde(default, skip_serializing_if = "crate::model::is_false")]
     pub phased: bool,
     /// Why this target won: "class-map", "class-unmapped",
@@ -159,25 +147,4 @@ pub struct RouteDecision {
     pub backend: Option<InferenceProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eval_latency_ms: Option<u64>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn routine_planning_does_not_demote_the_workhorse_model() {
-        assert_eq!(
-            TaskClass::General.implementation_class(),
-            TaskClass::General
-        );
-        assert_eq!(
-            TaskClass::Routine.implementation_class(),
-            TaskClass::Routine
-        );
-        assert_eq!(
-            TaskClass::Demanding.implementation_class(),
-            TaskClass::General
-        );
-    }
 }

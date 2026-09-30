@@ -1,9 +1,10 @@
 //! Auto model routing: a draft whose model selection is Auto asks the
 //! daemon's evaluation model to classify its first prompt, and the daemon
 //! resolves that classification through the user's class map to a concrete
-//! provider/model/effort. Subsequent turns re-evaluate only the reasoning
-//! effort — a confident answer retunes the live session before the prompt
-//! is sent.
+//! provider/model/effort. Subsequent turns can adjust reasoning effort and,
+//! with adaptive routing enabled, hand Hard tasks to the workhorse model.
+//! Judgments run before a prompt, using the previous settled turn and the
+//! next request; streamed phase labels never select a model.
 //!
 //! This file is the app-side seam. [`RouteStartPlan`] snapshots everything
 //! the resolved provider's start request needs while probes and settings are
@@ -17,8 +18,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::anyhow;
-use serde_json::json;
+use serde_json::{Value, json};
 use uuid::Uuid;
+use waku_client::routing::{
+    ModelHandoff, model_handoff_class, model_handoff_questions, model_handoff_targets,
+};
 use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 use waku_protocol::model::{ProviderKind, ProviderResumeCursor, RuntimeMode};
 use waku_protocol::routing::{RouteCandidate, RouteDecision, RouteTarget, TaskClass};
@@ -182,54 +186,74 @@ impl RouteStartPlan {
     }
 }
 
-/// A subsequent turn's effort evaluation: the prompt is scored against the
-/// session model's effort ladder, and a confident answer retunes the live
-/// driver before the prompt is sent. Snapshots what the eval needs while the
-/// session is still on the UI thread.
+/// Snapshot a follow-up prompt's effort and optional model-handoff judgment
+/// on the UI thread. The daemon call runs inside background preparation.
 pub(super) struct TurnRoutePlan {
     session_id: Uuid,
-    /// The user-visible prompt text the evaluator sees.
     prompt: String,
-    /// The session's resolved model — the effort ladder's owner.
     model: String,
-    /// The model's supported effort ids, in catalog order.
     efforts: Vec<String>,
-    /// The effort in effect now — the sticky default Jev must beat.
     current_effort: Option<String>,
+    owner: RouteDecision,
+    original_model: Option<String>,
+    original_effort: Option<String>,
+    original_service_tier: Option<String>,
+    original_context_window: Option<String>,
+    handoff: Option<ModelHandoff>,
+    previous_turn: Option<Value>,
     daemon: waku_client::DaemonSupervisor,
 }
 
-/// How sure the evaluator must be before a turn may move the session off its
-/// current effort. Below it the answer is advisory only.
-const TURN_EFFORT_CONFIDENCE: f64 = 0.7;
+pub(super) struct TurnRouteDecision {
+    owner: RouteDecision,
+    original_model: Option<String>,
+    original_effort: Option<String>,
+    original_service_tier: Option<String>,
+    original_context_window: Option<String>,
+    handoff: Option<(ModelHandoff, TaskClass)>,
+    effort: Option<String>,
+}
 
-const TURN_EFFORT_INSTRUCTIONS: &str = "Which reasoning effort does this turn deserve? \
+const TURN_EFFORT_CONFIDENCE: f64 = 0.7;
+const TURN_EFFORT_INSTRUCTIONS: &str = "Which reasoning effort does nextRequest deserve? \
 Answer with the effort that best fits the request's difficulty — but treat the current \
 effort as the default: only pick a different level when the task clearly warrants more \
 or less reasoning than usual.";
 
 impl TurnRoutePlan {
-    /// The effort this turn should run at — `None` keeps the session's
-    /// current setting. Never fails hard: an unanswered call, an
-    /// unconfident answer, or an unknown effort id all leave the effort
-    /// alone.
-    pub(super) fn evaluate(self) -> Option<String> {
-        let state = json!({
-            "task": self.prompt,
+    /// One bounded background call batches independent effort and model
+    /// judgments. An effort answer belongs only to the current model; a
+    /// handoff uses the new model's approved or remembered effort instead.
+    pub(super) fn evaluate(self) -> Option<TurnRouteDecision> {
+        let mut state = json!({
+            "sessionId": self.session_id,
+            "nextRequest": self.prompt.chars().take(4_000).collect::<String>(),
             "model": self.model,
             "currentEffort": self.current_effort,
         });
-        let questions = BTreeMap::from([(
-            "effort".to_owned(),
-            EvalQuestion::Choice {
-                instructions: TURN_EFFORT_INSTRUCTIONS.to_owned(),
-                criteria: self
-                    .efforts
-                    .iter()
-                    .map(|effort| (effort.clone(), None))
-                    .collect(),
-            },
-        )]);
+        let mut questions = BTreeMap::new();
+        if self.efforts.len() >= 2 {
+            questions.insert(
+                "effort".to_owned(),
+                EvalQuestion::Choice {
+                    instructions: TURN_EFFORT_INSTRUCTIONS.to_owned(),
+                    criteria: self
+                        .efforts
+                        .iter()
+                        .map(|effort| (effort.clone(), None))
+                        .collect(),
+                },
+            );
+        }
+        if let Some(handoff) = &self.handoff {
+            state["previousTurn"] = json!(self.previous_turn);
+            state["currentClass"] = json!(handoff.current_class(&self.model));
+            state["models"] = json!({"medium": handoff.medium.target, "hard": handoff.hard.target});
+            questions.extend(model_handoff_questions());
+        }
+        if questions.is_empty() {
+            return None;
+        }
         let payload = self
             .daemon
             .client()
@@ -239,7 +263,14 @@ impl TurnRoutePlan {
                 waku_client::Command::Evaluate {
                     state,
                     questions,
-                    feature: Some("route-effort".to_owned()),
+                    feature: Some(
+                        if self.handoff.is_some() {
+                            "route-handoff"
+                        } else {
+                            "route-effort"
+                        }
+                        .to_owned(),
+                    ),
                     timeout_secs: None,
                 },
             )
@@ -247,17 +278,38 @@ impl TurnRoutePlan {
         let waku_client::ResponsePayload::Evaluation { evaluation } = payload else {
             return None;
         };
-        let Some(EvalAnswer::Choice {
-            choice, confidence, ..
-        }) = evaluation.answers.get("effort")
-        else {
-            return None;
+        let handoff = self.handoff.and_then(|handoff| {
+            let current = handoff.current_class(&self.model)?;
+            let class = model_handoff_class(&evaluation, current)?;
+            Some((handoff, class))
+        });
+        let effort = match evaluation.answers.get("effort") {
+            Some(EvalAnswer::Choice {
+                choice,
+                confidence: Some(confidence),
+                ..
+            }) if handoff.is_none()
+                && confidence.is_finite()
+                && (TURN_EFFORT_CONFIDENCE..=1.0).contains(confidence)
+                && self.efforts.contains(choice)
+                && self.current_effort.as_ref() != Some(choice) =>
+            {
+                Some(choice.clone())
+            }
+            _ => None,
         };
-        if confidence.unwrap_or(0.0) < TURN_EFFORT_CONFIDENCE {
+        if handoff.is_none() && effort.is_none() {
             return None;
         }
-        (self.efforts.contains(choice) && self.current_effort.as_ref() != Some(choice))
-            .then(|| choice.clone())
+        Some(TurnRouteDecision {
+            owner: self.owner,
+            original_model: self.original_model,
+            original_effort: self.original_effort,
+            original_service_tier: self.original_service_tier,
+            original_context_window: self.original_context_window,
+            handoff,
+            effort,
+        })
     }
 }
 
@@ -377,33 +429,40 @@ impl Waku {
         })
     }
 
-    /// A subsequent turn's effort evaluation: the routed session's prompt is
-    /// scored against the session model's effort ladder, and a confident
-    /// answer retunes the live driver before the prompt is sent. Built on
-    /// the UI thread; `evaluate` runs inside `prepare_submission`.
+    /// Snapshot only actionable judgments. Handoffs are opt-in, stay inside
+    /// this provider, and require a previous settled turn. Ordinary Medium
+    /// tasks retain only their existing effort check.
     pub(super) fn route_turn_plan_for_session(
         &self,
         session: &AgentSession,
         prompt: String,
     ) -> Option<TurnRoutePlan> {
-        // Only sessions started through Auto keep deciding effort per turn —
-        // a manual pick clears `route_decision` and owns its effort again.
-        if session.route_decision.is_none() {
-            return None;
-        }
+        let owner = session.route_decision.as_ref()?;
         let daemon = self.daemons.daemon_for_session(session.id)?;
-        // The eval runs on the session's daemon — its backend, not the local
-        // mirror's, decides whether a turn evaluation can answer at all.
         if !daemon.settings().eval_ready() {
             return None;
         }
         let model = self.model_metadata_for_session(session)?;
-        let efforts: Vec<String> = model
+        let efforts = model
             .reasoning_efforts
             .iter()
             .map(|option| option.id.clone())
-            .collect();
-        if efforts.len() < 2 {
+            .collect::<Vec<_>>();
+        let handoff = self.model_handoff_for_session(session).filter(|_| {
+            session
+                .turns
+                .last()
+                .is_some_and(|turn| turn.status != TurnStatus::Running)
+        });
+        let previous_turn = handoff
+            .as_ref()
+            .and_then(|_| session.turns.last())
+            .map(|turn| {
+                let mut state = status_markers::turn_eval_state(session, turn.id, None);
+                state["finish"]["success"] = json!(turn.status == TurnStatus::Completed);
+                state
+            });
+        if efforts.len() < 2 && handoff.is_none() {
             return None;
         }
         Some(TurnRoutePlan {
@@ -411,14 +470,138 @@ impl Waku {
             prompt,
             model: model.id.clone(),
             efforts,
-            // What Jev compares against: the session's explicit effort, else
-            // the effort the model would launch with.
             current_effort: session
                 .reasoning_effort
                 .clone()
                 .or_else(|| model.default_reasoning_effort.clone()),
+            owner: owner.clone(),
+            original_model: session.model.clone(),
+            original_effort: session.reasoning_effort.clone(),
+            original_service_tier: session.service_tier.clone(),
+            original_context_window: session.context_window.clone(),
+            handoff,
+            previous_turn,
             daemon,
         })
+    }
+
+    fn model_handoff_for_session(&self, session: &AgentSession) -> Option<ModelHandoff> {
+        let probe =
+            self.provider_probe_on(self.daemons.session_owner(session.id), session.provider)?;
+        let current_model = session.model.as_deref()?;
+        model_handoff_targets(
+            self.state.phase_routing_enabled,
+            session.route_decision.as_ref(),
+            session.provider,
+            current_model,
+            self.state.provider_route_classes.get(&session.provider),
+            &self.state.route_classes,
+            &probe.models,
+        )
+    }
+
+    /// Apply only a still-owned decision to the driver that will receive
+    /// this prompt. Refusal restores all model traits and records no move.
+    pub(super) fn apply_turn_route_decision(
+        &mut self,
+        session_id: Uuid,
+        decision: TurnRouteDecision,
+        driver: &waku_client::driver::DriverHandle,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if session.route_decision.as_ref() != Some(&decision.owner)
+            || session.model != decision.original_model
+            || session.reasoning_effort != decision.original_effort
+            || session.service_tier != decision.original_service_tier
+            || session.context_window != decision.original_context_window
+        {
+            return;
+        }
+        let handoff = decision.handoff.filter(|(expected, _)| {
+            self.model_handoff_for_session(session).as_ref() == Some(expected)
+        });
+        if handoff.is_none() && decision.effort.is_none() {
+            return;
+        }
+        let previous = (
+            session.model.clone(),
+            session.reasoning_effort.clone(),
+            session.service_tier.clone(),
+            session.context_window.clone(),
+        );
+        let provider = session.provider;
+        let target = handoff
+            .as_ref()
+            .and_then(|(handoff, class)| handoff.target(*class).cloned());
+        let traits = target
+            .as_ref()
+            .and_then(|target| target.target.model.as_deref())
+            .map(|model| self.state.model_traits_for(provider, model));
+        let Some(session) = self.state.session_mut(session_id) else {
+            return;
+        };
+        if let Some(target) = &target {
+            session.model.clone_from(&target.target.model);
+            let (effort, tier, window) = traits.unwrap_or_default();
+            session.reasoning_effort = target.target.effort.clone().or(effort);
+            session.service_tier = tier;
+            session.context_window = window;
+        } else if let Some(effort) = decision.effort {
+            session.reasoning_effort = Some(effort);
+        }
+        let applied = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| self.session_options(session))
+            .is_some_and(|options| driver.apply_options(options));
+        if !applied {
+            if let Some(session) = self.state.session_mut(session_id) {
+                (
+                    session.model,
+                    session.reasoning_effort,
+                    session.service_tier,
+                    session.context_window,
+                ) = previous;
+            }
+            return;
+        }
+        let mut class_record = None;
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.updated_at = unix_time();
+            if let Some((_, class)) = handoff {
+                let from = previous.0.as_deref().unwrap_or("default");
+                let to = session.model.as_deref().unwrap_or("default");
+                session.messages.push(Message::new(
+                    MessageRole::System,
+                    tr!("transcript.model_handoff", from = from, to = to),
+                ));
+                if let Some(target) = target {
+                    class_record = Some((
+                        class,
+                        target.provider_map,
+                        RouteTarget {
+                            provider,
+                            model: session.model.clone(),
+                            effort: session.reasoning_effort.clone(),
+                        },
+                    ));
+                }
+            }
+        }
+        self.state.mark_session_dirty(session_id);
+        if let Some((class, provider_map, target)) = class_record {
+            self.record_route_class(session_id, class, provider_map, target, cx);
+        }
     }
 
     /// Log that the user replaced an Auto-routed model by hand — the decision

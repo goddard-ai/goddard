@@ -2266,8 +2266,8 @@ experiments.memory_models_caption: 各プロバイダーの終了したセッシ
 experiments.memory_model_default: プロバイダーのデフォルト
 experiments.needs_eval_backend: 評価バックエンドを使用します — まだ構成されていません。
 experiments.open_jev_settings: Jev 設定を開く
-experiments.phase_routing_description: 計画フェーズが必要と評価モデルが判定した自動振り分けタスクは、最上位クラスのモデルで開始し、ツールイベントまたは評価モデルが計画の終了を判断した時点で1クラス下のモデルに切り替えます — 実装が停滞した場合は元に戻ります。サイドバーの行にタスクのフェーズを表示します。
-experiments.phase_routing_title: フェーズ対応ルーティング
+experiments.phase_routing_description: Hard で開始した Auto タスクについて、前のターンと次のリクエストを基に、同じプロバイダーの異なる Hard と Medium モデルを選びます。判断が不確かな場合は現在のモデルを維持します。
+experiments.phase_routing_title: 状況に応じたモデル切り替え
 experiments.projects_page_description: ⌘⇧P でプロジェクトごとのページを開き、ワークツリー、ブランチ、Issue、プルリクエストを一覧します。⌘⌥1–4 でタブに直接移動できます。
 experiments.projects_page_title: プロジェクトページ
 experiments.review_queue_description: プロジェクトページにレビュータブを追加します。レビュー用ブランチの提案コミットを古い順に表示し、コミットごとの承認、却下とリバート、承認済み範囲のリリースタスクを開始できます。ブランチ名は「設定 → デーモン」で変更でき、初期値は dev です。
@@ -2949,3 +2949,9 @@ keyboard_options.fast: 高速
 keyboard_options.keyboard_hint: ↑ ↓ 移動 · Enter 選択 · Esc 閉じる
 settings.starred_idle_before_unseen: ジャンプ時にスター付きタスクを優先
 settings.starred_idle_before_unseen_description: "%{keys} は他のプロジェクトの未読完了より先に、スター付きプロジェクトの閲覧済みアイドルタスクへ移動します"
+
+routing.feature_route_handoff: モデル切り替え
+
+routing.feature_route_handoff_description: 完了したターンと次のリクエストを基に、Hard で開始した Auto タスクが Medium を使えるか、再び Hard が必要かを判断し、エフォートも同時に評価します
+
+transcript.model_handoff: Auto ルーティングが %{from} から %{to} に切り替わりました。

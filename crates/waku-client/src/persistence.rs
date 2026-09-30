@@ -1239,9 +1239,9 @@ pub struct AppSettings {
     /// clear an easier render gate. Suggestion chips only; automatic runs
     /// keep their per-action opt-in floors. Off by default.
     pub move_fast_break_things: bool,
-    /// Experimental: Auto-routed tasks judged plan-worthy start on the
-    /// hardest-class target, downshift one class tier once the tool stream
-    /// or the evaluation model says planning ended. Off by default,
+    /// Experimental: before follow-up prompts, Auto tasks that started on
+    /// Hard may hand off to Medium or return to Hard when needed. Requires
+    /// distinct approved models on the same provider. Off by default,
     /// including debug builds.
     pub phase_routing_enabled: bool,
     /// Desktop-owned overrides for the fixed suggested-prompt actions.

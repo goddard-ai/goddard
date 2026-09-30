@@ -60,9 +60,9 @@ carry the information the judgment actually needs.
 
 | Feature tag | Where | What it judges |
 | --- | --- | --- |
-| `route` | `crates/waku-core/src/routing.rs` | First prompt → task `class` (Choice) + `needs_planning` (Noul), resolved through the user's class map |
+| `route` | `crates/waku-core/src/routing.rs` | First prompt → task `class` (Choice), resolved through the user's class map |
 | `route-effort` | `src/app/routing.rs` | Each turn → effort ladder pick (Choice), only while routing owns the session |
-| `route-phase` | `src/app/phases.rs` | Settled turns on `phased` sessions → `still_planning`/`stuck` Nouls + `implementation_model` Choice over the user's approved models only |
+| `route-handoff` | `src/app/routing.rs`, `crates/waku-client/src/routing.rs` | Before a follow-up prompt on an eligible Hard-started Auto task → `remaining_work` Choice between approved same-provider Medium/Hard models, batched with effort |
 | `route-class-suggest` | `src/app/settings.rs` | Jev page "suggest defaults" for the class map |
 | `turn-status` | `src/app/status_markers.rs` | Settled turn → ending Choice + flag Nouls (unverified, drifted, needs-review, thrash, assumed, failed, blocked) |
 | `title-quality` | `src/app/title_quality.rs` | Settled turn → Noul judging whether its automatic title needs a rewrite |
@@ -82,19 +82,22 @@ carry the information the judgment actually needs.
   user.
 - Gate the spend on whether the answer can act. Status markers and action
   predictions evaluate only the selected session and queue the rest;
-  phase evals run only for sessions whose intake route marked `phased`;
-  cheap deterministic signals (`ActivityItem::phase_signal`, failure
-  counts) decide whether a settle evaluation is needed at all — never one
-  hosted call per tool event.
+  model handoffs are opt-in (`phase_routing_enabled`, default off) and run
+  only before a visible follow-up prompt on an Auto task that started on
+  Hard, including legacy planning overrides. Both Medium and Hard must map
+  to distinct catalog-listed models on the same provider. No handoff call
+  fires at settle or from tool events; activity-based phase labels do not
+  select models.
 - Batch independent questions into one call. Status markers ask ~10
   questions per settle on one shared `state`; provider-switch compaction
   asks one Noul per item. Prefer parallel questions over serialized
   follow-ups.
 - Thresholds are product decisions, not defaults. Use `confidence` and the
   full `probabilities` map: argmax-plus-margin for suggestions
-  (≥ 0.5 and ≥ 0.15 ahead), a dead band for irreversible-ish transitions
-  (phase commits below 0.4, stays above 0.6), asymmetric bars where false
-  positives and misses cost differently (`failed` renders at 0.45,
+  (≥ 0.5 and ≥ 0.15 ahead), conservative handoffs (Hard → Medium needs
+  confidence ≥ 0.75 and probability ≥ 0.85; Medium → Hard needs confidence
+  ≥ 0.70 and probability ≥ 0.75), asymmetric bars where false positives and
+  misses cost differently (`failed` renders at 0.45,
   `complete` needs 0.60). Choice options compete for probability mass —
   use Choice for mutually exclusive outcomes and Noul for qualities that
   can co-occur.
@@ -111,3 +114,26 @@ carry the information the judgment actually needs.
   before any suggestion renders. Treat returned probabilities as signals
   whose calibration needs testing on our workload, and let the decision
   log prove a feature's economics.
+
+## Model handoffs
+
+The handoff state carries `nextRequest`, the bounded `previousTurn` summary,
+`currentClass`, and the approved `models`. For example, Hard may establish
+the cause and approach for a concurrency fix, then Medium can implement
+and verify that settled approach. A new request exposing unresolved
+constraints may justify returning to Hard. A plan or the first code edit
+alone never authorizes a downshift.
+
+The evaluator selects a class; ordinary code requires its confidence and
+probability cutoff before applying the user's mapped model and effort.
+Missing or malformed probabilities keep the model in use. The application
+rechecks Auto ownership, current model traits, the opt-in flag, and current
+class maps before applying options. A driver refusal restores the previous
+traits. Only successful moves emit a transcript note and `route-class`
+record; judgments remain logged as `route-handoff`. Historical `route-phase`
+records and the persisted `phased` field remain readable, but no new
+planning verdict is requested.
+
+Compare handoff judgments with applied `route-class` moves before expanding
+the experiment. Reduced Hard usage is the intended saving; latency, retries,
+and user corrections still need workload validation.
