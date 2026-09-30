@@ -2998,7 +2998,7 @@ fn format_activity_json(value: &Value) -> Option<String> {
 }
 
 fn non_empty_activity_text(value: String) -> Option<String> {
-    const MAX_CHARS: usize = 16_000;
+    const MAX_CHARS: usize = super::activity::MAX_ACTIVITY_CHARS;
     let value = value.trim().to_owned();
     if value.is_empty() {
         return None;

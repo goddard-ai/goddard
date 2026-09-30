@@ -6,7 +6,11 @@ use serde_json::Value;
 
 use crate::model::{ActivityItem, ActivityKind};
 
-const MAX_ACTIVITY_CHARS: usize = 16_000;
+/// Per-activity ceiling for stored tool text — arguments and output alike.
+/// ~8K characters is a few hundred rendered lines in an expandable row;
+/// anything past it is truncated at the source so a single chatty tool
+/// cannot dominate a session's stored detail.
+pub(super) const MAX_ACTIVITY_CHARS: usize = 8_000;
 
 pub(super) fn tool_activity(
     source_id: Option<String>,
