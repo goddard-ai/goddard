@@ -20,6 +20,7 @@ use tungstenite::{Message, WebSocket, accept_hdr_with_config};
 use uuid::Uuid;
 
 use waku_protocol::event_to_wire;
+use waku_protocol::workspace::WorkspaceOperation;
 
 use crate::model::{AgentSession, DriverEvent, Project, ProviderKind, SessionStatus};
 use crate::protocol::MAX_WIRE_MESSAGE_BYTES;
@@ -53,7 +54,40 @@ const CONTROL_REQUEST_WORKERS: usize = 4;
 const CONTROL_REQUEST_QUEUE: usize = 64;
 const HEALTH_REQUEST_WORKERS: usize = 2;
 const HEALTH_REQUEST_QUEUE: usize = 16;
-type IndependentJob = Box<dyn FnOnce() + Send + 'static>;
+/// A pooled request job. The label is the command's wire `type` tag —
+/// `workspace` jobs add their operation tag (`workspace:listTree`) — so a
+/// full or slow pool names what it holds instead of just counting it.
+struct PoolJob {
+    label: String,
+    run: Box<dyn FnOnce() + Send + 'static>,
+}
+
+/// A job holding a worker this long earns a stderr line — the subprocess
+/// gate's `OUTLIER_HOLD` convention. The sample's `running_ms` records
+/// that it happened; stderr records when.
+const OUTLIER_JOB_RUN: Duration = Duration::from_secs(60);
+
+/// Per-command pool counters, keyed by [`pool_job_label`]. `queued` is a
+/// live gauge maintained at submit and pickup time; the rest accumulate.
+#[derive(Default)]
+struct CommandStats {
+    submits: u64,
+    queued: u32,
+    completed: u64,
+    run_ms: u64,
+    max_run_ms: u64,
+    rejected: u64,
+}
+
+/// A job occupying a worker thread right now. `outlier_logged` keeps the
+/// once-per-job stderr line single even though the stats sampler observes
+/// the same job for many minutes.
+struct RunningJob {
+    worker: String,
+    label: String,
+    started: Instant,
+    outlier_logged: bool,
+}
 
 #[derive(Default)]
 struct RequestPoolStats {
@@ -62,24 +96,67 @@ struct RequestPoolStats {
     wait_ms: u64,
     max_wait_ms: u64,
     rejected: u64,
+    commands: HashMap<String, CommandStats>,
+    /// One row per worker's current job — a queue pinned at capacity is
+    /// only diagnosable if the busy workers are named too.
+    running: Vec<RunningJob>,
+}
+
+impl RequestPoolStats {
+    fn command(&mut self, label: &str) -> &mut CommandStats {
+        self.commands.entry(label.to_owned()).or_default()
+    }
 }
 
 /// Per-pool counters for the `daemon-stats.jsonl` sample — the entry holds
 /// the jobs channel so a snapshot can read live queue depth.
-static REQUEST_POOLS: OnceLock<Mutex<HashMap<String, (RequestPoolStats, Sender<IndependentJob>)>>> =
+static REQUEST_POOLS: OnceLock<Mutex<HashMap<String, (RequestPoolStats, Sender<PoolJob>)>>> =
     OnceLock::new();
 
-fn request_pools() -> &'static Mutex<HashMap<String, (RequestPoolStats, Sender<IndependentJob>)>> {
+fn request_pools() -> &'static Mutex<HashMap<String, (RequestPoolStats, Sender<PoolJob>)>> {
     REQUEST_POOLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Pool counters for [`crate::stats`]: totals accumulate since boot, while
-/// `queued` samples the queue depth at call time.
+/// `queued` and each command's `running`/`running_ms` read live at call
+/// time — the fields that name a pinned queue's jobs.
 pub(crate) fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSample> {
-    request_pools()
-        .lock()
-        .iter()
+    let mut pools = request_pools().lock();
+    pools
+        .iter_mut()
         .map(|(name, (stats, jobs))| {
+            let mut commands: BTreeMap<String, waku_protocol::RequestCommandSample> = stats
+                .commands
+                .iter()
+                .map(|(label, command)| {
+                    (
+                        label.clone(),
+                        waku_protocol::RequestCommandSample {
+                            submits: command.submits,
+                            queued: command.queued,
+                            running: 0,
+                            running_ms: 0,
+                            completed: command.completed,
+                            run_ms: command.run_ms,
+                            max_run_ms: command.max_run_ms,
+                            rejected: command.rejected,
+                        },
+                    )
+                })
+                .collect();
+            for running in &mut stats.running {
+                let running_ms = running.started.elapsed().as_millis() as u64;
+                if running_ms >= OUTLIER_JOB_RUN.as_millis() as u64 && !running.outlier_logged {
+                    eprintln!(
+                        "goddard-daemon: {name} request `{}` has held a worker for {running_ms}ms",
+                        running.label
+                    );
+                    running.outlier_logged = true;
+                }
+                let command = commands.entry(running.label.clone()).or_default();
+                command.running += 1;
+                command.running_ms = command.running_ms.max(running_ms);
+            }
             (
                 name.clone(),
                 waku_protocol::RequestPoolSample {
@@ -89,6 +166,7 @@ pub(crate) fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::Request
                     wait_ms: stats.wait_ms,
                     max_wait_ms: stats.max_wait_ms,
                     rejected: stats.rejected,
+                    commands,
                 },
             )
         })
@@ -98,21 +176,63 @@ pub(crate) fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::Request
 /// Fixed execution and queue bounds for independent daemon requests.
 struct IndependentRequestPool {
     name: String,
-    jobs: Sender<IndependentJob>,
+    jobs: Sender<PoolJob>,
 }
 
 impl IndependentRequestPool {
     fn new(name: &str, workers: usize, queue_capacity: usize) -> Self {
-        let (jobs, receiver) = bounded::<IndependentJob>(queue_capacity);
+        let (jobs, receiver) = bounded::<PoolJob>(queue_capacity);
         for index in 0..workers {
             let receiver = receiver.clone();
-            let worker_name = name.to_owned();
+            let pool_name = name.to_owned();
+            let worker_name = format!("goddard-daemon-{name}-{index}");
             if let Err(error) = std::thread::Builder::new()
-                .name(format!("goddard-daemon-{name}-{index}"))
+                .name(worker_name.clone())
                 .spawn(move || {
                     while let Ok(job) = receiver.recv() {
-                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err() {
-                            eprintln!("daemon {worker_name} request worker recovered from a panic");
+                        {
+                            let mut pools = request_pools().lock();
+                            let stats = &mut pools
+                                .get_mut(&pool_name)
+                                .expect("a pool registers itself at construction")
+                                .0;
+                            let command = stats.command(&job.label);
+                            command.queued = command.queued.saturating_sub(1);
+                            stats.running.push(RunningJob {
+                                worker: worker_name.clone(),
+                                label: job.label.clone(),
+                                started: Instant::now(),
+                                outlier_logged: false,
+                            });
+                        }
+                        let started = Instant::now();
+                        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                            job.run,
+                        ))
+                        .is_err();
+                        let run_ms = started.elapsed().as_millis() as u64;
+                        {
+                            let mut pools = request_pools().lock();
+                            let stats = &mut pools
+                                .get_mut(&pool_name)
+                                .expect("a pool registers itself at construction")
+                                .0;
+                            stats.running.retain(|job| job.worker != worker_name);
+                            let command = stats.command(&job.label);
+                            command.completed += 1;
+                            command.run_ms += run_ms;
+                            command.max_run_ms = command.max_run_ms.max(run_ms);
+                        }
+                        if panicked {
+                            eprintln!(
+                                "daemon {worker_name} request worker recovered from a panic"
+                            );
+                        }
+                        if run_ms >= OUTLIER_JOB_RUN.as_millis() as u64 {
+                            eprintln!(
+                                "goddard-daemon: {pool_name} request `{}` held a worker for {run_ms}ms",
+                                job.label
+                            );
                         }
                     }
                 })
@@ -129,10 +249,21 @@ impl IndependentRequestPool {
         }
     }
 
-    fn submit(
-        &self,
-        job: IndependentJob,
-    ) -> Result<(), crossbeam_channel::SendTimeoutError<IndependentJob>> {
+    fn submit(&self, job: PoolJob) -> Result<(), crossbeam_channel::SendTimeoutError<PoolJob>> {
+        let label = job.label.clone();
+        {
+            let mut pools = request_pools().lock();
+            let stats = &mut pools
+                .get_mut(&self.name)
+                .expect("a pool registers itself at construction")
+                .0;
+            stats.submits += 1;
+            let command = stats.command(&label);
+            command.submits += 1;
+            // Counted before the send so a worker that drains the job in
+            // the meantime still balances the pickup decrement.
+            command.queued += 1;
+        }
         let started = Instant::now();
         let result = self.jobs.send_timeout(job, POOL_SUBMIT_WAIT);
         let wait_ms = started.elapsed().as_millis() as u64;
@@ -141,7 +272,6 @@ impl IndependentRequestPool {
             .get_mut(&self.name)
             .expect("a pool registers itself at construction")
             .0;
-        stats.submits += 1;
         // A sub-millisecond send found queue room without blocking; only
         // longer waits reflect real contention.
         if wait_ms >= 1 {
@@ -151,15 +281,15 @@ impl IndependentRequestPool {
         }
         if result.is_err() {
             stats.rejected += 1;
+            let command = stats.command(&label);
+            command.queued = command.queued.saturating_sub(1);
+            command.rejected += 1;
         }
         result
     }
 
     #[cfg(test)]
-    fn try_submit(
-        &self,
-        job: IndependentJob,
-    ) -> Result<(), crossbeam_channel::TrySendError<IndependentJob>> {
+    fn try_submit(&self, job: PoolJob) -> Result<(), crossbeam_channel::TrySendError<PoolJob>> {
         self.jobs.try_send(job)
     }
 }
@@ -1154,9 +1284,13 @@ impl RequestDispatcher {
         } else {
             &self.control_requests
         };
-        let job = Box::new(move || {
-            handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
-        });
+        let label = pool_job_label(&request.command);
+        let job = PoolJob {
+            label,
+            run: Box::new(move || {
+                handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
+            }),
+        };
         let error = match pool.submit(job) {
             Ok(()) => return,
             Err(crossbeam_channel::SendTimeoutError::Timeout(_)) if heavy => {
@@ -2246,20 +2380,243 @@ fn handle_request(
         // leaves no trace anywhere.
         eprintln!(
             "goddard-daemon: fire-and-forget {} for session {session_id} failed: {}",
-            command_kind.as_deref().unwrap_or("command"),
+            command_kind.unwrap_or("command"),
             error.message
         );
     }
     HandledRequest { outcome, executed }
 }
 
-/// A command's wire `type` tag, for naming a fire-and-forget failure
-/// without dumping its payload (prompt text, attachments) into stderr.
-fn command_kind(command: &Command) -> String {
-    serde_json::to_value(command)
-        .ok()
-        .and_then(|value| value.get("type")?.as_str().map(str::to_owned))
-        .unwrap_or_else(|| "unknown".into())
+/// A command's wire `type` tag — the `#[serde(tag)]` name the client
+/// sent — for naming pool jobs and fire-and-forget failures without
+/// serializing payloads (prompt text, attachments) just to read the tag.
+fn command_kind(command: &Command) -> &'static str {
+    match command {
+        Command::AttachSession => "attachSession",
+        Command::Start { .. } => "start",
+        Command::Prompt { .. } => "prompt",
+        Command::Steer { .. } => "steer",
+        Command::Compact => "compact",
+        Command::Cancel => "cancel",
+        Command::CancelComputerUse => "cancelComputerUse",
+        Command::RefreshBackgroundWork => "refreshBackgroundWork",
+        Command::StopBackgroundWork { .. } => "stopBackgroundWork",
+        Command::Respond { .. } => "respond",
+        Command::RespondUserInput { .. } => "respondUserInput",
+        Command::ClarifyUserInput { .. } => "clarifyUserInput",
+        Command::CancelUserInput { .. } => "cancelUserInput",
+        Command::Goal { .. } => "goal",
+        Command::ClaimManagedGoalTurn { .. } => "claimManagedGoalTurn",
+        Command::RunComputerTool { .. } => "runComputerTool",
+        Command::RejectComputerTool { .. } => "rejectComputerTool",
+        Command::ApplyOptions { .. } => "applyOptions",
+        Command::Rollback { .. } => "rollback",
+        Command::Fork { .. } => "fork",
+        Command::GetSettings => "getSettings",
+        Command::UpdateSettings { .. } => "updateSettings",
+        Command::GetDaemonStats => "getDaemonStats",
+        Command::SetDaemonExposure { .. } => "setDaemonExposure",
+        Command::UpsertCustomCommand { .. } => "upsertCustomCommand",
+        Command::RemoveCustomCommand { .. } => "removeCustomCommand",
+        Command::ListCustomCommands => "listCustomCommands",
+        Command::ProbeProvider { .. } => "probeProvider",
+        Command::SandboxSignIn { .. } => "sandboxSignIn",
+        Command::SandboxAuthStatus { .. } => "sandboxAuthStatus",
+        Command::FetchPlanUsage { .. } => "fetchPlanUsage",
+        Command::ConsumeCodexResetCredit { .. } => "consumeCodexResetCredit",
+        Command::ProbeComputerPermissions { .. } => "probeComputerPermissions",
+        Command::LoadUsageHistory { .. } => "loadUsageHistory",
+        Command::LoadSkills { .. } => "loadSkills",
+        Command::SetSkillsEnabled { .. } => "setSkillsEnabled",
+        Command::TrashSkills { .. } => "trashSkills",
+        Command::LoadTaskState => "loadTaskState",
+        Command::SaveTaskState { .. } => "saveTaskState",
+        Command::RemoveSession => "removeSession",
+        Command::RemoveProject { .. } => "removeProject",
+        Command::HydrateSession { .. } => "hydrateSession",
+        Command::SearchSessionMessages { .. } => "searchSessionMessages",
+        Command::ListProviderSessions { .. } => "listProviderSessions",
+        Command::LoadProviderSession { .. } => "loadProviderSession",
+        Command::Evaluate { .. } => "evaluate",
+        Command::TestEvalConnection { .. } => "testEvalConnection",
+        Command::GetInferenceCredential { .. } => "getInferenceCredential",
+        Command::LoadEvalUsage => "loadEvalUsage",
+        Command::RouteTask { .. } => "routeTask",
+        Command::RecordRouteOverride { .. } => "recordRouteOverride",
+        Command::RecordRouteClass { .. } => "recordRouteClass",
+        Command::ListIntegrations => "listIntegrations",
+        Command::ConnectIntegration { .. } => "connectIntegration",
+        Command::SetIntegrationProviders { .. } => "setIntegrationProviders",
+        Command::DisconnectIntegration { .. } => "disconnectIntegration",
+        Command::StartIntegrationAuth { .. } => "startIntegrationAuth",
+        Command::LoadComposerDrafts => "loadComposerDrafts",
+        Command::SaveComposerDrafts { .. } => "saveComposerDrafts",
+        Command::ApplyComposerDraftChanges { .. } => "applyComposerDraftChanges",
+        Command::StoreBlob { .. } => "storeBlob",
+        Command::ImportAttachment { .. } => "importAttachment",
+        Command::ImportPathAttachment { .. } => "importPathAttachment",
+        Command::ReadBlob { .. } => "readBlob",
+        Command::ReadAttachment { .. } => "readAttachment",
+        Command::SweepBlobs => "sweepBlobs",
+        Command::ForkSessionFromResponse { .. } => "forkSessionFromResponse",
+        Command::RewindSessionToMessage { .. } => "rewindSessionToMessage",
+        Command::ForkProviderSession { .. } => "forkProviderSession",
+        Command::Workspace { .. } => "workspace",
+        Command::OpenTerminal { .. } => "openTerminal",
+        Command::WriteTerminal { .. } => "writeTerminal",
+        Command::ResizeTerminal { .. } => "resizeTerminal",
+        Command::CloseTerminal => "closeTerminal",
+        Command::CloseSession => "closeSession",
+        Command::AgentCreateSession { .. } => "agentCreateSession",
+        Command::AgentPrompt { .. } => "agentPrompt",
+        Command::AgentRenameSelf { .. } => "agentRenameSelf",
+        Command::CancelQueuedPrompt { .. } => "cancelQueuedPrompt",
+        Command::GetFriends => "getFriends",
+        Command::SendFriendRequest { .. } => "sendFriendRequest",
+        Command::RespondFriendRequest { .. } => "respondFriendRequest",
+        Command::WithdrawFriendRequest { .. } => "withdrawFriendRequest",
+        Command::RemoveFriend { .. } => "removeFriend",
+        Command::SendFileToFriend { .. } => "sendFileToFriend",
+        Command::SendMessageToFriend { .. } => "sendMessageToFriend",
+        Command::CancelTransfer { .. } => "cancelTransfer",
+        Command::ProbeFriend { .. } => "probeFriend",
+        Command::SetFriendDisplayName { .. } => "setFriendDisplayName",
+        Command::SetFriendNickname { .. } => "setFriendNickname",
+        Command::GetAutomations => "getAutomations",
+        Command::UpsertAutomation { .. } => "upsertAutomation",
+        Command::RemoveAutomation { .. } => "removeAutomation",
+        Command::RunAutomationNow { .. } => "runAutomationNow",
+        Command::AgentReadSession { .. } => "agentReadSession",
+        Command::AgentSearchSessions { .. } => "agentSearchSessions",
+        Command::AgentProjectMap { .. } => "agentProjectMap",
+        Command::AgentAsk { .. } => "agentAsk",
+        Command::AgentListModels => "agentListModels",
+        Command::ShareProjectWithFriend { .. } => "shareProjectWithFriend",
+        Command::UnshareProjectWithFriend { .. } => "unshareProjectWithFriend",
+        Command::EnableFriendSync { .. } => "enableFriendSync",
+        Command::DisableFriendSync { .. } => "disableFriendSync",
+        Command::SetFriendSyncConfig { .. } => "setFriendSyncConfig",
+        Command::FriendSyncNow { .. } => "friendSyncNow",
+        Command::FriendSyncAlertAction { .. } => "friendSyncAlertAction",
+        Command::GetFriendSyncBranches { .. } => "getFriendSyncBranches",
+        Command::SetFriendSessionSharing { .. } => "setFriendSessionSharing",
+        Command::GetFriendSessions { .. } => "getFriendSessions",
+        Command::WatchFriendSession { .. } => "watchFriendSession",
+        Command::UnwatchFriendSession { .. } => "unwatchFriendSession",
+        Command::GetPairing => "getPairing",
+        Command::RespondPairRequest { .. } => "respondPairRequest",
+        Command::RevokePairedClient { .. } => "revokePairedClient",
+    }
+}
+
+/// The stats key for a pooled request: the command's wire tag, with the
+/// operation tag appended for `workspace` jobs (`workspace:listTree`)
+/// since they share one command across very different costs.
+fn pool_job_label(command: &Command) -> String {
+    match command {
+        Command::Workspace { operation } => {
+            format!("workspace:{}", workspace_operation_kind(operation))
+        }
+        _ => command_kind(command).to_owned(),
+    }
+}
+
+/// A workspace operation's wire `type` tag — the `workspace` half of the
+/// pool label comes from [`command_kind`].
+fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
+    match operation {
+        WorkspaceOperation::ListTree { .. } => "listTree",
+        WorkspaceOperation::BrowseDirectory { .. } => "browseDirectory",
+        WorkspaceOperation::ReadTextFile { .. } => "readTextFile",
+        WorkspaceOperation::ReadBinaryFile { .. } => "readBinaryFile",
+        WorkspaceOperation::WriteTextFile { .. } => "writeTextFile",
+        WorkspaceOperation::ListProjectFiles { .. } => "listProjectFiles",
+        WorkspaceOperation::SearchDirectories { .. } => "searchDirectories",
+        WorkspaceOperation::DiscoverSlashCommands { .. } => "discoverSlashCommands",
+        WorkspaceOperation::CreateProjectlessWorkspace { .. } => "createProjectlessWorkspace",
+        WorkspaceOperation::MigrateProjectlessWorkspace { .. } => "migrateProjectlessWorkspace",
+        WorkspaceOperation::ArchiveProjectlessWorkspace { .. } => "archiveProjectlessWorkspace",
+        WorkspaceOperation::RestoreProjectlessWorkspace { .. } => "restoreProjectlessWorkspace",
+        WorkspaceOperation::DeleteProjectlessWorkspace { .. } => "deleteProjectlessWorkspace",
+        WorkspaceOperation::InspectBranches { .. } => "inspectBranches",
+        WorkspaceOperation::CheckoutBranch { .. } => "checkoutBranch",
+        WorkspaceOperation::ResetWorktree { .. } => "resetWorktree",
+        WorkspaceOperation::CreateWorktree { .. } => "createWorktree",
+        WorkspaceOperation::CreateWorktreeFromCheckout { .. } => "createWorktreeFromCheckout",
+        WorkspaceOperation::RemoveWorktree { .. } => "removeWorktree",
+        WorkspaceOperation::EnsureWorktree { .. } => "ensureWorktree",
+        WorkspaceOperation::GitCommonDir { .. } => "gitCommonDir",
+        WorkspaceOperation::ListWorktrees { .. } => "listWorktrees",
+        WorkspaceOperation::ListRepoBranches { .. } => "listRepoBranches",
+        WorkspaceOperation::FetchRemote { .. } => "fetchRemote",
+        WorkspaceOperation::DeleteBranches { .. } => "deleteBranches",
+        WorkspaceOperation::PruneWorktrees { .. } => "pruneWorktrees",
+        WorkspaceOperation::RepairWorktrees { .. } => "repairWorktrees",
+        WorkspaceOperation::InspectCommit { .. } => "inspectCommit",
+        WorkspaceOperation::InspectCheckoutStatus { .. } => "inspectCheckoutStatus",
+        WorkspaceOperation::InspectArchivePreview { .. } => "inspectArchivePreview",
+        WorkspaceOperation::InspectReclaimable { .. } => "inspectReclaimable",
+        WorkspaceOperation::ReclaimPaths { .. } => "reclaimPaths",
+        WorkspaceOperation::GenerateCommitMessage { .. } => "generateCommitMessage",
+        WorkspaceOperation::GenerateSessionTitle { .. } => "generateSessionTitle",
+        WorkspaceOperation::GenerateTerminalCommand { .. } => "generateTerminalCommand",
+        WorkspaceOperation::Commit { .. } => "commit",
+        WorkspaceOperation::Push { .. } => "push",
+        WorkspaceOperation::PushBase { .. } => "pushBase",
+        WorkspaceOperation::SyncBase { .. } => "syncBase",
+        WorkspaceOperation::BasePushState { .. } => "basePushState",
+        WorkspaceOperation::FetchUpstream { .. } => "fetchUpstream",
+        WorkspaceOperation::InspectGitPanel { .. } => "inspectGitPanel",
+        WorkspaceOperation::StageFile { .. } => "stageFile",
+        WorkspaceOperation::UnstageFile { .. } => "unstageFile",
+        WorkspaceOperation::DiscardFile { .. } => "discardFile",
+        WorkspaceOperation::ReadFileAtRef { .. } => "readFileAtRef",
+        WorkspaceOperation::IgnoreFile { .. } => "ignoreFile",
+        WorkspaceOperation::PullUpstream { .. } => "pullUpstream",
+        WorkspaceOperation::AbortSync { .. } => "abortSync",
+        WorkspaceOperation::Land { .. } => "land",
+        WorkspaceOperation::RebaseOnto { .. } => "rebaseOnto",
+        WorkspaceOperation::ListCommits { .. } => "listCommits",
+        WorkspaceOperation::ListBaseCommits { .. } => "listBaseCommits",
+        WorkspaceOperation::ListUpstreamCommits { .. } => "listUpstreamCommits",
+        WorkspaceOperation::ResolveRemoteFile { .. } => "resolveRemoteFile",
+        WorkspaceOperation::FileDiff { .. } => "fileDiff",
+        WorkspaceOperation::CommitDiff { .. } => "commitDiff",
+        WorkspaceOperation::CommitEntry { .. } => "commitEntry",
+        WorkspaceOperation::ReviewQueue { .. } => "reviewQueue",
+        WorkspaceOperation::ReviewApprove { .. } => "reviewApprove",
+        WorkspaceOperation::ReviewReject { .. } => "reviewReject",
+        WorkspaceOperation::ReviewPromote { .. } => "reviewPromote",
+        WorkspaceOperation::CaptureTurnStart { .. } => "captureTurnStart",
+        WorkspaceOperation::CaptureTurn { .. } => "captureTurn",
+        WorkspaceOperation::CaptureRef { .. } => "captureRef",
+        WorkspaceOperation::RestoreRef { .. } => "restoreRef",
+        WorkspaceOperation::HasRef { .. } => "hasRef",
+        WorkspaceOperation::SessionTurnRefs { .. } => "sessionTurnRefs",
+        WorkspaceOperation::DeleteRef { .. } => "deleteRef",
+        WorkspaceOperation::DeleteTurnRefsAfter { .. } => "deleteTurnRefsAfter",
+        WorkspaceOperation::DeleteSessionRefs { .. } => "deleteSessionRefs",
+        WorkspaceOperation::CopySessionRefs { .. } => "copySessionRefs",
+        WorkspaceOperation::CollectReviewDiff { .. } => "collectReviewDiff",
+        WorkspaceOperation::ListPullRequests { .. } => "listPullRequests",
+        WorkspaceOperation::ResolveGitHubRepo { .. } => "resolveGitHubRepo",
+        WorkspaceOperation::ListGitHubActivity { .. } => "listGitHubActivity",
+        WorkspaceOperation::GetGitHubRelease { .. } => "getGitHubRelease",
+        WorkspaceOperation::GetGitHubWorkflowRun { .. } => "getGitHubWorkflowRun",
+        WorkspaceOperation::ListIssues { .. } => "listIssues",
+        WorkspaceOperation::GetIssue { .. } => "getIssue",
+        WorkspaceOperation::ListIssueTemplates { .. } => "listIssueTemplates",
+        WorkspaceOperation::CreateIssue { .. } => "createIssue",
+        WorkspaceOperation::ListRepoPullRequests { .. } => "listRepoPullRequests",
+        WorkspaceOperation::GetPullRequest { .. } => "getPullRequest",
+        WorkspaceOperation::PostWorkItemComment { .. } => "postWorkItemComment",
+        WorkspaceOperation::FetchPullRequestHead { .. } => "fetchPullRequestHead",
+        WorkspaceOperation::ListNotifications { .. } => "listNotifications",
+        WorkspaceOperation::MarkNotificationRead { .. } => "markNotificationRead",
+        WorkspaceOperation::MarkNotificationDone { .. } => "markNotificationDone",
+        WorkspaceOperation::MarkRepoNotificationsRead { .. } => "markRepoNotificationsRead",
+        WorkspaceOperation::MarkAllNotificationsRead => "markAllNotificationsRead",
+    }
 }
 
 fn task_catalog_action(command: &Command) -> TaskCatalogAction {
@@ -2419,13 +2776,20 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
+    fn test_job(label: &str, run: impl FnOnce() + Send + 'static) -> PoolJob {
+        PoolJob {
+            label: label.to_owned(),
+            run: Box::new(run),
+        }
+    }
+
     #[test]
     fn independent_request_pool_rejects_work_after_its_queue_fills() {
         let pool = IndependentRequestPool::new("test", 1, 1);
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let (queued_tx, queued_rx) = std::sync::mpsc::channel();
-        pool.try_submit(Box::new(move || {
+        pool.try_submit(test_job("blocking", move || {
             started_tx.send(()).unwrap();
             release_rx.recv().unwrap();
         }))
@@ -2433,17 +2797,17 @@ mod tests {
         started_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("the worker should start the first request");
-        pool.try_submit(Box::new(move || queued_tx.send(()).unwrap()))
+        pool.try_submit(test_job("queued", move || queued_tx.send(()).unwrap()))
             .unwrap();
 
         assert!(matches!(
-            pool.try_submit(Box::new(|| {})),
+            pool.try_submit(test_job("overflow", || {})),
             Err(crossbeam_channel::TrySendError::Full(_))
         ));
         let health_pool = IndependentRequestPool::new("health-test", 1, 1);
         let (health_tx, health_rx) = std::sync::mpsc::channel();
         health_pool
-            .try_submit(Box::new(move || health_tx.send(()).unwrap()))
+            .try_submit(test_job("health", move || health_tx.send(()).unwrap()))
             .unwrap();
         health_rx
             .recv_timeout(Duration::from_secs(1))
@@ -2457,20 +2821,33 @@ mod tests {
     #[test]
     fn request_pool_submit_records_stats() {
         let pool = IndependentRequestPool::new("stats-test", 1, 4);
+        let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
-        pool.submit(Box::new(move || {
+        pool.submit(test_job("stats-blocking", move || {
+            started_tx.send(()).unwrap();
             release_rx.recv().unwrap();
         }))
         .unwrap();
+        started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the worker should start the first request");
         // The single worker is parked in the first job, so this submit
         // stays queued at snapshot time.
-        pool.submit(Box::new(|| {})).unwrap();
+        pool.submit(test_job("stats-queued", || {})).unwrap();
 
         let snapshot = request_pool_snapshot();
         let stats = &snapshot["stats-test"];
         assert_eq!(stats.submits, 2);
-        assert!(stats.queued >= 1);
+        assert_eq!(stats.queued, 1);
         assert_eq!(stats.rejected, 0);
+        // The snapshot names what the pool holds: one job running, one
+        // queued, each under its own command label.
+        let running = &stats.commands["stats-blocking"];
+        assert_eq!(running.running, 1);
+        assert_eq!(running.queued, 0);
+        let queued = &stats.commands["stats-queued"];
+        assert_eq!(queued.running, 0);
+        assert_eq!(queued.queued, 1);
         release_tx.send(()).unwrap();
     }
 

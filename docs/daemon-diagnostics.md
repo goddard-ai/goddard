@@ -10,7 +10,7 @@ and how to read them together.
 | `errors.jsonl` | `~/.goddard/` | One JSONL record per error toast the app showed — `{at, atLocal, app, kind, message}` where `kind` is `alert` or `failure`, plus a `context` object (`sessionId`, `session`, `provider`, `workingDir`, `daemon`) naming the task on screen when it fired; incognito tasks leave only `provider`. The Diagnostics settings page reads this plus `daemon-recovery.jsonl` and `daemon-panics.jsonl` into one feed |
 | `daemon.recovery` | PostHog event | One recovery episode: `cause` (`unexpected_exit`, `disconnect`, `rebuild`), `outcome` (`recovered`, `unreachable`), `sessionsResumed`, `daemonRssMb`/`childrenRssMb` (pre-restart readings), `exitCode`/`exitSignal`/`exitSignalCode` when a real exit happened, `previousBootClean`. The same record lands in `~/.goddard/daemon-recovery.jsonl` with `atLocal` and `app` added |
 | `daemon.crash` | PostHog event | One OS crash report per unseen `goddard-daemon-*.ips`, scanned at launch: `termination` namespace (`exc_resource` = jetsam/resource limits, `signal` = crash/kill), `signal`, `uptimeSecs` |
-| `daemon-stats.jsonl` | `~/Library/Application Support/<App>/` | One JSONL sample per minute per boot: `boot`, `at`, `daemonRssMb`, `childrenRssMb` (whole descendant tree — provider runtimes carry memory under their own pids), `runtimes`, `terminals`, plus per-subtree `children` rows (`pid`, `name`, subtree `rssMb`, `processes`, `kind`, `sessionId`/`provider` when claimed) and per-session `sessions` rows (`detailLoaded`, `running`, `residentMessages`/`residentActivities`/`residentBytes`). A `"shutdown": true` line is the clean-exit marker |
+| `daemon-stats.jsonl` | `~/Library/Application Support/<App>/` | One JSONL sample per minute per boot: `boot`, `at`, `daemonRssMb`, `childrenRssMb` (whole descendant tree — provider runtimes carry memory under their own pids), `runtimes`, `terminals`, plus per-subtree `children` rows (`pid`, `name`, subtree `rssMb`, `processes`, `kind`, `sessionId`/`provider` when claimed), per-session `sessions` rows (`detailLoaded`, `running`, `residentMessages`/`residentActivities`/`residentBytes`), per-label `subprocesses` counters, and per-pool `requestPools` rows. A `"shutdown": true` line is the clean-exit marker |
 | `daemon-panics.jsonl` | `~/Library/Application Support/<App>/` | One line per panic: `at`, `atLocal`, `version`, `cwd`, `thread`, `location` (file:line:col), `message` (first line, 400 chars). Request-thread panics unwind without killing the daemon — a wedged handler leaves its trace here |
 | `daemon-crashes.json` | `~/.goddard/` | Internal watermark for the `.ips` scan (`lastSeenAt` mtime); not diagnostic data itself |
 
@@ -72,6 +72,37 @@ a rough heap estimate, good for ranking, not exact billing. Skeletons
 (never hydrated or already trimmed) are omitted; `sessionsTotal` counts
 them anyway. Incognito sessions appear with an empty `title` — the file
 must not persist what incognito keeps off disk.
+
+## Reading request pools
+
+`requestPools` carries one row per dispatch lane — `heavy` (subprocess
+work: provider probes, session loads, workspace requests), `control`
+(everything else), and `health` (`getSettings`/`getDaemonStats` probes).
+Pool-level `submits`/`waited`/`waitMs`/`rejected` accumulate since boot
+while `queued` is the live queue depth; `rejected` counts submits that
+waited out the 5-second capacity timeout and surfaced to the client as a
+"daemon is busy" error.
+
+Each pool's `commands` map attributes that work by the command's wire
+`type` tag (`workspace:*` keys add the operation tag, since `workspace`
+spans cheap file reads and expensive `gh` calls). Per command:
+`queued`/`running` are live gauges, `runningMs` is the longest
+*currently-running* job, and `runMs`/`maxRunMs`/`completed` accumulate.
+
+Reading a pinned queue — say `heavy.queued` at its 32-job cap across
+samples:
+
+- `commands` rows with high `queued` show what is backed up; high
+  `running` rows show what the four workers are doing.
+- A `runningMs` that keeps climbing across samples names a wedged job —
+  the workers are stuck on it, not merely busy. (The same event also
+  writes one stderr line once the job passes 60 s, but stderr only
+  reaches the dev watcher.)
+- `queued` high with `running` low and tiny `runningMs` means the queue
+  is draining fine — the minute cadence just caught a burst.
+- `waitMs`/`rejected` deltas between samples show whether submitters
+  actually stalled, separating a real stall from a full-but-healthy
+  queue.
 
 ## Caveats
 

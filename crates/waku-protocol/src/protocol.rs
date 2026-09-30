@@ -1191,6 +1191,37 @@ pub struct RequestPoolSample {
     /// Submits turned away after waiting out the capacity timeout — the
     /// "daemon is busy" errors the client sees.
     pub rejected: u64,
+    /// Per-command counters keyed by the command's wire `type` tag —
+    /// `workspace:*` entries add the operation tag so a pinned queue names
+    /// its jobs. Empty on daemons that predate command attribution.
+    #[serde(default)]
+    pub commands: BTreeMap<String, RequestCommandSample>,
+}
+
+/// One command's counters inside a pool's [`RequestPoolSample`]. `queued`,
+/// `running`, and `running_ms` read live at sample time; the rest
+/// accumulate over the daemon's lifetime.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestCommandSample {
+    /// Jobs of this command submitted since boot.
+    pub submits: u64,
+    /// Jobs of this command waiting in the queue right now.
+    pub queued: u32,
+    /// Jobs of this command a worker is running right now.
+    pub running: u32,
+    /// Milliseconds the longest currently-running job of this command has
+    /// held a worker — a value that keeps climbing across samples names
+    /// the wedge. `0` when nothing of this command is running.
+    pub running_ms: u64,
+    /// Jobs of this command finished since boot.
+    pub completed: u64,
+    /// Cumulative milliseconds spent running this command.
+    pub run_ms: u64,
+    /// Longest single completed run.
+    pub max_run_ms: u64,
+    /// Submits of this command turned away after the capacity timeout.
+    pub rejected: u64,
 }
 
 /// One label's subprocess counters in a [`DaemonStatsSample`]. `spawns`,
