@@ -869,7 +869,8 @@ common.copy_code: コードをコピー
 code_block.run_in_terminal: ターミナルで実行
 code_block.no_local_workspace: このタスクにはターミナルを開けるローカルフォルダがありません
 common.copy_expression: 数式をコピー
-common.copy_link: リンクをコピー
+common.copy_url: URL をコピー
+common.copy_file_path: ファイルパスをコピー
 common.open_link: リンクを開く
 common.open_link_in_browser_tab: ブラウザタブで開く
 common.open_link_in_private_window: プライベートウインドウで開く

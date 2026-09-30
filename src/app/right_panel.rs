@@ -282,6 +282,20 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
     }
 }
 
+/// What a right-clicked transcript link's copy item puts on the clipboard,
+/// and its label key: file targets copy their decoded path — the `:line` /
+/// `#heading` suffixes and `file:` scheme are link addressing, not part of
+/// the path — while everything else copies the link target itself.
+fn transcript_link_copy(url: &str) -> (String, &'static str) {
+    match markdown_file_link_path(url) {
+        Some(path) => (
+            path.to_string_lossy().into_owned(),
+            "common.copy_file_path",
+        ),
+        None => (url.to_owned(), "common.copy_url"),
+    }
+}
+
 /// Byte offset of a 1-based `line:column` in `content`, clamped into the
 /// file: a line past the end lands at the end, a column past its line's end
 /// lands on the line break. `column` counts characters, the way editors
@@ -1353,6 +1367,24 @@ mod tests {
     }
 
     #[test]
+    fn link_copy_names_what_it_copies() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let file = workspace.join("My File.rs");
+        let encoded_file_url = url::Url::from_file_path(&file).expect("absolute file path");
+
+        assert_eq!(
+            transcript_link_copy(&format!("{}:12:4", file.display())),
+            (file.to_string_lossy().into_owned(), "common.copy_file_path")
+        );
+        assert_eq!(
+            transcript_link_copy(&format!("{encoded_file_url}#L12")),
+            (file.to_string_lossy().into_owned(), "common.copy_file_path")
+        );
+        let url = "https://example.com/file.rs:12";
+        assert_eq!(transcript_link_copy(url), (url.to_owned(), "common.copy_url"));
+    }
+
+    #[test]
     fn line_column_offsets_clamp_into_the_file() {
         let content = "ab\ncd\néf\n";
 
@@ -2070,7 +2102,9 @@ impl Waku {
     /// surface's usual context-menu items. Web destinations also offer the
     /// built-in browser and, where the default browser has a known incognito
     /// flag, a private window; other schemes keep the same open and copy
-    /// every destination gets.
+    /// every destination gets. The copy item names what it puts on the
+    /// clipboard: "Copy URL" for link targets, "Copy file path" when the
+    /// target resolves to a file.
     pub(super) fn transcript_link_menu_items(
         &self,
         url: &str,
@@ -2108,8 +2142,8 @@ impl Waku {
                 ));
             }
         }
-        let copy_target = url.to_owned();
-        items.push(MenuItem::new(tr!("common.copy_link"), move |_, cx| {
+        let (copy_target, copy_key) = transcript_link_copy(url);
+        items.push(MenuItem::new(tr!(copy_key), move |_, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(copy_target.clone()));
         }));
         items

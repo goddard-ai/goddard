@@ -858,7 +858,8 @@ common.copy_code: 复制代码
 code_block.run_in_terminal: 在终端中运行
 code_block.no_local_workspace: 此任务没有可打开终端的本地文件夹
 common.copy_expression: 复制表达式
-common.copy_link: 复制链接
+common.copy_url: 复制 URL
+common.copy_file_path: 复制文件路径
 common.open_link: 打开链接
 common.open_link_in_browser_tab: 在内置浏览器标签页中打开
 common.open_link_in_private_window: 在隐私窗口中打开

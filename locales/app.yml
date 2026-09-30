@@ -2571,8 +2571,10 @@ code_block.no_local_workspace:
   en: This task has no local folder for a terminal
 common.copy_expression:
   en: Copy Expression
-common.copy_link:
-  en: Copy Link
+common.copy_url:
+  en: Copy URL
+common.copy_file_path:
+  en: Copy File Path
 common.open_link:
   en: Open Link
 common.open_link_in_browser_tab:
