@@ -4,6 +4,9 @@ Goddard is a native desktop workspace for coding agents on macOS, Linux, and
 Windows. Run Claude Code, Codex, Cursor, and other agent CLIs through one
 interface, using your existing accounts and subscriptions. Free and open source.
 
+Written in Rust with [GPUI](https://gpui.rs/), Goddard's desktop interface is
+GPU-rendered, not WebView-based.
+
 ## Why Goddard?
 
 Make parallel agent work easy to direct and finish: choose the right agent,
@@ -54,6 +57,17 @@ Jev routing and suggested actions have their own controls under
   platform, build, and provider; see [Computer Use](docs/computer-use.md).
 
 </details>
+
+## Native performance
+
+GPUI renders the desktop interface directly on the GPU, avoiding the browser
+engine and JavaScript runtime overhead of a web-based UI. That removes a
+layer of memory and processing overhead from the interface and helps keep
+scrolling, task switching, and streaming replies responsive.
+
+Long transcripts are virtualized so rendering work stays proportional to
+what is visible. Filesystem, Git, and provider operations run off the UI
+thread, keeping agent work from blocking the interface.
 
 ## Get started
 
