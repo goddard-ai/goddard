@@ -4979,9 +4979,9 @@ impl Waku {
         });
     }
 
-    /// ⌘⌥1–⌘⌥9 applies the nth starred selection to the composer session —
-    /// a draft or an idle session, and only while its provider is one the
-    /// session may still run.
+    /// ⌘⌥1 routes Auto; ⌘⌥2–⌘⌥9 apply the first eight starred selections to
+    /// the composer session — a draft or an idle session, and only while its
+    /// provider is one the session may still run.
     pub(super) fn select_favorite_model_action(
         &mut self,
         action: &SelectFavoriteModel,
@@ -5003,7 +5003,10 @@ impl Waku {
             self.choose_auto_route(cx);
             return;
         }
-        let Some(favorite) = self.state.favorite_models.get(action.index).cloned() else {
+        let Some(favorite) = model_picker::favorite_chord_target(action.index)
+            .and_then(|index| self.state.favorite_models.get(index))
+            .cloned()
+        else {
             return;
         };
         let Some(session) = self.composer_session() else {

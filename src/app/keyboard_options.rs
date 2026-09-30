@@ -1232,7 +1232,7 @@ fn model_option_row(
     // rows — the same hint the anchored panel draws.
     let shortcut_hint = row
         .favorite_index
-        .filter(|index| (1..=8).contains(index))
+        .and_then(model_picker::favorite_chord_index)
         .map(|index| {
             crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
                 .resolve(window, cx)

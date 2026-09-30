@@ -435,6 +435,25 @@ pub(super) fn favorite_matches_row(
     }
 }
 
+/// Starred selections that claim a ⌘⌥n chord: ⌘⌥1 is the stable
+/// Auto-routing chord, so ⌘⌥2–⌘⌥9 ride on the first eight stars.
+pub(super) const FAVORITE_CHORD_SLOTS: usize = 8;
+
+/// The `SelectFavoriteModel` index a star at `favorite_index` claims —
+/// one past the favorite's slot to leave index 0 (⌘⌥1) to Auto, `None`
+/// past the eighth star.
+pub(super) fn favorite_chord_index(favorite_index: usize) -> Option<usize> {
+    (favorite_index < FAVORITE_CHORD_SLOTS).then_some(favorite_index + 1)
+}
+
+/// The `favorite_models` position a `SelectFavoriteModel` index selects —
+/// `None` for index 0 (⌘⌥1, Auto routing) and slots past ⌘⌥9.
+pub(super) fn favorite_chord_target(index: usize) -> Option<usize> {
+    index
+        .checked_sub(1)
+        .filter(|favorite_index| *favorite_index < FAVORITE_CHORD_SLOTS)
+}
+
 /// How much of a model each combo row names: the composer's full
 /// (effort, tier) matrix, effort rows without tiers for targets that
 /// cannot encode one, or one row per model for bare `provider:model`

@@ -5555,6 +5555,23 @@ fn picker_rows_park_unstarred_selections_in_their_favorites_slot() {
 }
 
 #[test]
+fn favorite_chords_leave_slot_one_to_auto() {
+    use super::model_picker::{favorite_chord_index, favorite_chord_target};
+
+    // ⌘⌥1 is Auto: the first eight stars claim ⌘⌥2–⌘⌥9, the ninth gets
+    // no chord.
+    assert_eq!(favorite_chord_index(0), Some(1));
+    assert_eq!(favorite_chord_index(7), Some(8));
+    assert_eq!(favorite_chord_index(8), None);
+    // Action index 0 routes Auto; 1–8 select the first eight stars in
+    // order.
+    assert_eq!(favorite_chord_target(0), None);
+    assert_eq!(favorite_chord_target(1), Some(0));
+    assert_eq!(favorite_chord_target(8), Some(7));
+    assert_eq!(favorite_chord_target(9), None);
+}
+
+#[test]
 fn normalize_model_combo_decodes_packed_alias_traits() {
     use super::model_picker::normalize_model_combo;
 

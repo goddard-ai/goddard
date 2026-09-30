@@ -3,7 +3,7 @@ use super::annotations::{
 };
 use super::model_picker::{
     FavoriteModelDrag, FavoriteModelDragView, ModelPickerPanel, ModelPickerTarget,
-    PickerGranularity, PickerRow, PickerRowSpec, PickerSection, PolicyRowId,
+    PickerGranularity, PickerRow, PickerRowSpec, PickerSection, PolicyRowId, favorite_chord_index,
     model_picker_empty_state, model_picker_panel, model_picker_row_body, model_picker_row_shell,
     model_picker_state, model_picker_subtitle, open_settings_page_from_picker,
     picker_lists_provider, picker_provider_rail_item, picker_row_section, picker_rows,
@@ -1865,21 +1865,16 @@ impl Waku {
                 // still advertises itself; fall back to the default's
                 // label when the picker's own context path cannot see the
                 // scoped binding.
-                let shortcut_hint =
-                    favorite_index
-                        .filter(|index| (1..=8).contains(index))
-                        .map(|index| {
-                            crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel {
-                                index,
-                            })
-                            .resolve(window, cx)
-                            .unwrap_or_else(|| {
-                                crate::ui::shortcut::sequence_label(&format!(
-                                    "secondary-alt-{}",
-                                    index + 1
-                                ))
-                            })
-                        });
+                let shortcut_hint = favorite_index.and_then(favorite_chord_index).map(|index| {
+                    crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
+                        .resolve(window, cx)
+                        .unwrap_or_else(|| {
+                            crate::ui::shortcut::sequence_label(&format!(
+                                "secondary-alt-{}",
+                                index + 1
+                            ))
+                        })
+                });
                 let mut row_element = model_picker_row_shell(
                     SharedString::from(format!(
                         "model-row-{}-{}-{}-{}",
