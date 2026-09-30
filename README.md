@@ -7,6 +7,8 @@ interface, using your existing accounts and subscriptions. Free and open source.
 Written in Rust with [GPUI](https://gpui.rs/), Goddard's desktop interface is
 GPU-rendered, not WebView-based.
 
+![Goddard's light and dark themes shown in one screenshot with a diagonal split](docs/images/light-dark-themes.png)
+
 ## Why Goddard?
 
 Make parallel agent work easy to direct and finish: choose the right agent,
