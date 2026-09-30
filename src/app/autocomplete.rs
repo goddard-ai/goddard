@@ -1490,7 +1490,17 @@ impl Waku {
             }
             AutocompleteRow::Session(scored) => {
                 let session = &scored.item;
-                base.child(icon("icons/chat.svg", 12.0, theme.text_tertiary))
+                base.gap(px(10.0))
+                    .child(
+                        div()
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon("icons/chat.svg", 14.0, theme.text_tertiary)),
+                    )
                     .child(
                         div()
                             .flex_none()
