@@ -189,6 +189,9 @@ is told its working directory changed.
   in prose.
 - **@-mention files** — fuzzy-matched against the workspace file index — to
   pin them into context.
+- **Reference another chat** — drag it from the sidebar into the composer,
+  or type `@` and choose a matching chat in the current project. Send your
+  prompt with the reference to give the agent access to that conversation.
 - **Slash commands** — provider-native commands and skills the agent CLI
   advertises (invoked with the provider's own syntax), plus Goddard's own
   (`/resume`, `/goal`, `/fast`).
@@ -474,6 +477,10 @@ work on a host you control. That host must stay on for its agents to run.
 private, allow only the browser origins you need, and use a trusted encrypted
 connection outside a private network.
 
+Connect to a remote host over SSH from macOS or Linux, or use an authenticated
+WebSocket connection. Agents and project files stay on the connected host;
+connecting from another device does not move them to that device.
+
 With agent tools enabled and your permission, agents can spin off new tasks
 and send messages to existing tasks. Each new task has its own transcript;
 messages sent by an agent are attributed in the target task.
@@ -669,9 +676,10 @@ and send messages to existing tasks.
 Yes — command palette → Resume… lists resumable CLI sessions per provider.
 
 **Can I search everything I've ever asked an agent?**
-Yes. The command palette searches message content across all tasks, not just
-titles — type a few words you remember and matching messages come back as
-snippets. Cmd/Ctrl+F does the same thing within the open transcript.
+The command palette searches message content in active tasks, not just titles.
+Type a few words you remember to see matching snippets. Archived chats have
+their own full-text search under **Settings → Archived**. Cmd/Ctrl+F searches
+within the open transcript.
 
 **Can I undo what the agent did?**
 Revert to Here rolls back both the conversation and the Git working tree to

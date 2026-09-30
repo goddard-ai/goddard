@@ -22,14 +22,21 @@ machine you control.
   turns it needs on demand, keeping handoff context small.
 - **Isolated parallel work.** Run independent tasks across projects, with
   separate Git worktrees when you need to keep their changes apart.
+- **Remote work.** Run agents on another machine you control, connecting
+  over SSH from macOS or Linux, or through an authenticated WebSocket.
 - **Feedback while agents work.** Steer active turns, queue follow-ups, and
   annotate passages in a reply to send precise feedback with your next prompt.
 - **Review and recovery.** Inspect changes by turn, rewind the conversation
   and working tree together, or fork a different approach. Steering, rewind,
   and fork support vary by provider.
 - **Know what needs attention.** Track running tasks, requests for input, and
-  unread completions. Jump to the next unread reply or search across task
-  history from the command palette.
+  unread completions. Jump to the next unread reply.
+- **Searchable chat history.** Search message content from the command
+  palette. Archive finished chats to clear the sidebar, then find them again
+  with full-text archive search.
+- **Reuse chat context.** Reference another chat by dragging it from the
+  sidebar into the composer, or selecting it through `@` autocomplete, to
+  give an agent context from earlier work.
 - **Side chats and delegation.** Explore a question in a separate chat
   alongside the main task. With agent tools enabled and your permission,
   agents can spin off new tasks and send messages to existing tasks.
