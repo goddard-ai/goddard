@@ -7876,11 +7876,42 @@ impl Waku {
             })
         };
         let normalized_query = search.read(cx).content().trim().to_ascii_lowercase();
+        let searching = !normalized_query.is_empty();
         let available_rows = Rc::new(if handle.is_open() {
             self.memory_model_picker_rows(provider, &normalized_query)
         } else {
             Vec::new()
         });
+        let section_rows = if searching && handle.is_open() {
+            Rc::new(self.memory_model_picker_rows(provider, ""))
+        } else {
+            available_rows.clone()
+        };
+        let rail_favorites = section_rows
+            .iter()
+            .any(|row| picker_row_section(row) == PickerSection::Favorites);
+        let rail_recents = section_rows
+            .iter()
+            .any(|row| picker_row_section(row) == PickerSection::Recents);
+        let mut rail_sections = Vec::new();
+        if rail_favorites {
+            rail_sections.push(picker_section_rail_item(
+                format!("memory-model-rail-favorites-{}", provider.id()),
+                icon("icons/star.svg", 17.0, theme.text_tertiary).into_any_element(),
+                PickerSection::Favorites,
+                move |this| this.memory_model_picker_rows(provider, ""),
+                route_class_picker_state,
+            ));
+        }
+        if rail_recents {
+            rail_sections.push(picker_section_rail_item(
+                format!("memory-model-rail-recents-{}", provider.id()),
+                icon("icons/hourglass.svg", 17.0, theme.text_tertiary).into_any_element(),
+                PickerSection::Recents,
+                move |this| this.memory_model_picker_rows(provider, ""),
+                route_class_picker_state,
+            ));
+        }
         let highlight = self
             .route_class_picker
             .highlight
@@ -7894,7 +7925,7 @@ impl Waku {
             .label(label)
             .outlined()
             .selected(handle.is_open())
-            .w(px(160.0))
+            .w(px(240.0))
             .justify_between();
         div()
             .flex()
@@ -7995,7 +8026,8 @@ impl Waku {
                             scrollbar_state: scrollbar_state.clone(),
                             highlight,
                             empty_label: tr!("models.none_found").into(),
-                            rail_sections: Vec::new(),
+                            rail_sections,
+                            // This picker is already scoped to its row's provider.
                             rail_providers: Vec::new(),
                             render_row,
                             on_move: Rc::new(move |this, key, rows, cx| {
@@ -8046,9 +8078,9 @@ impl Waku {
                 leading: &[],
                 provider_defaults: true,
                 granularity: PickerGranularity::Models,
-                favorites: &[],
-                pinned: &[],
-                recents: &[],
+                favorites: &self.state.favorite_models,
+                pinned: &self.pinned_unfavorites,
+                recents: &self.state.recent_model_uses,
                 disabled_providers: &[],
                 locked_provider: Some(provider),
                 normalized_query,
@@ -9022,29 +9054,36 @@ impl Waku {
                         route_class_picker_state,
                     ));
                 }
-                let rail_providers = ProviderKind::ALL
-                    .into_iter()
-                    .filter(|kind| {
-                        picker_lists_provider(&probes, &disabled_providers, None, remote, *kind)
-                            && section_rows.iter().any(|row| {
-                                picker_row_section(row) == PickerSection::Provider(*kind)
-                            })
-                    })
-                    .map(|kind| {
-                        let active = normalized_query.split_whitespace().any(|token| {
-                            token
-                                .strip_prefix("provider:")
-                                .is_some_and(|value| value == kind.id())
-                        });
-                        picker_provider_rail_item(
-                            kind,
-                            provider_mark(&theme, kind, 18.0, theme.text_tertiary)
-                                .into_any_element(),
-                            active,
-                            route_class_picker_state,
-                        )
-                    })
-                    .collect();
+                // A provider-specific picker has already scoped its rows to
+                // one provider, so a provider rail would only repeat that
+                // fixed choice. Keep the filter rail on global preferences.
+                let rail_providers = if provider.is_none() {
+                    ProviderKind::ALL
+                        .into_iter()
+                        .filter(|kind| {
+                            picker_lists_provider(&probes, &disabled_providers, None, remote, *kind)
+                                && section_rows.iter().any(|row| {
+                                    picker_row_section(row) == PickerSection::Provider(*kind)
+                                })
+                        })
+                        .map(|kind| {
+                            let active = normalized_query.split_whitespace().any(|token| {
+                                token
+                                    .strip_prefix("provider:")
+                                    .is_some_and(|value| value == kind.id())
+                            });
+                            picker_provider_rail_item(
+                                kind,
+                                provider_mark(&theme, kind, 18.0, theme.text_tertiary)
+                                    .into_any_element(),
+                                active,
+                                route_class_picker_state,
+                            )
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
 
                 let render_row = Rc::new({
                     let weak = weak.clone();
