@@ -151,6 +151,14 @@ pub fn default_log_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("eval-decisions.jsonl"))
 }
 
+/// The decision log caps itself: over the cap, the tail rewrite keeps the
+/// newest half. Records carry the full eval `state`, so lines run kilobytes
+/// and occasional outliers reach megabytes — the cap is sized to keep
+/// hundreds of typical decisions plus one extreme line. `usage_stats`
+/// derives counters by scanning the file, so a trim also shrinks the
+/// reported history rather than erroring.
+const DECISION_LOG_CAP: u64 = 16 * 1024 * 1024;
+
 /// Append one record as a JSON line. Logging is best-effort: a write failure
 /// must never fail the feature that produced the decision.
 pub fn append_decision_log(path: &Path, record: &EvalDecisionRecord) {
@@ -160,11 +168,7 @@ pub fn append_decision_log(path: &Path, record: &EvalDecisionRecord) {
         }
         let mut line = serde_json::to_vec(record)?;
         line.push(b'\n');
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
-        file.write_all(&line)?;
+        crate::fs_ext::append_capped(path, &line, DECISION_LOG_CAP)?;
         Ok(())
     })();
 }

@@ -11,7 +11,6 @@
 
 use std::collections::HashMap;
 use std::ffi::CStr;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -246,24 +245,9 @@ pub fn install_panic_log(data_dir: &Path) {
 
 fn append_json_line(path: &Path, line: &impl Serialize) -> std::io::Result<()> {
     let line = serde_json::to_string(line).map_err(std::io::Error::other)?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{line}")?;
-    drop(file);
-    if std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0) > STATS_FILE_CAP {
-        // Keep the newest half, cut at a line boundary.
-        let bytes = std::fs::read(path)?;
-        let halfway = bytes.len() / 2;
-        let start = bytes[halfway..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map(|offset| halfway + offset + 1)
-            .unwrap_or(bytes.len());
-        std::fs::write(path, &bytes[start..])?;
-    }
-    Ok(())
+    let mut line = line.into_bytes();
+    line.push(b'\n');
+    crate::fs_ext::append_capped(path, &line, STATS_FILE_CAP)
 }
 
 /// One process-table row: parent, resident size, and the process name

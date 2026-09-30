@@ -68,3 +68,27 @@ pub(crate) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
         ))
     }
 }
+
+/// Append `bytes` to `path`, then keep the file under `cap` by rewriting it
+/// to its newest half, cut at a line boundary. JSONL-style append logs use
+/// this to stay self-bounding; callers decide whether a failure is fatal.
+pub(crate) fn append_capped(path: &Path, bytes: &[u8], cap: u64) -> io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.write_all(bytes)?;
+    drop(file);
+    if std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0) <= cap {
+        return Ok(());
+    }
+    let bytes = std::fs::read(path)?;
+    let halfway = bytes.len() / 2;
+    let start = bytes[halfway..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map(|offset| halfway + offset + 1)
+        .unwrap_or(bytes.len());
+    std::fs::write(path, &bytes[start..])
+}
