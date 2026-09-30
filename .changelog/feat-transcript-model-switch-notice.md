@@ -1,0 +1,1 @@
+- See a transcript notice when you switch models in an existing session, including a reminder that the prompt cache usually cannot be reused across models and the change may cost more.

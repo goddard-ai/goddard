@@ -1723,6 +1723,7 @@ transcript.landed: 已合入 %{base}
 transcript.landed_more: "…以及另外 %{count} 个提交"
 transcript.provider_switched: "已切换 provider — %{from} → %{to}"
 transcript.provider_switched_restarted: "已切换 provider — %{from} → %{to}；无法恢复之前的 %{to} 会话，已用完整历史启动新会话"
+transcript.model_switched: "已切换模型 — %{from} → %{to}。不同模型通常无法复用提示缓存，可能会增加费用。"
 transcript.show_more_commits: 再显示 %{count} 个提交
 transcript.show_fewer_commits: 收起提交列表
 transcript.showing_first_commits: 仅显示前 %{count}/%{total} 个

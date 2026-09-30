@@ -3116,6 +3116,8 @@ pub enum TranscriptNoticeStatus {
     Goal,
     /// The session's project changed — `content` names the destination.
     ProjectSwitched,
+    /// The user changed models within the same provider.
+    ModelSwitched,
 }
 
 /// A position in the persisted transcript: how many `messages` and

@@ -4496,7 +4496,7 @@ impl Waku {
         }
         // Picking a concrete model exits an Auto draft even when provider and
         // model happen to match the draft's last-used carryover.
-        let Some((session_id, provider_changed, was_routed)) = self
+        let Some((session_id, provider_changed, was_routed, previous_model, session_locked)) = self
             .model_picker_session()
             .filter(|session| {
                 session.can_choose_model(provider)
@@ -4511,6 +4511,8 @@ impl Waku {
                     session.id,
                     session.provider != provider,
                     session.route_decision.is_some(),
+                    session.model.clone(),
+                    session.provider_locked(),
                 )
             })
         else {
@@ -4532,6 +4534,23 @@ impl Waku {
             session.reasoning_effort.clone_from(&effort);
             session.service_tier.clone_from(&service_tier);
             session.context_window.clone_from(&context_window);
+            if !provider_changed
+                && session_locked
+                && let Some(previous_model) = previous_model
+                && previous_model != model
+            {
+                session.push_notice_message(
+                    MessageRole::System,
+                    tr!(
+                        "transcript.model_switched",
+                        from = previous_model,
+                        to = model.clone()
+                    ),
+                    TranscriptNotice::Status {
+                        kind: TranscriptNoticeStatus::ModelSwitched,
+                    },
+                );
+            }
             self.state.last_provider = provider;
             self.state.last_auto_route = false;
             self.state.last_model = Some(model.clone());
