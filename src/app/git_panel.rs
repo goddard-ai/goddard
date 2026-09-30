@@ -1534,6 +1534,7 @@ impl Waku {
     ///
     /// `progress_toast` raises a spinner toast that resolves to the outcome —
     /// how the palette reports, where no button shows the pending label.
+    /// `check_clean` reports uncommitted changes before starting the rebase.
     pub(super) fn start_git_panel_rebase(
         &mut self,
         workspace: PathBuf,
@@ -1541,6 +1542,7 @@ impl Waku {
         onto: Option<String>,
         strategy: PullStrategy,
         progress_toast: bool,
+        check_clean: bool,
         cx: &mut Context<Self>,
     ) {
         let Some((op_id, workspace)) =
@@ -1566,16 +1568,36 @@ impl Waku {
             }
             cx.notify();
         }
+        let dirty_message = tr!("git_panel.rebase_worktree_dirty");
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    client.request(WorkspaceOperation::RebaseOnto {
-                        cwd: workspace,
+                    let rebase = WorkspaceOperation::RebaseOnto {
+                        cwd: workspace.clone(),
                         base,
                         onto,
                         strategy,
-                    })
+                    };
+                    if check_clean {
+                        match client.request(WorkspaceOperation::InspectCheckoutStatus {
+                            cwd: workspace,
+                            base: None,
+                        }) {
+                            Ok(WorkspaceResult::CheckoutStatus {
+                                status: Some(status),
+                            }) if status.uncommitted_changes => {
+                                Err(anyhow::anyhow!("{}", dirty_message))
+                            }
+                            Ok(WorkspaceResult::CheckoutStatus { .. }) => client.request(rebase),
+                            Ok(_) => Err(anyhow::anyhow!(
+                                "the daemon returned an invalid checkout status response"
+                            )),
+                            Err(error) => Err(error),
+                        }
+                    } else {
+                        client.request(rebase)
+                    }
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {

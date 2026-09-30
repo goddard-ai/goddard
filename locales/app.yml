@@ -265,6 +265,8 @@ command_palette.reclaim_space:
   en: Reclaim disk space…
 command_palette.change_base_branch:
   en: Change base branch…
+command_palette.rebase_worktree:
+  en: Rebase worktree
 command_palette.based_on:
   en: based on %{base}
 command_palette.branches:
@@ -4363,6 +4365,8 @@ git_panel.rebasing_onto:
   en: "Rebasing onto %{base}…"
 git_panel.rebased_onto:
   en: Rebased onto %{base}
+git_panel.rebase_worktree_dirty:
+  en: This worktree has uncommitted changes. Commit or discard them before rebasing.
 git_panel.rebase_onto_conflict_description:
   en: Rebasing onto %{base} stopped midway — the conflicts are still in the working tree.
 git_panel.resolve_rebase_onto_prompt:

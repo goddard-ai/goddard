@@ -221,6 +221,10 @@ enum PaletteAction {
     MoveToWorktree,
     LandChanges,
     ChangeBaseBranch,
+    RebaseWorktree {
+        workspace: PathBuf,
+        base: String,
+    },
     RebaseOntoBranch {
         workspace: PathBuf,
         branch: String,
@@ -2329,6 +2333,34 @@ impl Waku {
                     _ => None,
                 });
             commands.push(item);
+
+            let rebase_worktree =
+                self.composer_session()
+                    .and_then(|session| match &session.workspace {
+                        SessionWorkspace::Worktree {
+                            base_branch: Some(base),
+                            ..
+                        } => self
+                            .workspace_path_for_session(session)
+                            .map(|workspace| (workspace.to_path_buf(), base.clone())),
+                        _ => None,
+                    });
+            if let Some((workspace, base)) = rebase_worktree {
+                let mut item = CommandPaletteItem::command(
+                    display_section(PaletteSection::Suggested),
+                    tr!("command_palette.rebase_worktree"),
+                    "icons/git-branch.svg",
+                    None,
+                    PaletteAction::RebaseWorktree {
+                        workspace,
+                        base: base.clone(),
+                    },
+                    "rebase worktree onto base branch replay commits git",
+                    next(),
+                );
+                item.detail = Some(tr!("command_palette.based_on", base = base));
+                commands.push(item);
+            }
         }
 
         // Rebase is a started worktree's base change: drafts still pick
@@ -4842,6 +4874,18 @@ impl Waku {
                 self.settings_page = None;
                 self.land_composer_session(waku_client::git::PullStrategy::Rebase, cx);
             }
+            PaletteAction::RebaseWorktree { workspace, base } => {
+                self.settings_page = None;
+                self.start_git_panel_rebase(
+                    workspace,
+                    base,
+                    None,
+                    waku_client::git::PullStrategy::Rebase,
+                    true,
+                    true,
+                    cx,
+                );
+            }
             PaletteAction::RebaseOntoBranch {
                 workspace,
                 branch,
@@ -4859,6 +4903,7 @@ impl Waku {
                         onto,
                         waku_client::git::PullStrategy::Rebase,
                         true,
+                        false,
                         cx,
                     );
                 }
