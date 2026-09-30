@@ -46,6 +46,28 @@ pub(super) struct ArchiveDialogState {
     scroll: ScrollHandle,
     archive_focus: FocusHandle,
     cancel_focus: FocusHandle,
+    /// Confirmations from the same batch or overlapping background previews
+    /// wait here instead of replacing the task currently being reviewed.
+    pending: VecDeque<Self>,
+}
+
+impl ArchiveDialogState {
+    fn enqueue(&mut self, dialog: Self) -> FocusHandle {
+        if !(self.session_id == dialog.session_id && self.kind == dialog.kind)
+            && !self.pending.iter().any(|pending| {
+                pending.session_id == dialog.session_id && pending.kind == dialog.kind
+            })
+        {
+            self.pending.push_back(dialog);
+        }
+        self.archive_focus.clone()
+    }
+
+    fn take_next(&mut self) -> Option<Self> {
+        let mut next = self.pending.pop_front()?;
+        next.pending = std::mem::take(&mut self.pending);
+        Some(next)
+    }
 }
 
 impl Waku {
@@ -116,31 +138,53 @@ impl Waku {
             scroll: ScrollHandle::new(),
             cancel_focus: cx.focus_handle(),
             archive_focus: archive_focus.clone(),
+            pending: VecDeque::new(),
         };
+        if let Some(dialog) = self.archive_dialog.as_mut() {
+            return dialog.enqueue(state);
+        }
         self.archive_dialog = Some(state);
         cx.notify();
         archive_focus
     }
 
     fn confirm_archive_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.archive_dialog.take() else {
+        let Some(mut dialog) = self.archive_dialog.take() else {
             return;
         };
+        self.archive_dialog = dialog.take_next();
         match dialog.kind {
             ArchiveDialogKind::Archive => {
                 self.finish_archive_session(dialog.session_id, dialog.landing_row, window, cx)
             }
             ArchiveDialogKind::Dormant => self.finish_sweep_session(dialog.session_id, cx),
         }
+        self.focus_next_archive_dialog(window, cx);
     }
 
     fn close_archive_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.archive_dialog.take().is_none() {
+        let Some(mut dialog) = self.archive_dialog.take() else {
+            return;
+        };
+        self.archive_dialog = dialog.take_next();
+        if self.focus_next_archive_dialog(window, cx) {
             return;
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
         cx.notify();
+    }
+
+    fn focus_next_archive_dialog(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(dialog) = self.archive_dialog.as_ref() else {
+            return false;
+        };
+        let focus = dialog.archive_focus.clone();
+        cx.notify();
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        });
+        true
     }
 
     pub(super) fn render_archive_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -445,4 +489,60 @@ pub(super) fn render_archive_action_row(
                 cx.stop_propagation();
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    fn dialog(session_id: u128, cx: &mut TestAppContext) -> ArchiveDialogState {
+        cx.update(|cx| ArchiveDialogState {
+            session_id: Uuid::from_u128(session_id),
+            kind: ArchiveDialogKind::Archive,
+            landing_row: Some(session_id as usize),
+            title: format!("Task {session_id}"),
+            active_turn: true,
+            preview: crate::git_commit::ArchivePreview {
+                files: Vec::new(),
+                unpushed_commits: vec![format!("Commit {session_id}")],
+            },
+            scroll: ScrollHandle::new(),
+            archive_focus: cx.focus_handle(),
+            cancel_focus: cx.focus_handle(),
+            pending: VecDeque::new(),
+        })
+    }
+
+    #[gpui::test]
+    fn overlapping_archive_confirmations_preserve_every_task(cx: &mut TestAppContext) {
+        let mut first = dialog(1, cx);
+        let first_focus = first.archive_focus.clone();
+        // Background previews can finish while the first modal is visible.
+        assert_eq!(first.enqueue(dialog(3, cx)), first_focus);
+        assert_eq!(first.enqueue(dialog(2, cx)), first_focus);
+        assert_eq!(first.session_id, Uuid::from_u128(1));
+
+        // Both confirm and cancel advance to the next retained warning.
+        let mut second = first.take_next().unwrap();
+        assert_eq!(second.session_id, Uuid::from_u128(3));
+        assert_eq!(second.landing_row, Some(3));
+        assert_eq!(second.preview.unpushed_commits, ["Commit 3"]);
+        let mut third = second.take_next().unwrap();
+        assert_eq!(third.session_id, Uuid::from_u128(2));
+        assert_eq!(third.landing_row, Some(2));
+        assert_eq!(third.preview.unpushed_commits, ["Commit 2"]);
+        assert!(third.take_next().is_none());
+    }
+
+    #[gpui::test]
+    fn repeated_archive_requests_do_not_duplicate_confirmations(cx: &mut TestAppContext) {
+        let mut first = dialog(1, cx);
+        first.enqueue(dialog(1, cx));
+        first.enqueue(dialog(2, cx));
+        first.enqueue(dialog(2, cx));
+        let mut second = first.take_next().unwrap();
+        assert_eq!(second.session_id, Uuid::from_u128(2));
+        assert!(second.take_next().is_none());
+    }
 }

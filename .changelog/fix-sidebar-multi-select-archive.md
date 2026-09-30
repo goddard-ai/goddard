@@ -1,0 +1,1 @@
+- Archiving multiple selected tasks now keeps every required confirmation instead of skipping tasks or replacing their dialogs.

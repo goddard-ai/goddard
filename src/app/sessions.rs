@@ -2016,7 +2016,7 @@ impl Waku {
             } => Some((path.clone(), base_branch.clone())),
             _ => None,
         }) else {
-            if busy && self.archive_dialog.is_none() {
+            if busy {
                 let focus = self.open_archive_dialog(
                     session_id,
                     crate::git_commit::ArchivePreview::default(),
@@ -2034,7 +2034,7 @@ impl Waku {
             }
             return;
         };
-        if self.archive_dialog.is_some() || !self.archive_preview_pending.insert(session_id) {
+        if !self.archive_preview_pending.insert(session_id) {
             return;
         }
         let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
