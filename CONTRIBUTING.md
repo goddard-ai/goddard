@@ -1,7 +1,7 @@
 # Contributing to Goddard
 
-Thanks for helping improve Goddard. Bug reports, focused fixes, tests, and
-well-scoped features are welcome.
+This guide covers development setup, checks, and contribution policies.
+For the product overview and installation, see [README.md](README.md).
 
 ## Development setup
 
