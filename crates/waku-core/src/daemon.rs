@@ -1363,6 +1363,9 @@ fn create_transfer_session(
     // Received files stay in the sandbox VM even once trusted — the agent
     // never works on them with this Mac's filesystem in reach.
     session.environment = crate::model::SessionEnvironment::Sandbox;
+    // Sandbox isolation is the safety boundary for received files, so the
+    // task starts with full autonomy inside that boundary.
+    session.runtime_mode = waku_protocol::model::RuntimeMode::FullAccess;
     let session_id = session.id;
     state.push_session(session);
     task_store.save(&mut state)?;
