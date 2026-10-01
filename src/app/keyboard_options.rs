@@ -737,20 +737,22 @@ impl Waku {
             return;
         }
         let modifiers = event.keystroke.modifiers;
-        if self.keyboard_options.chord == Some(KeyboardOptionsChord::Favorites)
-            && event.keystroke.key == "tab"
+        if event.keystroke.key == "tab"
             && modifiers.alt
             && !modifiers.control
             && !modifiers.platform
             && !modifiers.function
         {
+            let chord = match (self.keyboard_options.chord, modifiers.shift) {
+                (Some(KeyboardOptionsChord::Favorites), _) => KeyboardOptionsChord::Favorites,
+                (Some(KeyboardOptionsChord::Model), true) => KeyboardOptionsChord::Model,
+                _ => {
+                    // Other pickers keep their existing Tab behavior.
+                    return;
+                }
+            };
             let direction = if modifiers.shift { -1 } else { 1 };
-            self.cycle_keyboard_options_chord_direction(
-                KeyboardOptionsChord::Favorites,
-                direction,
-                window,
-                cx,
-            );
+            self.cycle_keyboard_options_chord_direction(chord, direction, window, cx);
             window.prevent_default();
             cx.stop_propagation();
             return;
