@@ -5184,6 +5184,7 @@ impl Waku {
             .iter()
             .find(|project| project.id == session.project_id);
         let pinned = session.pinned_at.is_some();
+        let dormant = self.session_dormant_now(session);
         // A friend delivery labels its sender under the title — in any
         // grouping, ahead of the project name or branch the slot would
         // otherwise show.
