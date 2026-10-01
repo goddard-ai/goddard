@@ -2598,6 +2598,8 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AgentProjectMap { .. } => "agentProjectMap",
         Command::AgentAsk { .. } => "agentAsk",
         Command::AgentListModels => "agentListModels",
+        Command::AgentComputerUse { .. } => "agentComputerUse",
+        Command::AgentComputerUseReset => "agentComputerUseReset",
         Command::ShareProjectWithFriend { .. } => "shareProjectWithFriend",
         Command::UnshareProjectWithFriend { .. } => "unshareProjectWithFriend",
         Command::EnableFriendSync { .. } => "enableFriendSync",
