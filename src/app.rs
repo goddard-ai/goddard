@@ -68,9 +68,9 @@ use crate::persistence::{
     DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, DefaultWorkspace, PersistedDiffSource,
     PersistedFullscreenSurface, PersistedListOffset, PersistedNavigationLocation,
     PersistedRightPanelState, PersistedRightPanelSurface, PersistedSettingsPage,
-    PersistedSidebarGroup, PersistedState, PersistedTerminal, PersistedTranscriptScrollPosition,
-    PersistedWindowState, RecentModelUse, SidebarDraftPreviewColor, SidebarGrouping,
-    SidebarOrdering, SidebarProjectOrdering, StateStore, TerminalLinkModifier, UpdateChannel,
+    PersistedSidebarGroup, PersistedState, PersistedTranscriptScrollPosition, PersistedWindowState,
+    RecentModelUse, SidebarDraftPreviewColor, SidebarGrouping, SidebarOrdering,
+    SidebarProjectOrdering, StateStore, TerminalLinkModifier, UpdateChannel,
     VoiceBriefingSummaryModel, VoiceBriefingTtsModel,
 };
 use crate::query::{Query, QueryCache};
@@ -1820,10 +1820,9 @@ fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRight
         RightPanelSurface::SideChat(session_id) => {
             Some(PersistedRightPanelSurface::SideChat(*session_id))
         }
-        RightPanelSurface::Terminal(terminal_id) => {
-            Some(PersistedRightPanelSurface::Terminal(*terminal_id))
-        }
-        RightPanelSurface::Browser(_) | RightPanelSurface::BackgroundWork { .. } => None,
+        RightPanelSurface::Browser(_)
+        | RightPanelSurface::Terminal(_)
+        | RightPanelSurface::BackgroundWork { .. } => None,
     }
 }
 
@@ -1842,9 +1841,6 @@ fn panel_surface_from_persisted(surface: &PersistedRightPanelSurface) -> RightPa
         PersistedRightPanelSurface::GitHub(project_id) => RightPanelSurface::GitHub(*project_id),
         PersistedRightPanelSurface::SideChat(session_id) => {
             RightPanelSurface::SideChat(*session_id)
-        }
-        PersistedRightPanelSurface::Terminal(terminal_id) => {
-            RightPanelSurface::Terminal(*terminal_id)
         }
     }
 }
@@ -2020,44 +2016,6 @@ fn right_panel_state_from_persisted(state: &PersistedRightPanelState) -> RightPa
                 .and_then(|index| restored.surfaces.get(index))
                 == Some(surface)
         });
-    restored
-}
-
-fn right_panel_state_from_persisted_with_terminals(
-    state: &PersistedRightPanelState,
-    terminal_ids: &HashSet<Uuid>,
-) -> RightPanelSessionState {
-    let mut restored = right_panel_state_from_persisted(state);
-    let mut remap = vec![None; restored.surfaces.len()];
-    let mut surfaces = Vec::with_capacity(restored.surfaces.len());
-    for (index, surface) in std::mem::take(&mut restored.surfaces)
-        .into_iter()
-        .enumerate()
-    {
-        if surface
-            .terminal_id()
-            .is_none_or(|terminal_id| terminal_ids.contains(&terminal_id))
-        {
-            remap[index] = Some(surfaces.len());
-            surfaces.push(surface);
-        }
-    }
-    restored.surfaces = surfaces;
-    let had_active_surface = restored.active_surface.is_some();
-    restored.active_surface = restored
-        .active_surface
-        .and_then(|index| remap.get(index).copied().flatten());
-    if had_active_surface && restored.active_surface.is_none() && !restored.surfaces.is_empty() {
-        restored.active_surface = Some(0);
-    }
-    if !restored.fullscreen.as_ref().is_some_and(|(surface, _)| {
-        restored
-            .active_surface
-            .and_then(|index| restored.surfaces.get(index))
-            == Some(surface)
-    }) {
-        restored.fullscreen = None;
-    }
     restored
 }
 
@@ -3287,9 +3245,6 @@ pub struct Waku {
     /// partitions it pinned-first at read time.
     terminal_records: HashMap<Uuid, TerminalRecord>,
     terminal_order: Vec<Uuid>,
-    /// Last live cwd captured from the previous app process, consumed once
-    /// when the corresponding fresh shell is first spawned.
-    terminal_restore_directories: HashMap<Uuid, PathBuf>,
     /// Terminals whose last command finished successfully while the
     /// surface was off-screen — the sidebar row's unread dot until the
     /// terminal next takes focus.
@@ -6852,7 +6807,6 @@ impl Waku {
                 right_panel_terminals: HashMap::new(),
                 terminal_records: HashMap::new(),
                 terminal_order: Vec::new(),
-                terminal_restore_directories: HashMap::new(),
                 unseen_terminal_completions: HashSet::new(),
                 selected_terminal: None,
                 last_visible_terminal: None,

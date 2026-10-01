@@ -884,78 +884,6 @@ impl Waku {
             );
         }
         self.state.right_panel_sessions = panels;
-
-        self.state.terminals = self
-            .terminal_order
-            .iter()
-            .filter_map(|terminal_id| {
-                self.terminal_records
-                    .get(terminal_id)
-                    .map(|record| PersistedTerminal {
-                        id: *terminal_id,
-                        session: record.session,
-                        pinned: record.pinned,
-                        working_directory: record.working_directory.clone(),
-                        last_working_directory: record.last_working_directory.clone(),
-                        opened_at: record.opened_at,
-                        custom_title: record.custom_title.clone(),
-                    })
-            })
-            .collect();
-        self.state.selected_terminal = self
-            .selected_terminal
-            .filter(|terminal_id| self.terminal_records.contains_key(terminal_id));
-        self.state.last_visible_terminal = self
-            .last_visible_terminal
-            .filter(|terminal_id| self.terminal_records.contains_key(terminal_id));
-        let mut terminal_panels: HashMap<Uuid, PersistedRightPanelState> = self
-            .right_panel_states
-            .iter()
-            .filter_map(|(owner, state)| {
-                let RightPanelOwner::Terminal(terminal_id) = owner else {
-                    return None;
-                };
-                self.terminal_records.contains_key(terminal_id).then(|| {
-                    (
-                        *terminal_id,
-                        persist_right_panel_state(
-                            state.visible,
-                            state.git_panel_open,
-                            &state.surfaces,
-                            state.active_surface,
-                            &state.expanded_paths,
-                            &state.files_selected_path,
-                            state.file_tree_width,
-                            state.diff_selected_file,
-                            &state.diff_expanded_paths,
-                            state.diff_source,
-                            &state.fullscreen,
-                        ),
-                    )
-                })
-            })
-            .collect();
-        if let RightPanelOwner::Terminal(terminal_id) = self.right_panel_live_owner
-            && self.terminal_records.contains_key(&terminal_id)
-        {
-            terminal_panels.insert(
-                terminal_id,
-                persist_right_panel_state(
-                    self.right_panel_visible,
-                    self.git_panel_visible,
-                    &self.right_panel_surfaces,
-                    self.right_panel_active_surface,
-                    &self.right_panel_expanded_paths,
-                    &self.right_panel_files_selected_path,
-                    self.right_panel_file_tree_width,
-                    self.right_panel_diff_selected_file,
-                    &self.right_panel_diff_expanded_paths,
-                    self.right_panel_diff_source,
-                    &self.fullscreen_surface,
-                ),
-            );
-        }
-        self.state.right_panel_terminals = terminal_panels;
     }
 
     /// Rehydrate the UI state persisted across the last quit — history,
@@ -968,8 +896,6 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == *id && session.has_started())
         };
-        let session_exists =
-            |id: &Uuid| self.state.sessions.iter().any(|session| session.id == *id);
         let project_exists = |id: &Uuid| {
             self.state
                 .projects
@@ -1030,100 +956,18 @@ impl Waku {
             })
             .collect();
         self.briefed_messages = self.state.briefed_messages.iter().copied().collect();
-        let terminal_records = self
-            .state
-            .terminals
-            .iter()
-            .filter(|terminal| {
-                terminal
-                    .session
-                    .is_none_or(|session_id| session_exists(&session_id))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        self.terminal_records = terminal_records
-            .iter()
-            .map(|terminal| {
-                (
-                    terminal.id,
-                    TerminalRecord {
-                        session: terminal.session,
-                        pinned: terminal.pinned,
-                        working_directory: terminal.working_directory.clone(),
-                        last_working_directory: terminal.last_working_directory.clone(),
-                        workspace_directory: terminal
-                            .working_directory
-                            .is_none()
-                            .then(|| {
-                                terminal
-                                    .session
-                                    .and_then(|session_id| {
-                                        self.state
-                                            .sessions
-                                            .iter()
-                                            .find(|session| session.id == session_id)
-                                    })
-                                    .and_then(|session| self.workspace_path_for_session(session))
-                                    .map(Path::to_path_buf)
-                            })
-                            .flatten(),
-                        opened_at: terminal.opened_at,
-                        custom_title: terminal.custom_title.clone(),
-                    },
-                )
-            })
-            .collect();
-        self.terminal_order = terminal_records
-            .iter()
-            .map(|terminal| terminal.id)
-            .collect();
-        self.terminal_restore_directories = terminal_records
-            .iter()
-            .filter_map(|terminal| {
-                terminal
-                    .last_working_directory
-                    .clone()
-                    .map(|working_directory| (terminal.id, working_directory))
-            })
-            .collect();
-        let terminal_ids = self
-            .terminal_records
-            .keys()
-            .copied()
-            .collect::<HashSet<_>>();
-        self.selected_terminal = self
-            .state
-            .selected_terminal
-            .filter(|terminal_id| terminal_ids.contains(terminal_id));
-        self.last_visible_terminal = self
-            .state
-            .last_visible_terminal
-            .filter(|terminal_id| terminal_ids.contains(terminal_id));
-
         self.right_panel_states = self
             .state
             .right_panel_sessions
             .iter()
-            .filter(|(id, _)| session_exists(id))
+            .filter(|(id, _)| task_exists(id))
             .map(|(id, state)| {
                 (
                     RightPanelOwner::Session(*id),
-                    right_panel_state_from_persisted_with_terminals(state, &terminal_ids),
+                    right_panel_state_from_persisted(state),
                 )
             })
             .collect();
-        self.right_panel_states.extend(
-            self.state
-                .right_panel_terminals
-                .iter()
-                .filter(|(terminal_id, _)| terminal_ids.contains(terminal_id))
-                .map(|(terminal_id, state)| {
-                    (
-                        RightPanelOwner::Terminal(*terminal_id),
-                        right_panel_state_from_persisted_with_terminals(state, &terminal_ids),
-                    )
-                }),
-        );
         // A side-chat tab outlives an unsent chat — those are never
         // catalogued — and a chat deleted while the app was down.
         let dead_side_chats: Vec<Uuid> = self
@@ -1154,9 +998,6 @@ impl Waku {
                 self.transcript_landing = Some((session_id, landing));
                 self.scroll_to_transcript_landing(landing, cx);
             }
-        }
-        if let Some(terminal_id) = self.selected_terminal {
-            let _ = self.activate_terminal_state(terminal_id, false, cx);
         }
         // Page restores ride the open paths so their side effects — the
         // Terminals fold, the strip owner swap, search focus — land the same

@@ -4424,7 +4424,14 @@ impl Waku {
             self.right_panel_terminals.remove(&terminal_id);
             return;
         };
-        if !self.is_remote_path(&working_directory) && !working_directory.is_dir() {
+        if self.is_remote_path(&working_directory) {
+            // A desktop PTY would interpret the remote cwd on the wrong
+            // machine. Keep the surface unavailable until the protocol grows
+            // a daemon-owned streaming terminal.
+            self.right_panel_terminals.remove(&terminal_id);
+            return;
+        }
+        if !working_directory.is_dir() {
             // The directory is gone — typically an archived session's
             // worktree awaiting restore. A PTY launched now would fall back
             // to the filesystem root and, once the directory returns, look
@@ -4434,18 +4441,13 @@ impl Waku {
             return;
         }
         let spawned_at = self
-            .terminal_records
+            .right_panel_terminals
             .get(&terminal_id)
-            .and_then(|record| record.workspace_directory.clone())
-            .or_else(|| {
-                self.right_panel_terminals
-                    .get(&terminal_id)
-                    .map(|terminal| terminal.read(cx).spawn_directory().to_path_buf())
-            });
+            .map(|terminal| terminal.read(cx).spawn_directory().to_path_buf());
         match spawned_at {
             None => self.spawn_terminal_entity(terminal_id, working_directory, cx),
             // A workspace-tracking terminal follows the workspace when it
-            // moves — its workspace anchor is the test, never the live cwd,
+            // moves — the spawn directory is the test, never the live cwd,
             // so a `cd` inside the shell can't read as a move. A terminal
             // spawned at a recorded directory stays where it was put.
             Some(spawned_at) if workspace_bound && spawned_at != working_directory => {
