@@ -3554,7 +3554,7 @@ impl Waku {
                 self.save();
                 cx.notify();
             }
-            "You have permission to rename this task. Keep its current title unless the task has substantially changed or pivoted. If renaming, preserve its unique subject and describe the task's purpose, not recent steps or progress; use `goddard-agent rename`."
+            "You have permission to rename this task. First read this task's transcript with `goddard-agent read '{}'` to see its current title. Keep it unless the task has substantially changed or pivoted. If renaming, preserve its unique subject and describe the task's purpose, not recent steps or progress; use `goddard-agent rename`."
                 .to_owned()
         } else {
             prompt.to_owned()

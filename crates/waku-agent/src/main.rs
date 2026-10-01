@@ -62,26 +62,26 @@ USAGE CONTRACT
     the human asks you to create, start, or spawn another task or session —
     including running work in a separate task — use `create`; when they ask
     you to send a message to another task, use `prompt`. `read` is the read
-    half of that surface — use it when another task's transcript holds
-    context you need, for example when GODDARD_PARENT_TASK_ID names the
-    task this session is a side chat of; with no address fields it reads
-    this task's own transcript, which is how context handed off across a
-    provider switch stays reachable. `search` is read-only and confined to
-    this task's project — use it to find which sibling tasks are worth
-    `read`ing. Use `create` and `prompt` only when the human you are
-    working for has explicitly asked — never for exploration,
+    half of that surface — it reads a task's transcript, title, provider,
+    and status. With no address fields it reads this task's own data; use it
+    when another task's transcript holds context you need, for example when
+    GODDARD_PARENT_TASK_ID names the task this session is a side chat of.
+    `search` is read-only within this task's project; use it to find sibling
+    tasks worth `read`ing. Use `create` and `prompt` only when the human you
+    are working for has explicitly asked — never for exploration,
     convenience, or self-orchestration.
     `map` searches this workspace's indexed declarations for code relevant to
     the current task. Ask a specific question, add `anchors` for known symbol
     names, and use `known_paths` when you have already inspected files; then
     read the returned source locations before drawing conclusions. Narrow with
     `path` when you know the relevant directory.
-    `rename` changes only this task's title. Keep its current title unless
-    the task has substantially changed or pivoted. If renaming, preserve its
-    unique subject and describe the task's purpose, not recent steps or
-    progress. Unless the task already granted standing permission, each call
-    asks the user first — it blocks on the request card and fails when the
-    user declines.
+    `rename` changes only this task's title. Before deciding, read this task's
+    transcript with `goddard-agent read '{}'` to see its current title. Keep
+    that title unless the task has substantially changed or pivoted. If
+    renaming, preserve its unique subject and describe the task's purpose, not
+    recent steps or progress. Unless the task already granted standing
+    permission, each call asks the user first — it blocks on the request card
+    and fails when the user declines.
     `ask` renders a question card in the user's Goddard client and blocks
     until they answer, clarify, or dismiss it. Use it when the human's
     decision — a choice between options or a confirmation — must come back
