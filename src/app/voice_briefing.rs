@@ -58,6 +58,30 @@ const GATE_FEATURE: &str = "voice-briefing-gate";
 const GATE_QUESTION: &str = "brief";
 const GATE_THRESHOLD: f64 = 0.5;
 
+pub(super) fn default_voice_briefing_summary_instructions() -> String {
+    format!(
+        "You write a short spoken briefing for a user returning to an agent coding session. \
+         Given the agent's latest reply, say what it did and how it ended, then state plainly \
+         any decision or action the user needs to take. Plain spoken sentences only — no \
+         markdown, lists, or code. At most {TRANSCRIPT_WORD_CAP} words. Output only the transcript."
+    )
+}
+
+pub(super) fn effective_voice_briefing_summary_instructions(
+    stored: &str,
+    is_full_prompt: bool,
+) -> String {
+    if is_full_prompt {
+        return stored.to_owned();
+    }
+    let mut instructions = default_voice_briefing_summary_instructions();
+    if !stored.trim().is_empty() {
+        instructions.push_str("\n\n");
+        instructions.push_str(stored.trim());
+    }
+    instructions
+}
+
 impl Waku {
     /// The settle-side half: a reply that finishes off screen gets its
     /// clip built now, so landing on the task plays instantly. Runs only
@@ -418,7 +442,10 @@ impl Waku {
         cx.notify();
         let provider = self.state.voice_briefing_provider;
         let summary_model = self.state.voice_briefing_summary_model.trim().to_owned();
-        let instructions = self.state.voice_briefing_summary_instructions.trim().to_owned();
+        let instructions = effective_voice_briefing_summary_instructions(
+            &self.state.voice_briefing_summary_instructions,
+            self.state.voice_briefing_summary_instructions_full_prompt,
+        );
         let tts_model = self.state.voice_briefing_tts_model;
         let tts_model_id = match tts_model {
             VoiceBriefingTtsModel::Custom => {
@@ -533,17 +560,7 @@ async fn summarize(
     instructions: &str,
     response: &str,
 ) -> anyhow::Result<String> {
-    let mut system = format!(
-        "You write a short spoken briefing for a user returning to an agent \
-         coding session. Given the agent's latest reply, say what it did and \
-         how it ended, then state plainly any decision or action the user \
-         needs to take. Plain spoken sentences only — no markdown, lists, or \
-         code. At most {TRANSCRIPT_WORD_CAP} words. Output only the transcript."
-    );
-    if !instructions.is_empty() {
-        system.push_str("\n\nAdditional instructions from the user: ");
-        system.push_str(instructions);
-    }
+    let system = instructions;
     let body = json!({
         "model": model,
         "messages": [

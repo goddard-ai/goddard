@@ -5071,19 +5071,28 @@ impl Waku {
             input.set_content(state.voice_briefing_tts_custom_model.clone(), cx);
             input
         });
+        let initial_voice_briefing_instructions =
+            voice_briefing::effective_voice_briefing_summary_instructions(
+                &state.voice_briefing_summary_instructions,
+                state.voice_briefing_summary_instructions_full_prompt,
+            );
         let voice_briefing_instructions_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .tab_index(0)
-                .select_all_on_focus_click()
+                .multi_line()
+                .auto_height()
+                .max_lines(10)
                 .accessibility_label(tr!("experiments.voice_briefing_instructions"))
                 .placeholder(tr!("experiments.voice_briefing_instructions_placeholder"));
-            input.set_content(state.voice_briefing_summary_instructions.clone(), cx);
+            input.set_content(initial_voice_briefing_instructions, cx);
             input
         });
         let voice_briefing_gate_instructions_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .tab_index(0)
-                .select_all_on_focus_click()
+                .multi_line()
+                .auto_height()
+                .max_lines(10)
                 .accessibility_label(tr!("experiments.voice_briefing_gate_instructions"))
                 .placeholder(tr!("experiments.voice_briefing_gate_placeholder"));
             input.set_content(state.voice_briefing_gate_instructions.clone(), cx);

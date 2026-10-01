@@ -945,6 +945,8 @@ experiments.voice_briefing_instructions:
   en: Summary instructions
 experiments.voice_briefing_instructions_placeholder:
   en: "e.g. name the files that changed"
+experiments.voice_briefing_reset_instructions:
+  en: Reset to default
 experiments.voice_briefing_autoplay:
   en: Automatic playback
 experiments.voice_briefing_gate:
@@ -953,6 +955,14 @@ experiments.voice_briefing_gate_instructions:
   en: Gate criteria
 experiments.voice_briefing_gate_placeholder:
   en: "e.g. only when the reply needs a decision"
+experiments.voice_briefing_gate_examples:
+  en: Examples (click to add)
+experiments.voice_briefing_gate_example_decision:
+  en: Brief me only when the reply needs a decision or action from me; skip routine updates.
+experiments.voice_briefing_gate_example_blockers:
+  en: Prioritize failures, blockers, and unexpected changes that need my attention.
+experiments.voice_briefing_gate_example_risks:
+  en: Brief me when a meaningful result changes the plan or reveals a risk; skip status-only updates.
 experiments.voice_briefing_gate_needs_eval:
   en: No eval backend is configured — the gate never runs, so every briefing generates. Set one up on the Jev page.
 experiments.memory_title:

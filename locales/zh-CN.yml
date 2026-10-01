@@ -2254,10 +2254,15 @@ experiments.voice_briefing_custom_model_placeholder: 服务商/模型 — 例如
 experiments.voice_briefing_tts: 语音模型
 experiments.voice_briefing_instructions: 摘要说明
 experiments.voice_briefing_instructions_placeholder: "例如：说出改动的文件名"
+experiments.voice_briefing_reset_instructions: 重置为默认
 experiments.voice_briefing_autoplay: 自动播放
 experiments.voice_briefing_gate: Jev 门控
 experiments.voice_briefing_gate_instructions: 门控条件
 experiments.voice_briefing_gate_placeholder: "例如：仅在回复需要你决策时"
+experiments.voice_briefing_gate_examples: 示例（点击添加）
+experiments.voice_briefing_gate_example_decision: 仅当回复需要我作出决定或采取行动时才播报；跳过常规进度更新。
+experiments.voice_briefing_gate_example_blockers: 优先播报需要我关注的失败、阻塞或意外变化。
+experiments.voice_briefing_gate_example_risks: 当重要结果改变计划或揭示风险时播报；跳过纯状态更新。
 experiments.voice_briefing_gate_needs_eval: 未配置评估后端——门控不会运行，因此每次都会生成简报。请在 Jev 页面设置。
 friends.a_friend: 一位好友
 friends.abort_sync: 中止

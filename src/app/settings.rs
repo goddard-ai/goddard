@@ -7426,6 +7426,22 @@ impl Waku {
                 )
                 .child(control)
         };
+        let text_area_row = |label: String, control: AnyElement| {
+            div()
+                .flex()
+                .items_start()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .w(px(110.0))
+                        .flex_none()
+                        .pt(px(6.0))
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(label),
+                )
+                .child(control)
+        };
 
         let summary = if self.state.voice_briefing_summary_custom {
             VoiceBriefingSummaryModel::Custom
@@ -7523,6 +7539,80 @@ impl Waku {
             },
         );
 
+        let default_instructions =
+            super::voice_briefing::default_voice_briefing_summary_instructions();
+        let instructions_customized = self
+            .voice_briefing_instructions_input
+            .read(cx)
+            .content()
+            .trim()
+            != default_instructions.trim();
+        let mut instructions_control = div().flex().flex_col().gap(px(6.0)).child(
+            TextField::new(
+                "voice-briefing-instructions",
+                self.voice_briefing_instructions_input.clone(),
+            )
+            .multiline()
+            .w(px(280.0)),
+        );
+        if instructions_customized {
+            instructions_control = instructions_control.child(settings_button(
+                "voice-briefing-summary-instructions-reset",
+                tr!("experiments.voice_briefing_reset_instructions"),
+                true,
+                false,
+                true,
+                theme,
+                cx,
+                |this, _, cx| this.reset_voice_briefing_summary_instructions(cx),
+            ));
+        }
+
+        let mut gate_example = |id: &'static str, label: String| {
+            let appended = label.clone();
+            div()
+                .id(id)
+                .tab_index(0)
+                .rounded(px(4.0))
+                .px(px(4.0))
+                .py(px(2.0))
+                .flex()
+                .items_start()
+                .gap(px(6.0))
+                .cursor_default()
+                .text_size(sp(12.0))
+                .line_height(sp(16.0))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .hover(|style| style.bg(theme.overlay))
+                .child(div().text_color(theme.text_secondary).child("•"))
+                .child(div().flex_1().text_color(theme.accent).child(label))
+                .on_activation(cx, move |this, _, cx| {
+                    this.append_voice_briefing_gate_example(appended.clone(), cx);
+                })
+        };
+        let gate_examples = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("experiments.voice_briefing_gate_examples")),
+            )
+            .child(gate_example(
+                "voice-briefing-gate-example-decision",
+                tr!("experiments.voice_briefing_gate_example_decision"),
+            ))
+            .child(gate_example(
+                "voice-briefing-gate-example-blockers",
+                tr!("experiments.voice_briefing_gate_example_blockers"),
+            ))
+            .child(gate_example(
+                "voice-briefing-gate-example-risks",
+                tr!("experiments.voice_briefing_gate_example_risks"),
+            ));
+
         div()
             .mt(px(10.0))
             .flex()
@@ -7584,14 +7674,9 @@ impl Waku {
                     .into_any_element(),
                 ))
             })
-            .child(row(
+            .child(text_area_row(
                 tr!("experiments.voice_briefing_instructions"),
-                TextField::new(
-                    "voice-briefing-instructions",
-                    self.voice_briefing_instructions_input.clone(),
-                )
-                .w(px(280.0))
-                .into_any_element(),
+                instructions_control.into_any_element(),
             ))
             .child(row(
                 tr!("experiments.voice_briefing_autoplay"),
@@ -7625,15 +7710,17 @@ impl Waku {
                 .into_any_element(),
             ))
             .when(self.state.voice_briefing_gate_enabled, |card| {
-                card.child(row(
+                card.child(text_area_row(
                     tr!("experiments.voice_briefing_gate_instructions"),
                     TextField::new(
                         "voice-briefing-gate-instructions",
                         self.voice_briefing_gate_instructions_input.clone(),
                     )
+                    .multiline()
                     .w(px(280.0))
                     .into_any_element(),
                 ))
+                .child(gate_examples)
             })
             .when(
                 self.state.voice_briefing_gate_enabled
@@ -7768,6 +7855,7 @@ impl Waku {
             .content()
             .trim()
             .to_owned();
+        self.state.voice_briefing_summary_instructions_full_prompt = true;
         self.state.voice_briefing_gate_instructions = self
             .voice_briefing_gate_instructions_input
             .read(cx)
@@ -7775,6 +7863,32 @@ impl Waku {
             .trim()
             .to_owned();
         self.save();
+    }
+
+    fn reset_voice_briefing_summary_instructions(&mut self, cx: &mut Context<Self>) {
+        let instructions = super::voice_briefing::default_voice_briefing_summary_instructions();
+        self.voice_briefing_instructions_input
+            .update(cx, |input, cx| input.set_content(instructions, cx));
+        self.save_voice_briefing_fields(cx);
+        cx.notify();
+    }
+
+    fn append_voice_briefing_gate_example(&mut self, example: String, cx: &mut Context<Self>) {
+        let existing = self
+            .voice_briefing_gate_instructions_input
+            .read(cx)
+            .content()
+            .trim_end()
+            .to_owned();
+        let instructions = if existing.trim().is_empty() {
+            example
+        } else {
+            format!("{existing}\n{example}")
+        };
+        self.voice_briefing_gate_instructions_input
+            .update(cx, |input, cx| input.set_content(instructions, cx));
+        self.save_voice_briefing_fields(cx);
+        cx.notify();
     }
 
     /// The project-memory card's tuning block: one model picker per enabled

@@ -1349,9 +1349,13 @@ pub struct AppSettings {
     /// Gateway model ID used when the TTS selector is set to Custom.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_tts_custom_model: String,
-    /// Extra guidance folded into the transcript writer's prompt.
+    /// Full system instructions used by the transcript writer.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_summary_instructions: String,
+    /// Older versions stored only extra guidance in the instructions field.
+    /// This flag distinguishes a saved full prompt from that legacy value.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub voice_briefing_summary_instructions_full_prompt: bool,
     /// Play the finished clip as soon as its task is opened. Off leaves
     /// generation to the response footer's on-demand button — nothing
     /// prefetches.
@@ -1448,6 +1452,7 @@ impl Default for AppSettings {
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             voice_briefing_tts_custom_model: String::new(),
             voice_briefing_summary_instructions: String::new(),
+            voice_briefing_summary_instructions_full_prompt: false,
             voice_briefing_autoplay: false,
             voice_briefing_gate_enabled: false,
             voice_briefing_gate_instructions: String::new(),
@@ -1993,6 +1998,8 @@ pub struct PersistedState {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_summary_instructions: String,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub voice_briefing_summary_instructions_full_prompt: bool,
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub voice_briefing_autoplay: bool,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub voice_briefing_gate_enabled: bool,
@@ -2373,6 +2380,7 @@ impl PersistedState {
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             voice_briefing_tts_custom_model: String::new(),
             voice_briefing_summary_instructions: String::new(),
+            voice_briefing_summary_instructions_full_prompt: false,
             voice_briefing_autoplay: false,
             voice_briefing_gate_enabled: false,
             voice_briefing_gate_instructions: String::new(),
@@ -2800,6 +2808,8 @@ impl PersistedState {
             voice_briefing_tts_model: self.voice_briefing_tts_model,
             voice_briefing_tts_custom_model: self.voice_briefing_tts_custom_model.clone(),
             voice_briefing_summary_instructions: self.voice_briefing_summary_instructions.clone(),
+            voice_briefing_summary_instructions_full_prompt: self
+                .voice_briefing_summary_instructions_full_prompt,
             voice_briefing_autoplay: self.voice_briefing_autoplay,
             voice_briefing_gate_enabled: self.voice_briefing_gate_enabled,
             voice_briefing_gate_instructions: self.voice_briefing_gate_instructions.clone(),
@@ -2950,6 +2960,8 @@ impl PersistedState {
         self.voice_briefing_tts_model = settings.voice_briefing_tts_model;
         self.voice_briefing_tts_custom_model = settings.voice_briefing_tts_custom_model;
         self.voice_briefing_summary_instructions = settings.voice_briefing_summary_instructions;
+        self.voice_briefing_summary_instructions_full_prompt =
+            settings.voice_briefing_summary_instructions_full_prompt;
         self.voice_briefing_autoplay = settings.voice_briefing_autoplay;
         self.voice_briefing_gate_enabled = settings.voice_briefing_gate_enabled;
         self.voice_briefing_gate_instructions = settings.voice_briefing_gate_instructions;
