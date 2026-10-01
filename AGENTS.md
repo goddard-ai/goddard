@@ -133,11 +133,11 @@ text searches or source reads. Choose the command that fits the task:
 
 - `graft map` gives a token-budgeted repo orientation with directory clusters,
   hubs, and hotspots. Start here when the relevant area is not yet clear.
-- `graft ask "<specific question>" --source` returns ranked nodes with source
-  spans (an eight-line crux by default; add `--full` for whole definitions).
-  Reuse known symbols, error strings, and paths in the query. Treat results as
-  ranked leads, not a complete match list; narrow with `--in <scope>/` in a
-  monorepo.
+- `graft ask "<terms or specific question>" --source` is an optional first-pass
+  lookup when you have concrete symbols, paths, or distinctive terms. Its
+  ranked matches can be noisy, so inspect the returned source spans rather than
+  treating the top hit as an answer. It shows an eight-line crux by default;
+  add `--full` for whole definitions and `--in <scope>/` to narrow a monorepo.
 - `graft callers <symbol>` gives exact caller edges. Add `--direction out` for
   callees or `--depth N` (or `all`) to walk relationships transitively.
 - `graft grep "<literal or regex>"` finds every match in indexed files,
