@@ -30,6 +30,7 @@ actions!(
 
 const SEARCH_CONTEXT: &str = "CommandPalette > TextInput";
 const MAX_TASK_RESULTS: usize = 12;
+const MIN_EXACT_COMMAND_SUBSTRING_CHARS: usize = 3;
 const MAX_RESUME_RESULTS: usize = 30;
 const PROVIDER_SESSION_CATALOG_LIMIT: usize = 250;
 const MESSAGE_SEARCH_LIMIT: usize = 50;
@@ -80,6 +81,7 @@ pub fn init(cx: &mut App) {
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum PaletteSection {
+    BestMatch,
     Suggested,
     Tasks,
     Sessions,
@@ -104,6 +106,7 @@ enum PaletteSection {
 impl PaletteSection {
     fn label(self) -> String {
         crate::i18n::translate(match self {
+            Self::BestMatch => "command_palette.best_match",
             Self::Suggested => "command_palette.suggested",
             Self::Tasks => "command_palette.tasks",
             Self::Sessions => "command_palette.sessions",
@@ -123,7 +126,11 @@ impl PaletteSection {
 
     fn query_rank(self) -> usize {
         match self {
-            Self::Commands | Self::Suggested | Self::Sessions | Self::Providers => 0,
+            Self::BestMatch
+            | Self::Commands
+            | Self::Suggested
+            | Self::Sessions
+            | Self::Providers => 0,
             Self::CustomCommands | Self::Prompts => 1,
             Self::Tasks => 2,
             Self::Settings => 3,
@@ -406,6 +413,22 @@ fn order_sections_by_best_score(scored_results: &mut [ScoredPaletteItem]) {
             .position(|(section, _)| *section == scored.item.section)
             .unwrap_or(usize::MAX)
     });
+}
+
+fn palette_labels_match_exactly(normalized_query: &str, label: &str) -> bool {
+    normalized_query == label.trim().to_lowercase()
+}
+
+fn palette_label_contains_literal_query(normalized_query: &str, label: &str) -> bool {
+    let label = label.trim().to_lowercase();
+    !normalized_query.is_empty()
+        && (normalized_query == label
+            || (normalized_query
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .count()
+                >= MIN_EXACT_COMMAND_SUBSTRING_CHARS
+                && label.contains(normalized_query)))
 }
 
 /// The user-level template directory — scanned into the composer's command
@@ -4243,6 +4266,7 @@ impl Waku {
         // scores titles and excerpts against the remaining needle only.
         let search = crate::persistence::parse_session_message_search(query);
         let needle = search.text.as_str();
+        let normalized_needle = needle.trim().to_lowercase();
         let pattern = Pattern::parse(needle, CaseMatching::Ignore, Normalization::Smart);
         let message_matches_are_current =
             self.command_palette.message_matches_query.as_deref() == Some(query);
@@ -4308,6 +4332,37 @@ impl Waku {
         };
         commands.sort_by(|a, b| b.score.cmp(&a.score).then(a.item.order.cmp(&b.item.order)));
 
+        // A custom command's full name or sufficiently long literal substring
+        // is a stronger signal than a built-in action's fuzzy keyword match.
+        // Lift literal label matches into their own section so only those rows
+        // move ahead of the normal section-ranked results.
+        let has_literal_custom_command_match = commands.iter().any(|scored| {
+            matches!(&scored.item.action, PaletteAction::RunCustomCommand(_))
+                && palette_label_contains_literal_query(&normalized_needle, &scored.item.label)
+        });
+        let mut best_matches = Vec::new();
+        if has_literal_custom_command_match {
+            let mut remaining = Vec::with_capacity(commands.len());
+            for mut scored in commands.drain(..) {
+                if palette_label_contains_literal_query(&normalized_needle, &scored.item.label) {
+                    scored.item.section = PaletteSection::BestMatch;
+                    best_matches.push(scored);
+                } else {
+                    remaining.push(scored);
+                }
+            }
+            commands = remaining;
+            best_matches.sort_by(|a, b| {
+                palette_labels_match_exactly(&normalized_needle, &b.item.label)
+                    .cmp(&palette_labels_match_exactly(
+                        &normalized_needle,
+                        &a.item.label,
+                    ))
+                    .then(b.score.cmp(&a.score))
+                    .then(a.item.order.cmp(&b.item.order))
+            });
+        }
+
         let selected_action = preserve_selection.then(|| {
             self.command_palette
                 .results
@@ -4317,10 +4372,14 @@ impl Waku {
         let mut scored_results = tasks;
         scored_results.extend(commands);
         order_sections_by_best_score(&mut scored_results);
-        let next_results = scored_results
+        let preferred_action = best_matches
+            .first()
+            .map(|scored| scored.item.action.clone());
+        let mut next_results = best_matches
             .into_iter()
             .map(|scored| scored.item)
             .collect::<Vec<_>>();
+        next_results.extend(scored_results.into_iter().map(|scored| scored.item));
         // This is the palette equivalent of TanStack Query's
         // `keepPreviousData`: never replace useful rows with a transient blank
         // frame while the transcript query is still in flight.
@@ -4334,8 +4393,8 @@ impl Waku {
             return;
         }
         self.command_palette.results = next_results;
-        self.command_palette.selected = selected_action
-            .flatten()
+        self.command_palette.selected = preferred_action
+            .or_else(|| selected_action.flatten())
             .and_then(|action| {
                 self.command_palette
                     .results

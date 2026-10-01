@@ -119,6 +119,8 @@ command_palette.resume_placeholder:
   en: Search terminal sessions…
 command_palette.resume_provider_placeholder:
   en: Select a provider…
+command_palette.best_match:
+  en: Best match
 command_palette.suggested:
   en: Suggested
 command_palette.tasks:

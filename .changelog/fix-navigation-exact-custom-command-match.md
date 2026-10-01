@@ -1,0 +1,1 @@
+- Typing a custom command’s full name or a literal substring of at least three non-space characters in the command palette now puts matching labels first, ahead of actions that only match fuzzily.
