@@ -22,6 +22,13 @@
 
 - Understand failures before changing code or tests. Run focused checks, then broader affected checks as warranted.
 
+- Run scoped tests routinely during development, not only before finishing.
+  On machines with mbx configured, `cargo test -p <changed crate>` restores
+  dependency compilations from the shared cache even in a fresh worktree, so
+  most of the cost is the changed crate and test execution. Prefer
+  package-scoped or filtered runs; `--workspace` still builds every member's
+  test binaries, including the app crate.
+
 - Report verification gaps and provide concrete manual steps when automated verification is unavailable.
 
 ## Focused verification gaps
