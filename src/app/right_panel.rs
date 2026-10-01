@@ -3920,6 +3920,7 @@ impl Waku {
                         MessageRender {
                             theme: &theme,
                             message: &message,
+                            provider: session.provider,
                             assistant_footer_copy_content: None,
                             assistant_footer_time: None,
                             copied,

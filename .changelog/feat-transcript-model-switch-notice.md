@@ -1,1 +1,1 @@
-- After submitting a prompt with a newly selected model in an existing session, see a notice immediately after the prompt with the model change and a reminder that the prompt cache usually cannot be reused across models, which can increase cost.
+- After submitting a prompt with a newly selected model in an existing session, see the provider's logo beside the model-change notice and focus the info icon for a reminder that prompt-cache reuse can change across models and increase costs.

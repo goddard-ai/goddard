@@ -429,6 +429,8 @@ pub(super) fn render_message_footer(
 pub(super) struct MessageRender<'a> {
     pub(super) theme: &'a Theme,
     pub(super) message: &'a Message,
+    /// The owning session's provider, used for model-switch notices.
+    pub(super) provider: crate::model::ProviderKind,
     pub(super) assistant_footer_copy_content: Option<SharedString>,
     pub(super) assistant_footer_time: Option<u64>,
     pub(super) copied: bool,
@@ -1168,6 +1170,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
     let MessageRender {
         theme,
         message,
+        provider,
         assistant_footer_copy_content,
         assistant_footer_time,
         copied,
@@ -1610,7 +1613,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             // for a reply the turn never produced; the kind's leading icon
             // keeps them from reading as agent prose.
             if let Some(TranscriptNotice::Status { kind }) = &message.notice {
-                status_notice_row(*kind, &content, message_id, theme, ctx)
+                status_notice_row(*kind, &content, message_id, provider, theme, ctx)
             } else if let Some(notice @ TranscriptNotice::TransferReceived { .. }) = &message.notice
             {
                 transfer_notice_row(theme, message_id, notice, transfer_notice.as_ref(), &waku)
@@ -1668,10 +1671,11 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 ctx,
             ),
             _ => {
-                let status_icon = match &message.notice {
-                    Some(TranscriptNotice::Status { kind }) => Some(status_notice_icon(*kind)),
+                let status_kind = match &message.notice {
+                    Some(TranscriptNotice::Status { kind }) => Some(*kind),
                     _ => None,
                 };
+                let model_switched = status_kind == Some(TranscriptNoticeStatus::ModelSwitched);
                 div().w_full().flex().justify_center().child(
                     div()
                         .flex()
@@ -1683,8 +1687,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                         .bg(theme.overlay)
                         .text_size(sp(12.5))
                         .line_height(sp(16.0))
-                        .when_some(status_icon, |row, path| {
-                            row.child(icon(path, 11.0, theme.text_tertiary))
+                        .when_some(status_kind, |row, kind| {
+                            row.child(status_notice_icon(kind, provider, theme, 11.0))
                         })
                         .child(md::render::plain_text(
                             content.clone(),
@@ -1692,7 +1696,10 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                             FontWeight::NORMAL,
                             theme.text_tertiary,
                             ctx,
-                        )),
+                        ))
+                        .when(model_switched, |row| {
+                            row.child(model_switch_cache_info(message_id, theme))
+                        }),
                 )
             }
         },
@@ -1719,10 +1726,17 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
     )
 }
 
-/// Which icon a [`TranscriptNotice::Status`] leads with — one Lucide glyph
-/// per [`TranscriptNoticeStatus`].
-fn status_notice_icon(status: TranscriptNoticeStatus) -> &'static str {
-    match status {
+/// Which mark a [`TranscriptNotice::Status`] leads with. Model switches use
+/// the session's provider mark; other notices keep their status glyphs.
+#[track_caller]
+fn status_notice_icon(
+    status: TranscriptNoticeStatus,
+    provider: crate::model::ProviderKind,
+    theme: &Theme,
+    size: f32,
+) -> AnyElement {
+    let color = theme.text_tertiary;
+    let path = match status {
         TranscriptNoticeStatus::Stopped => "icons/hand.svg",
         TranscriptNoticeStatus::Completed => "icons/circle-check.svg",
         TranscriptNoticeStatus::StoppedBeforeResponse => "icons/octagon-x.svg",
@@ -1734,8 +1748,33 @@ fn status_notice_icon(status: TranscriptNoticeStatus) -> &'static str {
         TranscriptNoticeStatus::Error => "icons/alert.svg",
         TranscriptNoticeStatus::Goal => "icons/goal.svg",
         TranscriptNoticeStatus::ProjectSwitched => "icons/folder.svg",
-        TranscriptNoticeStatus::ModelSwitched => "icons/bot.svg",
-    }
+        TranscriptNoticeStatus::ModelSwitched => {
+            return crate::ui::provider_mark(theme, provider, size, color).into_any_element();
+        }
+    };
+    icon(path, size, color).into_any_element()
+}
+
+#[track_caller]
+fn model_switch_cache_info(message_id: Uuid, theme: &Theme) -> impl gpui::IntoElement {
+    div()
+        .id(SharedString::from(format!(
+            "model-switch-cache-info-{message_id}"
+        )))
+        .tab_index(0)
+        .flex_none()
+        .h(px(20.0))
+        .min_w(px(20.0))
+        .px(px(3.0))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
+        .child(icon("icons/info.svg", 12.0, theme.text_secondary))
+        .tooltip(crate::ui::tooltip::Tooltip::text(tr!(
+            "transcript.model_switched_cache_tooltip"
+        )))
 }
 
 /// A [`TranscriptNotice::Status`] rendered in the assistant column: the
@@ -1746,6 +1785,7 @@ fn status_notice_row(
     status: TranscriptNoticeStatus,
     content: &str,
     message_id: Uuid,
+    provider: crate::model::ProviderKind,
     theme: &Theme,
     ctx: &MarkdownCtx,
 ) -> Div {
@@ -1757,7 +1797,7 @@ fn status_notice_row(
         .py(px(4.0))
         .text_size(sp(12.5))
         .line_height(sp(16.0))
-        .child(icon(status_notice_icon(status), 12.0, theme.text_tertiary))
+        .child(status_notice_icon(status, provider, theme, 12.0))
         .child(md::render::plain_text(
             content.to_owned(),
             ctx.families().ui.clone(),
@@ -1766,26 +1806,7 @@ fn status_notice_row(
             ctx,
         ))
         .when(status == TranscriptNoticeStatus::ModelSwitched, |row| {
-            row.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "model-switch-cache-info-{message_id}"
-                    )))
-                    .tab_index(0)
-                    .flex_none()
-                    .h(px(20.0))
-                    .min_w(px(20.0))
-                    .px(px(3.0))
-                    .rounded_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .child(icon("icons/info.svg", 12.0, theme.text_tertiary))
-                    .tooltip(crate::ui::tooltip::Tooltip::text(tr!(
-                        "transcript.model_switched_cache_tooltip"
-                    ))),
-            )
+            row.child(model_switch_cache_info(message_id, theme))
         })
 }
 

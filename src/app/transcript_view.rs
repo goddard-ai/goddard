@@ -1675,9 +1675,14 @@ impl Waku {
         let inner = match kind {
             TranscriptRowKind::Message(message_index) => self
                 .selected_session()
-                .and_then(|session| session.messages.get(message_index))
-                .cloned()
-                .map(|message| {
+                .and_then(|session| {
+                    session
+                        .messages
+                        .get(message_index)
+                        .cloned()
+                        .map(|message| (message, session.provider))
+                })
+                .map(|(message, provider)| {
                     let copied = self.copied_message_feedback.contains_key(&message.id);
                     let (assistant_footer_copy_content, assistant_footer_time) =
                         self.assistant_response_footer_cached(message_index);
@@ -1838,6 +1843,7 @@ impl Waku {
                         MessageRender {
                             theme: &theme,
                             message: &message,
+                            provider,
                             assistant_footer_copy_content,
                             assistant_footer_time,
                             copied,
