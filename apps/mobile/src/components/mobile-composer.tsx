@@ -410,7 +410,7 @@ export function MobileComposer({
       let displayPrompt = prompt;
       let providerPrompt = bareRename
         ? [
-            'You have permission to rename this task. Choose a concise title that reflects its current goal, then rename it now using `goddard-agent rename`.',
+            'You have permission to rename this task. Keep its current title unless the task has substantially changed or pivoted. If renaming, preserve its unique subject and describe the task\'s purpose, not recent steps or progress; use `goddard-agent rename`.',
             submittedAttachments.map(attachmentPromptToken).join(' '),
           ].filter(Boolean).join(' ')
         : expanded;
@@ -418,7 +418,7 @@ export function MobileComposer({
         displayPrompt = annotationBubbleContent(submittedAnnotations, prompt);
         const base = bareRename
           ? [
-              'You have permission to rename this task. Choose a concise title that reflects its current goal, then rename it now using `goddard-agent rename`.',
+              'You have permission to rename this task. Keep its current title unless the task has substantially changed or pivoted. If renaming, preserve its unique subject and describe the task\'s purpose, not recent steps or progress; use `goddard-agent rename`.',
               submittedAttachments.map(attachmentPromptToken).join(' '),
             ].filter(Boolean).join(' ')
           : expanded ?? [

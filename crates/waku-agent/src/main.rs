@@ -76,9 +76,12 @@ USAGE CONTRACT
     names, and use `known_paths` when you have already inspected files; then
     read the returned source locations before drawing conclusions. Narrow with
     `path` when you know the relevant directory.
-    `rename` changes only this task's title. Unless the task already granted
-    standing permission, each call asks the user first — it blocks on the
-    request card and fails when the user declines.
+    `rename` changes only this task's title. Keep its current title unless
+    the task has substantially changed or pivoted. If renaming, preserve its
+    unique subject and describe the task's purpose, not recent steps or
+    progress. Unless the task already granted standing permission, each call
+    asks the user first — it blocks on the request card and fails when the
+    user declines.
     `ask` renders a question card in the user's Goddard client and blocks
     until they answer, clarify, or dismiss it. Use it when the human's
     decision — a choice between options or a confirmation — must come back

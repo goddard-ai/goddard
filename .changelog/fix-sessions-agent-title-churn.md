@@ -1,0 +1,1 @@
+- Agents keep a task's existing title unless its scope has substantially changed or pivoted, and use the task's unique subject instead of recent progress when renaming.
