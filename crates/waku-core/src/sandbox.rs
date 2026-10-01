@@ -2334,9 +2334,17 @@ mod tests {
     #[test]
     fn sign_in_invocation_mounts_the_provider_home() {
         let dir = std::env::temp_dir().join(format!("waku-signin-{}", Uuid::new_v4()));
-        // Without shuru installed this test cannot run — the argv itself is
-        // what is under test, so a missing binary skips rather than fails.
-        if shuru_binary().is_err() {
+        if std::env::var_os("GODDARD_SHURU_BIN").is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "sandbox::tests::sign_in_invocation_mounts_the_provider_home",
+                    "--nocapture",
+                ])
+                .env("GODDARD_SHURU_BIN", "fixture-shuru-not-executed")
+                .status()
+                .unwrap();
+            assert!(status.success(), "isolated sign-in invocation check failed");
             return;
         }
         let (program, args, cwd) =

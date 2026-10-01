@@ -1,3 +1,4 @@
+import './test-support/async-storage';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AgentSession, Command, ResponsePayload, SequencedEvent, WakuClient } from '@waku/client';
@@ -10,7 +11,7 @@ import { beginTurn, createSession } from './mobile-runtime';
 let activeDaemon: { activeProfile: { id: string }; client: WakuClient; phase: 'connected' };
 mock.module('./daemon-context', () => ({ useDaemon: () => activeDaemon }));
 mock.module('expo-crypto', () => ({ randomUUID: () => crypto.randomUUID() }));
-mock.module('./composer-preferences-store', () => ({ persistentStorageSync: () => null }));
+
 
 const { RuntimeProvider, useRuntime } = await import('./runtime-context');
 const cleanups: Array<() => Promise<void>> = [];

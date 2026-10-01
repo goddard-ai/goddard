@@ -1833,10 +1833,8 @@ server.serve_forever()
     fn apply_options_retunes_the_live_session_without_a_restart() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let Some(python) = crate::command_env::find_executable("python3") else {
-            eprintln!("python3 is not installed; skipping the fake-server test");
-            return;
-        };
+        let python = crate::command_env::find_executable("python3")
+            .expect("python3 is required for the controlled OpenCode HTTP server");
         let root = std::env::temp_dir().join(format!(
             "waku-fake-opencode-{}-{}",
             std::process::id(),

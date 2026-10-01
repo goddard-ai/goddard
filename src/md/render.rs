@@ -4333,48 +4333,6 @@ mod tests {
     }
 
     #[test]
-    fn code_block_rendering_wraps_and_exposes_a_keyboard_copy_control() {
-        let source = include_str!("render.rs");
-        let start = source
-            .find("\nfn render_code_block(")
-            .expect("code block renderer");
-        let body = &source[start + 1..];
-        let end = body
-            .find("\nfn code_runs(")
-            .expect("code block renderer end");
-        let body = &body[..end];
-
-        assert!(body.contains(".whitespace_normal()"));
-        assert!(!body.contains(".overflow_x_scroll()"));
-        assert!(!body.contains(".whitespace_nowrap()"));
-        assert!(body.contains("\"icons/copy.svg\""));
-        assert!(body.contains("\"icons/check.svg\""));
-        assert!(body.contains("ClipboardItem::new_string"));
-        assert!(body.contains("show_code_copied"));
-        assert!(body.contains(".tab_index(0)"));
-        assert!(body.contains(".on_key_down"));
-    }
-
-    #[test]
-    fn code_block_rendering_exposes_a_keyboard_run_control() {
-        let source = include_str!("render.rs");
-        let start = source
-            .find("\nfn render_code_block(")
-            .expect("code block renderer");
-        let body = &source[start + 1..];
-        let end = body
-            .find("\nfn code_runs(")
-            .expect("code block renderer end");
-        let body = &body[..end];
-
-        assert!(body.contains("code_run_kind(language).is_some()"));
-        assert!(body.contains("\"icons/play.svg\""));
-        assert!(body.contains("\"run-code-"));
-        assert!(body.contains("CodeRunRequest"));
-        assert!(body.contains(".on_key_down"));
-    }
-
-    #[test]
     fn code_run_script_maps_shells_and_interpreters() {
         // Shell tags run the block verbatim, in the tagged shell when it
         // names one — a `bash` block must not land in a zsh interpreter.

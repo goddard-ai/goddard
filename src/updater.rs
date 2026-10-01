@@ -843,15 +843,14 @@ mod macos {
         use objc2::ClassType;
 
         #[test]
+        #[ignore = "requires a packaged debug app with Sparkle"]
         fn routing_user_driver_satisfies_sparkle_protocols() {
             let target_dir = std::env::var_os("CARGO_TARGET_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target"));
             let library = target_dir
                 .join("debug/Goddard Debug.app/Contents/Frameworks/Sparkle.framework/Sparkle");
-            if !library.exists() {
-                return;
-            }
+            assert!(library.exists(), "packaged debug app must contain Sparkle");
 
             let library_c =
                 std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(library.as_os_str()))

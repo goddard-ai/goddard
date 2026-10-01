@@ -1,16 +1,8 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AgentSession } from '@waku/client';
 
-const memory = new Map<string, string>();
-mock.module('./composer-preferences-store', () => ({
-  hydratePersistentStorage: () => Promise.resolve(),
-  persistentStorageSync: () => ({
-    getItem: (key: string) => memory.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      memory.set(key, value);
-    },
-  }),
-}));
+import { nativeStorage } from './test-support/async-storage';
+const { hydratePersistentStorage, persistentStorageSync } = await import('./composer-preferences-store');
 
 const {
   markSessionRepliesSeen,
@@ -23,8 +15,9 @@ const {
 
 const DAEMON = 'wss://daemon.example';
 
-beforeEach(() => {
-  memory.clear();
+beforeEach(async () => {
+  await hydratePersistentStorage();
+  persistentStorageSync()!.setItem('waku.mobile.unseen-replies.v1', '{}');
   resetUnseenReplyStore();
 });
 
@@ -70,6 +63,7 @@ describe('unseen reply watermarks', () => {
 
   test('watermarks survive a reload from storage', async () => {
     await markSessionRepliesSeen(DAEMON, session({ id: 'a', last_reply_at: 10 }));
+    expect(nativeStorage.get('waku.mobile.unseen-replies.v1')).toContain(DAEMON);
     resetUnseenReplyStore();
     const watermarks = unseenReplyWatermarks(DAEMON);
     expect(sessionHasUnseenReply(session({ id: 'a', last_reply_at: 11 }), watermarks)).toBe(true);

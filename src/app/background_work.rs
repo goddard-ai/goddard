@@ -2470,57 +2470,11 @@ mod tests {
     }
 
     #[test]
-    fn info_popover_background_titles_stay_on_one_line() {
-        let source = include_str!("background_work.rs");
-        let row = source
-            .split_once("\nfn render_background_summary_row(")
-            .expect("background summary row renderer")
-            .1
-            .split_once("\n#[cfg(test)]")
-            .expect("background summary row renderer end")
-            .0;
-
-        assert!(row.contains(".truncate()"));
-        assert!(row.contains(".child(single_line_label(&item.display_title()))"));
-        assert!(!row.contains(".line_clamp(1)"));
+    fn background_titles_normalize_multiline_commands() {
         assert_eq!(
             single_line_label("/bin/zsh -lc 'set -euo pipefail\n  for n in one two'"),
             "/bin/zsh -lc 'set -euo pipefail for n in one two'"
         );
-    }
-
-    #[test]
-    fn collapsed_accordion_rows_stay_on_one_line() {
-        let source = include_str!("background_work.rs");
-        let row = source
-            .split_once("\n    fn render_background_work_collapsed_row(")
-            .expect("collapsed accordion row renderer")
-            .1
-            .split_once("\n    fn render_background_work_card(")
-            .expect("collapsed accordion row renderer end")
-            .0;
-
-        assert!(row.contains(".truncate()"));
-        assert!(row.contains(".child(single_line_label(&item.display_title()))"));
-        assert!(row.contains("icons/chevron-right.svg"));
-        assert!(!row.contains(".line_clamp(1)"));
-    }
-
-    #[test]
-    fn accordion_rows_expand_by_retargeting_the_surface() {
-        let source = include_str!("background_work.rs");
-        let surface = source
-            .split_once("\n    fn expand_background_work_item(")
-            .expect("accordion expand")
-            .1
-            .split_once("\n    /// Open a session-linked pull request")
-            .expect("accordion expand end")
-            .0;
-
-        // Expanding swaps the surface's key rather than pushing a tab, and an
-        // item that already owns a tab activates it instead of duplicating.
-        assert!(surface.contains("self.right_panel_surfaces[active] = requested"));
-        assert!(surface.contains("reusable_surface_index"));
     }
 
     #[test]

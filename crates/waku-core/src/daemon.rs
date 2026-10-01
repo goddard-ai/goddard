@@ -7525,12 +7525,11 @@ mod tests {
     }
 
     /// Sign-in resolves to the host-side `shuru run` argv the sign-in
-    /// terminal executes. Skipped where shuru is not installed.
+    /// terminal executes after preparing the real sandbox.
     #[test]
+    #[ignore = "requires Shuru and provider sandbox assets"]
     fn sandbox_sign_in_returns_the_guest_invocation() {
-        if crate::sandbox::shuru_binary().is_err() {
-            return;
-        }
+        crate::sandbox::shuru_binary().expect("Shuru must be installed for sandbox setup");
         let root = std::env::temp_dir().join(format!("waku-sandbox-signin-{}", Uuid::new_v4()));
         let backend = WakuBackend::new(
             DaemonSettingsStore::open(root.join("settings.json")).unwrap(),

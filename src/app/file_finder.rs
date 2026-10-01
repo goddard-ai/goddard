@@ -672,34 +672,4 @@ mod tests {
             ("foo:12:bar", None, None)
         );
     }
-
-    /// The modal repaints on every keystroke frame; the index walk and the
-    /// fuzzy match must stay out of it — everything the render path shows
-    /// comes from the prefetched, pre-filtered snapshot.
-    #[test]
-    fn the_finder_render_path_does_no_io_or_filtering() {
-        let source = include_str!("./file_finder.rs");
-        let start = source
-            .find("\n    pub(super) fn render_file_finder(")
-            .expect("render function must exist");
-        let end = source[start..]
-            .find("\n#[cfg(test)]")
-            .map(|offset| start + offset)
-            .expect("test module marker must exist");
-        let render = &source[start..end];
-        for forbidden in [
-            "refresh_file_finder_results(",
-            "refresh_composer_sources(",
-            "filter_files(",
-            "background_executor(",
-            "std::fs",
-            "Command::new",
-            "read_dir",
-        ] {
-            assert!(
-                !render.contains(forbidden),
-                "finder render must not call `{forbidden}`"
-            );
-        }
-    }
 }

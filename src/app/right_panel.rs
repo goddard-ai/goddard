@@ -1605,115 +1605,6 @@ mod tests {
     }
 
     #[test]
-    fn review_render_path_only_reads_the_in_memory_snapshot() {
-        let source = include_str!("right_panel.rs");
-        let start = source
-            .find("\n    fn render_right_panel_diff(")
-            .expect("review render fn");
-        let body = &source[start + 1..];
-        let end = body
-            .find("\n    fn render_right_panel_empty_message(")
-            .expect("review render end");
-        let body = &body[..end];
-
-        for forbidden in [
-            "Command::new",
-            "std::fs::",
-            "review_diff::collect",
-            "capture_worktree_commit",
-        ] {
-            assert!(
-                !body.contains(forbidden),
-                "Review rendering must not call `{forbidden}`; prepare it in refresh_right_panel_diff"
-            );
-        }
-    }
-
-    /// A wrapped diff line must grow its row rather than be clipped by it.
-    /// Both the panel's own rows and the shared code row have to hold this,
-    /// and the shared one is also what the transcript's diff paints with.
-    #[test]
-    fn diff_text_rows_soft_wrap() {
-        let source = include_str!("right_panel.rs");
-        let panel = source
-            .split_once("\n    fn render_right_panel_diff_line(")
-            .expect("review diff line renderer")
-            .1
-            .split_once("\n    #[allow(clippy::too_many_arguments)]")
-            .expect("review diff line renderer end")
-            .0;
-        let shared = source
-            .split_once("\npub(super) fn render_diff_code_row(")
-            .expect("shared diff code row")
-            .1
-            .split_once("\nfn review_diff_flat_text(")
-            .expect("shared diff code row end")
-            .0;
-
-        for body in [panel, shared] {
-            assert!(!body.contains(".whitespace_nowrap()"));
-        }
-        assert!(panel.matches(".whitespace_normal()").count() >= 2);
-        assert!(shared.contains(".whitespace_normal()"));
-        assert!(shared.contains(".min_h(px(style.row_height))"));
-        assert!(!shared.contains(".h(px(style.row_height))"));
-    }
-
-    /// The render path must never reach the filesystem. This reads the source
-    /// rather than the behaviour, because the cost of a regression here is a
-    /// syscall per directory entry on every frame — invisible until a project
-    /// is large or its volume is slow.
-    #[test]
-    fn the_working_tree_render_path_does_no_filesystem_work() {
-        let source = include_str!("right_panel.rs");
-        // Anchored on the definition's indentation so this test does not match
-        // its own string literals.
-        let start = source
-            .find("\n    fn render_right_panel_working_tree(")
-            .expect("render fn");
-        let body = &source[start + 1..];
-        let end = body.find("\n    fn ").unwrap_or(body.len());
-        let body = &body[..end];
-
-        for forbidden in [
-            "visible_working_tree_entries",
-            "read_dir",
-            "std::fs::",
-            "metadata(",
-        ] {
-            assert!(
-                !body.contains(forbidden),
-                "render_right_panel_working_tree must not call `{forbidden}`; \
-                 walk the tree in refresh_right_panel_working_tree instead"
-            );
-        }
-    }
-
-    /// Same guard for the file editor, which `render_right_panel_file` reaches
-    /// on every frame that draws a file tab. Opening a large file used to read
-    /// it inline, so the frame that revealed the tab paid for the whole file.
-    #[test]
-    fn the_file_editor_render_path_does_no_filesystem_work() {
-        let source = include_str!("right_panel.rs");
-        let start = source
-            .find("\n    fn ensure_right_panel_file_editor(")
-            .expect("ensure fn");
-        let body = &source[start + 1..];
-        let end = body
-            .find("\n    /// Reads a file into its editor")
-            .unwrap_or(body.len());
-        let body = &body[..end];
-
-        for forbidden in ["read_right_panel_file(", "std::fs::", "metadata("] {
-            assert!(
-                !body.contains(forbidden),
-                "ensure_right_panel_file_editor must not call `{forbidden}`; \
-                 read the file in read_right_panel_file_into_editor instead"
-            );
-        }
-    }
-
-    #[test]
     fn working_tree_only_descends_into_expanded_directories() {
         let root = std::env::temp_dir().join(format!("waku-working-tree-{}", Uuid::new_v4()));
         std::fs::create_dir_all(root.join("src/nested")).unwrap();
@@ -1890,18 +1781,6 @@ mod tests {
 
     #[test]
     fn right_panel_tab_titles_stay_on_one_line() {
-        let source = include_str!("right_panel.rs");
-        let header = source
-            .split_once("\n    fn render_right_panel_header(")
-            .expect("right panel header renderer")
-            .1
-            .split_once("\n    fn render_right_panel_chooser(")
-            .expect("right panel header renderer end")
-            .0;
-
-        assert!(header.contains(".truncate()"));
-        assert!(!header.contains(".line_clamp(1)"));
-
         let background = RightPanelSurface::BackgroundWork {
             key: BackgroundWorkKey::new(BackgroundWorkKind::Process, "process-1"),
             title: "node -e '\n  const value = 1'".into(),

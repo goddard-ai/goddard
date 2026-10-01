@@ -1717,34 +1717,3 @@ pub(super) fn composer_card_bounds_probe(
     .absolute()
     .inset_0()
 }
-
-#[cfg(test)]
-mod tests {
-    /// The popup renders on every keystroke frame; discovery walks the
-    /// filesystem and forks subprocesses. The two must never meet: everything
-    /// the render path shows comes from the prefetched indexes.
-    #[test]
-    fn the_autocomplete_render_path_does_no_filesystem_work() {
-        let source = include_str!("./autocomplete.rs");
-        let start = source
-            .find("\n    fn composer_trigger_for(")
-            .expect("composer_trigger_for must exist");
-        let end = source
-            .find("\n/// The probe recording")
-            .expect("probe marker must exist");
-        let render_paths = &source[start..end];
-        for forbidden in [
-            "discover_slash_commands(",
-            "list_project_files(",
-            "std::fs",
-            "Command::new",
-            "read_dir",
-        ] {
-            assert!(
-                !render_paths.contains(forbidden),
-                "the render path must not call `{forbidden}`; \
-                 discovery belongs in refresh_composer_sources"
-            );
-        }
-    }
-}

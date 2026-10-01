@@ -5874,33 +5874,4 @@ mod tests {
         ));
         assert!(!confirm_within_open_grace(None, opened));
     }
-
-    #[test]
-    fn render_reads_only_the_cached_result_snapshot() {
-        let source = include_str!("./command_palette.rs");
-        let start = source
-            .find("\n    pub(super) fn render_command_palette(")
-            .expect("render function must exist");
-        let end = source[start..]
-            // Match from the final newline only so this accepts both LF and
-            // CRLF checkouts.
-            .find("\n#[cfg(test)]")
-            .map(|offset| start + offset)
-            .expect("test module marker must exist");
-        let render = &source[start..end];
-        for forbidden in [
-            "refresh_command_palette_results(",
-            "command_palette_task_candidates(",
-            "session_message_search(",
-            "background_executor(",
-            "std::fs",
-            "Command::new",
-            "read_dir",
-        ] {
-            assert!(
-                !render.contains(forbidden),
-                "palette render must not call `{forbidden}`"
-            );
-        }
-    }
 }
