@@ -5543,17 +5543,18 @@ impl WakuBackend {
             let index = session
                 .queued_messages
                 .iter()
-                .position(|queued| queued.id == queued_message_id)
-                .ok_or_else(|| {
-                    anyhow!("task {session_id} has no queued prompt {queued_message_id}")
-                })?;
-            if !session.queued_messages[index].is_agent_owned() {
-                bail!("queued message {queued_message_id} is owned by the client, not the daemon");
+                .position(|queued| queued.id == queued_message_id);
+            if let Some(index) = index {
+                if !session.queued_messages[index].is_agent_owned() {
+                    bail!("queued message {queued_message_id} is owned by the client, not the daemon");
+                }
+                session.queued_messages.remove(index);
+                session.updated_at = crate::model::unix_time();
+                state.mark_session_dirty(session_id);
+                self.task_store.save(&mut state)?;
             }
-            session.queued_messages.remove(index);
-            session.updated_at = crate::model::unix_time();
-            state.mark_session_dirty(session_id);
-            self.task_store.save(&mut state)?;
+            // The chip may already have been cleared when delivery began;
+            // clients can still send its in-flight remove request afterward.
         }
         if let Some(runtime_id) = self.runtime_id_for(session_id) {
             send_agent_queue_changed(

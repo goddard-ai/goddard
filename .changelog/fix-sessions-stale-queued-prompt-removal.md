@@ -1,0 +1,1 @@
+- Removing a queued agent prompt no longer shows an error if it has already started delivering.
