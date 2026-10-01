@@ -145,6 +145,10 @@ impl EvalDecisionRecord {
 
 /// Where the decision log lives: beside the daemon's `settings.json`.
 pub fn default_log_path() -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = test_support::log_path() {
+        return path;
+    }
     waku_protocol::settings::DaemonSettings::default_path()
         .parent()
         .map(|dir| dir.join("eval-decisions.jsonl"))
@@ -520,6 +524,10 @@ fn curl_post_json(
     body: &[u8],
     timeout_secs: u64,
 ) -> anyhow::Result<(u16, Vec<u8>)> {
+    #[cfg(test)]
+    if let Some(response) = test_support::post(body) {
+        return response;
+    }
     let config = write_curl_config(url, headers)?;
     let mut child = crate::command_env::plain_command(CURL_PATH)
         .args([
@@ -606,6 +614,73 @@ fn split_status_and_body(raw: &[u8]) -> anyhow::Result<(u16, Vec<u8>)> {
         .context("evaluation response carried an invalid status")?;
     // The marker is preceded by the newline the `-w` format prepends.
     Ok((status, raw[..marker.saturating_sub(1)].to_vec()))
+}
+
+/// Substitute only the external HTTP response, keeping request construction,
+/// answer decoding, and the caller's policy real. Each fixture belongs to its
+/// test thread and owns its decision-log directory, including during unwind.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use std::cell::RefCell;
+
+    type Response = Box<dyn FnOnce(Value) -> anyhow::Result<(u16, Vec<u8>)>>;
+
+    struct Backend {
+        response: Option<Response>,
+        directory: PathBuf,
+    }
+
+    thread_local! {
+        static BACKEND: RefCell<Option<Backend>> = const { RefCell::new(None) };
+    }
+
+    pub(crate) fn with_http_response<T>(
+        response: impl FnOnce(Value) -> anyhow::Result<(u16, Vec<u8>)> + 'static,
+        run: impl FnOnce() -> T,
+    ) -> T {
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                if let Some(backend) = BACKEND.with(|slot| slot.borrow_mut().take()) {
+                    let _ = std::fs::remove_dir_all(backend.directory);
+                }
+            }
+        }
+
+        BACKEND.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            assert!(slot.is_none(), "evaluation fixtures cannot nest");
+            *slot = Some(Backend {
+                response: Some(Box::new(response)),
+                directory: std::env::temp_dir()
+                    .join(format!("goddard-eval-test-{}", uuid::Uuid::new_v4())),
+            });
+        });
+        let _cleanup = Cleanup;
+        run()
+    }
+
+    pub(super) fn log_path() -> Option<PathBuf> {
+        BACKEND.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .map(|backend| backend.directory.join("eval-decisions.jsonl"))
+        })
+    }
+
+    pub(super) fn post(body: &[u8]) -> Option<anyhow::Result<(u16, Vec<u8>)>> {
+        let response = BACKEND.with(|slot| {
+            slot.borrow_mut().as_mut().map(|backend| {
+                backend
+                    .response
+                    .take()
+                    .expect("unexpected extra evaluation request")
+            })
+        });
+        response
+            .map(|respond| respond(serde_json::from_slice(body).expect("evaluation request JSON")))
+    }
 }
 
 #[cfg(test)]
