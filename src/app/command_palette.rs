@@ -1446,7 +1446,21 @@ impl Waku {
     /// the search roots, the picker fuzzy-filters the result per keystroke.
     /// The generation guard keeps a superseded scan from landing after Esc
     /// or a re-entry.
-    fn open_command_palette_new_task_view(&mut self, incognito: bool, cx: &mut Context<Self>) {
+    pub(super) fn open_command_palette_new_task_view(
+        &mut self,
+        incognito: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if incognito {
+            let return_focus = self.command_palette.search.read(cx).focus_handle(cx);
+            if self.require_incognito_disclosure(
+                crate::app::incognito_dialog::IncognitoDisclosureAction::NewTaskIn,
+                return_focus,
+                cx,
+            ) {
+                return;
+            }
+        }
         self.command_palette.view = CommandPaletteView::NewTaskIn;
         self.command_palette.new_task_incognito = incognito;
         self.command_palette.new_task_directories.clear();

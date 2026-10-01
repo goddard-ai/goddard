@@ -1,0 +1,1 @@
+- Incognito tasks now default to the Local workspace. The first time you use Incognito, a confirmation explains that it is for throwaway chats and does not add security or privacy; Project Memory is described as experimental.

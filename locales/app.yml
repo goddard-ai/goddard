@@ -1971,7 +1971,15 @@ session.new_incognito_task:
 session.incognito:
   en: Incognito
 session.incognito_hint:
-  en: This task is incognito — nothing is saved and project memory is neither read nor written
+  en: This is a throwaway chat; Incognito does not add security or privacy. If you have Project Memory enabled (still experimental), this chat will not read from or update it.
+session.incognito_disclosure_title:
+  en: Start an Incognito chat?
+session.incognito_disclosure_description:
+  en: Incognito does not add security or privacy. Its only purpose is to start a throwaway chat.
+session.incognito_disclosure_memory:
+  en: If you have Project Memory enabled (still experimental), this chat will not read from or update it.
+session.incognito_disclosure_continue:
+  en: Continue in Incognito
 session.copy_working_directory:
   en: Copy Working Directory
 session.move_to_worktree:

@@ -1387,6 +1387,7 @@ impl Waku {
         session.incognito = true;
         session.runtime_mode = runtime_mode;
         session.environment = environment;
+        session.workspace = SessionWorkspace::Local;
         let id = session.id;
         self.daemons
             .claim_session(id, self.daemons.project_owner(project_id));
@@ -2868,6 +2869,14 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let return_focus = self.composer_focus(cx);
+        if self.require_incognito_disclosure(
+            crate::app::incognito_dialog::IncognitoDisclosureAction::NewTask,
+            return_focus,
+            cx,
+        ) {
+            return;
+        }
         if self.big_picture.is_open() {
             self.set_big_picture_target(None, cx);
             self.big_picture.new_task_incognito = true;
@@ -2913,6 +2922,14 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let return_focus = self.composer_focus(cx);
+        if self.require_incognito_disclosure(
+            crate::app::incognito_dialog::IncognitoDisclosureAction::SameWorktree,
+            return_focus,
+            cx,
+        ) {
+            return;
+        }
         self.new_task_in_same_worktree_inner(true, window, cx);
     }
 
@@ -3928,6 +3945,7 @@ impl Waku {
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
             || self.full_access_dialog.is_some()
+            || self.incognito_dialog.is_some()
             || self.provider_switch_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.goal_dialog.is_some()
@@ -4017,6 +4035,7 @@ impl Waku {
             || self.commit_dialog.is_some()
             || self.archive_dialog.is_some()
             || self.full_access_dialog.is_some()
+            || self.incognito_dialog.is_some()
             || self.provider_switch_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.goal_dialog.is_some()

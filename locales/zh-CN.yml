@@ -620,7 +620,11 @@ common.rename: 重命名
 session.new_task: 新任务
 session.new_incognito_task: 新建无痕任务
 session.incognito: 无痕
-session.incognito_hint: 此任务为无痕模式 — 不会保存，也不会读写项目记忆
+session.incognito_hint: 这是一次性聊天；无痕模式不会提升安全性或隐私保护。如果你启用了项目记忆（仍处于实验阶段），此聊天不会读取或更新它。
+session.incognito_disclosure_title: 开始无痕聊天？
+session.incognito_disclosure_description: 无痕模式不会提升安全性或隐私保护。它只用于开始一次性聊天。
+session.incognito_disclosure_memory: 如果你启用了项目记忆（仍处于实验阶段），此聊天不会读取或更新它。
+session.incognito_disclosure_continue: 继续使用无痕模式
 session.copy_working_directory: 复制工作目录
 session.move_to_worktree: 移动到工作树
 session.archive: 归档

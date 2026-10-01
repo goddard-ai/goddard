@@ -4150,7 +4150,11 @@ impl Waku {
 
     /// `/incognito [prompt]` toggles the current draft's incognito state.
     /// A prompt submits as its first turn; started sessions cannot change it.
-    fn execute_incognito_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+    pub(super) fn execute_incognito_composer_command(
+        &mut self,
+        prompt: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(incognito_prompt) = crate::composer_complete::parse_incognito_submission(prompt)
         else {
             return false;
@@ -4160,6 +4164,18 @@ impl Waku {
             // the flag rides the overlay's pending new-task destination and
             // lands on whatever session the submit creates.
             if self.big_picture.is_open() {
+                if !self.big_picture.new_task_incognito {
+                    let return_focus = self.composer_focus(cx);
+                    if self.require_incognito_disclosure(
+                        crate::app::incognito_dialog::IncognitoDisclosureAction::ComposerCommand(
+                            prompt.to_owned(),
+                        ),
+                        return_focus,
+                        cx,
+                    ) {
+                        return true;
+                    }
+                }
                 self.big_picture.new_task_incognito = !self.big_picture.new_task_incognito;
                 self.composer.update(cx, |input, cx| input.clear(cx));
                 if let Some(prompt) = incognito_prompt {
@@ -4178,6 +4194,18 @@ impl Waku {
         let session_id = session.id;
         let was_incognito = session.incognito;
         let draft_key = crate::persistence::ComposerDraftKey::for_session(session);
+        if !was_incognito {
+            let return_focus = self.composer_focus(cx);
+            if self.require_incognito_disclosure(
+                crate::app::incognito_dialog::IncognitoDisclosureAction::ComposerCommand(
+                    prompt.to_owned(),
+                ),
+                return_focus,
+                cx,
+            ) {
+                return true;
+            }
+        }
         self.state
             .session_mut(session_id)
             .map(|session| session.incognito = !was_incognito);

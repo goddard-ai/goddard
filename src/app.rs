@@ -2648,6 +2648,8 @@ pub struct Waku {
     /// The one-time confirmation gating the first switch to Full access;
     /// `state.full_access_acknowledged` records that it was accepted.
     full_access_dialog: Option<full_access_dialog::FullAccessDialogState>,
+    /// The one-time explanation shown before using Incognito for the first time.
+    incognito_dialog: Option<incognito_dialog::IncognitoDialogState>,
     /// The kill confirmation ⌘W raises on a main-area terminal whose shell
     /// still has a command running.
     terminal_close_dialog: Option<terminal_close_dialog::TerminalCloseDialogState>,
@@ -3914,6 +3916,7 @@ mod github_media;
 mod go_to_line;
 mod goal_dialog;
 mod image_preview;
+mod incognito_dialog;
 mod issue_dialog;
 mod keybindings_page;
 mod keyboard_options;
@@ -3977,6 +3980,7 @@ pub use full_access_dialog::init as init_full_access_dialog_keys;
 pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
+pub use incognito_dialog::init as init_incognito_dialog_keys;
 pub use issue_dialog::init as init_issue_dialog_keys;
 pub use provider_switch_dialog::init as init_provider_switch_dialog_keys;
 pub use push_base::init as init_push_base_dialog_keys;
@@ -6586,6 +6590,7 @@ impl Waku {
                 archive_preview_toasts: HashSet::new(),
                 undoable_archive: Vec::new(),
                 full_access_dialog: None,
+                incognito_dialog: None,
                 shortcuts_dialog: None,
                 goal_dialog: None,
                 goal_dialog_request: None,

@@ -1597,6 +1597,10 @@ struct AppState {
     /// the modal, not the mode — the mode itself is `last_runtime_mode`.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     full_access_acknowledged: bool,
+    /// Whether the user has confirmed that Incognito is a throwaway chat,
+    /// not an added security or privacy boundary.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    incognito_disclosure_acknowledged: bool,
     /// The environment the last session ran in, seeded into the next draft.
     #[serde(default, skip_serializing_if = "SessionEnvironment::is_local")]
     last_environment: SessionEnvironment,
@@ -1749,6 +1753,10 @@ pub struct PersistedState {
     /// the modal, not the mode — the mode itself is `last_runtime_mode`.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub full_access_acknowledged: bool,
+    /// Whether the user has confirmed that Incognito is a throwaway chat,
+    /// not an added security or privacy boundary.
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub incognito_disclosure_acknowledged: bool,
     /// The environment the last session ran in, seeded into the next draft.
     /// Read through [`Self::last_environment`], which folds in the legacy
     /// `last_sandboxed` flag.
@@ -2324,6 +2332,7 @@ impl PersistedState {
             last_auto_route: false,
             last_runtime_mode: RuntimeMode::default(),
             full_access_acknowledged: false,
+            incognito_disclosure_acknowledged: false,
             last_environment: SessionEnvironment::Local,
             last_sandboxed: false,
             last_model: None,
@@ -2860,6 +2869,7 @@ impl PersistedState {
             last_auto_route: self.last_auto_route,
             last_runtime_mode: self.last_runtime_mode,
             full_access_acknowledged: self.full_access_acknowledged,
+            incognito_disclosure_acknowledged: self.incognito_disclosure_acknowledged,
             last_environment: self.last_environment(),
             last_sandboxed: false,
             last_model: self.last_model.clone(),
@@ -3010,6 +3020,7 @@ impl PersistedState {
         self.last_auto_route = app_state.last_auto_route;
         self.last_runtime_mode = app_state.last_runtime_mode;
         self.full_access_acknowledged = app_state.full_access_acknowledged;
+        self.incognito_disclosure_acknowledged = app_state.incognito_disclosure_acknowledged;
         self.last_environment =
             resolve_last_environment(app_state.last_environment, app_state.last_sandboxed);
         self.last_sandboxed = false;

@@ -629,7 +629,11 @@ common.rename: 名前を変更
 session.new_task: 新規タスク
 session.new_incognito_task: 新しいシークレットタスク
 session.incognito: シークレット
-session.incognito_hint: このタスクはシークレットです — 保存されず、プロジェクトメモリの読み書きも行いません
+session.incognito_hint: これは使い捨てのチャットです。シークレット機能はセキュリティやプライバシーを高めません。プロジェクトメモリを有効にしている場合（まだ実験的機能です）、このチャットはその内容を読み取らず、更新もしません。
+session.incognito_disclosure_title: シークレットチャットを開始しますか？
+session.incognito_disclosure_description: シークレット機能はセキュリティやプライバシーを高めません。使い捨てのチャットを開始するための機能です。
+session.incognito_disclosure_memory: プロジェクトメモリを有効にしている場合（まだ実験的機能です）、このチャットはその内容を読み取らず、更新もしません。
+session.incognito_disclosure_continue: シークレットで続行
 session.copy_working_directory: 作業ディレクトリをコピー
 session.move_to_worktree: ワークツリーへ移動
 session.archive: アーカイブ
