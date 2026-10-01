@@ -19,6 +19,27 @@
   rebuilt app — a successful Rust build alone is insufficient.
 - No visual test unless requested.
 
+## Build cache (mbx)
+
+Rust builds on this machine go through mbx (Mr Boxington), which shares
+compiled artifacts across checkouts and worktrees into
+`~/dev/Library/Caches/mbx`.
+
+- Prefer `mbx <cargo command>` (`mbx build`, `mbx check`, `mbx clippy`,
+  `mbx test`) — it works regardless of PATH. Plain `cargo` routes through
+  mbx only when `~/Library/Application Support/mbx/bin` precedes rustup on
+  PATH (`command -v cargo` to check); the dev watcher may run unwrapped
+  depending on where it was launched.
+- `target/` may be a symlink into the managed cache. Don't delete it or
+  `cargo clean` to reclaim disk — use `mbx gc` or `mbx clean`. Never put
+  `cargo clean` in a watch loop.
+- `check`/`clippy` get their own `target/check/` lane and can run beside a
+  `cargo build` watcher without waiting on its lock.
+- Restored artifacts can carry another checkout's absolute paths in debug
+  info. For path-sensitive debugging:
+  `CARGO_TARGET_DIR=target/dbg MBX_DISABLE=1 cargo build`.
+- `mbx explain --last` shows why compilations hit, missed, or bypassed.
+
 ## Topic docs
 
 Read the doc before working in its area:
