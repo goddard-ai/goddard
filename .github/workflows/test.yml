@@ -62,6 +62,7 @@ jobs:
             libxkbcommon-x11-dev \
             mold \
             pkg-config \
+            python3 \
             xdg-desktop-portal
 
       # sccache caches per-crate compilation units, so it keeps hitting across
@@ -85,17 +86,17 @@ jobs:
       - name: Run tests
         env:
           RUSTFLAGS: ${{ (runner.os == 'Linux' && '-C linker=clang -C link-arg=-fuse-ld=mold') || (runner.os == 'Windows' && '-C linker=rust-lld') || '' }}
-        run: cargo test --locked
+        run: cargo test --workspace --locked
 
-      # The generated protocol and browser client are platform-independent, so
+      # The generated protocol and TypeScript suites are platform-independent, so
       # one runner is enough to catch a drifted checked-in artifact.
       - name: Install JavaScript dependencies
         if: runner.os == 'Linux'
         run: bun install --frozen-lockfile
 
-      - name: Check generated protocol and browser client
+      - name: Check generated protocol and TypeScript suites
         if: runner.os == 'Linux'
         run: |
           bun run protocol:check
           bun run --filter @waku/client check
-          bun run --filter @waku/client test
+          bun test ./packages/waku-client ./apps/web ./apps/mobile
