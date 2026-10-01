@@ -3164,6 +3164,9 @@ impl Waku {
                     }
                 }
                 ComposerEvent::Edited => cx.notify(),
+                ComposerEvent::Focus => {
+                    this.last_focused_side_chat_composer = Some(session_id);
+                }
                 ComposerEvent::BackspaceOnEmpty => {
                     // Chat idiom: pop the last staged atom, the way the
                     // session column pops attachments and atoms.

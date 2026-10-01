@@ -3740,7 +3740,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
-        let focus_handle = self.typing_target_composer(cx).read(cx).focus();
+        let focus_handle = self.typing_target_composer().read(cx).focus();
         window.focus(&focus_handle, cx);
         cx.notify();
     }
@@ -3802,7 +3802,7 @@ impl Waku {
         }) {
             return;
         }
-        let composer = self.typing_target_composer(cx);
+        let composer = self.typing_target_composer();
         let focus = composer.read(cx).focus();
         window.focus(&focus, cx);
         let text = text.to_owned();
@@ -3810,19 +3810,13 @@ impl Waku {
         cx.stop_propagation();
     }
 
-    /// Which composer a stray keystroke belongs to — the visible lane's
-    /// field while it holds a draft or was the last composer a message went
-    /// out from, the session column's otherwise.
-    fn typing_target_composer(&self, cx: &App) -> Entity<ComposerInput> {
-        if let Some(session_id) = self.visible_side_chat_id()
+    /// The last-focused visible composer receives global composer shortcuts.
+    fn typing_target_composer(&self) -> Entity<ComposerInput> {
+        if let model_picker::ModelPickerTarget::SideChat(session_id) =
+            self.last_focused_composer_target()
             && let Some(chat) = self.side_chat_composers.get(&session_id)
         {
-            let has_draft = !chat.composer.read(cx).content(cx).trim().is_empty()
-                || !chat.atoms.is_empty()
-                || self.side_chat_has_annotations(session_id);
-            if has_draft || self.last_sent_composer == Some(session_id) {
-                return chat.composer.clone();
-            }
+            return chat.composer.clone();
         }
         self.composer.clone()
     }
@@ -4654,13 +4648,13 @@ impl Waku {
             );
             return;
         }
-        let Some(session) = self.composer_session().cloned() else {
+        self.model_picker_target = self.last_focused_composer_target();
+        let Some(session) = self.model_picker_session().cloned() else {
             return;
         };
         if !session.can_choose_model(session.provider) {
             return;
         }
-        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
         self.model_picker
             .search
             .update(cx, |input, cx| input.clear(cx));
@@ -4702,7 +4696,7 @@ impl Waku {
         normalized_query: &str,
         cx: &App,
     ) -> Vec<keyboard_options::KeyboardOptionItem> {
-        let Some(session) = self.composer_session() else {
+        let Some(session) = self.model_picker_session() else {
             return Vec::new();
         };
         let selection = self.model_picker_selection(cx);
@@ -5040,9 +5034,7 @@ impl Waku {
         // A pick from the chord dismisses an open options modal rather than
         // leaving it stacked over the choice it just applied.
         self.dismiss_keyboard_options(false, window, cx);
-        // The chords belong to the session column's composer — a side chat's
-        // open model menu must not redirect them onto its own session.
-        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
+        self.model_picker_target = self.last_focused_composer_target();
         // ⌘⌥1 is the stable shortcut for Auto routing. Favorites begin at
         // ⌘⌥2 so this chord never depends on the user's starred models.
         if action.index == 0 {
@@ -5055,7 +5047,7 @@ impl Waku {
         else {
             return;
         };
-        let Some(session) = self.composer_session() else {
+        let Some(session) = self.model_picker_session() else {
             return;
         };
         if !session.can_choose_model(favorite.provider) {
@@ -5143,10 +5135,8 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
-        // Composer-scoped like the favorite chords it mixes: a side chat's
-        // open model menu must not redirect the cycle onto its session.
-        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
-        let Some(session) = self.composer_session() else {
+        self.model_picker_target = self.last_focused_composer_target();
+        let Some(session) = self.model_picker_session() else {
             return;
         };
         // Same gate the ⌘⌥n chords apply: a started session only runs its
@@ -5249,7 +5239,6 @@ impl Waku {
                 ),
             )
         }));
-        self.model_picker_target = model_picker::ModelPickerTarget::Composer;
         let highlighted = items.iter().position(|item| {
             matches!(
                 item,
@@ -5295,7 +5284,8 @@ impl Waku {
         if self.settings_page.is_some() {
             return;
         }
-        let Some((steps, current)) = self.composer_session().and_then(|session| {
+        self.model_picker_target = self.last_focused_composer_target();
+        let Some((steps, current)) = self.model_picker_session().and_then(|session| {
             let model = self.model_metadata_for_session(session)?;
             if model.reasoning_efforts.is_empty() {
                 return None;
@@ -5317,7 +5307,7 @@ impl Waku {
         }) else {
             return;
         };
-        let Some(session) = self.composer_session() else {
+        let Some(session) = self.model_picker_session() else {
             return;
         };
         let Some(model) = self.model_metadata_for_session(session) else {

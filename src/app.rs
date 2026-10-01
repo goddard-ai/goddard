@@ -2496,8 +2496,8 @@ pub struct Waku {
     /// and keyboard cursor in one bundle. One set serves both targets; the
     /// panel is only ever open for one.
     model_picker: model_picker::PickerState,
-    /// Which surface a picker pick lands on — the composer session or the
-    /// automation editor's provider/model fields.
+    /// Which surface a picker pick lands on — the main or side-chat composer,
+    /// or the automation editor's provider/model fields.
     model_picker_target: model_picker::ModelPickerTarget,
     /// Selections unstarred while a model picker is open. Each leaves
     /// `favorite_models` at once — empty star, compacted ⌘⌥ chords — but
@@ -2681,10 +2681,12 @@ pub struct Waku {
     /// inline instead.
     composer_inline_atoms: Vec<composer::ComposerInlineAtom>,
     /// The composer a prompt last went out from: `None` is the session
-    /// column's field, `Some` a side chat's panel composer. Type-to-focus and
-    /// Enter-outside-composer prefer that field while its draft or recency
-    /// still stands.
+    /// column's field, `Some` a side chat's panel composer. Enter-outside-
+    /// composer prefers that field while its draft or recency still stands.
     last_sent_composer: Option<Uuid>,
+    /// The side-chat composer most recently focused, if it remains visible.
+    /// `None` routes composer shortcuts to the session-column composer.
+    last_focused_side_chat_composer: Option<Uuid>,
     /// Window-modal expansion of an image attachment. The path is already
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
@@ -5710,7 +5712,9 @@ impl Waku {
                         this.schedule_composer_draft_save(cx);
                         cx.notify();
                     }
-                    ComposerEvent::Focus => {}
+                    ComposerEvent::Focus => {
+                        this.last_focused_side_chat_composer = None;
+                    }
                     ComposerEvent::BackspaceOnEmpty => {
                         // The field is empty, so no atom can still have a
                         // live marker — pop clears a straggler. Attachments
@@ -6590,6 +6594,7 @@ impl Waku {
                 composer_attachments,
                 composer_inline_atoms: Vec::new(),
                 last_sent_composer: None,
+                last_focused_side_chat_composer: None,
                 image_preview: None,
                 image_preview_generation: 0,
                 remote_images: RefCell::new(image_preview::RemoteImageCache::new()),

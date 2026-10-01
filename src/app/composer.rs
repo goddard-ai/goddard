@@ -5278,6 +5278,20 @@ impl Waku {
             }))
     }
 
+    /// The composer most recently focused, when its side-chat surface is
+    /// still visible. Composer shortcuts fall back to the main composer when
+    /// no visible side-chat composer has taken focus.
+    pub(super) fn last_focused_composer_target(&self) -> ModelPickerTarget {
+        if let Some(session_id) = self.last_focused_side_chat_composer
+            && self.visible_side_chat_id() == Some(session_id)
+            && self.side_chat_composers.contains_key(&session_id)
+        {
+            ModelPickerTarget::SideChat(session_id)
+        } else {
+            ModelPickerTarget::Composer
+        }
+    }
+
     /// The session the composer's submit affordances answer to: the big-
     /// picture target while the overlay is open — `None` there means the next
     /// prompt starts a fresh task — and the selected session everywhere else.
