@@ -32,6 +32,7 @@ import { Transcript } from '@/components/transcript'
 import { WakuIcon } from '@/components/waku-icon'
 import {
   useComposerDrafts,
+  useDaemonSettings,
   useSession,
   useSessionTurnRefs,
   useTaskState,
@@ -112,6 +113,7 @@ export function WakuApp() {
     saveSession,
   } = useRuntime()
   const taskState = useTaskState()
+  const daemonSettings = useDaemonSettings()
   const loadedComposerDrafts = useComposerDrafts()
   const selected = useSession(search.session)
   const [displayed, setDisplayed] = useState<AgentSession | null>(null)
@@ -1003,6 +1005,7 @@ export function WakuApp() {
 
   function enqueueComposerDraftChanges(changes: ComposerDraftChange[]) {
     if (!client || !changes.length) return
+    if (daemonSettings.data?.composer_drafts_experiment_enabled !== true) return
     composerDraftWriteQueue.current = composerDraftWriteQueue.current
       .catch(() => {})
       .then(() => applyComposerDraftChanges(client, changes))

@@ -8,6 +8,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useComposerDraftRefreshRevision } from './use-composer-draft-refresh';
+import { useDaemonSettings } from './use-daemon-data';
 import {
   ComposerDraftSaveTracker,
   ComposerDraftWriteQueue,
@@ -57,6 +58,8 @@ export function useSyncedComposerDraft({
   flushOnUnmount = false,
 }: SyncedComposerDraftOptions): SyncedComposerDraft {
   const daemon = useDaemon();
+  const settings = useDaemonSettings();
+  const draftsEnabled = settings.data?.composer_drafts_experiment_enabled === true;
   const refreshRevision = useComposerDraftRefreshRevision();
   const [hydratedTarget, setHydratedTarget] = useState<string | null>(null);
   const lastHydratedTarget = useRef<string | null>(null);
@@ -73,6 +76,8 @@ export function useSyncedComposerDraft({
   targetRef.current = target;
   const clientRef = useRef(daemon.client);
   clientRef.current = daemon.client;
+  const draftsEnabledRef = useRef(draftsEnabled);
+  draftsEnabledRef.current = draftsEnabled;
   const annotationsRef = useRef<ComposerDraftAnnotation[]>([]);
   const valueRef = useRef<SynchronizedComposerDraft>({
     text,
@@ -93,6 +98,7 @@ export function useSyncedComposerDraft({
     if (
       refreshRevision === null
       || !client
+      || !draftsEnabled
       || daemon.phase !== 'connected'
       || !targetKey
       || !activeTarget
@@ -139,6 +145,7 @@ export function useSyncedComposerDraft({
     carryAcrossTargets,
     daemon.client,
     daemon.phase,
+    draftsEnabled,
     refreshRevision,
     targetKey,
     tracker,
@@ -150,6 +157,7 @@ export function useSyncedComposerDraft({
     const saveRevision = tracker.pendingRevision();
     if (
       !client
+      || !draftsEnabled
       || daemon.phase !== 'connected'
       || !targetKey
       || !activeTarget
@@ -180,6 +188,7 @@ export function useSyncedComposerDraft({
     attachments,
     daemon.client,
     daemon.phase,
+    draftsEnabled,
     hydratedTarget,
     queue,
     targetKey,
@@ -188,7 +197,7 @@ export function useSyncedComposerDraft({
   ]);
 
   useEffect(() => () => {
-    if (!flushOnUnmount) return;
+    if (!flushOnUnmount || !draftsEnabledRef.current) return;
     if (timer.current) clearTimeout(timer.current);
     const client = clientRef.current;
     const activeTarget = targetRef.current;
@@ -216,7 +225,7 @@ export function useSyncedComposerDraft({
     annotationsRef.current = [];
     const client = clientRef.current;
     const activeTarget = targetRef.current;
-    if (!client || !activeTarget) return;
+    if (!client || !activeTarget || !draftsEnabledRef.current) return;
     void queue
       .enqueue(() => applyComposerDraftChanges(client, [{
         target: activeTarget,

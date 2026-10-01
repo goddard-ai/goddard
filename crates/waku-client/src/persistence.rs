@@ -768,6 +768,11 @@ impl ComposerDraftStore {
         let mut loaded = HashMap::new();
         let mut first_error = None;
         for (key, daemon) in self.daemons.connected() {
+            // A daemon with the experiment off owns no drafts; asking it
+            // only earns the gate's rejection.
+            if !daemon.settings().composer_drafts_experiment_enabled {
+                continue;
+            }
             match daemon
                 .client()
                 .request(Uuid::nil(), Uuid::nil(), Command::LoadComposerDrafts)
@@ -812,6 +817,12 @@ impl ComposerDraftStore {
         }
         let mut first_error = None;
         for (key, daemon) in self.daemons.connected() {
+            // Same gate as `load`: skip rather than collect a rejection on
+            // every debounced save. The stale snapshot stays so accumulated
+            // drafts still diff out if the flag flips back on.
+            if !daemon.settings().composer_drafts_experiment_enabled {
+                continue;
+            }
             let owned = self.drafts_for(key, &drafts);
             let previous = state.snapshots.get(&key).cloned().unwrap_or_default();
             let changes = composer_draft_changes(&previous, &owned);

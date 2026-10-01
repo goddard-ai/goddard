@@ -35,10 +35,14 @@ export function useTaskState() {
 
 export function useComposerDrafts() {
   const { client, config, phase } = useDaemon()
+  const settings = useDaemonSettings()
   return useQuery({
     queryKey: daemonKeys.composerDrafts(config?.address ?? 'disconnected'),
     queryFn: () => loadComposerDrafts(requireClient(client)),
-    enabled: phase === 'connected' && Boolean(client && config),
+    enabled:
+      phase === 'connected' &&
+      Boolean(client && config) &&
+      settings.data?.composer_drafts_experiment_enabled === true,
     staleTime: Number.POSITIVE_INFINITY,
   })
 }

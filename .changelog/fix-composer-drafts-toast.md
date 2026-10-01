@@ -1,0 +1,1 @@
+- With the "Composer drafts" experiment off, the app no longer pops a save-failed toast every time a draft would persist — clients check the flag before asking the daemon to load or store drafts.
