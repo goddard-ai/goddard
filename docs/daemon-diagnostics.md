@@ -8,6 +8,8 @@ and how to read them together.
 | Signal | Where | What it tells you |
 | --- | --- | --- |
 | `errors.jsonl` | `~/.goddard/` | One JSONL record per error toast the app showed — `{at, atLocal, app, kind, message}` where `kind` is `alert` or `failure`, plus a `context` object (`sessionId`, `session`, `provider`, `workingDir`, `daemon`) naming the task on screen when it fired; incognito tasks leave only `provider`. The Diagnostics settings page reads this plus `daemon-recovery.jsonl` and `daemon-panics.jsonl` into one feed |
+| `daemon-stderr.jsonl` | `~/.goddard/` | Redacted stderr from the local managed daemon, one `{atMs, line}` record per line. Common credential assignments, bearer values, and URL userinfo are redacted; home paths become `~`. Lines over 8 KiB are omitted and the file caps at 256 KiB. Review it before sharing: redaction covers known credential formats, not every possible secret |
+| `sidebar-checkout-scans.jsonl` | `~/.goddard/` | Numeric-only scan records: completion time, duration, unique checkout and daemon counts, request/result/failure/timeout counts, and total/max request latency. It records no paths or task data and caps at 256 KiB; correlate its timestamps with `daemon-stats.jsonl` queue-wait samples |
 | `daemon.recovery` | PostHog event | One recovery episode: `cause` (`unexpected_exit`, `disconnect`, `rebuild`), `outcome` (`recovered`, `unreachable`), `sessionsResumed`, `daemonRssMb`/`childrenRssMb` (pre-restart readings), `exitCode`/`exitSignal`/`exitSignalCode` when a real exit happened, `previousBootClean`. The same record lands in `~/.goddard/daemon-recovery.jsonl` with `atLocal` and `app` added |
 | `daemon.crash` | PostHog event | One OS crash report per unseen `goddard-daemon-*.ips`, scanned at launch: `termination` namespace (`exc_resource` = jetsam/resource limits, `signal` = crash/kill), `signal`, `uptimeSecs` |
 | `daemon-stats.jsonl` | `~/Library/Application Support/<App>/` | One JSONL sample per minute per boot: `boot`, `at`, `daemonRssMb`, `childrenRssMb` (whole descendant tree — provider runtimes carry memory under their own pids), `runtimes`, `terminals`, plus per-subtree `children` rows (`pid`, `name`, subtree `rssMb`, `processes`, `kind`, `sessionId`/`provider` when claimed), per-session `sessions` rows (`detailLoaded`, `running`, `residentMessages`/`residentActivities`/`residentBytes`; capped at the 16 heaviest by `residentBytes` with `sessionsOmitted` counting the rest), per-label `subprocesses` counters, and per-pool `requestPools` rows. A `"shutdown": true` line is the clean-exit marker |
@@ -16,8 +18,8 @@ and how to read them together.
 
 Analytics are release-only; the files exist in every build and are the
 fallback forensics. `daemon-stats.jsonl` and `daemon-panics.jsonl` each
-cap at 16 MB by keeping the newest half; `errors.jsonl` caps at 256 KB
-the same way.
+cap at 16 MB by keeping the newest half. The `~/.goddard/` JSONL files
+cap at 256 KiB by keeping the newest half.
 
 ## How the supervisor decides
 
@@ -96,8 +98,9 @@ samples:
   `running` rows show what the four workers are doing.
 - A `runningMs` that keeps climbing across samples names a wedged job —
   the workers are stuck on it, not merely busy. (The same event also
-  writes one stderr line once the job passes 60 s, but stderr only
-  reaches the dev watcher.)
+  writes one stderr line once the job passes 60 s; local managed daemon
+  stderr is retained in `~/.goddard/daemon-stderr.jsonl` in every build.
+  Remote daemon stderr remains on its host.)
 - `queued` high with `running` low and tiny `runningMs` means the queue
   is draining fine — the minute cadence just caught a burst.
 - `waitMs`/`rejected` deltas between samples show whether submitters

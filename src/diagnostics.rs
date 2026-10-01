@@ -66,10 +66,57 @@ fn errors_log_path() -> Option<PathBuf> {
 }
 
 /// The folder the Diagnostics page's reveal button opens — home of
-/// `errors.jsonl` and `daemon-recovery.jsonl`. `daemon-panics.jsonl` lives
-/// in the daemon's own data directory instead.
+/// `errors.jsonl`, `daemon-recovery.jsonl`, `daemon-stderr.jsonl`, and
+/// `sidebar-checkout-scans.jsonl`. `daemon-panics.jsonl` and
+/// `daemon-stats.jsonl` live in the daemon's own data directory instead.
 pub(crate) fn logs_directory() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".goddard"))
+}
+
+/// Numeric-only sidebar scan telemetry. Daemon request-pool wait samples are
+/// already persisted with `daemon-stats.jsonl`; these timestamps let support
+/// correlate them with checkout work without recording paths or task data.
+pub(crate) struct SidebarCheckoutScanMetrics {
+    pub(crate) duration_ms: u64,
+    pub(crate) checkout_count: usize,
+    pub(crate) owner_count: usize,
+    pub(crate) offline_count: usize,
+    pub(crate) request_count: usize,
+    pub(crate) result_count: usize,
+    pub(crate) failed_count: usize,
+    pub(crate) empty_count: usize,
+    pub(crate) timeout_count: usize,
+    pub(crate) request_total_ms: u64,
+    pub(crate) request_max_ms: u64,
+}
+
+/// Keep a bounded, path-free record of each completed sidebar checkout scan.
+/// The Diagnostics page's reveal action opens the directory containing it.
+pub(crate) fn record_sidebar_checkout_scan(metrics: SidebarCheckoutScanMetrics) {
+    let Some(path) =
+        logs_directory().map(|directory| directory.join("sidebar-checkout-scans.jsonl"))
+    else {
+        return;
+    };
+    let at = crate::model::unix_time();
+    let record = serde_json::json!({
+        "at": at,
+        "atLocal": local_iso(at),
+        "app": app_build(),
+        "event": "sidebarCheckoutScan",
+        "durationMs": metrics.duration_ms,
+        "checkouts": metrics.checkout_count,
+        "owners": metrics.owner_count,
+        "offline": metrics.offline_count,
+        "requests": metrics.request_count,
+        "results": metrics.result_count,
+        "failed": metrics.failed_count,
+        "outsideCheckout": metrics.empty_count,
+        "timeouts": metrics.timeout_count,
+        "requestTotalMs": metrics.request_total_ms,
+        "requestMaxMs": metrics.request_max_ms,
+    });
+    let _ = append_capped_line(&path, &record.to_string());
 }
 
 /// The directory the local daemon writes `daemon-panics.jsonl` into — the

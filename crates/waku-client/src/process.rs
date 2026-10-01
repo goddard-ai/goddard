@@ -1,11 +1,12 @@
-use std::io::{BufRead as _, BufReader};
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead as _, BufReader, Read, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command as ProcessCommand, Stdio};
-use std::sync::Arc;
+use std::process::{Child, ChildStderr, Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::time::SystemTime;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, bail};
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -30,6 +31,9 @@ const UNREACHABLE_AFTER_FAILURES: u32 = 4;
 /// Reconnect attempts an alive-but-disconnected daemon earns before the
 /// supervisor falls back to killing and respawning it.
 const LOCAL_RECONNECT_ATTEMPTS: u32 = 3;
+const DAEMON_STDERR_LOG_CAP: u64 = 256 * 1024;
+const MAX_DAEMON_STDERR_LINE_BYTES: usize = 8 * 1024;
+static DAEMON_STDERR_LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 pub const DEFAULT_EXPOSED_DAEMON_PORT: u16 = 34_123;
 
 /// Desktop-owned launch configuration for the daemon it supervises.
@@ -131,10 +135,28 @@ impl DaemonProcess {
         let token = settings.token.clone();
         let app_executable =
             std::env::current_exe().context("could not locate Goddard executable")?;
+        // Create the reader before spawning the daemon so failure to allocate
+        // a drain thread falls back to inherited stderr instead of leaving a
+        // child blocked on a full pipe.
+        let stderr_path = dirs::home_dir().map(|home| home.join(".goddard/daemon-stderr.jsonl"));
+        let (stderr_sender, capture_stderr) = {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            let reader = std::thread::Builder::new()
+                .name("goddard-daemon-stderr".into())
+                .spawn(move || {
+                    if let Ok(stderr) = receiver.recv() {
+                        pump_daemon_stderr(stderr, stderr_path);
+                    }
+                });
+            match reader {
+                Ok(_) => (Some(sender), true),
+                Err(_) => (None, false),
+            }
+        };
         let mut command = ProcessCommand::new(executable);
         // The desktop is a GUI-subsystem binary on Windows, so a console
-        // child would get a console window of its own. `stderr` still reaches
-        // the app's inherited handle.
+        // child would get a console window of its own. Captured stderr is
+        // forwarded through a background reader to the inherited handle.
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt as _;
@@ -158,9 +180,25 @@ impl DaemonProcess {
             .env(APP_EXECUTABLE_ENV, app_executable)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(if capture_stderr {
+                Stdio::piped()
+            } else {
+                Stdio::inherit()
+            })
             .spawn()
             .with_context(|| format!("could not launch {}", executable.display()))?;
+        if let Some(sender) = stderr_sender {
+            let Some(stderr) = child.stderr.take() else {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("Goddard daemon did not expose its stderr stream");
+            };
+            if sender.send(stderr).is_err() {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("could not start the Goddard daemon stderr reader");
+            }
+        }
         let stdout = child
             .stdout
             .take()
@@ -260,6 +298,279 @@ impl DaemonProcess {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+fn pump_daemon_stderr(mut stderr: ChildStderr, path: Option<PathBuf>) {
+    let mut buffer = [0u8; 4096];
+    let mut line = Vec::with_capacity(512);
+    let mut too_long = false;
+    loop {
+        let bytes = match stderr.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        };
+        for byte in buffer[..bytes].iter().copied() {
+            if byte == b'\n' {
+                if !too_long {
+                    emit_daemon_stderr_line(&line, false, path.as_deref());
+                }
+                line.clear();
+                too_long = false;
+            } else if too_long {
+                continue;
+            } else if line.len() < MAX_DAEMON_STDERR_LINE_BYTES {
+                line.push(byte);
+            } else {
+                emit_daemon_stderr_line(&[], true, path.as_deref());
+                line.clear();
+                too_long = true;
+            }
+        }
+    }
+    if !line.is_empty() && !too_long {
+        emit_daemon_stderr_line(&line, false, path.as_deref());
+    }
+}
+
+fn emit_daemon_stderr_line(raw: &[u8], too_long: bool, path: Option<&Path>) {
+    let line = if too_long {
+        "[daemon stderr line omitted: exceeded the 8 KiB limit]".to_owned()
+    } else {
+        String::from_utf8_lossy(raw)
+            .trim_end_matches('\r')
+            .to_owned()
+    };
+    if line.is_empty() {
+        return;
+    }
+    let line = redact_daemon_stderr(&line);
+    if let Some(path) = path {
+        let _ = append_capped_daemon_stderr(path, &line);
+    }
+    let mut stderr = std::io::stderr().lock();
+    let _ = writeln!(stderr, "{line}");
+}
+
+fn redact_daemon_stderr(input: &str) -> String {
+    const SECRET_KEYS: [&str; 19] = [
+        "refresh-token",
+        "refresh_token",
+        "access-token",
+        "access_token",
+        "client-secret",
+        "client_secret",
+        "private-key",
+        "private_key",
+        "api_key",
+        "api-key",
+        "apikey",
+        "authorization",
+        "password",
+        "passwd",
+        "secret",
+        "api key",
+        "cookie",
+        "credential",
+        "token",
+    ];
+
+    let input = redact_url_userinfo(input);
+    let lowercase = input.to_ascii_lowercase();
+    let bytes = input.as_bytes();
+    let mut output = String::with_capacity(input.len());
+    let mut cursor = 0;
+    while cursor < input.len() {
+        if let Some((value_start, value_end)) = bearer_value_range(bytes, &lowercase, cursor) {
+            output.push_str(&input[cursor..value_start]);
+            output.push_str("[REDACTED]");
+            cursor = value_end;
+            continue;
+        }
+        if let Some((value_start, value_end)) =
+            secret_value_range(bytes, &lowercase, cursor, &SECRET_KEYS)
+        {
+            output.push_str(&input[cursor..value_start]);
+            output.push_str("[REDACTED]");
+            cursor = value_end;
+            continue;
+        }
+        let character = input[cursor..]
+            .chars()
+            .next()
+            .expect("cursor is before the end of the string");
+        output.push(character);
+        cursor += character.len_utf8();
+    }
+
+    if let Some(home) = dirs::home_dir().and_then(|path| path.into_os_string().into_string().ok())
+        && !home.is_empty()
+    {
+        output = output.replace(&home, "~");
+    }
+    output
+}
+
+fn bearer_value_range(bytes: &[u8], lowercase: &str, start: usize) -> Option<(usize, usize)> {
+    if start > 0 && bytes[start - 1].is_ascii_alphanumeric() {
+        return None;
+    }
+    if !lowercase.get(start..)?.starts_with("bearer") {
+        return None;
+    }
+    let mut value_start = start + "bearer".len();
+    if !bytes.get(value_start).is_some_and(u8::is_ascii_whitespace) {
+        return None;
+    }
+    while bytes.get(value_start).is_some_and(u8::is_ascii_whitespace) {
+        value_start += 1;
+    }
+    let mut value_end = value_start;
+    while let Some(byte) = bytes.get(value_end) {
+        if byte.is_ascii_whitespace() || matches!(*byte, b'"' | b'\'' | b',' | b';') {
+            break;
+        }
+        value_end += 1;
+    }
+    (value_end > value_start).then_some((value_start, value_end))
+}
+
+fn secret_value_range(
+    bytes: &[u8],
+    lowercase: &str,
+    start: usize,
+    keys: &[&str],
+) -> Option<(usize, usize)> {
+    if start > 0 && bytes[start - 1].is_ascii_alphanumeric() {
+        let camel_case_boundary = bytes[start - 1].is_ascii_lowercase()
+            && bytes.get(start).is_some_and(u8::is_ascii_uppercase);
+        if !camel_case_boundary {
+            return None;
+        }
+    }
+    let key = keys.iter().find(|key| {
+        lowercase
+            .get(start..)
+            .is_some_and(|tail| tail.starts_with(**key))
+    })?;
+    let key_end = start + key.len();
+    if bytes
+        .get(key_end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'_' | b'-'))
+    {
+        return None;
+    }
+
+    let mut separator = key_end;
+    if bytes
+        .get(separator)
+        .is_some_and(|byte| matches!(*byte, b'"' | b'\'') && start > 0 && bytes[start - 1] == *byte)
+    {
+        separator += 1;
+    }
+    let mut value_start = separator;
+    let mut had_space = false;
+    while bytes.get(value_start).is_some_and(u8::is_ascii_whitespace) {
+        had_space = true;
+        value_start += 1;
+    }
+    if bytes
+        .get(value_start)
+        .is_some_and(|byte| matches!(*byte, b':' | b'='))
+    {
+        value_start += 1;
+        while bytes.get(value_start).is_some_and(u8::is_ascii_whitespace) {
+            value_start += 1;
+        }
+    } else if had_space && start >= 2 && &bytes[start - 2..start] == b"--" {
+        // `--token value` and similar CLI options.
+    } else {
+        return None;
+    }
+
+    let Some(first) = bytes.get(value_start).copied() else {
+        return None;
+    };
+    if matches!(first, b'"' | b'\'') {
+        let quote = first;
+        let content_start = value_start + 1;
+        let mut end = content_start;
+        while end < bytes.len() {
+            if bytes[end] == quote && (end == content_start || bytes[end - 1] != b'\\') {
+                return (end > content_start).then_some((content_start, end));
+            }
+            end += 1;
+        }
+        return (content_start < bytes.len()).then_some((content_start, bytes.len()));
+    }
+
+    let whole_field = *key == "authorization" || *key == "cookie";
+    let mut value_end = value_start;
+    while let Some(byte) = bytes.get(value_end) {
+        let delimiter = if whole_field {
+            matches!(*byte, b',' | b';' | b'}' | b']' | b'"' | b'\'')
+        } else {
+            byte.is_ascii_whitespace() || matches!(*byte, b',' | b';' | b'}' | b']' | b'"' | b'\'')
+        };
+        if delimiter {
+            break;
+        }
+        value_end += 1;
+    }
+    (value_end > value_start).then_some((value_start, value_end))
+}
+
+fn redact_url_userinfo(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut cursor = 0;
+    while let Some(scheme) = input.get(cursor..).and_then(|tail| tail.find("://")) {
+        let authority_start = cursor + scheme + 3;
+        let authority_end = input[authority_start..]
+            .find(|character: char| matches!(character, '/' | '?' | '#' | ' ' | '\t' | '\r' | '\n'))
+            .map_or(input.len(), |offset| authority_start + offset);
+        let authority = &input[authority_start..authority_end];
+        if let Some(user_info_end) = authority.rfind('@') {
+            output.push_str(&input[cursor..authority_start]);
+            output.push_str("[REDACTED]@");
+            cursor = authority_start + user_info_end + 1;
+        } else {
+            output.push_str(&input[cursor..authority_end]);
+            cursor = authority_end;
+        }
+    }
+    output.push_str(&input[cursor..]);
+    output
+}
+
+fn append_capped_daemon_stderr(path: &Path, line: &str) -> std::io::Result<()> {
+    let _guard = DAEMON_STDERR_LOG_LOCK.get_or_init(|| Mutex::new(())).lock();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let record = serde_json::json!({ "atMs": at_ms, "line": line });
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{record}")?;
+    drop(file);
+    if fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
+        <= DAEMON_STDERR_LOG_CAP
+    {
+        return Ok(());
+    }
+    let bytes = fs::read(path)?;
+    let halfway = bytes.len() / 2;
+    let start = bytes[halfway..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map(|offset| halfway + offset + 1)
+        .unwrap_or(bytes.len());
+    fs::write(path, &bytes[start..])
 }
 
 impl Drop for DaemonProcess {

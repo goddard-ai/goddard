@@ -2,6 +2,7 @@
 //! generation. Every entry point performs process I/O and must run on the
 //! background executor; render code consumes only the returned snapshots.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
@@ -22,12 +23,27 @@ pub use waku_protocol::git::{
 use waku_protocol::git::{CLAUDE_COMMIT_MODEL, CODEX_COMMIT_MODEL};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
+const CHECKOUT_STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const AGENT_TIMEOUT: Duration = Duration::from_secs(180);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(40);
 const MAX_DIFF_BYTES: usize = 96 * 1024;
 const MAX_STDOUT_BYTES: usize = 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 const MAX_ERROR_CHARS: usize = 4_000;
+
+thread_local! {
+    /// A checkout-status request can touch several repositories and refs. Give
+    /// every Git child it starts the remaining portion of one shared deadline.
+    static GIT_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+struct GitDeadlineReset(Option<Instant>);
+
+impl Drop for GitDeadlineReset {
+    fn drop(&mut self) {
+        GIT_DEADLINE.with(|deadline| deadline.set(self.0));
+    }
+}
 
 // A commit subject is a fixed classification over a diff that is already in the
 // prompt, so it does not need — or benefit from — the model the task runs on.
@@ -97,11 +113,21 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Snapshot> {
     })
 }
 
-/// Dirty flag plus unpushed-commit count for sidebar badges — two cheap Git
-/// invocations, no diff numstats. `Ok(None)` outside a work tree. `base` is
-/// the worktree's recorded base branch; [`checkout_only_subjects`] uses it to
-/// excuse commits whose patch already landed there under a rewritten SHA.
+/// Dirty flag plus unpushed-commit count for sidebar badges. All Git children
+/// share one deadline so a slow repository cannot hold a status request for
+/// minutes. `Ok(None)` outside a work tree. `base` is the worktree's recorded
+/// base branch; [`checkout_only_subjects`] uses it to excuse commits whose
+/// patch already landed there under a rewritten SHA.
 pub fn checkout_status(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<CheckoutStatus>> {
+    let deadline = Instant::now() + CHECKOUT_STATUS_TIMEOUT;
+    let previous = GIT_DEADLINE.with(|current| {
+        let effective = current
+            .get()
+            .map_or(deadline, |parent| parent.min(deadline));
+        current.replace(Some(effective))
+    });
+    let _reset = GitDeadlineReset(previous);
+
     if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
         .is_some_and(|answer| answer == "true")
     {
@@ -885,7 +911,17 @@ pub(crate) fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedO
         .current_dir(cwd)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_EDITOR", "true");
-    run_capture(&mut command, GIT_TIMEOUT)
+    let timeout = GIT_DEADLINE.with(|deadline| {
+        deadline.get().map_or(GIT_TIMEOUT, |deadline| {
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(GIT_TIMEOUT)
+        })
+    });
+    if timeout.is_zero() {
+        bail!("checkout status Git deadline expired");
+    }
+    run_capture(&mut command, timeout)
 }
 
 pub(crate) fn run_capture(
