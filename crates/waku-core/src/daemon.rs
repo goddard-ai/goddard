@@ -1325,14 +1325,9 @@ fn create_transfer_session(
     let mut state = task_state.lock();
     let project_id = friends_project_id(&mut state, share_dir);
     rename_friend_sessions(&mut state, &transfer.peer_id, peer_name);
-    // Transfer sessions are unconditionally sandboxed (received files never
-    // reach the host fs), so the provider must be one the sandbox can run —
-    // fall back to Claude rather than minting a session that can never start.
-    let provider = if state.last_provider.supports_sandbox() {
-        state.last_provider
-    } else {
-        ProviderKind::Claude
-    };
+    // Match New task: inherit the remembered provider and let new_session
+    // carry its model and related provider defaults into the delivery task.
+    let provider = state.last_provider;
     let mut session = state.new_session(project_id, provider);
     // The sender owns the title; the row labels them by name.
     session.title = transfer.title.clone();
