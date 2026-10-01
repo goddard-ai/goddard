@@ -184,8 +184,7 @@ impl MuseDriver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+
         let computer_use_config = (!mcp_servers.is_empty())
             .then(|| json!({"mcpServers": super::mcp::config_map(&mcp_servers, "http")}));
         // Goddard mints the id (UUIDv7 is the host's session-id shape) so the
@@ -1712,6 +1711,12 @@ fn truncate(text: &str, max: usize) -> String {
 }
 
 impl DriverControl for MuseDriver {
+    fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
+    }
+
     fn cancel_computer_use(&self) {
         if let Some(computer_use) = &self.computer_use {
             computer_use.stop();
@@ -1822,6 +1827,7 @@ impl DriverControl for MuseDriver {
 
 impl Drop for MuseDriver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         // Shutdown wakes the worker, whose exit drops the subscription; the
         // host itself belongs to the pool and outlives any one session.
         let _ = self.commands.send(DriverCommand::Shutdown);

@@ -145,7 +145,7 @@ const installer = join(
   `Goddard-${version}-${architecture}-Setup.exe`,
 );
 
-await $`cargo build --locked --release --target ${targetTriple} --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-computer-use --bin goddard_computer_use`;
+await $`cargo build --locked --release --target ${targetTriple} --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent --package waku-computer-use --bin goddard_computer_use`;
 
 const staging = await mkdtemp(join(tmpdir(), "goddard-bundle-"));
 try {
@@ -159,7 +159,7 @@ try {
     "release",
     targetTriple,
   );
-  for (const file of ["goddard.exe", "goddard-daemon.exe"]) {
+  for (const file of ["goddard.exe", "goddard-daemon.exe", "goddard-agent.exe"]) {
     await copyFile(join(buildDirectory, file), join(packageDirectory, file));
   }
   await copyFile(
@@ -181,6 +181,7 @@ try {
     await sign(signtool, certificate, certificatePassword, [
       join(packageDirectory, "goddard.exe"),
       join(packageDirectory, "goddard-daemon.exe"),
+      join(packageDirectory, "goddard-agent.exe"),
       join(packageDirectory, "goddard_js_repl.exe"),
       join(packageDirectory, "goddard_computer_use.exe"),
       join(packageDirectory, "cua_driver_sdk.dll"),

@@ -778,6 +778,15 @@ pub enum Command {
     /// started task actually used, in preference order. Agents read this
     /// instead of guessing catalog model ids.
     AgentListModels,
+    /// Execute JavaScript only in the authenticated caller's computer-use kernel.
+    AgentComputerUse {
+        code: String,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+        #[serde(default)]
+        title: Option<String>,
+    },
+    AgentComputerUseReset,
     /// Share one of my projects with a friend. The daemon resolves the
     /// project's name and `origin` URL from `project_path` and re-sends
     /// the friend our full shared set.
@@ -1474,6 +1483,9 @@ pub enum ResponsePayload {
     },
     /// The preference-ordered provider/model list an `agentListModels`
     /// resolved.
+    AgentComputerUseResult {
+        result: serde_json::Value,
+    },
     AgentModelOptions {
         options: Vec<AgentModelOption>,
     },

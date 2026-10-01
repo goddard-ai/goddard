@@ -102,8 +102,9 @@ thread (`threads continue`). Every other provider has a protocol interrupt and
 keeps its runtime (`retain_runtime_after_cancel`). `cancel_computer_use` kills
 the turn's registered helpers on every provider and drops a `cancel-kernel`
 marker into the session's process directory, which the `goddard_js_repl`
-kernel polls to abort an in-flight `js` call — its serve loop is synchronous,
-so an MCP `notifications/cancelled` could never reach it.
+kernel polls to abort an in-flight CLI execution. Each task owns its kernel;
+provider MCP registrations are no longer required. See [Computer Use](computer-use.md)
+for the shared CLI, screenshot delivery, and access gates.
 
 Option changes go through `DriverControl::apply_options`, which returns whether
 the transport absorbed the change or wants to be restarted:
@@ -268,10 +269,11 @@ unknown markers are dropped. Private control markers never reach the transcript
 **Models** — a throwaway app-server, `model/list` paged via `nextCursor`, up to
 32 pages ([model_catalog.rs:367](../crates/waku-core/src/model_catalog.rs#L367)).
 
-**Computer Use** — `-c mcp_servers.goddard_js_repl.command=…` registers Goddard's
-QuickJS MCP server, with several `-c` flags disabling Codex's own external
-computer-use plugin/MCP/skill so only Goddard's `js` / `js_reset` surface is
-visible.
+**Computer Use** — the task-scoped `goddard-agent computer js` and `computer reset`
+commands are announced through the session instructions. Launch flags still
+disable Codex's competing external computer-use plugin/MCP/skill and Node REPL.
+Background memory distillation independently disables inherited `node_repl`
+and `cua_repl` servers using process-local overrides.
 
 ---
 
@@ -292,7 +294,7 @@ which is what keeps the two from drifting into near-copies:
 | Title event / field | `session_info_changed` / `name` | `session_info_update` / `title` |
 | Branch commands | `get_fork_messages`, `fork` | `get_branch_messages`, `branch` |
 | Whole-session copy | in place | only at launch, so Goddard shells out (see below) |
-| Computer Use | Goddard's Pi extension | none — Oh My Pi ships its own `/computer` |
+| Computer Use | task-scoped Goddard CLI | task-scoped Goddard CLI |
 | Catalog probe's context-files flag | `--no-context-files` | `--no-rules` |
 
 Everything below is shared unless noted.
@@ -390,10 +392,8 @@ My Pi advertises the levels a model actually honors under `thinking.efforts`.
 yet it is always accepted, so it is added back
 ([model_catalog.rs](../crates/waku-core/src/model_catalog.rs)).
 
-**Computer Use** — Pi only: `--extension <goddard pi extension>` and
-`--skill <SKILL.md>`, with the REPL and helper paths passed through the
-environment. Goddard's bridge is written against Pi's extension API, and Oh My Pi
-ships its own `/computer` instead, so the flag is never passed to it.
+**Computer Use** — both flavors use the task-scoped Goddard CLI and bundled skill.
+No CUA provider extension is loaded. The independent subagent extension remains.
 
 ---
 
@@ -588,9 +588,10 @@ through its resident server, avoiding a second OpenCode process contending for
 the same local resources; a cold task may use a short-lived server
 ([opencode_session.rs](../crates/waku-core/src/opencode_session.rs)).
 
-**Computer Use** — `OPENCODE_CONFIG_CONTENT` and the helper paths are handed to
-the resident server through its environment, exactly as the one-shot invocation
-received them.
+**Computer Use** — session instructions announce the Goddard CLI. The daemon owns
+the kernel independently of OpenCode; connected MCP integrations continue to
+use `OPENCODE_CONFIG_CONTENT`. OpenCode 2 uses its session-specific CLI launcher
+and retires the old generated CUA MCP registrations.
 
 ---
 
@@ -895,8 +896,8 @@ keep history the user asked to discard. The daemon and desktop match arms for it
 exist only to keep the matches exhaustive; reaching them means the UI gate was
 bypassed. Restoring these depends on the agent accepting a truncation point.
 
-**Computer Use** — Grok's isolated `GROK_HOME` and `--rules` setup is transport
-independent, so the ACP session reuses the same builder the headless driver used.
+**Computer Use** — Grok uses the same task-scoped CLI as other ACP providers;
+no CUA-specific `GROK_HOME`, rules file, or MCP registration is needed.
 
 **What moving to ACP gained.** Grok's Supervised mode no longer means "deny"
 (`--permission-mode dontAsk` existed because the one-shot stream had no response

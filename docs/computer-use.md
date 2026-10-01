@@ -18,6 +18,43 @@ any driver starts — so nothing registers the `cua` bridge, attaches the
 skill, or reaches the SDK. Turning the experiment off also turns the
 Computer Use enable flag itself off.
 
+## Agent interface
+
+All supported providers use the same task-scoped CLI:
+
+```sh
+goddard-agent computer js '{"code":"jsRepl.write(1 + 1)","timeout_ms":10000,"title":"Check runtime"}'
+goddard-agent computer reset
+```
+
+For multiline scripts, `computer js --stdin` reads the JSON object from stdin.
+Shared-service providers receive a session-specific launcher path in their
+Goddard instructions; use that path in place of `goddard-agent`.
+
+Each task runtime owns a persistent QuickJS kernel. Bindings survive CLI calls
+and turns until reset or teardown. Requests to one kernel execute in order on
+a dedicated queue; approval waits leave daemon control requests available.
+A full queue refuses additional calls before execution, with a message to wait
+for the current call. The CLI cannot choose another task's kernel, and it does
+not enable cross-task or settings writes when their feature flags are off.
+
+Results preserve text, `isError`, and metadata. Emitted image blocks return
+`path` and `mimeType`; the agent opens the path with its image-reading tool.
+Screenshots use the daemon's blob store and are referenced by the transcript,
+so runtime teardown does not delete retained screenshots. Remote tasks use
+paths on their daemon host, where the provider runs. Cloud and sandbox tasks
+remain unsupported for Computer Use.
+
+Execution defaults to five minutes, including approval waits; `timeout_ms`
+accepts 1–300000. JavaScript failures return an error result and a nonzero CLI
+exit status. An action is never automatically replayed after a lost response,
+since it may already have run. A transport failure discards the kernel; the
+next explicit call starts a fresh one.
+
+Goddard no longer registers CUA MCP tools or a Pi CUA extension with providers.
+The native helper's private protocol remains unchanged, as do unrelated MCP
+integrations.
+
 ## Processes and lifetime
 
 On macOS, the signed `Goddard Computer Use.app` hosts the SDK library directly.
@@ -108,7 +145,7 @@ the ABI bindings together. Include `resources/computer-use/CUA-LICENSE`.
 The portable host can run `list-tools` as a diagnostic without capturing or
 operating the desktop. The protocol smoke test uses only tool discovery,
 configuration reads, a request missing required arguments, a synthetic image,
-and REPL reset/reconnect:
+and private REPL reset/reconnect:
 
 ```sh
 cargo build -p waku --bin goddard_js_repl -p waku-computer-use --bin goddard_computer_use

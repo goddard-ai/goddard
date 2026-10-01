@@ -6,6 +6,8 @@ use serde_json::{Map, Value, json};
 /// translation from this transport shape to the provider's configuration.
 #[derive(Clone)]
 pub(crate) enum McpServerSpec {
+    // Kept for non-CUA stdio integrations; current connected integrations use HTTP.
+    #[allow(dead_code)]
     Stdio {
         name: String,
         command: PathBuf,
@@ -19,6 +21,7 @@ pub(crate) enum McpServerSpec {
 }
 
 impl McpServerSpec {
+    #[allow(dead_code)]
     pub(crate) fn stdio(
         name: impl Into<String>,
         command: impl Into<PathBuf>,
@@ -98,4 +101,36 @@ pub(crate) fn config_map(servers: &[McpServerSpec], http_type: &str) -> Map<Stri
         .iter()
         .map(|server| (server.name().to_owned(), server.config_value(http_type)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn unrelated_stdio_and_http_integrations_keep_their_launch_config() {
+        let servers = [
+            McpServerSpec::stdio(
+                "user_server",
+                "/bin/custom-server",
+                [("CUSTOM_ENV".into(), "value".into())].into(),
+            ),
+            McpServerSpec::http(
+                "goddard_linear",
+                "https://integration.invalid/mcp",
+                "test-token",
+            ),
+        ];
+        let config = config_map(&servers, "http");
+        assert_eq!(config["user_server"]["command"], "/bin/custom-server");
+        assert_eq!(config["user_server"]["env"]["CUSTOM_ENV"], "value");
+        assert_eq!(
+            config["goddard_linear"]["url"],
+            "https://integration.invalid/mcp"
+        );
+        let yaml = crate::integrations::deliver::deepseek_overlay_yaml(&servers);
+        assert!(yaml.contains("id: user_server"));
+        assert!(yaml.contains("transport: stdio"));
+        assert!(yaml.contains("id: goddard_linear"));
+        assert!(!yaml.contains("goddard-computer-use"));
+    }
 }

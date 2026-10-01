@@ -203,8 +203,7 @@ impl CopilotDriver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+
         let computer_use_config = computer_use.as_ref().map(|runtime| runtime.config.clone());
         let mcp_servers = copilot_mcp_servers(&mcp_servers);
         // `UnboundedSender::send` is synchronous, so the `DriverControl`
@@ -1142,6 +1141,12 @@ fn copilot_attachments(attachments: Vec<MessageAttachment>) -> Vec<Attachment> {
 }
 
 impl DriverControl for CopilotDriver {
+    fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
+    }
+
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt {
             text: prompt,
@@ -1249,6 +1254,7 @@ impl DriverControl for CopilotDriver {
 
 impl Drop for CopilotDriver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         let _ = self.commands.send(CommandMessage::Shutdown);
     }
 }

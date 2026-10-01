@@ -148,8 +148,7 @@ impl DeepSeekDriver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+
         let patch_args = if mcp_servers.is_empty() {
             Vec::new()
         } else {
@@ -316,6 +315,12 @@ impl DeepSeekDriver {
 }
 
 impl DriverControl for DeepSeekDriver {
+    fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
+    }
+
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
     }
@@ -412,6 +417,7 @@ impl DriverControl for DeepSeekDriver {
 
 impl Drop for DeepSeekDriver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         drop(self.server.take());
         let _ = self.commands.send(CommandMessage::Shutdown);
     }

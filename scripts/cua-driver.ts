@@ -140,7 +140,6 @@ export async function bundleComputerUse(
     );
   }
   for (const [source, relative] of [
-    ["resources/computer-use/pi-extension.ts", "computer-use/pi-extension.ts"],
     ["resources/computer-use/CUA-LICENSE", "computer-use/CUA-LICENSE"],
   ]) {
     const destination = join(resourcesDirectory, relative!);

@@ -381,8 +381,7 @@ impl CodexDriver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+
         let computer_use_skill_root = computer_use.as_ref().and_then(|runtime| {
             runtime
                 .config
@@ -1431,6 +1430,9 @@ fn handle_goal_response(
 
 impl DriverControl for CodexDriver {
     fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
         self.thread_lease.close();
         let _ = self.commands.send(CommandMessage::Shutdown);
         let _ = self.process_shutdown.try_send(());
@@ -3908,43 +3910,16 @@ mod tests {
                 .all(|(name, _)| { !name.to_string_lossy().starts_with("GODDARD_COMPUTER_USE_") })
         );
 
-        let server = super::super::McpServerSpec::stdio(
-            "goddard_js_repl",
-            "/tmp/waku",
-            [
-                (
-                    "GODDARD_COMPUTER_USE_SERVER".into(),
-                    "/tmp/goddard-computer-use-server".into(),
-                ),
-                (
-                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".into(),
-                    "/tmp/goddard-computer-use-processes".into(),
-                ),
-            ]
-            .into(),
-        );
         let mut enabled = Command::new("/usr/bin/true");
-        configure_computer_use_command(&mut enabled, true, false, &[server]);
+        configure_computer_use_command(&mut enabled, true, false, &[]);
         let enabled_arguments = enabled
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        // The raw helper must never be registered as a Codex MCP server: the
-        // Goddard REPL owns it and exposes only `cua` inside JavaScript.
         assert!(
             !enabled_arguments
                 .iter()
-                .any(|argument| argument.contains("mcp_servers.goddard_computer_use"))
-        );
-        assert!(
-            enabled_arguments
-                .iter()
-                .any(|argument| argument.contains("mcp_servers.goddard_js_repl.command"))
-        );
-        assert!(
-            enabled_arguments
-                .iter()
-                .any(|argument| { argument == "mcp_servers.goddard_js_repl.args=[]" })
+                .any(|argument| argument.contains("mcp_servers.goddard_"))
         );
         assert!(
             enabled_arguments
@@ -3971,9 +3946,6 @@ mod tests {
                 .iter()
                 .any(|argument| argument == DISABLE_CODEX_NODE_REPL_COMMAND)
         );
-        assert!(enabled_arguments.iter().any(|argument| {
-            argument.contains("mcp_servers.goddard_js_repl.env.GODDARD_COMPUTER_USE_SERVER")
-        }));
     }
 
     #[test]

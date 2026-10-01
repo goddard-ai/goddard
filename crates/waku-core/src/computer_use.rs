@@ -295,12 +295,6 @@ pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
     packaged_file(&path, "Goddard JavaScript REPL")
 }
 
-pub fn pi_extension_path() -> anyhow::Result<PathBuf> {
-    let path = resources_directory(&host_executable_path()?, std::env::consts::OS)?
-        .join("computer-use/pi-extension.ts");
-    packaged_file(&path, "Goddard Pi Computer Use extension")
-}
-
 pub(crate) fn helper_install_root() -> anyhow::Result<PathBuf> {
     Ok(dirs::data_dir()
         .ok_or_else(|| anyhow!("Application Support directory is unavailable"))?

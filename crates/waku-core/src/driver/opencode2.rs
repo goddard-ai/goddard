@@ -50,7 +50,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::activity;
-use super::opencode2_computer_use::{INSTRUCTION_KEY, OpenCode2ComputerUse};
+use super::opencode2_computer_use::cleanup_legacy;
 use super::support::{self, OpenCodePermissionRequest, OpenCodePermissionState};
 use crate::driver::{
     AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
@@ -386,7 +386,6 @@ struct Worker {
     command_names: HashSet<String>,
     events: DriverEventSender,
     commands: Sender<DriverCommand>,
-    computer_use: Option<Arc<OpenCode2ComputerUse>>,
 }
 
 pub(super) struct OpenCode2Driver {
@@ -403,7 +402,7 @@ pub(super) struct OpenCode2Driver {
     mode: RuntimeMode,
     commands: Sender<DriverCommand>,
     supports_steer: bool,
-    computer_use: Option<Arc<OpenCode2ComputerUse>>,
+    computer_use: Option<Arc<super::computer_use::ComputerUseRuntime>>,
     agent_surface: Option<OpenCode2AgentSurface>,
     subagent_instruction: Option<SubagentInstruction>,
 }
@@ -445,11 +444,6 @@ impl OpenCode2Driver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(
-            &mut mcp_servers,
-            computer_use_runtime.as_ref(),
-        );
 
         let resumed = match provider_cursor {
             Some(ProviderResumeCursor::OpenCode2 { session_id, .. }) => {
@@ -561,27 +555,8 @@ impl OpenCode2Driver {
             }
         }
 
-        let computer_use = if let Some(runtime) = computer_use_runtime {
-            let server = super::computer_use::mcp_server_spec(&mcp_servers, Some(&runtime))
-                .expect("Computer Use runtime has an MCP server spec");
-            let attached =
-                OpenCode2ComputerUse::start(&service, &directory, &session_id, runtime, &server);
-            match attached {
-                Ok(runtime) => Some(Arc::new(runtime)),
-                Err(error) => {
-                    if !resuming {
-                        let _ = opencode2_api::delete_session(&endpoint, &session_id);
-                    }
-                    return Err(error);
-                }
-            }
-        } else {
-            // A resumed task may retain our instructions after an interrupted
-            // host shutdown. Remove only Goddard's own entry when disabled.
-            let _ =
-                opencode2_api::remove_instruction_entry(&endpoint, &session_id, INSTRUCTION_KEY);
-            None
-        };
+        cleanup_legacy(&service, &directory, &session_id);
+        let computer_use = computer_use_runtime.map(Arc::new);
 
         // The adopted service is one process for every session, so a scoped
         // token cannot ride its launch environment. The session gets a
@@ -703,7 +678,6 @@ impl OpenCode2Driver {
             command_names,
             events,
             commands: commands.clone(),
-            computer_use: computer_use.clone(),
         };
         let generation = service.generation();
         let mut state = StreamState::new(session_id.clone(), mode, session_model, generation);
@@ -746,11 +720,6 @@ impl OpenCode2Driver {
                                 // process exit for an adopted daemon.
                                 HubFrame::Disconnected => {}
                                 HubFrame::Resync { generation } => {
-                                    if let Some(computer_use) = worker.computer_use.as_ref()
-                                        && let Err(error) = computer_use.ensure_connected()
-                                    {
-                                        let _ = worker.events.send(DriverEvent::Error(error.to_string()));
-                                    }
                                     reconcile(&worker, &mut state, generation);
                                 }
                             }
@@ -900,6 +869,12 @@ impl Drop for OpenCode2AgentSurface {
 }
 
 impl DriverControl for OpenCode2Driver {
+    fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
+    }
+
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(DriverCommand::Prompt(prompt));
     }
@@ -997,6 +972,7 @@ impl DriverControl for OpenCode2Driver {
 
 impl Drop for OpenCode2Driver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         // No socket surgery, no process signal, no exit budget: the clean
         // consequence of owning no server. Unsubscribe first so the hub stops
         // fanning out, then wake the worker so it winds down.
@@ -1201,9 +1177,6 @@ fn submit_prompt(
     text: &str,
     delivery: Option<Delivery>,
 ) -> Result<Option<opencode2_api::InboxUser>, ApiError> {
-    if let Some(computer_use) = worker.computer_use.as_ref() {
-        computer_use.ensure_connected().map_err(ApiError::from)?;
-    }
     if let Some((name, arguments)) = native_command_invocation(text, &worker.command_names) {
         opencode2_api::command(endpoint, &worker.session_id, name, arguments, delivery)
             .map(|_| None)
@@ -3574,177 +3547,5 @@ mod tests {
         assert!(session_id.starts_with("ses_"));
         assert!(directory.is_some_and(|directory| !directory.ends_with('/')));
         drop(driver);
-    }
-
-    /// Nonvisual integration check: only reads Cua configuration and emits a
-    /// synthetic image. Requires the signed app through GODDARD_APP_EXECUTABLE.
-    #[test]
-    #[ignore = "requires a configured OpenCode 2 model and a packaged Goddard app"]
-    fn opencode2_computer_use_against_the_adopted_service() {
-        struct Cleanup {
-            service: Arc<Opencode2Service>,
-            sessions: Vec<String>,
-            directory: std::path::PathBuf,
-        }
-        impl Drop for Cleanup {
-            fn drop(&mut self) {
-                for session in &self.sessions {
-                    let _ = opencode2_api::delete_session(&self.service.endpoint(), session);
-                }
-                let _ = std::fs::remove_dir_all(&self.directory);
-            }
-        }
-        let binary = crate::command_env::find_executable("opencode2").unwrap();
-        let service = opencode2_service::shared(&binary).unwrap();
-        let directory = std::env::temp_dir().join(format!("waku-opencode2-cua-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&directory).unwrap();
-        let mut cleanup = Cleanup {
-            service,
-            sessions: Vec::new(),
-            directory,
-        };
-        let test_directory = cleanup.directory.clone();
-        let start = || {
-            let (events, received) = crate::driver::test_event_channel();
-            let driver = OpenCode2Driver::start(
-                DriverStartOptions {
-                    eval: None,
-                    sandbox: None,
-                    allow_model_fallback: false,
-                    distillation: false,
-                    ephemeral: false,
-                    binary: binary.clone(),
-                    cwd: test_directory.clone(),
-                    mode: RuntimeMode::FullAccess,
-                    model: None,
-                    reasoning_effort: None,
-                    service_tier: None,
-                    context_window: None,
-                    agent_preset: None,
-                    computer_use_enabled: true,
-                    agent: None,
-                    read_own_transcript: false,
-                    subagents: None,
-                    computer_use_runtime: None,
-                    mcp_servers: Vec::new(),
-                    http_mcp_capability_recorder: None,
-                    provider_cursor: None,
-                },
-                events,
-            )
-            .unwrap();
-            (driver, received)
-        };
-        let (a, a_events) = start();
-        cleanup.sessions.push(a.session_id.clone());
-        let (b, b_events) = start();
-        cleanup.sessions.push(b.session_id.clone());
-        let directory = dunce::canonicalize(&cleanup.directory)
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        let servers = opencode2_api::list_mcp(&cleanup.service.endpoint(), &directory).unwrap();
-        let owned: Vec<_> = servers
-            .iter()
-            .filter(|server| {
-                server["name"]
-                    .as_str()
-                    .is_some_and(|name| name.starts_with("goddard_js_repl_"))
-            })
-            .collect();
-        assert_eq!(
-            owned.len(),
-            1,
-            "one connection should serve both Goddard tasks"
-        );
-        let server = owned[0]["name"].as_str().unwrap();
-        let run = |driver: &OpenCode2Driver, events: &Receiver<DriverEvent>, code: &str| {
-            events.try_iter().for_each(drop);
-            driver.prompt(format!("Integration test. Call the js tool on MCP server {server} exactly once with this JavaScript, then reply Done. Do not perform any other operations.\n\n{code}"));
-            let deadline = std::time::Instant::now() + Duration::from_secs(120);
-            let mut calls = Vec::new();
-            loop {
-                let event = events
-                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
-                    .expect("OpenCode 2 integration turn timed out");
-                match event {
-                    DriverEvent::RichActivity(item)
-                        if item.complete && item.mcp_server.as_deref() == Some(server) =>
-                    {
-                        calls.push(item)
-                    }
-                    DriverEvent::TurnFinished { success, .. } => {
-                        assert!(success);
-                        break;
-                    }
-                    DriverEvent::Error(error) => panic!("OpenCode 2 integration failed: {error}"),
-                    _ => {}
-                }
-            }
-            assert_eq!(calls.len(), 1, "one direct MCP call should complete");
-            let item = calls.pop().unwrap();
-            assert!(!item.failed, "{:?}", item.detail);
-            item
-        };
-        let item = run(
-            &a,
-            &a_events,
-            "var wakuIsolationMarker = 41; await setupComputerUseRuntime({ globals: globalThis }); var nativeConfig = await cua.get_config(); jsRepl.write('CUA_CONFIG=' + JSON.stringify(nativeConfig)); await jsRepl.emitImage('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==');",
-        );
-        assert_eq!(item.image_urls.len(), 1, "{item:?}");
-        assert!(
-            item.output
-                .as_deref()
-                .unwrap_or_default()
-                .contains("CUA_CONFIG=")
-        );
-        let item = run(
-            &b,
-            &b_events,
-            "jsRepl.write('OTHER_SESSION=' + typeof wakuIsolationMarker);",
-        );
-        assert!(
-            item.output
-                .as_deref()
-                .unwrap_or_default()
-                .contains("OTHER_SESSION=undefined")
-        );
-        let item = run(
-            &a,
-            &a_events,
-            "jsRepl.write('PERSISTED=' + ++wakuIsolationMarker);",
-        );
-        assert!(
-            item.output
-                .as_deref()
-                .unwrap_or_default()
-                .contains("PERSISTED=42")
-        );
-        drop(a);
-        std::thread::sleep(Duration::from_millis(300));
-        let item = run(
-            &b,
-            &b_events,
-            "jsRepl.write('SURVIVED=other session closed');",
-        );
-        assert!(
-            item.output
-                .as_deref()
-                .unwrap_or_default()
-                .contains("SURVIVED=other session closed")
-        );
-        drop(b);
-        let deadline = std::time::Instant::now() + Duration::from_secs(15);
-        loop {
-            let servers = opencode2_api::list_mcp(&cleanup.service.endpoint(), &directory).unwrap();
-            if servers.iter().all(|entry| entry["name"] != server) {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the final lease must unregister the MCP server"
-            );
-            std::thread::sleep(Duration::from_millis(100));
-        }
     }
 }

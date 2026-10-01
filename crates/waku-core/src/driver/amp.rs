@@ -134,8 +134,7 @@ impl AmpDriver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+
         let reader_initial_thread_id = thread_id.clone();
         let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd).args(amp_args(
@@ -390,6 +389,12 @@ impl AmpDriver {
 }
 
 impl DriverControl for AmpDriver {
+    fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
+    }
+
     fn cancel_computer_use(&self) {
         if let Some(computer_use) = &self.computer_use {
             computer_use.stop();
@@ -436,6 +441,7 @@ impl DriverControl for AmpDriver {
 
 impl Drop for AmpDriver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         let _ = self.commands.send(CommandMessage::Shutdown);
     }
 }

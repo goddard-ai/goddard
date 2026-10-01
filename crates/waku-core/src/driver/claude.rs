@@ -224,8 +224,7 @@ impl ClaudeDriver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
+
         let mut system_appendix: Vec<String> = Vec::new();
         if let Some(runtime) = &computer_use {
             let config_path = runtime.config.process_directory.join("claude-mcp.json");
@@ -601,6 +600,12 @@ impl ClaudeDriver {
 }
 
 impl DriverControl for ClaudeDriver {
+    fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
+    }
+
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
     }
@@ -685,6 +690,7 @@ impl DriverControl for ClaudeDriver {
 
 impl Drop for ClaudeDriver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         let _ = self.commands.send(CommandMessage::Shutdown);
     }
 }

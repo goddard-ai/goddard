@@ -45,6 +45,9 @@ USAGE
     goddard-agent search '<json>'            Search this project's task transcripts
     goddard-agent map '<json>'               Find relevant code in this workspace
     goddard-agent ask '<json>'               Ask the user a structured question
+    goddard-agent computer js '<json>'       Execute JavaScript in this task's persistent CUA kernel
+    goddard-agent computer js --stdin        Read that JSON payload from stdin
+    goddard-agent computer reset             Reset this task's CUA kernel
     goddard-agent models                     List the provider/model options `create` accepts
     goddard-agent command list               List the user's custom commands
     goddard-agent command upsert '<json>'    Add or update a custom command
@@ -83,7 +86,12 @@ USAGE CONTRACT
     you can just ask in your reply.
     `models` lists the provider/model combinations `create` accepts, in
     preference order — read it instead of guessing model ids.
-    There is no per-call approval gate for either surface; the daemon records
+    `computer js` and `computer reset` operate only on this task's enabled
+    Computer Use runtime. JavaScript bindings persist; emitted images return
+    file paths to open with your image reader. App, browser, clipboard, and
+    desktop access keep their Goddard approval prompts. No actions are
+    automatically retried after a lost response.
+    There is no per-call approval gate for task/settings writes; the daemon records
     this task's id on every accepted write, so agent-originated commands and
     turns are visibly attributed to it.
 
@@ -101,7 +109,8 @@ fn schema() -> serde_json::Value {
         .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
         .collect();
     json!({
-        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate; the daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
+        "computer": {"js": {"code": "string (required)", "timeout_ms": "integer 1..300000 (default 300000)", "title": "string (optional)"}, "reset": "no payload; resets only this task", "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"},
+        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate for task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
         "create": {
             "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation. The task inherits this task's access mode and run environment — a sandboxed task spawns sandboxed tasks.",
             "fields": {
@@ -375,6 +384,7 @@ fn run() -> anyhow::Result<()> {
                 other => bail!("daemon returned an unexpected response: {other:?}"),
             }
         }
+        "computer" => computer(arguments.collect()),
         "command" => command(arguments.next().as_deref(), arguments.next()),
         "create" | "prompt" | "read" | "search" | "map" | "rename" | "ask" => {
             let payload = arguments
@@ -429,6 +439,59 @@ fn run() -> anyhow::Result<()> {
         other => Err(anyhow!(
             "unknown subcommand `{other}`; run `goddard-agent --help`"
         )),
+    }
+}
+
+fn computer_command(arguments: &[String]) -> anyhow::Result<Command> {
+    let command = match arguments {
+        [action] if action == "reset" => Command::AgentComputerUseReset,
+        [action, payload] if action == "js" => {
+            let payload = if payload == "--stdin" {
+                let mut input = String::new();
+                std::io::Read::read_to_string(
+                    &mut std::io::Read::take(std::io::stdin().lock(), 1024 * 1024 + 1),
+                    &mut input,
+                )?;
+                if input.len() > 1024 * 1024 {
+                    bail!("computer payload exceeds 1 MB");
+                }
+                input
+            } else {
+                payload.clone()
+            };
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Input {
+                code: String,
+                #[serde(default)]
+                timeout_ms: Option<u64>,
+                #[serde(default)]
+                title: Option<String>,
+            }
+            let input: Input =
+                serde_json::from_str(&payload).context("invalid computer js payload")?;
+            Command::AgentComputerUse {
+                code: input.code,
+                timeout_ms: input.timeout_ms,
+                title: input.title,
+            }
+        }
+        _ => bail!("use `computer js '<json>'`, `computer js --stdin`, or `computer reset`"),
+    };
+    Ok(command)
+}
+
+fn computer(arguments: Vec<String>) -> anyhow::Result<()> {
+    let command = computer_command(&arguments)?;
+    match connect()?.request_with_timeout(request_session_id(), Uuid::nil(), command, None)? {
+        ResponsePayload::AgentComputerUseResult { result } => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            if result["isError"] == true {
+                bail!("computer-use JavaScript failed; see the result above");
+            }
+            Ok(())
+        }
+        other => bail!("daemon returned an unexpected response: {other:?}"),
     }
 }
 
@@ -682,6 +745,31 @@ fn request_session_id() -> Uuid {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn computer_commands_accept_execution_and_reset_but_no_task_selector() {
+        let command = super::computer_command(&[
+            "js".into(),
+            r#"{"code":"var value = 42","timeout_ms":1000,"title":"Initialize"}"#.into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            command,
+            Command::AgentComputerUse {
+                timeout_ms: Some(1000),
+                ..
+            }
+        ));
+        assert!(matches!(
+            super::computer_command(&["reset".into()]).unwrap(),
+            Command::AgentComputerUseReset
+        ));
+        assert!(super::computer_command(&["reset".into(), "{}".into()]).is_err());
+        assert!(
+            super::computer_command(&["js".into(), r#"{"code":"1","task_id":"foreign"}"#.into()])
+                .is_err()
+        );
+    }
+
     use super::*;
 
     #[test]

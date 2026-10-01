@@ -206,7 +206,6 @@ const bundledPiComputerUseExtension = join(
   contentsDirectory,
   "Resources",
   "computer-use",
-  "pi-extension.ts",
 );
 const bundledComputerUseHelper = join(
   contentsDirectory,
@@ -471,7 +470,6 @@ try {
       mountedContents,
       "Resources",
       "computer-use",
-      "pi-extension.ts",
     ),
     mountedComputerUseHelper,
     join(mountedSparkleFramework, "Sparkle"),

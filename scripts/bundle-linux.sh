@@ -19,6 +19,7 @@ trap 'rm -rf -- "$staging"' EXIT
 cargo build --locked --release \
   --package waku --bin goddard --bin goddard-updater --bin goddard_js_repl \
   --package waku-daemon --bin goddard-daemon \
+  --package waku-agent --bin goddard-agent \
   --package waku-computer-use --bin goddard_computer_use
 
 package_dir="$staging/$package"
@@ -26,6 +27,7 @@ bun scripts/cua-driver.ts bundle "$package_dir/bin" "$package_dir/share/goddard"
 install -Dm755 "$target_dir/release/goddard" "$package_dir/bin/goddard"
 install -Dm755 "$target_dir/release/goddard-updater" "$package_dir/bin/goddard-updater"
 install -Dm755 "$target_dir/release/goddard-daemon" "$package_dir/bin/goddard-daemon"
+install -Dm755 "$target_dir/release/goddard-agent" "$package_dir/bin/goddard-agent"
 install -Dm644 resources/linux/org.goddardai.app.desktop \
   "$package_dir/share/applications/org.goddardai.app.desktop"
 install -Dm644 resources/linux/self-update-v1 \

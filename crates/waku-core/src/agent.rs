@@ -755,6 +755,9 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
         "<goddard-agent>\nGoddard gives this session a `{command}` CLI; \
          `{command} --help` documents every subcommand and its JSON payload."
     );
+    instruction.push_str(&format!(
+        "\n- `computer js` / `computer reset` — when Computer Use is enabled for this task, execute JavaScript or reset its persistent kernel using `{command} computer js '<json>'` (or `--stdin`). Read the bundled Computer Use skill before the first call; open returned image paths with your image-reading tool."
+    ));
     if scope.task_tools {
         instruction.push_str(&format!(
             "\n- `create` — when the user asks you to create, start, or \

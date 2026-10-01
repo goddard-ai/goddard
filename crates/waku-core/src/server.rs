@@ -730,6 +730,7 @@ struct RequestDispatcher {
     /// lifecycle order across desktop and web clients without serializing
     /// unrelated sessions or read-only requests.
     runtime_mailboxes: Arc<Mutex<HashMap<Uuid, RuntimeMailbox>>>,
+    computer_use_mailboxes: Arc<Mutex<HashMap<Uuid, RuntimeMailbox>>>,
     heavy_requests: IndependentRequestPool,
     control_requests: IndependentRequestPool,
     health_requests: IndependentRequestPool,
@@ -1198,6 +1199,7 @@ impl RequestDispatcher {
             backend,
             hub,
             runtime_mailboxes: Arc::new(Mutex::new(HashMap::new())),
+            computer_use_mailboxes: Arc::new(Mutex::new(HashMap::new())),
             heavy_requests: IndependentRequestPool::new(
                 "heavy",
                 HEAVY_REQUEST_WORKERS,
@@ -1257,10 +1259,91 @@ impl RequestDispatcher {
         source_subscriber_id: u64,
         agent: Option<Uuid>,
     ) {
-        if command_targets_runtime(&request.command) {
+        if matches!(
+            request.command,
+            Command::AgentComputerUse { .. } | Command::AgentComputerUseReset
+        ) {
+            self.dispatch_computer_use(request, outgoing, source_subscriber_id, agent);
+        } else if command_targets_runtime(&request.command) {
             self.dispatch_runtime(request, outgoing, source_subscriber_id, agent);
         } else {
             self.dispatch_independent(request, outgoing, source_subscriber_id, agent);
+        }
+    }
+
+    fn dispatch_computer_use(
+        &self,
+        request: Request,
+        outgoing: Sender<ServerMessage>,
+        source_subscriber_id: u64,
+        agent: Option<Uuid>,
+    ) {
+        let task = agent.unwrap_or(request.session_id);
+        let request_id = request.request_id;
+        let session_id = request.session_id;
+        let failed_outgoing = outgoing.clone();
+        let mut dispatched = DispatchedRequest {
+            request,
+            outgoing,
+            source_subscriber_id,
+            agent,
+        };
+        let mut mailboxes = self.computer_use_mailboxes.lock();
+        if let Some(mailbox) = mailboxes.get(&task) {
+            match mailbox.sender.try_send(dispatched) {
+                Ok(()) => return,
+                Err(crossbeam_channel::TrySendError::Full(_)) => {
+                    drop(mailboxes);
+                    send_dispatch_error(request_id, session_id, failed_outgoing, &self.hub,
+                        "computer-use queue is full; this call did not run. Wait for the current call before retrying".into());
+                    return;
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(request)) => {
+                    // A failed worker must not strand this task on a dead queue.
+                    dispatched = request;
+                    mailboxes.remove(&task);
+                }
+            }
+        }
+        let mailbox_id = Uuid::new_v4();
+        let (sender, requests) = bounded(8);
+        let _ = sender.try_send(dispatched);
+        mailboxes.insert(
+            task,
+            RuntimeMailbox {
+                id: mailbox_id,
+                sender,
+            },
+        );
+        let registry = Arc::downgrade(&self.computer_use_mailboxes);
+        let backend = self.backend.clone();
+        let hub = self.hub.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name(format!("goddard-computer-use-{task}"))
+            .spawn(move || {
+                while let Some(dispatched) =
+                    take_queued_request_or_retire(task, mailbox_id, &requests, &registry)
+                {
+                    handle_request(
+                        dispatched.request,
+                        dispatched.outgoing,
+                        dispatched.source_subscriber_id,
+                        dispatched.agent,
+                        backend.clone(),
+                        hub.clone(),
+                    );
+                }
+            })
+        {
+            mailboxes.remove(&task);
+            drop(mailboxes);
+            send_dispatch_error(
+                request_id,
+                session_id,
+                failed_outgoing,
+                &self.hub,
+                format!("could not start computer-use worker: {error}"),
+            );
         }
     }
 
@@ -2123,6 +2206,8 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentProjectMap { .. }
             | Command::AgentAsk { .. }
             | Command::AgentListModels
+            | Command::AgentComputerUse { .. }
+            | Command::AgentComputerUseReset
             | Command::UpsertCustomCommand { .. }
             | Command::RemoveCustomCommand { .. }
             | Command::ListCustomCommands
@@ -4235,6 +4320,29 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("disabled"), "{error}");
 
+        let error = agent
+            .request(
+                sender_id,
+                Uuid::nil(),
+                Command::AgentComputerUse {
+                    code: "1".into(),
+                    timeout_ms: None,
+                    title: None,
+                },
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("computer use is disabled"),
+            "{error}"
+        );
+        let error = agent
+            .request(Uuid::new_v4(), Uuid::nil(), Command::AgentComputerUseReset)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("cannot target another task"),
+            "{error}"
+        );
+
         human.shutdown();
         agent.shutdown();
         server.join().unwrap();
@@ -5120,6 +5228,118 @@ mod tests {
             response_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
             ServerMessage::Response { request_id, .. } if request_id == probe_id
         ));
+    }
+
+    struct ComputerUseQueueBackend {
+        handled: Sender<(Uuid, String)>,
+        release: Receiver<()>,
+    }
+    impl Backend for ComputerUseQueueBackend {
+        fn handle(
+            &self,
+            request: Request,
+            _: EventSink,
+            _: Option<Uuid>,
+        ) -> anyhow::Result<ResponsePayload> {
+            let action = match request.command {
+                Command::AgentComputerUse { code, .. } => code,
+                Command::CancelComputerUse => "cancel".into(),
+                _ => "other".into(),
+            };
+            self.handled
+                .send((request.session_id, action.clone()))
+                .unwrap();
+            if action == "wait" {
+                self.release.recv().unwrap();
+            }
+            Ok(ResponsePayload::Ack)
+        }
+    }
+
+    #[test]
+    fn computer_use_queue_serializes_calls_without_blocking_control_or_other_tasks() {
+        let task = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let (handled, received) = unbounded();
+        let (release, release_rx) = bounded(1);
+        struct Release(Sender<()>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                let _ = self.0.try_send(());
+            }
+        }
+        let release = Release(release);
+        let dispatcher = RequestDispatcher::new(
+            Arc::new(ComputerUseQueueBackend {
+                handled,
+                release: release_rx,
+            }),
+            Arc::new(Hub::default()),
+        );
+        let (outgoing, _responses) = unbounded();
+        let call = |task, code: &str, outgoing: Sender<ServerMessage>| {
+            dispatcher.dispatch(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: task,
+                    runtime_id: Uuid::nil(),
+                    command: Command::AgentComputerUse {
+                        code: code.into(),
+                        timeout_ms: None,
+                        title: None,
+                    },
+                },
+                outgoing,
+                0,
+                Some(task),
+            )
+        };
+        call(task, "wait", outgoing.clone());
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (task, "wait".into())
+        );
+        for index in 0..8 {
+            call(task, &format!("queued-{index}"), outgoing.clone());
+        }
+        let (overflow, response) = unbounded();
+        call(task, "must-not-run", overflow);
+        let ServerMessage::Response {
+            outcome: ResponseOutcome::Error { error },
+            ..
+        } = response.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!("queue must refuse excess work");
+        };
+        assert!(error.message.contains("queue is full"));
+        assert!(received.try_recv().is_err());
+        call(other, "independent", outgoing.clone());
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (other, "independent".into())
+        );
+        dispatcher.dispatch(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: task,
+                runtime_id: Uuid::nil(),
+                command: Command::CancelComputerUse,
+            },
+            outgoing,
+            0,
+            None,
+        );
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (task, "cancel".into())
+        );
+        release.0.send(()).unwrap();
+        for index in 0..8 {
+            assert_eq!(
+                received.recv_timeout(Duration::from_secs(2)).unwrap(),
+                (task, format!("queued-{index}"))
+            );
+        }
     }
 
     struct RuntimeOrderingBackend {

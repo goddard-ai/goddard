@@ -1,5 +1,7 @@
 //! Computer Use helper process integration.
 
+pub(crate) mod cli;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,8 +22,6 @@ use crate::driver::DriverEventSender;
 use crate::fs_ext;
 use crate::model::DriverEvent;
 
-pub(crate) const MCP_SERVER_NAME: &str = "goddard_js_repl";
-
 #[cfg(target_os = "macos")]
 use std::ffi::OsString;
 #[cfg(target_os = "macos")]
@@ -35,53 +35,9 @@ pub(super) struct ComputerUseConfig {
     pub(super) process_directory: PathBuf,
 }
 
-impl ComputerUseConfig {
-    pub(super) fn mcp_server(&self) -> super::McpServerSpec {
-        super::McpServerSpec::stdio(
-            MCP_SERVER_NAME,
-            self.repl_path.clone(),
-            [
-                (
-                    "GODDARD_COMPUTER_USE_SERVER".to_owned(),
-                    self.server_path.display().to_string(),
-                ),
-                (
-                    "GODDARD_COMPUTER_USE_PROCESS_DIRECTORY".to_owned(),
-                    self.process_directory.display().to_string(),
-                ),
-            ]
-            .into(),
-        )
-    }
-}
-
-pub(super) fn mcp_server_spec(
-    servers: &[super::McpServerSpec],
-    runtime: Option<&ComputerUseRuntime>,
-) -> Option<super::McpServerSpec> {
-    servers
-        .iter()
-        .find(|server| server.name() == MCP_SERVER_NAME)
-        .cloned()
-        .or_else(|| runtime.map(|runtime| runtime.config.mcp_server()))
-}
-
-pub(super) fn ensure_runtime_server_spec(
-    servers: &mut Vec<super::McpServerSpec>,
-    runtime: Option<&ComputerUseRuntime>,
-) {
-    if !servers
-        .iter()
-        .any(|server| server.name() == MCP_SERVER_NAME)
-        && let Some(runtime) = runtime
-    {
-        servers.push(runtime.mcp_server_spec());
-    }
-}
-
 pub(crate) fn hint(skill_path: &Path) -> String {
     format!(
-        "When the user asks you to interact with a local app, use the `js` tool from `goddard_js_repl` and read the Goddard Computer Use skill at {} before the first call.",
+        "When the user asks you to interact with a local app, use `goddard-agent computer js` (or the session-specific launcher supplied in the Goddard instructions) and read the Goddard Computer Use skill at {} before the first call. JavaScript bindings persist per task. Returned image paths must be opened with your image-reading tool.",
         skill_path.display()
     )
 }
@@ -89,6 +45,8 @@ pub(crate) fn hint(skill_path: &Path) -> String {
 pub(crate) struct ComputerUseRuntime {
     pub(super) config: ComputerUseConfig,
     preview_monitor: Option<ComputerUsePreviewMonitor>,
+    cli_service: Option<Arc<cli::Service>>,
+    cli_events: Mutex<Option<DriverEventSender>>,
 }
 
 impl ComputerUseRuntime {
@@ -100,7 +58,7 @@ impl ComputerUseRuntime {
             .join("SKILL.md");
         let process_directory = create_process_directory()?;
         let preview_monitor =
-            match ComputerUsePreviewMonitor::start(process_directory.clone(), events) {
+            match ComputerUsePreviewMonitor::start(process_directory.clone(), events.clone()) {
                 Ok(monitor) => monitor,
                 Err(error) => {
                     let _ = fs::remove_dir_all(&process_directory);
@@ -115,11 +73,24 @@ impl ComputerUseRuntime {
                 process_directory,
             },
             preview_monitor: Some(preview_monitor),
+            cli_service: None,
+            cli_events: Mutex::new(Some(events)),
         })
     }
 
-    pub(crate) fn mcp_server_spec(&self) -> super::McpServerSpec {
-        self.config.mcp_server()
+    pub(crate) fn bind_task(
+        &mut self,
+        task: Uuid,
+        cwd: &Path,
+        blobs: Arc<crate::blob_store::BlobStore>,
+    ) {
+        self.cli_service = Some(cli::Service::bind(
+            task,
+            self.config.clone(),
+            cwd,
+            self.cli_events.lock().take().expect("runtime binds once"),
+            blobs,
+        ));
     }
 
     pub(super) fn for_launch(
@@ -147,6 +118,10 @@ impl ComputerUseRuntime {
     /// owns) could never run.
     pub(super) fn begin_shutdown(&self) {
         self.stop();
+        self.cli_events.lock().take();
+        if let Some(service) = &self.cli_service {
+            service.shutdown();
+        }
         if let Some(monitor) = self.preview_monitor.as_ref() {
             monitor.stop();
         }
@@ -156,6 +131,10 @@ impl ComputerUseRuntime {
 impl Drop for ComputerUseRuntime {
     fn drop(&mut self) {
         self.stop();
+        self.cli_events.lock().take();
+        if let Some(service) = self.cli_service.take() {
+            service.shutdown();
+        }
         drop(self.preview_monitor.take());
         process_directories()
             .lock()

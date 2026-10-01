@@ -67,8 +67,7 @@ pub struct AcpDriver {
     commands: smol::channel::Sender<CommandMessage>,
     supports_steer: bool,
     mode: RuntimeMode,
-    computer_use: Option<super::support::HeadlessComputerUseRuntime>,
-    native_computer_use: Option<super::computer_use::ComputerUseRuntime>,
+    computer_use: Option<super::computer_use::ComputerUseRuntime>,
 }
 
 /// Per-provider launch details. Everything after process launch is ACP.
@@ -149,7 +148,7 @@ impl AcpDriver {
             agent: agent_env,
             read_own_transcript: _,
             subagents: _,
-            mut mcp_servers,
+            mcp_servers,
             http_mcp_capability_recorder,
             provider_cursor,
             eval,
@@ -178,52 +177,19 @@ impl AcpDriver {
         };
 
         let launch = launch_for(provider, reasoning_effort.as_deref())?;
-        let mut computer_use_runtime = super::computer_use::ComputerUseRuntime::for_launch(
+        let computer_use_runtime = super::computer_use::ComputerUseRuntime::for_launch(
             computer_use_enabled,
             computer_use_runtime,
             events.clone(),
         )?;
-        super::computer_use::ensure_runtime_server_spec(
-            &mut mcp_servers,
-            computer_use_runtime.as_ref(),
-        );
-        let computer_use_spec =
-            super::computer_use::mcp_server_spec(&mcp_servers, computer_use_runtime.as_ref());
-        let computer_use = if provider == ProviderKind::Grok {
-            computer_use_runtime
-                .take()
-                .map(|runtime| {
-                    super::support::HeadlessComputerUseRuntime::from_runtime(
-                        provider,
-                        runtime,
-                        computer_use_spec
-                            .clone()
-                            .expect("Computer Use runtime has an MCP server spec"),
-                    )
-                })
-                .transpose()?
-        } else {
-            None
-        };
-        let native_computer_use = computer_use_runtime;
-        if provider == ProviderKind::Grok {
-            mcp_servers.retain(|server| server.name() != super::computer_use::MCP_SERVER_NAME);
-        }
-        let grok_title_home = computer_use
-            .as_ref()
-            .and_then(super::support::HeadlessComputerUseRuntime::grok_home)
-            .map(ToOwned::to_owned);
-        let grok_computer_use_rules = computer_use
-            .as_ref()
-            .and_then(super::support::HeadlessComputerUseRuntime::grok_rules)
-            .map(ToOwned::to_owned);
+
+        let computer_use = computer_use_runtime;
         let stderr_lines = Arc::new(Mutex::new(Vec::<String>::new()));
         let agent = match &sandbox {
             Some(vm) => guest_transport(
                 &binary,
                 &cwd,
                 launch,
-                computer_use.as_ref().map(|runtime| &runtime.config),
                 agent_env.as_ref(),
                 vm,
                 stderr_lines.clone(),
@@ -232,7 +198,6 @@ impl AcpDriver {
                 &binary,
                 &cwd,
                 launch,
-                computer_use.as_ref().map(|runtime| &runtime.config),
                 agent_env.as_ref(),
                 stderr_lines.clone(),
             )?),
@@ -261,10 +226,8 @@ impl AcpDriver {
                     service_tier,
                     context_window,
                     allow_model_fallback,
-                    grok_computer_use_rules,
                     resume_session_id,
                     fork_context,
-                    grok_title_home,
                     mcp_servers,
                     http_mcp_capability_recorder,
                     eval,
@@ -289,7 +252,6 @@ impl AcpDriver {
             supports_steer: provider != ProviderKind::Fx && provider != ProviderKind::Droid,
             mode,
             computer_use,
-            native_computer_use,
         })
     }
 }
@@ -338,14 +300,12 @@ fn guest_transport(
     binary: &Path,
     cwd: &Path,
     mut launch: AcpLaunch,
-    computer_use: Option<&super::support::HeadlessComputerUseConfig>,
     agent_env: Option<&crate::agent::AgentLaunchEnv>,
     vm: &Arc<crate::sandbox::ShuruVm>,
     stderr_lines: Arc<Mutex<Vec<String>>>,
 ) -> anyhow::Result<AgentTransport> {
     use std::io::{BufRead as _, BufReader, Write as _};
 
-    let computer_env = super::support::grok_computer_use_environment(computer_use);
     let mut environment = crate::command_env::shell_environment()
         .into_iter()
         .map(|(name, value)| {
@@ -356,7 +316,6 @@ fn guest_transport(
         })
         .collect::<Vec<_>>();
     environment.append(&mut launch.env);
-    environment.extend(computer_env);
     if let Some(agent_env) = agent_env {
         crate::command_env::merge_agent_environment(&mut environment, agent_env);
     }
@@ -433,7 +392,6 @@ fn sdk_agent(
     binary: &Path,
     cwd: &Path,
     mut launch: AcpLaunch,
-    computer_use: Option<&super::support::HeadlessComputerUseConfig>,
     agent_env: Option<&crate::agent::AgentLaunchEnv>,
     stderr_lines: Arc<Mutex<Vec<String>>>,
 ) -> anyhow::Result<AcpAgent> {
@@ -443,7 +401,6 @@ fn sdk_agent(
     let cwd = cwd
         .to_str()
         .ok_or_else(|| anyhow!("the ACP working directory is not valid UTF-8"))?;
-    let computer_env = super::support::grok_computer_use_environment(computer_use);
     let mut environment = crate::command_env::shell_environment()
         .into_iter()
         .map(|(name, value)| {
@@ -454,7 +411,6 @@ fn sdk_agent(
         })
         .collect::<Vec<_>>();
     environment.append(&mut launch.env);
-    environment.extend(computer_env);
     if let Some(agent_env) = agent_env {
         crate::command_env::merge_agent_environment(&mut environment, agent_env);
     }
@@ -509,14 +465,7 @@ pub(crate) fn catalog_agent(
     cwd: &Path,
 ) -> anyhow::Result<AcpAgent> {
     let launch = launch_for(provider, None)?;
-    sdk_agent(
-        binary,
-        cwd,
-        launch,
-        None,
-        None,
-        Arc::new(Mutex::new(Vec::new())),
-    )
+    sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new())))
 }
 
 const DEVIN_ACP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -730,10 +679,8 @@ async fn run_sdk_connection(
     service_tier: Option<String>,
     context_window: Option<String>,
     allow_model_fallback: bool,
-    grok_computer_use_rules: Option<String>,
     resume_session_id: Option<String>,
     fork_context: Option<String>,
-    grok_title_home: Option<std::path::PathBuf>,
     mcp_server_specs: Vec<super::McpServerSpec>,
     http_mcp_capability_recorder: Option<Arc<dyn Fn(bool) + Send + Sync>>,
     eval: Option<waku_protocol::eval::EvalSettings>,
@@ -777,7 +724,6 @@ async fn run_sdk_connection(
             {
                 let events = events.clone();
                 let prompt_requests = prompt_requests.clone();
-                let grok_title_home = grok_title_home.clone();
                 let title_refresh = title_refresh.clone();
                 let first_prompt = first_prompt.clone();
                 let stream_state = stream_state.clone();
@@ -806,12 +752,7 @@ async fn run_sdk_connection(
                             &prompt_requests,
                             &events,
                         ) {
-                            start_grok_title_refresh(
-                                grok_title_home.as_deref(),
-                                &session_id,
-                                &title_refresh,
-                                events.clone(),
-                            );
+                            start_grok_title_refresh(&session_id, &title_refresh, events.clone());
                         }
                     }
                     if let Some(title) = crate::devin_session::title_from_notification(
@@ -1009,9 +950,7 @@ async fn run_sdk_connection(
                             &prompt_requests,
                             &events,
                             provider,
-                            grok_computer_use_rules.as_deref(),
                             &native_session_id,
-                            grok_title_home.clone(),
                             title_placeholder,
                             title_refresh.clone(),
                             stream_state.clone(),
@@ -1044,9 +983,7 @@ async fn run_sdk_connection(
                             &prompt_requests,
                             &events,
                             provider,
-                            grok_computer_use_rules.as_deref(),
                             &native_session_id,
-                            grok_title_home.clone(),
                             first_prompt.lock().clone(),
                             title_refresh.clone(),
                             stream_state.clone(),
@@ -2197,9 +2134,7 @@ fn send_prompt(
     prompt_requests: &PendingPromptRequests,
     events: &DriverEventSender,
     provider: ProviderKind,
-    grok_computer_use_rules: Option<&str>,
     native_session_id: &str,
-    grok_title_home: Option<std::path::PathBuf>,
     title_placeholder: Option<String>,
     title_refresh: super::title_refresh::NativeTitleRefresh,
     stream_state: Arc<Mutex<AcpStreamState>>,
@@ -2211,16 +2146,7 @@ fn send_prompt(
         .then(|| crate::kimi_session::wire_offset(native_session_id));
     let extension_id =
         (provider == ProviderKind::Grok).then(|| format!("waku-{}", uuid::Uuid::new_v4()));
-    let slash_command = is_slash_command(&text);
-    let mut prompt = vec![ContentBlock::Text(TextContent::new(text))];
-    if provider == ProviderKind::Grok
-        && !slash_command
-        && let Some(rules) = grok_computer_use_rules.filter(|rules| !rules.trim().is_empty())
-    {
-        // Grok's ACP command rejects --rules. Like T3 Code's runtime guidance,
-        // send the Computer Use skill as a separate prompt block instead.
-        prompt.push(ContentBlock::Text(TextContent::new(rules.to_owned())));
-    }
+    let prompt = vec![ContentBlock::Text(TextContent::new(text))];
     let mut request = PromptRequest::new(session_id.clone(), prompt);
     if let Some(extension_id) = extension_id.as_ref() {
         let mut meta = serde_json::Map::new();
@@ -2253,12 +2179,7 @@ fn send_prompt(
                 .and_then(|offset| crate::kimi_session::turn_failure(&native_session_id, offset));
             let success = finish_prompt(result, native_failure, settle, &callback_events);
             if success && provider == ProviderKind::Grok {
-                start_grok_title_refresh(
-                    grok_title_home.as_deref(),
-                    &native_session_id,
-                    &title_refresh,
-                    callback_events,
-                );
+                start_grok_title_refresh(&native_session_id, &title_refresh, callback_events);
             } else if success && provider == ProviderKind::Devin {
                 start_devin_title_refresh(
                     &native_session_id,
@@ -2274,18 +2195,6 @@ fn send_prompt(
         prompt_requests.lock().settle_request(&request_id, false);
     }
     registered
-}
-
-fn is_slash_command(text: &str) -> bool {
-    let Some(command) = text
-        .trim_start()
-        .split_whitespace()
-        .next()
-        .and_then(|token| token.strip_prefix('/'))
-    else {
-        return false;
-    };
-    !command.is_empty() && !command.contains('/')
 }
 
 fn settle_prompt_request(
@@ -2508,12 +2417,10 @@ fn xai_error_message(error: &str) -> String {
 }
 
 fn start_grok_title_refresh(
-    grok_title_home: Option<&Path>,
     native_session_id: &str,
     title_refresh: &super::title_refresh::NativeTitleRefresh,
     events: DriverEventSender,
 ) {
-    let grok_title_home = grok_title_home.map(ToOwned::to_owned);
     let native_session_id = native_session_id.to_owned();
     title_refresh.start(
         "waku-grok-title",
@@ -2528,10 +2435,7 @@ fn start_grok_title_refresh(
             Duration::from_secs(10),
         ],
         events,
-        move || match grok_title_home.as_deref() {
-            Some(home) => crate::grok_session::generated_title_in(home, &native_session_id),
-            None => crate::grok_session::generated_title(&native_session_id),
-        },
+        move || crate::grok_session::generated_title(&native_session_id),
     );
 }
 
@@ -3449,9 +3353,6 @@ impl DriverControl for AcpDriver {
         if let Some(computer_use) = self.computer_use.as_ref() {
             computer_use.begin_shutdown();
         }
-        if let Some(computer_use) = self.native_computer_use.as_ref() {
-            computer_use.begin_shutdown();
-        }
         let _ = self.commands.try_send(CommandMessage::Shutdown);
     }
 
@@ -3459,13 +3360,10 @@ impl DriverControl for AcpDriver {
         if let Some(computer_use) = self.computer_use.as_ref() {
             computer_use.stop();
         }
-        if let Some(computer_use) = self.native_computer_use.as_ref() {
-            computer_use.stop();
-        }
     }
 
     fn computer_use_available(&self) -> bool {
-        self.computer_use.is_some() || self.native_computer_use.is_some()
+        self.computer_use.is_some()
     }
 
     fn respond(&self, request_id: String, option_id: String) {
@@ -3555,7 +3453,6 @@ mod tests {
             supports_steer: false,
             mode: RuntimeMode::Auto,
             computer_use: None,
-            native_computer_use: None,
         }));
         let forwarders_clone = handle.clone();
         handle.begin_shutdown();

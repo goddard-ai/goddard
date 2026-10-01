@@ -19,7 +19,9 @@ mod support;
 mod title_refresh;
 
 pub(crate) use computer_use::ComputerUseRuntime;
-pub(crate) use computer_use::MCP_SERVER_NAME;
+#[cfg(test)]
+pub(crate) use computer_use::cli::bind_for_test as bind_computer_use_for_test;
+pub(crate) use computer_use::cli::for_task as computer_use_service;
 pub(crate) use computer_use::hint as computer_use_hint;
 pub(crate) use mcp::McpServerSpec;
 

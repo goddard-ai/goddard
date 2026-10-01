@@ -185,23 +185,6 @@ pub struct PiDriver {
     session_file: Arc<Mutex<Option<PathBuf>>>,
 }
 
-fn configure_pi_computer_use_command(
-    command: &mut std::process::Command,
-    config: Option<(super::McpServerSpec, &Path, &Path)>,
-) {
-    if let Some((server, skill_path, extension)) = config {
-        if let Some((_, executable, env)) = server.stdio_parts() {
-            command
-                .arg("--extension")
-                .arg(extension)
-                .arg("--skill")
-                .arg(skill_path)
-                .env("GODDARD_JS_REPL_SERVER", executable)
-                .envs(env);
-        }
-    }
-}
-
 impl PiDriver {
     pub fn start(
         flavor: PiFlavor,
@@ -265,13 +248,7 @@ impl PiDriver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(&mut mcp_servers, computer_use.as_ref());
-        let pi_extension = computer_use
-            .as_ref()
-            .filter(|_| flavor == PiFlavor::Pi)
-            .map(|_| crate::computer_use::pi_extension_path())
-            .transpose()?;
+
         // Pi has no built-in subagent tool, so delegation arrives as a
         // goddard-owned extension: a `goddard_delegate` tool that runs `pi -p`
         // subprocesses on the spec's models. The file lives in Goddard's
@@ -300,16 +277,7 @@ impl PiDriver {
         if flavor.skips_version_check_by_env() {
             command.env("PI_SKIP_VERSION_CHECK", "1");
         }
-        configure_pi_computer_use_command(
-            command.command_mut(),
-            computer_use
-                .as_ref()
-                .zip(pi_extension.as_deref())
-                .and_then(|(runtime, extension)| {
-                    let server = super::computer_use::mcp_server_spec(&mcp_servers, Some(runtime))?;
-                    Some((server, runtime.config.skill_path.as_path(), extension))
-                }),
-        );
+
         if flavor == PiFlavor::OhMyPi
             && let Some(runtime) = computer_use.as_ref()
             && !mcp_servers.is_empty()
@@ -834,6 +802,12 @@ impl PiDriver {
 }
 
 impl DriverControl for PiDriver {
+    fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
+    }
+
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
     }
@@ -944,6 +918,7 @@ impl DriverControl for PiDriver {
 
 impl Drop for PiDriver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         self.cancel_computer_use();
         let _ = self.commands.send(CommandMessage::Shutdown);
     }
@@ -2011,62 +1986,6 @@ mod tests {
         assert!(command_rx.try_recv().is_err());
     }
 
-    #[test]
-    fn pi_computer_use_uses_only_session_scoped_extension_and_skill_arguments() {
-        let config = computer_use_runtime::ComputerUseConfig {
-            server_path: PathBuf::from("/tmp/Goddard Computer Use"),
-            repl_path: PathBuf::from("/Applications/Goddard.app/Resources/goddard_js_repl"),
-            skill_path: PathBuf::from("/Applications/Goddard.app/Resources/skills/SKILL.md"),
-            process_directory: PathBuf::from("/tmp/goddard-computer-use/session"),
-        };
-        let mut command = std::process::Command::new("pi");
-
-        configure_pi_computer_use_command(
-            &mut command,
-            Some((
-                config.mcp_server(),
-                Path::new("/Applications/Goddard.app/Resources/skills/SKILL.md"),
-                Path::new("/Applications/Goddard.app/Resources/computer-use/pi-extension.ts"),
-            )),
-        );
-
-        let arguments = command
-            .get_args()
-            .map(|argument| argument.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            arguments,
-            [
-                "--extension",
-                "/Applications/Goddard.app/Resources/computer-use/pi-extension.ts",
-                "--skill",
-                "/Applications/Goddard.app/Resources/skills/SKILL.md",
-            ]
-        );
-        let environment = command
-            .get_envs()
-            .map(|(name, value)| {
-                (
-                    name.to_string_lossy().into_owned(),
-                    value.map(|value| value.to_string_lossy().into_owned()),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        assert_eq!(
-            environment.get("GODDARD_JS_REPL_SERVER"),
-            Some(&Some(
-                "/Applications/Goddard.app/Resources/goddard_js_repl".into()
-            ))
-        );
-        assert_eq!(
-            environment.get("GODDARD_COMPUTER_USE_PROCESS_DIRECTORY"),
-            Some(&Some("/tmp/goddard-computer-use/session".into()))
-        );
-    }
-
-    /// `goddard_delegate` runs a helper `pi -p` that emits no events of its own,
-    /// so the driver synthesizes the tasks-surface item from the tool call:
-    /// running while it executes, settled at the end, role carried across.
     #[test]
     fn goddard_delegate_calls_emit_subagent_background_work() {
         let (pending, commands, _command_rx, mut state) = harness();

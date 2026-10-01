@@ -3102,6 +3102,20 @@ impl Backend for WakuBackend {
             Command::AgentAsk { questions } => {
                 self.agent_ask(session_id, agent, questions, &events)
             }
+            Command::AgentComputerUse {
+                code,
+                timeout_ms,
+                title,
+            } => self.agent_computer_use(
+                session_id,
+                agent,
+                Some(&code),
+                timeout_ms,
+                title.as_deref(),
+            ),
+            Command::AgentComputerUseReset => {
+                self.agent_computer_use(session_id, agent, None, None, None)
+            }
             Command::AgentListModels => self.agent_model_options(),
             Command::CancelQueuedPrompt { queued_message_id } => {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
@@ -4593,8 +4607,8 @@ impl WakuBackend {
                 spawn_repo_map_refresh(&self.repo_maps, options.cwd.clone());
             }
         }
-        // Connected integrations and Computer Use share one provider-neutral
-        // MCP description. Drivers translate it into their own launch format.
+        // Connected integrations keep their provider-neutral MCP descriptions.
+        // Computer Use is owned separately by the task-scoped CLI service.
         options.mcp_servers = if cloud_launch {
             Vec::new()
         } else {
@@ -4646,8 +4660,8 @@ impl WakuBackend {
         }
         let computer_use_start_error = if options.computer_use_enabled {
             match driver::ComputerUseRuntime::start(event_sender.clone()) {
-                Ok(runtime) => {
-                    options.mcp_servers.push(runtime.mcp_server_spec());
+                Ok(mut runtime) => {
+                    runtime.bind_task(session_id, &options.cwd, self.task_store.blobs());
                     options.computer_use_runtime = Some(runtime);
                     None
                 }
@@ -6076,6 +6090,40 @@ impl WakuBackend {
         Ok(matches)
     }
 
+    fn agent_computer_use(
+        &self,
+        session_id: Uuid,
+        agent: Option<Uuid>,
+        code: Option<&str>,
+        timeout_ms: Option<u64>,
+        title: Option<&str>,
+    ) -> anyhow::Result<ResponsePayload> {
+        // A task-scoped token never chooses another task, even if the wire
+        // envelope was forged. A desktop credential addresses its own task.
+        let task = agent.unwrap_or(session_id);
+        if agent.is_some() && task != session_id {
+            anyhow::bail!("computer use cannot target another task");
+        }
+        {
+            let settings = self.settings.get();
+            if !settings.computer_use_enabled || !settings.computer_use_experiment_enabled {
+                anyhow::bail!("computer use is disabled");
+            }
+        }
+        if !self
+            .sessions
+            .lock()
+            .get(&task)
+            .is_some_and(|runtime| runtime.computer_use_available)
+        {
+            anyhow::bail!("computer use is unavailable for this task");
+        }
+        let service = driver::computer_use_service(task)?;
+        Ok(ResponsePayload::AgentComputerUseResult {
+            result: service.call(code, timeout_ms, title)?,
+        })
+    }
+
     /// `agent ask`: surface the session's ordinary question card and park
     /// this request until the user answers, clarifies, or dismisses — or the
     /// turn underneath it ends. The provider never sees the exchange; to it
@@ -6530,6 +6578,8 @@ fn handle_driver_command(
         | Command::AgentProjectMap { .. }
         | Command::AgentAsk { .. }
         | Command::AgentListModels
+        | Command::AgentComputerUse { .. }
+        | Command::AgentComputerUseReset
         | Command::CancelQueuedPrompt { .. }
         | Command::UpsertCustomCommand { .. }
         | Command::RemoveCustomCommand { .. }
@@ -8813,6 +8863,273 @@ mod tests {
         )
         .unwrap();
         (backend, session_id, side_id)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn computer_use_is_scoped_independently_of_task_and_settings_writes() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = std::env::temp_dir().join(format!("waku-cli-scope-{}", Uuid::new_v4()));
+        let (backend, task, other) = read_scope_test_backend(&root);
+        let repl = root.join("kernel");
+        std::fs::write(
+            &repl,
+            include_str!("driver/fixtures/computer_use_kernel.py"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&repl, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let (events, _received) = crate::driver::test_event_channel();
+        let service = crate::driver::bind_computer_use_for_test(
+            task,
+            repl,
+            &root,
+            events,
+            backend.task_store.blobs(),
+        );
+        let mut settings = backend.settings.get();
+        settings.agent_tools_enabled = false;
+        settings.agent_settings_enabled = false;
+        settings.computer_use_enabled = true;
+        settings.computer_use_experiment_enabled = true;
+        backend.settings.replace(settings.clone()).unwrap();
+        backend.sessions.lock().insert(
+            task,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: true,
+                provider: ProviderKind::Codex,
+                cwd: root.join("repo"),
+            },
+        );
+        assert!(matches!(
+            backend
+                .agent_computer_use(task, Some(task), Some("text"), None, None)
+                .unwrap(),
+            ResponsePayload::AgentComputerUseResult { .. }
+        ));
+        assert!(
+            backend
+                .agent_computer_use(other, Some(task), Some("text"), None, None)
+                .unwrap_err()
+                .to_string()
+                .contains("cannot target another task")
+        );
+        assert!(
+            backend
+                .agent_computer_use(other, Some(other), None, None, None)
+                .unwrap_err()
+                .to_string()
+                .contains("unavailable")
+        );
+        assert!(backend.require_agent_tools().is_err());
+        settings.computer_use_experiment_enabled = false;
+        backend.settings.replace(settings).unwrap();
+        assert!(
+            backend
+                .agent_computer_use(task, Some(task), None, None, None)
+                .unwrap_err()
+                .to_string()
+                .contains("disabled")
+        );
+        service.shutdown();
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "set GODDARD_TEST_AGENT_CLI and GODDARD_TEST_JS_REPL to built executable paths"]
+    fn computer_use_through_the_built_cli_and_scoped_daemon_connection() {
+        let root = std::env::temp_dir().join(format!("waku-cli-wire-{}", Uuid::new_v4()));
+        let (backend, task, other) = read_scope_test_backend(&root);
+        let (events, _received) = crate::driver::test_event_channel();
+        let service = crate::driver::bind_computer_use_for_test(
+            task,
+            std::env::var_os("GODDARD_TEST_JS_REPL").unwrap().into(),
+            &root,
+            events,
+            backend.task_store.blobs(),
+        );
+        let mut settings = backend.settings.get();
+        settings.agent_tools_enabled = false;
+        settings.agent_settings_enabled = false;
+        settings.computer_use_enabled = true;
+        settings.computer_use_experiment_enabled = true;
+        backend.settings.replace(settings).unwrap();
+        backend.sessions.lock().insert(
+            task,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: true,
+                provider: ProviderKind::Codex,
+                cwd: root.join("repo"),
+            },
+        );
+        let token = backend.agent.mint(task);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let backend = Arc::new(backend);
+        let server_backend = backend.clone();
+        let server = std::thread::spawn(move || {
+            crate::server::serve(
+                listener,
+                "test-desktop-token".into(),
+                server_backend,
+                server_shutdown,
+                crate::server::ServerOptions::default(),
+            )
+            .unwrap()
+        });
+        struct Stop(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for Stop {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+        let stop = Stop(shutdown);
+        let run = |id: Uuid, args: &[&str], stdin: Option<&str>| {
+            use std::io::Write as _;
+            let mut child =
+                std::process::Command::new(std::env::var_os("GODDARD_TEST_AGENT_CLI").unwrap())
+                    .env("GODDARD_DAEMON_ADDRESS", address.to_string())
+                    .env("GODDARD_AGENT_TOKEN", &token)
+                    .env("GODDARD_TASK_ID", id.to_string())
+                    .args(args)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap();
+            if let Some(stdin) = stdin {
+                child
+                    .stdin
+                    .as_mut()
+                    .unwrap()
+                    .write_all(stdin.as_bytes())
+                    .unwrap();
+            }
+            drop(child.stdin.take());
+            child.wait_with_output().unwrap()
+        };
+        let first = run(
+            task,
+            &[
+                "computer",
+                "js",
+                r#"{"code":"var persistent = 41; jsRepl.write(persistent);"}"#,
+            ],
+            None,
+        );
+        assert!(
+            first.status.success(),
+            "{}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&first.stdout).unwrap()["content"][0]["text"],
+            "41"
+        );
+        let next = run(
+            task,
+            &["computer", "js", "--stdin"],
+            Some(r#"{"code":"jsRepl.write(++persistent);"}"#),
+        );
+        assert!(
+            next.status.success(),
+            "{}",
+            String::from_utf8_lossy(&next.stderr)
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&next.stdout).unwrap()["content"][0]["text"],
+            "42"
+        );
+        let foreign = run(other, &["computer", "reset"], None);
+        assert!(!foreign.status.success());
+        assert!(String::from_utf8_lossy(&foreign.stderr).contains("cannot target another task"));
+        let error = run(
+            task,
+            &[
+                "computer",
+                "js",
+                r#"{"code":"throw new Error('expected CLI failure');"}"#,
+            ],
+            None,
+        );
+        assert!(!error.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&error.stdout).unwrap()["isError"],
+            true
+        );
+        let image = run(
+            task,
+            &[
+                "computer",
+                "js",
+                r#"{"code":"await jsRepl.emitImage('data:image/png;base64,aGVsbG8=');"}"#,
+            ],
+            None,
+        );
+        assert!(image.status.success());
+        let result: Value = serde_json::from_slice(&image.stdout).unwrap();
+        let image = result["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "image")
+            .unwrap();
+        assert_eq!(
+            std::fs::read(image["path"].as_str().unwrap()).unwrap(),
+            b"hello"
+        );
+        assert!(run(task, &["computer", "reset"], None).status.success());
+        let reset = run(
+            task,
+            &[
+                "computer",
+                "js",
+                r#"{"code":"jsRepl.write(typeof persistent);"}"#,
+            ],
+            None,
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&reset.stdout).unwrap()["content"][0]["text"],
+            "undefined"
+        );
+        // Neither unrelated feature becomes reachable merely because CUA works.
+        assert!(
+            !run(
+                task,
+                &[
+                    "prompt",
+                    r#"{"task_id":"00000000-0000-0000-0000-000000000001","prompt":"no"}"#
+                ],
+                None
+            )
+            .status
+            .success()
+        );
+        assert!(
+            !run(
+                task,
+                &["command", "upsert", r#"{"name":"no","script":"true"}"#],
+                None
+            )
+            .status
+            .success()
+        );
+        service.shutdown();
+        drop(stop);
+        server.join().unwrap();
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

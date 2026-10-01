@@ -222,7 +222,7 @@ pub struct OpenCodeDriver {
     permissions: Arc<Mutex<OpenCodePermissionState>>,
     event_stream: Arc<StreamControl>,
     mode: RuntimeMode,
-    computer_use: Option<super::support::HeadlessComputerUseRuntime>,
+    computer_use: Option<super::computer_use::ComputerUseRuntime>,
     announced_agent_surface: bool,
 }
 
@@ -269,38 +269,25 @@ impl OpenCodeDriver {
             computer_use_runtime,
             events.clone(),
         )?;
-        let mut mcp_servers = mcp_servers;
-        super::computer_use::ensure_runtime_server_spec(
-            &mut mcp_servers,
-            computer_use_runtime.as_ref(),
-        );
-        let computer_use = computer_use_runtime
-            .map(|runtime| {
-                let server = super::computer_use::mcp_server_spec(&mcp_servers, Some(&runtime))
-                    .expect("Computer Use runtime has an MCP server spec");
-                super::support::HeadlessComputerUseRuntime::from_runtime(
-                    crate::model::ProviderKind::OpenCode,
-                    runtime,
-                    server,
-                )
-            })
-            .transpose()?;
-        // The one-shot path handed Computer Use to OpenCode through the
-        // environment; the resident server takes it exactly the same way.
-        let mut environment = computer_use
-            .as_ref()
-            .map(|runtime| super::support::opencode_computer_use_environment(&runtime.config))
-            .unwrap_or_default();
+
+        let computer_use = computer_use_runtime;
+        let mut environment = Vec::new();
         if let Some(agent_env) = &agent_env {
             crate::command_env::merge_agent_environment(&mut environment, agent_env);
         }
         // Subagent definitions and connected integrations merge into one
         // `OPENCODE_CONFIG_CONTENT` document layered over the user's files.
-        let mut config_doc = environment
-            .iter()
-            .find(|(name, _)| name == "OPENCODE_CONFIG_CONTENT")
-            .and_then(|(_, content)| serde_json::from_str::<Value>(content).ok())
-            .unwrap_or_else(|| json!({}));
+        let mut config_doc = match std::env::var("OPENCODE_CONFIG_CONTENT") {
+            Ok(content) => serde_json::from_str::<Value>(&content)
+                .context("OPENCODE_CONFIG_CONTENT is invalid JSON")?,
+            Err(std::env::VarError::NotPresent) => json!({}),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                anyhow::bail!("OPENCODE_CONFIG_CONTENT is not valid UTF-8")
+            }
+        };
+        if !config_doc.is_object() {
+            anyhow::bail!("OPENCODE_CONFIG_CONTENT must contain a JSON object");
+        }
         if let Some(subagent_doc) = subagents
             .as_ref()
             .and_then(crate::subagents::opencode_config_json)
@@ -855,6 +842,12 @@ impl OpenCodeDriver {
 }
 
 impl DriverControl for OpenCodeDriver {
+    fn begin_shutdown(&self) {
+        if let Some(runtime) = &self.computer_use {
+            runtime.begin_shutdown();
+        }
+    }
+
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
     }
@@ -945,6 +938,7 @@ impl DriverControl for OpenCodeDriver {
 
 impl Drop for OpenCodeDriver {
     fn drop(&mut self) {
+        self.begin_shutdown();
         self.cancel_computer_use();
         self.event_stream.cancel();
         // The worker owns the other server lease. Release the UI-owned lease

@@ -5,8 +5,31 @@ description: Control local macOS, Windows, and Linux apps through Goddard Comput
 
 # Goddard Computer Use
 
-Use the `js` tool from `goddard_js_repl` for computer interactions. It runs a
-persistent QuickJS kernel. Use the direct `cua` methods documented here;
+Use `goddard-agent computer js` for computer interactions. If Goddard's
+session instructions supply an absolute launcher path, use that launcher
+instead of `goddard-agent`. It runs a persistent QuickJS kernel scoped to this
+task; calls and turns share bindings, and other tasks have separate kernels.
+
+Pass one JSON object, or use `--stdin` for longer scripts:
+
+```sh
+goddard-agent computer js '{"code":"jsRepl.write(1 + 1)","title":"Check runtime","timeout_ms":10000}'
+goddard-agent computer js --stdin <<'JSON'
+{"code":"if (!globalThis.cua) { await setupComputerUseRuntime({ globals: globalThis }); }"}
+JSON
+```
+
+`goddard-agent computer reset` resets this task's kernel. Results preserve text,
+errors, and metadata. Image blocks contain `path` and `mimeType`; open each
+returned image path with your provider's image-reading tool to see screenshots.
+Paths are on the task's daemon host, where its provider runs. Goddard stores
+emitted images as transcript blobs; runtime teardown does not remove screenshots
+that a retained transcript still references. A JavaScript error returns `isError: true` and a nonzero CLI
+exit status. A lost transport response must not be retried automatically:
+the action may already have run. A new call after transport failure starts a
+fresh kernel. Computer use remains unavailable in cloud and sandbox tasks.
+
+ Use the direct `cua` methods documented here;
 all methods are available immediately after bootstrap. Goddard shows Cua's native
 virtual cursor automatically while actions run; no cursor setup is needed.
 
@@ -20,14 +43,14 @@ if (!globalThis.cua) {
 }
 ```
 
-After `js_reset`, bootstrap again before using `cua`. Module imports and Node
+After `computer reset`, bootstrap again before using `cua`. Module imports and Node
 subprocess APIs are unavailable. The native runtime is managed by Goddard.
 The first access to an app, browser tabs, the clipboard, or the whole desktop
 may pause until the user approves it in Goddard. A denial ends that call;
 do not retry it without a new user request. Full access does not skip this gate.
 
 Use `jsRepl.write(value)` for text or structured output and
-`await jsRepl.emitImage(image)` to show a returned image. Prefer top-level `var`
+`await jsRepl.emitImage(image)` to return an image path and show it in Goddard. Prefer top-level `var`
 for names reused across calls. Calls allow up to 5 minutes so a user can answer
 an access request. Set a shorter `timeout_ms` for quick observations when useful.
 

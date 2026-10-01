@@ -146,9 +146,14 @@ impl BlobStore {
             }
         }
         fs::create_dir_all(&directory)?;
-        let temporary = path.with_extension("tmp");
+        // Separate tasks may emit identical screenshots concurrently. Each
+        // writer needs its own staging file before the atomic rename.
+        let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
         fs::write(&temporary, bytes)?;
-        fs::rename(&temporary, &path)?;
+        if let Err(error) = fs::rename(&temporary, &path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
         self.written_bytes
             .fetch_add(bytes.len() as u64, Ordering::Relaxed);
         Ok(())
@@ -232,6 +237,39 @@ mod tests {
             "data:{mime_type};base64,{}",
             base64::engine::general_purpose::STANDARD.encode(bytes)
         )
+    }
+
+    #[test]
+    fn concurrent_identical_images_share_one_complete_blob() {
+        let root = temporary_root();
+        let store = std::sync::Arc::new(BlobStore::new(root.clone()));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let store = store.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store
+                        .store_image_bytes("image/png", &vec![42; 100_000])
+                        .unwrap()
+                })
+            })
+            .collect();
+        let references: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert!(
+            references
+                .iter()
+                .all(|reference| reference == &references[0])
+        );
+        assert_eq!(
+            fs::read(store.path_for(&references[0]).unwrap()).unwrap(),
+            vec![42; 100_000]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

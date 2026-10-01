@@ -352,13 +352,8 @@ pub(crate) fn deepseek_overlay_yaml(servers: &[McpServerSpec]) -> String {
                     .expect("authorization header is valid JSON"),
             ));
         } else if let Some((name, command, env)) = server.stdio_parts() {
-            let id = if name == crate::driver::MCP_SERVER_NAME {
-                "goddard-computer-use"
-            } else {
-                name
-            };
             yaml.push_str(&format!(
-                "- id: {id}\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: {name}\n    transport: stdio\n    command: {}\n    args: []\n    env:\n",
+                "- id: {name}\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: {name}\n    transport: stdio\n    command: {}\n    args: []\n    env:\n",
                 serde_json::to_string(&command.display().to_string())
                     .expect("command path is valid JSON"),
             ));
@@ -367,9 +362,6 @@ pub(crate) fn deepseek_overlay_yaml(servers: &[McpServerSpec]) -> String {
                     "      {key}: {}\n",
                     serde_json::to_string(value).expect("environment value is valid JSON"),
                 ));
-            }
-            if name == crate::driver::MCP_SERVER_NAME {
-                yaml.push_str("    toolCallTimeoutMs: 300000\n");
             }
         }
     }
