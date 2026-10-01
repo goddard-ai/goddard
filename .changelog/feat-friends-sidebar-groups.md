@@ -1,1 +1,1 @@
-- Friend-delivered chats, files, and folders now share the Friends group; each task shows its sender, and file senders can set a display title. Delivery tasks start with Full access inside Sandbox while received files stay quarantined until you trust them.
+- Friend-delivered chats, files, and folders now share the Friends group; each task shows its sender, file senders can set a display title, and the quarantine banner refers to a delivery as a task. Delivery tasks start with Full access inside Sandbox while received files stay quarantined until you trust them.

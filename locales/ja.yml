@@ -2352,7 +2352,7 @@ friends.no_projects_hint: プロジェクトを追加するとフレンドと共
 friends.online: オンライン
 friends.open_chat: チャットを開く
 friends.pending: 保留中
-friends.quarantined_hint: このセッションにはフレンドから受信したファイルがあります。隔離されたままチャットは使えます — 空の入力欄で Enter を押すとファイルとメモがエージェントに渡されます。
+friends.quarantined_hint: このタスクにはフレンドから受信したファイルがあります。隔離されたままチャットは使えます — 空の入力欄で Enter を押すとファイルとメモがエージェントに渡されます。
 friends.quarantined_title: 隔離されたファイル
 friends.remove: 削除
 friends.requests: リクエスト

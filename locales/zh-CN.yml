@@ -2303,7 +2303,7 @@ friends.no_projects_hint: 添加一个项目即可与好友分享。
 friends.online: 在线
 friends.open_chat: 打开聊天
 friends.pending: 待处理
-friends.quarantined_hint: 此会话持有从好友处收到的文件。文件隔离期间聊天可正常使用 — 在输入框为空时按 Enter 会把文件和备注交给智能体。
+friends.quarantined_hint: 此任务包含从好友处收到的文件。文件隔离期间聊天可正常使用 — 在输入框为空时按 Enter 会把文件和备注交给智能体。
 friends.quarantined_title: 隔离的文件
 friends.remove: 移除
 friends.requests: 请求
