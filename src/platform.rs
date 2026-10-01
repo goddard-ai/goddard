@@ -338,10 +338,10 @@ pub fn play_completion_sound(_: waku_client::persistence::CompletionSound, _: f3
 /// `AVAudioPlayer` decodes (the gateway returns WAV or MP3 depending on the
 /// model). Reuses the completion-sound volume so the experiment honors the
 /// existing slider.
-/// Returns whether playback actually started. Other platforms have no
-/// playback implementation yet and return `false`.
+/// Returns the clip's duration when playback starts. Other platforms have no
+/// playback implementation yet and return `None`.
 #[cfg(target_os = "macos")]
-pub fn play_briefing_audio(bytes: &[u8], volume: f32) -> bool {
+pub fn play_briefing_audio(bytes: &[u8], volume: f32) -> Option<std::time::Duration> {
     use objc2::AnyThread;
     use objc2_avf_audio::AVAudioPlayer;
     use objc2_foundation::NSData;
@@ -350,23 +350,83 @@ pub fn play_briefing_audio(bytes: &[u8], volume: f32) -> bool {
     let data = NSData::with_bytes(bytes);
     let Ok(player) = (unsafe { AVAudioPlayer::initWithData_error(AVAudioPlayer::alloc(), &data) })
     else {
-        return false;
+        return None;
     };
+    let duration = std::time::Duration::try_from_secs_f64(unsafe { player.duration() }).ok()?;
+    if duration.is_zero() {
+        return None;
+    }
     unsafe {
         player.setVolume(volume);
         if player.play() {
             PLAYING_BRIEFING.with_borrow_mut(|slot| *slot = Some(player));
-            true
+            Some(duration)
         } else {
-            false
+            None
         }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn play_briefing_audio(_: &[u8], _: f32) -> bool {
-    false
+pub fn play_briefing_audio(_: &[u8], _: f32) -> Option<std::time::Duration> {
+    None
 }
+
+#[cfg(target_os = "macos")]
+pub fn pause_briefing_audio() -> Option<std::time::Duration> {
+    PLAYING_BRIEFING.with_borrow(|slot| {
+        let player = slot.as_ref()?;
+        unsafe { player.pause() };
+        briefing_audio_status().map(|(_, remaining)| remaining)
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn pause_briefing_audio() -> Option<std::time::Duration> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+pub fn resume_briefing_audio() -> Option<std::time::Duration> {
+    PLAYING_BRIEFING.with_borrow(|slot| {
+        let player = slot.as_ref()?;
+        if !unsafe { player.play() } {
+            return None;
+        }
+        briefing_audio_status().map(|(_, remaining)| remaining)
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn resume_briefing_audio() -> Option<std::time::Duration> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+pub fn briefing_audio_status() -> Option<(bool, std::time::Duration)> {
+    PLAYING_BRIEFING.with_borrow(|slot| {
+        let player = slot.as_ref()?;
+        let (playing, current_time, duration) = unsafe {
+            (player.isPlaying(), player.currentTime(), player.duration())
+        };
+        let remaining = std::time::Duration::try_from_secs_f64((duration - current_time).max(0.0))
+            .ok()?;
+        Some((playing, remaining))
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn briefing_audio_status() -> Option<(bool, std::time::Duration)> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+pub fn stop_briefing_audio() {
+    PLAYING_BRIEFING.with_borrow_mut(|slot| *slot = None);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn stop_briefing_audio() {}
 
 #[cfg(target_os = "macos")]
 fn app_icon_for_application_path(

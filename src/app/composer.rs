@@ -5722,6 +5722,11 @@ impl Waku {
         // compositing over it.
         let drop_wash = theme.composer.blend(theme.overlay_strong);
         let drop_ring = theme.accent.opacity(0.7);
+        let playback = if interactive {
+            self.voice_briefing_playback_status()
+        } else {
+            None
+        };
         let send_route = surface.clone();
         let queue_route = surface.clone();
         let continue_route = surface.clone();
@@ -5823,6 +5828,60 @@ impl Waku {
                     })
             })
             .children(self.render_annotation_chip_for(surface, cx))
+            .when_some(playback, |card, playback| {
+                let (icon_path, label) = if playback.playing {
+                    ("icons/pause.svg", tr!("automations.pause"))
+                } else {
+                    ("icons/play.svg", tr!("automations.resume"))
+                };
+                let seconds = playback.remaining.as_secs();
+                let time_remaining = format!("{:02}:{:02}", seconds / 60, seconds % 60);
+                card.child(
+                    div()
+                        .mx(px(10.0))
+                        .mb(px(6.0))
+                        .px(px(8.0))
+                        .py(px(5.0))
+                        .rounded(px(10.0))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.raised)
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .id("voice-briefing-playback-toggle")
+                                .tab_index(0)
+                                .h(px(28.0))
+                                .px(px(8.0))
+                                .rounded(px(8.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .cursor_default()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text)
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                .hover(|style| style.bg(theme.overlay))
+                                .child(icon(icon_path, 14.0, theme.text))
+                                .child(label)
+                                .on_activation(cx, |this, _, cx| {
+                                    this.toggle_voice_briefing_playback(cx);
+                                }),
+                        )
+                        .child(div().flex_1())
+                        .child(
+                            div()
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!(
+                                    "experiments.voice_briefing_time_remaining",
+                                    time = time_remaining
+                                )),
+                        ),
+                )
+            })
             .child(div().pt(px(2.0)).child(composer))
             // The paste chip's floating editor, anchored below the
             // atom's painted label.

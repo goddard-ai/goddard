@@ -963,6 +963,8 @@ experiments.voice_briefing_gate_example_blockers:
   en: Prioritize failures, blockers, and unexpected changes that need my attention.
 experiments.voice_briefing_gate_example_risks:
   en: Brief me when a meaningful result changes the plan or reveals a risk; skip status-only updates.
+experiments.voice_briefing_time_remaining:
+  en: "%{time} remaining"
 experiments.voice_briefing_gate_needs_eval:
   en: No eval backend is configured — the gate never runs, so every briefing generates. Set one up on the Jev page.
 experiments.memory_title:

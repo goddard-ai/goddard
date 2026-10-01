@@ -2312,6 +2312,7 @@ experiments.voice_briefing_gate_examples: 例（クリックして追加）
 experiments.voice_briefing_gate_example_decision: 返信で判断や対応が必要な場合のみ知らせ、通常の進捗報告は省いてください。
 experiments.voice_briefing_gate_example_blockers: 対応が必要な失敗、ブロッカー、予期しない変更を優先して知らせてください。
 experiments.voice_briefing_gate_example_risks: 重要な結果で計画が変わる場合やリスクが見つかった場合に知らせ、状況だけの更新は省いてください。
+experiments.voice_briefing_time_remaining: 残り %{time}
 experiments.voice_briefing_gate_needs_eval: 評価バックエンドが未設定です — ゲートは実行されず、毎回ブリーフィングが生成されます。Jev ページで設定してください。
 friends.a_friend: フレンド
 friends.abort_sync: 中止

@@ -2126,6 +2126,12 @@ impl Default for ActivityScrollViewport {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct VoiceBriefingPlayback {
+    pub(super) playing: bool,
+    pub(super) remaining: std::time::Duration,
+}
+
 pub struct Waku {
     /// Owns the headless provider process for exactly as long as the desktop
     /// app entity. Debug builds can replace it independently after a rebuild;
@@ -2302,6 +2308,8 @@ pub struct Waku {
     /// Insertion order for `briefing_clips` eviction — the cache is a small
     /// FIFO, not a library.
     briefing_clip_order: VecDeque<Uuid>,
+    voice_briefing_playback: Option<VoiceBriefingPlayback>,
+    voice_briefing_playback_generation: u64,
     /// Pipelines in flight per reply message; the bool marks an activation
     /// waiting on the clip, which plays the moment it lands.
     briefing_pending: HashMap<Uuid, bool>,
@@ -6433,6 +6441,8 @@ impl Waku {
                 briefed_messages: HashSet::new(),
                 briefing_clips: HashMap::new(),
                 briefing_clip_order: VecDeque::new(),
+                voice_briefing_playback: None,
+                voice_briefing_playback_generation: 0,
                 briefing_pending: HashMap::new(),
                 briefing_gate_pending: HashMap::new(),
                 eval_probe_pending: false,

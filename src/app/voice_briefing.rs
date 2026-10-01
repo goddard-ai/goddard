@@ -120,10 +120,8 @@ impl Waku {
         if self.briefed_messages.contains(&message_id) {
             return;
         }
-        if let Some(bytes) = self.briefing_clips.get(&message_id) {
-            if crate::platform::play_briefing_audio(bytes, self.state.completion_sound_volume) {
-                self.mark_briefed(message_id);
-            } else {
+        if self.briefing_clips.contains_key(&message_id) {
+            if !self.play_voice_briefing_clip(message_id, cx) {
                 self.show_toast(tr!("errors.voice_briefing_playback"));
             }
             return;
@@ -328,12 +326,7 @@ impl Waku {
             return;
         }
         if self.briefing_clips.contains_key(&message_id) {
-            let started = self.briefing_clips.get(&message_id).is_some_and(|bytes| {
-                crate::platform::play_briefing_audio(bytes, self.state.completion_sound_volume)
-            });
-            if started {
-                self.mark_briefed(message_id);
-            } else {
+            if !self.play_voice_briefing_clip(message_id, cx) {
                 self.show_toast(tr!("errors.voice_briefing_playback"));
             }
             return;
@@ -423,6 +416,104 @@ impl Waku {
             .map(|message| message.id)
             .filter(|message_id| self.voice_briefing_in_flight(*message_id))
             .collect()
+    }
+
+    pub(super) fn voice_briefing_playback_status(&self) -> Option<super::VoiceBriefingPlayback> {
+        self.voice_briefing_playback
+    }
+
+    pub(super) fn toggle_voice_briefing_playback(&mut self, cx: &mut Context<Self>) {
+        let Some(playback) = self.voice_briefing_playback else {
+            return;
+        };
+        self.voice_briefing_playback_generation =
+            self.voice_briefing_playback_generation.wrapping_add(1);
+        let remaining = if playback.playing {
+            crate::platform::pause_briefing_audio()
+        } else {
+            crate::platform::resume_briefing_audio()
+        };
+        let Some(remaining) = remaining else {
+            crate::platform::stop_briefing_audio();
+            self.voice_briefing_playback = None;
+            cx.notify();
+            return;
+        };
+        if remaining.is_zero() {
+            crate::platform::stop_briefing_audio();
+            self.voice_briefing_playback = None;
+            cx.notify();
+            return;
+        }
+
+        let playing = !playback.playing;
+        self.voice_briefing_playback = Some(super::VoiceBriefingPlayback { playing, remaining });
+        if playing {
+            self.schedule_voice_briefing_playback_tick(cx);
+        }
+        cx.notify();
+    }
+
+    fn play_voice_briefing_clip(&mut self, message_id: Uuid, cx: &mut Context<Self>) -> bool {
+        let Some(duration) = self.briefing_clips.get(&message_id).and_then(|bytes| {
+            crate::platform::play_briefing_audio(bytes, self.state.completion_sound_volume)
+        }) else {
+            return false;
+        };
+        self.mark_briefed(message_id);
+        self.track_voice_briefing_playback(duration, cx);
+        true
+    }
+
+    fn track_voice_briefing_playback(&mut self, remaining: Duration, cx: &mut Context<Self>) {
+        self.voice_briefing_playback_generation =
+            self.voice_briefing_playback_generation.wrapping_add(1);
+        self.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
+            playing: true,
+            remaining,
+        });
+        self.schedule_voice_briefing_playback_tick(cx);
+        cx.notify();
+    }
+
+    fn schedule_voice_briefing_playback_tick(&self, cx: &mut Context<Self>) {
+        let generation = self.voice_briefing_playback_generation;
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let updated = weak.update(cx, |this, cx| {
+                    if this.voice_briefing_playback_generation != generation {
+                        return false;
+                    }
+                    let Some((playing, remaining)) = crate::platform::briefing_audio_status()
+                    else {
+                        crate::platform::stop_briefing_audio();
+                        this.voice_briefing_playback = None;
+                        this.voice_briefing_playback_generation =
+                            this.voice_briefing_playback_generation.wrapping_add(1);
+                        cx.notify();
+                        return false;
+                    };
+                    if remaining.is_zero() {
+                        crate::platform::stop_briefing_audio();
+                        this.voice_briefing_playback = None;
+                        this.voice_briefing_playback_generation =
+                            this.voice_briefing_playback_generation.wrapping_add(1);
+                        cx.notify();
+                        return false;
+                    }
+                    this.voice_briefing_playback =
+                        Some(super::VoiceBriefingPlayback { playing, remaining });
+                    cx.notify();
+                    playing
+                });
+                if !matches!(updated, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     /// Run the summarize → speak pipeline for one reply. `play` decides
@@ -518,16 +609,7 @@ impl Waku {
                             // AVAudioPlayer must start on the UI thread, so
                             // the bytes ride the spawn back rather than
                             // playing from the executor.
-                            let started =
-                                this.briefing_clips.get(&message_id).is_some_and(|bytes| {
-                                    crate::platform::play_briefing_audio(
-                                        bytes,
-                                        this.state.completion_sound_volume,
-                                    )
-                                });
-                            if started {
-                                this.mark_briefed(message_id);
-                            } else {
+                            if !this.play_voice_briefing_clip(message_id, cx) {
                                 this.show_toast(tr!("errors.voice_briefing_playback"));
                             }
                         }

@@ -2263,6 +2263,7 @@ experiments.voice_briefing_gate_examples: 示例（点击添加）
 experiments.voice_briefing_gate_example_decision: 仅当回复需要我作出决定或采取行动时才播报；跳过常规进度更新。
 experiments.voice_briefing_gate_example_blockers: 优先播报需要我关注的失败、阻塞或意外变化。
 experiments.voice_briefing_gate_example_risks: 当重要结果改变计划或揭示风险时播报；跳过纯状态更新。
+experiments.voice_briefing_time_remaining: 剩余 %{time}
 experiments.voice_briefing_gate_needs_eval: 未配置评估后端——门控不会运行，因此每次都会生成简报。请在 Jev 页面设置。
 friends.a_friend: 一位好友
 friends.abort_sync: 中止
