@@ -11,6 +11,11 @@ pub(super) struct TerminalRecord {
     /// workspace at spawn time, so the terminal follows the workspace
     /// when it moves; `Some` pins the terminal to a chosen directory.
     pub working_directory: Option<PathBuf>,
+    /// The shell's latest prompt-reported cwd, persisted for restart.
+    pub last_working_directory: Option<PathBuf>,
+    /// Workspace path used to detect a moved workspace. It stays at the
+    /// workspace root even when a restored shell starts in a nested cwd.
+    pub workspace_directory: Option<PathBuf>,
     /// When the terminal opened (unix seconds) — the row's "…ago" label
     /// until the view reports a command's start.
     pub opened_at: u64,
@@ -125,6 +130,11 @@ impl Waku {
             .or_else(|| {
                 self.terminal_records
                     .get(&terminal_id)
+                    .and_then(|record| record.last_working_directory.clone())
+            })
+            .or_else(|| {
+                self.terminal_records
+                    .get(&terminal_id)
                     .and_then(|record| self.terminal_spawn_directory(record))
             })
     }
@@ -216,11 +226,29 @@ impl Waku {
         if self.terminal_records.contains_key(&terminal_id) {
             return;
         }
+        let workspace_directory = working_directory
+            .is_none()
+            .then(|| {
+                session
+                    .and_then(|session_id| {
+                        self.state
+                            .sessions
+                            .iter()
+                            .find(|session| session.id == session_id)
+                    })
+                    .and_then(|session| self.workspace_path_for_session(session))
+                    .map(Path::to_path_buf)
+            })
+            .flatten();
         self.terminal_records.insert(
             terminal_id,
             TerminalRecord {
                 session,
                 pinned: false,
+                last_working_directory: working_directory
+                    .clone()
+                    .or_else(|| workspace_directory.clone()),
+                workspace_directory,
                 working_directory,
                 opened_at: unix_time(),
                 custom_title: None,
@@ -255,6 +283,13 @@ impl Waku {
         self.terminal_order.retain(|id| *id != terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
         self.session_navigation.remove_terminal(terminal_id);
+        self.terminal_restore_directories.remove(&terminal_id);
+        let scrollback_path = self.store.terminal_scrollback_path(terminal_id);
+        cx.background_executor()
+            .spawn(async move {
+                let _ = std::fs::remove_file(scrollback_path);
+            })
+            .detach();
         if self.terminal_rename == Some(terminal_id) {
             self.terminal_rename = None;
         }
@@ -293,6 +328,7 @@ impl Waku {
             let window_handle = self.window_handle;
             let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
         }
+        self.save();
     }
 
     /// Move a session-scoped terminal out of every session strip and into
@@ -312,6 +348,11 @@ impl Waku {
                 .get(&terminal_id)
                 .map(|terminal| terminal.read(cx).working_directory().to_path_buf());
         }
+        record.last_working_directory = record
+            .working_directory
+            .clone()
+            .or_else(|| record.last_working_directory.clone());
+        record.workspace_directory = None;
         // The live strip is the terminal's own when it fills the main area —
         // its tab belongs there; anywhere else it sat on a session's loan.
         if self.right_panel_live_owner != RightPanelOwner::Terminal(terminal_id)
@@ -377,6 +418,7 @@ impl Waku {
         // hides and the vanished tab reads as a kill after all.
         self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
         self.show_toast(tr!("terminal.moved_to_group"));
+        self.save();
         cx.notify();
     }
 
@@ -399,17 +441,48 @@ impl Waku {
             .or_else(|| command.cloned().map(TerminalLaunch::CustomCommand))
             .unwrap_or(TerminalLaunch::Shell);
         let close_on_exit = command.is_some_and(|command| command.close_on_success);
-        let view = if self.is_remote_path(&working_directory) {
-            let daemon = self.daemon_for_path(&working_directory);
+        let restored_working_directory = self
+            .terminal_restore_directories
+            .remove(&terminal_id)
+            .filter(|path| self.is_remote_path(path) || path.is_dir());
+        let launch_directory = restored_working_directory.unwrap_or(working_directory.clone());
+        let workspace_directory = self
+            .terminal_records
+            .get(&terminal_id)
+            .filter(|record| record.working_directory.is_none())
+            .map(|_| working_directory.clone());
+        if let Some(record) = self.terminal_records.get_mut(&terminal_id) {
+            record.workspace_directory = workspace_directory;
+            if record.last_working_directory.is_none() {
+                record.last_working_directory = Some(launch_directory.clone());
+            }
+        }
+        let scrollback_path = Some(self.store.terminal_scrollback_path(terminal_id));
+        let view = if self.is_remote_path(&launch_directory) {
+            let daemon = self.daemon_for_path(&launch_directory);
             let owner = self
                 .terminal_records
                 .get(&terminal_id)
                 .and_then(|record| record.session);
             cx.new(|cx| {
-                TerminalView::remote(daemon, terminal_id, working_directory.clone(), owner, cx)
+                TerminalView::remote_with_scrollback(
+                    daemon,
+                    terminal_id,
+                    launch_directory.clone(),
+                    owner,
+                    scrollback_path,
+                    cx,
+                )
             })
         } else {
-            cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx))
+            cx.new(|cx| {
+                TerminalView::with_launch_and_scrollback(
+                    launch_directory.clone(),
+                    launch,
+                    scrollback_path,
+                    cx,
+                )
+            })
         };
         cx.subscribe(&view, move |this, view, event: &TerminalViewEvent, cx| {
             match event {
@@ -467,10 +540,25 @@ impl Waku {
                 // the repo scan re-run on its own. A `cd` in the terminal
                 // on screen also re-roots the panel's files.
                 TerminalViewEvent::ActivityChanged => {
+                    let cwd = view.read(cx).working_directory().to_path_buf();
+                    let cwd_changed =
+                        this.terminal_records
+                            .get_mut(&terminal_id)
+                            .is_some_and(|record| {
+                                if record.last_working_directory.as_ref() == Some(&cwd) {
+                                    false
+                                } else {
+                                    record.last_working_directory = Some(cwd);
+                                    true
+                                }
+                            });
                     if this.selected_terminal == Some(terminal_id)
                         && this.sync_right_panel_files_root(cx)
                     {
                         this.refresh_right_panel_working_tree(cx);
+                    }
+                    if cwd_changed {
+                        this.save();
                     }
                     cx.notify()
                 }
@@ -706,6 +794,7 @@ impl Waku {
         self.spawn_terminal_entity(terminal_id, working_directory, cx);
         self.analytics
             .track(crate::analytics::Event::TerminalOpened { kind });
+        self.save();
         cx.notify();
         Some(terminal_id)
     }
@@ -835,6 +924,7 @@ impl Waku {
                     terminal.set_custom_title(Some(title), cx);
                 });
             }
+            self.save();
         }
         cx.notify();
     }
@@ -877,7 +967,7 @@ impl Waku {
     /// The state half of activation — spawn the view if needed, record the
     /// visit, move selection — returning the terminal's focus handle so a
     /// caller with or without a `Window` can aim it.
-    fn activate_terminal_state(
+    pub(super) fn activate_terminal_state(
         &mut self,
         terminal_id: Uuid,
         record_visit: bool,
@@ -1133,9 +1223,11 @@ impl Waku {
             return None;
         };
         record.pinned = !record.pinned;
+        let pinned = record.pinned;
         self.sidebar_rows_fingerprint.set(None);
+        self.save();
         cx.notify();
-        Some(record.pinned)
+        Some(pinned)
     }
 
     /// Close a terminal wherever it lives — the active session's tab
@@ -1752,6 +1844,8 @@ mod tests {
             session: None,
             pinned,
             working_directory: None,
+            last_working_directory: None,
+            workspace_directory: None,
             opened_at: 0,
             custom_title: None,
         };

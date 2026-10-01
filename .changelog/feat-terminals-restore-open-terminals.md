@@ -1,0 +1,1 @@
+- Open terminals now return after restart as fresh shells at their last reported working directory, with recent plain-text scrollback restored above the prompt.
