@@ -169,6 +169,7 @@ impl CopilotDriver {
             eval,
             sandbox: _,
             allow_model_fallback: _,
+            distillation: _,
             ephemeral: _,
         } = options;
         let resume_session_id = match provider_cursor {
@@ -1425,6 +1426,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                distillation: false,
                 ephemeral: false,
                 binary,
                 cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
@@ -1490,6 +1492,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                distillation: false,
                 ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),

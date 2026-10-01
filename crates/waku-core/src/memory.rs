@@ -1226,6 +1226,7 @@ fn headless_prompt(
         eval: None,
         sandbox: None,
         allow_model_fallback: true,
+        distillation: true,
         ephemeral: true,
     };
     let handle = driver::start_local(provider, options, sender)

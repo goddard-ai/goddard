@@ -194,6 +194,7 @@ impl ClaudeDriver {
             eval: _,
             sandbox,
             allow_model_fallback: _,
+            distillation: _,
             ephemeral: _,
         } = options;
         let (resume_session_id, resume_at) = match provider_cursor {
@@ -2007,6 +2008,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                distillation: false,
                 ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),
@@ -2085,6 +2087,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                distillation: false,
                 ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),

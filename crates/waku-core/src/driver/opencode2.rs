@@ -436,6 +436,7 @@ impl OpenCode2Driver {
             eval,
             sandbox: _,
             allow_model_fallback: _,
+            distillation: _,
             ephemeral: _,
         } = options;
 
@@ -3534,6 +3535,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                distillation: false,
                 ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),
@@ -3609,6 +3611,7 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
+                    distillation: false,
                     ephemeral: false,
                     binary: binary.clone(),
                     cwd: test_directory.clone(),

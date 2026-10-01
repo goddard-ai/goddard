@@ -40,6 +40,8 @@ const DISABLE_EXTERNAL_COMPUTER_USE_SKILL: &str =
 // override needs a valid stdio command before disabling the bundled server.
 const DISABLE_CODEX_NODE_REPL_COMMAND: &str = "mcp_servers.node_repl.command=\"/usr/bin/true\"";
 const DISABLE_CODEX_NODE_REPL: &str = "mcp_servers.node_repl.enabled=false";
+const DISABLE_CODEX_CUA_REPL_COMMAND: &str = "mcp_servers.cua_repl.command=\"/usr/bin/true\"";
+const DISABLE_CODEX_CUA_REPL: &str = "mcp_servers.cua_repl.enabled=false";
 
 enum CommandMessage {
     Prompt(String),
@@ -299,6 +301,7 @@ impl CodexThreadLease {
 fn configure_computer_use_command(
     command: &mut Command,
     computer_use_enabled: bool,
+    distillation: bool,
     servers: &[super::McpServerSpec],
 ) {
     if computer_use_enabled {
@@ -310,11 +313,21 @@ fn configure_computer_use_command(
             .arg("-c")
             .arg(DISABLE_EXTERNAL_COMPUTER_USE_MCP)
             .arg("-c")
-            .arg(DISABLE_EXTERNAL_COMPUTER_USE_SKILL)
+            .arg(DISABLE_EXTERNAL_COMPUTER_USE_SKILL);
+    }
+    if computer_use_enabled || distillation {
+        command
             .arg("-c")
             .arg(DISABLE_CODEX_NODE_REPL_COMMAND)
             .arg("-c")
             .arg(DISABLE_CODEX_NODE_REPL);
+        if distillation {
+            command
+                .arg("-c")
+                .arg(DISABLE_CODEX_CUA_REPL_COMMAND)
+                .arg("-c")
+                .arg(DISABLE_CODEX_CUA_REPL);
+        }
     }
     for server in servers {
         if let Some((_, _, token)) = server.http_parts() {
@@ -346,6 +359,7 @@ impl CodexDriver {
             eval: _,
             sandbox,
             allow_model_fallback: _,
+            distillation,
             ephemeral,
         } = options;
         let provider_session_id = match provider_cursor {
@@ -386,7 +400,12 @@ impl CodexDriver {
         let title_sandbox = sandbox.clone();
         let mut command = crate::command_env::command(&binary);
         command.args(["app-server", "--stdio"]);
-        configure_computer_use_command(command.command_mut(), announce_computer_use, &mcp_servers);
+        configure_computer_use_command(
+            command.command_mut(),
+            announce_computer_use,
+            distillation,
+            &mcp_servers,
+        );
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(command.command_mut(), agent);
         }
@@ -3187,6 +3206,7 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
+                    distillation: false,
                     ephemeral: false,
                     binary: binary.clone(),
                     cwd: directory.clone(),
@@ -3269,6 +3289,7 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
+                    distillation: false,
                     ephemeral: false,
                     binary: binary.clone(),
                     cwd: directory.clone(),
@@ -3369,6 +3390,7 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: true,
+                distillation: true,
                 ephemeral: true,
                 binary: binary.clone(),
                 cwd: directory.clone(),
@@ -3406,6 +3428,11 @@ mod tests {
             DriverEvent::ProcessExited
         ) {}
 
+        let arguments = fs::read_to_string(directory.join("arguments.txt")).unwrap();
+        assert!(arguments.contains(DISABLE_CODEX_NODE_REPL));
+        assert!(arguments.contains(DISABLE_CODEX_CUA_REPL));
+        assert!(arguments.contains(DISABLE_CODEX_NODE_REPL_COMMAND));
+        assert!(arguments.contains(DISABLE_CODEX_CUA_REPL_COMMAND));
         let requests = fs::read_to_string(directory.join("requests.jsonl")).unwrap();
         let starts: Vec<&str> = requests
             .lines()
@@ -3433,6 +3460,7 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
+                    distillation: false,
                     ephemeral: false,
                     binary: binary.clone(),
                     cwd: cwd.clone(),
@@ -3868,7 +3896,7 @@ mod tests {
     #[test]
     fn computer_use_command_configuration_follows_the_setting() {
         let mut disabled = Command::new("/usr/bin/true");
-        configure_computer_use_command(&mut disabled, false, &[]);
+        configure_computer_use_command(&mut disabled, false, false, &[]);
         let disabled_arguments = disabled
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
@@ -3896,7 +3924,7 @@ mod tests {
             .into(),
         );
         let mut enabled = Command::new("/usr/bin/true");
-        configure_computer_use_command(&mut enabled, true, &[server]);
+        configure_computer_use_command(&mut enabled, true, false, &[server]);
         let enabled_arguments = enabled
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())

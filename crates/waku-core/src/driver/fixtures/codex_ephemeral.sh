@@ -2,6 +2,7 @@
 # Records every request into requests.jsonl next to the binary so tests can
 # inspect the wire params, then drives one tiny turn per turn/start.
 fixture_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+printf '%s\n' "$@" > "$fixture_dir/arguments.txt"
 thread_id=thread-ephemeral
 
 while IFS= read -r request; do

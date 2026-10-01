@@ -248,6 +248,7 @@ impl OpenCodeDriver {
             eval,
             sandbox: _,
             allow_model_fallback: _,
+            distillation: _,
             ephemeral: _,
         } = options;
         let resume_session_id = match provider_cursor {
@@ -1902,6 +1903,7 @@ server.serve_forever()
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                distillation: false,
                 ephemeral: false,
             },
             events,
@@ -2038,6 +2040,7 @@ server.serve_forever()
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                distillation: false,
                 ephemeral: false,
             },
             events,
@@ -2136,6 +2139,7 @@ server.serve_forever()
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
+                distillation: false,
                 ephemeral: false,
             },
             events,
