@@ -118,6 +118,29 @@ See the [Windows guide](docs/windows.md) for portable installation.
 Goddard uses the agent CLIs you install and authenticate. No Goddard account
 or separate agent subscription is required.
 
+## Supported agent harnesses
+
+Goddard supports these agent harnesses:
+
+- Amp
+- Antigravity CLI
+- Claude Code
+- Codex CLI
+- Cursor CLI
+- DeepSeek Harness
+- Devin CLI
+- Droid
+- Fx
+- GitHub Copilot
+- Goose
+- Grok Build
+- Kimi Code
+- Muse Code
+- Oh My Pi
+- OpenCode
+- OpenCode 2
+- Pi
+
 ## Contribute
 
 Bug reports, focused fixes, tests, and well-scoped features are welcome.
