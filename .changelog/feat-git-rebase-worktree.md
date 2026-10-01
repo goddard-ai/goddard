@@ -1,1 +1,1 @@
-- Run **Rebase worktree** from the command palette to replay an idle worktree session's commits onto its recorded base branch. Dirty worktrees show an error toast, and rebases that stop on conflicts open the conflict dialog.
+- Run **Rebase worktree** from the command palette to replay an idle worktree session's commits onto its recorded base branch. Dirty worktrees show an error toast, and rebases that stop on conflicts open the conflict dialog. The command and dirty-worktree message are also translated into Chinese and Japanese.

@@ -2098,6 +2098,7 @@ automations.weekday_wed: 周三
 automations.workspace_existing: 现有任务
 automations.workspace_local: 项目目录
 automations.workspace_worktree: 每次运行新建工作树
+command_palette.rebase_worktree: 变基工作树
 command_palette.based_on: 基于 %{base}
 command_palette.branches: 分支
 command_palette.change_base_branch: 更改基准分支…
@@ -2363,6 +2364,7 @@ git_panel.files: 文件
 git_panel.land_confirm_description: 将此检出变基到 %{base} 并将 %{base} 快进到结果 — %{count} 个提交将落到该分支上。
 git_panel.land_confirm_description_one: 将此检出变基到 %{base} 并将 %{base} 快进到结果 — 1 个提交将落到该分支上。
 git_panel.land_confirm_title: 合入基准分支？
+git_panel.rebase_worktree_dirty: 此工作树有未提交的更改。请先提交或丢弃这些更改，再进行变基。
 git_panel.rebase_onto_conflict_description: 变基到 %{base} 中途停止 — 冲突仍留在工作区中。
 git_panel.rebased_onto: 已变基到 %{base}
 git_panel.rebasing: 正在变基…

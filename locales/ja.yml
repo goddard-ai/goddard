@@ -2147,6 +2147,7 @@ automations.weekday_wed: 水曜日
 automations.workspace_existing: 既存のタスク
 automations.workspace_local: プロジェクトディレクトリ
 automations.workspace_worktree: 実行ごとに新しいワークツリー
+command_palette.rebase_worktree: ワークツリーをリベース
 command_palette.based_on: "%{base} をベース"
 command_palette.branches: ブランチ
 command_palette.change_base_branch: ベースブランチを変更…
@@ -2412,6 +2413,7 @@ git_panel.files: ファイル
 git_panel.land_confirm_description: "このチェックアウトを %{base} にリベースし、%{base} を結果に fast-forward します — %{count} 件のコミットがブランチに取り込まれます。"
 git_panel.land_confirm_description_one: "このチェックアウトを %{base} にリベースし、%{base} を結果に fast-forward します — 1 件のコミットがブランチに取り込まれます。"
 git_panel.land_confirm_title: ベースに取り込みますか？
+git_panel.rebase_worktree_dirty: このワークツリーには未コミットの変更があります。リベースする前にコミットするか破棄してください。
 git_panel.rebase_onto_conflict_description: "%{base} へのリベースが途中で停止しました — 競合は作業ツリーに残っています。"
 git_panel.rebased_onto: "%{base} にリベースしました"
 git_panel.rebasing: リベース中…
