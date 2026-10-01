@@ -132,6 +132,15 @@ pub(super) fn suggested_prompt(
     Some(template)
 }
 
+pub(super) fn visible_suggestion_label(label: &str) -> String {
+    let display_label: String = label.replace('\n', " ").chars().take(96).collect();
+    if label.chars().count() > 96 || label.contains('\n') {
+        format!("{display_label}…")
+    } else {
+        display_label
+    }
+}
+
 pub(super) fn valid_suggested_prompt(action: &str, prompt: &str) -> bool {
     let trimmed = prompt.trim();
     !trimmed.is_empty() && trimmed.chars().count() <= 2_000
@@ -1404,7 +1413,7 @@ impl Waku {
     /// The chip's presentation: icon and localized label. `None` means the
     /// candidate is not renderable — call sites reach here only through
     /// `gated_suggestion`, which already filtered to actionable ids.
-    fn suggestion_parts(&self, action: &str) -> Option<(&'static str, String)> {
+    pub(super) fn suggestion_parts(&self, action: &str) -> Option<(&'static str, String)> {
         match action {
             "commit" => Some(("icons/git-commit-horizontal.svg", tr!("suggestions.commit"))),
             "push" => Some(("icons/arrow-up.svg", tr!("suggestions.push"))),
@@ -1499,12 +1508,7 @@ impl Waku {
             None
         };
         let tooltip = label.clone();
-        let display_label: String = label.replace('\n', " ").chars().take(96).collect();
-        let display_label = if label.chars().count() > 96 || label.contains('\n') {
-            format!("{display_label}…")
-        } else {
-            display_label
-        };
+        let display_label = visible_suggestion_label(&label);
         let theme = Theme::current(cx);
         // The turn's verdict pill leads the row while the footer holding its
         // inline copy sits below the fold — the standalone transcript float

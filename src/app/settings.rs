@@ -6593,8 +6593,9 @@ impl Waku {
     ) -> Option<AnyElement> {
         let entries = action_predictions::CANNED_PROMPTS.iter().copied();
         let rows = entries
-            .map(|(id, label_key)| {
-                let title = tr!(label_key);
+            .map(|(id, _label_key)| {
+                let (_, chip_label) = self.suggestion_parts(id)?;
+                let title = action_predictions::visible_suggestion_label(&chip_label);
                 let prompt =
                     action_predictions::suggested_prompt(id, &self.state.suggested_prompts)?;
                 let preview: String = prompt.chars().take(120).collect();

@@ -1,0 +1,1 @@
+- In Settings → Jev, each prompt suggestion is now titled with the label shown on its floating composer chip.
