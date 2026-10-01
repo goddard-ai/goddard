@@ -1579,6 +1579,47 @@ fn is_codex_turn_started(value: &Value, thread_id: Option<&str>) -> bool {
         && value.pointer("/params/threadId").and_then(Value::as_str) == Some(thread_id)
 }
 
+fn codex_notification_matches_active_thread(
+    method: &str,
+    params: &Value,
+    thread_id: &Mutex<Option<String>>,
+    turn_id: &Mutex<Option<String>>,
+) -> bool {
+    let thread_scoped = method.starts_with("thread/")
+        || method.starts_with("turn/")
+        || method.starts_with("item/");
+    if !thread_scoped {
+        return true;
+    }
+
+    let Some(notification_thread_id) = params.get("threadId").and_then(Value::as_str) else {
+        // Thread-level updates have historically been accepted without an ID.
+        // Turn and item events need one so child events cannot leak through.
+        return method.starts_with("thread/");
+    };
+    if thread_id.lock().as_deref() != Some(notification_thread_id) {
+        return false;
+    }
+
+    if method == "turn/started" {
+        return true;
+    }
+    if method == "turn/completed" {
+        return params
+            .pointer("/turn/id")
+            .and_then(Value::as_str)
+            .is_some_and(|notification_turn_id| {
+                turn_id.lock().as_deref() == Some(notification_turn_id)
+            });
+    }
+    if method.starts_with("item/")
+        && let Some(notification_turn_id) = params.get("turnId").and_then(Value::as_str)
+    {
+        return turn_id.lock().as_deref() == Some(notification_turn_id);
+    }
+    true
+}
+
 fn codex_title_thread_params(cwd: &Path) -> Value {
     json!({
         "cwd": cwd.display().to_string(),
@@ -2332,6 +2373,16 @@ fn handle_codex_message(
         return;
     };
     let params = value.get("params").cloned().unwrap_or(Value::Null);
+    // One app-server can publish lifecycle notifications for child threads as
+    // well as the thread this driver owns. Keep those child turns and their
+    // items out of the foreground transcript and don't let their completion
+    // settle the parent turn. Server requests carry an id and remain routed
+    // through the existing response path so interactive requests can resolve.
+    if value.get("id").is_none()
+        && !codex_notification_matches_active_thread(method, &params, thread_id, turn_id)
+    {
+        return;
+    }
 
     match method {
         "turn/started" => {
@@ -2493,8 +2544,7 @@ fn handle_codex_message(
             });
         }
         "thread/name/updated" => {
-            let current_thread_id = thread_id.lock().clone();
-            if params.get("threadId").and_then(Value::as_str) == current_thread_id.as_deref() {
+            if params.get("threadId").and_then(Value::as_str) == thread_id.lock().as_deref() {
                 let title = params
                     .get("threadName")
                     .and_then(Value::as_str)
