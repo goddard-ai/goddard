@@ -1,11 +1,13 @@
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::HashSet;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::input::TextInput;
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
@@ -41,6 +43,9 @@ use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::scrollbar::{self, ScrollbarState};
 use uuid::Uuid;
+
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 /// Fallback advance width, used only until the font has been measured.
 const TERMINAL_CELL_WIDTH: f32 = 7.8;
@@ -146,6 +151,9 @@ const TERMINAL_TOOLBAR_HEIGHT: f32 = 34.0;
 const TERMINAL_MIN_COLUMNS: usize = 20;
 const TERMINAL_MIN_ROWS: usize = 8;
 const TERMINAL_SCROLLBACK_LINES: usize = 10_000;
+const TERMINAL_SAVED_SCROLLBACK_LINES: usize = 1_200;
+const TERMINAL_SAVED_SCROLLBACK_BYTES: usize = 128 * 1024;
+const TERMINAL_SAVED_SCROLLBACK_INTERVAL: Duration = Duration::from_secs(2);
 /// Grid lines sent with a command-bar request — enough for "that failed"
 /// or "retry it with sudo" to resolve.
 const COMMAND_BAR_CONTEXT_LINES: usize = 60;
@@ -670,6 +678,7 @@ impl TerminalSession {
         launch: &TerminalLaunch,
         columns: usize,
         rows: usize,
+        restored_scrollback: Option<String>,
     ) -> Result<Self> {
         let columns = columns.max(TERMINAL_MIN_COLUMNS);
         let rows = rows.max(TERMINAL_MIN_ROWS);
@@ -682,6 +691,9 @@ impl TerminalSession {
         let parts = EmulatorParts::new(columns, rows)?;
         let term = parts.term.clone();
         let proxy = parts.proxy.clone();
+        if let Some(scrollback) = restored_scrollback {
+            restore_scrollback(&term, &scrollback);
+        }
 
         let (shell, startup_line, shell_integration, program_args) = match launch {
             TerminalLaunch::Shell => {
@@ -791,10 +803,14 @@ impl TerminalSession {
         owner: Option<Uuid>,
         columns: usize,
         rows: usize,
+        restored_scrollback: Option<String>,
     ) -> Result<Self> {
         let columns = columns.max(TERMINAL_MIN_COLUMNS);
         let rows = rows.max(TERMINAL_MIN_ROWS);
         let parts = EmulatorParts::new(columns, rows)?;
+        if let Some(scrollback) = restored_scrollback {
+            restore_scrollback(&parts.term, &scrollback);
+        }
         let client = daemon.client();
         let events = client.subscribe(channel_id, channel_id);
         let initial_size = *parts.window_size.lock();
@@ -1456,6 +1472,10 @@ pub struct TerminalView {
     /// until cleared.
     custom_title: Option<String>,
     exited: bool,
+    scrollback_path: Option<PathBuf>,
+    scrollback_snapshot_pending: bool,
+    scrollback_snapshot_in_flight: bool,
+    last_scrollback_snapshot_at: Option<Instant>,
     scroll_accumulator: f32,
     panel_width: f32,
     /// Terminals rendered inside another surface — the provider setup block
@@ -1493,6 +1513,15 @@ impl TerminalView {
         launch: TerminalLaunch,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::with_launch_and_scrollback(working_directory, launch, None, cx)
+    }
+
+    pub fn with_launch_and_scrollback(
+        working_directory: PathBuf,
+        launch: TerminalLaunch,
+        scrollback_path: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let default_title = match &launch {
             TerminalLaunch::Shell => tr!("right_panel.terminal"),
             TerminalLaunch::CustomCommand(command) => command.display_name().to_owned(),
@@ -1516,11 +1545,12 @@ impl TerminalView {
             .to_owned();
         let runs_a_command = matches!(launch, TerminalLaunch::CustomCommand(_));
         let terminal_cwd = working_directory.clone();
-        Self::spawn_session(
-            cx.background_executor()
-                .spawn(async move { TerminalSession::new(&terminal_cwd, &launch, 52, 36) }),
-            cx,
-        );
+        let restore_path = scrollback_path.clone();
+        let spawn = cx.background_executor().spawn(async move {
+            let restored_scrollback = restore_path.as_deref().and_then(read_scrollback_snapshot);
+            TerminalSession::new(&terminal_cwd, &launch, 52, 36, restored_scrollback)
+        });
+        Self::spawn_session(spawn, scrollback_path.clone(), cx);
 
         let context_menu = ContextMenuHandle::new(cx);
         let cursor_blink = cx.new(|_| TerminalCursorBlink::new());
@@ -1544,6 +1574,10 @@ impl TerminalView {
             last_command_exit: None,
             last_command_started_at: runs_a_command.then(crate::model::unix_time),
             exited: false,
+            scrollback_path,
+            scrollback_snapshot_pending: false,
+            scrollback_snapshot_in_flight: false,
+            last_scrollback_snapshot_at: None,
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
@@ -1573,16 +1607,39 @@ impl TerminalView {
         owner: Option<Uuid>,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::remote_with_scrollback(daemon, terminal_id, working_directory, owner, None, cx)
+    }
+
+    pub fn remote_with_scrollback(
+        daemon: Option<waku_client::DaemonSupervisor>,
+        terminal_id: Uuid,
+        working_directory: PathBuf,
+        owner: Option<Uuid>,
+        scrollback_path: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let default_title = tr!("right_panel.terminal");
         let shell_name = "ssh".to_owned();
         let terminal_cwd = working_directory.clone();
+        let restore_path = scrollback_path.clone();
         Self::spawn_session(
             cx.background_executor().spawn(async move {
                 let Some(daemon) = daemon else {
                     anyhow::bail!("the remote host is not connected");
                 };
-                TerminalSession::remote(&daemon, terminal_id, &terminal_cwd, owner, 52, 36)
+                let restored_scrollback =
+                    restore_path.as_deref().and_then(read_scrollback_snapshot);
+                TerminalSession::remote(
+                    &daemon,
+                    terminal_id,
+                    &terminal_cwd,
+                    owner,
+                    52,
+                    36,
+                    restored_scrollback,
+                )
             }),
+            scrollback_path.clone(),
             cx,
         );
 
@@ -1606,6 +1663,10 @@ impl TerminalView {
             last_command_exit: None,
             last_command_started_at: None,
             exited: false,
+            scrollback_path,
+            scrollback_snapshot_pending: false,
+            scrollback_snapshot_in_flight: false,
+            last_scrollback_snapshot_at: None,
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
@@ -1626,13 +1687,20 @@ impl TerminalView {
 
     /// Run the session spawn off the UI thread, install the result, then
     /// keep draining its UI events — shared by local and remote launches.
-    fn spawn_session(spawn: Task<Result<TerminalSession>>, cx: &mut Context<Self>) {
+    fn spawn_session(
+        spawn: Task<Result<TerminalSession>>,
+        scrollback_path: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
         cx.spawn(async move |this, cx| {
             let started = spawn.await;
             if this
                 .update(cx, |this, cx| {
                     match started {
-                        Ok(session) => this.session = Some(session),
+                        Ok(session) => {
+                            this.session = Some(session);
+                            this.scrollback_path = scrollback_path;
+                        }
                         Err(error) => {
                             this.error = Some(error.to_string());
                             // A command that never launched still owns a
@@ -1656,12 +1724,56 @@ impl TerminalView {
                         if this.poll(cx) {
                             cx.notify();
                         }
+                        this.maybe_persist_scrollback(cx);
                     })
                     .is_err()
                 {
                     break;
                 }
             }
+        })
+        .detach();
+    }
+
+    fn maybe_persist_scrollback(&mut self, cx: &mut Context<Self>) {
+        if !self.scrollback_snapshot_pending
+            || self.scrollback_snapshot_in_flight
+            || self.scrollback_path.is_none()
+            || self
+                .last_scrollback_snapshot_at
+                .is_some_and(|last| last.elapsed() < TERMINAL_SAVED_SCROLLBACK_INTERVAL)
+        {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let term = session.term.clone();
+        let Some(path) = self.scrollback_path.clone() else {
+            return;
+        };
+        self.scrollback_snapshot_pending = false;
+        self.scrollback_snapshot_in_flight = true;
+        self.last_scrollback_snapshot_at = Some(Instant::now());
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| {
+            let failed = cx
+                .background_executor()
+                .spawn(async move {
+                    let Some(snapshot) = terminal_scrollback_snapshot(&term.lock()) else {
+                        return Ok(());
+                    };
+                    write_scrollback_snapshot(&path, &snapshot)
+                })
+                .await
+                .is_err();
+            let _ = weak.update(cx, |this, cx| {
+                this.scrollback_snapshot_in_flight = false;
+                if failed {
+                    this.scrollback_snapshot_pending = true;
+                }
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -1762,6 +1874,9 @@ impl TerminalView {
             .session
             .as_ref()
             .is_some_and(|session| session.take_dirty());
+        if changed && self.scrollback_path.is_some() {
+            self.scrollback_snapshot_pending = true;
+        }
         if changed && let Some(url) = self.detect_localhost_url() {
             cx.emit(TerminalViewEvent::LocalhostUrl(url));
         }
@@ -3468,6 +3583,122 @@ fn tail_lines<T: EventListener>(term: &Term<T>, count: usize) -> Vec<String> {
     }
     lines.reverse();
     lines
+}
+
+/// Capture plain text from the primary screen and its recent scrollback. The
+/// terminal grid is shared with the PTY event loop, so callers run this from
+/// the background executor rather than the UI poll or render path.
+fn terminal_scrollback_snapshot(term: &Term<TerminalEventProxy>) -> Option<String> {
+    if term.mode().contains(TermMode::ALT_SCREEN) {
+        return None;
+    }
+    let grid = term.grid();
+    let screen_lines = grid.screen_lines() as i32;
+    let history_lines = grid.history_size() as i32;
+    let total_lines = history_lines.saturating_add(screen_lines);
+    let skip = total_lines.saturating_sub(TERMINAL_SAVED_SCROLLBACK_LINES as i32);
+    let first_line = -history_lines + skip;
+    let mut lines = Vec::with_capacity(total_lines.saturating_sub(skip) as usize);
+    for line in first_line..screen_lines {
+        let row = &grid[Line(line)];
+        let mut text = String::with_capacity(row.len());
+        for cell in row {
+            if cell.flags.intersects(
+                Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER | Flags::HIDDEN,
+            ) {
+                text.push(' ');
+                continue;
+            }
+            text.push(cell.c);
+            if let Some(zerowidth) = cell.zerowidth() {
+                text.extend(zerowidth);
+            }
+        }
+        lines.push(text.trim_end().to_owned());
+    }
+    let Some(first) = lines.iter().position(|line| !line.is_empty()) else {
+        return Some(String::new());
+    };
+    let last = lines.iter().rposition(|line| !line.is_empty())?;
+    let snapshot = bounded_scrollback(&lines[first..=last].join("\n"));
+    Some(snapshot)
+}
+
+fn restore_scrollback(term: &Arc<FairMutex<Term<TerminalEventProxy>>>, snapshot: &str) {
+    let snapshot = bounded_scrollback(snapshot);
+    if snapshot.is_empty() {
+        return;
+    }
+    let mut bytes = Vec::with_capacity(snapshot.len() + 2);
+    for character in snapshot.chars() {
+        if character == '\n' {
+            bytes.extend_from_slice(b"\r\n");
+        } else {
+            let mut encoded = [0; 4];
+            bytes.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
+        }
+    }
+    // Leave the restored output above the fresh shell's first prompt.
+    bytes.extend_from_slice(b"\r\n");
+    let mut processor: alacritty_terminal::vte::ansi::Processor =
+        alacritty_terminal::vte::ansi::Processor::new();
+    let mut term = term.lock();
+    processor.advance(&mut *term, &bytes);
+    term.scroll_display(Scroll::Bottom);
+}
+
+fn bounded_scrollback(text: &str) -> String {
+    let mut cleaned = String::with_capacity(text.len().min(TERMINAL_SAVED_SCROLLBACK_BYTES));
+    for character in text.chars() {
+        match character {
+            '\n' => cleaned.push('\n'),
+            '\t' => cleaned.push(' '),
+            _ if character.is_control() => {}
+            _ => cleaned.push(character),
+        }
+    }
+    if cleaned.len() <= TERMINAL_SAVED_SCROLLBACK_BYTES {
+        return cleaned;
+    }
+    let mut start = cleaned.len() - TERMINAL_SAVED_SCROLLBACK_BYTES;
+    while !cleaned.is_char_boundary(start) {
+        start += 1;
+    }
+    if let Some(newline) = cleaned[start..].find('\n') {
+        start += newline + 1;
+    }
+    cleaned[start..].to_owned()
+}
+
+fn read_scrollback_snapshot(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    let start = bytes.len().saturating_sub(TERMINAL_SAVED_SCROLLBACK_BYTES);
+    let snapshot = bounded_scrollback(&String::from_utf8_lossy(&bytes[start..]));
+    (!snapshot.is_empty()).then_some(snapshot)
+}
+
+fn write_scrollback_snapshot(path: &Path, snapshot: &str) -> std::io::Result<()> {
+    if fs::read(path).is_ok_and(|existing| existing == snapshot.as_bytes()) {
+        return Ok(());
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&temporary)?;
+    let result = (|| {
+        file.write_all(snapshot.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 /// Scans the grid lines added since `watermark` was last advanced for a

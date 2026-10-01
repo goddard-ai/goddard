@@ -984,10 +984,10 @@ pub struct PersistedTranscriptScrollPosition {
     pub tail_while_busy: bool,
 }
 
-/// A right-panel tab that can be reopened without runtime objects. Terminal,
-/// browser, and background-work surfaces are omitted: their PTYs, webviews,
-/// and output buffers die with the app. Side chats persist — they are
-/// sessions, and the session outlives the window.
+/// A right-panel tab that can be reopened without runtime objects. Browser
+/// and background-work surfaces are omitted because their runtime state dies
+/// with the app. Terminal ids persist separately with their launch directory;
+/// side chats persist because the session outlives the window.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PersistedRightPanelSurface {
@@ -1006,6 +1006,29 @@ pub enum PersistedRightPanelSurface {
     /// The side-chat session's id; the tab restores only while that session
     /// still lives under this panel's owner.
     SideChat(Uuid),
+    /// A terminal's id; the tab restores only while its terminal record lives.
+    Terminal(Uuid),
+}
+
+/// The durable part of an open terminal. Goddard reopens a fresh shell at the
+/// last reported cwd; it does not resume the interrupted process.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PersistedTerminal {
+    pub id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
+    pub pinned: bool,
+    /// `None` means follow the owning session's workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<PathBuf>,
+    /// The shell's most recently reported directory, including `cd`s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_working_directory: Option<PathBuf>,
+    #[serde(default)]
+    pub opened_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_title: Option<String>,
 }
 
 /// A right-panel surface maximized over the window, if one was.
@@ -1669,6 +1692,17 @@ struct AppState {
     /// Parked right-panel state per task, plus the selected task's live one.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
+    /// Open terminal records in sidebar order. Their scrollback lives in
+    /// bounded sidecar files beside the app state.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    terminals: Vec<PersistedTerminal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_terminal: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_visible_terminal: Option<Uuid>,
+    /// A main-area terminal owns its own right-panel strip, like a task does.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    right_panel_terminals: HashMap<Uuid, PersistedRightPanelState>,
     /// Read-only compatibility field for saves written while the maximized
     /// surface was global — `apply_app_state` moves it onto the selected
     /// task's strip. New saves omit it.
@@ -2064,6 +2098,17 @@ pub struct PersistedState {
     /// Parked right-panel state per task, plus the selected task's live one.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub right_panel_sessions: HashMap<Uuid, PersistedRightPanelState>,
+    /// Open terminal records in sidebar order. Their scrollback lives in
+    /// bounded sidecar files beside the app state.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminals: Vec<PersistedTerminal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_terminal: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_visible_terminal: Option<Uuid>,
+    /// A main-area terminal owns its own right-panel strip, like a task does.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub right_panel_terminals: HashMap<Uuid, PersistedRightPanelState>,
     /// Drafts parked from a composer via "Create draft", newest first.
     /// App-local — they persist through `AppState`, not the daemon.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2392,6 +2437,10 @@ impl PersistedState {
             automations_page: false,
             inbox_open: false,
             right_panel_sessions: HashMap::new(),
+            terminals: Vec::new(),
+            selected_terminal: None,
+            last_visible_terminal: None,
+            right_panel_terminals: HashMap::new(),
             saved_drafts: Vec::new(),
             computer_use_enabled: false,
             computer_use_experiment_enabled: default_experiment_enabled(),
@@ -2844,6 +2893,10 @@ impl PersistedState {
             automations_page: self.automations_page,
             inbox_open: self.inbox_open,
             right_panel_sessions: self.right_panel_sessions.clone(),
+            terminals: self.terminals.clone(),
+            selected_terminal: self.selected_terminal,
+            last_visible_terminal: self.last_visible_terminal,
+            right_panel_terminals: self.right_panel_terminals.clone(),
             fullscreen_surface: None,
             saved_drafts: self.saved_drafts.clone(),
         }
@@ -2995,6 +3048,10 @@ impl PersistedState {
         self.automations_page = app_state.automations_page;
         self.inbox_open = app_state.inbox_open;
         self.right_panel_sessions = app_state.right_panel_sessions;
+        self.terminals = app_state.terminals;
+        self.selected_terminal = app_state.selected_terminal;
+        self.last_visible_terminal = app_state.last_visible_terminal;
+        self.right_panel_terminals = app_state.right_panel_terminals;
         // Saves from before the Git panel's open flag was per-task carried
         // it globally; it belongs to the task that was selected, so it lands
         // on that strip. A hand-edited file could hold both flags — the
@@ -3843,6 +3900,14 @@ impl StateStore {
                     .request(Uuid::nil(), Uuid::nil(), Command::SweepBlobs);
             }
         }
+    }
+
+    /// Private app-local sidecar for one terminal's bounded plain-text
+    /// scrollback snapshot.
+    pub fn terminal_scrollback_path(&self, terminal_id: Uuid) -> PathBuf {
+        self.app_state_path
+            .with_file_name("terminal-scrollback")
+            .join(format!("{terminal_id}.txt"))
     }
 
     pub fn path(&self) -> &Path {
