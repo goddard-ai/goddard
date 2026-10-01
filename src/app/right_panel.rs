@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use super::*;
 
@@ -1013,6 +1013,61 @@ pub(super) fn file_highlighter_language(relative_path: &str) -> &'static str {
     }
 }
 
+fn transfer_file_is_previewable(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if image_preview::image_format_for_name(file_name).is_some()
+        || file_highlighter_language(file_name) != "text"
+    {
+        return true;
+    }
+
+    let normalized_name = file_name.to_ascii_lowercase();
+    if matches!(
+        normalized_name.as_str(),
+        "readme"
+            | "license"
+            | "licence"
+            | "notice"
+            | "authors"
+            | "contributors"
+            | "copying"
+            | "changelog"
+            | "changes"
+            | "todo"
+            | ".gitignore"
+            | ".dockerignore"
+            | ".gitattributes"
+            | ".editorconfig"
+            | ".env.example"
+    ) {
+        return true;
+    }
+
+    matches!(
+        Path::new(file_name)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some(
+            "txt"
+                | "text"
+                | "log"
+                | "csv"
+                | "tsv"
+                | "rst"
+                | "adoc"
+                | "properties"
+                | "nfo"
+                | "out"
+                | "err"
+                | "jsonl"
+        )
+    )
+}
+
 /// Reads a file for the editor, returning its text and whether it can be saved.
 ///
 /// One unbounded `read_to_string`, so callers keep it off the UI thread; the
@@ -1935,7 +1990,23 @@ mod tests {
 impl Waku {
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
         let files_root = self.resolve_right_panel_files_root(cx);
-        match transcript_link_route(target, files_root.as_deref()) {
+        let route = transcript_link_route(target, files_root.as_deref());
+        let linked_path = match &route {
+            TranscriptLinkRoute::ProjectFile(relative_path, _) => {
+                files_root.as_ref().map(|root| root.join(relative_path))
+            }
+            TranscriptLinkRoute::Finder(path) => Some(path.clone()),
+            TranscriptLinkRoute::Task(_) | TranscriptLinkRoute::External => None,
+        };
+        if linked_path
+            .as_deref()
+            .is_some_and(|path| self.is_quarantined_transfer_path(path))
+        {
+            self.show_toast(tr!("friends.transfer_open_quarantined"));
+            cx.notify();
+            return true;
+        }
+        match route {
             TranscriptLinkRoute::ProjectFile(relative_path, heading) => {
                 // A `file:line` target rides the same pending slot the finder
                 // uses: the editor takes focus and the jump lands once the
@@ -1975,6 +2046,36 @@ impl Waku {
             TranscriptLinkRoute::External => return false,
         }
         true
+    }
+
+    fn is_quarantined_transfer_path(&self, target: &Path) -> bool {
+        let Some(session) = self.selected_session() else {
+            return false;
+        };
+        if session.friend_peer_id.is_none() || !session.quarantined {
+            return false;
+        }
+        let Some(delivery_directory) =
+            session
+                .messages
+                .iter()
+                .find_map(|message| match message.notice.as_ref() {
+                    Some(crate::model::TranscriptNotice::TransferReceived { path, .. }) => {
+                        path.parent().map(Path::to_path_buf)
+                    }
+                    _ => None,
+                })
+        else {
+            return false;
+        };
+        let target = if target.is_absolute() {
+            target.to_path_buf()
+        } else if let Some(workspace) = self.selected_workspace_path() {
+            workspace.join(target)
+        } else {
+            return false;
+        };
+        target.starts_with(delivery_directory)
     }
 
     /// The link-specific actions a right-clicked URL contributes before the
@@ -2068,6 +2169,96 @@ impl Waku {
             return;
         }
         crate::platform::open_with_default_app(&resolved, cx);
+    }
+
+    /// Route a trusted delivery entry through the right-panel file preview or
+    /// the OS default app. A directory opens in the existing Files tree and
+    /// starts expanded at the clicked path.
+    pub(super) fn open_transfer_path(
+        &mut self,
+        session_id: Uuid,
+        message_id: Uuid,
+        path: PathBuf,
+        is_dir: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((current_session_id, current_message_id, payload_path, payload_is_dir)) =
+            self.selected_transfer_notice()
+        else {
+            return;
+        };
+        if current_session_id != session_id || current_message_id != message_id {
+            return;
+        }
+
+        let allowed_path = if payload_is_dir {
+            path.strip_prefix(&payload_path).is_ok_and(|relative| {
+                (path != payload_path || is_dir)
+                    && relative
+                        .components()
+                        .all(|component| matches!(component, Component::Normal(_)))
+            })
+        } else {
+            path == payload_path && !is_dir
+        };
+        if !allowed_path {
+            return;
+        }
+
+        let files_root = if payload_is_dir {
+            payload_path
+        } else {
+            let Some(parent) = payload_path.parent() else {
+                return;
+            };
+            parent.to_path_buf()
+        };
+        if self.is_remote_path(&path) {
+            self.show_toast(tr!("errors.remote_host_path"));
+            cx.notify();
+            return;
+        }
+
+        self.sync_right_panel_files_root(cx);
+        if self.right_panel_files_root.as_deref() != Some(files_root.as_path()) {
+            return;
+        }
+        if is_dir {
+            if path != files_root {
+                self.right_panel_expanded_paths.insert(path);
+            }
+            self.open_right_panel_surface(RightPanelSurface::Files, cx);
+            return;
+        }
+
+        if transfer_file_is_previewable(&path)
+            && let Ok(relative_path) = path.strip_prefix(&files_root)
+            && let Some(relative_path) = relative_path.to_str()
+        {
+            self.open_right_panel_file(relative_path.to_owned(), cx);
+        } else {
+            crate::platform::open_with_default_app(&path, cx);
+        }
+    }
+
+    fn selected_transfer_notice(&self) -> Option<(Uuid, Uuid, PathBuf, bool)> {
+        let session = self.selected_session()?;
+        if session.friend_peer_id.is_none()
+            || session.quarantined
+            || !session.detail_loaded
+            || self.is_remote_session(session.id)
+        {
+            return None;
+        }
+        session
+            .messages
+            .iter()
+            .find_map(|message| match message.notice.as_ref() {
+                Some(crate::model::TranscriptNotice::TransferReceived { path, is_dir, .. }) => {
+                    Some((session.id, message.id, path.clone(), *is_dir))
+                }
+                _ => None,
+            })
     }
 
     /// Which place the live strip belongs to right now, derived from the
@@ -2749,6 +2940,27 @@ impl Waku {
                 cx.notify();
             }
             _ => self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx),
+        }
+    }
+
+    fn activate_right_panel_working_tree_entry(
+        &mut self,
+        relative_path: String,
+        absolute_path: PathBuf,
+        is_dir: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if is_dir {
+            if !self.right_panel_expanded_paths.remove(&absolute_path) {
+                self.right_panel_expanded_paths
+                    .insert(absolute_path.clone());
+            }
+            self.refresh_right_panel_working_tree(cx);
+            cx.notify();
+        } else if let Some((session_id, message_id, _, _)) = self.selected_transfer_notice() {
+            self.open_transfer_path(session_id, message_id, absolute_path, false, cx);
+        } else {
+            self.open_right_panel_file(relative_path, cx);
         }
     }
 
@@ -4991,6 +5203,10 @@ impl Waku {
             let menu = self.menu_handle(menu_id.clone(), cx);
             let menu_path = absolute_path.clone();
             let menu_name = entry.name.clone();
+            let row_focus = self.transcript_control_focus(
+                format!("right-panel-tree-row-{}", absolute_path.display()),
+                cx,
+            );
             let row = div()
                 .id(SharedString::from(format!(
                     "right-panel-file-{relative_path}"
@@ -5001,11 +5217,14 @@ impl Waku {
                 .pr(px(8.0))
                 .rounded(px(8.0))
                 .flex()
+                .track_focus(&row_focus)
+                .tab_index(0)
                 .items_center()
                 .gap(px(6.0))
                 .cursor_default()
                 .when(selected, |element| element.bg(theme.overlay_strong))
                 .hover(|element| element.bg(theme.overlay))
+                .focus_visible(|element| element.bg(theme.focus_highlight()))
                 .child(if is_dir {
                     icon(
                         if entry.expanded {
@@ -5032,20 +5251,32 @@ impl Waku {
                         .text_color(theme.text_secondary)
                         .child(entry.name),
                 );
-            let row = if is_dir {
-                row.on_click(cx.listener(move |this, _, _, cx| {
-                    if !this.right_panel_expanded_paths.remove(&absolute_path) {
-                        this.right_panel_expanded_paths
-                            .insert(absolute_path.clone());
+            let click_relative_path = relative_path.clone();
+            let click_absolute_path = absolute_path.clone();
+            let key_relative_path = relative_path.clone();
+            let key_absolute_path = absolute_path;
+            let row = row
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.activate_right_panel_working_tree_entry(
+                        click_relative_path.clone(),
+                        click_absolute_path.clone(),
+                        is_dir,
+                        cx,
+                    );
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        this.activate_right_panel_working_tree_entry(
+                            key_relative_path.clone(),
+                            key_absolute_path.clone(),
+                            is_dir,
+                            cx,
+                        );
+                        cx.stop_propagation();
                     }
-                    this.refresh_right_panel_working_tree(cx);
-                    cx.notify();
-                }))
-            } else {
-                row.on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_right_panel_file(relative_path.clone(), cx);
-                }))
-            };
+                }));
             let waku_menu = waku.clone();
             list = list.child(context_menu(
                 div().w_full().child(row),
@@ -7765,14 +7996,46 @@ impl Waku {
     }
 
     /// The directory the Files surface and its editors are rooted at right
-    /// now, from the owner on screen: the selected session's workspace, the
-    /// selected terminal's live cwd, or the project a Projects page is
-    /// scoped to. Pages that admit no files resolve to `None`.
+    /// now, from the owner on screen: a trusted Friends delivery's payload,
+    /// the selected session's workspace, the selected terminal's live cwd,
+    /// or the project a Projects page is scoped to. Pages that admit no files
+    /// and quarantined deliveries resolve to `None`.
     pub(super) fn resolve_right_panel_files_root(&self, cx: &App) -> Option<PathBuf> {
         match self.active_right_panel_owner() {
-            RightPanelOwner::Session(_) => self
-                .selected_workspace_path()
-                .map(std::path::Path::to_path_buf),
+            RightPanelOwner::Session(session_id) => {
+                let session = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)?;
+                if session.quarantined
+                    || (session.friend_peer_id.is_some() && !session.detail_loaded)
+                {
+                    return None;
+                }
+                if session.friend_peer_id.is_some()
+                    && let Some((payload_path, is_dir)) =
+                        session
+                            .messages
+                            .iter()
+                            .find_map(|message| match message.notice.as_ref() {
+                                Some(crate::model::TranscriptNotice::TransferReceived {
+                                    path,
+                                    is_dir,
+                                    ..
+                                }) => Some((path, *is_dir)),
+                                _ => None,
+                            })
+                {
+                    return if is_dir {
+                        Some(payload_path.clone())
+                    } else {
+                        payload_path.parent().map(Path::to_path_buf)
+                    };
+                }
+                self.selected_workspace_path()
+                    .map(std::path::Path::to_path_buf)
+            }
             RightPanelOwner::Terminal(terminal_id) => self.terminal_cwd(terminal_id, cx),
             RightPanelOwner::Projects(project_id) => self
                 .state

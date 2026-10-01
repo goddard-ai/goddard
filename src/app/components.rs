@@ -511,6 +511,7 @@ pub(super) struct TransferNoticeState {
     pub(super) reveal_focus: FocusHandle,
     pub(super) trust_focus: FocusHandle,
     pub(super) entries_focus: FocusHandle,
+    pub(super) entry_focuses: Vec<FocusHandle>,
     pub(super) image_focus: FocusHandle,
 }
 
@@ -2221,10 +2222,9 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 /// A [`TranscriptNotice::TransferReceived`] rendered as a payload card:
-/// sender and title up top, then a folder's children or an image thumbnail —
-/// a plain file needs no body, its meta line already carries kind and size.
-/// Preview works while quarantined (decoding is read-only); Open stays
-/// disabled until Trust clears the flag, with the reason on its tooltip.
+/// sender and title up top, then a folder's children or a trusted image
+/// thumbnail — a plain file needs no body, its meta line already carries
+/// kind and size. File access stays disabled until Trust clears quarantine.
 fn transfer_notice_row(
     theme: &Theme,
     message_id: Uuid,
@@ -2246,10 +2246,11 @@ fn transfer_notice_row(
         return div();
     };
     // `state` is missing only where the card renders without the
-    // transcript's live session — fail closed rather than arming Open on an
-    // unanswered quarantine flag.
+    // transcript's live session — fail closed rather than enabling file
+    // actions without an answered quarantine flag.
     let quarantined = state.is_none_or(|state| state.quarantined);
     let can_open = state.is_some_and(|state| state.can_open);
+    let can_browse = !quarantined && can_open;
     let show_all = state.is_some_and(|state| state.show_all);
 
     let from = tr!("friends.transfer_from", name = peer_name.clone()).to_string();
@@ -2312,12 +2313,18 @@ fn transfer_notice_row(
             );
         }
 
-        // Reveal only ever shows the payload's location — safe while
-        // quarantined, meaningless for a remote host's path.
+        // Revealing the payload in the file manager also waits for Trust.
         let reveal_waku = waku.clone();
         let reveal_key_waku = waku.clone();
         let reveal_path = path.clone();
         let reveal_key_path = path.clone();
+        let reveal_reason = if quarantined {
+            Some(tr!("friends.transfer_open_quarantined"))
+        } else if !can_open {
+            Some(tr!("errors.remote_host_path"))
+        } else {
+            None
+        };
         let mut reveal = div()
             .id(SharedString::from(format!("transfer-reveal-{message_id}")))
             .track_focus(&state.reveal_focus)
@@ -2329,7 +2336,34 @@ fn transfer_notice_row(
             .items_center()
             .justify_center()
             .cursor_default();
-        if can_open {
+        if let Some(reason) = reveal_reason {
+            let toast_reason = reason.clone();
+            let key_reason = reason.clone();
+            reveal = reveal
+                .opacity(0.45)
+                .tooltip(Tooltip::text(reason))
+                .child(icon("icons/folder-open.svg", 12.0, theme.text_ghost))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    let reason = toast_reason.clone();
+                    let _ = reveal_waku.update(cx, |this, cx| {
+                        this.show_toast(reason.clone());
+                        cx.notify();
+                    });
+                })
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.stop_propagation();
+                        let reason = key_reason.clone();
+                        let _ = reveal_key_waku.update(cx, |this, cx| {
+                            this.show_toast(reason.clone());
+                            cx.notify();
+                        });
+                    }
+                });
+        } else {
             reveal = reveal
                 .tooltip(Tooltip::text(tr!("common.reveal_in_finder")))
                 .hover(|style| style.bg(theme.overlay_strong))
@@ -2351,11 +2385,6 @@ fn transfer_notice_row(
                         });
                     }
                 });
-        } else {
-            reveal = reveal
-                .opacity(0.45)
-                .tooltip(Tooltip::text(tr!("errors.remote_host_path")))
-                .child(icon("icons/folder-open.svg", 12.0, theme.text_ghost));
         }
         controls = controls.child(reveal);
 
@@ -2368,8 +2397,11 @@ fn transfer_notice_row(
         };
         let open_waku = waku.clone();
         let open_key_waku = waku.clone();
-        let open_path = path.to_string_lossy().into_owned();
+        let open_session_id = state.session_id;
+        let open_key_session_id = open_session_id;
+        let open_path = path.clone();
         let open_key_path = open_path.clone();
+        let open_is_dir = *is_dir;
         let mut open = div()
             .id(SharedString::from(format!("transfer-open-{message_id}")))
             .track_focus(&state.open_focus)
@@ -2423,7 +2455,13 @@ fn transfer_notice_row(
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
                     let _ = open_waku.update(cx, |this, cx| {
-                        this.open_path_in_default_app(&open_path, cx);
+                        this.open_transfer_path(
+                            open_session_id,
+                            message_id,
+                            open_path.clone(),
+                            open_is_dir,
+                            cx,
+                        );
                     });
                 })
                 .on_key_down(move |event: &KeyDownEvent, _, cx| {
@@ -2432,7 +2470,13 @@ fn transfer_notice_row(
                     {
                         cx.stop_propagation();
                         let _ = open_key_waku.update(cx, |this, cx| {
-                            this.open_path_in_default_app(&open_key_path, cx);
+                            this.open_transfer_path(
+                                open_key_session_id,
+                                message_id,
+                                open_key_path.clone(),
+                                open_is_dir,
+                                cx,
+                            );
                         });
                     }
                 });
@@ -2501,41 +2545,88 @@ fn transfer_notice_row(
             .flex_col()
             .border_t(hairline())
             .border_color(theme.separator);
-        for entry in entries.iter().take(shown) {
-            rows = rows.child(
-                div()
-                    .h(px(26.0))
-                    .px(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(icon(
-                        if entry.is_dir {
-                            "icons/folder.svg"
-                        } else {
-                            right_panel::file_icon_for_path(&entry.name)
-                        },
-                        11.0,
-                        theme.text_tertiary,
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_color(theme.text_secondary)
-                            .child(entry.name.clone()),
-                    )
-                    .when(!entry.is_dir, |row| {
-                        row.child(
-                            div()
-                                .flex_none()
-                                .text_size(sp(11.0))
-                                .text_color(theme.text_ghost)
-                                .child(format_bytes(entry.size_bytes)),
-                        )
-                    }),
-            );
+        for (entry_index, entry) in entries.iter().take(shown).enumerate() {
+            let mut row = div()
+                .id(SharedString::from(format!(
+                    "transfer-entry-{message_id}-{entry_index}"
+                )))
+                .h(px(26.0))
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(icon(
+                    if entry.is_dir {
+                        "icons/folder.svg"
+                    } else {
+                        right_panel::file_icon_for_path(&entry.name)
+                    },
+                    11.0,
+                    theme.text_tertiary,
+                ))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_color(theme.text_secondary)
+                        .child(entry.name.clone()),
+                );
+            if !entry.is_dir {
+                row = row.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_ghost)
+                        .child(format_bytes(entry.size_bytes)),
+                );
+            }
+            if can_browse && let Some(state) = state {
+                if let Some(focus) = state.entry_focuses.get(entry_index) {
+                    let click_waku = waku.clone();
+                    let key_waku = waku.clone();
+                    let entry_session_id = state.session_id;
+                    let key_session_id = entry_session_id;
+                    let entry_path = path.join(&entry.name);
+                    let key_path = entry_path.clone();
+                    let entry_is_dir = entry.is_dir;
+                    let key_is_dir = entry_is_dir;
+                    row = row
+                        .track_focus(focus)
+                        .tab_index(0)
+                        .hover(|style| style.bg(theme.overlay_strong))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            let _ = click_waku.update(cx, |this, cx| {
+                                this.open_transfer_path(
+                                    entry_session_id,
+                                    message_id,
+                                    entry_path.clone(),
+                                    entry_is_dir,
+                                    cx,
+                                );
+                            });
+                        })
+                        .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                            if !event.keystroke.modifiers.modified()
+                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                            {
+                                cx.stop_propagation();
+                                let _ = key_waku.update(cx, |this, cx| {
+                                    this.open_transfer_path(
+                                        key_session_id,
+                                        message_id,
+                                        key_path.clone(),
+                                        key_is_dir,
+                                        cx,
+                                    );
+                                });
+                            }
+                        });
+                }
+            }
+            rows = rows.child(row);
         }
         card = card.child(rows);
 
@@ -2629,17 +2720,15 @@ fn transfer_notice_row(
         }
     }
 
-    if *is_image {
-        let frame = match state.and_then(|state| state.image.clone()) {
+    if *is_image && let Some(state) = state.filter(|state| !state.quarantined && state.can_open) {
+        let frame = match state.image.clone() {
             Some(image) => {
                 let preview_waku = waku.clone();
                 let key_waku = waku.clone();
-                let preview_image = image.clone();
-                let key_image = image.clone();
-                let preview_name = SharedString::from(title.clone());
-                let key_name = preview_name.clone();
                 let preview_path = path.clone();
                 let key_path = path.clone();
+                let session_id = state.session_id;
+                let key_session_id = session_id;
                 let mut frame = div()
                     .id(SharedString::from(format!("transfer-image-{message_id}")))
                     .max_w(px(ACTIVITY_IMAGE_WIDTH))
@@ -2649,40 +2738,38 @@ fn transfer_notice_row(
                     .cursor_default()
                     .tooltip(Tooltip::text(tr!("friends.transfer_preview")))
                     .child(img(image).size_full().object_fit(ObjectFit::Cover));
-                if let Some(state) = state {
-                    frame = frame
-                        .track_focus(&state.image_focus)
-                        .tab_index(0)
-                        .focus_visible(|style| style.bg(theme.focus_highlight()))
-                        .on_click(move |_, window, cx| {
+                frame = frame
+                    .track_focus(&state.image_focus)
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        let _ = preview_waku.update(cx, |this, cx| {
+                            this.open_transfer_path(
+                                session_id,
+                                message_id,
+                                preview_path.clone(),
+                                false,
+                                cx,
+                            );
+                        });
+                    })
+                    .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
                             cx.stop_propagation();
-                            let _ = preview_waku.update(cx, |this, cx| {
-                                this.open_image_preview(
-                                    preview_image.clone(),
-                                    preview_name.clone(),
-                                    preview_path.clone(),
-                                    window,
+                            let _ = key_waku.update(cx, |this, cx| {
+                                this.open_transfer_path(
+                                    key_session_id,
+                                    message_id,
+                                    key_path.clone(),
+                                    false,
                                     cx,
                                 );
                             });
-                        })
-                        .on_key_down(move |event: &KeyDownEvent, window, cx| {
-                            if !event.keystroke.modifiers.modified()
-                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                            {
-                                cx.stop_propagation();
-                                let _ = key_waku.update(cx, |this, cx| {
-                                    this.open_image_preview(
-                                        key_image.clone(),
-                                        key_name.clone(),
-                                        key_path.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                });
-                            }
-                        });
-                }
+                        }
+                    });
                 frame
             }
             None => div()

@@ -2158,26 +2158,40 @@ impl Waku {
     }
 
     /// Live state for a `TranscriptNotice::TransferReceived` row — `None`
-    /// for every other notice. Quarantine gates Open (a skeleton session
-    /// fails closed until its detail hydrates the flag), `show_all` lifts
-    /// the folder listing's preview cap, and `image` starts the thumbnail's
-    /// background read on a cache miss.
+    /// for every other notice. Quarantine gates file access (a skeleton
+    /// session fails closed until its detail hydrates the flag), `show_all`
+    /// lifts the folder listing's preview cap, and `image` starts the
+    /// trusted thumbnail's background read on a cache miss.
     pub(super) fn transfer_notice_state(
         &self,
         session: &AgentSession,
         message: &Message,
         cx: &mut Context<Self>,
     ) -> Option<TransferNoticeState> {
-        let Some(TranscriptNotice::TransferReceived { path, is_image, .. }) = &message.notice
+        let Some(TranscriptNotice::TransferReceived {
+            path,
+            is_image,
+            entries,
+            ..
+        }) = &message.notice
         else {
             return None;
         };
+        let quarantined = session.quarantined || !session.detail_loaded;
+        let can_open = !self.is_remote_session(session.id);
+        let entry_focuses = entries
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                self.transcript_control_focus(format!("transfer-entry-{}-{index}", message.id), cx)
+            })
+            .collect();
         Some(TransferNoticeState {
-            quarantined: session.quarantined || !session.detail_loaded,
+            quarantined,
             session_id: session.id,
-            can_open: !self.is_remote_session(session.id),
+            can_open,
             show_all: self.transfer_notice_show_all.contains(&message.id),
-            image: is_image
+            image: (*is_image && !quarantined && can_open)
                 .then(|| self.local_image_for_path(path, cx))
                 .flatten(),
             open_focus: self.transcript_control_focus(format!("transfer-open-{}", message.id), cx),
@@ -2187,6 +2201,7 @@ impl Waku {
                 .transcript_control_focus(format!("transfer-trust-{}", message.id), cx),
             entries_focus: self
                 .transcript_control_focus(format!("transfer-entries-{}", message.id), cx),
+            entry_focuses,
             image_focus: self
                 .transcript_control_focus(format!("transfer-image-{}", message.id), cx),
         })
