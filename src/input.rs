@@ -607,8 +607,9 @@ pub const INLINE_ATOM_MARKER: char = '\u{FFF9}';
 
 /// The whitespace an atom chip's painted label opens with — the width the
 /// chip reserves for its leading icon. The em space carries the icon; the
-/// thin space keeps it off the label text.
-pub(crate) const ATOM_ICON_SLOT: &str = "\u{2003}\u{2009}";
+/// en space keeps it off the label text. A thin space leaves almost no gap
+/// once the height-scaled icon and its inset occupy the leading em.
+pub(crate) const ATOM_ICON_SLOT: &str = "\u{2003}\u{2002}";
 
 /// A session reference's chip icon — the same chat glyph the sidebar and
 /// the session attachment chip carry.
