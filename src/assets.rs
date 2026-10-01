@@ -288,6 +288,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "trash",
     "type",
     "unplug",
+    "user-round",
     "volume-2",
     "whole-word",
     "wifi",
