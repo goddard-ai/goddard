@@ -7882,25 +7882,6 @@ impl Waku {
         let rail_recents = section_rows
             .iter()
             .any(|row| picker_row_section(row) == PickerSection::Recents);
-        let mut rail_sections = Vec::new();
-        if rail_favorites {
-            rail_sections.push(picker_section_rail_item(
-                format!("memory-model-rail-favorites-{}", provider.id()),
-                icon("icons/star.svg", 17.0, theme.text_tertiary).into_any_element(),
-                PickerSection::Favorites,
-                move |this| this.memory_model_picker_rows(provider, ""),
-                route_class_picker_state,
-            ));
-        }
-        if rail_recents {
-            rail_sections.push(picker_section_rail_item(
-                format!("memory-model-rail-recents-{}", provider.id()),
-                icon("icons/hourglass.svg", 17.0, theme.text_tertiary).into_any_element(),
-                PickerSection::Recents,
-                move |this| this.memory_model_picker_rows(provider, ""),
-                route_class_picker_state,
-            ));
-        }
         let highlight = self
             .route_class_picker
             .highlight
@@ -7943,6 +7924,25 @@ impl Waku {
                 MenuAlign::BelowRight,
                 move |popover, _window, _cx| {
                     let theme = Theme::current(_cx);
+                    let mut rail_sections = Vec::new();
+                    if rail_favorites {
+                        rail_sections.push(picker_section_rail_item(
+                            format!("memory-model-rail-favorites-{}", provider.id()),
+                            icon("icons/star.svg", 17.0, theme.text_tertiary).into_any_element(),
+                            PickerSection::Favorites,
+                            move |this| this.memory_model_picker_rows(provider, ""),
+                            route_class_picker_state,
+                        ));
+                    }
+                    if rail_recents {
+                        rail_sections.push(picker_section_rail_item(
+                            format!("memory-model-rail-recents-{}", provider.id()),
+                            icon("icons/hourglass.svg", 17.0, theme.text_tertiary).into_any_element(),
+                            PickerSection::Recents,
+                            move |this| this.memory_model_picker_rows(provider, ""),
+                            route_class_picker_state,
+                        ));
+                    }
                     let render_weak = weak_for_render.clone();
                     let render_current = current_for_render.clone();
                     let move_current = current.clone();
