@@ -31,8 +31,17 @@ export async function prepareCuaHost(targetTriple?: string): Promise<string> {
     "utf8",
   );
   const compiler = await $`rustc -vV`.quiet().text();
+  // Rust's debuginfo stripping can misalign Mach-O LINKEDIT string pools,
+  // making proc-macro dylibs unloadable on macOS 27 (rust-lang/rust#157750).
+  const buildEnv = {
+    ...process.env,
+    ...(process.platform === "darwin"
+      ? { CARGO_PROFILE_RELEASE_STRIP: "none" }
+      : {}),
+  };
   const key = createHash("sha256")
     .update(revision + extension + header + compiler + (targetTriple ?? "host"))
+    .update(buildEnv.CARGO_PROFILE_RELEASE_STRIP ?? "")
     .digest("hex");
   const cache = join(wakuCacheDir(), "cua-host");
   const destination = join(cache, key);
@@ -80,7 +89,7 @@ export async function prepareCuaHost(targetTriple?: string): Promise<string> {
   console.error("Building Cua SDK native cursor host...");
   await $`cargo build --locked --release --manifest-path ${join(source, "libs/cua-driver/rust/Cargo.toml")} --target-dir ${target} --package cua-driver-sdk ${targetTriple ? ["--target", targetTriple] : []}`.cwd(
     join(source, "libs/cua-driver/rust"),
-  );
+  ).env(buildEnv);
   if (existsSync(join(destination, library))) return destination;
   const staging = await mkdtemp(join(cache, ".host-"));
   try {
