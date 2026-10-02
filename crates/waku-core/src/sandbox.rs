@@ -2350,7 +2350,7 @@ mod tests {
         let (program, args, cwd) =
             sign_in_invocation(ProviderKind::Devin, &dir).expect("devin sign-in resolves");
         assert_eq!(cwd, dir.join("sandbox-homes"));
-        let home = dir.join("sandbox-homes/devin");
+        let home = sandbox_home(ProviderKind::Devin, &dir);
         assert!(home.is_dir());
         assert_eq!(program, shuru_binary().unwrap(),);
         assert_eq!(args[0], "run");
