@@ -1,89 +1,90 @@
 # Goddard on Linux
 
+Install the latest release, keep it updated, and troubleshoot common startup
+problems on a Linux desktop.
+
 ## Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh
 ```
 
-The script needs no root. It unpacks the release tarball into
-`~/.local/goddard.app` and installs the desktop entry into
-`~/.local/share/applications`, so **Goddard appears in your applications menu** —
-you can also launch it from a terminal via `goddard` command. Run the script again to
-upgrade manually; the installed app also keeps itself current.
+The installer selects your architecture and installs without root into
+`~/.local/goddard.app`. It adds an application-menu entry and a `goddard`
+command under `~/.local/bin`. Open Goddard from your applications menu; if
+`~/.local/bin` is on your `PATH`, you can also run `goddard` in a terminal.
 
-Goddard expects:
+You need:
 
-- **glibc 2.35 or newer** — Ubuntu 22.04, Debian 12, Fedora 36, and anything
-  more recent. Releases are built on Ubuntu 22.04, so older distributions must
-  build from source.
-- **A working Vulkan or OpenGL driver.** Goddard renders through wgpu, which tries
-  Vulkan first and falls back to GL. Software rasterizers (lavapipe, llvmpipe)
-  are accepted, so it can run in a VM, but see the note below.
-- **x86_64 or aarch64.** Other architectures build from source.
+- glibc 2.35 or newer, such as Ubuntu 22.04 or Debian 12.
+- An x86_64 or aarch64 machine.
+- A working Vulkan or OpenGL driver.
 - `xdg-desktop-portal` for native file dialogs.
-- `curl` or `wget` for installation and update downloads.
+- `curl` or `wget` for downloads.
 
-Set `GODDARD_VERSION` to install a specific version rather than the latest.
+After installation, install and sign in to a coding-agent CLI, then check
+**Settings → Providers** in Goddard.
 
-## Installing manually
+## Other installation options
 
-The script is a convenience, not a requirement. Download
-`Goddard-<version>-<target>.tar.gz` from the [latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest),
-then unpack it wherever you like:
-
-```sh
-mkdir -p ~/.local/goddard.app
-tar -xzf Goddard-<version>-<target>.tar.gz --strip-components=1 -C ~/.local/goddard.app
-ln -sf ~/.local/goddard.app/bin/goddard ~/.local/bin/goddard   # optional
-```
-
-The archive uses an install-prefix layout (`bin/`, `share/`) beneath one
-versioned directory, so `--strip-components=1` into a prefix such as
-`/usr/local` works too.
-
-**Keep `bin/` and `share/goddard/` intact.** Goddard launches its daemon, updater,
-and Computer Use helpers from `bin/`; the SDK library and supporting resources
-ship in the same installation. A symlink is fine — Goddard resolves it back to
-the real path.
-
-Installing the desktop entry is the part that matters — it is how the app is
-launched normally, and it is what associates the running window with its icon
-and name (Goddard reports the Wayland `app_id` / X11 `WM_CLASS` `org.goddardai.app`, which
-matches the entry's filename). Install the packaged file and point it at the
-install (the packaged copy uses bare `Exec=goddard` and `Icon=org.goddardai.app` names so it
-can be relocated):
+To install a specific release, set `GODDARD_VERSION` before running the
+installer. For example, this command installs version 0.13.0:
 
 ```sh
-install -D ~/.local/goddard.app/share/applications/org.goddardai.app.desktop \
-  -t ~/.local/share/applications
-sed -i "s|^Exec=goddard$|Exec=$HOME/.local/goddard.app/bin/goddard|" \
-  ~/.local/share/applications/org.goddardai.app.desktop
-sed -i "s|^Icon=org.goddardai.app$|Icon=$HOME/.local/goddard.app/share/icons/hicolor/256x256/apps/org.goddardai.app.png|" \
-  ~/.local/share/applications/org.goddardai.app.desktop
+curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | GODDARD_VERSION=0.13.0 sh
 ```
+
+For a manual installation, download the `.tar.gz` for your architecture from
+the [latest GitHub release](https://github.com/goddard-ai/goddard/releases/latest)
+and extract it into a folder you own. Run `bin/goddard` inside the extracted
+folder. Keep `bin/` and `share/` together: Goddard needs the companion programs
+and resources, so moving only the main executable will break the installation.
+The script above also installs the application-menu entry for you.
+
+For a source build, see [Contributing](../CONTRIBUTING.md#development-setup).
 
 ## Updating
 
-Tarball installs under the user's home directory update themselves. Goddard
-checks once per launch by default; an available release appears in the sidebar
-footer. Clicking it validates the staged installation, quits through Goddard's
-normal draft/state saves, swaps the complete prefix, and relaunches. If the new
-build exits before opening its window, the helper restores and relaunches the
-previous version.
+Goddard checks for updates at launch. An available update appears in the
+sidebar footer. You can also choose **Check for Updates** from the app menu,
+or disable launch checks under **Settings → General → Automatic updates**.
 
-Every archive is verified with the same Ed25519 release key used by the macOS
-and Windows updaters. The architecture-specific feeds are:
+The default user-local installation updates itself and verifies the release
+signature before installing. If the replacement cannot start, Goddard restores
+the previous installation. Re-running the install command is another way to
+upgrade to the latest release.
 
-- `https://github.com/goddard-ai/goddard/releases/latest/download/appcast-linux-x86_64.xml`
-- `https://github.com/goddard-ai/goddard/releases/latest/download/appcast-linux-aarch64.xml`
+System-wide or package-manager installations must be updated through their
+original installation method.
 
-Use **Check for Updates** for an explicit check, or disable launch checks in
-**Settings → General → Automatic updates**. System-wide installs such as
-`/usr/local`, builds without the managed-install marker, root sessions, and
-package-manager-owned builds do not modify themselves; upgrade those through
-their original installation method. Re-running `install.sh` remains a safe
-manual fallback for the default `~/.local/goddard.app` install.
+## Computer use
+
+Computer use is experimental. X11 uses your active desktop; Wayland support
+depends on your compositor and desktop integrations. See
+[Computer use](computer-use.md) for setup and permissions.
+
+## Troubleshooting
+
+**The app exits before showing a window.** Check that your system meets the
+glibc requirement and has a working graphics driver. Update the driver before
+retrying. An older distribution may need a source build.
+
+**The app crashes in a virtual machine.** Enable virtual GPU acceleration
+where available. Software graphics drivers can fail while compiling shaders.
+To try OpenGL instead of Vulkan for one launch:
+
+```sh
+VK_DRIVER_FILES=/nonexistent.json ~/.local/goddard.app/bin/goddard
+```
+
+This is a troubleshooting step, not a replacement for a working graphics
+driver. It may not help if both graphics backends use the same failing driver.
+
+**Goddard is missing from the applications menu.** Re-run the installer and
+check that `~/.local/share/applications/org.goddardai.app.desktop` exists.
+
+**The `goddard` command is missing.** Add `~/.local/bin` to your shell's `PATH`,
+or launch Goddard from your applications menu.
 
 ## Uninstalling
 
@@ -91,45 +92,5 @@ manual fallback for the default `~/.local/goddard.app` install.
 curl -fsSL https://raw.githubusercontent.com/goddard-ai/goddard/main/install.sh | sh -s -- --uninstall
 ```
 
-This removes `~/.local/goddard.app`, the symlink, and the desktop entry. Projects
-and settings stay in `~/.goddard`; delete that directory to remove them too.
-
-## Building from source
-
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for build prerequisites, then
-install Bun for the SDK artifact assembler, then produce the same archive
-this page installs with:
-
-```sh
-./scripts/bundle-linux.sh
-```
-
-To exercise the install script against that local build:
-
-```sh
-GODDARD_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
-  sh install.sh
-```
-
-## Computer Use
-
-Debug builds expose Computer Use through the bundled Cua Driver SDK. X11 and
-AT-SPI use the current desktop session; native Wayland support is experimental
-and depends on compositor integrations. See [Computer Use](computer-use.md)
-for capability checks, packaged helper files, and limitations.
-
-## Running in a virtual machine
-
-VMs usually have no GPU passthrough, so Mesa falls back to a software
-rasterizer. That works in principle — wgpu accepts a CPU adapter — but both
-lavapipe (Vulkan) and llvmpipe (GL) JIT-compile shaders through LLVM, and that
-path is fragile: on Fedora 44 aarch64 (mesa 26.0.3 + LLVM 22.1) it segfaults
-inside `gallivm_jit_function` while compiling a fragment shader. The crash is
-in the driver, not in Goddard, and no application-side setting avoids it.
-
-If the app dies on its first frame in a VM, check `coredumpctl info` for a
-backtrace through `libvulkan_lvp.so` or `libgallium`. The reliable fix is to
-give the guest a real GL driver — on UTM that means the QEMU backend with
-virtio-gpu-gl (virgl) rather than Apple Virtualization, which offers Linux
-guests no 3D at all. `VK_DRIVER_FILES=/nonexistent.json` hides the software
-Vulkan driver so wgpu takes the GL path instead.
+This removes the app, command symlink, and application-menu entry. It leaves
+project files and settings alone.

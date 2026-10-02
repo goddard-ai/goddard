@@ -22,7 +22,7 @@ sudo apt install build-essential clang cmake pkg-config libfontconfig-dev \
 ```
 
 Equivalent packages are available on Fedora, Arch, and other desktop Linux
-distributions. A working Vulkan driver is required at runtime.
+distributions. A working Vulkan or OpenGL driver is required at runtime.
 
 Install dependencies and start the development watcher from the repository
 root:
@@ -33,16 +33,18 @@ bun run dev
 ```
 
 On macOS the watcher builds and signs `target/debug/Goddard Debug.app`; on Linux
-and Windows it builds `target/debug/goddard`. In both cases the provider daemon remains an
-external `target/debug/goddard-debug-daemon`: provider-only edits rebuild and
-hot-swap that process without relaunching the app, while desktop edits rebuild
-and relaunch the app normally. Keep that watcher running while you work. Do
-not start a second watcher or manually relaunch the debug app. Press `Ctrl-C`,
-or quit the app, to stop it.
+and Windows it builds `target/debug/goddard`. The watcher also manages the
+separate provider daemon. Keep it running while you work; do not start a
+second watcher or launch a second debug app yourself.
 
-The embedded browser and experimental computer-use integration are currently
-macOS-only. On Linux and Windows the browser reports that it is unavailable,
-while the computer-use UI and runtime stay disabled.
+After a successful rebuild, type `a` and Enter in the watcher terminal to
+relaunch the app, or `b` and Enter to restart the daemon as well. Quitting the
+app leaves the watcher running. Type `q` and Enter, or press Ctrl-C, to stop
+the watcher and its processes.
+
+The embedded browser is available on macOS and Windows. Computer use is
+experimental, with platform-specific requirements described in the
+[computer-use guide](docs/computer-use.md).
 
 Windows needs the MSVC toolchain (Visual Studio Build Tools with the C++
 workload and the Windows SDK) so Cargo can link and so the resource compiler
@@ -71,6 +73,9 @@ without publishing:
 GODDARD_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
   sh install.sh
 ```
+
+Replace `<version>` and `<target>` with the archive's actual version and target
+from `target/release`.
 
 [docs/linux.md](docs/linux.md) documents both paths for users.
 
@@ -139,8 +144,7 @@ recording in the pull request when they make the result easier to review.
 
 ## Pull requests
 
-Use the [pull request template](.github/pull_request_template.md) and write
-your responses in your own words.
+Use the [pull request template](.github/pull_request_template.md).
 
 - Explain the problem and the chosen solution.
 - List the checks you ran.
@@ -156,26 +160,6 @@ your responses in your own words.
   folds them into `CHANGELOG.md` at release time. Highlight fragments must
   embed a screenshot or recording via `![](media/<slug>.{png,gif,mp4,mov})`
   with the asset at `.changelog/media/<slug>.<ext>`.
-
-### AI policy
-
-- **Disclose all AI usage.** In your pull request description or issue, name
-  each tool you used and explain the extent of its involvement.
-- **Understand the entire change.** You are responsible for the code you
-  submit and all actions taken, including those performed by AI tools. Take
-  time to review and verify the work before submitting it.
-- **PR descriptions and comments must not be LLM generated.** Write them
-  yourself, in your own words. PRs with obviously LLM-generated descriptions
-  or comments will be closed immediately without review. This is especially
-  important when submitting multiple PRs in a short period. A PR may be
-  reopened once the text is corrected.
-- These requirements also apply to issues, though enforcement is less strict.
-- There is no vouching system at this time, though one may be added in the
-  future.
-
-AI-assisted contributions are welcome. This policy aims to prevent low-effort
-submissions and preserve Goddard's standards for code quality, performance, and
-maintainability.
 
 ## License
 

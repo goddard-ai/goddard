@@ -23,7 +23,7 @@ cap at 256 KiB by keeping the newest half.
 
 ## How the supervisor decides
 
-`monitor_daemon` in [crates/waku-client/src/process.rs](../crates/waku-client/src/process.rs)
+`monitor_daemon` in [crates/waku-client/src/process.rs](../../crates/waku-client/src/process.rs)
 drives everything:
 
 1. Every 5 s the app's shared connection answers a `GetSettings` probe

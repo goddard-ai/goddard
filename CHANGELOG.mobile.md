@@ -1,6 +1,7 @@
 # Changelog — Mobile
 
-All notable changes to the Goddard mobile app. Fragments live under `.changelog/mobile/` with the same naming rules as [CHANGELOG.md](CHANGELOG.md) and fold here per release.
+Release notes for the Goddard mobile app. Changes shared with Desktop are in
+[the main changelog](CHANGELOG.md).
 
 ## [0.10.0]
 

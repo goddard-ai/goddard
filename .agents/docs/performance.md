@@ -32,7 +32,7 @@
 - Streaming CPU is governed by two cadences — stream commits at ≤ ~8.3 Hz and
   pulse-clock ticks at ≤ 60 Hz (spinners; other pulses stay at ≤ ~30 Hz) —
   and by what one frame can see. Read
-  [docs/performance.md](../../docs/performance.md) before touching the event
+  [streaming-performance.md](streaming-performance.md) before touching the event
   pump, the pulse clock (`src/ui/motion.rs`), veils, overlay scrollbars, pane
   caching, or anything else a streaming frame reaches; it also records the
   counter-based measurement playbook that actually finds regressions.

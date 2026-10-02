@@ -59,6 +59,18 @@ Read the doc before working in its area:
 - [.agents/docs/jev.md](.agents/docs/jev.md) — the eval model's plumbing,
   call sites, thresholds, and the spend-gating rules
 
+## Documentation audiences
+
+- Write `README.md`, `WIKI.md`, and `docs/` for human readers. This also
+  applies recursively to local documentation linked from those pages:
+  explain the reader's task, prerequisites, steps, and observable result.
+- Keep implementation notes, agent instructions, investigations, and internal
+  proposals in `.agents/docs/`. Preserve useful technical detail there rather
+  than mixing it into user guides.
+- Contributor and release guides may explain technical procedures for human
+  maintainers. Keep their links within human-facing documentation and verify
+  relative paths and heading anchors after moving pages.
+
 ## Performance
 
 - Performance is a product requirement: nothing a frame can reach may do I/O

@@ -19,7 +19,7 @@ Use PostHog Cloud EU by default for a privacy-forward global desktop product, wh
 
 ## What exists today
 
-The integration is isolated in [`src/analytics.rs`](../src/analytics.rs):
+The integration is isolated in [`src/analytics.rs`](../../src/analytics.rs):
 
 | Concern | Current behavior |
 | --- | --- |
@@ -31,7 +31,7 @@ The integration is isolated in [`src/analytics.rs`](../src/analytics.rs):
 | Consent | `analytics_enabled` is persisted, defaults to `true`, and disabling it also drops events already waiting in the worker |
 | Build scope | Debug builds never enable analytics; release builds require compile-time endpoint and website-ID configuration |
 
-The main construction point is [`src/app.rs`](../src/app.rs), while the setting is rendered and persisted separately. [`docs/daemon-diagnostics.md`](daemon-diagnostics.md) currently names Umami in its diagnostic event reference and should be updated as part of the cutover.
+The main construction point is [`src/app.rs`](../../src/app.rs), while the setting is rendered and persisted separately. [`.agents/docs/daemon-diagnostics.md`](daemon-diagnostics.md) currently names Umami in its diagnostic event reference and should be updated as part of the cutover.
 
 ## Research findings
 
@@ -96,7 +96,7 @@ GODDARD_POSTHOG_API_KEY   PostHog project token for capture (required)
 GODDARD_POSTHOG_HOST      Regional ingestion host override (default: https://eu.i.posthog.com)
 ```
 
-The project token is used only for the public capture API; no personal or project-secret API key belongs in the desktop binary. Pass these values through [`scripts/release.ts`](../scripts/release.ts) and each release job in [`.github/workflows/release.yml`](../.github/workflows/release.yml). Remove `GODDARD_ANALYTICS_ENDPOINT`, `GODDARD_ANALYTICS_WEBSITE_ID`, and the old Umami dependency after the first PostHog-backed release is verified.
+The project token is used only for the public capture API; no personal or project-secret API key belongs in the desktop binary. Pass these values through [`scripts/release.ts`](../../scripts/release.ts) and each release job in [`.github/workflows/release.yml`](../../.github/workflows/release.yml). Remove `GODDARD_ANALYTICS_ENDPOINT`, `GODDARD_ANALYTICS_WEBSITE_ID`, and the old Umami dependency after the first PostHog-backed release is verified.
 
 Roll out in this order:
 
@@ -115,7 +115,7 @@ Roll out in this order:
 - Debug builds make no PostHog requests. Release builds without a project token remain analytics-disabled and still start normally; the ingestion host defaults to EU Cloud.
 - Queue-full, timeout, rejected-request, SDK initialization, and shutdown failures cannot block or fail app startup, rendering, or user actions.
 - The release pipeline embeds the selected region and project token without exposing any personal or project-secret API key.
-- `docs/daemon-diagnostics.md` refers to PostHog rather than Umami, and the Umami crate and release variables are gone after cutover.
+- `.agents/docs/daemon-diagnostics.md` refers to PostHog rather than Umami, and the Umami crate and release variables are gone after cutover.
 
 ## Implementation checklist
 
@@ -123,9 +123,9 @@ Roll out in this order:
 - [ ] Add the PostHog adapter and privacy gates in `src/analytics.rs`; retain the existing typed events and tests.
 - [ ] Add serialization tests for representative lifecycle, turn, and daemon events.
 - [ ] Add a mock-ingestion test covering opt-out-before-delivery and missing release configuration.
-- [ ] Update [`scripts/release.ts`](../scripts/release.ts) and all release workflow jobs.
+- [ ] Update [`scripts/release.ts`](../../scripts/release.ts) and all release workflow jobs.
 - [ ] Recreate dashboards and record the cutover date in the PostHog project.
-- [ ] Update [`docs/daemon-diagnostics.md`](daemon-diagnostics.md), remove Umami references, and run the repository's normal Rust checks.
+- [ ] Update [`.agents/docs/daemon-diagnostics.md`](daemon-diagnostics.md), remove Umami references, and run the repository's normal Rust checks.
 
 ## Decision
 

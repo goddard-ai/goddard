@@ -23,11 +23,11 @@ price:
 | --- | --- | --- |
 | `cx.notify(view)` | Re-renders that view and its ancestors; **cached sibling panes replay** | The stream pump (per commit), the pulse clock, user-event handlers |
 | `window.refresh()` | Re-renders everything and **bypasses every cached pane** | Genuine whole-window invalidation only: hover transitions, drags, theme |
-| `request_animation_frame` | Display-rate (120 Hz) re-render of the current view for as long as it re-arms | Nothing during streaming. One mounted repeating `with_animation` pinned the window at 120 Hz for a whole turn (~36% CPU by itself). The one sanctioned transient: the 200 ms panel show/hide slide ([src/app/render.rs](../src/app/render.rs)), which re-arms only while an edge is moving and gates the pane fan-out (below) |
+| `request_animation_frame` | Display-rate (120 Hz) re-render of the current view for as long as it re-arms | Nothing during streaming. One mounted repeating `with_animation` pinned the window at 120 Hz for a whole turn (~36% CPU by itself). The one sanctioned transient: the 200 ms panel show/hide slide ([src/app/render.rs](../../src/app/render.rs)), which re-arms only while an edge is moving and gates the pane fan-out (below) |
 
 The root `Waku` view re-renders on every frame regardless of what is dirty, so
 it must stay thin: the sidebar, transcript, and right panel are `WakuPane`
-islands ([src/app.rs](../src/app.rs)) embedded with the fork's
+islands ([src/app.rs](../../src/app.rs)) embedded with the fork's
 `Entity::cached`. Each pane observes the root — any root notify still
 re-renders every island, so caching can never show stale state — while a
 notify targeted at one pane (the pulse clock leases `window.current_view()`)
@@ -82,8 +82,8 @@ the pipeline must keep it that way:
 
 **Commits, ≤ ~8.3 Hz.** Provider chunks queue for a full
 `STREAM_FRAME_INTERVAL` (120 ms) and fold into one drain → one notify → one
-tail remeasure ([src/app.rs](../src/app.rs),
-[src/app/runtime.rs](../src/app/runtime.rs)).
+tail remeasure ([src/app.rs](../../src/app.rs),
+[src/app/runtime.rs](../../src/app/runtime.rs)).
 Two hard-won rules:
 
 - The pump timer must **not** race the wake channel. It used to, which made
@@ -97,7 +97,7 @@ Two hard-won rules:
   while text streamed at 10% was this one flag.
 
 **Pulse ticks, ≤ 60 Hz.** All repeating animation rides the shared
-self-parking clock in [src/ui/motion.rs](../src/ui/motion.rs): loaders read
+self-parking clock in [src/ui/motion.rs](../../src/ui/motion.rs): loaders read
 a phase from a shared epoch, leases expire 300 ms after the loader last
 painted, and the clock parks when no leases remain. Never use
 `with_animation(...).repeat()` — it re-arms `request_animation_frame` every
@@ -118,7 +118,7 @@ veil at ≈ 30 Hz, the reasoning veil at ≈ 15 Hz, both leasing
 **Overlay scrollbars are the classic violator of both cadences.** A streaming
 surface moves its content every commit, so the bar sits in its reveal hold for
 the whole turn — and the hold is constant-opacity, needing zero repaints.
-[src/ui/scrollbar.rs](../src/ui/scrollbar.rs) therefore schedules a single
+[src/ui/scrollbar.rs](../../src/ui/scrollbar.rs) therefore schedules a single
 one-shot wake for hold expiry and rides the pulse clock only through the
 350 ms fade. Driving frames through the hold pinned the pane at pulse rate the
 moment any scrollbar became visible.
@@ -128,13 +128,13 @@ moment any scrollbar became visible.
 - The transcript is virtualized with `list()`; per-commit invalidation is the
   last `STREAM_REMEASURE_TAIL_ROWS` rows only, and row folds, navigation
   turns, response footers, and sidebar rows are all fingerprint-cached
-  ([src/app/transcript.rs](../src/app/transcript.rs),
-  [src/app/sidebar.rs](../src/app/sidebar.rs)). A fingerprint must hash at
+  ([src/app/transcript.rs](../../src/app/transcript.rs),
+  [src/app/sidebar.rs](../../src/app/sidebar.rs)). A fingerprint must hash at
   display granularity: the sidebar row cache keys session recency, and hashing
   raw seconds would bust it on every commit.
 - The live reasoning peek renders a **byte window** of the tail
   (`live_reasoning_window_start`,
-  [src/app/transcript_view.rs](../src/app/transcript_view.rs)): markdown cost
+  [src/app/transcript_view.rs](../../src/app/transcript_view.rs)): markdown cost
   is O(rendered source) per tick regardless of block shape — a wall-of-text
   think is one giant paragraph and a bulleted think one giant list, so a
   block-count cap bounds neither. The slide hysteresis is wide
@@ -142,7 +142,7 @@ moment any scrollbar became visible.
   commit and each slide rebuilds the window from a fresh view. The full trace
   renders once the turn settles.
 - `markdown_tail` and block-index element ordinals
-  (`block_ix << 16 | position`, [src/md/render.rs](../src/md/render.rs)) let
+  (`block_ix << 16 | position`, [src/md/render.rs](../../src/md/render.rs)) let
   a capped walk hand settled blocks the same flatten-cache and veil keys as a
   full walk.
 - `MarkdownView::set_text` derives the mended display tail only when content
@@ -152,7 +152,7 @@ moment any scrollbar became visible.
 ## Markdown math
 
 Inline `$…$` and display `$$…$$` formulas use the native RaTeX engine
-([src/md/math.rs](../src/md/math.rs)). Parsing TeX, loading embedded font
+([src/md/math.rs](../../src/md/math.rs)). Parsing TeX, loading embedded font
 outlines, producing SVGs and rasterizing them all run on the background
 executor. A frame only queues cache misses and reads completed results.
 The General setting **Render math expressions** is enabled by default.
