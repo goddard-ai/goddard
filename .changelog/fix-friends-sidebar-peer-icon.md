@@ -1,1 +1,0 @@
-- Friend projects now show their person icon in the sidebar.

@@ -1,1 +1,0 @@
-- Model and focus shortcuts follow the composer you last focused, including a visible side chat. Typing with no composer focused also returns to that composer when its draft is empty.

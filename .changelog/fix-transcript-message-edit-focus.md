@@ -1,1 +1,0 @@
-- Fixed the "Revert to here" prompt editor ignoring keystrokes — such as Backspace over selected text — once you click into it.

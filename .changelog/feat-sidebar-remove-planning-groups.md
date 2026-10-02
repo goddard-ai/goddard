@@ -1,1 +1,0 @@
-- Planning tasks stay in their date groups; Settings no longer offers “Group recent Planning tasks.”

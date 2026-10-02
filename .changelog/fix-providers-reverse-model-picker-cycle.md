@@ -1,1 +1,0 @@
-- Press Alt+Shift+Tab while the model picker is open to move to the previous model.

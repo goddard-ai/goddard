@@ -1,1 +1,0 @@
-- The jump-to-bottom button now moves above turn status markers and Jev-suggested actions when they appear above the composer.

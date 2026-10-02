@@ -1,1 +1,0 @@
-- Search and switch projects from the project name in the New task prompt. Results use the composer’s starred and recent ordering.

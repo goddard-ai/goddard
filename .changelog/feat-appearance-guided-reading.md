@@ -1,1 +1,0 @@
-- Find Guided reading in Appearance settings, where it stays off by default and lets you adjust how much and how often words are emphasized.

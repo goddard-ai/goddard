@@ -1,1 +1,0 @@
-- The transcript’s **Blocked** marker now means requested work is still stopped by an unresolved external obstacle; resolved issues and completed turns no longer count as blocked.

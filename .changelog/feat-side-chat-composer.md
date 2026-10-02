@@ -1,1 +1,0 @@
-- Side chats now support the same composer features as the main task: `@` file and task mentions, `/` command suggestions and execution, dragging a task from the sidebar to reference it, and selecting text in an agent's reply or commentary to annotate it with a comment before sending.

@@ -1,1 +1,0 @@
-- Restarting the app no longer floods a task with "the Goddard daemon is unreachable" alerts while the daemon is still coming back — the background-work poll now waits quietly for the connection instead of reporting each missed beat.

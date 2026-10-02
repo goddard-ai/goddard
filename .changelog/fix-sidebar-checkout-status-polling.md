@@ -1,1 +1,0 @@
-- The sidebar checks active task checkouts every 30 seconds and allows only one scan at a time; archived tasks keep their last-known status and refresh when unarchived. Diagnostics now retain bounded, redacted stderr from the local daemon and path-free checkout scan timing and request counts.

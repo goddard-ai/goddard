@@ -1,1 +1,0 @@
-- Resumed Devin sessions now show the real date each reply finished in the transcript footer instead of "Dec 31st 1969"; sessions resumed from other providers fall back to the session's last-activity date.

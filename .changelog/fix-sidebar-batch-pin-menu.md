@@ -1,1 +1,0 @@
-- Pinning multiple selected tasks keeps the batch selected, and immediately reopening its right-click menu offers to unpin them.

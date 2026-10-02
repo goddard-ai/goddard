@@ -1,1 +1,0 @@
-- After updating Codex CLI, reopen the model picker to discover its new models without restarting Goddard.

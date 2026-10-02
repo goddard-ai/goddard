@@ -1,1 +1,0 @@
-- ⌘⌥2 now selects your first favorite model — ⌘⌥1 stays on Auto routing, so favorites shift up one slot and a ninth favorite no longer takes ⌘⌥9.

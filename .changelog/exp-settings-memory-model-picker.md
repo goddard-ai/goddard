@@ -1,1 +1,0 @@
-- Each provider's Project Memory model picker now includes Favorites and Recents, so you can reuse a familiar model without searching the full catalog.

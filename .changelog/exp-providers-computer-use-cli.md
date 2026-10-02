@@ -1,1 +1,0 @@
-- Computer Use now runs through a task-scoped `goddard-agent` CLI across supported providers, with persistent JavaScript bindings, existing access approvals, and screenshot paths agents can open directly.

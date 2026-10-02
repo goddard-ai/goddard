@@ -1,1 +1,0 @@
-- Daemon request pools now attribute queued and running work per command in `daemon-stats.jsonl` (`requestPools.*.commands`), so a saturated heavy queue names the jobs holding it — including which workspace operations — instead of only reporting queue depth.

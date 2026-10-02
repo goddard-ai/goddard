@@ -1,1 +1,0 @@
-- Right-clicking a link in a task transcript now labels its copy item after what it copies: “Copy URL” for web links, and “Copy File Path” for links that point at a file — which copies the decoded path without any line-number or heading suffix.

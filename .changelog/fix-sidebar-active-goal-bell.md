@@ -1,1 +1,0 @@
-- Keep the top bar bell quiet for intermediate turns in an active goal; it still lights up when a task needs your input.

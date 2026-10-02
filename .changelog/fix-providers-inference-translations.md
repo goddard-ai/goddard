@@ -1,1 +1,0 @@
-- Chinese and Japanese provider settings now include the hosted inference credential guidance and current voice briefing details.

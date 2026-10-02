@@ -1,1 +1,0 @@
-- Use ⌘↩ to activate the visible suggested action when focus is outside the composer, as long as the composer is empty.

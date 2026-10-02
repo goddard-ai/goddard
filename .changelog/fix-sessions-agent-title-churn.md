@@ -1,1 +1,0 @@
-- Before considering a title change, agents can read their current title from their own task transcript. They keep it unless the task has substantially changed or pivoted, and use its unique subject instead of recent progress when renaming.

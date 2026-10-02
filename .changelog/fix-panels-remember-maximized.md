@@ -1,1 +1,0 @@
-- Maximizing a right-panel tab now persists per task — switching to another task and back returns to the maximized panel instead of a docked one, and the remembered state survives relaunching the app.

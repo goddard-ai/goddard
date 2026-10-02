@@ -4,6 +4,95 @@ Release notes for Goddard Desktop and features shared across clients.
 Changes specific to the mobile app are in
 [the mobile changelog](CHANGELOG.mobile.md).
 
+## [0.14.0]
+
+### Features
+
+- **Sidebar**
+  - Holding Option over the task list now shows each task's provider logo next to its model name instead of a generic sparkle icon.
+  - In Sidebar options, choose Grouping → Project and Project order → Manual to arrange groups within the starred and unstarred sections by dragging; Alt+Up/Down also moves the focused group, and the order is saved. The Chats group can also move among unstarred project groups.
+  - Planning tasks stay in their date groups; Settings no longer offers “Group recent Planning tasks.”
+- **Composer**
+  - Search and switch projects from the project name in the New task prompt. Results use the composer’s starred and recent ordering.
+  - In the composer’s project picker, remote projects now show their host alias after the project name.
+- **Transcript**
+  - Right-clicking a link in a task transcript now labels its copy item after what it copies: “Copy URL” for web links, and “Copy File Path” for links that point at a file — which copies the decoded path without any line-number or heading suffix.
+  - After submitting a prompt with a newly selected model in an existing session, see the provider's logo beside the model-change notice and focus the info icon for a reminder that prompt-cache reuse can change across models and increase costs.
+- **Terminals**
+  - Opening the Terminals sidebar group now keeps it open while you switch to a task, Inbox, Drafts, Automations, or a project page — it folds again only when you collapse it yourself or close its last terminal.
+  - Open terminals now return after restart as fresh shells at their last reported working directory, with recent plain-text scrollback restored above the prompt.
+- Find Guided reading in Appearance settings, where it stays off by default and lets you adjust how much and how often words are emphasized.
+- Daemon request pools now attribute queued and running work per command in `daemon-stats.jsonl` (`requestPools.*.commands`), so a saturated heavy queue names the jobs holding it — including which workspace operations — instead of only reporting queue depth.
+- Friend-delivered chats, files, and folders now share the Friends group; each task shows its sender, file senders can set a display title, and the quarantine banner refers to a delivery as a task. Delivery tasks inherit New task's remembered provider and model, start with Full access inside Sandbox, and keep files quarantined until you trust them. After you trust a delivery, previewable files open in the right panel, other files open with their OS default app, and folders open in the expandable Files tree.
+- Run **Rebase worktree** from the command palette to replay an idle worktree session's commits onto its recorded base branch. Dirty worktrees show an error toast, and rebases that stop on conflicts open the conflict dialog. The command and dirty-worktree message are also translated into Chinese and Japanese.
+- Issues and pull requests now use GitHub's own status glyphs, and issues closed as "not planned" show the muted crossed-circle instead of the completed check.
+- Focus the Archived Chats search field when opening the page so you can start filtering chats immediately.
+- Terminals opened on a remote host's workspace now run on that host over its daemon connection — SSH and socket remotes both work — instead of refusing to open. The tab renders locally, resizes propagate to the remote PTY, and a dropped connection reattaches to the still-running shell with its recent screen restored.
+- Incognito tasks now default to the Local workspace. The first time you use Incognito, a confirmation explains that it is for throwaway chats and does not add security or privacy; Project Memory is described as experimental.
+- Side chats now support the same composer features as the main task: `@` file and task mentions, `/` command suggestions and execution, dragging a task from the sidebar to reference it, and selecting text in an agent's reply or commentary to annotate it with a comment before sending.
+- Model and focus shortcuts follow the composer you last focused, including a visible side chat. Typing with no composer focused also returns to that composer when its draft is empty.
+
+### Experiments
+
+- **Providers**
+  - **[Experimental]** Enable Adaptive model handoffs in Settings → Experiments to let Auto tasks that started on Hard use Medium for routine follow-up work and return to Hard when needed, with each model change noted in the transcript.
+  - **[Experimental]** Computer Use now runs through a task-scoped `goddard-agent` CLI across supported providers, with persistent JavaScript bindings, existing access approvals, and screenshot paths agents can open directly.
+- **[Experimental]** Voice briefing settings now show the full spoken-summary prompt in a multiline editor, with a reset button when it has been customized. With the optional Jev gate enabled, its multiline criteria editor offers clickable examples to append decision, blocker, and risk criteria; automatic playback remains off by default, and the response footer and command palette can generate or cancel briefings on demand. While a clip plays, pause or resume it above the composer and see its remaining time.
+- **[Experimental]** Each provider's Project Memory model picker now includes Favorites and Recents, so you can reuse a familiar model without searching the full catalog.
+- **[Experimental]** The sidebar's quick-action dock now shrinks its magnified buttons back to normal size as it slides away when the pointer leaves, instead of snapping them to rest size mid-drop.
+
+### Fixed
+
+- **Sessions**
+  - Tasks an agent or automation created no longer open to a bare prompt: a turn that finished before you first opened the task now loads its full transcript.
+  - Before considering a title change, agents can read their current title from their own task transcript. They keep it unless the task has substantially changed or pivoted, and use its unique subject instead of recent progress when renaming.
+  - Fixed a bug where the app could intermittently report "Goddard daemon is disconnected" while several tasks were streaming at once, dropping in-flight actions like `/compact` until the connection re-established.
+  - Restarting the app no longer floods a task with "the Goddard daemon is unreachable" alerts while the daemon is still coming back — the background-work poll now waits quietly for the connection instead of reporting each missed beat.
+  - Moving a task to Dormant or Archive now releases its provider runtime immediately, including runtimes retained by the daemon after the task was last opened.
+  - Removing a queued agent prompt no longer shows an error if it has already started delivering.
+- **Sidebar**
+  - Keep the top bar bell quiet for intermediate turns in an active goal; it still lights up when a task needs your input.
+  - Pinning multiple selected tasks keeps the batch selected, and immediately reopening its right-click menu offers to unpin them.
+  - The sidebar checks active task checkouts every 30 seconds and allows only one scan at a time; archived tasks keep their last-known status and refresh when unarchived. Diagnostics now retain bounded, redacted stderr from the local daemon and path-free checkout scan timing and request counts.
+  - Archiving multiple selected tasks now keeps every required confirmation instead of skipping tasks or replacing their dialogs.
+- **Composer**
+  - With the "Composer drafts" experiment off, the app no longer pops a save-failed toast every time a draft would persist — clients check the flag before asking the daemon to load or store drafts.
+  - Hovering the goal chip in the composer now shows the goal wrapped in a compact card instead of one long line, so lengthy goals stay readable.
+  - The suggested-action chip no longer offers "Keep going" after turns that finished cleanly — it could only appear where there was nothing to continue. Turns that genuinely stopped mid-work still get the option through the "Needs continuation" status chip.
+- **Providers**
+  - Codex child-thread notifications no longer add late activity to the main conversation or finish its turn early.
+  - SWE-2 Medium and SWE-2 Max are back in the Devin model picker, including the Jev routing class maps — Devin moved thinking level out of the model name into a session option, which had left only SWE-2 High listed.
+  - ⌘⌥2 now selects your first favorite model — ⌘⌥1 stays on Auto routing, so favorites shift up one slot and a ninth favorite no longer takes ⌘⌥9.
+  - Tasks running on Grok Build now show when the provider rate-limits or runs out of free usage — retries get a live status row, and a spent quota fails the turn with Grok's message instead of ending it looking completed
+  - Chinese and Japanese provider settings now include the hosted inference credential guidance and current voice briefing details.
+  - Project memory distillation no longer attempts to start inherited Codex JavaScript and computer-use REPL servers.
+  - After updating Codex CLI, reopen the model picker to discover its new models without restarting Goddard.
+  - Press Alt+Shift+Tab while the model picker is open to move to the previous model.
+  - Auto model routing keeps ordinary exploration and planning on your Medium model preference, reserving Easy for clearly mechanical work and Hard for unusually demanding tasks.
+- **Git**
+  - Fixed turn checkpoints failing when a project tracks files inside a folder its ignore rules exclude, such as a force-added vendor directory.
+  - Only remind a task to commit after an empty land when its checkout has uncommitted changes.
+- **Transcript**
+  - The transcript’s **Blocked** marker now means requested work is still stopped by an unresolved external obstacle; resolved issues and completed turns no longer count as blocked.
+  - Transcript blockquotes now keep the indentation written after the `>` marker, so quoted code or aligned text no longer collapses against the quote bar.
+  - `/compact` now leaves a persistent "Compacted context" row in the task transcript; previously the record folded into a generic "Worked for" group, so the command looked like it did nothing.
+  - The transcript’s **Failed** marker now requires an unresolved error that leaves requested work incomplete; recovered tool errors no longer mark a successful turn as failed.
+  - The jump-to-bottom button now moves above turn status markers and Jev-suggested actions when they appear above the composer.
+  - Transcript MCP startup failures now use a concise warning, with a control to copy the full diagnostic.
+  - Fixed the "Revert to here" prompt editor ignoring keystrokes — such as Backspace over selected text — once you click into it.
+  - Resumed Devin sessions now show the real date each reply finished in the transcript footer instead of "Dec 31st 1969"; sessions resumed from other providers fall back to the session's last-activity date.
+- **Navigation**
+  - Typing a custom command’s full name or a literal substring of at least three non-space characters in the command palette now puts matching labels first, ahead of actions that only match fuzzily.
+  - The GitHub notification inbox now joins ⌘[ / ⌘] back-and-forward history like the other main-column pages — opening it records the surface it covered so back returns to it, and closing it leaves a hop that forward (or back) can replay.
+- **Friends**
+  - Fixed “Send to friend” on an agent message silently doing nothing instead of opening its confirmation dialog.
+  - Friend projects now show their person icon in the sidebar.
+- Tasks archived more than a week now shed their stored tool output, arguments, and thinking text; an archived transcript keeps its messages and a skeleton of which tools ran, and the task is still removed entirely after thirty days. Recorded tool output in new transcripts is also capped tighter per activity, and the daemon's eval decision log now caps itself instead of growing without limit.
+- Fixed image files opening to a blank pane in the file viewer — photos, icons, and SVGs now preview again, still with ⌘+scroll zoom and vertical panning.
+- Use ⌘↩ to activate the visible suggested action when focus is outside the composer, as long as the composer is empty.
+- Maximizing a right-panel tab now persists per task — switching to another task and back returns to the maximized panel instead of a docked one, and the remembered state survives relaunching the app.
+- In Settings → Jev, each prompt suggestion is now titled with the label shown on its floating composer chip.
+
 ## [0.13.0]
 
 ### Features

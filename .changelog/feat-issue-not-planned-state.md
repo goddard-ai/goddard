@@ -1,1 +1,0 @@
-- Issues and pull requests now use GitHub's own status glyphs, and issues closed as "not planned" show the muted crossed-circle instead of the completed check.

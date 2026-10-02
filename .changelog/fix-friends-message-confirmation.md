@@ -1,1 +1,0 @@
-- Fixed “Send to friend” on an agent message silently doing nothing instead of opening its confirmation dialog.

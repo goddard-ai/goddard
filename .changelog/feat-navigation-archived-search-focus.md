@@ -1,1 +1,0 @@
-- Focus the Archived Chats search field when opening the page so you can start filtering chats immediately.

@@ -1,1 +1,0 @@
-- Transcript MCP startup failures now use a concise warning, with a control to copy the full diagnostic.

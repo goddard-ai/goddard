@@ -1,1 +1,0 @@
-- Transcript blockquotes now keep the indentation written after the `>` marker, so quoted code or aligned text no longer collapses against the quote bar.

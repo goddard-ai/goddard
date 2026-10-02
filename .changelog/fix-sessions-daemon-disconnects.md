@@ -1,1 +1,0 @@
-- Fixed a bug where the app could intermittently report "Goddard daemon is disconnected" while several tasks were streaming at once, dropping in-flight actions like `/compact` until the connection re-established.

@@ -1,1 +1,0 @@
-- Enable Adaptive model handoffs in Settings → Experiments to let Auto tasks that started on Hard use Medium for routine follow-up work and return to Hard when needed, with each model change noted in the transcript.
