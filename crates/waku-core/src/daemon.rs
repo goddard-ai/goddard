@@ -168,6 +168,11 @@ const IDLE_REAPER_INTERVAL: std::time::Duration = std::time::Duration::from_secs
 /// task's process alive for the whole workday.
 const DEFAULT_RUNTIME_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
+/// Minimum spacing between pressure-driven shed passes — the OS can report
+/// pressure every few seconds, and a runtime reopened under sustained
+/// pressure is now active and protected anyway.
+const PRESSURE_SHED_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Default cap for an agent's transcript search when its query carries no
 /// `limit:` token.
 const AGENT_SEARCH_DEFAULT_LIMIT: usize = 20;
@@ -1627,17 +1632,54 @@ impl Backend for WakuBackend {
         let settings = self.settings.clone();
         let agent = self.agent.clone();
         let repo_maps = self.repo_maps.clone();
+        // A platform memory-pressure signal, when this OS has one, lets the
+        // reaper shed safely evictable runtimes ahead of the age cutoff —
+        // before contention becomes a daemon restart. `None` on platforms
+        // without a signal or when setup failed keeps the ordinary cadence.
+        let pressure = crate::pressure::watch();
         let _ = std::thread::Builder::new()
             .name("waku-idle-reaper".into())
             .spawn(move || {
+                // A pressure shed pass just ran — shed at most once per
+                // cooldown so a persistent-pressure stream cannot churn
+                // through teardown-and-reopen cycles.
+                let mut last_pressure_shed: Option<std::time::Instant> = None;
                 loop {
-                    std::thread::sleep(IDLE_REAPER_INTERVAL);
-                    for (session_id, runtime_id, driver) in
-                        reap_idle_runtimes(&sessions, &task_state, &settings, &agent)
-                    {
-                        evict_idle_runtime(
-                            session_id, runtime_id, driver, &agent, &repo_maps, &events,
-                        );
+                    let shed = |under_pressure: bool| {
+                        for (session_id, runtime_id, driver) in reap_idle_runtimes(
+                            &sessions,
+                            &task_state,
+                            &settings,
+                            &agent,
+                            under_pressure,
+                        ) {
+                            evict_idle_runtime(
+                                session_id,
+                                runtime_id,
+                                driver,
+                                &agent,
+                                &repo_maps,
+                                &events,
+                            );
+                        }
+                    };
+                    let Some(pressure) = &pressure else {
+                        std::thread::sleep(IDLE_REAPER_INTERVAL);
+                        shed(false);
+                        continue;
+                    };
+                    crossbeam_channel::select! {
+                        recv(pressure) -> _ => {
+                            if last_pressure_shed.is_none_or(|at| {
+                                at.elapsed() >= PRESSURE_SHED_COOLDOWN
+                            }) {
+                                last_pressure_shed = Some(std::time::Instant::now());
+                                shed(true);
+                            }
+                        }
+                        recv(crossbeam_channel::after(IDLE_REAPER_INTERVAL)) -> _ => {
+                            shed(false);
+                        }
                     }
                 }
             });
@@ -6900,16 +6942,21 @@ fn forward_driver_events(
     }
 }
 
-/// Reclaim provider runtimes idle past the configured timeout. A runtime is
-/// only reclaimable when its task can come back: nothing mid-turn, parked,
-/// or queued for delivery, and the session either never produced provider
-/// state or holds a resume cursor to rebuild it. Entries are removed here;
-/// hub retirement and process teardown are the caller's job, off this lock.
+/// Collect the runtimes safe to evict right now — a runtime is only
+/// reclaimable when its task can come back: nothing mid-turn, parked, or
+/// queued for delivery, and the session either never produced provider
+/// state or holds a resume cursor to rebuild it. `under_pressure` comes
+/// from the OS's memory-pressure signal and bypasses only the idle-age
+/// cutoff — eligibility rules (`runtime_evictable`) still gate every
+/// runtime, and a `runtime_idle_timeout_secs` of `0` still disables
+/// eviction outright. Entries are removed here; hub retirement and process
+/// teardown are the caller's job, off this lock.
 fn reap_idle_runtimes(
     sessions: &Mutex<HashMap<Uuid, RuntimeEntry>>,
     task_state: &Mutex<PersistedState>,
     settings: &DaemonSettingsStore,
     agent: &crate::agent::AgentState,
+    under_pressure: bool,
 ) -> Vec<(Uuid, Uuid, DriverHandle)> {
     let timeout = match settings.get().runtime_idle_timeout_secs {
         Some(0) => return Vec::new(),
@@ -6922,7 +6969,8 @@ fn reap_idle_runtimes(
     let evictable = sessions
         .iter()
         .filter(|(session_id, entry)| {
-            entry.last_active <= cutoff && runtime_evictable(&state, **session_id, entry, agent)
+            (under_pressure || entry.last_active <= cutoff)
+                && runtime_evictable(&state, **session_id, entry, agent)
         })
         .map(|(session_id, _)| *session_id)
         .collect::<Vec<_>>();
@@ -9978,6 +10026,7 @@ mod tests {
             &backend.task_state,
             &backend.settings,
             &backend.agent,
+            false,
         );
         assert_eq!(evicted.len(), 1);
         assert_eq!(evicted[0].0, idle_id);
@@ -9993,7 +10042,7 @@ mod tests {
             idle_id,
             RuntimeEntry {
                 runtime_id: Uuid::new_v4(),
-                driver,
+                driver: driver.clone(),
                 last_active: std::time::Instant::now(),
                 resumable: true,
                 computer_use_available: false,
@@ -10006,7 +10055,54 @@ mod tests {
                 &sessions,
                 &backend.task_state,
                 &backend.settings,
-                &backend.agent
+                &backend.agent,
+                false
+            )
+            .is_empty()
+        );
+
+        // Under memory pressure the age gate lifts: the young resumable
+        // runtime sheds while busy, queued, and unresumable work — the
+        // protections that make eviction safe — stay untouched.
+        let evicted = reap_idle_runtimes(
+            &sessions,
+            &backend.task_state,
+            &backend.settings,
+            &backend.agent,
+            true,
+        );
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(evicted[0].0, idle_id);
+        let remaining = sessions.lock();
+        assert!(remaining.contains_key(&unresumable_id));
+        assert!(remaining.contains_key(&working_id));
+        assert!(remaining.contains_key(&queued_id));
+        drop(remaining);
+
+        // An explicit `0` disables eviction outright — pressure is a
+        // reason to shed sooner, never a reason to override "never".
+        let mut disabled = backend.settings.get();
+        disabled.runtime_idle_timeout_secs = Some(0);
+        backend.settings.replace(disabled).unwrap();
+        sessions.lock().insert(
+            idle_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: driver.clone(),
+                last_active: std::time::Instant::now(),
+                resumable: true,
+                computer_use_available: false,
+                provider: ProviderKind::Claude,
+                cwd: PathBuf::new(),
+            },
+        );
+        assert!(
+            reap_idle_runtimes(
+                &sessions,
+                &backend.task_state,
+                &backend.settings,
+                &backend.agent,
+                true
             )
             .is_empty()
         );
