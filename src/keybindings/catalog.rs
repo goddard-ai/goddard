@@ -2975,6 +2975,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("app.open_localhost_tab", All, "secondary-alt-shift-o", ""),
     e("app.view_unarchived_task", All, "secondary-alt-o", ""),
     e("app.open_created_issue", All, "secondary-alt-i", ""),
+    // With focus outside the composer, ⌘↩ still activates the visible
+    // suggestion; TextInput's deeper binding keeps its normal submit behavior.
     e("text.submit_steer", All, "secondary-enter", Workspace),
     // === crate::bind_keys — macOS only ==========================================
     e("app.hide", MacOS, "cmd-h", ""),

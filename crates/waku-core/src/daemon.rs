@@ -2561,9 +2561,7 @@ impl Backend for WakuBackend {
                     ProviderKind::OpenCode => {
                         crate::opencode_session::list_provider_sessions(&binary, limit)?.into()
                     }
-                    ProviderKind::OpenCode2 => {
-                        crate::opencode2_session::list_provider_sessions(&binary, limit)?.into()
-                    }
+
                     ProviderKind::DeepSeek => {
                         crate::deepseek_session::list_provider_sessions(&binary, limit)?.into()
                     }
@@ -2656,11 +2654,11 @@ impl Backend for WakuBackend {
                             VISIBLE_TURN_LIMIT,
                         )?
                     }
-                    // OpenCode 2 is not an ACP provider: its history comes
-                    // from the adopted v2 service's own export route.
-                    ProviderResumeCursor::OpenCode2 { session_id, .. } => {
-                        let binary = self.provider_binary(ProviderKind::OpenCode2)?;
-                        crate::opencode2_session::provider_session_history(
+                    // OpenCode is not an ACP provider: its history comes from
+                    // the adopted background service's own export route.
+                    ProviderResumeCursor::OpenCode { session_id, .. } => {
+                        let binary = self.provider_binary(ProviderKind::OpenCode)?;
+                        crate::opencode_session::provider_session_history(
                             &binary,
                             session_id,
                             VISIBLE_TURN_LIMIT,
@@ -2669,7 +2667,6 @@ impl Backend for WakuBackend {
                     ProviderResumeCursor::Cursor { session_id, .. }
                     | ProviderResumeCursor::Devin { session_id }
                     | ProviderResumeCursor::Fx { session_id }
-                    | ProviderResumeCursor::OpenCode { session_id }
                     | ProviderResumeCursor::Goose { session_id }
                     | ProviderResumeCursor::Grok { session_id }
                     | ProviderResumeCursor::Kimi { session_id }
@@ -3856,29 +3853,15 @@ impl WakuBackend {
                 Ok((fork.cursor, HashMap::new()))
             }
             ProviderKind::OpenCode => {
-                let Some(ProviderResumeCursor::OpenCode { session_id }) =
+                let Some(ProviderResumeCursor::OpenCode { session_id, .. }) =
                     source.provider_cursor.as_ref()
                 else {
                     bail!("OpenCode's native session is unavailable");
                 };
+                // No cwd: a session carries its own `location`, so there is no
+                // server working directory to fork against.
                 let fork = fork_provider_session(ProviderSessionForkRequest::OpenCode {
                     binary: self.provider_binary(ProviderKind::OpenCode)?,
-                    cwd: cwd.to_owned(),
-                    session_id: session_id.clone(),
-                    turn_count: provider_turn_count,
-                })?;
-                Ok((fork.cursor, HashMap::new()))
-            }
-            ProviderKind::OpenCode2 => {
-                let Some(ProviderResumeCursor::OpenCode2 { session_id, .. }) =
-                    source.provider_cursor.as_ref()
-                else {
-                    bail!("OpenCode 2's native session is unavailable");
-                };
-                // No cwd: a v2 session carries its own `location`, so there is
-                // no server working directory to fork against.
-                let fork = fork_provider_session(ProviderSessionForkRequest::OpenCode2 {
-                    binary: self.provider_binary(ProviderKind::OpenCode2)?,
                     session_id: session_id.clone(),
                     turn_count: provider_turn_count,
                 })?;
@@ -4080,38 +4063,12 @@ impl WakuBackend {
                         .rollback(rollback_turns)?
                         .ok_or_else(|| anyhow!("OpenCode returned no rewound-session cursor"))?
                 } else {
-                    let Some(ProviderResumeCursor::OpenCode { session_id }) =
+                    let Some(ProviderResumeCursor::OpenCode { session_id, .. }) =
                         source.provider_cursor.as_ref()
                     else {
                         bail!("OpenCode's native session is unavailable");
                     };
                     fork_provider_session(ProviderSessionForkRequest::OpenCode {
-                        binary: binary.to_owned(),
-                        cwd: cwd.to_owned(),
-                        session_id: session_id.clone(),
-                        turn_count: provider_turn_count,
-                    })?
-                    .cursor
-                };
-                Ok((Some(cursor), HashMap::new(), false))
-            }
-            ProviderKind::OpenCode2 => {
-                let cursor = if let Some(driver) = self
-                    .sessions
-                    .lock()
-                    .get(&source.id)
-                    .map(|entry| entry.driver.clone())
-                {
-                    driver
-                        .rollback(rollback_turns)?
-                        .ok_or_else(|| anyhow!("OpenCode 2 returned no rewound-session cursor"))?
-                } else {
-                    let Some(ProviderResumeCursor::OpenCode2 { session_id, .. }) =
-                        source.provider_cursor.as_ref()
-                    else {
-                        bail!("OpenCode 2's native session is unavailable");
-                    };
-                    fork_provider_session(ProviderSessionForkRequest::OpenCode2 {
                         binary: binary.to_owned(),
                         session_id: session_id.clone(),
                         turn_count: provider_turn_count,
@@ -6385,20 +6342,10 @@ fn fork_provider_session(
         ),
         ProviderSessionForkRequest::OpenCode {
             binary,
-            cwd,
             session_id,
             turn_count,
         } => (
-            crate::opencode_session::fork_session_at_turn(&binary, &cwd, &session_id, turn_count)?,
-            HashMap::new(),
-            None,
-        ),
-        ProviderSessionForkRequest::OpenCode2 {
-            binary,
-            session_id,
-            turn_count,
-        } => (
-            crate::opencode2_session::fork_session_at_turn(&binary, &session_id, turn_count)?,
+            crate::opencode_session::fork_session_at_turn(&binary, &session_id, turn_count)?,
             HashMap::new(),
             None,
         ),

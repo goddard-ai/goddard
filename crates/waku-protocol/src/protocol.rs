@@ -184,7 +184,7 @@ pub enum Command {
     /// Ask the live provider runtime to compact the session's context.
     /// Fire-and-forget like [`Self::Goal`]: admission, progress, and the
     /// outcome arrive as driver events — Codex answers `thread/compact/start`
-    /// immediately while OpenCode 2 admits a durable inbox item that reports
+    /// immediately while OpenCode admits a durable inbox item that reports
     /// through `session.compaction.*`. Drivers without a dedicated RPC fall
     /// back to sending the provider's own `/compact` command.
     Compact,

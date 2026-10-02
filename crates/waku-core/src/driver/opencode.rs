@@ -1,53 +1,134 @@
-//! `opencode serve` is OpenCode's real API: one resident process serves
-//! every session in a workspace, streams server-sent events, and answers
-//! permission requests the user can actually be asked. Goddard already started
-//! this server for a side-quest — forking a session — while running
-//! conversations through one-shot `opencode run` invocations; this drives
-//! everything through it, pooled per workspace via `opencode_pool` so
-//! sessions share the process instead of starting one each. A prompt posted
-//! into a busy session is folded into the running turn rather than queued
-//! behind it, which is what makes steering a plain post.
+//! OpenCode sessions over the one adopted background service.
 //!
-//! Routes and payload shapes here were read off a live server's OpenAPI
-//! document and event stream, not guessed.
+//! Everything structural about this driver follows from a single fact: Goddard
+//! does not own an OpenCode process. `opencode_service` finds the daemon the
+//! user's own terminal already started, and every Goddard task rides the one
+//! `GET /api/event` stream it exposes. Dropping a driver unsubscribes and
+//! sends `Shutdown`; the worker releases its optional Computer Use attachment
+//! without terminating or reconfiguring the user's OpenCode service.
+//!
+//! Commands and events land in ONE worker thread driven by
+//! `crossbeam::select!`, so all mutable stream state is thread-local, and
+//! context windows come from the service-level catalogue cache rather than a
+//! per-session poller.
+//!
+//! Three traps are encoded here rather than left to a reader to remember:
+//!
+//! * **The execution outcome is the settle point.** `session.execution.`
+//!   `{succeeded,failed,interrupted}` ends the turn and emits exactly one
+//!   `TurnFinished`; settling is idempotent, so a steered second message —
+//!   which joins the running execution rather than starting its own — still
+//!   settles once. Do NOT wait for `session.idle`: the service never publishes
+//!   it (the schema keeps it only as a deprecated entry, and a live turn's
+//!   stream ends at `session.execution.*`), and waiting for it pins every
+//!   finished turn to Working forever. A prompt whose HTTP call fails settles
+//!   the turn itself, because no execution ever starts.
+//! * **A stream break is never `ProcessExited`.** For an adopted service that
+//!   would kill a perfectly healthy session every time the socket blinked.
+//!   Reconnection is the service's job and arrives here as `HubFrame::Resync`.
+//!   Nor is a shutdown the end of a turn: the service keeps the run's claim
+//!   and resumes it as it boots again, with no `idle` marker in between, so
+//!   the turn stays open across the restart (see `reconcile`).
+//! * **`always` never goes on the wire.** An `always` reply writes into
+//!   `/api/permission/saved`, a GLOBAL store shared with the user's terminal
+//!   and every other workspace, so durable choices stay in this driver's own
+//!   state and every provider reply is one-shot. See `driver::support`.
+//!
+//! Everything in this file blocks on sockets and runs on the worker thread or
+//! a daemon request thread. Nothing here is reachable from a frame.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use parking_lot::Mutex;
 
 use anyhow::{Context as _, anyhow};
-use crossbeam_channel::{Sender, unbounded};
-use parking_lot::Mutex;
+use crossbeam_channel::{Sender, bounded, unbounded};
 use serde_json::{Value, json};
 
 use super::activity;
-use super::support::{OpenCodePermissionRequest, OpenCodePermissionState, permission_responses};
+use super::opencode_computer_use::cleanup_legacy;
+use super::support::{self, OpenCodePermissionRequest, OpenCodePermissionState};
 use crate::driver::{
     AgentSurfaceDelivery, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
     SessionOptions,
 };
-use crate::http_wire::{Endpoint, StreamControl, open_event_stream};
+use crate::http_wire::Endpoint;
 use crate::model::{
     ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKind,
     BackgroundWorkStatus, DriverEvent, PermissionOption, ProviderResumeCursor, ReportedCommand,
     RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
-use crate::opencode_pool::PooledServer;
-use crate::opencode_session::{
-    OpenCodeServer, encode_path_segment, fork_session_removing_turns_on_server,
+use crate::opencode_api::{
+    self, ApiError, AssistantContent, Delivery, FormAnswer, FormField, FormInfo, FormValue,
+    MessageInfo, MigrationStatus, ModelRef, Order, PermissionReply, SessionOutcome, TokenUsage,
+    ToolContent, ToolState,
 };
+use crate::opencode_service::{self, HubFrame, OpenCodeService, Subscription};
 
-enum CommandMessage {
+/// A one-shot user action posted onto the worker waits this long before Goddard
+/// gives up on it. Comfortably past the API layer's own fork budget, so a slow
+/// fork answers rather than being reported as a timeout twice.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(150);
+/// An option change is a live UI interaction: a `false` answer restarts the
+/// driver, which is always correct, so waiting long for a `true` is pointless.
+const OPTIONS_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a resume waits for OpenCode's one-time import of OpenCode 1
+/// history to reach the session it names. The import runs in the background
+/// after the first service start, and a session it has not reached yet reads
+/// as missing — which would otherwise start an empty session under the same
+/// id and cut the task off from its history.
+const MIGRATION_WAIT: Duration = Duration::from_secs(60);
+const MIGRATION_POLL: Duration = Duration::from_millis(500);
+
+/// How long after a reconnect a run the service's shutdown suspended may take
+/// to resume. The boot that brings the service back resumes it within moments
+/// (it was already active when `/api/info` first answered, live), so this
+/// only bounds a run that is never coming back.
+const RESUME_GRACE: Duration = Duration::from_secs(60);
+
+/// Provider control markers, which must never reach a transcript.
+///
+/// `session.tool.called` carries the provider's own metadata as a SIBLING of
+/// `input` (`state`), and the completion events nest it under `resultState`.
+/// Verified live to hold `{itemId, reasoningEncryptedContent: <multi-KB
+/// base64>}`: it is private, it is enormous, and it is not content.
+///
+/// The bare `state` key is deliberately absent from this list. Nothing here
+/// ever hands a whole event payload to the activity layer, so a sibling
+/// marker cannot leak — whereas stripping `state` recursively would blank a
+/// tool argument that legitimately has a field by that name.
+const PROVIDER_STATE_KEYS: [&str; 3] = ["providerState", "resultState", "providerResultState"];
+
+/// The one thing the event decoder needs from the shared service.
+///
+/// A trait rather than the concrete handle so the pure-logic tests can decode
+/// a whole event family without an adopted daemon; a miss already means "not
+/// known yet", never "unlimited".
+pub(super) trait ContextWindows {
+    fn context_window(&self, key: &str) -> Option<u64>;
+}
+
+impl ContextWindows for Arc<OpenCodeService> {
+    fn context_window(&self, key: &str) -> Option<u64> {
+        self.model_context_window(key)
+    }
+}
+
+#[cfg(test)]
+impl ContextWindows for HashMap<String, u64> {
+    fn context_window(&self, key: &str) -> Option<u64> {
+        self.get(key).copied()
+    }
+}
+
+enum DriverCommand {
     Prompt(String),
     Steer(String),
-    Options(SessionOptions),
-    NativeCommandFinished {
-        generation: u64,
-        steer: Option<String>,
-        result: Result<(), String>,
-    },
+    Compact,
     Cancel,
     Respond {
         request_id: String,
@@ -60,174 +141,332 @@ enum CommandMessage {
         request_id: String,
         answers: Vec<UserInputAnswer>,
     },
+    ApplyOptions(SessionOptions, Sender<bool>),
+    Fork {
+        turns: usize,
+        reply: Sender<anyhow::Result<ProviderResumeCursor>>,
+    },
     Shutdown,
 }
 
-/// The prompt body both turn starts and steers post; the model rides on every
-/// prompt because the server has no session-level model setting.
+/// A streaming assistant part.
 ///
-/// `variant` is how OpenCode expresses reasoning effort — the same ids the
-/// model catalogue advertises from each model's `variants` map — and it is a
-/// sibling of `model`, not a field inside it. It is always sent: `default`
-/// is OpenCode's explicit base-model selection, and sending it is what lets
-/// the picker reset a live session after a variant was chosen. An absent
-/// field would let a configured agent variant take over instead.
-fn prompt_body(text: &str, model: Option<&str>, variant: Option<&str>, agent: &str) -> Value {
-    let mut body = json!({
-        "agent": agent,
-        "parts": [{"type": "text", "text": text}]
-    });
-    if let Some((provider_id, model_id)) = model.and_then(|model| model.split_once('/')) {
-        body["model"] = json!({"providerID": provider_id, "modelID": model_id});
-    }
-    body["variant"] = json!(
-        variant
-            .map(str::trim)
-            .filter(|variant| !variant.is_empty())
-            .unwrap_or("default")
-    );
-    body
+/// Text and reasoning share ONE ordinal namespace per assistant message, so
+/// one map holding this enum is correct; two maps would let a reasoning part
+/// and a text part with the same ordinal overwrite each other's repair state.
+/// The accumulated text is what the reconnect gap-fill compares against, and
+/// `session.*.ended` replaces it with the server's authoritative copy.
+#[derive(Debug, Eq, PartialEq)]
+enum PartKind {
+    Text(String),
+    Reasoning(String),
 }
 
-fn native_command_body(
-    text: &str,
-    commands: &HashSet<String>,
-    model: Option<&str>,
-    variant: Option<&str>,
-    agent: &str,
-) -> Option<Value> {
-    let invocation = text.strip_prefix('/')?;
-    let (name, arguments) = invocation
-        .split_once(char::is_whitespace)
-        .unwrap_or((invocation, ""));
-    if !commands.contains(name) {
-        return None;
-    }
-    let mut body = json!({"command": name, "arguments": arguments.trim(), "agent": agent});
-    // The command route takes a provider/model string, unlike prompt_async.
-    if let Some(model) = model {
-        body["model"] = json!(model);
-    }
-    body["variant"] = json!(
-        variant
-            .map(str::trim)
-            .filter(|variant| !variant.is_empty())
-            .unwrap_or("default")
-    );
-    Some(body)
-}
-
-fn requires_dedicated_server(
-    has_computer_use: bool,
-    has_agent_environment: bool,
-    has_integrations: bool,
-    has_subagents: bool,
-) -> bool {
-    has_computer_use || has_agent_environment || has_integrations || has_subagents
-}
-
-fn start_native_command(
-    port: u16,
-    session_id: &str,
-    body: Value,
-    commands: Sender<CommandMessage>,
-    generation: u64,
-    steer: Option<String>,
-) -> std::io::Result<()> {
-    let path = format!("/session/{}/command", encode_path_segment(session_id));
-    // Unlike prompt_async, /command holds its response until the turn ends.
-    // Keep the control worker free to answer permissions, stop, and steer.
-    // A port alone cannot keep the pooled server alive after driver teardown.
-    thread::Builder::new()
-        .name("waku-opencode-command".into())
-        .spawn(move || {
-            let result = crate::opencode_session::request_json_on_port(
-                port,
-                "POST",
-                &path,
-                Some(&body),
-                Duration::from_secs(30 * 60),
-            )
-            .map(|_| ())
-            .map_err(|error| error.to_string());
-            let _ = commands.send(CommandMessage::NativeCommandFinished {
-                generation,
-                steer,
-                result,
-            });
-        })?;
-    Ok(())
-}
-
-fn reject_prompt(error: impl std::fmt::Display, events: &impl DriverEventSink, turn: &Mutex<bool>) {
-    let _ = events.send(DriverEvent::localized_error(localized!(
-        "errors.provider_rejected_prompt_detail",
-        provider = "OpenCode",
-        error = error
-    )));
-    // session.idle never arrives for a request that failed to start.
-    if std::mem::take(&mut *turn.lock()) {
-        let _ = events.send(DriverEvent::turn_finished_keyed(
-            false,
-            localized!("errors.provider_start_turn", provider = "OpenCode"),
-        ));
-    }
-}
-
-/// Write the session's `goddard-agent` instruction into its private launch
-/// directory — OpenCode's `instructions` config references files, not text.
-fn write_agent_surface_instruction(
-    agent: &crate::agent::AgentLaunchEnv,
-) -> anyhow::Result<std::path::PathBuf> {
-    crate::fs_ext::create_private_dir_all(&agent.shim_directory)
-        .with_context(|| format!("could not create {}", agent.shim_directory.display()))?;
-    let path = agent.shim_directory.join("goddard-agent.md");
-    std::fs::write(
-        &path,
-        crate::agent::surface_instruction("goddard-agent", &agent.scope()),
-    )
-    .with_context(|| format!("could not write {}", path.display()))?;
-    Ok(path)
-}
-
-fn opencode_permission_rules(mode: RuntimeMode) -> Value {
-    let rule = |permission: &str, action: &str| {
-        json!({
-            "permission": permission,
-            "pattern": "*",
-            "action": action,
-        })
-    };
-
-    match mode {
-        // `Auto` shares Ask's posture so every sensitive call reaches
-        // Goddard: the evaluation reviewer answers when configured and the
-        // user does when it is not.
-        RuntimeMode::Ask | RuntimeMode::Auto => {
-            Value::Array(vec![rule("bash", "ask"), rule("edit", "ask")])
+impl PartKind {
+    fn new(reasoning: bool) -> Self {
+        if reasoning {
+            Self::Reasoning(String::new())
+        } else {
+            Self::Text(String::new())
         }
-        RuntimeMode::AutoAcceptEdits => {
-            Value::Array(vec![rule("bash", "ask"), rule("edit", "allow")])
+    }
+
+    fn text_mut(&mut self) -> &mut String {
+        match self {
+            Self::Text(text) | Self::Reasoning(text) => text,
         }
-        RuntimeMode::FullAccess => Value::Array(vec![rule("*", "allow")]),
+    }
+
+    fn is_reasoning(&self) -> bool {
+        matches!(self, Self::Reasoning(_))
     }
 }
 
-pub struct OpenCodeDriver {
-    // `Drop` releases this lease before waking the worker, guaranteeing that
-    // final process teardown runs on the worker rather than the UI thread.
-    server: Option<PooledServer>,
+/// One in-flight tool call. Tools carry no ordinal — they are keyed by
+/// `(assistantMessageID, id)` — and they are removed only on success or
+/// failure, never on `session.tool.called`, because OpenCode can still emit
+/// `session.tool.progress` afterwards.
+#[derive(Clone, Debug)]
+struct ToolSlot {
+    kind: ActivityKind,
+    tool_name: Option<String>,
+    title: String,
+    /// `session.tool.input.delta` streams the argument object as JSON TEXT,
+    /// so the title can only be upgraded once it parses.
+    input_text: String,
+    input: Option<Value>,
+    metadata: Option<Value>,
+}
+
+/// The assistant message the provider is currently writing.
+#[derive(Clone, Debug)]
+struct StepState {
+    message_id: String,
+    #[allow(dead_code)]
+    agent: Option<String>,
+    /// A step can run a different model than the session (a subagent step
+    /// does), so the context window is looked up from here first.
+    model: Option<ModelRef>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TurnOutcome {
+    success: bool,
+    summary: Option<String>,
+    summary_i18n: Option<waku_protocol::WireTranslation>,
+}
+
+/// `session.execution.*` arms the outcome and then settles the turn. Settling
+/// is idempotent, which is what keeps a steered turn to exactly one
+/// `TurnFinished`.
+#[derive(Debug, Default, Eq, PartialEq)]
+enum TurnState {
+    #[default]
+    Idle,
+    Running {
+        outcome: Option<TurnOutcome>,
+    },
+}
+
+/// The prompt or steer whose inbox entry has not been delivered yet.
+#[derive(Clone, Debug)]
+struct PendingInput {
+    inbox_id: String,
+    message: String,
+    /// Whether a cancelled entry goes back to the app's follow-up queue: only
+    /// a steer does, because a prompt is already in the transcript.
+    steer: bool,
+}
+
+struct StreamState {
     session_id: String,
-    commands: Sender<CommandMessage>,
-    permissions: Arc<Mutex<OpenCodePermissionState>>,
-    event_stream: Arc<StreamControl>,
     mode: RuntimeMode,
-    computer_use: Option<super::computer_use::ComputerUseRuntime>,
-    announced_agent_surface: bool,
+    parts: HashMap<(String, u64), PartKind>,
+    tools: HashMap<(String, String), ToolSlot>,
+    /// Stable placement per assistant message, so a reconnect repairs tool
+    /// rows in the order they were opened rather than hash order.
+    tool_order: HashMap<String, Vec<String>>,
+    step: Option<StepState>,
+    turn: TurnState,
+    /// Three-state: pending (asked the user), responding (answered, waiting
+    /// for `permission.replied`), approved (remembered wildcard rules). The
+    /// dedupe is what absorbs the overlap between a snapshot and the live
+    /// stream.
+    permissions: OpenCodePermissionState,
+    /// The forms Goddard has surfaced, with their fields: a reply must
+    /// round-trip each field's own `key` rather than rely on positional
+    /// answers.
+    forms: HashMap<String, Vec<FormField>>,
+    pending_input: Option<PendingInput>,
+    /// The connection this state belongs to; a reconciliation answer from a
+    /// superseded pass must not overwrite newer state.
+    generation: u64,
+    /// The session-level model, moved by `session.model.selected`.
+    model: Option<ModelRef>,
+    /// A manual compaction admitted while idle opened the current turn —
+    /// `session.compaction.*` frames carry no `session.execution.*` wrapper,
+    /// and the app drops activities that land with no open turn. Only a turn
+    /// this flag marks is settled by a compaction outcome; a mid-execution
+    /// compaction leaves the real turn alone.
+    compaction_opened_turn: bool,
+    /// Unknown event types are dropped and counted, never fatal.
+    unknown: HashMap<String, u64>,
+    /// The user stopped the turn while the service was unreachable, so the
+    /// interrupt never landed. A shutdown keeps the run's claim and the next
+    /// boot resumes it, and that resumed run is stopped rather than shown as
+    /// a turn of its own.
+    stop_pending: bool,
+    /// The running turn shows the "waiting for the service" row.
+    reconnecting: bool,
+    /// When a run the service should have resumed by now is given up on.
+    resume_deadline: Option<Instant>,
+}
+
+impl StreamState {
+    fn new(
+        session_id: String,
+        mode: RuntimeMode,
+        model: Option<ModelRef>,
+        generation: u64,
+    ) -> Self {
+        Self {
+            session_id,
+            mode,
+            parts: HashMap::new(),
+            tools: HashMap::new(),
+            tool_order: HashMap::new(),
+            step: None,
+            turn: TurnState::Idle,
+            permissions: OpenCodePermissionState::default(),
+            forms: HashMap::new(),
+            pending_input: None,
+            generation,
+            model,
+            compaction_opened_turn: false,
+            unknown: HashMap::new(),
+            stop_pending: false,
+            reconnecting: false,
+            resume_deadline: None,
+        }
+    }
+
+    fn model_key(&self) -> Option<String> {
+        self.step
+            .as_ref()
+            .and_then(|step| step.model.as_ref())
+            .or(self.model.as_ref())
+            .map(|model| format!("{}/{}", model.provider_id, model.id))
+    }
+
+    fn begin_turn(&mut self, events: &impl DriverEventSink) {
+        if matches!(self.turn, TurnState::Running { .. }) {
+            return;
+        }
+        self.turn = TurnState::Running { outcome: None };
+        let _ = events.send(DriverEvent::TurnStarted);
+    }
+
+    fn arm(&mut self, success: bool, summary: Option<String>) {
+        if let TurnState::Running { outcome } = &mut self.turn {
+            outcome.get_or_insert(TurnOutcome {
+                success,
+                summary,
+                summary_i18n: None,
+            });
+        }
+    }
+
+    /// The single settle point: exactly one `TurnFinished` per open turn, no
+    /// matter how many execution outcomes armed it.
+    fn settle(&mut self, events: &impl DriverEventSink, fallback: Option<TurnOutcome>) {
+        let TurnState::Running { outcome } = std::mem::take(&mut self.turn) else {
+            return;
+        };
+        let outcome = outcome.or(fallback).unwrap_or(TurnOutcome {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        });
+        let _ = events.send(DriverEvent::TurnFinished {
+            success: outcome.success,
+            summary: outcome.summary,
+            summary_i18n: outcome.summary_i18n,
+        });
+    }
+
+    /// Ends the turn and drops the per-turn scratch.
+    ///
+    /// Idempotent through [`Self::settle`], so a second execution outcome — or
+    /// a `session.idle` from a build that still sends one — cannot emit a
+    /// second `TurnFinished`.
+    fn finish_turn(&mut self, events: &impl DriverEventSink) {
+        self.drop_turn_scratch();
+        self.settle(events, None);
+    }
+
+    /// Drops the open turn without a `TurnFinished`, because the app already
+    /// ended it: the next prompt must open a fresh turn.
+    fn abandon_turn(&mut self) {
+        self.drop_turn_scratch();
+        self.turn = TurnState::Idle;
+    }
+
+    fn drop_turn_scratch(&mut self) {
+        self.permissions.pending.clear();
+        self.permissions.responding.clear();
+        self.parts.clear();
+        self.step = None;
+        self.reconnecting = false;
+        self.resume_deadline = None;
+    }
+
+    /// Says why a running turn went quiet: the service is gone, possibly
+    /// restarting, and OpenCode resumes the run once it is back.
+    fn begin_reconnecting(&mut self, events: &impl DriverEventSink) {
+        if self.reconnecting || !matches!(self.turn, TurnState::Running { .. }) {
+            return;
+        }
+        self.reconnecting = true;
+        self.reconnect_row(events, false);
+    }
+
+    fn end_reconnecting(&mut self, events: &impl DriverEventSink) {
+        if !std::mem::take(&mut self.reconnecting) {
+            return;
+        }
+        self.reconnect_row(events, true);
+    }
+
+    fn reconnect_row(&self, events: &impl DriverEventSink, reconnected: bool) {
+        let title = if reconnected {
+            tr!(
+                "activity.provider_service_reconnected",
+                provider = "OpenCode"
+            )
+        } else {
+            tr!("activity.provider_service_waiting", provider = "OpenCode")
+        };
+        let item = activity::tool_activity(
+            // One row, upserted: every failed reconnect attempt reports again.
+            Some(format!("reconnect:{}", self.session_id)),
+            ActivityKind::Tool,
+            title,
+            None,
+            None,
+            None,
+            false,
+            reconnected,
+        );
+        let _ = events.send(DriverEvent::RichActivity(item));
+    }
+
+    /// A compaction outcome settles the synthetic turn an idle compaction
+    /// opened, and only that turn: a compaction running inside a real
+    /// execution leaves the flag unset and the turn alone.
+    fn settle_compaction_turn(&mut self, events: &impl DriverEventSink) {
+        if std::mem::take(&mut self.compaction_opened_turn) {
+            self.finish_turn(events);
+        }
+    }
+}
+
+/// Everything the worker needs to talk back to the service and the app.
+struct Worker {
+    service: Arc<OpenCodeService>,
+    session_id: String,
+    command_names: HashSet<String>,
+    events: DriverEventSender,
+    commands: Sender<DriverCommand>,
+}
+
+pub(super) struct OpenCodeDriver {
+    /// The service object is permanent and this is never a lease over the
+    /// user's process: nothing about dropping a driver can reach it.
+    service: Arc<OpenCodeService>,
+    /// Dropped before `Shutdown` is sent, so the hub stops fanning frames out
+    /// to a worker that is on its way out.
+    subscription: Option<Subscription>,
+    /// What this driver was started with. The worker owns the live copies —
+    /// a mode change is absorbed there — so these are identity, not state.
+    session_id: String,
+    #[allow(dead_code)]
+    mode: RuntimeMode,
+    commands: Sender<DriverCommand>,
+    supports_steer: bool,
+    computer_use: Option<Arc<super::computer_use::ComputerUseRuntime>>,
+    agent_surface: Option<OpenCodeAgentSurface>,
+    subagent_instruction: Option<SubagentInstruction>,
 }
 
 impl OpenCodeDriver {
-    pub fn start(options: DriverStartOptions, events: DriverEventSender) -> anyhow::Result<Self> {
+    /// Runs on the daemon request thread. Blocking is allowed here, but every
+    /// wait is bounded: discovery and the readiness probe live in
+    /// `opencode_service`, a resume waits at most [`MIGRATION_WAIT`] for the
+    /// OpenCode 1 import, and everything else is one local HTTP call.
+    pub(super) fn start(
+        options: DriverStartOptions,
+        events: DriverEventSender,
+    ) -> anyhow::Result<Self> {
         let DriverStartOptions {
             binary,
             cwd,
@@ -236,7 +475,7 @@ impl OpenCodeDriver {
             reasoning_effort,
             service_tier: _,
             context_window: _,
-            agent_preset: _,
+            agent_preset,
             computer_use_enabled,
             computer_use_runtime,
             agent: agent_env,
@@ -251,8 +490,15 @@ impl OpenCodeDriver {
             distillation: _,
             ephemeral: _,
         } = options;
-        let resume_session_id = match provider_cursor {
-            Some(ProviderResumeCursor::OpenCode { session_id }) => {
+
+        let computer_use_runtime = super::computer_use::ComputerUseRuntime::for_launch(
+            computer_use_enabled,
+            computer_use_runtime,
+            events.clone(),
+        )?;
+
+        let resumed = match provider_cursor {
+            Some(ProviderResumeCursor::OpenCode { session_id, .. }) => {
                 (!session_id.is_empty()).then_some(session_id)
             }
             Some(cursor) => {
@@ -264,580 +510,418 @@ impl OpenCodeDriver {
             None => None,
         };
 
-        let computer_use_runtime = super::computer_use::ComputerUseRuntime::for_launch(
-            computer_use_enabled,
-            computer_use_runtime,
-            events.clone(),
-        )?;
+        // One canonical string with no trailing slash, reused for BOTH
+        // `location.directory` on create and `?directory=` on list. The server
+        // canonicalizes neither and filters by exact string equality, so a
+        // trailing slash or a subdirectory silently yields zero sessions — and
+        // a directory the service cannot resolve answers HTTP 500 with an
+        // empty body rather than a readable error.
+        let directory = dunce::canonicalize(&cwd)
+            .with_context(|| {
+                format!(
+                    "OpenCode needs a resolvable workspace directory, but {} could not be canonicalized",
+                    cwd.display()
+                )
+            })?
+            .to_string_lossy()
+            .into_owned();
 
-        let computer_use = computer_use_runtime;
-        let mut environment = Vec::new();
-        if let Some(agent_env) = &agent_env {
-            crate::command_env::merge_agent_environment(&mut environment, agent_env);
-        }
-        // Subagent definitions and connected integrations merge into one
-        // `OPENCODE_CONFIG_CONTENT` document layered over the user's files.
-        let mut config_doc = match std::env::var("OPENCODE_CONFIG_CONTENT") {
-            Ok(content) => serde_json::from_str::<Value>(&content)
-                .context("OPENCODE_CONFIG_CONTENT is invalid JSON")?,
-            Err(std::env::VarError::NotPresent) => json!({}),
-            Err(std::env::VarError::NotUnicode(_)) => {
-                anyhow::bail!("OPENCODE_CONFIG_CONTENT is not valid UTF-8")
-            }
+        let service = opencode_service::shared(&binary)?;
+        let endpoint = service.endpoint();
+        let resuming = resumed.is_some();
+        let session_id = resumed.unwrap_or_else(opencode_api::new_session_id);
+
+        // SUBSCRIBE BEFORE CREATE. The service can emit this session's first
+        // event before `POST /api/session` has answered; the create body takes
+        // a client-minted id precisely so that race cannot exist.
+        let subscription = service.subscribe(&session_id);
+        let frames = subscription.rx.clone();
+
+        let agents = opencode_api::list_agents(&endpoint, Some(&directory)).unwrap_or_default();
+        let requested_agent = agent_preset.filter(|preset| !preset.is_empty());
+        let agent = resolve_agent(requested_agent.as_deref(), &agents);
+        let model = model_ref(model.as_deref(), reasoning_effort.as_deref());
+
+        let create = || {
+            opencode_api::create_session(
+                &endpoint,
+                &session_id,
+                Some(&agent),
+                model.as_ref(),
+                &directory,
+            )
+            .map_err(|error| anyhow!("could not open an OpenCode session: {error}"))
         };
-        if !config_doc.is_object() {
-            anyhow::bail!("OPENCODE_CONFIG_CONTENT must contain a JSON object");
-        }
-        if let Some(subagent_doc) = subagents
-            .as_ref()
-            .and_then(crate::subagents::opencode_config_json)
-            .and_then(|json| serde_json::from_str::<Value>(&json).ok())
-            .and_then(|value| value.as_object().cloned())
+        let session = match resuming {
+            // A cursor can outlive the session it names — the user's own
+            // client can delete it — so a resume that finds nothing starts
+            // fresh under the same id rather than failing the task.
+            true => match resumed_session(&endpoint, &session_id) {
+                Ok(Some(session)) => session,
+                Ok(None) => create()?,
+                Err(error) => {
+                    return Err(anyhow!("could not read the OpenCode session: {error}"));
+                }
+            },
+            false => create()?,
+        };
+
+        // A resumed session keeps whatever the user's own client last chose,
+        // so an explicit Goddard selection is re-applied and everything else is
+        // left alone. Neither is fatal: a session that will not switch is
+        // still a session Goddard can drive.
+        let agent = if resuming {
+            match requested_agent {
+                Some(_) if session.agent.as_deref() != Some(agent.as_str()) => {
+                    let _ = opencode_api::switch_agent(&endpoint, &session_id, &agent);
+                    agent
+                }
+                _ => session.agent.clone().unwrap_or(agent),
+            }
+        } else {
+            agent
+        };
+        if resuming
+            && let Some(model) = model.as_ref()
+            && session.model.as_ref() != Some(model)
         {
-            if let Some(config) = config_doc.as_object_mut() {
-                config.extend(subagent_doc);
-            } else {
-                config_doc = Value::Object(subagent_doc);
+            let _ = opencode_api::switch_model(&endpoint, &session_id, model);
+        }
+
+        // HTTP MCP servers register on the service scoped to this directory —
+        // runtime-only, never written to its config files. A failed
+        // registration degrades that server, not the session.
+        for server in &mcp_servers {
+            let Some((name, _, _)) = server.http_parts() else {
+                continue;
+            };
+            let mut config = server
+                .http_config_value("remote")
+                .expect("HTTP server spec has an HTTP configuration");
+            config["enabled"] = json!(true);
+            if let Err(error) = opencode_api::add_mcp(&endpoint, &directory, name, &config) {
+                eprintln!(
+                    "goddard-mcp: could not register {} with OpenCode: {error:#}",
+                    name
+                );
             }
         }
-        if !mcp_servers.is_empty() {
-            let servers = crate::integrations::deliver::opencode_config_entries(&mcp_servers);
-            if let Some(existing) = config_doc.get_mut("mcp").and_then(Value::as_object_mut) {
-                existing.extend(servers);
-            } else {
-                config_doc["mcp"] = Value::Object(servers);
-            }
-        }
-        // `goddard-agent` is on PATH in this session's dedicated server, but
-        // nothing tells the model — OpenCode's `instructions` config is its
-        // native announcement channel, and it takes a file, not text. A
-        // failed write degrades to first-prompt context rather than failing
-        // the launch.
-        let mut announced_agent_surface = false;
-        if let Some(agent_env) = &agent_env {
-            match write_agent_surface_instruction(agent_env) {
-                Ok(path) => {
-                    if let Some(object) = config_doc.as_object_mut()
-                        && let Some(list) = object
-                            .entry("instructions")
-                            .or_insert_with(|| json!([]))
-                            .as_array_mut()
-                    {
-                        list.push(Value::String(path.display().to_string()));
-                        announced_agent_surface = true;
+
+        cleanup_legacy(&service, &directory, &session_id);
+        let computer_use = computer_use_runtime.map(Arc::new);
+
+        // The adopted service is one process for every session, so a scoped
+        // token cannot ride its launch environment. The session gets a
+        // credential-carrying launcher plus an instruction pointing at it.
+        let agent_surface = match &agent_env {
+            Some(agent_env) => {
+                match OpenCodeAgentSurface::start(&service, &session_id, agent_env) {
+                    Ok(surface) => Some(surface),
+                    Err(error) => {
+                        if !resuming {
+                            let _ = opencode_api::delete_session(&endpoint, &session_id);
+                        }
+                        return Err(error);
                     }
                 }
-                Err(error) => eprintln!(
-                    "goddard-daemon: could not write OpenCode agent instructions: {error:#}"
-                ),
             }
-        }
-        if config_doc.as_object().is_some_and(|doc| !doc.is_empty()) {
-            environment.push(("OPENCODE_CONFIG_CONTENT".into(), config_doc.to_string()));
-        }
-        // Computer Use bakes per-session configuration into the server's
-        // environment, so it keeps a dedicated server. A session carrying
-        // the agent surface gets one too — its scoped token must never leak
-        // into a server other sessions share. Integrations do force a
-        // dedicated server: their proxy bearer is per-daemon and a pooled
-        // server started without them would answer without the entries.
-        // A subagent roster is also session-specific: a pooled server would
-        // retain the first task's model/variant definitions and silently apply
-        // them to later sessions. Every other session shares the workspace's
-        // one resident server — OpenCode hosts many sessions per process, and
-        // a second `opencode serve` in the same workspace contends with it.
-        let server = if requires_dedicated_server(
-            computer_use.is_some(),
-            agent_env.is_some(),
-            !mcp_servers.is_empty(),
-            subagents
-                .as_ref()
-                .is_some_and(|spec| !spec.agents.is_empty()),
-        ) {
-            PooledServer::dedicated(OpenCodeServer::start_with_env(&binary, &cwd, &environment)?)
-        } else {
-            crate::opencode_pool::acquire_with_env(&binary, &cwd, &environment)?
-        };
-
-        let agent = "build";
-
-        // Reuse the native session when resuming so the conversation, and the
-        // cursor already persisted for it, stay the same.
-        let session_id = match resume_session_id {
-            Some(session_id) => session_id,
             None => {
-                let created = server
-                    .request("POST", "/session", Some(&json!({"agent": agent})))
-                    .context("could not open an OpenCode session")?;
-                created
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-                    .ok_or_else(|| anyhow!("OpenCode returned no session ID"))?
+                let _ = opencode_api::remove_instruction_entry(
+                    &endpoint,
+                    &session_id,
+                    AGENT_INSTRUCTION_KEY,
+                );
+                None
             }
         };
 
-        // OpenCode's build agent allows ordinary shell commands by default.
-        // Goddard must therefore install the selected access policy on this
-        // native session; listening for permission events alone cannot make
-        // Supervised mode ask. Session-local rules are also safe on the shared
-        // per-workspace server and replace a previous mode when resuming.
-        server
-            .request(
-                "PATCH",
-                &format!("/session/{}", encode_path_segment(&session_id)),
-                Some(&json!({
-                    "permission": opencode_permission_rules(mode)
-                })),
-            )
-            .context("could not configure OpenCode session permissions")?;
+        // The adopted service cannot register agents, so delegation is a
+        // routing-hint instruction entry naming the subagent-mode agents the
+        // user's own config already defines. A hint that fails to write
+        // degrades to no delegation, not a failed session.
+        let subagent_instruction = match &subagents {
+            Some(spec) if !spec.agents.is_empty() => {
+                let available = agents
+                    .iter()
+                    .filter(|agent| {
+                        !agent.hidden
+                            && matches!(
+                                agent.mode,
+                                opencode_api::AgentMode::Subagent | opencode_api::AgentMode::All
+                            )
+                    })
+                    .map(|agent| agent.id.clone())
+                    .collect::<Vec<_>>();
+                let hint = crate::subagents::opencode_hint(&available);
+                match attach_instruction_entry(
+                    &endpoint,
+                    &session_id,
+                    SUBAGENT_INSTRUCTION_KEY,
+                    &hint,
+                ) {
+                    Ok(generation) => Some(SubagentInstruction {
+                        endpoint: endpoint.clone(),
+                        session_id: session_id.clone(),
+                        generation,
+                    }),
+                    Err(error) => {
+                        eprintln!(
+                            "goddard-daemon: could not attach OpenCode subagent instructions: {error}"
+                        );
+                        None
+                    }
+                }
+            }
+            // Same reconcile rule as the agent surface: a resumed session may
+            // retain our entry after an interrupted shutdown.
+            _ => {
+                let _ = opencode_api::remove_instruction_entry(
+                    &endpoint,
+                    &session_id,
+                    SUBAGENT_INSTRUCTION_KEY,
+                );
+                None
+            }
+        };
+
+        // The session's own token totals are a LIFETIME cumulative counter and
+        // cannot gauge how full the window is, so read the latest assistant
+        // message's per-request usage instead.
+        let session_model = model.clone().or_else(|| session.model.clone());
+        let context_tokens = resumed_context_tokens(&endpoint, &session_id);
+        let context_window = session_model
+            .as_ref()
+            .and_then(|model| service.model_context_window(&model_key(model)));
+        if context_tokens.is_some() || context_window.is_some() {
+            let _ = events.send(DriverEvent::UsageUpdated {
+                context_tokens,
+                context_window,
+            });
+        }
+
         let _ = events.send(DriverEvent::Connected {
             provider_cursor: Some(ProviderResumeCursor::OpenCode {
                 session_id: session_id.clone(),
+                directory: Some(directory.clone()),
             }),
         });
-
-        let catalog = server
-            .request_with_timeout("GET", "/command", None, Duration::from_secs(10))
-            .ok()
-            .map(|value| crate::slash_command_catalog::parse_opencode_commands(&value))
-            .unwrap_or_default();
-        let command_names = catalog
+        let _ = events.send(DriverEvent::AgentPresetSelected(Some(agent)));
+        if let Some(title) = generated_title(session.title.as_deref()) {
+            let _ = events.send(DriverEvent::AutoTitleUpdated(Some(title)));
+        }
+        let native_commands =
+            opencode_api::list_commands(&endpoint, Some(&directory)).unwrap_or_default();
+        let command_names = native_commands
             .iter()
             .map(|command| command.name.clone())
-            .collect::<HashSet<_>>();
-        let _ = events.send(DriverEvent::AvailableCommands(
-            catalog
-                .into_iter()
-                .map(|command| ReportedCommand {
-                    name: command.name,
-                    description: command.description,
-                })
-                .collect(),
-        ));
-
-        let usage_metadata = Arc::new(OpenCodeUsageMetadata::default());
-        let previous_usage_path = format!(
-            "/session/{}/message?limit=20",
-            encode_path_segment(&session_id)
-        );
-        let previous_info = server
-            .request("GET", &previous_usage_path, None)
-            .ok()
-            .and_then(|messages| latest_opencode_usage_info(&messages).cloned());
-        if let Some(info) = previous_info.as_ref() {
-            if let Some(model) = opencode_model_key(info) {
-                *usage_metadata.last_model.lock() = Some(model);
-            }
-            if let Some(tokens) = opencode_context_tokens(info) {
-                let _ = events.send(DriverEvent::UsageUpdated {
-                    context_tokens: Some(tokens),
-                    context_window: None,
-                });
-            }
-        } else if let Some(model) = model.as_ref() {
-            *usage_metadata.last_model.lock() = Some(model.clone());
+            .collect();
+        let reported = reported_commands(native_commands);
+        if !reported.is_empty() {
+            let _ = events.send(DriverEvent::AvailableCommands(reported));
         }
 
-        // `/api/model` can be cold on the first server in a directory. Resolve
-        // it off the driver-start path so a slow catalog never delays the
-        // transcript or turns an otherwise healthy provider into a 0% meter.
-        // The stream records the actual provider/model key in parallel; when
-        // the catalog lands, publish the matching window as a separate merge.
-        // The thread holds only the port: a handle would delay the pooled
-        // server's teardown behind this request's timeout.
-        let metadata_port = server.port;
-        let metadata_events = events.clone();
-        let background_usage_metadata = usage_metadata.clone();
-        thread::Builder::new()
-            .name("waku-opencode-usage-metadata".into())
-            .spawn(move || {
-                // `/api/model` answers with an empty catalog until the server
-                // warms it up. The first session of a workspace starts a cold
-                // server, so poll until models land or the budget runs out;
-                // later sessions share an already-warm server.
-                let started = std::time::Instant::now();
-                let budget = Duration::from_secs(30);
-                let response = loop {
-                    let request = crate::opencode_session::request_json_on_port(
-                        metadata_port,
-                        "GET",
-                        "/api/model",
-                        None,
-                        Duration::from_secs(30),
-                    );
-                    let landed = request.as_ref().is_ok_and(|response| {
-                        response
-                            .pointer("/data")
-                            .and_then(Value::as_array)
-                            .is_some_and(|data| !data.is_empty())
-                    });
-                    if landed || started.elapsed() >= budget {
-                        break request;
-                    }
-                    thread::sleep(Duration::from_secs(2));
-                };
-                let Ok(response) = response else {
-                    return;
-                };
-                let windows = opencode_model_context_windows(&response);
-                *background_usage_metadata.model_context_windows.lock() = windows;
-                let window = background_usage_metadata.current_context_window();
-                if let Some(window) = window {
-                    let _ = metadata_events.send(DriverEvent::UsageUpdated {
-                        context_tokens: None,
-                        context_window: Some(window),
-                    });
-                }
-            })?;
-
-        let auto_approve = mode == RuntimeMode::FullAccess;
         let (commands, command_rx) = unbounded();
-        let turn_active = Arc::new(Mutex::new(false));
-        let permissions = Arc::new(Mutex::new(OpenCodePermissionState::default()));
-        // `Auto` asks like `Ask` and the review answers instead: configured
-        // credentials ride the permission state so the event stream and the
-        // reconnect snapshot share them.
-        permissions.lock().eval = if mode == RuntimeMode::Auto {
+        let worker = Worker {
+            service: Arc::clone(&service),
+            session_id: session_id.clone(),
+            command_names,
+            events,
+            commands: commands.clone(),
+        };
+        let generation = service.generation();
+        let mut state = StreamState::new(session_id.clone(), mode, session_model, generation);
+        // `Auto` never answers blindly: the review replies when a backend is
+        // configured and the user does when it is not.
+        state.permissions.eval = if mode == RuntimeMode::Auto {
             eval.map(Arc::new)
         } else {
             None
         };
-        let event_stream = Arc::new(StreamControl::default());
-
-        // The reader holds only the port, never a server handle: the stream
-        // closes exactly when the process exits, so a handle held here would
-        // keep the pooled server from ever being killed.
-        let stream_port = server.port;
-        let stream_session = session_id.clone();
-        let stream_events = events.clone();
-        let stream_commands = commands.clone();
-        let stream_turn = turn_active.clone();
-        let stream_usage_metadata = usage_metadata;
-        let stream_permissions = Arc::clone(&permissions);
-        let stream_control = Arc::clone(&event_stream);
         thread::Builder::new()
-            .name("waku-opencode-events".into())
+            .name(format!("waku-opencode-{session_id}"))
             .spawn(move || {
-                let mut state = OpenCodeStreamState {
-                    usage_metadata: stream_usage_metadata,
-                    permissions: stream_permissions,
-                    ..OpenCodeStreamState::default()
-                };
-                // The server-wide stream, not a per-session one: the scoped
-                // route exists only under `/api`, and the workspace server
-                // may carry other sessions' traffic, so filter by session id.
-                match open_event_stream(&Endpoint::local(stream_port), "/event", &stream_control) {
-                    Ok(Some(stream)) => {
-                        // The stream is live before this snapshot is read, so
-                        // a request can neither fall between the two nor be
-                        // lost when Goddard reconnects after it was asked. Events
-                        // that arrive during the snapshot wait in the socket;
-                        // request-level de-duplication handles the overlap.
-                        if let Ok(pending) = crate::opencode_session::request_json_on_port(
-                            stream_port,
-                            "GET",
-                            "/permission",
-                            None,
-                            Duration::from_secs(5),
-                        ) {
-                            rehydrate_pending_permissions(
-                                &pending,
-                                &stream_session,
-                                &stream_events,
-                                &stream_commands,
-                                &stream_turn,
-                                auto_approve,
-                                &state.permissions,
-                            );
-                        }
-                        for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                            if stream_control.is_cancelled() {
-                                break;
+                // The snapshot runs in the same sequential position as the
+                // event loop, before a single frame is decoded. Deferring it
+                // would let a concurrently decoded `session.idle` take the
+                // turn flag before a pending native permission — which proves
+                // the resumed turn is live — could restore it.
+                reconcile(&worker, &mut state, generation);
+                loop {
+                    let resume_deadline = state
+                        .resume_deadline
+                        .map_or_else(crossbeam_channel::never, crossbeam_channel::at);
+                    crossbeam_channel::select! {
+                        recv(command_rx) -> message => {
+                            let Ok(message) = message else { return };
+                            if !handle_command(&worker, message, &mut state) {
+                                return;
                             }
-                            let Some(payload) = line.strip_prefix("data:") else {
-                                continue;
-                            };
-                            let Ok(value) = serde_json::from_str::<Value>(payload.trim()) else {
-                                continue;
-                            };
-                            // Another session's traffic must not reach this
-                            // task's transcript.
-                            let session = value
-                                .pointer("/properties/sessionID")
-                                .and_then(Value::as_str);
-                            if session.is_some_and(|session| session != stream_session) {
-                                continue;
-                            }
-                            handle_event(
-                                &value,
-                                &stream_events,
-                                &stream_commands,
-                                &stream_turn,
-                                auto_approve,
-                                &mut state,
-                            );
                         }
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        if !stream_control.is_cancelled() {
-                            let _ = stream_events.send(DriverEvent::localized_error(localized!(
-                                "errors.read_provider_event_stream",
-                                provider = "OpenCode",
-                                error = error
-                            )));
+                        recv(frames) -> frame => {
+                            let Ok(frame) = frame else { return };
+                            match frame {
+                                HubFrame::Event(envelope) => handle_event(
+                                    &envelope,
+                                    &mut state,
+                                    &worker.events,
+                                    &worker.commands,
+                                    &worker.service,
+                                ),
+                                // Reconnection is the service's job and is
+                                // already under way. A break is NEVER a
+                                // process exit for an adopted daemon.
+                                HubFrame::Disconnected => {
+                                    connection_lost(&mut state, &worker.events);
+                                }
+                                HubFrame::Resync { generation } => {
+                                    reconcile(&worker, &mut state, generation);
+                                }
+                            }
+                        }
+                        recv(resume_deadline) -> _ => {
+                            resume_overdue(&mut state, &worker.events);
                         }
                     }
                 }
-                stream_control.clear();
-                if !stream_control.is_cancelled() {
-                    let _ = stream_events.send(DriverEvent::ProcessExited);
-                }
-            })?;
-
-        let worker_server = server.clone();
-        let worker_session = session_id.clone();
-        let variant = reasoning_effort;
-        let worker_events = events;
-        let worker_turn = turn_active;
-        let worker_commands = commands.clone();
-        thread::Builder::new()
-            .name("waku-opencode-driver".into())
-            .spawn(move || {
-                let mut generation = 0_u64;
-                // The model and variant ride on every prompt, so the latest
-                // options apply to the next turn without restarting the
-                // resident server.
-                let mut current_model = model;
-                let mut current_variant = variant;
-                while let Ok(message) = command_rx.recv() {
-                    match message {
-                        CommandMessage::Prompt(text) => {
-                            generation = generation.wrapping_add(1);
-                            *worker_turn.lock() = true;
-                            let _ = worker_events.send(DriverEvent::TurnStarted);
-                            if let Some(body) = native_command_body(
-                                &text,
-                                &command_names,
-                                current_model.as_deref(),
-                                current_variant.as_deref(),
-                                agent,
-                            ) {
-                                if let Err(error) = start_native_command(
-                                    worker_server.port,
-                                    &worker_session,
-                                    body,
-                                    worker_commands.clone(),
-                                    generation,
-                                    None,
-                                ) {
-                                    reject_prompt(error, &worker_events, &worker_turn);
-                                }
-                                continue;
-                            }
-                            // `prompt_async` acknowledges as soon as the prompt
-                            // is accepted; completion arrives as `session.idle`
-                            // on the event stream. The blocking message route
-                            // holds its response for the whole turn, which no
-                            // sane read timeout survives — a turn longer than
-                            // the HTTP timeout would be falsely failed.
-                            let path = format!(
-                                "/session/{}/prompt_async",
-                                encode_path_segment(&worker_session)
-                            );
-                            let body = prompt_body(
-                                &text,
-                                current_model.as_deref(),
-                                current_variant.as_deref(),
-                                agent,
-                            );
-                            if let Err(error) = worker_server.request("POST", &path, Some(&body)) {
-                                reject_prompt(error, &worker_events, &worker_turn);
-                            }
-                        }
-                        CommandMessage::Steer(text) => {
-                            // A prompt posted into a busy session is a steer:
-                            // the server folds it into the running turn and one
-                            // `session.idle` still settles everything —
-                            // OpenCode's own UI calls this "queued", but it is
-                            // the live turn absorbing the message, not a
-                            // follow-up turn. `prompt_async` acknowledges as
-                            // soon as the prompt is accepted, unlike the
-                            // message route, which blocks until the merged turn
-                            // ends — which is what makes it the steer vehicle.
-                            if !*worker_turn.lock() {
-                                let _ = worker_events.send(DriverEvent::steer_rejected_keyed(
-                                    text,
-                                    localized!(
-                                        "errors.provider_no_active_turn",
-                                        provider = "OpenCode"
-                                    ),
-                                ));
-                                continue;
-                            }
-                            if let Some(body) = native_command_body(
-                                &text,
-                                &command_names,
-                                current_model.as_deref(),
-                                current_variant.as_deref(),
-                                agent,
-                            ) {
-                                if let Err(error) = start_native_command(
-                                    worker_server.port,
-                                    &worker_session,
-                                    body,
-                                    worker_commands.clone(),
-                                    generation,
-                                    Some(text.clone()),
-                                ) {
-                                    let _ = worker_events.send(DriverEvent::SteerRejected {
-                                        message: text,
-                                        reason: error.to_string(),
-                                        reason_i18n: None,
-                                        hidden: false,
-                                    });
-                                }
-                                continue;
-                            }
-                            let path = format!(
-                                "/session/{}/prompt_async",
-                                encode_path_segment(&worker_session)
-                            );
-                            let body = prompt_body(
-                                &text,
-                                current_model.as_deref(),
-                                current_variant.as_deref(),
-                                agent,
-                            );
-                            match worker_server.request("POST", &path, Some(&body)) {
-                                Ok(_) => {
-                                    let _ = worker_events.send(DriverEvent::SteerAccepted {
-                                        message: text,
-                                        sent_by_task: None,
-                                        hidden: false,
-                                    });
-                                }
-                                Err(error) => {
-                                    let _ = worker_events.send(DriverEvent::steer_rejected_keyed(
-                                        text,
-                                        localized!(
-                                            "errors.provider_rejected_steer",
-                                            provider = "OpenCode",
-                                            error = error
-                                        ),
-                                    ));
-                                }
-                            }
-                        }
-                        CommandMessage::Options(options) => {
-                            current_model = options.model;
-                            current_variant = options.reasoning_effort;
-                        }
-                        CommandMessage::NativeCommandFinished {
-                            generation: completed,
-                            steer,
-                            result,
-                        } => {
-                            if let Some(message) = steer {
-                                let event = match result {
-                                    Ok(()) => DriverEvent::SteerAccepted {
-                                        message,
-                                        sent_by_task: None,
-                                        hidden: false,
-                                    },
-                                    Err(reason) => DriverEvent::SteerRejected {
-                                        message,
-                                        reason,
-                                        reason_i18n: None,
-                                        hidden: false,
-                                    },
-                                };
-                                let _ = worker_events.send(event);
-                            } else if completed == generation
-                                && *worker_turn.lock()
-                                && let Err(error) = result
-                            {
-                                // A late HTTP failure must not fail a newer
-                                // turn or one the event stream already settled.
-                                reject_prompt(error, &worker_events, &worker_turn);
-                            }
-                        }
-                        CommandMessage::Cancel => {
-                            let path =
-                                format!("/session/{}/abort", encode_path_segment(&worker_session));
-                            if let Err(error) = worker_server.request("POST", &path, None) {
-                                let _ =
-                                    worker_events.send(DriverEvent::localized_error(localized!(
-                                        "errors.stop_provider",
-                                        provider = "OpenCode",
-                                        error = error
-                                    )));
-                            }
-                        }
-                        CommandMessage::Respond {
-                            request_id,
-                            option_id,
-                        } => {
-                            let path =
-                                format!("/permission/{}/reply", encode_path_segment(&request_id));
-                            if let Err(error) = worker_server.request(
-                                "POST",
-                                &path,
-                                Some(&json!({"reply": option_id})),
-                            ) {
-                                let _ =
-                                    worker_events.send(DriverEvent::localized_error(localized!(
-                                        "errors.answer_provider_permission",
-                                        provider = "OpenCode",
-                                        error = error
-                                    )));
-                            }
-                        }
-                        CommandMessage::Emit(event) => {
-                            let _ = worker_events.send(event);
-                        }
-                        CommandMessage::RespondUserInput {
-                            request_id,
-                            answers,
-                        } => {
-                            let path =
-                                format!("/question/{}/reply", encode_path_segment(&request_id));
-                            let answers = answers
-                                .into_iter()
-                                .map(|answer| answer.answers)
-                                .collect::<Vec<_>>();
-                            if let Err(error) = worker_server.request(
-                                "POST",
-                                &path,
-                                Some(&json!({"answers": answers})),
-                            ) {
-                                let _ =
-                                    worker_events.send(DriverEvent::localized_error(localized!(
-                                        "errors.answer_provider_question",
-                                        provider = "OpenCode",
-                                        error = error
-                                    )));
-                            }
-                        }
-                        CommandMessage::Shutdown => break,
-                    }
-                }
-            })
-            .inspect_err(|_| {
-                event_stream.cancel();
             })?;
 
         Ok(Self {
-            server: Some(server),
+            service,
+            subscription: Some(subscription),
             session_id,
-            commands,
-            permissions,
-            event_stream,
             mode,
+            commands,
+            // Decided by the transport, snapshotted at `Command::Start` and
+            // shipped in `ResponsePayload::Started`, so it cannot change
+            // mid-session.
+            supports_steer: true,
             computer_use,
-            announced_agent_surface,
+            agent_surface,
+            subagent_instruction,
         })
+    }
+}
+
+/// The agent surface for a session on the adopted shared service. The
+/// service is one process for every session, so the scoped credential
+/// cannot ride its environment; instead the daemon writes a per-session
+/// launcher and attaches an instruction pointing the agent at it.
+struct OpenCodeAgentSurface {
+    endpoint: Endpoint,
+    session_id: String,
+    shim_directory: std::path::PathBuf,
+    generation: u64,
+}
+
+const AGENT_INSTRUCTION_KEY: &str = "goddard-agent";
+const SUBAGENT_INSTRUCTION_KEY: &str = "goddard-subagents";
+
+/// Instruction entries are named per (endpoint, session, key) and the API
+/// has no conditional delete. Once runtime teardown detaches from the
+/// session mailbox, a dying runtime's DELETE can land after its
+/// replacement's PUT and revoke the new registration. Attach and guarded
+/// remove therefore share one lock and a per-entry attach generation: a
+/// stale teardown sees a newer generation and leaves the entry alone.
+/// Holding the lock across the request serializes the wire order too, so a
+/// remove already in flight finishes before the next attach is sent.
+static INSTRUCTION_ATTACH_GENERATIONS: OnceLock<Mutex<HashMap<(String, String, String), u64>>> =
+    OnceLock::new();
+
+fn instruction_attach_generations() -> &'static Mutex<HashMap<(String, String, String), u64>> {
+    INSTRUCTION_ATTACH_GENERATIONS.get_or_init(Default::default)
+}
+
+/// Attach an instruction entry and return its attach generation, which the
+/// caller must later present to remove it.
+fn attach_instruction_entry(
+    endpoint: &Endpoint,
+    session: &str,
+    key: &str,
+    value: &str,
+) -> opencode_api::Result<u64> {
+    let mut generations = instruction_attach_generations().lock();
+    let map_key = (endpoint.address(), session.to_owned(), key.to_owned());
+    let generation = generations.get(&map_key).copied().unwrap_or(0) + 1;
+    opencode_api::put_instruction_entry(endpoint, session, key, value)?;
+    generations.insert(map_key, generation);
+    Ok(generation)
+}
+
+/// Remove an entry only while `generation` is still the latest attach; a
+/// detached teardown whose runtime has already been replaced skips its
+/// DELETE instead of revoking the replacement's entry.
+fn remove_attached_instruction_entry(
+    endpoint: &Endpoint,
+    session: &str,
+    key: &str,
+    generation: u64,
+) {
+    let generations = instruction_attach_generations().lock();
+    let map_key = (endpoint.address(), session.to_owned(), key.to_owned());
+    if generations.get(&map_key).copied() == Some(generation) {
+        let _ = opencode_api::remove_instruction_entry(endpoint, session, key);
+    }
+}
+
+/// A `goddard-subagents` instruction entry: attached at start, removed on drop
+/// so a later session reconciles to whatever its own launch injected.
+struct SubagentInstruction {
+    endpoint: Endpoint,
+    session_id: String,
+    generation: u64,
+}
+
+impl Drop for SubagentInstruction {
+    fn drop(&mut self) {
+        remove_attached_instruction_entry(
+            &self.endpoint,
+            &self.session_id,
+            SUBAGENT_INSTRUCTION_KEY,
+            self.generation,
+        );
+    }
+}
+
+impl OpenCodeAgentSurface {
+    fn start(
+        service: &Arc<OpenCodeService>,
+        session_id: &str,
+        agent: &crate::agent::AgentLaunchEnv,
+    ) -> anyhow::Result<Self> {
+        let shim = crate::agent::write_session_shim(agent)?;
+        let endpoint = service.endpoint();
+        let generation = match attach_instruction_entry(
+            &endpoint,
+            session_id,
+            AGENT_INSTRUCTION_KEY,
+            &crate::agent::shared_service_instruction(&shim, agent),
+        ) {
+            Ok(generation) => generation,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&agent.shim_directory);
+                return Err(anyhow!(
+                    "could not attach OpenCode agent instructions: {error}"
+                ));
+            }
+        };
+        Ok(Self {
+            endpoint,
+            session_id: session_id.to_owned(),
+            shim_directory: agent.shim_directory.clone(),
+            generation,
+        })
+    }
+}
+
+impl Drop for OpenCodeAgentSurface {
+    fn drop(&mut self) {
+        remove_attached_instruction_entry(
+            &self.endpoint,
+            &self.session_id,
+            AGENT_INSTRUCTION_KEY,
+            self.generation,
+        );
+        let _ = std::fs::remove_dir_all(&self.shim_directory);
     }
 }
 
@@ -849,15 +933,15 @@ impl DriverControl for OpenCodeDriver {
     }
 
     fn prompt(&self, prompt: String) {
-        let _ = self.commands.send(CommandMessage::Prompt(prompt));
+        let _ = self.commands.send(DriverCommand::Prompt(prompt));
     }
 
     fn supports_steer(&self) -> bool {
-        true
+        self.supports_steer
     }
 
     fn agent_surface_delivery(&self) -> AgentSurfaceDelivery {
-        if self.announced_agent_surface {
+        if self.agent_surface.is_some() {
             AgentSurfaceDelivery::Announced
         } else {
             AgentSurfaceDelivery::Silent
@@ -865,11 +949,16 @@ impl DriverControl for OpenCodeDriver {
     }
 
     fn steer(&self, prompt: String) {
-        let _ = self.commands.send(CommandMessage::Steer(prompt));
+        let _ = self.commands.send(DriverCommand::Steer(prompt));
+    }
+
+    fn compact(&self) {
+        let _ = self.commands.send(DriverCommand::Compact);
     }
 
     fn cancel(&self) {
-        let _ = self.commands.send(CommandMessage::Cancel);
+        self.cancel_computer_use();
+        let _ = self.commands.send(DriverCommand::Cancel);
     }
 
     fn cancel_computer_use(&self) {
@@ -883,31 +972,39 @@ impl DriverControl for OpenCodeDriver {
     }
 
     fn respond(&self, request_id: String, option_id: String) {
-        for (request_id, option_id) in
-            permission_responses(&self.permissions, &request_id, &option_id)
-        {
-            let _ = self.commands.send(CommandMessage::Respond {
-                request_id,
-                option_id,
-            });
-        }
+        let _ = self.commands.send(DriverCommand::Respond {
+            request_id,
+            option_id,
+        });
     }
 
     fn respond_user_input(&self, request_id: String, answers: Vec<UserInputAnswer>) {
-        let _ = self.commands.send(CommandMessage::RespondUserInput {
+        let _ = self.commands.send(DriverCommand::RespondUserInput {
             request_id,
             answers,
         });
     }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
-        // The model and variant ride on each prompt, so they apply to the
-        // live session. Access is installed when the driver starts, so a
-        // mode change still restarts the driver.
-        if options.mode != self.mode {
+        // The access mode is not installed on the session — it decides who
+        // answers a permission request, which is the worker's own state — so
+        // a mode change is absorbed in place rather than restarting the
+        // driver.
+        let (reply, answer) = bounded(1);
+        if self
+            .commands
+            .send(DriverCommand::ApplyOptions(options, reply))
+            .is_err()
+        {
             return false;
         }
-        self.commands.send(CommandMessage::Options(options)).is_ok()
+        answer.recv_timeout(OPTIONS_TIMEOUT).unwrap_or(false)
+    }
+
+    fn delete_provider_session(&self) {
+        // The service outlives the driver, so the session can be removed
+        // even while the worker is mid-teardown.
+        let _ = opencode_api::delete_session(&self.service.endpoint(), &self.session_id);
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
@@ -917,505 +1014,1771 @@ impl DriverControl for OpenCodeDriver {
         self.fork(turns).map(Some)
     }
 
-    fn delete_provider_session(&self) {
-        if let Some(server) = self.server.as_deref() {
-            let _ = server.request(
-                "DELETE",
-                &format!("/session/{}", encode_path_segment(&self.session_id)),
-                None,
-            );
-        }
-    }
-
     fn fork(&self, turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
-        let server = self
-            .server
-            .as_deref()
-            .ok_or_else(|| anyhow!("OpenCode driver is shutting down"))?;
-        fork_session_removing_turns_on_server(server, &self.session_id, turns_to_remove)
+        let (reply, answer) = bounded(1);
+        self.commands
+            .send(DriverCommand::Fork {
+                turns: turns_to_remove,
+                reply,
+            })
+            .map_err(|_| anyhow!("the OpenCode driver is shutting down"))?;
+        answer
+            .recv_timeout(ACTION_TIMEOUT)
+            .map_err(|_| anyhow!("OpenCode did not answer the fork request"))?
     }
 }
 
 impl Drop for OpenCodeDriver {
     fn drop(&mut self) {
         self.begin_shutdown();
-        self.cancel_computer_use();
-        self.event_stream.cancel();
-        // The worker owns the other server lease. Release the UI-owned lease
-        // first, then wake the worker so any final terminate/wait happens there.
-        drop(self.server.take());
-        let _ = self.commands.send(CommandMessage::Shutdown);
+        // No socket surgery, no process signal, no exit budget: the clean
+        // consequence of owning no server. Unsubscribe first so the hub stops
+        // fanning out, then wake the worker so it winds down.
+        drop(self.subscription.take());
+        // The worker retains the final lease and cleans up the MCP runtime
+        // when it handles Shutdown; the user's service is never terminated.
+        drop(self.computer_use.take());
+        // Revoke the session's agent instruction and credential-carrying
+        // launcher while the service is still expected to answer.
+        drop(self.agent_surface.take());
+        drop(self.subagent_instruction.take());
+        let _ = self.commands.send(DriverCommand::Shutdown);
     }
 }
 
-/// Reads the human-readable text out of a `session.error` event.
+fn model_key(model: &ModelRef) -> String {
+    // Keyed on `providerID/id`. `Model.Ref` has no `modelID` — that field
+    // exists only on the catalogue entry.
+    format!("{}/{}", model.provider_id, model.id)
+}
+
+/// Reads the session a resume cursor names, or `None` when it is gone.
 ///
-/// Every OpenCode error is wrapped as `{name, data: {message}}` — verified
-/// against the live 1.18 `/doc` schema, where all eight `session.error`
-/// members (`ProviderAuthError`, `APIError`, `ContextOverflowError`,
-/// `ContentFilterError`, `MessageAbortedError`, `MessageOutputLengthError`,
-/// `StructuredOutputError`, `UnknownError`) share that shape. Reading
-/// `/error/message` therefore never matched, and every failure — an expired
-/// login, a billing stop, a context overflow — surfaced as the same bare
-/// "OpenCode reported an error" with the real cause discarded.
-fn session_error_message(properties: &Value) -> (String, Option<waku_protocol::WireTranslation>) {
-    let error = properties.get("error");
-    error
-        .and_then(|error| {
-            error
-                .pointer("/data/message")
-                .or_else(|| error.get("message"))
-                .or_else(|| properties.get("message"))
-                .and_then(Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|message| !message.is_empty())
-        .map(str::to_owned)
-        // `MessageOutputLengthError` carries an empty `data`, so its name is
-        // the only thing that says what went wrong.
-        .or_else(|| {
-            error
-                .and_then(|error| error.get("name"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(str::to_owned)
-        })
-        .map(|message| (message, None))
-        .unwrap_or_else(|| {
-            let pair = localized!("errors.provider_reported_error", provider = "OpenCode");
-            (pair.0, Some(pair.1))
-        })
-}
-
-#[derive(Default)]
-struct OpenCodeStreamState {
-    tools: HashMap<String, (ActivityKind, String)>,
-    reasoning_parts: HashSet<String>,
-    usage_metadata: Arc<OpenCodeUsageMetadata>,
-    permissions: Arc<Mutex<OpenCodePermissionState>>,
-}
-
-#[derive(Default)]
-struct OpenCodeUsageMetadata {
-    model_context_windows: Mutex<HashMap<String, u64>>,
-    last_model: Mutex<Option<String>>,
-}
-
-impl OpenCodeUsageMetadata {
-    fn current_context_window(&self) -> Option<u64> {
-        let model = self.last_model.lock().clone()?;
-        self.model_context_windows.lock().get(&model).copied()
+/// OpenCode imports OpenCode 1 history in the background after its first
+/// start, and a session the import has not reached yet reads as missing. A
+/// missing session is therefore retried while the import runs, up to
+/// [`MIGRATION_WAIT`], rather than replaced by an empty one under its id.
+fn resumed_session(
+    endpoint: &Endpoint,
+    session_id: &str,
+) -> Result<Option<opencode_api::SessionInfo>, ApiError> {
+    let deadline = Instant::now() + MIGRATION_WAIT;
+    loop {
+        // Read the import's state first, so an import that finishes in
+        // between has already landed by the time the session read below
+        // reports the session missing.
+        let importing = matches!(
+            opencode_api::v1_migration_status(endpoint),
+            Ok(MigrationStatus::Running)
+        );
+        match opencode_api::get_session(endpoint, session_id) {
+            Ok(session) => return Ok(Some(session)),
+            Err(error) if !error.is_not_found() => return Err(error),
+            Err(_) if !importing || Instant::now() >= deadline => return Ok(None),
+            Err(_) => thread::sleep(MIGRATION_POLL),
+        }
     }
 }
 
-fn opencode_model_context_windows(response: &Value) -> HashMap<String, u64> {
-    response
-        .pointer("/data")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|model| {
-            let provider = model.get("providerID").and_then(Value::as_str)?;
-            let id = model.get("id").and_then(Value::as_str)?;
-            let window = model
-                .pointer("/limit/context")
-                .and_then(Value::as_u64)
-                .filter(|window| *window > 0)?;
-            Some((format!("{provider}/{id}"), window))
+/// Goddard stores a model as `"provider/model"`; OpenCode wants the two apart,
+/// plus the variant that carries reasoning effort (`low`/`high`). The variant
+/// is always populated: `default` is the server's own id for the base model —
+/// it is what `session.model` reports for a session that never chose a
+/// variant — so sending it both resets a session after an effort pick and
+/// keeps the ref comparable to what the event stream echoes back.
+fn model_ref(model: Option<&str>, reasoning_effort: Option<&str>) -> Option<ModelRef> {
+    let (provider_id, id) = model?.split_once('/')?;
+    (!provider_id.is_empty() && !id.is_empty()).then(|| ModelRef {
+        id: id.to_owned(),
+        provider_id: provider_id.to_owned(),
+        variant: Some(
+            reasoning_effort
+                .map(str::trim)
+                .filter(|variant| !variant.is_empty())
+                .unwrap_or("default")
+                .to_owned(),
+        ),
+    })
+}
+
+/// The agent this session runs.
+///
+/// Goddard's access modes do not name an agent — OpenCode has no read-only
+/// product mode in this tree — so the choice is the user's own preset when
+/// the service
+/// still lists it as a selectable primary, and `build` otherwise.
+fn resolve_agent(preset: Option<&str>, agents: &[opencode_api::AgentInfo]) -> String {
+    let selectable = |name: &str| {
+        agents.iter().any(|agent| {
+            agent.id == name && !agent.hidden && agent.mode != opencode_api::AgentMode::Subagent
         })
+    };
+    match preset {
+        Some(preset) if !preset.is_empty() && (agents.is_empty() || selectable(preset)) => {
+            preset.to_owned()
+        }
+        _ => "build".to_owned(),
+    }
+}
+
+/// Context-window occupancy. OpenCode reports reasoning tokens separately
+/// instead of folding them into output, so leaving them out under-reports
+/// every thinking model.
+fn context_tokens(tokens: &TokenUsage) -> Option<u64> {
+    let total = [
+        tokens.input,
+        tokens.output,
+        tokens.reasoning,
+        tokens.cache.read,
+        tokens.cache.write,
+    ]
+    .into_iter()
+    .filter(|count| count.is_finite() && *count > 0.0)
+    .fold(0_u64, |total, count| total.saturating_add(count as u64));
+    (total > 0).then_some(total)
+}
+
+/// Context-window occupancy for a resumed or reconnected session.
+///
+/// `SessionInfo.tokens` is a *lifetime* cumulative counter — `cache.read` in
+/// particular only ever grows over a session, so it can run millions of tokens
+/// past the model's window while the actual context is tiny. Gauge occupancy
+/// from the latest assistant message's per-request token total instead, which
+/// is what opencode's own context meter reads. A stale or unknown value is
+/// `None`, which the meter already degrades gracefully to.
+fn resumed_context_tokens(endpoint: &Endpoint, session_id: &str) -> Option<u64> {
+    let Ok((messages, _)) =
+        opencode_api::list_messages(endpoint, session_id, Order::Desc, Some(20), None)
+    else {
+        return None;
+    };
+    for message in messages {
+        let MessageInfo::Assistant { tokens, .. } = message else {
+            continue;
+        };
+        if let Some(tokens) = tokens
+            && let Some(context_tokens) = context_tokens(&tokens)
+        {
+            return Some(context_tokens);
+        }
+    }
+    None
+}
+
+/// OpenCode emits `New session - <timestamp>` before its title-generation model
+/// call, and that placeholder is not a title.
+fn generated_title(title: Option<&str>) -> Option<String> {
+    title
+        .map(str::trim)
+        .filter(|title| !title.is_empty() && !title.starts_with("New session - "))
+        .map(str::to_owned)
+}
+
+/// The commands a user can type. Skills are not among them: OpenCode attaches
+/// a skill to a prompt as an `@` mention rather than running it as a command.
+fn reported_commands(commands: Vec<opencode_api::CommandInfo>) -> Vec<ReportedCommand> {
+    let mut seen = HashSet::new();
+    commands
+        .into_iter()
+        .map(|command| ReportedCommand {
+            name: command.name,
+            description: command.description.unwrap_or_default(),
+        })
+        .filter(|command| !command.name.is_empty() && seen.insert(command.name.clone()))
         .collect()
 }
 
-fn opencode_context_tokens(info: &Value) -> Option<u64> {
-    let tokens = info.get("tokens")?;
-    tokens
-        .get("total")
-        .and_then(Value::as_u64)
-        .filter(|tokens| *tokens > 0)
-        .or_else(|| {
-            let total = [
-                tokens.get("input"),
-                tokens.get("output"),
-                tokens.pointer("/cache/read"),
-                tokens.pointer("/cache/write"),
-            ]
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_u64)
-            .fold(0_u64, u64::saturating_add);
-            (total > 0).then_some(total)
-        })
-}
-
-fn opencode_model_key(info: &Value) -> Option<String> {
-    info.get("providerID")
-        .and_then(Value::as_str)
-        .zip(info.get("modelID").and_then(Value::as_str))
-        .map(|(provider, model)| format!("{provider}/{model}"))
-}
-
-fn opencode_context_usage(
-    info: &Value,
-    model_context_windows: &HashMap<String, u64>,
-) -> Option<(Option<u64>, Option<u64>)> {
-    if info.get("role").and_then(Value::as_str) != Some("assistant") {
-        return None;
-    }
-    let tokens = opencode_context_tokens(info);
-    let window = opencode_model_key(info)
-        .as_ref()
-        .and_then(|model| model_context_windows.get(model).copied());
-    (tokens.is_some() || window.is_some()).then_some((tokens, window))
-}
-
-fn latest_opencode_usage_info(messages: &Value) -> Option<&Value> {
-    let mut assistant = None;
-    for message in messages.as_array()?.iter().rev() {
-        let Some(info) = message
-            .get("info")
-            .filter(|info| info.get("role").and_then(Value::as_str) == Some("assistant"))
-        else {
-            continue;
-        };
-        if opencode_context_tokens(info).is_some() {
-            return Some(info);
-        }
-        assistant.get_or_insert(info);
-    }
-    assistant
-}
-
-fn handle_event(
-    value: &Value,
-    events: &impl DriverEventSink,
-    commands: &Sender<CommandMessage>,
-    turn_active: &Mutex<bool>,
-    auto_approve: bool,
-    state: &mut OpenCodeStreamState,
-) {
-    let kind = value
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let properties = value.get("properties").unwrap_or(&Value::Null);
-
-    match kind {
-        "message.part.delta" => {
-            let Some(delta) = properties.get("delta").and_then(Value::as_str) else {
-                return;
-            };
-            if delta.is_empty() {
-                return;
-            }
-            let part_id = properties.get("partID").and_then(Value::as_str);
-            let native_reasoning_part =
-                part_id.is_some_and(|part_id| state.reasoning_parts.contains(part_id));
-            match properties.get("field").and_then(Value::as_str) {
-                // OpenCode streams a reasoning part's own `text` property as
-                // `field: "text"`. The preceding part update is therefore the
-                // authoritative distinction between answer and thought text.
-                Some("text") if native_reasoning_part => {
-                    let _ = events.send(DriverEvent::ReasoningDelta(delta.to_owned()));
-                }
-                Some("text") => {
-                    let _ = events.send(DriverEvent::TextDelta(delta.to_owned()));
-                }
-                Some("reasoning" | "thinking") => {
-                    if let Some(part_id) = part_id {
-                        state.reasoning_parts.insert(part_id.to_owned());
-                    }
-                    let _ = events.send(DriverEvent::ReasoningDelta(delta.to_owned()));
-                }
-                _ => {}
+fn strip_provider_state(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.retain(|key, _| !PROVIDER_STATE_KEYS.contains(&key.as_str()));
+            for nested in object.values_mut() {
+                strip_provider_state(nested);
             }
         }
-        "message.part.updated" => {
-            let part = properties.get("part").unwrap_or(&Value::Null);
-            let part_type = part.get("type").and_then(Value::as_str);
-            if let Some(part_id) = part.get("id").and_then(Value::as_str) {
-                if matches!(part_type, Some("reasoning" | "thinking")) {
-                    state.reasoning_parts.insert(part_id.to_owned());
-                } else {
-                    state.reasoning_parts.remove(part_id);
-                }
-            }
-            if part_type == Some("tool") {
-                tool_activity(part, events, state);
+        Value::Array(items) => {
+            for item in items {
+                strip_provider_state(item);
             }
         }
-        "message.updated" => {
-            if let Some(info) = properties.get("info") {
-                if let Some(model) = opencode_model_key(info) {
-                    *state.usage_metadata.last_model.lock() = Some(model);
-                }
-                let usage = {
-                    let windows = state.usage_metadata.model_context_windows.lock();
-                    opencode_context_usage(info, &windows)
-                };
-                if let Some((context_tokens, context_window)) = usage {
-                    let _ = events.send(DriverEvent::UsageUpdated {
-                        context_tokens,
-                        context_window,
-                    });
-                }
-            }
-        }
-        "session.idle" => {
-            state.reasoning_parts.clear();
-            let mut permissions = state.permissions.lock();
-            permissions.pending.clear();
-            permissions.responding.clear();
-            drop(permissions);
-            if std::mem::take(&mut *turn_active.lock()) {
-                let _ = events.send(DriverEvent::TurnFinished {
-                    success: true,
-                    summary: None,
-                    summary_i18n: None,
-                });
-            }
-        }
-        "session.error" => {
-            let (message, i18n) = session_error_message(properties);
-            let _ = events.send(DriverEvent::error_or_localized(message, i18n));
-        }
-        "session.updated" => {
-            let title = properties
-                .pointer("/info/title")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|title| !title.is_empty() && !title.starts_with("New session - "));
-            if let Some(title) = title {
-                let _ = events.send(DriverEvent::AutoTitleUpdated(Some(title.to_owned())));
-            }
-        }
-        "permission.replied" => {
-            if let Some(request_id) = properties
-                .get("requestID")
-                .or_else(|| properties.get("id"))
-                .and_then(Value::as_str)
-            {
-                let mut permissions = state.permissions.lock();
-                permissions.pending.remove(request_id);
-                permissions.responding.remove(request_id);
-            }
-        }
-        _ if kind.starts_with("permission.") => {
-            request_permission(
-                properties,
-                events,
-                commands,
-                auto_approve,
-                &state.permissions,
-            );
-        }
-        "question.asked" => request_user_input(properties, events),
-        "question.replied" | "question.rejected" => {}
-        // `session.created`, `session.diff`, and the plugin/catalog/reference
-        // chatter are not transcript content.
         _ => {}
     }
 }
 
-fn rehydrate_pending_permissions(
-    response: &Value,
-    session_id: &str,
-    events: &impl DriverEventSink,
-    commands: &Sender<CommandMessage>,
-    turn_active: &Mutex<bool>,
-    auto_approve: bool,
-    permissions: &Mutex<OpenCodePermissionState>,
-) {
-    let requests = response
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|request| {
-            request.get("sessionID").and_then(Value::as_str) == Some(session_id)
-                && request.get("id").and_then(Value::as_str).is_some()
-        })
-        .collect::<Vec<_>>();
-    if requests.is_empty() {
-        return;
-    }
+fn stripped(value: Option<&Value>) -> Option<Value> {
+    let mut value = value.filter(|value| !value.is_null()).cloned()?;
+    strip_provider_state(&mut value);
+    Some(value)
+}
 
-    // A pending native permission proves that the resumed provider turn is
-    // still live. Restore this driver-local edge so the eventual
-    // `session.idle` settles Goddard's persisted running turn exactly once.
-    *turn_active.lock() = true;
-    for request in requests {
-        request_permission(request, events, commands, auto_approve, permissions);
+/// Goddard's access mode, applied locally.
+///
+/// What reaches Goddard is whatever the resolved agent's own rules mark
+/// `ask`; the mode only decides who answers. Nothing is ever saved to
+/// `/api/permission/saved`, a GLOBAL store shared with the user's own
+/// terminal.
+fn auto_replies(mode: RuntimeMode, action: &str) -> bool {
+    match mode {
+        // `Auto` never answers blindly: the evaluation reviewer replies when
+        // a backend is configured and the user does when it is not.
+        RuntimeMode::Ask | RuntimeMode::Auto => false,
+        RuntimeMode::AutoAcceptEdits => matches!(action, "edit" | "write" | "patch"),
+        RuntimeMode::FullAccess => true,
     }
 }
 
-fn request_user_input(properties: &Value, events: &impl DriverEventSink) {
-    let Some(request_id) = properties.get("id").and_then(Value::as_str) else {
+fn native_command_invocation<'a>(
+    text: &'a str,
+    commands: &HashSet<String>,
+) -> Option<(&'a str, &'a str)> {
+    let invocation = text.strip_prefix('/')?;
+    let (name, arguments) = invocation
+        .split_once(char::is_whitespace)
+        .unwrap_or((invocation, ""));
+    commands.contains(name).then(|| (name, arguments.trim()))
+}
+
+fn submit_prompt(
+    worker: &Worker,
+    endpoint: &Endpoint,
+    text: &str,
+    delivery: Option<Delivery>,
+) -> Result<Option<opencode_api::InboxUser>, ApiError> {
+    if let Some((name, arguments)) = native_command_invocation(text, &worker.command_names) {
+        opencode_api::command(endpoint, &worker.session_id, name, arguments, delivery).map(|_| None)
+    } else {
+        opencode_api::prompt(endpoint, &worker.session_id, text, delivery).map(Some)
+    }
+}
+
+fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamState) -> bool {
+    let endpoint = worker.service.endpoint();
+    let events = &worker.events;
+    match message {
+        DriverCommand::Prompt(text) => {
+            // The user moved on; a run they stopped earlier is theirs again.
+            state.stop_pending = false;
+            state.begin_turn(events);
+            match submit_prompt(worker, &endpoint, &text, None) {
+                Ok(Some(inbox)) => {
+                    // Not a steer, whatever delivery the server reports: it
+                    // picks `steer` for a prompt into an idle session, and a
+                    // prompt must never fall back into the app's follow-up
+                    // queue — the transcript already shows it.
+                    state.pending_input = Some(PendingInput {
+                        inbox_id: inbox.id,
+                        message: text,
+                        steer: false,
+                    });
+                }
+                Ok(None) => state.pending_input = None,
+                Err(error) => {
+                    let _ = events.send(DriverEvent::localized_error(localized!(
+                        "errors.provider_rejected_prompt_detail",
+                        provider = "OpenCode",
+                        error = error
+                    )));
+                    // `session.idle` never arrives for a turn that never
+                    // started, so settle it here instead of spinning forever.
+                    state.settle(
+                        events,
+                        Some(TurnOutcome {
+                            success: false,
+                            summary: Some(tr!("errors.provider_start_turn", provider = "OpenCode")),
+                            summary_i18n: Some(
+                                localized!("errors.provider_start_turn", provider = "OpenCode").1,
+                            ),
+                        }),
+                    );
+                }
+            }
+        }
+        DriverCommand::Steer(text) => {
+            if matches!(state.turn, TurnState::Idle) {
+                let (reason, reason_i18n) =
+                    localized!("errors.provider_no_active_turn", provider = "OpenCode");
+                let _ = events.send(DriverEvent::SteerRejected {
+                    message: text,
+                    reason,
+                    reason_i18n: Some(reason_i18n),
+                    hidden: false,
+                });
+                return true;
+            }
+            match submit_prompt(worker, &endpoint, &text, Some(Delivery::Steer)) {
+                Ok(Some(inbox)) => {
+                    // A server that queued the message anyway is promoted, so
+                    // "steer" means the same thing on both paths.
+                    if inbox.delivery != Delivery::Steer {
+                        let _ = opencode_api::set_inbox_delivery(
+                            &endpoint,
+                            &worker.session_id,
+                            &inbox.id,
+                            Delivery::Steer,
+                        );
+                    }
+                    state.pending_input = Some(PendingInput {
+                        inbox_id: inbox.id,
+                        message: text.clone(),
+                        steer: true,
+                    });
+                    // The inbox event is authoritative; this 2xx is only the
+                    // fallback for a response Goddard never sees.
+                    let _ = events.send(DriverEvent::SteerAccepted {
+                        message: text,
+                        sent_by_task: None,
+                        hidden: false,
+                    });
+                }
+                Ok(None) => {
+                    let _ = events.send(DriverEvent::SteerAccepted {
+                        message: text,
+                        sent_by_task: None,
+                        hidden: false,
+                    });
+                }
+                Err(error) => {
+                    let _ = events.send(DriverEvent::steer_rejected_keyed(
+                        text,
+                        localized!(
+                            "errors.provider_rejected_steer",
+                            provider = "OpenCode",
+                            error = error
+                        ),
+                    ));
+                }
+            }
+        }
+        DriverCommand::Compact => {
+            // Admission is durable but asynchronous: a 2xx only means the
+            // inbox item landed, and `session.compaction.*` events carry the
+            // rest — including a possible `failed` admission outcome.
+            if let Err(error) = opencode_api::compact(&endpoint, &worker.session_id) {
+                let _ = events.send(DriverEvent::localized_error(localized!(
+                    "errors.provider_rejected_compact",
+                    provider = "OpenCode",
+                    error = error
+                )));
+            }
+        }
+        DriverCommand::Cancel => {
+            let interrupted = opencode_api::interrupt(&endpoint, &worker.session_id);
+            stop_turn(state, interrupted, events);
+        }
+        DriverCommand::Respond {
+            request_id,
+            option_id,
+        } => {
+            for (request_id, option_id) in
+                support::permission_responses(&mut state.permissions, &request_id, &option_id)
+            {
+                let reply = match option_id.as_str() {
+                    "reject" => PermissionReply::Reject,
+                    // Never `always`: see the module doc.
+                    _ => PermissionReply::Once,
+                };
+                if let Err(error) = opencode_api::reply_permission(
+                    &endpoint,
+                    &worker.session_id,
+                    &request_id,
+                    reply,
+                ) {
+                    let _ = events.send(DriverEvent::localized_error(localized!(
+                        "errors.answer_provider_permission",
+                        provider = "OpenCode",
+                        error = error
+                    )));
+                }
+            }
+        }
+        DriverCommand::Emit(event) => {
+            let _ = events.send(event);
+        }
+        DriverCommand::RespondUserInput {
+            request_id,
+            answers,
+        } => {
+            let Some(fields) = state.forms.remove(&request_id) else {
+                return true;
+            };
+            let answer = form_answer(&fields, &answers);
+            if let Err(error) =
+                opencode_api::reply_form(&endpoint, &worker.session_id, &request_id, &answer)
+            {
+                let _ = events.send(DriverEvent::localized_error(localized!(
+                    "errors.answer_provider_question",
+                    provider = "OpenCode",
+                    error = error
+                )));
+            }
+        }
+        DriverCommand::ApplyOptions(options, reply) => {
+            let applied = apply_options(worker, &endpoint, &options, state);
+            let _ = reply.send(applied);
+        }
+        DriverCommand::Fork { turns, reply } => {
+            let _ = reply.send(fork_session(&endpoint, worker, turns));
+        }
+        DriverCommand::Shutdown => return false,
+    }
+    true
+}
+
+fn apply_options(
+    worker: &Worker,
+    endpoint: &Endpoint,
+    options: &SessionOptions,
+    state: &mut StreamState,
+) -> bool {
+    let model = model_ref(
+        options.model.as_deref(),
+        options.reasoning_effort.as_deref(),
+    );
+    if model != state.model
+        && let Some(model) = model.as_ref()
+        && opencode_api::switch_model(endpoint, &worker.session_id, model).is_err()
+    {
+        return false;
+    }
+    if model.is_some() {
+        state.model = model;
+    }
+    state.mode = options.mode;
+    true
+}
+
+/// Branches the live session by dropping its last `turns_to_remove` turns.
+///
+/// Shared with the cold path, because a steer is a user message of its own:
+/// counting user messages as turns would fork inside a steered turn.
+fn fork_session(
+    endpoint: &Endpoint,
+    worker: &Worker,
+    turns_to_remove: usize,
+) -> anyhow::Result<ProviderResumeCursor> {
+    crate::opencode_session::fork_session_removing_turns(
+        endpoint,
+        &worker.session_id,
+        turns_to_remove,
+    )
+}
+
+/// Repairs this session against the server after a stream break, and takes the
+/// initial snapshot when the driver starts.
+///
+/// Deliberately append-only: the transcript rides the runtime event journal,
+/// and replacing it wholesale from `/message` would clobber every other client
+/// that already saved a projection. Full replay stays confined to the cold
+/// import path.
+fn reconcile(worker: &Worker, state: &mut StreamState, generation: u64) {
+    if generation < state.generation {
+        return;
+    }
+    state.generation = generation;
+    let endpoint = worker.service.endpoint();
+    let events = &worker.events;
+
+    let session = match opencode_api::get_session(&endpoint, &worker.session_id) {
+        Ok(session) => Some(session),
+        Err(error) if error.is_not_found() => {
+            // A foreign client deleting this session is authoritative.
+            let _ = events.send(DriverEvent::localized_error(localized!(
+                "errors.provider_reported_error",
+                provider = "OpenCode"
+            )));
+            let _ = events.send(DriverEvent::ProcessExited);
+            return;
+        }
+        Err(_) => None,
+    };
+
+    if let Some(session) = session.as_ref() {
+        if let Some(title) = generated_title(session.title.as_deref()) {
+            let _ = events.send(DriverEvent::AutoTitleUpdated(Some(title)));
+        }
+        if let Some(model) = session.model.clone() {
+            state.model = Some(model);
+        }
+        let context_tokens = resumed_context_tokens(&endpoint, &worker.session_id);
+        let context_window = state
+            .model_key()
+            .and_then(|key| worker.service.model_context_window(&key));
+        if context_tokens.is_some() || context_window.is_some() {
+            let _ = events.send(DriverEvent::UsageUpdated {
+                context_tokens,
+                context_window,
+            });
+        }
+    }
+
+    // Permissions BEFORE the turn edge: a pending native request proves the
+    // resumed turn is live, and the three-state dedupe absorbs the overlap
+    // with frames already buffered in the hub channel.
+    let mut blocked = false;
+    if let Ok(pending) = opencode_api::list_permissions(&endpoint, &worker.session_id) {
+        blocked = !pending.is_empty();
+        for request in pending {
+            // `PermissionRequest` is a read type; the decoder wants the wire
+            // shape, so the snapshot is re-expressed rather than re-decoded.
+            let value = json!({
+                "id": request.id,
+                "action": request.action,
+                "resources": request.resources,
+                "save": request.save,
+                "message": request.message,
+            });
+            request_permission(&value, state, events, &worker.commands);
+        }
+    }
+    if let Ok(forms) = opencode_api::list_forms(&endpoint, &worker.session_id) {
+        blocked = blocked || !forms.is_empty();
+        for form in forms {
+            surface_form(form, state, events);
+        }
+    }
+    if let Ok(inbox) = opencode_api::list_inbox(&endpoint, &worker.session_id) {
+        let undelivered = state.pending_input.as_ref().is_some_and(|pending| {
+            inbox
+                .iter()
+                .any(|entry| entry.get("id").and_then(Value::as_str) == Some(&pending.inbox_id))
+        });
+        if !undelivered {
+            state.pending_input = None;
+        }
+    }
+
+    let draining = opencode_api::active_sessions(&endpoint)
+        .map(|active| active.contains(&worker.session_id))
+        .unwrap_or(false);
+    // Before any settle: the app drops output for a turn it has ended.
+    gap_fill(&endpoint, &worker.session_id, events, state);
+    state.end_reconnecting(events);
+    if state.stop_pending {
+        if draining {
+            // Resumed by the boot that brought the service back. Success
+            // lands as the run's own interrupted outcome, which clears this.
+            let _ = opencode_api::interrupt(&endpoint, &worker.session_id);
+        } else if latest_run_settled(&endpoint, &worker.session_id) {
+            state.stop_pending = false;
+        }
+    } else if draining || blocked {
+        state.begin_turn(events);
+    } else if matches!(state.turn, TurnState::Running { .. })
+        && !latest_run_settled(&endpoint, &worker.session_id)
+    {
+        // Suspended by a shutdown. The boot that brought the service back
+        // resumes the run, which can trail this reconnect by a moment.
+        state.resume_deadline = Some(Instant::now() + RESUME_GRACE);
+    } else {
+        let failed = session
+            .as_ref()
+            .and_then(|session| session.outcome)
+            .is_some_and(|outcome| outcome == SessionOutcome::Failed);
+        state.settle(
+            events,
+            Some(TurnOutcome {
+                success: !failed,
+                summary: None,
+                summary_i18n: None,
+            }),
+        );
+    }
+}
+
+/// Brings the driver in line with a stop the app has already applied.
+///
+/// A service that is down, or has no active run because its shutdown
+/// suspended it, cannot interrupt that run now. It is stopped when it next
+/// starts instead, which honours the stop, so there is nothing to report.
+/// Whenever the run did not stop here, the open turn is dropped, so the next
+/// prompt opens a turn of its own instead of vanishing into this one.
+fn stop_turn(
+    state: &mut StreamState,
+    interrupted: opencode_api::Result<bool>,
+    events: &impl DriverEventSink,
+) {
+    let report = |error: &ApiError| {
+        let _ = events.send(DriverEvent::localized_error(localized!(
+            "errors.stop_provider",
+            provider = "OpenCode",
+            error = error
+        )));
+    };
+    if !matches!(state.turn, TurnState::Running { .. }) {
+        if let Err(error) = &interrupted {
+            report(error);
+        }
+        return;
+    }
+    let deferred = match &interrupted {
+        // Its own `interrupted` outcome settles the turn.
+        Ok(true) => return,
+        Ok(false) => true,
+        Err(error) => error.is_unavailable(),
+    };
+    if let Err(error) = &interrupted
+        && !deferred
+    {
+        report(error);
+    }
+    state.stop_pending = deferred;
+    state.abandon_turn();
+}
+
+/// The event stream broke. Nothing is lost yet, but a running turn says why
+/// it went quiet, and no resume is due while the service is gone.
+fn connection_lost(state: &mut StreamState, events: &impl DriverEventSink) {
+    state.resume_deadline = None;
+    state.begin_reconnecting(events);
+}
+
+/// The service came back but never resumed the run its shutdown suspended,
+/// so that run is not coming: the turn ends unfinished.
+fn resume_overdue(state: &mut StreamState, events: &impl DriverEventSink) {
+    state.drop_turn_scratch();
+    state.settle(
+        events,
+        Some(TurnOutcome {
+            success: false,
+            summary: None,
+            summary_i18n: None,
+        }),
+    );
+}
+
+/// Whether the session's latest run has ended, read from its transcript.
+///
+/// The service exposes no "suspended" state: a run its shutdown interrupted
+/// is neither active nor ended until the next boot resumes it. What tells the
+/// two apart is OpenCode's own turn delimiter, the `idle` marker every ending
+/// writes. An unreadable transcript counts as ended, which settles the turn.
+fn latest_run_settled(endpoint: &Endpoint, session_id: &str) -> bool {
+    opencode_api::list_messages(endpoint, session_id, Order::Desc, Some(20), None)
+        .map_or(true, |(messages, _)| run_settled(&messages))
+}
+
+/// Whether an `idle` marker follows the newest prompt and step, newest first.
+/// Only those two count: a model switch, an instructions update or a restart
+/// notice can land after the marker without starting a run.
+fn run_settled(newest_first: &[MessageInfo]) -> bool {
+    newest_first
+        .iter()
+        .find_map(|message| match message {
+            MessageInfo::Idle { .. } => Some(true),
+            MessageInfo::User { .. } | MessageInfo::Assistant { .. } => Some(false),
+            _ => None,
+        })
+        .unwrap_or(true)
+}
+
+/// Appends whatever the in-flight assistant message gained while the stream
+/// was down, keyed by `(assistantMessageID, ordinal)`.
+fn gap_fill(
+    endpoint: &Endpoint,
+    session_id: &str,
+    events: &impl DriverEventSink,
+    state: &mut StreamState,
+) {
+    let Some(step) = state.step.clone() else {
         return;
     };
-    let questions = properties
-        .get("questions")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter_map(|(index, question)| {
-            let text = question.get("question").and_then(Value::as_str)?.trim();
-            if text.is_empty() {
-                return None;
+    // The newest STEP, not the newest message: a turn that settled while the
+    // stream was down ends with its `idle` marker.
+    let Ok((messages, _)) =
+        opencode_api::list_messages(endpoint, session_id, Order::Desc, Some(4), None)
+    else {
+        return;
+    };
+    let Some((id, content)) = messages.into_iter().find_map(|message| match message {
+        MessageInfo::Assistant { id, content, .. } => Some((id, content)),
+        _ => None,
+    }) else {
+        return;
+    };
+    if id != step.message_id {
+        return;
+    }
+    // The content array's own order is the ordinal namespace the events use.
+    for (ordinal, part) in content.iter().enumerate() {
+        let ordinal = ordinal as u64;
+        match part {
+            AssistantContent::Text { text, .. } => {
+                append_suffix(state, events, &id, ordinal, text, false);
             }
-            let header = question
-                .get("header")
-                .and_then(Value::as_str)
-                .filter(|header| !header.trim().is_empty())
-                .unwrap_or("Question");
-            let slug = header
-                .trim()
-                .to_ascii_lowercase()
-                .chars()
-                .map(|character| {
-                    if character.is_ascii_alphanumeric() || character == '_' || character == '-' {
-                        character
-                    } else {
-                        '-'
-                    }
-                })
-                .collect::<String>();
-            let slug = slug.trim_matches('-');
-            let id = if slug.is_empty() {
-                format!("question-{index}")
-            } else {
-                format!("question-{index}-{slug}")
+            AssistantContent::Reasoning { text, .. } => {
+                append_suffix(state, events, &id, ordinal, text, true);
+            }
+            AssistantContent::Tool {
+                id: call_id,
+                name,
+                state: tool_state,
+                ..
+            } => {
+                repair_tool(state, events, &id, call_id, name, tool_state);
+            }
+            AssistantContent::Unknown => {}
+        }
+    }
+}
+
+fn append_suffix(
+    state: &mut StreamState,
+    events: &impl DriverEventSink,
+    message_id: &str,
+    ordinal: u64,
+    text: &str,
+    reasoning: bool,
+) {
+    let part = state
+        .parts
+        .entry((message_id.to_owned(), ordinal))
+        .or_insert_with(|| PartKind::new(reasoning));
+    if part.is_reasoning() != reasoning {
+        return;
+    }
+    let seen = part.text_mut();
+    // Append-only. A body that does not extend what the transcript already
+    // shows is a rewrite, and a rewrite is exactly what must not happen.
+    let Some(suffix) = text.strip_prefix(seen.as_str()) else {
+        return;
+    };
+    if suffix.is_empty() {
+        return;
+    }
+    let delta = suffix.to_owned();
+    seen.push_str(&delta);
+    let _ = events.send(if reasoning {
+        DriverEvent::ReasoningDelta(delta)
+    } else {
+        DriverEvent::TextDelta(delta)
+    });
+}
+
+fn repair_tool(
+    state: &mut StreamState,
+    events: &impl DriverEventSink,
+    message_id: &str,
+    call_id: &str,
+    name: &str,
+    tool_state: &ToolState,
+) {
+    let key = (message_id.to_owned(), call_id.to_owned());
+    if !state.tools.contains_key(&key) {
+        return;
+    }
+    let (failed, output) = match tool_state {
+        ToolState::Completed { content, .. } => (false, Some(tool_content(content))),
+        ToolState::Error { error, .. } => (true, Some(Value::String(error.message.clone()))),
+        // Still open on the server, so there is nothing to repair.
+        _ => return,
+    };
+    let mut slot = state.tools.remove(&key).unwrap_or_else(|| ToolSlot {
+        kind: support::classify_tool(name),
+        tool_name: Some(name.to_owned()),
+        title: name.to_owned(),
+        input_text: String::new(),
+        input: None,
+        metadata: None,
+    });
+    slot.title = activity::input_title(slot.input.as_ref()).unwrap_or(slot.title);
+    emit_tool(events, call_id, &slot, output.as_ref(), failed, true);
+}
+
+/// Flattens a completed tool's content blocks into the shape the shared
+/// normalizer already knows how to render and harvest images from.
+fn tool_content(content: &[ToolContent]) -> Value {
+    Value::Array(
+        content
+            .iter()
+            .filter_map(|item| match item {
+                ToolContent::Text { text } => Some(json!({"type": "text", "text": text})),
+                ToolContent::File { uri, mime, name } => {
+                    Some(json!({"type": "file", "url": uri, "mime": mime, "name": name}))
+                }
+                ToolContent::Unknown => None,
+            })
+            .collect(),
+    )
+}
+
+fn handle_event(
+    envelope: &Value,
+    state: &mut StreamState,
+    events: &impl DriverEventSink,
+    commands: &Sender<DriverCommand>,
+    service: &impl ContextWindows,
+) {
+    let kind = envelope
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let data = envelope.get("data").unwrap_or(&Value::Null);
+
+    match kind {
+        // Turn lifecycle. The execution outcome IS the terminal event: the
+        // service never publishes `session.idle` (the stream ends at
+        // `session.execution.*` and nothing follows), so waiting for one left
+        // every turn pinned to Working forever. `session.idle` is still
+        // handled below in case a build sends it; settling is idempotent.
+        "session.execution.started" => {
+            if state.stop_pending {
+                // The run the user stopped while the service was down, which
+                // its next boot resumed: stop it again instead of showing it.
+                let _ = commands.send(DriverCommand::Cancel);
+                return;
+            }
+            state.resume_deadline = None;
+            state.end_reconnecting(events);
+            state.begin_turn(events);
+        }
+        "session.step.started" => {
+            let Some(message_id) = data.get("assistantMessageID").and_then(Value::as_str) else {
+                return;
             };
-            let options = question
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|option| {
-                    let label = option.get("label").and_then(Value::as_str)?.trim();
-                    (!label.is_empty()).then(|| UserInputOption {
-                        label: label.to_owned(),
-                        description: option
-                            .get("description")
-                            .and_then(Value::as_str)
-                            .map(str::trim)
-                            .filter(|description| !description.is_empty())
-                            .map(str::to_owned),
-                    })
-                })
-                .collect();
+            state.step = Some(StepState {
+                message_id: message_id.to_owned(),
+                agent: data.get("agent").and_then(Value::as_str).map(str::to_owned),
+                model: serde_json::from_value(data.get("model").cloned().unwrap_or(Value::Null))
+                    .ok(),
+            });
+        }
+        "session.step.ended" => {
+            emit_usage(data.get("tokens"), state, events, service);
+        }
+        "session.step.failed" => {
+            let _ = events.send(DriverEvent::Error(error_message(data.get("error"))));
+        }
+        "session.execution.succeeded" => {
+            state.stop_pending = false;
+            state.arm(true, None);
+            state.finish_turn(events);
+        }
+        "session.execution.failed" => {
+            let message = error_message(data.get("error"));
+            // A run the user already stopped has nothing left to report.
+            if !std::mem::take(&mut state.stop_pending) {
+                let _ = events.send(DriverEvent::Error(message.clone()));
+            }
+            state.arm(false, Some(message));
+            state.finish_turn(events);
+        }
+        "session.execution.interrupted" => {
+            let reason = data
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("user")
+                .to_owned();
+            // `shutdown` does not end the turn: the service keeps the run's
+            // claim and resumes it as it boots again, writing no `idle`
+            // marker in between, so OpenCode counts one turn and so must
+            // Waku. The stream breaks next, and `reconcile` picks the run up
+            // after the reconnect. A user, superseded or inactivity interrupt
+            // did stop the work, and says so.
+            if reason == "shutdown" {
+                state.begin_reconnecting(events);
+                return;
+            }
+            state.stop_pending = false;
+            state.arm(false, Some(reason));
+            state.finish_turn(events);
+        }
+        // Retained for compatibility only; the service never sends this.
+        // Harmless after the outcome already settled the turn.
+        "session.idle" => state.finish_turn(events),
+
+        // Streaming. Text and reasoning share one ordinal namespace.
+        "session.text.started" => start_part(data, state, false),
+        "session.reasoning.started" => start_part(data, state, true),
+        "session.text.delta" => stream_delta(data, state, events, false),
+        "session.reasoning.delta" => stream_delta(data, state, events, true),
+        // Emit NOTHING: the deltas already carried this text. Re-emitting it
+        // doubles every assistant paragraph. It is stored because it is the
+        // authoritative body the reconnect gap-fill compares against.
+        "session.text.ended" => end_part(data, state, false),
+        "session.reasoning.ended" => end_part(data, state, true),
+
+        // Tools. Keyed by `(assistantMessageID, id)`, no ordinal.
+        "session.tool.input.started" => {
+            let Some((key, id)) = tool_key(data, state) else {
+                return;
+            };
+            let name = data
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| tr!("activity.tool"));
+            let slot = ToolSlot {
+                kind: support::classify_tool(&name),
+                tool_name: data.get("name").and_then(Value::as_str).map(str::to_owned),
+                title: name,
+                input_text: String::new(),
+                input: None,
+                metadata: None,
+            };
+            state
+                .tool_order
+                .entry(key.0.clone())
+                .or_default()
+                .push(id.clone());
+            // Emit at once so the row appears while the arguments stream.
+            emit_tool(events, &id, &slot, None, false, false);
+            state.tools.insert(key, slot);
+        }
+        "session.tool.input.delta" => {
+            let Some((key, id)) = tool_key(data, state) else {
+                return;
+            };
+            let Some(delta) = data.get("delta").and_then(Value::as_str) else {
+                return;
+            };
+            let Some(slot) = state.tools.get_mut(&key) else {
+                return;
+            };
+            slot.input_text.push_str(delta);
+            let Ok(mut input) = serde_json::from_str::<Value>(&slot.input_text) else {
+                return;
+            };
+            strip_provider_state(&mut input);
+            let title = activity::input_title(Some(&input));
+            slot.input = Some(input);
+            // Only a title change is worth another row; a row per delta would
+            // be a transcript update at token rate.
+            if let Some(title) = title.filter(|title| *title != slot.title) {
+                slot.title = title;
+                let slot = slot.clone();
+                emit_tool(events, &id, &slot, None, false, false);
+            }
+        }
+        "session.tool.called" => {
+            let Some((key, id)) = tool_key(data, state) else {
+                return;
+            };
+            let Some(slot) = state.tools.get_mut(&key) else {
+                return;
+            };
+            if let Some(input) = stripped(data.get("input")) {
+                slot.title = activity::input_title(Some(&input)).unwrap_or(slot.title.clone());
+                slot.input = Some(input);
+            }
+            // `executed: false` means produced-but-not-run — a denied or
+            // interrupted call — and must never render as a completed one.
+            let slot = slot.clone();
+            emit_tool(events, &id, &slot, None, false, false);
+        }
+        "session.tool.progress" => {
+            let Some((key, id)) = tool_key(data, state) else {
+                return;
+            };
+            let Some(slot) = state.tools.get_mut(&key) else {
+                return;
+            };
+            slot.metadata = stripped(data.get("metadata"));
+            let slot = slot.clone();
+            let metadata = slot.metadata.clone();
+            // This is what makes a long bash or grep visibly alive instead of
+            // a frozen row.
+            emit_tool(events, &id, &slot, metadata.as_ref(), false, false);
+        }
+        "session.tool.success" => complete_tool(data, state, events, false),
+        "session.tool.failed" => complete_tool(data, state, events, true),
+
+        // Inbox and steering.
+        // Every inbox event names its entry `inboxID`; only the prompt answer
+        // calls it `id`.
+        "session.inbox.enqueued" => {
+            let Some(id) = data.get("inboxID").and_then(Value::as_str) else {
+                return;
+            };
+            let Some(pending) = state.pending_input.as_mut() else {
+                return;
+            };
+            if pending.inbox_id.is_empty() {
+                pending.inbox_id = id.to_owned();
+            }
+        }
+        "session.inbox.delivered" => {
+            if state.pending_input.as_ref().is_some_and(|pending| {
+                Some(pending.inbox_id.as_str()) == data.get("inboxID").and_then(Value::as_str)
+            }) {
+                state.pending_input = None;
+            }
+        }
+        // Another client cancelled the entry, or a move dropped it.
+        "session.inbox.cancelled" => {
+            let Some(pending) = state.pending_input.as_ref() else {
+                return;
+            };
+            if Some(pending.inbox_id.as_str()) != data.get("inboxID").and_then(Value::as_str) {
+                return;
+            }
+            // The app falls back to its own follow-up queue.
+            if pending.steer {
+                let _ = events.send(DriverEvent::steer_rejected_keyed(
+                    pending.message.clone(),
+                    localized!("errors.provider_rejected_prompt", provider = "OpenCode"),
+                ));
+            }
+            state.pending_input = None;
+        }
+
+        // Permissions.
+        "permission.asked" => request_permission(data, state, events, commands),
+        // NAME ASYMMETRY: `asked` puts the id at `data.id`, `replied` calls it
+        // `data.requestID`, and the reply path takes the `asked` id.
+        "permission.replied" | "permission.rejected" => {
+            if let Some(request_id) = data
+                .get("requestID")
+                .or_else(|| data.get("id"))
+                .and_then(Value::as_str)
+            {
+                state.permissions.pending.remove(request_id);
+                state.permissions.responding.remove(request_id);
+            }
+        }
+
+        // Forms. NEVER auto-cancelled: that would silently destroy a
+        // structured question the agent is blocked on.
+        "form.created" => {
+            let Ok(form) = serde_json::from_value::<FormInfo>(
+                data.get("form").cloned().unwrap_or(Value::Null),
+            ) else {
+                return;
+            };
+            surface_form(form, state, events);
+        }
+        "form.replied" | "form.cancelled" => {
+            if let Some(id) = data.get("id").and_then(Value::as_str) {
+                state.forms.remove(id);
+            }
+        }
+
+        // Session level.
+        // The session's LIFETIME cumulative token counter (`cache.read` never
+        // shrinks) can run far past the model's window while the actual context
+        // is small, so this is deliberately NOT a context-occupancy source.
+        // Occupancy comes from per-step `session.step.ended` tokens above,
+        // which reflect the actual request. Keep the arm so the event is
+        // acknowledged rather than recorded as unknown.
+        "session.usage.updated" => {}
+        "session.renamed" => {
+            if let Some(title) = generated_title(data.get("title").and_then(Value::as_str)) {
+                let _ = events.send(DriverEvent::AutoTitleUpdated(Some(title)));
+            }
+        }
+        "session.agent.selected" => {
+            let _ = events.send(DriverEvent::AgentPresetSelected(
+                data.get("agent").and_then(Value::as_str).map(str::to_owned),
+            ));
+        }
+        "session.model.selected" => {
+            if let Ok(model) = serde_json::from_value::<ModelRef>(
+                data.get("model").cloned().unwrap_or(Value::Null),
+            ) {
+                state.model = Some(model);
+            }
+        }
+        "session.status" | "session.retry.scheduled" => retry_activity(kind, data, state, events),
+        "session.shell.started" => shell_work(data, events, true),
+        "session.shell.ended" => shell_work(data, events, false),
+        // Compaction deltas carry NO `assistantMessageID` and NO ordinal, so
+        // routing them as a `TextDelta` would drop the compaction summary
+        // inside the assistant's own reply. One row keyed on the session.
+        "session.compaction.started" => {
+            // A manually admitted compaction can run outside any execution —
+            // no `session.execution.*` frames wrap it and the app drops
+            // activities that land with no open turn. Open a synthetic one so
+            // the card has a home; the flag marks whose turn it is so an
+            // in-flight execution's turn is never settled by the outcome.
+            if matches!(state.turn, TurnState::Idle) {
+                state.begin_turn(events);
+                state.compaction_opened_turn = true;
+            }
+            compaction_activity(state, events, None, false, false);
+        }
+        "session.compaction.delta" => compaction_activity(
+            state,
+            events,
+            data.get("text").and_then(Value::as_str),
+            false,
+            false,
+        ),
+        "session.compaction.ended" => {
+            compaction_activity(state, events, None, true, false);
+            state.settle_compaction_turn(events);
+        }
+        "session.compaction.failed" => {
+            compaction_activity(state, events, None, true, true);
+            if state.compaction_opened_turn {
+                state.arm(false, Some(error_message(data.get("error"))));
+            }
+            state.settle_compaction_turn(events);
+        }
+        // Activities, never user messages: a synthetic note is the harness
+        // talking to the model, not the user.
+        "session.synthetic" => {
+            let (title, title_i18n) = match data
+                .get("description")
+                .or_else(|| data.get("text"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            {
+                Some(title) => (title, None),
+                None => {
+                    let pair = localized!("activity.activity");
+                    (pair.0, Some(pair.1))
+                }
+            };
+            let mut item = activity::tool_activity(
+                data.get("id").and_then(Value::as_str).map(str::to_owned),
+                ActivityKind::Tool,
+                title,
+                None,
+                data.get("text"),
+                None,
+                false,
+                true,
+            );
+            item.title_i18n = title_i18n;
+            let _ = events.send(DriverEvent::RichActivity(item));
+        }
+        "session.skill.activated" => {
+            let (title, title_i18n) =
+                match data.get("name").and_then(Value::as_str).map(str::to_owned) {
+                    Some(title) => (title, None),
+                    None => {
+                        let pair = localized!("activity.activity");
+                        (pair.0, Some(pair.1))
+                    }
+                };
+            let mut item = activity::tool_activity(
+                data.get("id").and_then(Value::as_str).map(str::to_owned),
+                ActivityKind::Tool,
+                title,
+                None,
+                data.get("text"),
+                None,
+                false,
+                true,
+            );
+            item.title_i18n = title_i18n;
+            let _ = events.send(DriverEvent::RichActivity(item));
+        }
+        // Driver state only: the revert edge is what the rollback path reads,
+        // and it is not transcript content.
+        "session.revert.staged" | "session.revert.cleared" | "session.revert.committed" => {}
+        "session.deleted" => {
+            let _ = events.send(DriverEvent::localized_error(localized!(
+                "errors.provider_reported_error",
+                provider = "OpenCode"
+            )));
+            // Terminal, and always last: the runtime is not reinserted after
+            // it.
+            let _ = events.send(DriverEvent::ProcessExited);
+        }
+
+        _ if is_ignored(kind) => {}
+        // Tolerant by requirement: three weeks of upstream churn renamed a
+        // whole event family, and an unknown type must never be fatal.
+        unknown => {
+            *state.unknown.entry(unknown.to_owned()).or_default() += 1;
+        }
+    }
+}
+
+/// Event families that are known and deliberately dropped.
+///
+/// Deny-by-default: the union has 88 members and the stream is shared with
+/// the user's own terminal, so nothing unattributable may reach a transcript.
+/// Note that top-level `shell.*` belongs to `/api/shell` and has no session
+/// id at all — it is not `session.shell.*`.
+fn is_ignored(kind: &str) -> bool {
+    const PREFIXES: [&str; 13] = [
+        "tui.",
+        "pty.",
+        "mcp.",
+        "installation.",
+        "vcs.",
+        "plugin.",
+        "integration.",
+        "credential.",
+        "reference.",
+        "websearch.",
+        "shell.",
+        "project.",
+        "lsp.",
+    ];
+    const EXACT: [&str; 14] = [
+        "server.connected",
+        "filesystem.changed",
+        "location.shutdown",
+        "model.updated",
+        "provider.updated",
+        "agent.updated",
+        "command.updated",
+        "skill.updated",
+        "config.updated",
+        "models-dev.refreshed",
+        "session.created",
+        "session.viewed",
+        "session.moved",
+        "session.forked",
+    ];
+    const UNINTERESTING: [&str; 7] = [
+        "session.instructions.updated",
+        "session.metadata.updated",
+        "session.permissions",
+        "session.step.streamed",
+        // The input object is already complete on `session.tool.called`.
+        "session.tool.input.ended",
+        "session.inbox.delivery.changed",
+        // Durable-union only; it can never arrive on the live stream.
+        "session.usage.recorded",
+    ];
+    PREFIXES.iter().any(|prefix| kind.starts_with(prefix))
+        || EXACT.contains(&kind)
+        || UNINTERESTING.contains(&kind)
+}
+
+fn error_message(error: Option<&Value>) -> String {
+    error
+        .and_then(|error| {
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .or_else(|| error.as_str())
+        })
+        .map(str::to_owned)
+        .unwrap_or_else(|| tr!("errors.provider_reported_error", provider = "OpenCode"))
+}
+
+fn emit_usage(
+    tokens: Option<&Value>,
+    state: &StreamState,
+    events: &impl DriverEventSink,
+    service: &impl ContextWindows,
+) {
+    let context_tokens = tokens
+        .cloned()
+        .and_then(|tokens| serde_json::from_value::<TokenUsage>(tokens).ok())
+        .as_ref()
+        .and_then(context_tokens);
+    let context_window = state
+        .model_key()
+        .and_then(|key| service.context_window(&key));
+    if context_tokens.is_none() && context_window.is_none() {
+        return;
+    }
+    let _ = events.send(DriverEvent::UsageUpdated {
+        context_tokens,
+        context_window,
+    });
+}
+
+fn part_key(data: &Value, state: &StreamState) -> Option<(String, u64)> {
+    let message_id = data
+        .get("assistantMessageID")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| state.step.as_ref().map(|step| step.message_id.clone()))?;
+    let ordinal = data.get("ordinal").and_then(Value::as_u64).unwrap_or(0);
+    Some((message_id, ordinal))
+}
+
+fn tool_key(data: &Value, state: &StreamState) -> Option<((String, String), String)> {
+    let message_id = data
+        .get("assistantMessageID")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| state.step.as_ref().map(|step| step.message_id.clone()))?;
+    let id = data.get("id").and_then(Value::as_str)?.to_owned();
+    Some(((message_id, id.clone()), id))
+}
+
+fn start_part(data: &Value, state: &mut StreamState, reasoning: bool) {
+    let Some(key) = part_key(data, state) else {
+        return;
+    };
+    state.parts.insert(key, PartKind::new(reasoning));
+}
+
+fn stream_delta(
+    data: &Value,
+    state: &mut StreamState,
+    events: &impl DriverEventSink,
+    reasoning: bool,
+) {
+    let Some(delta) = data.get("delta").and_then(Value::as_str) else {
+        return;
+    };
+    if delta.is_empty() {
+        return;
+    }
+    if let Some(key) = part_key(data, state) {
+        state
+            .parts
+            .entry(key)
+            .or_insert_with(|| PartKind::new(reasoning))
+            .text_mut()
+            .push_str(delta);
+    }
+    let _ = events.send(if reasoning {
+        DriverEvent::ReasoningDelta(delta.to_owned())
+    } else {
+        DriverEvent::TextDelta(delta.to_owned())
+    });
+}
+
+fn end_part(data: &Value, state: &mut StreamState, reasoning: bool) {
+    let Some(key) = part_key(data, state) else {
+        return;
+    };
+    let Some(text) = data.get("text").and_then(Value::as_str) else {
+        return;
+    };
+    let part = state
+        .parts
+        .entry(key)
+        .or_insert_with(|| PartKind::new(reasoning));
+    *part.text_mut() = text.to_owned();
+}
+
+fn complete_tool(
+    data: &Value,
+    state: &mut StreamState,
+    events: &impl DriverEventSink,
+    failed: bool,
+) {
+    let Some((key, id)) = tool_key(data, state) else {
+        return;
+    };
+    // Removed ONLY here: OpenCode can still emit `session.tool.progress`
+    // after `called`, so removing on `called` would strand every later update.
+    let Some(mut slot) = state.tools.remove(&key) else {
+        return;
+    };
+    if let Some(metadata) = stripped(data.get("metadata")) {
+        slot.metadata = Some(metadata);
+    }
+    let output = if failed {
+        stripped(data.get("error")).or_else(|| stripped(data.get("content")))
+    } else {
+        stripped(data.get("content"))
+    };
+    emit_tool(events, &id, &slot, output.as_ref(), failed, true);
+}
+
+/// Every tool row goes through the shared normalizer, so the 16 000-character
+/// truncation, image harvesting and file-change precomputation are identical
+/// to every other provider. Never hand-roll an `ActivityItem` here.
+fn emit_tool(
+    events: &impl DriverEventSink,
+    id: &str,
+    slot: &ToolSlot,
+    output: Option<&Value>,
+    failed: bool,
+    complete: bool,
+) {
+    let mut item = activity::tool_activity(
+        Some(id.to_owned()),
+        slot.kind,
+        slot.title.clone(),
+        slot.input.as_ref(),
+        output,
+        slot.metadata.as_ref(),
+        failed,
+        complete,
+    )
+    .with_tool_name(slot.tool_name.as_deref());
+    if let Some((server, tool)) = slot
+        .tool_name
+        .as_deref()
+        .and_then(super::opencode_computer_use::tool_identity)
+    {
+        item = item
+            .with_tool_name(Some(tool))
+            .with_mcp_server(Some(server));
+    }
+    let _ = events.send(DriverEvent::RichActivity(item));
+
+    // A `subagent`/`task` call is also a unit of delegated work: upsert it so
+    // the run renders on the tasks surface, its agent name carried on `role`.
+    // Every tool transition re-emits, so `role` lands once `called` delivers
+    // the parsed input.
+    if matches!(slot.tool_name.as_deref(), Some("subagent" | "task")) {
+        let status = if complete {
+            if failed {
+                BackgroundWorkStatus::Failed
+            } else {
+                BackgroundWorkStatus::Completed
+            }
+        } else {
+            BackgroundWorkStatus::Running
+        };
+        let mut work =
+            BackgroundWorkItem::new(BackgroundWorkKind::Subagent, id, slot.title.clone(), status);
+        work.role = slot
+            .input
+            .as_ref()
+            .and_then(|input| input.get("agent"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        work.model = slot
+            .input
+            .as_ref()
+            .and_then(|input| input.get("model"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        work.origin_activity_id = Some(id.to_owned());
+        let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+            work,
+        )));
+    }
+}
+
+/// `session.status` nests its state under `status` (`{type: "retry",
+/// message, action?}`), while `session.retry.scheduled` carries the failure
+/// that caused the retry as `error`.
+fn retry_activity(kind: &str, data: &Value, state: &StreamState, events: &impl DriverEventSink) {
+    let retry = if kind == "session.status" {
+        match data.get("status") {
+            Some(status) if status.get("type").and_then(Value::as_str) == Some("retry") => status,
+            _ => return,
+        }
+    } else {
+        data
+    };
+    let (title, title_i18n) = match retry
+        .pointer("/action/title")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    {
+        Some(title) => (title, None),
+        None => {
+            let pair = localized!("activity.provider_retrying");
+            (pair.0, Some(pair.1))
+        }
+    };
+    // The reason travels as TEXT, never as colour alone.
+    let detail = retry
+        .pointer("/action/message")
+        .or_else(|| retry.get("message"))
+        .or_else(|| retry.pointer("/error/message"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let detail = detail.map(Value::String);
+    let mut item = activity::tool_activity(
+        // One row, upserted: a retry that escalates must not stack rows.
+        Some(format!("retry:{}", state.session_id)),
+        ActivityKind::Tool,
+        title,
+        None,
+        detail.as_ref(),
+        None,
+        false,
+        false,
+    );
+    item.title_i18n = title_i18n;
+    let _ = events.send(DriverEvent::RichActivity(item));
+}
+
+fn compaction_activity(
+    state: &StreamState,
+    events: &impl DriverEventSink,
+    delta: Option<&str>,
+    complete: bool,
+    failed: bool,
+) {
+    let (title, title_i18n) = if failed {
+        localized!("activity.compaction_failed")
+    } else if complete {
+        localized!("activity.compacted_context")
+    } else {
+        localized!("activity.compacting_context")
+    };
+    let delta = delta.map(|delta| Value::String(delta.to_owned()));
+    let mut item = activity::tool_activity(
+        Some(format!("compaction:{}", state.session_id)),
+        ActivityKind::Tool,
+        title,
+        None,
+        delta.as_ref(),
+        None,
+        failed,
+        complete,
+    );
+    item.title_i18n = Some(title_i18n);
+    let _ = events.send(DriverEvent::RichActivity(item));
+}
+
+/// Session-level work that outlives the turn which created it.
+///
+/// Deliberately `BackgroundWork` rather than a transcript activity: it
+/// bypasses `accepts_turn_output` so a detached shell survives a settled turn.
+fn shell_work(data: &Value, events: &impl DriverEventSink, running: bool) {
+    let shell = data.get("shell").unwrap_or(&Value::Null);
+    let Some(id) = shell.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let command = shell
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let status = match (running, shell.get("status").and_then(Value::as_str)) {
+        (true, _) => BackgroundWorkStatus::Running,
+        (false, Some("killed")) => BackgroundWorkStatus::Stopped,
+        (false, Some("timeout")) => BackgroundWorkStatus::Failed,
+        (false, _) => BackgroundWorkStatus::Completed,
+    };
+    let (title, title_i18n) = match command.clone() {
+        Some(title) => (title, None),
+        None => {
+            let pair = localized!("activity.background_shell");
+            (pair.0, Some(pair.1))
+        }
+    };
+    let mut item = BackgroundWorkItem::new(BackgroundWorkKind::Process, id, title, status);
+    item.title_i18n = title_i18n;
+    item.background = true;
+    item.command = command;
+    item.control_id = Some(id.to_owned());
+    item.output = shell
+        .pointer("/output/output")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    item.output_truncated = shell
+        .pointer("/output/truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    item.exit_code = shell
+        .get("exit")
+        .and_then(Value::as_i64)
+        .and_then(|exit| i32::try_from(exit).ok());
+    let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+        item,
+    )));
+}
+
+fn surface_form(form: FormInfo, state: &mut StreamState, events: &impl DriverEventSink) {
+    if state.forms.contains_key(&form.id) {
+        return;
+    }
+    let questions = form_questions(&form);
+    if questions.is_empty() {
+        return;
+    }
+    state.forms.insert(form.id.clone(), form.fields);
+    let _ = events.send(DriverEvent::UserInputRequested {
+        request_id: form.id,
+        questions,
+    });
+}
+
+/// One `Form.Field` becomes one question, keyed by the field's own `key` so
+/// the answer round-trips instead of relying on positional order.
+fn form_questions(form: &FormInfo) -> Vec<UserInputQuestion> {
+    form.fields
+        .iter()
+        .filter_map(|field| {
+            let (key, title, options, multi_select, note) = match field {
+                FormField::String {
+                    key,
+                    title,
+                    options,
+                    ..
+                } => (key, title.clone(), options.clone(), false, None),
+                FormField::Number { key, title, .. }
+                | FormField::Integer { key, title, .. }
+                | FormField::Boolean { key, title, .. } => (key, title.clone(), None, false, None),
+                FormField::Multiselect {
+                    key,
+                    title,
+                    options,
+                    ..
+                } => (key, title.clone(), Some(options.clone()), true, None),
+                // Read-only in the first cut: the URL is the whole content.
+                FormField::External {
+                    key, title, url, ..
+                } => (key, title.clone(), None, false, Some(url.clone())),
+                FormField::Unknown => return None,
+            };
+            let header = title
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| key.clone());
+            let question = note.unwrap_or_else(|| {
+                let title = form.title.trim();
+                if title.is_empty() {
+                    header.clone()
+                } else {
+                    title.to_owned()
+                }
+            });
             Some(UserInputQuestion {
-                id,
-                header: header.to_owned(),
-                question: text.to_owned(),
-                options,
-                multi_select: question
-                    .get("multiple")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                id: key.clone(),
+                header,
+                question,
+                options: options
+                    .into_iter()
+                    .flatten()
+                    .map(|option| UserInputOption {
+                        label: option.label,
+                        description: option.description,
+                    })
+                    .collect(),
+                multi_select,
             })
         })
-        .collect::<Vec<_>>();
-    if !questions.is_empty() {
-        let _ = events.send(DriverEvent::UserInputRequested {
-            request_id: request_id.to_owned(),
-            questions,
-        });
+        .collect()
+}
+
+fn form_answer(fields: &[FormField], answers: &[UserInputAnswer]) -> FormAnswer {
+    let mut answer = FormAnswer::new();
+    for field in fields {
+        let Some(key) = field_key(field) else {
+            continue;
+        };
+        let Some(given) = answers
+            .iter()
+            .find(|answer| answer.question_id == key)
+            .map(|answer| answer.answers.as_slice())
+        else {
+            continue;
+        };
+        // The card carries option LABELS; the server wants option values.
+        let resolve = |value: &String| -> String {
+            field_options(field)
+                .iter()
+                .find(|option| &option.label == value)
+                .map(|option| option.value.clone())
+                .unwrap_or_else(|| value.clone())
+        };
+        let value = match field {
+            FormField::Multiselect { .. } => {
+                FormValue::List(given.iter().map(resolve).collect::<Vec<_>>())
+            }
+            FormField::Boolean { .. } => FormValue::Bool(matches!(
+                given.first().map(String::as_str),
+                Some("true" | "yes" | "1")
+            )),
+            FormField::Number { .. } | FormField::Integer { .. } => given
+                .first()
+                .and_then(|value| value.parse::<f64>().ok())
+                .map(FormValue::Number)
+                .unwrap_or_else(|| FormValue::Text(given.first().cloned().unwrap_or_default())),
+            _ => FormValue::Text(given.first().map(resolve).unwrap_or_default()),
+        };
+        answer.insert(key.to_owned(), value);
+    }
+    answer
+}
+
+fn field_key(field: &FormField) -> Option<&str> {
+    match field {
+        FormField::String { key, .. }
+        | FormField::Number { key, .. }
+        | FormField::Integer { key, .. }
+        | FormField::Boolean { key, .. }
+        | FormField::Multiselect { key, .. }
+        | FormField::External { key, .. } => Some(key),
+        FormField::Unknown => None,
+    }
+}
+
+fn field_options(field: &FormField) -> &[opencode_api::FormOption] {
+    match field {
+        FormField::String { options, .. } => options.as_deref().unwrap_or_default(),
+        FormField::Multiselect { options, .. } => options,
+        _ => &[],
     }
 }
 
 fn request_permission(
-    properties: &Value,
+    data: &Value,
+    state: &mut StreamState,
     events: &impl DriverEventSink,
-    commands: &Sender<CommandMessage>,
-    auto_approve: bool,
-    permissions: &Mutex<OpenCodePermissionState>,
+    commands: &Sender<DriverCommand>,
 ) {
-    // The request is either the properties themselves or nested under a key,
-    // and it is identified by its `per`-prefixed ID.
-    let request = ["permission", "request", "info"]
-        .iter()
-        .find_map(|key| properties.get(*key))
-        .filter(|value| value.get("id").is_some())
-        .unwrap_or(properties);
-    let Some(request_id) = request.get("id").and_then(Value::as_str) else {
+    // `permission.asked` puts the id at `data.id`, and that is the id the
+    // reply path takes. `data.source` links the card to the exact tool row,
+    // which the driver event has no field for yet.
+    let Some(request_id) = data.get("id").and_then(Value::as_str) else {
         return;
     };
-    let permission_request = OpenCodePermissionRequest {
-        permission: request
-            .get("permission")
+    let strings = |name: &str| {
+        data.get(name)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let request = OpenCodePermissionRequest {
+        permission: data
+            .get("action")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned(),
-        patterns: request
-            .get("patterns")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
-        always: request
-            .get("always")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
+        patterns: strings("resources"),
+        always: strings("save"),
     };
 
-    // OpenCode's `always` response updates a process-wide approval cache. A
-    // pooled Full Access task must never suppress prompts in a Supervised task,
-    // so Goddard sends only one-shot provider replies and retains durable choices
-    // in this driver's session-local state.
-    let mut permission_state = permissions.lock();
-    if permission_state.pending.contains_key(request_id)
-        || permission_state.responding.contains(request_id)
+    if state.permissions.pending.contains_key(request_id)
+        || state.permissions.responding.contains(request_id)
     {
         return;
     }
-    if auto_approve || permission_state.is_approved(&permission_request) {
-        permission_state.responding.insert(request_id.to_owned());
-        drop(permission_state);
-        let _ = commands.send(CommandMessage::Respond {
+    if auto_replies(state.mode, &request.permission) || state.permissions.is_approved(&request) {
+        state.permissions.responding.insert(request_id.to_owned());
+        // Posted back through the worker's own channel rather than inline so
+        // one slow reply cannot stall the decoding of the frames behind it.
+        let _ = commands.send(DriverCommand::Respond {
             request_id: request_id.to_owned(),
             option_id: "once".into(),
         });
         return;
     }
 
-    let permission = if permission_request.permission.is_empty() {
+    let action = if request.permission.is_empty() {
         tr!("permission.run_a_tool_lower")
     } else {
-        permission_request.permission.clone()
+        request.permission.clone()
     };
-    let patterns = (!permission_request.patterns.is_empty())
-        .then(|| permission_request.patterns.join(", "))
-        .filter(|patterns| !patterns.is_empty());
-    let (title, title_i18n) = match &patterns {
-        Some(patterns) => (patterns.clone(), None),
+    let resources = (!request.patterns.is_empty()).then(|| request.patterns.join(", "));
+    let (title, title_i18n) = match &resources {
+        Some(resources) => (resources.clone(), None),
         None => {
             let pair = localized!(
                 "permission.allow_named_permission",
-                permission = permission.as_str()
+                permission = action.as_str()
             );
             (pair.0, Some(pair.1))
         }
     };
-    let (detail, detail_i18n) = match &patterns {
-        Some(_) => localized!(
-            "permission.agent_asks_for_named_permission",
-            permission = permission.as_str()
-        ),
-        None => localized!("permission.agent_asks_for_permission"),
+    let (detail, detail_i18n) = match data
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .map(str::to_owned)
+    {
+        Some(message) => (message, None),
+        None => {
+            let pair = match &resources {
+                Some(_) => localized!(
+                    "permission.agent_asks_for_named_permission",
+                    permission = action.as_str()
+                ),
+                None => localized!("permission.agent_asks_for_permission"),
+            };
+            (pair.0, Some(pair.1))
+        }
     };
     let event = DriverEvent::Permission {
         request_id: request_id.to_owned(),
         title,
         title_i18n,
         detail,
-        detail_i18n: Some(detail_i18n),
+        detail_i18n,
         options: vec![
             PermissionOption::keyed("once", localized!("permission.allow_once"), true),
             PermissionOption::keyed("always", localized!("permission.always_allow"), true),
@@ -1423,22 +2786,24 @@ fn request_permission(
         ],
     };
 
-    if let Some(eval) = permission_state.eval.clone() {
+    if state.mode == RuntimeMode::Auto
+        && let Some(eval) = state.permissions.eval.clone()
+    {
         // Park the request like a user prompt — an escalation reuses the
         // same pending entry — then let the review answer: `clear` replies
         // "once" through the existing respond path, anything else escalates.
-        permission_state
+        state
+            .permissions
             .pending
-            .insert(request_id.to_owned(), permission_request.clone());
-        permission_state.responding.insert(request_id.to_owned());
-        drop(permission_state);
+            .insert(request_id.to_owned(), request.clone());
+        state.permissions.responding.insert(request_id.to_owned());
         let action = crate::permission_review::PendingAction {
             provider: "opencode",
-            tool: permission_request.permission.clone(),
-            arguments: request.to_string(),
+            tool: request.permission.clone(),
+            arguments: data.to_string(),
             call_id: request_id.to_owned(),
-            detail: request
-                .get("title")
+            detail: data
+                .get("message")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         };
@@ -1446,1231 +2811,1649 @@ fn request_permission(
         let request_id = request_id.to_owned();
         crate::permission_review::review_on_thread(eval, action, move |verdict| {
             let message = match verdict {
-                crate::permission_review::ReviewVerdict::Allow => CommandMessage::Respond {
+                crate::permission_review::ReviewVerdict::Allow => DriverCommand::Respond {
                     request_id,
                     option_id: "once".into(),
                 },
-                crate::permission_review::ReviewVerdict::Escalate => CommandMessage::Emit(event),
+                crate::permission_review::ReviewVerdict::Escalate => DriverCommand::Emit(event),
             };
             let _ = commands.send(message);
         });
         return;
     }
 
-    permission_state
+    state
+        .permissions
         .pending
-        .insert(request_id.to_owned(), permission_request.clone());
-    drop(permission_state);
-
+        .insert(request_id.to_owned(), request);
     let _ = events.send(event);
-}
-
-fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCodeStreamState) {
-    let wire_title = part
-        .get("tool")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .unwrap_or_else(|| tr!("activity.tool"));
-    let id = part
-        .get("callID")
-        .or_else(|| part.get("id"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let arguments = part.pointer("/state/input");
-    let complete = matches!(
-        part.pointer("/state/status").and_then(Value::as_str),
-        Some("completed" | "error")
-    );
-    let stored = id.as_ref().and_then(|id| {
-        if complete {
-            state.tools.remove(id)
-        } else {
-            state.tools.get(id).cloned()
-        }
-    });
-    let kind = stored
-        .as_ref()
-        .map(|(kind, _)| *kind)
-        .unwrap_or_else(|| super::support::classify_tool(&wire_title));
-    let title = activity::input_title(arguments)
-        .or_else(|| stored.map(|(_, title)| title))
-        .unwrap_or(wire_title);
-    if !complete && let Some(id) = id.as_ref() {
-        state.tools.insert(id.clone(), (kind, title.clone()));
-    }
-    let failed = part.pointer("/state/status").and_then(Value::as_str) == Some("error")
-        || part
-            .pointer("/state/error")
-            .is_some_and(|error| !error.is_null());
-    let output = part
-        .pointer("/state/error")
-        .filter(|value| !value.is_null())
-        .or_else(|| {
-            part.pointer("/state/output")
-                .filter(|value| !value.is_null())
-        });
-    let item = activity::tool_activity(
-        id,
-        kind,
-        title,
-        arguments,
-        output,
-        part.get("state"),
-        failed,
-        complete,
-    )
-    .with_tool_name(part.get("tool").and_then(Value::as_str));
-    let _ = events.send(DriverEvent::RichActivity(item));
-
-    // A `task` call is also a unit of delegated work: upsert it so the run
-    // renders on the tasks surface, its agent name carried on `role` — the
-    // `waku-` prefix is what attributes a run to a Goddard-injected agent.
-    if part.get("tool").and_then(Value::as_str) == Some("task")
-        && let Some(call_id) = part.get("callID").and_then(Value::as_str)
-    {
-        let input = part.pointer("/state/input");
-        let status = match part.pointer("/state/status").and_then(Value::as_str) {
-            Some("completed") => BackgroundWorkStatus::Completed,
-            Some("error") => BackgroundWorkStatus::Failed,
-            _ => BackgroundWorkStatus::Running,
-        };
-        let (title, title_i18n) = match input
-            .and_then(|input| input.get("description"))
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-        {
-            Some(title) => (title, None),
-            None => {
-                let pair = localized!("background.subagent");
-                (pair.0, Some(pair.1))
-            }
-        };
-        let mut work =
-            BackgroundWorkItem::new(BackgroundWorkKind::Subagent, call_id, title, status);
-        work.title_i18n = title_i18n;
-        work.role = input
-            .and_then(|input| {
-                input
-                    .get("subagent_type")
-                    .or_else(|| input.get("subagentType"))
-                    .or_else(|| input.get("agent"))
-            })
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        work.model = input
-            .and_then(|input| input.get("model"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        work.origin_activity_id = Some(call_id.to_owned());
-        let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
-            work,
-        )));
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn native_commands_preserve_provider_arguments_and_model_options() {
-        let commands = ["init".to_owned(), "review".to_owned()]
-            .into_iter()
-            .collect();
-        assert_eq!(
-            native_command_body(
-                "/review main\nfocus on tests",
-                &commands,
-                Some("openai/gpt-5"),
-                Some("high"),
-                "build"
-            ),
-            Some(json!({
-                "command": "review", "arguments": "main\nfocus on tests", "model": "openai/gpt-5", "variant": "high", "agent": "build"
-            }))
-        );
-        assert_eq!(
-            native_command_body("/init", &commands, None, Some(" "), "build"),
-            Some(json!({
-                "command": "init", "arguments": "", "variant": "default", "agent": "build"
-            }))
-        );
-        for text in [
-            "ordinary prompt",
-            "/unknown args",
-            "/reviewer",
-            "Discuss /review",
-        ] {
-            assert!(native_command_body(text, &commands, None, None, "build").is_none());
+    use crossbeam_channel::Receiver;
+    use uuid::Uuid;
+
+    struct Harness {
+        events: Sender<DriverEvent>,
+        seen: Receiver<DriverEvent>,
+        commands: Sender<DriverCommand>,
+        issued: Receiver<DriverCommand>,
+        windows: HashMap<String, u64>,
+        state: StreamState,
+    }
+
+    impl Harness {
+        fn new(mode: RuntimeMode) -> Self {
+            let (events, seen) = unbounded();
+            let (commands, issued) = unbounded();
+            Self {
+                events,
+                seen,
+                commands,
+                issued,
+                windows: HashMap::new(),
+                state: StreamState::new("ses_1".into(), mode, None, 0),
+            }
+        }
+
+        fn feed(&mut self, event: Value) {
+            handle_event(
+                &event,
+                &mut self.state,
+                &self.events,
+                &self.commands,
+                &self.windows,
+            );
+        }
+
+        fn drain(&self) -> Vec<DriverEvent> {
+            self.seen.try_iter().collect()
         }
     }
 
-    #[test]
-    fn native_command_http_wait_keeps_control_delivery_unblocked() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let (received, requests) = unbounded();
-        let (finish, finish_rx) = unbounded();
+    /// Answers each request with the next canned response, in order, and
+    /// reports how many it served. A request that never comes ends the server
+    /// after a few seconds rather than hanging the test.
+    fn canned_service(responses: Vec<(u16, Value)>) -> (Endpoint, thread::JoinHandle<usize>) {
+        use std::io::{BufRead as _, Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = Endpoint::local(listener.local_addr().unwrap().port());
         let server = thread::spawn(move || {
-            let (mut socket, _) = listener.accept().unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_secs(5)))
+            let mut served = 0;
+            for (status, body) in responses {
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let mut socket = loop {
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(_) if std::time::Instant::now() < deadline => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(_) => return served,
+                    }
+                };
+                socket.set_nonblocking(false).unwrap();
+                let mut input = std::io::BufReader::new(&mut socket);
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    input.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((key, value)) = line.split_once(':')
+                        && key.eq_ignore_ascii_case("content-length")
+                    {
+                        length = value.trim().parse().unwrap();
+                    }
+                }
+                input.read_exact(&mut vec![0; length]).unwrap();
+                let body = body.to_string();
+                write!(
+                    socket,
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                )
                 .unwrap();
-            let mut reader = BufReader::new(socket.try_clone().unwrap());
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            let route = line.trim().to_owned();
-            let mut length = 0;
-            loop {
-                line.clear();
-                reader.read_line(&mut line).unwrap();
-                if line == "\r\n" {
-                    break;
-                }
-                if let Some(value) = line.strip_prefix("Content-Length: ") {
-                    length = value.trim().parse::<usize>().unwrap();
-                }
+                served += 1;
             }
-            let mut body = vec![0; length];
-            reader.read_exact(&mut body).unwrap();
-            received
-                .send((route, serde_json::from_slice::<Value>(&body).unwrap()))
-                .unwrap();
-            finish_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-            socket
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
-                .unwrap();
+            served
         });
-        let (commands, command_rx) = unbounded();
-        let body = json!({"command": "review", "arguments": "main"});
-        start_native_command(port, "ses_test", body.clone(), commands.clone(), 7, None).unwrap();
-        let (route, sent) = requests.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(route, "POST /session/ses_test/command HTTP/1.1");
-        assert_eq!(sent, body);
-        commands.send(CommandMessage::Cancel).unwrap();
-        assert!(matches!(
-            command_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            CommandMessage::Cancel
-        ));
-        finish.send(()).unwrap();
-        assert!(matches!(
-            command_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            CommandMessage::NativeCommandFinished {
-                generation: 7,
-                steer: None,
-                result: Ok(())
-            }
-        ));
-        server.join().unwrap();
+        (endpoint, server)
     }
 
-    fn harness() -> (
-        Sender<DriverEvent>,
-        crossbeam_channel::Receiver<DriverEvent>,
-        Sender<CommandMessage>,
-        crossbeam_channel::Receiver<CommandMessage>,
-        Mutex<bool>,
-        OpenCodeStreamState,
-    ) {
-        let (events, event_rx) = unbounded();
-        let (commands, command_rx) = unbounded();
-        (
-            events,
-            event_rx,
-            commands,
-            command_rx,
-            Mutex::new(true),
-            OpenCodeStreamState::default(),
-        )
+    fn session_info(id: &str) -> Value {
+        json!({"data": {
+            "id": id,
+            "projectID": "prj",
+            "cost": 0,
+            "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+            "time": {"created": 1.0, "updated": 1.0},
+            "location": {"directory": "/work"},
+        }})
     }
 
+    /// A session the OpenCode 1 import has not reached yet reads as missing.
+    /// The resume waits for it instead of starting an empty session under
+    /// the same id.
     #[test]
-    fn prompts_select_the_agent_and_model_for_the_turn() {
-        assert_eq!(
-            prompt_body(
-                "Inspect the failure",
-                Some("opencode-go/deepseek-v4-flash"),
-                None,
-                "build",
+    fn a_resume_waits_for_the_opencode_one_import_to_reach_its_session() {
+        let missing = json!({"_tag": "SessionNotFoundError", "message": "Session not found"});
+        let (endpoint, server) = canned_service(vec![
+            (
+                200,
+                json!({"status": "running", "progress": {"label": "Migrating sessions"}}),
             ),
-            json!({
-                "agent": "build",
-                "model": {
-                    "providerID": "opencode-go",
-                    "modelID": "deepseek-v4-flash",
+            (404, missing),
+            (
+                200,
+                json!({"status": "running", "progress": {"label": "Migrating sessions"}}),
+            ),
+            (200, session_info("ses_v1")),
+        ]);
+        let session = resumed_session(&endpoint, "ses_v1").unwrap();
+        assert_eq!(session.map(|session| session.id).as_deref(), Some("ses_v1"));
+        assert_eq!(server.join().unwrap(), 4);
+    }
+
+    /// Once nothing is importing, a missing session is gone for good.
+    #[test]
+    fn a_resume_without_an_import_gives_up_on_a_missing_session_at_once() {
+        let missing = json!({"_tag": "SessionNotFoundError", "message": "Session not found"});
+        let (endpoint, server) =
+            canned_service(vec![(200, json!({"status": "completed"})), (404, missing)]);
+        assert!(resumed_session(&endpoint, "ses_gone").unwrap().is_none());
+        assert_eq!(server.join().unwrap(), 2);
+    }
+
+    /// A turn that settles while the stream is down ends with its `idle`
+    /// marker, and the final step's missing tail must still be repaired.
+    #[test]
+    fn a_reconnect_repairs_the_final_step_behind_its_idle_marker() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        for event in [
+            json!({"type": "session.execution.started", "data": {"sessionID": "ses_1"}}),
+            step_started("msg_1"),
+            json!({"type": "session.text.started", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 0}}),
+            json!({"type": "session.text.delta", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 0, "delta": "Hello"}}),
+        ] {
+            harness.feed(event);
+        }
+        harness.drain();
+        let (endpoint, server) = canned_service(vec![(
+            200,
+            json!({"data": [
+                {"id": "msg_idle", "type": "idle", "time": {"created": 3.0}, "outcome": "succeeded"},
+                {
+                    "id": "msg_1", "type": "assistant",
+                    "time": {"created": 1.0, "streamed": 2.0, "completed": 2.0},
+                    "agent": "build",
+                    "model": {"id": "claude-sonnet-4-5", "providerID": "anthropic"},
+                    "content": [{"type": "text", "text": "Hello, world."}],
+                    "finish": "stop",
                 },
-                "variant": "default",
-                "parts": [{"type": "text", "text": "Inspect the failure"}],
-            })
+            ]}),
+        )]);
+
+        gap_fill(&endpoint, "ses_1", &harness.events, &mut harness.state);
+
+        assert_eq!(server.join().unwrap(), 1);
+        let seen = harness.drain();
+        assert!(
+            matches!(seen.as_slice(), [DriverEvent::TextDelta(text)] if text == ", world."),
+            "{seen:?}"
         );
     }
 
-    /// Reasoning effort is OpenCode's per-model `variant`, and it sits beside
-    /// `model` rather than inside it. The driver used to discard the chosen
-    /// effort entirely, so every turn ran at the model's default.
-    #[test]
-    fn prompts_carry_the_selected_reasoning_effort_as_a_variant() {
-        let body = prompt_body(
-            "Inspect the failure",
-            Some("opencode-go/deepseek-v4-flash"),
-            Some("max"),
-            "build",
-        );
-        assert_eq!(body["variant"], json!("max"));
-        assert_eq!(body["model"]["modelID"], json!("deepseek-v4-flash"));
-    }
-
-    /// `default` is OpenCode's explicit base-model selection: an unset effort
-    /// still sends it, both so the server never falls back to an
-    /// agent-configured variant and so the picker can reset a session that
-    /// previously chose one. The server resolves it without consulting the
-    /// model's variants map, so a variant-less model accepts it too.
-    #[test]
-    fn prompts_default_an_absent_variant_to_the_base_model() {
-        for variant in [None, Some(""), Some("   ")] {
-            let body = prompt_body("hi", Some("opencode/big-pickle"), variant, "build");
-            assert_eq!(body["variant"], json!("default"), "{body}");
-        }
-    }
-
-    #[test]
-    fn subagent_config_requires_a_private_opencode_server() {
-        assert!(requires_dedicated_server(false, false, false, true));
-        assert!(requires_dedicated_server(false, false, true, false));
-        assert!(!requires_dedicated_server(false, false, false, false));
-    }
-
-    /// A minimal `opencode serve` stand-in: answers every route the driver
-    /// touches and appends each request as one JSON line to requests.jsonl
-    /// beside itself, so the test can read what the worker actually posted.
-    const FAKE_OPENCODE_SERVER: &str = r#"
-import json
-import sys
-import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-
-LOG = Path(__file__).with_name("requests.jsonl")
-
-
-class Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
-
-    def log_message(self, *args):
-        pass
-
-    def record(self, body):
-        with LOG.open("a") as log:
-            entry = {"method": self.command, "path": self.path, "body": body}
-            log.write(json.dumps(entry) + "\n")
-
-    def reply(self, payload):
-        data = json.dumps(payload).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def request_body(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if not length:
-            return None
-        try:
-            return json.loads(self.rfile.read(length))
-        except ValueError:
-            return None
-
-    def do_GET(self):
-        self.record(None)
-        if self.path.startswith("/event"):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.end_headers()
-            self.wfile.flush()
-            try:
-                while True:
-                    time.sleep(3600)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            return
-        if self.path.startswith("/global/health"):
-            self.reply({"healthy": True})
-            return
-        if self.path.startswith("/api/model"):
-            self.reply({"data": [{"id": "m", "providerID": "p"}]})
-            return
-        self.reply([])
-
-    def do_POST(self):
-        self.record(self.request_body())
-        self.reply({"id": "ses_fake"} if self.path == "/session" else {})
-
-    def do_PATCH(self):
-        self.record(self.request_body())
-        self.reply({})
-
-
-server = ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler)
-server.daemon_threads = True
-server.serve_forever()
-"#;
-
-    /// `apply_options` must retune the model and variant the resident worker
-    /// posts on the next turn — the transport carries them per prompt, so a
-    /// restart would only cost the session. A fake `opencode serve` records
-    /// every request body, so the assertions read the wire, not the plumbing.
-    #[cfg(unix)]
-    #[test]
-    fn apply_options_retunes_the_live_session_without_a_restart() {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        let python = crate::command_env::find_executable("python3")
-            .expect("python3 is required for the controlled OpenCode HTTP server");
-        let root = std::env::temp_dir().join(format!(
-            "waku-fake-opencode-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let log = root.join("requests.jsonl");
-        let server_py = root.join("fake_serve.py");
-        std::fs::write(&server_py, FAKE_OPENCODE_SERVER).unwrap();
-        let binary = root.join("opencode");
-        std::fs::write(
-            &binary,
-            format!(
-                "#!/bin/sh\nport=\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--port\" ]; then port=\"$2\"; break; fi\n  shift\ndone\nexec \"{}\" \"{}\" \"$port\"\n",
-                python.display(),
-                server_py.display(),
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let prompt_bodies = |count: usize| -> Vec<Value> {
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            loop {
-                let bodies: Vec<Value> = std::fs::read_to_string(&log)
-                    .unwrap_or_default()
-                    .lines()
-                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                    .filter(|entry| {
-                        entry["path"]
-                            .as_str()
-                            .is_some_and(|path| path.ends_with("/prompt_async"))
-                    })
-                    .filter_map(|entry| entry.get("body").cloned())
-                    .collect();
-                if bodies.len() >= count || std::time::Instant::now() >= deadline {
-                    return bodies;
-                }
-                thread::sleep(Duration::from_millis(25));
+    fn step_started(message_id: &str) -> Value {
+        json!({
+            "type": "session.step.started",
+            "data": {
+                "sessionID": "ses_1",
+                "assistantMessageID": message_id,
+                "agent": "build",
+                "model": {"id": "claude-sonnet-4-5", "providerID": "anthropic"}
             }
-        };
+        })
+    }
 
-        let (events, _event_rx) = crate::driver::test_event_channel();
-        let driver = OpenCodeDriver::start(
-            DriverStartOptions {
-                binary,
-                cwd: root.clone(),
-                mode: RuntimeMode::Auto,
-                model: Some("openai/gpt-5".into()),
-                reasoning_effort: Some("high".into()),
-                service_tier: None,
-                context_window: None,
-                agent_preset: None,
-                computer_use_enabled: false,
-                agent: None,
-                read_own_transcript: false,
-                subagents: None,
-                computer_use_runtime: None,
-                mcp_servers: Vec::new(),
-                http_mcp_capability_recorder: None,
-                provider_cursor: None,
-                eval: None,
-                sandbox: None,
-                allow_model_fallback: false,
-                distillation: false,
-                ephemeral: false,
-            },
-            events,
-        )
-        .expect("the driver should start against the fake server");
-
-        driver.prompt("first turn".to_owned());
-        let bodies = prompt_bodies(1);
-        assert_eq!(bodies.len(), 1, "the first prompt should be posted");
-        assert_eq!(bodies[0]["model"]["providerID"], json!("openai"));
-        assert_eq!(bodies[0]["model"]["modelID"], json!("gpt-5"));
-        assert_eq!(bodies[0]["variant"], json!("high"));
-
-        // A same-mode change is absorbed by the live worker; the next prompt
-        // posts the new model and the explicit base variant.
-        assert!(driver.apply_options(SessionOptions {
-            mode: RuntimeMode::Auto,
-            model: Some("anthropic/claude-sonnet-4-5".into()),
-            reasoning_effort: None,
-            service_tier: None,
-            context_window: None,
+    /// A `subagent` tool call doubles as delegated work: the transcript keeps
+    /// its activity row and the tasks surface gets a subagent item keyed on
+    /// the same call id, with the agent name on `role` once the input lands.
+    #[test]
+    fn subagent_calls_emit_background_work() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(step_started("msg_1"));
+        harness.feed(json!({
+            "type": "session.tool.input.started",
+            "data": {"assistantMessageID": "msg_1", "id": "call_s1", "name": "subagent"}
         }));
-        driver.prompt("second turn".to_owned());
-        let bodies = prompt_bodies(2);
-        assert_eq!(bodies.len(), 2, "the second prompt should be posted");
-        assert_eq!(bodies[1]["model"]["providerID"], json!("anthropic"));
-        assert_eq!(bodies[1]["model"]["modelID"], json!("claude-sonnet-4-5"));
-        assert_eq!(bodies[1]["variant"], json!("default"));
-
-        // Access is installed at driver start, so a mode change still
-        // cannot be absorbed in place.
-        assert!(!driver.apply_options(SessionOptions {
-            mode: RuntimeMode::Ask,
-            model: None,
-            reasoning_effort: None,
-            service_tier: None,
-            context_window: None,
+        harness.feed(json!({
+            "type": "session.tool.called",
+            "data": {"assistantMessageID": "msg_1", "id": "call_s1",
+                     "input": {"agent": "explore", "prompt": "Find auth flow"}}
+        }));
+        harness.feed(json!({
+            "type": "session.tool.success",
+            "data": {"assistantMessageID": "msg_1", "id": "call_s1",
+                     "content": [{"type": "text", "text": "auth lives in auth.rs"}]}
         }));
 
-        drop(driver);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn access_modes_install_session_local_opencode_permissions() {
-        let rule = |permission: &str, action: &str| {
-            json!({
-                "permission": permission,
-                "pattern": "*",
-                "action": action,
-            })
-        };
-
-        assert_eq!(
-            opencode_permission_rules(RuntimeMode::Ask),
-            json!([rule("bash", "ask"), rule("edit", "ask")])
-        );
-        // Auto asks like Ask — the evaluation review (or the user, when no
-        // backend is configured) answers what the server sends up.
-        assert_eq!(
-            opencode_permission_rules(RuntimeMode::Auto),
-            json!([rule("bash", "ask"), rule("edit", "ask")])
-        );
-        assert_eq!(
-            opencode_permission_rules(RuntimeMode::AutoAcceptEdits),
-            json!([rule("bash", "ask"), rule("edit", "allow")])
-        );
-        assert_eq!(
-            opencode_permission_rules(RuntimeMode::FullAccess),
-            json!([rule("*", "allow")])
-        );
-    }
-
-    #[test]
-    fn question_events_preserve_multiple_selection_and_option_copy() {
-        let (events, event_rx) = unbounded();
-        request_user_input(
-            &json!({
-                "id": "question-request",
-                "sessionID": "session-1",
-                "questions": [{
-                    "header": "Files",
-                    "question": "Which files should change?",
-                    "multiple": true,
-                    "options": [{
-                        "label": "Source",
-                        "description": "Update implementation files"
-                    }]
-                }]
-            }),
-            &events,
-        );
-
-        let DriverEvent::UserInputRequested {
-            request_id,
-            questions,
-        } = event_rx.try_recv().unwrap()
-        else {
-            panic!("OpenCode question.asked must use the structured question event");
-        };
-        assert_eq!(request_id, "question-request");
-        assert_eq!(questions[0].id, "question-0-files");
-        assert!(questions[0].multi_select);
-        assert_eq!(questions[0].options[0].label, "Source");
-    }
-
-    /// Drives a real `opencode serve` through the actual driver. Ignored by
-    /// default: needs the CLI installed, credentials, and the network. Run with
-    /// `cargo test --bin waku opencode_session_against_a_real_server -- --ignored`.
-    #[test]
-    #[ignore = "requires an installed, authenticated opencode"]
-    fn opencode_session_against_a_real_server() {
-        let binary =
-            crate::command_env::find_executable("opencode").expect("opencode is not installed");
-        let (events, event_rx) = crate::driver::test_event_channel();
-        let driver = OpenCodeDriver::start(
-            DriverStartOptions {
-                binary,
-                cwd: std::env::temp_dir(),
-                mode: RuntimeMode::FullAccess,
-                model: None,
-                reasoning_effort: None,
-                service_tier: None,
-                context_window: None,
-                agent_preset: None,
-                computer_use_enabled: false,
-                agent: None,
-                read_own_transcript: false,
-                subagents: None,
-                computer_use_runtime: None,
-                mcp_servers: Vec::new(),
-                http_mcp_capability_recorder: None,
-                provider_cursor: None,
-                eval: None,
-                sandbox: None,
-                allow_model_fallback: false,
-                distillation: false,
-                ephemeral: false,
-            },
-            events,
-        )
-        .expect("the server should start and open a session");
-
-        let connected = event_rx
-            .recv_timeout(std::time::Duration::from_secs(90))
-            .expect("the server should report its session");
-        let source_session_id = match connected {
-            DriverEvent::Connected {
-                provider_cursor: Some(ProviderResumeCursor::OpenCode { session_id }),
-            } => session_id,
-            event => panic!("expected an OpenCode cursor, got {event:?}"),
-        };
-
-        driver.prompt("Reply with exactly: OK. Do not use any tools.".into());
-        let mut text = String::new();
-        let mut finished = None;
-        let mut context_tokens = None;
-        let mut context_window = None;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
-        while std::time::Instant::now() < deadline {
-            let Ok(event) = event_rx.recv_timeout(std::time::Duration::from_secs(5)) else {
-                continue;
-            };
-            match event {
-                DriverEvent::TextDelta(delta) => text.push_str(&delta),
-                DriverEvent::UsageUpdated {
-                    context_tokens: tokens,
-                    context_window: window,
-                } => {
-                    context_tokens = tokens.or(context_tokens);
-                    context_window = window.or(context_window);
-                }
-                DriverEvent::TurnFinished { success, .. } => {
-                    finished = Some(success);
-                }
-                DriverEvent::Error(error) => panic!("the server reported: {error}"),
-                _ => {}
-            }
-            if finished.is_some()
-                && context_tokens.is_some_and(|tokens| tokens > 0)
-                && context_window.is_some_and(|window| window > 0)
-            {
-                break;
-            }
-        }
-        assert_eq!(finished, Some(true), "the turn should settle successfully");
-        assert!(
-            text.contains("OK"),
-            "expected the reply to stream through, got {text:?}"
-        );
-        assert!(context_tokens.is_some_and(|tokens| tokens > 0));
-        assert!(context_window.is_some_and(|window| window > 0));
-
-        let ProviderResumeCursor::OpenCode {
-            session_id: fork_session_id,
-        } = driver
-            .fork(1)
-            .expect("the resident server should fork away the completed turn")
-        else {
-            panic!("expected an OpenCode fork cursor");
-        };
-        assert_ne!(fork_session_id, source_session_id);
-    }
-
-    /// Proves steering through the actual driver: the message injected while
-    /// the bash tool sleeps lands inside the same turn — one SteerAccepted,
-    /// one TurnFinished, and a reply that honors both instructions. Ignored by
-    /// default: needs the CLI installed, credentials, and the network.
-    #[test]
-    #[ignore = "requires an installed, authenticated opencode"]
-    fn opencode_steering_folds_a_mid_turn_message_into_the_running_turn() {
-        let binary =
-            crate::command_env::find_executable("opencode").expect("opencode is not installed");
-        let (events, event_rx) = crate::driver::test_event_channel();
-        let driver = OpenCodeDriver::start(
-            DriverStartOptions {
-                binary,
-                cwd: std::env::temp_dir(),
-                mode: RuntimeMode::FullAccess,
-                model: None,
-                reasoning_effort: None,
-                service_tier: None,
-                context_window: None,
-                agent_preset: None,
-                computer_use_enabled: false,
-                agent: None,
-                read_own_transcript: false,
-                subagents: None,
-                computer_use_runtime: None,
-                mcp_servers: Vec::new(),
-                http_mcp_capability_recorder: None,
-                provider_cursor: None,
-                eval: None,
-                sandbox: None,
-                allow_model_fallback: false,
-                distillation: false,
-                ephemeral: false,
-            },
-            events,
-        )
-        .expect("the server should start and open a session");
-
-        driver.prompt(
-            "Use the bash tool to run exactly `sleep 6` (nothing else). \
-             After the command completes, reply with exactly: FIRST DONE"
-                .into(),
-        );
-
-        let mut text = String::new();
-        let mut steered = false;
-        let mut steer_accepted = false;
-        let mut turns_finished = 0;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
-        while std::time::Instant::now() < deadline {
-            let Ok(event) = event_rx.recv_timeout(std::time::Duration::from_secs(5)) else {
-                // Quiet after the turn settled means no second turn is coming.
-                if turns_finished == 1 {
-                    break;
-                }
-                continue;
-            };
-            match event {
-                DriverEvent::RichActivity(item) if !steered && !item.complete => {
-                    // The tool is running: the turn is unambiguously live.
-                    steered = true;
-                    driver.steer(
-                        "ADDITIONAL INSTRUCTION: end your very next reply \
-                         with the word BANANA."
-                            .into(),
-                    );
-                }
-                DriverEvent::SteerAccepted {
-                    message,
-                    sent_by_task: None,
-                    ..
-                } => {
-                    assert!(message.contains("BANANA"));
-                    steer_accepted = true;
-                }
-                DriverEvent::SteerRejected { reason, .. } => {
-                    panic!("the steer should be accepted, got rejection: {reason}");
-                }
-                DriverEvent::TextDelta(delta) => text.push_str(&delta),
-                DriverEvent::TurnFinished { success, .. } => {
-                    assert!(success, "the turn should settle successfully");
-                    turns_finished += 1;
-                }
-                DriverEvent::Error(error) => panic!("the server reported: {error}"),
-                _ => {}
-            }
-        }
-
-        assert!(steered, "the probe never saw the tool start");
-        assert!(steer_accepted, "the driver should acknowledge the steer");
-        assert_eq!(
-            turns_finished, 1,
-            "a steered message must not settle a second turn"
-        );
-        assert!(
-            text.contains("BANANA"),
-            "the steered instruction should shape the same turn's reply, got {text:?}"
-        );
-    }
-
-    #[test]
-    fn streams_text_and_correlated_tools_and_settles_on_idle() {
-        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
-        // Payloads copied from a live `opencode serve` event stream.
-        let wire = [
-            json!({"type":"message.part.delta","properties":{"sessionID":"ses_1","messageID":"msg_1","partID":"prt_1","field":"text","delta":"OK"}}),
-            json!({"type":"message.part.delta","properties":{"field":"reasoning","delta":"thinking"}}),
-            json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"read","callID":"call_1","state":{"status":"running","input":{"filePath":"a.txt"}}}}}),
-            json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"read","callID":"call_1","state":{"status":"completed","output":"contents"}}}}),
-            // Not transcript content.
-            json!({"type":"session.diff","properties":{"diff":[]}}),
-            json!({"type":"message.updated","properties":{"info":{"role":"assistant"}}}),
-            json!({"type":"session.idle","properties":{"sessionID":"ses_1"}}),
-        ];
-        for event in wire {
-            handle_event(&event, &events, &commands, &turn, true, &mut state);
-        }
-
-        let mut seen = Vec::new();
-        while let Ok(event) = event_rx.try_recv() {
-            seen.push(event);
-        }
-        assert!(matches!(&seen[0], DriverEvent::TextDelta(text) if text == "OK"));
-        assert!(matches!(&seen[1], DriverEvent::ReasoningDelta(text) if text == "thinking"));
-        assert!(matches!(&seen[2], DriverEvent::RichActivity(item)
-                if item.kind == ActivityKind::FileRead
-                    && !item.complete
-                    && item.display_target.as_deref() == Some("a.txt")));
-        assert!(matches!(&seen[3], DriverEvent::RichActivity(item)
-                if item.complete && item.title == "read"));
-        assert!(matches!(
-            &seen[4],
-            DriverEvent::TurnFinished { success: true, .. }
-        ));
-        assert_eq!(seen.len(), 5, "non-transcript events leaked");
-        assert!(!*turn.lock(), "the turn should be settled exactly once");
-    }
-
-    /// A `task` tool call doubles as delegated work: the transcript keeps its
-    /// activity row and the tasks surface gets a subagent item keyed on the
-    /// same call id, with the agent name on `role`.
-    #[test]
-    fn task_calls_emit_subagent_background_work() {
-        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
-        let wire = [
-            json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"task","callID":"call_t1","state":{"status":"running","input":{"description":"Find auth flow","subagent_type":"goddard-explore"}}}}}),
-            json!({"type":"message.part.updated","properties":{"part":{"type":"tool","tool":"task","callID":"call_t1","state":{"status":"completed","output":"auth lives in auth.rs"}}}}),
-        ];
-        for event in wire {
-            handle_event(&event, &events, &commands, &turn, true, &mut state);
-        }
-
-        let seen: Vec<DriverEvent> = event_rx.try_iter().collect();
-        let works: Vec<&BackgroundWorkItem> = seen
-            .iter()
+        let works: Vec<BackgroundWorkItem> = harness
+            .drain()
+            .into_iter()
             .filter_map(|event| match event {
                 DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => Some(item),
                 _ => None,
             })
             .collect();
-        assert_eq!(works.len(), 2);
-        assert_eq!(works[0].key.provider_id, "call_t1");
+        assert_eq!(works.len(), 3);
         assert_eq!(works[0].key.kind, BackgroundWorkKind::Subagent);
-        assert_eq!(works[0].role.as_deref(), Some("goddard-explore"));
         assert_eq!(works[0].status, BackgroundWorkStatus::Running);
-        assert_eq!(works[1].status, BackgroundWorkStatus::Completed);
-        assert_eq!(works[0].origin_activity_id.as_deref(), Some("call_t1"));
+        assert_eq!(works[1].role.as_deref(), Some("explore"));
+        assert_eq!(works[2].status, BackgroundWorkStatus::Completed);
+        assert_eq!(works[2].origin_activity_id.as_deref(), Some("call_s1"));
     }
 
-    /// The exact `session.error` payload a live opencode 1.18 server emits when
-    /// the account is out of credit. Every error is `{name, data:{message}}`,
-    /// so reading `/error/message` reported "OpenCode reported an error" and
-    /// threw the actionable billing URL away.
+    /// The regression that shipped: the service emits NO `session.idle`, so
+    /// a driver that settles only there leaves every finished turn stuck on
+    /// "Working" forever. Captured live, the terminal frame is
+    /// `session.execution.*` and nothing follows it.
     #[test]
-    fn session_errors_surface_the_provider_message_not_a_generic_sentence() {
-        let properties = json!({
-            "sessionID": "ses_1",
-            "error": {
-                "name": "APIError",
-                "data": {
-                    "message": "Insufficient balance. Manage your billing here: https://opencode.ai/workspace/wrk_1/billing",
-                    "statusCode": 401,
-                    "isRetryable": false
-                }
-            }
-        });
-        assert_eq!(
-            session_error_message(&properties).0,
-            "Insufficient balance. Manage your billing here: https://opencode.ai/workspace/wrk_1/billing"
+    fn turn_settles_without_any_session_idle() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        for event in [
+            json!({"type": "session.execution.started", "data": {"sessionID": "ses_1"}}),
+            step_started("msg_1"),
+            json!({"type": "session.text.delta", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 0, "delta": "ok"}}),
+            json!({"type": "session.execution.succeeded", "data": {"sessionID": "ses_1"}}),
+        ] {
+            harness.feed(event);
+        }
+        let seen = harness.drain();
+        assert!(
+            seen.iter()
+                .any(|event| matches!(event, DriverEvent::TurnFinished { success: true, .. })),
+            "execution.succeeded must settle the turn on its own: {seen:?}"
         );
     }
 
-    /// `MessageOutputLengthError` is the one member with an empty `data`, so
-    /// its name is the only thing that says what happened.
+    /// The exact frame sequence captured from the live service for a turn that
+    /// failed on provider auth. It must settle too, or a failed turn hangs.
     #[test]
-    fn session_errors_without_a_message_fall_back_to_the_error_name() {
-        let properties = json!({
-            "sessionID": "ses_1",
-            "error": {"name": "MessageOutputLengthError", "data": {}}
-        });
-        assert_eq!(
-            session_error_message(&properties).0,
-            "MessageOutputLengthError"
-        );
+    fn live_failure_frame_sequence_settles_the_turn() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        let error =
+            json!({"type": "provider.auth", "message": "Insufficient balance.", "status": 401});
+        for event in [
+            json!({"type": "session.inbox.enqueued", "data": {"sessionID": "ses_1"}}),
+            json!({"type": "session.execution.started", "data": {"sessionID": "ses_1"}}),
+            json!({"type": "session.instructions.updated", "data": {"sessionID": "ses_1"}}),
+            json!({"type": "session.inbox.delivered", "data": {"sessionID": "ses_1"}}),
+            step_started("msg_1"),
+            json!({"type": "session.step.failed", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "error": error}}),
+            json!({"type": "session.execution.failed", "data": {"sessionID": "ses_1", "error": error}}),
+        ] {
+            harness.feed(event);
+        }
+        let seen = harness.drain();
+        let finished: Vec<_> = seen
+            .iter()
+            .filter(|event| matches!(event, DriverEvent::TurnFinished { .. }))
+            .collect();
+        assert_eq!(finished.len(), 1, "exactly one TurnFinished: {seen:?}");
+        assert!(matches!(
+            finished[0],
+            DriverEvent::TurnFinished { success: false, .. }
+        ));
     }
 
-    /// A flatter shape still works, so a future server rename cannot silently
-    /// regress this back to the generic sentence.
+    /// Walks one whole turn across every streaming family and proves the
+    /// single settle point: two `session.execution.*` outcomes and a repeated
+    /// `session.idle` still produce exactly one `TurnFinished`.
     #[test]
-    fn session_errors_accept_a_flat_message() {
-        let properties = json!({"error": {"message": "boom"}});
-        assert_eq!(session_error_message(&properties).0, "boom");
-    }
-
-    #[test]
-    fn classifies_text_deltas_by_their_native_part_type() {
-        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
-        // DeepSeek V4 Flash is stored by OpenCode as a reasoning part, but the
-        // part's content still streams through the generic `text` field.
-        let wire = [
-            json!({"type":"message.part.updated","properties":{"part":{"id":"prt_reason","type":"reasoning","text":""}}}),
-            json!({"type":"message.part.delta","properties":{"partID":"prt_reason","field":"text","delta":"thinking"}}),
-            json!({"type":"message.part.updated","properties":{"part":{"id":"prt_answer","type":"text","text":""}}}),
-            json!({"type":"message.part.delta","properties":{"partID":"prt_answer","field":"text","delta":"answer"}}),
-            json!({"type":"message.part.delta","properties":{"partID":"prt_unknown","field":"text","delta":" fallback"}}),
-            json!({"type":"session.idle","properties":{"sessionID":"ses_1"}}),
-        ];
-        for event in wire {
-            handle_event(&event, &events, &commands, &turn, true, &mut state);
+    fn streams_text_reasoning_and_tools_then_settles_exactly_once() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        for event in [
+            json!({"type": "session.execution.started", "data": {"sessionID": "ses_1"}}),
+            step_started("msg_1"),
+            json!({"type": "session.reasoning.started", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 0}}),
+            json!({"type": "session.reasoning.delta", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 0, "delta": "thinking"}}),
+            json!({"type": "session.reasoning.ended", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 0, "text": "thinking"}}),
+            json!({"type": "session.text.started", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 1}}),
+            json!({"type": "session.text.delta", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 1, "delta": "OK"}}),
+            // Emits NOTHING: re-emitting the body would double the paragraph.
+            json!({"type": "session.text.ended", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "ordinal": 1, "text": "OK"}}),
+            json!({"type": "session.tool.input.started", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "id": "call_1", "name": "read"}}),
+            json!({"type": "session.tool.called", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "id": "call_1", "input": {"filePath": "a.txt"}, "executed": true, "state": {"reasoningEncryptedContent": "SECRET"}}}),
+            json!({"type": "session.tool.success", "data": {"sessionID": "ses_1", "assistantMessageID": "msg_1", "id": "call_1", "content": [{"type": "text", "text": "contents"}], "metadata": {"resultState": {"reasoningEncryptedContent": "SECRET"}}}}),
+            json!({"type": "session.execution.succeeded", "data": {"sessionID": "ses_1"}}),
+            json!({"type": "session.idle", "data": {"sessionID": "ses_1"}}),
+            json!({"type": "session.idle", "data": {"sessionID": "ses_1"}}),
+        ] {
+            harness.feed(event);
         }
 
-        let seen = event_rx.try_iter().collect::<Vec<_>>();
-        assert!(matches!(&seen[0], DriverEvent::ReasoningDelta(text) if text == "thinking"));
-        assert!(matches!(&seen[1], DriverEvent::TextDelta(text) if text == "answer"));
-        assert!(matches!(&seen[2], DriverEvent::TextDelta(text) if text == " fallback"));
+        let seen = harness.drain();
+        assert!(matches!(&seen[0], DriverEvent::TurnStarted));
+        assert!(matches!(&seen[1], DriverEvent::ReasoningDelta(text) if text == "thinking"));
+        assert!(matches!(&seen[2], DriverEvent::TextDelta(text) if text == "OK"));
+        assert!(matches!(&seen[3], DriverEvent::RichActivity(item)
+            if item.kind == ActivityKind::FileRead && !item.complete));
+        assert!(matches!(&seen[4], DriverEvent::RichActivity(item)
+            if !item.complete && item.display_target.as_deref() == Some("a.txt")));
+        assert!(
+            matches!(&seen[5], DriverEvent::RichActivity(item) if item.complete && !item.failed)
+        );
         assert!(matches!(
-            &seen[3],
+            &seen[6],
             DriverEvent::TurnFinished { success: true, .. }
         ));
-        assert_eq!(seen.len(), 4);
+        assert_eq!(seen.len(), 7, "a second idle must not settle a second turn");
+        assert!(harness.state.tools.is_empty());
+        assert_eq!(harness.state.turn, TurnState::Idle);
+
+        let rendered = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::RichActivity(item) => Some(format!(
+                    "{}{}",
+                    item.arguments.clone().unwrap_or_default(),
+                    item.output.clone().unwrap_or_default()
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            state.reasoning_parts.is_empty(),
-            "settled turns should release their part classification state"
+            !rendered.contains("SECRET"),
+            "provider control state must never reach a transcript"
         );
     }
 
+    /// Text and reasoning share ONE ordinal namespace per assistant message,
+    /// and `ended` stores the authoritative body for reconnect repair.
     #[test]
-    fn assistant_updates_feed_opencode_context_usage() {
-        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
-        state
-            .usage_metadata
-            .model_context_windows
-            .lock()
-            .insert("opencode/deepseek-v4-flash-free".into(), 200_000);
+    fn text_and_reasoning_keep_separate_ordinals_in_one_namespace() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(step_started("msg_1"));
+        harness.feed(json!({"type": "session.reasoning.started", "data": {"assistantMessageID": "msg_1", "ordinal": 0}}));
+        harness.feed(json!({"type": "session.text.started", "data": {"assistantMessageID": "msg_1", "ordinal": 1}}));
+        harness.feed(json!({"type": "session.text.delta", "data": {"assistantMessageID": "msg_1", "ordinal": 1, "delta": "part"}}));
+        harness.feed(json!({"type": "session.text.ended", "data": {"assistantMessageID": "msg_1", "ordinal": 1, "text": "partial"}}));
 
-        handle_event(
-            &json!({
-                "type": "message.updated",
-                "properties": {
-                    "sessionID": "ses_1",
-                    "info": {
-                        "role": "assistant",
-                        "providerID": "opencode",
-                        "modelID": "deepseek-v4-flash-free",
-                        "tokens": {
-                            "total": 0,
-                            "input": 13_399,
-                            "output": 10,
-                            "reasoning": 0,
-                            "cache": {"read": 1792, "write": 0}
-                        }
-                    }
-                }
-            }),
-            &events,
-            &commands,
-            &turn,
-            true,
-            &mut state,
-        );
-
-        assert!(matches!(
-            event_rx.try_recv().unwrap(),
-            DriverEvent::UsageUpdated {
-                context_tokens: Some(15_201),
-                context_window: Some(200_000)
-            }
-        ));
-        assert!(event_rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn model_metadata_and_last_message_restore_opencode_usage() {
-        let models = json!({
-            "data": [{
-                "providerID": "opencode-go",
-                "id": "deepseek-v4-flash",
-                "limit": {"context": 1_000_000, "output": 384_000}
-            }]
-        });
-        let windows = opencode_model_context_windows(&models);
-        let messages = json!([
-            {"info": {"role": "user"}},
-            {"info": {
-                "role": "assistant",
-                "providerID": "opencode-go",
-                "modelID": "deepseek-v4-flash",
-                "tokens": {
-                    "total": 15_467,
-                    "input": 15_450,
-                    "output": 17,
-                    "reasoning": 0,
-                    "cache": {"read": 0, "write": 0}
-                }
-            }}
-        ]);
-
-        let latest = latest_opencode_usage_info(&messages).expect("latest assistant usage");
+        assert_eq!(harness.state.parts.len(), 2);
         assert_eq!(
-            opencode_context_usage(latest, &windows),
-            Some((Some(15_467), Some(1_000_000)))
+            harness.state.parts.get(&("msg_1".into(), 0)),
+            Some(&PartKind::Reasoning(String::new()))
         );
-    }
-
-    #[test]
-    fn generated_session_titles_replace_the_local_fallback() {
-        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
-
-        // OpenCode emits this placeholder before its title-generation model call.
-        handle_event(
-            &json!({
-                "type": "session.updated",
-                "properties": {
-                    "sessionID": "ses_1",
-                    "info": {"title": "New session - 2026-08-08T18:33:35.122Z"}
-                }
-            }),
-            &events,
-            &commands,
-            &turn,
-            true,
-            &mut state,
-        );
-        assert!(event_rx.try_recv().is_err());
-
-        // Exact envelope captured from a live isolated `opencode serve` stream.
-        handle_event(
-            &json!({
-                "type": "session.updated",
-                "properties": {
-                    "sessionID": "ses_1",
-                    "info": {"title": "Generated provider title"}
-                }
-            }),
-            &events,
-            &commands,
-            &turn,
-            true,
-            &mut state,
+        assert_eq!(
+            harness.state.parts.get(&("msg_1".into(), 1)),
+            Some(&PartKind::Text("partial".into()))
         );
         assert!(matches!(
-            event_rx.try_recv().unwrap(),
-            DriverEvent::AutoTitleUpdated(Some(title)) if title == "Generated provider title"
+            harness.drain().as_slice(),
+            [DriverEvent::TextDelta(text)] if text == "part"
         ));
-        assert!(event_rx.try_recv().is_err());
+    }
+
+    /// OpenCode can still emit `session.tool.progress` after
+    /// `session.tool.called`, so the slot is removed only on success or
+    /// failure. Removing it on `called` would strand every later update.
+    #[test]
+    fn tool_slots_survive_called_and_progress_and_are_removed_on_completion() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(step_started("msg_1"));
+        harness.feed(json!({"type": "session.tool.input.started", "data": {"assistantMessageID": "msg_1", "id": "call_1", "name": "bash"}}));
+        harness.feed(json!({"type": "session.tool.called", "data": {"assistantMessageID": "msg_1", "id": "call_1", "input": {"command": "sleep 5"}, "executed": false}}));
+        assert_eq!(harness.state.tools.len(), 1);
+        harness.feed(json!({"type": "session.tool.progress", "data": {"assistantMessageID": "msg_1", "id": "call_1", "metadata": {"output": "still running"}}}));
+        assert_eq!(harness.state.tools.len(), 1);
+
+        let seen = harness.drain();
+        assert!(
+            seen.iter().all(|event| matches!(
+                event,
+                DriverEvent::RichActivity(item) if !item.complete
+            )),
+            "produced-but-not-run must never render as a completed call"
+        );
+        assert_eq!(seen.len(), 3);
+
+        harness.feed(json!({"type": "session.tool.failed", "data": {"assistantMessageID": "msg_1", "id": "call_1", "error": {"type": "tool.execution", "message": "boom"}}}));
+        assert!(harness.state.tools.is_empty());
+        assert!(matches!(
+            harness.drain().as_slice(),
+            [DriverEvent::RichActivity(item)] if item.complete && item.failed
+        ));
+        assert_eq!(
+            harness.state.tool_order.get("msg_1").map(Vec::as_slice),
+            Some(["call_1".to_owned()].as_slice())
+        );
     }
 
     #[test]
-    fn pending_permissions_rehydrate_only_their_session_without_duplicate_prompts() {
-        let (events, event_rx, commands, command_rx, turn, state) = harness();
-        *turn.lock() = false;
-        let response = json!([
-            {
-                "id": "per_current",
-                "sessionID": "ses_current",
-                "permission": "bash",
-                "patterns": ["ps aux", "sort -rk3", "head -25"],
-                "metadata": {},
-                "always": ["ps *", "sort *", "head *"]
-            },
-            {
-                "id": "per_other",
-                "sessionID": "ses_other",
-                "permission": "bash",
-                "patterns": ["cargo test"],
-                "metadata": {},
-                "always": ["cargo *"]
-            }
-        ]);
+    fn computer_use_tools_keep_mcp_identity_and_image_results() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        let server = "goddard_js_repl_0123456789abcdef0123456789abcdef";
+        harness.feed(step_started("msg_cua"));
+        harness.feed(json!({"type":"session.tool.input.started","data":{
+            "assistantMessageID":"msg_cua","id":"call_cua","name":format!("{server}_js")
+        }}));
+        harness.feed(json!({"type":"session.tool.called","data":{
+            "assistantMessageID":"msg_cua","id":"call_cua","input":{"code":"await setupComputerUseRuntime({ globals: globalThis });","title":"Inspect desktop"}
+        }}));
+        harness.feed(json!({"type":"session.tool.success","data":{
+            "assistantMessageID":"msg_cua","id":"call_cua","content":[{"type":"text","text":"ready"},{"type":"file","uri":"data:image/png;base64,aGVsbG8=","mime":"image/png"}]
+        }}));
+        let events = harness.drain();
+        let item = events
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::RichActivity(item) if item.complete => Some(item),
+                _ => None,
+            })
+            .last()
+            .expect("completed computer-use tool");
+        assert_eq!(item.tool_name.as_deref(), Some("js"));
+        assert_eq!(item.mcp_server.as_deref(), Some(server));
+        assert_eq!(item.title, "Inspect desktop");
+        assert!(!item.failed);
+        assert!(!item.image_urls.is_empty());
+    }
 
-        rehydrate_pending_permissions(
-            &response,
-            "ses_current",
-            &events,
-            &commands,
-            &turn,
-            false,
-            &state.permissions,
+    /// `session.execution.*` only arms the outcome; `session.idle` disarms it.
+    #[test]
+    fn a_failed_execution_settles_once_at_idle_with_its_own_error() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.execution.started", "data": {}}));
+        harness.feed(json!({"type": "session.execution.failed", "data": {"error": {"message": "provider refused"}}}));
+        harness.feed(json!({"type": "session.execution.succeeded", "data": {}}));
+        harness.feed(json!({"type": "session.idle", "data": {}}));
+
+        let seen = harness.drain();
+        assert!(matches!(&seen[0], DriverEvent::TurnStarted));
+        assert!(matches!(&seen[1], DriverEvent::Error(error) if error == "provider refused"));
+        assert!(matches!(
+            &seen[2],
+            DriverEvent::TurnFinished {
+                success: false,
+                summary: Some(summary),
+                    summary_i18n: None,} if summary == "provider refused"
+        ));
+        assert_eq!(seen.len(), 3);
+    }
+
+    fn reconnect_rows(seen: &[DriverEvent]) -> Vec<(String, bool)> {
+        seen.iter()
+            .filter_map(|event| match event {
+                DriverEvent::RichActivity(item)
+                    if item
+                        .source_id
+                        .as_deref()
+                        .is_some_and(|id| id.starts_with("reconnect:")) =>
+                {
+                    Some((item.title.clone(), item.complete))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A service going down suspends the run rather than ending it: OpenCode
+    /// resumes it as the service boots again, with no `idle` marker in
+    /// between, so the resumed run belongs to the same turn.
+    #[test]
+    fn a_shutdown_suspends_the_turn_until_its_run_resumes() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.execution.started", "data": {}}));
+        harness
+            .feed(json!({"type": "session.execution.interrupted", "data": {"reason": "shutdown"}}));
+        let suspended = harness.drain();
+        assert!(matches!(suspended[0], DriverEvent::TurnStarted));
+        assert!(
+            !suspended
+                .iter()
+                .any(|event| matches!(event, DriverEvent::TurnFinished { .. })),
+            "{suspended:?}"
+        );
+        assert_eq!(
+            reconnect_rows(&suspended),
+            [("Waiting for the OpenCode service".to_owned(), false)]
+        );
+
+        // Seen live when the stream is already back as the run resumes.
+        harness.feed(json!({"type": "session.execution.started", "data": {}}));
+        harness.feed(json!({"type": "session.execution.succeeded", "data": {}}));
+        let resumed = harness.drain();
+        assert_eq!(
+            reconnect_rows(&resumed),
+            [("Reconnected to the OpenCode service".to_owned(), true)]
         );
         assert!(
-            *turn.lock(),
-            "a restored request proves the native turn is still active"
+            !resumed
+                .iter()
+                .any(|event| matches!(event, DriverEvent::TurnStarted)),
+            "the resumed run continues the turn: {resumed:?}"
         );
         assert!(matches!(
-            event_rx.try_recv().unwrap(),
-            DriverEvent::Permission { request_id, ..} if request_id == "per_current"
+            resumed.last(),
+            Some(DriverEvent::TurnFinished { success: true, .. })
         ));
-        assert!(event_rx.try_recv().is_err());
-        assert!(command_rx.try_recv().is_err());
 
-        // The live SSE event can already be buffered while the snapshot is
-        // read. Replaying the same request must not replace the approval card
-        // or send a second provider response.
-        rehydrate_pending_permissions(
-            &response,
-            "ses_current",
-            &events,
-            &commands,
-            &turn,
-            false,
-            &state.permissions,
-        );
-        assert!(event_rx.try_recv().is_err());
-        assert!(command_rx.try_recv().is_err());
+        let mut cancelled = Harness::new(RuntimeMode::FullAccess);
+        cancelled.feed(json!({"type": "session.execution.started", "data": {}}));
+        cancelled
+            .feed(json!({"type": "session.execution.interrupted", "data": {"reason": "user"}}));
+        assert!(matches!(
+            &cancelled.drain()[1],
+            DriverEvent::TurnFinished { success: false, summary: Some(summary),
+                    summary_i18n: None,} if summary == "user"
+        ));
     }
 
+    /// Every failed reconnect attempt reports the break again; the running
+    /// turn shows one row for all of them, and an idle task shows none.
     #[test]
-    fn auto_approval_deduplicates_snapshot_and_stream_overlap() {
-        let (events, event_rx, commands, command_rx, turn, mut state) = harness();
-        let response = json!([{
-            "id": "per_auto",
-            "sessionID": "ses_current",
-            "permission": "bash",
-            "patterns": ["cargo test"],
-            "always": ["cargo *"]
-        }]);
+    fn a_lost_connection_shows_one_waiting_row_for_a_running_turn() {
+        let mut idle = Harness::new(RuntimeMode::FullAccess);
+        connection_lost(&mut idle.state, &idle.events);
+        assert!(idle.drain().is_empty());
 
-        for _ in 0..2 {
-            rehydrate_pending_permissions(
-                &response,
-                "ses_current",
-                &events,
-                &commands,
-                &turn,
-                true,
-                &state.permissions,
-            );
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.execution.started", "data": {}}));
+        harness.state.resume_deadline = Some(Instant::now());
+        connection_lost(&mut harness.state, &harness.events);
+        connection_lost(&mut harness.state, &harness.events);
+        assert_eq!(
+            reconnect_rows(&harness.drain()),
+            [("Waiting for the OpenCode service".to_owned(), false)]
+        );
+        assert!(
+            harness.state.resume_deadline.is_none(),
+            "no resume is due while the service is gone"
+        );
+    }
+
+    /// A run that never resumes ends its turn unfinished.
+    #[test]
+    fn an_overdue_resume_ends_the_turn_unfinished() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.execution.started", "data": {}}));
+        harness.state.resume_deadline = Some(Instant::now());
+        resume_overdue(&mut harness.state, &harness.events);
+        assert!(matches!(
+            harness.drain().last(),
+            Some(DriverEvent::TurnFinished {
+                success: false,
+                summary: None,
+                ..
+            })
+        ));
+        assert!(harness.state.resume_deadline.is_none());
+        assert!(matches!(harness.state.turn, TurnState::Idle));
+    }
+
+    /// The user stopped the turn while the service was down, so the interrupt
+    /// never landed and the next boot resumes the run anyway. It is stopped
+    /// again rather than shown as a turn of its own, and quietly.
+    #[test]
+    fn a_run_stopped_during_an_outage_is_stopped_again_when_it_resumes() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.execution.started", "data": {}}));
+        harness.drain();
+        // What a failed `Cancel` leaves behind.
+        harness.state.stop_pending = true;
+        harness.state.abandon_turn();
+
+        harness.feed(json!({"type": "session.execution.started", "data": {}}));
+        assert!(harness.drain().is_empty(), "no turn for the stopped run");
+        assert!(matches!(
+            harness.issued.try_recv(),
+            Ok(DriverCommand::Cancel)
+        ));
+        harness.feed(json!({"type": "session.execution.failed", "data": {"error": {"message": "Execution was interrupted repeatedly"}}}));
+        assert!(
+            harness.drain().is_empty(),
+            "the stopped run reports nothing"
+        );
+        assert!(!harness.state.stop_pending);
+
+        // Anything after that is a run of its own again.
+        harness.feed(json!({"type": "session.execution.started", "data": {}}));
+        assert!(matches!(
+            harness.drain().as_slice(),
+            [DriverEvent::TurnStarted]
+        ));
+    }
+
+    /// What a stop leaves behind depends on what the interrupt answered.
+    #[test]
+    fn a_stop_the_service_cannot_apply_now_waits_for_the_run_to_resume() {
+        let running = || {
+            let mut harness = Harness::new(RuntimeMode::FullAccess);
+            harness.feed(json!({"type": "session.execution.started", "data": {}}));
+            harness.drain();
+            harness
+        };
+
+        // Interrupted: the run's own outcome settles the turn.
+        let mut stopped = running();
+        stop_turn(&mut stopped.state, Ok(true), &stopped.events);
+        assert!(matches!(stopped.state.turn, TurnState::Running { .. }));
+        assert!(!stopped.state.stop_pending);
+
+        // Down, still stopping, or holding a run its shutdown suspended.
+        for interrupted in [
+            Err(ApiError::Transport(anyhow!("connection refused"))),
+            Err(ApiError::Http {
+                status: 503,
+                body: r#"{"code":"service_stopping"}"#.to_owned(),
+            }),
+            Ok(false),
+        ] {
+            let mut deferred = running();
+            stop_turn(&mut deferred.state, interrupted, &deferred.events);
+            assert!(deferred.drain().is_empty(), "the stop is honoured later");
+            assert!(deferred.state.stop_pending);
+            assert!(matches!(deferred.state.turn, TurnState::Idle));
         }
 
-        assert!(matches!(
-            command_rx.try_recv().unwrap(),
-            CommandMessage::Respond { request_id, option_id }
-                if request_id == "per_auto" && option_id == "once"
-        ));
-        assert!(command_rx.try_recv().is_err());
-        assert!(event_rx.try_recv().is_err());
-
-        handle_event(
-            &json!({
-                "type": "permission.replied",
-                "properties": {
-                    "sessionID": "ses_current",
-                    "requestID": "per_auto",
-                    "reply": "once"
-                }
+        // A live refusal is reported, and the next prompt still opens a turn.
+        let mut refused = running();
+        stop_turn(
+            &mut refused.state,
+            Err(ApiError::Http {
+                status: 500,
+                body: String::new(),
             }),
-            &events,
-            &commands,
-            &turn,
-            true,
-            &mut state,
+            &refused.events,
         );
-        assert!(state.permissions.lock().responding.is_empty());
+        assert!(matches!(
+            refused.drain().as_slice(),
+            [DriverEvent::LocalizedError { .. }]
+        ));
+        assert!(!refused.state.stop_pending);
+        assert!(matches!(refused.state.turn, TurnState::Idle));
     }
 
+    /// Bookkeeping can land after a marker without starting a run; only a
+    /// prompt or a step reopens it.
     #[test]
-    fn permission_approvals_stay_driver_local() {
-        let (events, event_rx, commands, command_rx, turn, mut state) = harness();
-        // Shape from the server's OpenAPI PermissionRequest schema.
-        let permission = json!({
-            "type": "permission.requested",
-            "properties": {
+    fn a_run_is_settled_once_its_marker_follows_the_last_prompt_and_step() {
+        let messages =
+            |value: Value| -> Vec<MessageInfo> { serde_json::from_value(value).unwrap() };
+        let idle = json!({"id": "msg_idle", "type": "idle", "time": {"created": 3.0}, "outcome": "succeeded"});
+        let step = json!({
+            "id": "msg_step", "type": "assistant", "time": {"created": 1.0},
+            "agent": "build", "model": {"id": "big-pickle", "providerID": "opencode"},
+            "content": [], "finish": "error",
+        });
+        let restart = json!({
+            "id": "msg_restart", "type": "synthetic", "time": {"created": 2.0},
+            "text": "The server restarted while you were working.",
+            "metadata": {"notice": "restart"},
+        });
+        let switched = json!({
+            "id": "msg_model", "type": "model-switched", "time": {"created": 4.0},
+            "model": {"id": "m", "providerID": "p"},
+        });
+        let prompt =
+            json!({"id": "msg_user", "type": "user", "time": {"created": 5.0}, "text": "go"});
+
+        assert!(run_settled(&messages(json!([idle, step]))));
+        assert!(run_settled(&messages(json!([switched, idle, step]))));
+        assert!(!run_settled(&messages(json!([restart, step]))));
+        assert!(!run_settled(&messages(json!([prompt, idle]))));
+        assert!(run_settled(&[]));
+    }
+
+    /// The id asymmetry is real: `permission.asked` carries `data.id` and the
+    /// reply path takes that id, while `permission.replied` calls it
+    /// `data.requestID`.
+    #[test]
+    fn permission_requests_dedupe_and_translate_always_into_one_shot() {
+        let mut harness = Harness::new(RuntimeMode::Ask);
+        let asked = json!({
+            "type": "permission.asked",
+            "data": {
                 "id": "per_abc",
                 "sessionID": "ses_1",
-                "permission": "bash",
-                "patterns": ["rm -rf *"],
-                "metadata": {},
-                "always": ["rm -rf *"]
+                "action": "bash",
+                "resources": ["rm -rf *"],
+                "save": ["rm -rf *"],
+                "source": {"type": "tool", "messageID": "msg_1", "id": "call_1"}
             }
         });
+        harness.feed(asked.clone());
+        // The live event can arrive while the snapshot is still being read.
+        harness.feed(asked);
 
-        handle_event(&permission, &events, &commands, &turn, false, &mut state);
+        let seen = harness.drain();
+        assert_eq!(seen.len(), 1, "one request must produce one card");
         let DriverEvent::Permission {
             request_id,
-            options,
             title,
+            options,
             ..
-        } = event_rx.try_recv().unwrap()
+        } = &seen[0]
         else {
-            panic!("Supervised mode must surface the request to the user");
+            panic!("a supervising mode must surface the request");
         };
         assert_eq!(request_id, "per_abc");
         assert_eq!(title, "rm -rf *");
         assert_eq!(
-            options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+            options
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
             ["once", "always", "reject"]
         );
-        assert!(command_rx.try_recv().is_err());
+        assert!(harness.issued.try_recv().is_err());
 
         assert_eq!(
-            permission_responses(&state.permissions, "per_abc", "always"),
-            [("per_abc".into(), "once".into())],
-            "provider-wide durable approval must be translated to one-shot"
+            support::permission_responses(&mut harness.state.permissions, "per_abc", "always"),
+            [("per_abc".to_owned(), "once".to_owned())],
+            "a durable choice must never go on the wire"
         );
-        let repeated = json!({
-            "type": "permission.requested",
-            "properties": {
+
+        harness.feed(json!({
+            "type": "permission.asked",
+            "data": {
                 "id": "per_def",
                 "sessionID": "ses_1",
-                "permission": "bash",
-                "patterns": ["rm -rf /tmp/waku-cache"],
-                "metadata": {},
-                "always": ["rm -rf *"]
+                "action": "bash",
+                "resources": ["rm -rf /tmp/waku-cache"],
+                "save": ["rm -rf *"]
             }
-        });
-        handle_event(&repeated, &events, &commands, &turn, false, &mut state);
-        let Ok(CommandMessage::Respond { option_id, .. }) = command_rx.try_recv() else {
-            panic!("the driver's remembered rule should answer without asking again");
+        }));
+        let Ok(DriverCommand::Respond { option_id, .. }) = harness.issued.try_recv() else {
+            panic!("the remembered rule should answer without asking again");
         };
         assert_eq!(option_id, "once");
-        assert!(event_rx.try_recv().is_err());
+        assert!(harness.drain().is_empty());
 
-        let mut isolated = OpenCodeStreamState::default();
-        handle_event(&repeated, &events, &commands, &turn, false, &mut isolated);
+        harness.feed(json!({
+            "type": "permission.replied",
+            "data": {"sessionID": "ses_1", "requestID": "per_def", "reply": "once"}
+        }));
+        assert!(!harness.state.permissions.responding.contains("per_def"));
+    }
+
+    #[test]
+    fn access_modes_decide_who_answers_a_permission() {
+        for (mode, action, asks) in [
+            (RuntimeMode::Ask, "edit", true),
+            (RuntimeMode::AutoAcceptEdits, "edit", false),
+            (RuntimeMode::AutoAcceptEdits, "bash", true),
+            // Auto never answers blindly: the review replies when a backend
+            // is configured and the user — like here — does when it is not.
+            (RuntimeMode::Auto, "bash", true),
+            (RuntimeMode::FullAccess, "bash", false),
+        ] {
+            let mut harness = Harness::new(mode);
+            harness.feed(json!({
+                "type": "permission.asked",
+                "data": {"id": "per_1", "sessionID": "ses_1", "action": action, "resources": ["x"]}
+            }));
+            assert_eq!(
+                harness.drain().is_empty(),
+                !asks,
+                "{mode:?} should {} ask about {action}",
+                if asks { "" } else { "not" }
+            );
+            assert_eq!(harness.issued.try_recv().is_ok(), !asks);
+            assert!(
+                harness.state.permissions.approved.is_empty(),
+                "an automatic reply must not broaden future access"
+            );
+        }
+    }
+
+    /// Each field's own `key` round-trips through the answer instead of
+    /// relying on positional order.
+    #[test]
+    fn forms_become_keyed_questions_whose_answers_round_trip() {
+        let mut harness = Harness::new(RuntimeMode::Ask);
+        harness.feed(json!({
+            "type": "form.created",
+            "data": {
+                "form": {
+                    "id": "frm_1",
+                    "sessionID": "ses_1",
+                    "title": "Which files should change?",
+                    "fields": [
+                        {
+                            "type": "multiselect",
+                            "key": "files",
+                            "title": "Files",
+                            "options": [
+                                {"value": "src", "label": "Source", "description": "Implementation"},
+                                {"value": "test", "label": "Tests"}
+                            ]
+                        },
+                        {"type": "boolean", "key": "confirm", "title": "Proceed"}
+                    ]
+                }
+            }
+        }));
+
+        let seen = harness.drain();
+        let DriverEvent::UserInputRequested {
+            request_id,
+            questions,
+        } = &seen[0]
+        else {
+            panic!("a form is a structured question, not a permission");
+        };
+        assert_eq!(request_id, "frm_1");
+        assert_eq!(questions[0].id, "files");
+        assert_eq!(questions[0].header, "Files");
+        assert_eq!(questions[0].question, "Which files should change?");
+        assert!(questions[0].multi_select);
+        assert_eq!(questions[0].options[0].label, "Source");
+        assert_eq!(
+            questions[0].options[0].description.as_deref(),
+            Some("Implementation")
+        );
+        assert!(!questions[1].multi_select);
+
+        // A second `form.created` for the same form must not ask twice.
+        assert_eq!(seen.len(), 1);
+
+        let fields = harness.state.forms.get("frm_1").cloned().unwrap();
+        let answer = form_answer(
+            &fields,
+            &[
+                UserInputAnswer {
+                    question_id: "files".into(),
+                    answers: vec!["Source".into()],
+                },
+                UserInputAnswer {
+                    question_id: "confirm".into(),
+                    answers: vec!["true".into()],
+                },
+            ],
+        );
+        // Labels are what the card shows; values are what the server wants.
+        assert_eq!(
+            answer.get("files"),
+            Some(&FormValue::List(vec!["src".to_owned()]))
+        );
+        assert_eq!(answer.get("confirm"), Some(&FormValue::Bool(true)));
+    }
+
+    /// OpenCode reports reasoning tokens separately instead of folding them
+    /// into output, so leaving them out under-reports every thinking model.
+    /// The window is keyed on `providerID/id`, never `modelID`.
+    #[test]
+    fn usage_sums_reasoning_and_cache_and_keys_the_window_on_provider_and_id() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness
+            .windows
+            .insert("anthropic/claude-sonnet-4-5".into(), 200_000);
+        harness.feed(step_started("msg_1"));
+        harness.feed(json!({
+            "type": "session.step.ended",
+            "data": {
+                "sessionID": "ses_1",
+                "assistantMessageID": "msg_1",
+                "cost": 0.01,
+                "tokens": {
+                    "input": 13_399.0,
+                    "output": 10.0,
+                    "reasoning": 5.0,
+                    "cache": {"read": 1_792.0, "write": 0.0}
+                }
+            }
+        }));
+
         assert!(matches!(
-            event_rx.try_recv().unwrap(),
-            DriverEvent::Permission { request_id, ..} if request_id == "per_def"
+            harness.drain().as_slice(),
+            [DriverEvent::UsageUpdated {
+                context_tokens: Some(15_206),
+                context_window: Some(200_000)
+            }]
         ));
+    }
+
+    /// Compaction deltas carry no `assistantMessageID` and no ordinal, so
+    /// routing them as text would put the summary inside the assistant reply.
+    #[test]
+    fn compaction_streams_into_one_row_of_its_own() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.compaction.started", "data": {"sessionID": "ses_1"}}));
+        harness.feed(json!({"type": "session.compaction.delta", "data": {"sessionID": "ses_1", "text": "summarising"}}));
+        harness.feed(json!({"type": "session.compaction.ended", "data": {"sessionID": "ses_1"}}));
+
+        // An idle compaction carries no `session.execution.*` wrapper, so the
+        // driver opens a synthetic turn to give the card a home and settles
+        // exactly that turn on the outcome.
+        let seen = harness.drain();
+        assert_eq!(seen.len(), 5);
+        assert!(matches!(seen[0], DriverEvent::TurnStarted));
+        assert!(matches!(
+            seen[4],
+            DriverEvent::TurnFinished { success: true, .. }
+        ));
+        let ids = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::RichActivity(item) => item.source_id.clone(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["compaction:ses_1"; 3]);
         assert!(
-            command_rx.try_recv().is_err(),
-            "another driver must not inherit the approval"
+            !seen
+                .iter()
+                .any(|event| matches!(event, DriverEvent::TextDelta(_))),
+            "a compaction summary is not the assistant's reply"
+        );
+    }
+
+    /// Inside a real execution the same frames ride the open turn: the
+    /// driver neither opens a second one nor settles the execution's.
+    #[test]
+    fn mid_turn_compaction_neither_opens_nor_settles_a_turn() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.execution.started", "data": {"sessionID": "ses_1"}}));
+        harness.drain();
+
+        harness.feed(json!({"type": "session.compaction.started", "data": {"sessionID": "ses_1"}}));
+        harness.feed(json!({"type": "session.compaction.ended", "data": {"sessionID": "ses_1"}}));
+
+        let seen = harness.drain();
+        assert_eq!(seen.len(), 2);
+        assert!(
+            seen.iter().all(|event| {
+                matches!(
+                    event,
+                    DriverEvent::RichActivity(item)
+                        if item.source_id.as_deref() == Some("compaction:ses_1")
+                )
+            }),
+            "mid-execution compaction emits only its card updates"
+        );
+    }
+
+    /// A detached shell must survive its turn, so it is background work
+    /// rather than a transcript activity.
+    #[test]
+    fn session_shells_become_background_work_keyed_on_the_shell_id() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({
+            "type": "session.shell.started",
+            "data": {"sessionID": "ses_1", "shell": {"id": "shl_1", "command": "npm run dev", "status": "running"}}
+        }));
+        harness.feed(json!({
+            "type": "session.shell.ended",
+            "data": {"sessionID": "ses_1", "shell": {"id": "shl_1", "command": "npm run dev", "status": "exited", "exit": 0}}
+        }));
+
+        let seen = harness.drain();
+        let statuses = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => {
+                    Some((item.key.provider_id.clone(), item.status))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            statuses,
+            [
+                ("shl_1".to_owned(), BackgroundWorkStatus::Running),
+                ("shl_1".to_owned(), BackgroundWorkStatus::Completed),
+            ]
+        );
+    }
+
+    /// Deny by default. The union has 88 members and the stream is shared with
+    /// the user's own terminal, so an unrecognized type is dropped and
+    /// counted, never rendered and never fatal.
+    #[test]
+    fn unknown_types_are_counted_and_known_noise_is_dropped_silently() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        for event in [
+            json!({"type": "server.connected", "id": "evt_1", "data": {}}),
+            json!({"type": "mcp.status.changed", "data": {}}),
+            json!({"type": "shell.created", "data": {}}),
+            json!({"type": "session.usage.recorded", "data": {}}),
+            // Introduced by the 2.0 release.
+            json!({"type": "model.updated", "data": {}}),
+            json!({"type": "provider.updated", "data": {}}),
+            json!({"type": "location.shutdown", "data": {}}),
+            json!({"type": "credential.updated", "data": {}}),
+            json!({"type": "session.metadata.updated", "data": {"sessionID": "ses_1", "metadata": {}}}),
+            json!({"type": "session.permissions", "data": {"sessionID": "ses_1", "permissions": []}}),
+            json!({"type": "session.something.new", "data": {"sessionID": "ses_1"}}),
+        ] {
+            harness.feed(event);
+        }
+
+        assert!(harness.drain().is_empty());
+        assert_eq!(
+            harness.state.unknown,
+            HashMap::from([("session.something.new".to_owned(), 1)])
+        );
+    }
+
+    /// A steer the service drops falls back to the app's own follow-up queue.
+    #[test]
+    fn a_cancelled_steer_is_rejected_back_to_the_app() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.state.pending_input = Some(PendingInput {
+            inbox_id: "msg_1".into(),
+            message: "keep going".into(),
+            steer: true,
+        });
+        // The exact payload the service sends: the entry is `inboxID`.
+        harness.feed(json!({"type": "session.inbox.cancelled", "data": {"sessionID": "ses_1", "inboxID": "msg_1"}}));
+        assert!(matches!(
+            harness.drain().as_slice(),
+            [DriverEvent::SteerRejected { message, ..}] if message == "keep going"
+        ));
+        assert!(harness.state.pending_input.is_none());
+
+        // A cancelled prompt is already in the transcript; it is not re-queued.
+        harness.state.pending_input = Some(PendingInput {
+            inbox_id: "msg_2".into(),
+            message: "first prompt".into(),
+            steer: false,
+        });
+        harness.feed(json!({"type": "session.inbox.cancelled", "data": {"sessionID": "ses_1", "inboxID": "msg_2"}}));
+        assert!(harness.drain().is_empty());
+        assert!(harness.state.pending_input.is_none());
+    }
+
+    #[test]
+    fn delivery_clears_the_pending_entry() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.state.pending_input = Some(PendingInput {
+            inbox_id: "msg_1".into(),
+            message: "also check the tests".into(),
+            steer: true,
+        });
+        harness.feed(json!({"type": "session.inbox.delivered", "data": {"sessionID": "ses_1", "inboxID": "msg_other"}}));
+        assert!(harness.state.pending_input.is_some());
+        harness.feed(json!({"type": "session.inbox.delivered", "data": {"sessionID": "ses_1", "inboxID": "msg_1"}}));
+        assert!(harness.state.pending_input.is_none());
+        assert!(harness.drain().is_empty());
+    }
+
+    /// The exact retry payloads of the 2.0 schema: `session.status` nests
+    /// its state under `status`, and `session.retry.scheduled` carries the
+    /// failure as `error`. Both upsert the same row, and its reason is text.
+    #[test]
+    fn retries_surface_their_reason_in_one_row() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.status", "data": {"sessionID": "ses_1", "status": {"type": "busy"}}}));
+        assert!(harness.drain().is_empty(), "only a retry status is shown");
+        harness.feed(json!({"type": "session.status", "data": {
+            "sessionID": "ses_1",
+            "status": {
+                "type": "retry",
+                "attempt": 2,
+                "message": "Rate limited",
+                "next": 1_790_000_000_000_u64,
+                "action": {"reason": "rate_limit", "provider": "anthropic", "title": "Anthropic is rate limiting", "message": "Retrying in 8s", "label": "Retry"}
+            }
+        }}));
+        harness.feed(json!({"type": "session.retry.scheduled", "data": {
+            "sessionID": "ses_1",
+            "assistantMessageID": "msg_1",
+            "attempt": 3,
+            "at": 1_790_000_000_000_u64,
+            "error": {"type": "api", "message": "Overloaded", "status": 529}
+        }}));
+        let rows = harness
+            .drain()
+            .into_iter()
+            .filter_map(|event| match event {
+                DriverEvent::RichActivity(item) => Some(item),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].title, "Anthropic is rate limiting");
+        assert!(
+            rows[0]
+                .output
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Retrying in 8s"),
+            "{:?}",
+            rows[0].output
+        );
+        assert!(
+            rows[1]
+                .output
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Overloaded"),
+            "{:?}",
+            rows[1].output
+        );
+        assert!(
+            rows.iter()
+                .all(|row| row.source_id.as_deref() == Some("retry:ses_1"))
         );
     }
 
     #[test]
-    fn auto_modes_use_one_shot_provider_approval() {
-        let (events, event_rx, commands, command_rx, turn, mut state) = harness();
-        handle_event(
-            &json!({
-                "type": "permission.requested",
-                "properties": {
-                    "id": "per_auto",
-                    "sessionID": "ses_1",
-                    "permission": "bash",
-                    "patterns": ["cargo test"],
-                    "always": ["cargo *"]
-                }
-            }),
-            &events,
-            &commands,
-            &turn,
-            true,
-            &mut state,
+    fn a_deleted_session_reports_the_error_before_the_terminal_exit() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.feed(json!({"type": "session.deleted", "data": {"sessionID": "ses_1"}}));
+        let seen = harness.drain();
+        assert!(matches!(&seen[0], DriverEvent::LocalizedError { .. }));
+        assert!(matches!(&seen[1], DriverEvent::ProcessExited));
+        assert_eq!(seen.len(), 2);
+    }
+
+    #[test]
+    fn stored_models_split_into_a_reference_with_its_effort_variant() {
+        assert_eq!(
+            model_ref(Some("anthropic/claude-sonnet-4-5"), Some("high")),
+            Some(ModelRef {
+                id: "claude-sonnet-4-5".into(),
+                provider_id: "anthropic".into(),
+                variant: Some("high".into()),
+            })
         );
-        let Ok(CommandMessage::Respond { option_id, .. }) = command_rx.try_recv() else {
-            panic!("auto modes must answer without the user");
+        // `default` is the server's own base-variant id; an unset effort is
+        // sent explicitly so a session that picked a variant can reset to it.
+        for effort in [None, Some(""), Some("  ")] {
+            assert_eq!(
+                model_ref(Some("openai/gpt-5"), effort),
+                Some(ModelRef {
+                    id: "gpt-5".into(),
+                    provider_id: "openai".into(),
+                    variant: Some("default".into()),
+                })
+            );
+        }
+        assert_eq!(model_ref(Some("bare-model"), None), None);
+        assert_eq!(model_ref(None, Some("high")), None);
+    }
+
+    #[test]
+    fn only_selectable_primary_agents_override_the_build_default() {
+        let agents = vec![
+            opencode_api::AgentInfo {
+                id: "plan".into(),
+                name: "Plan".into(),
+                description: None,
+                mode: opencode_api::AgentMode::Primary,
+                hidden: false,
+                model: None,
+            },
+            opencode_api::AgentInfo {
+                id: "title".into(),
+                name: "Title".into(),
+                description: None,
+                mode: opencode_api::AgentMode::Primary,
+                hidden: true,
+                model: None,
+            },
+        ];
+        assert_eq!(resolve_agent(Some("plan"), &agents), "plan");
+        assert_eq!(resolve_agent(Some("title"), &agents), "build");
+        assert_eq!(resolve_agent(None, &agents), "build");
+        // A catalogue Goddard could not read must not veto the user's choice.
+        assert_eq!(resolve_agent(Some("plan"), &[]), "plan");
+    }
+
+    #[test]
+    fn registered_commands_reach_the_palette_once_each() {
+        let command = |name: &str| opencode_api::CommandInfo {
+            name: name.into(),
+            description: Some(format!("{name} things")),
         };
-        assert_eq!(option_id, "once");
-        assert!(event_rx.try_recv().is_err());
-        assert!(state.permissions.lock().approved.is_empty());
+        let reported = reported_commands(vec![
+            command("init"),
+            command("review"),
+            command("review"),
+            command(""),
+        ]);
+        assert_eq!(
+            reported
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect::<Vec<_>>(),
+            ["init", "review"]
+        );
+        assert_eq!(reported[1].description, "review things");
+    }
+
+    #[test]
+    fn native_command_dispatch_matches_only_registered_slash_names() {
+        let commands = ["init".into(), "review".into(), "team/review".into()]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            native_command_invocation("/init", &commands),
+            Some(("init", ""))
+        );
+        assert_eq!(
+            native_command_invocation("/review main\ncheck tests", &commands),
+            Some(("review", "main\ncheck tests"))
+        );
+        assert_eq!(
+            native_command_invocation("/team/review main", &commands),
+            Some(("team/review", "main"))
+        );
+        assert!(native_command_invocation("/reviewer", &commands).is_none());
+        assert!(native_command_invocation("Discuss /review", &commands).is_none());
+    }
+
+    #[test]
+    fn generated_titles_replace_the_providers_own_placeholder() {
+        assert_eq!(
+            generated_title(Some("New session - 2026-09-06T18:33:35.122Z")),
+            None
+        );
+        assert_eq!(generated_title(Some("  ")), None);
+        assert_eq!(
+            generated_title(Some("Wire OpenCode")).as_deref(),
+            Some("Wire OpenCode")
+        );
+    }
+
+    /// Drives the user's own adopted service through the real driver. Ignored
+    /// by default: it needs the OpenCode CLI installed and its background
+    /// service healthy. Run with
+    /// `cargo test -p waku-core opencode_session_against_the_adopted_service -- --ignored`.
+    #[test]
+    #[ignore = "requires a healthy OpenCode background service"]
+    fn opencode_session_against_the_adopted_service() {
+        let binary =
+            crate::command_env::find_executable("opencode").expect("opencode is not installed");
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let driver = OpenCodeDriver::start(
+            DriverStartOptions {
+                eval: None,
+                sandbox: None,
+                allow_model_fallback: false,
+                distillation: false,
+                ephemeral: false,
+                binary,
+                cwd: std::env::temp_dir(),
+                mode: RuntimeMode::FullAccess,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                agent: None,
+                read_own_transcript: false,
+                subagents: None,
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
+                provider_cursor: None,
+            },
+            events,
+        )
+        .expect("the adopted service should open a session");
+
+        let (session_id, directory) = connected_cursor(&event_rx);
+        assert!(session_id.starts_with("ses_"));
+        assert!(directory.is_some_and(|directory| !directory.ends_with('/')));
+        drop(driver);
+    }
+
+    /// The cursor from `Connected`, skipping the usage report that can precede
+    /// it.
+    fn connected_cursor(events: &Receiver<DriverEvent>) -> (String, Option<String>) {
+        loop {
+            match events
+                .recv_timeout(Duration::from_secs(30))
+                .expect("the driver should report its cursor")
+            {
+                DriverEvent::Connected {
+                    provider_cursor:
+                        Some(ProviderResumeCursor::OpenCode {
+                            session_id,
+                            directory,
+                        }),
+                } => return (session_id, directory),
+                DriverEvent::Connected { provider_cursor } => {
+                    panic!("expected an OpenCode cursor, got {provider_cursor:?}")
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Everything the driver reports until the turn settles, plus a grace
+    /// window that would catch a second `TurnFinished`.
+    fn settle(
+        events: &Receiver<DriverEvent>,
+        mut on_event: impl FnMut(&DriverEvent),
+    ) -> Vec<DriverEvent> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(240);
+        let mut seen = Vec::new();
+        let mut finished_at: Option<std::time::Instant> = None;
+        loop {
+            let wait = match finished_at {
+                Some(at) => (at + Duration::from_secs(3))
+                    .saturating_duration_since(std::time::Instant::now()),
+                None => deadline.saturating_duration_since(std::time::Instant::now()),
+            };
+            match events.recv_timeout(wait) {
+                Ok(event) => {
+                    on_event(&event);
+                    if matches!(event, DriverEvent::TurnFinished { .. }) && finished_at.is_none() {
+                        finished_at = Some(std::time::Instant::now());
+                    }
+                    seen.push(event);
+                }
+                Err(_) if finished_at.is_some() => return seen,
+                Err(_) => panic!("the turn never settled: {seen:?}"),
+            }
+        }
+    }
+
+    /// A real conversation through the driver against the adopted service: a
+    /// plain turn, then a shell call with a steer that joins the running
+    /// execution, a fork that drops that steered turn whole, and a resume.
+    /// `GODDARD_OPENCODE_TEST_MODEL` picks the model; the default is one of
+    /// OpenCode's free models, whose gateway also rejects any session id
+    /// OpenCode could not have minted.
+    #[test]
+    #[ignore = "requires a healthy OpenCode background service and a runnable model"]
+    fn opencode_turn_steer_fork_and_resume_against_the_adopted_service() {
+        let binary =
+            crate::command_env::find_executable("opencode").expect("opencode is not installed");
+        let model = std::env::var("GODDARD_OPENCODE_TEST_MODEL")
+            .unwrap_or_else(|_| "opencode/big-pickle".to_owned());
+        let workspace = std::env::temp_dir().join(format!("waku-opencode-turn-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace).unwrap();
+        let options = |provider_cursor| DriverStartOptions {
+            eval: None,
+            sandbox: None,
+            allow_model_fallback: false,
+            distillation: false,
+            ephemeral: false,
+            binary: binary.clone(),
+            cwd: workspace.clone(),
+            mode: RuntimeMode::FullAccess,
+            model: Some(model.clone()),
+            reasoning_effort: None,
+            service_tier: None,
+            context_window: None,
+            agent_preset: None,
+            computer_use_enabled: false,
+            agent: None,
+            read_own_transcript: false,
+            subagents: None,
+            computer_use_runtime: None,
+            mcp_servers: Vec::new(),
+            http_mcp_capability_recorder: None,
+            provider_cursor,
+        };
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let driver = OpenCodeDriver::start(options(None), events).unwrap();
+        let (session_id, _) = connected_cursor(&event_rx);
+        let service = opencode_service::shared(&binary).unwrap();
+        let endpoint = service.endpoint();
+
+        driver.prompt("Reply with the single word FIRST.".to_owned());
+        let seen = settle(&event_rx, |_| {});
+        assert!(
+            seen.iter()
+                .any(|event| matches!(event, DriverEvent::TurnFinished { success: true, .. })),
+            "{seen:?}"
+        );
+
+        driver.prompt(
+            "Use your shell tool to run `sleep 6 && echo waku-probe`. When it has finished, reply with the single word DONE."
+                .to_owned(),
+        );
+        let mut steered = false;
+        let seen = settle(&event_rx, |event| {
+            if !steered
+                && let DriverEvent::RichActivity(item) = event
+                && item.kind == ActivityKind::Command
+                && !item.complete
+            {
+                steered = true;
+                driver.steer("Also end your reply with the word STEERED.".to_owned());
+            }
+        });
+        assert!(steered, "the shell call never surfaced: {seen:?}");
+        let finished = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::TurnFinished {
+                    success, summary, ..
+                } => Some((*success, summary.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(finished, [(true, None)], "one settled turn: {seen:?}");
+        assert!(
+            seen.iter()
+                .any(|event| matches!(event, DriverEvent::SteerAccepted { .. })),
+            "{seen:?}"
+        );
+        assert!(
+            seen.iter().any(|event| matches!(
+                event,
+                DriverEvent::RichActivity(item)
+                    if item.kind == ActivityKind::Command
+                        && item.complete
+                        && !item.failed
+                        && item.output.as_deref().unwrap_or_default().contains("waku-probe")
+            )),
+            "{seen:?}"
+        );
+        let reply = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::TextDelta(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert!(reply.contains("DONE"), "{reply:?}");
+
+        let user_messages = |session: &str| {
+            let (messages, _) =
+                opencode_api::list_messages(&endpoint, session, Order::Asc, None, None).unwrap();
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    MessageInfo::User { text, .. } => Some(text),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // Two prompts and a steer: three user messages in two turns.
+        let original = user_messages(&session_id);
+        assert_eq!(original.len(), 3, "{original:?}");
+        let history =
+            crate::opencode_session::provider_session_history(&binary, &session_id, 10).unwrap();
+        assert_eq!(history.turns.len(), 2, "{:#?}", history.messages);
+        let steer_turn = history
+            .messages
+            .iter()
+            .find(|message| {
+                message.role == crate::model::MessageRole::User
+                    && message.content.contains("STEERED")
+            })
+            .and_then(|message| message.turn_id);
+        assert_eq!(
+            steer_turn,
+            Some(history.turns[1].id),
+            "{:#?}",
+            history.messages
+        );
+
+        let ProviderResumeCursor::OpenCode {
+            session_id: fork_id,
+            directory,
+        } = driver.fork(1).unwrap()
+        else {
+            panic!("expected an OpenCode cursor");
+        };
+        assert_ne!(fork_id, session_id);
+        assert_eq!(
+            user_messages(&fork_id),
+            original[..1],
+            "the fork drops the steered turn whole"
+        );
+        // A rewind with no live driver counts the same turns.
+        let ProviderResumeCursor::OpenCode {
+            session_id: cold_fork_id,
+            ..
+        } = crate::opencode_session::fork_session_at_turn(&binary, &session_id, 1).unwrap()
+        else {
+            panic!("expected an OpenCode cursor");
+        };
+        assert_eq!(user_messages(&cold_fork_id), original[..1]);
+        drop(driver);
+
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let resumed = OpenCodeDriver::start(
+            options(Some(ProviderResumeCursor::OpenCode {
+                session_id: fork_id.clone(),
+                directory,
+            })),
+            events,
+        )
+        .unwrap();
+        assert_eq!(connected_cursor(&event_rx).0, fork_id);
+        drop(resumed);
+
+        for session in [&session_id, &fork_id, &cold_fork_id] {
+            let _ = opencode_api::delete_session(&endpoint, session);
+        }
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    /// Stops the service mid-turn and starts it again after longer than a
+    /// quick restart takes. OpenCode resumes the run as it boots, with no
+    /// `idle` marker in between, and Waku keeps that run in the same turn: one
+    /// `TurnStarted`, one `TurnFinished`, one native turn.
+    ///
+    /// It stops and starts whatever service it finds, so run it only against
+    /// a sandboxed one (see `opencode_turn_steer_fork_and_resume_…`).
+    #[test]
+    #[ignore = "stops and restarts the OpenCode service it finds; sandbox only"]
+    fn opencode_turn_survives_a_service_restart() {
+        let binary =
+            crate::command_env::find_executable("opencode").expect("opencode is not installed");
+        let model = std::env::var("GODDARD_OPENCODE_TEST_MODEL")
+            .unwrap_or_else(|_| "opencode/big-pickle".to_owned());
+        let workspace =
+            std::env::temp_dir().join(format!("waku-opencode-restart-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace).unwrap();
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let driver = OpenCodeDriver::start(
+            DriverStartOptions {
+                eval: None,
+                sandbox: None,
+                allow_model_fallback: false,
+                distillation: false,
+                ephemeral: false,
+                binary: binary.clone(),
+                cwd: workspace.clone(),
+                mode: RuntimeMode::FullAccess,
+                model: Some(model),
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                agent: None,
+                read_own_transcript: false,
+                subagents: None,
+                computer_use_runtime: None,
+                mcp_servers: Vec::new(),
+                http_mcp_capability_recorder: None,
+                provider_cursor: None,
+            },
+            events,
+        )
+        .unwrap();
+        let (session_id, _) = connected_cursor(&event_rx);
+        let service = |verb: &str| {
+            let status = std::process::Command::new(&binary)
+                .args(["service", verb])
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "opencode service {verb} failed");
+        };
+
+        driver.prompt(
+            "Use your shell tool to run `sleep 15 && echo waku-probe`. When it has finished, reply with the single word DONE."
+                .to_owned(),
+        );
+        let mut seen = Vec::new();
+        while !seen.iter().any(|event| {
+            matches!(event, DriverEvent::RichActivity(item)
+                if item.kind == ActivityKind::Command && !item.complete)
+        }) {
+            seen.push(
+                event_rx
+                    .recv_timeout(Duration::from_secs(120))
+                    .unwrap_or_else(|_| panic!("the shell call never surfaced: {seen:?}")),
+            );
+        }
+        service("stop");
+        // Well past the second the reader used to wait before giving up.
+        thread::sleep(Duration::from_secs(5));
+        service("start");
+        seen.extend(settle(&event_rx, |_| {}));
+
+        let count =
+            |wanted: fn(&DriverEvent) -> bool| seen.iter().filter(|event| wanted(event)).count();
+        assert_eq!(
+            count(|event| matches!(event, DriverEvent::TurnStarted)),
+            1,
+            "{seen:?}"
+        );
+        assert_eq!(
+            count(|event| matches!(event, DriverEvent::TurnFinished { success: true, .. })),
+            1,
+            "{seen:?}"
+        );
+        assert_eq!(
+            count(|event| matches!(event, DriverEvent::TurnFinished { .. })),
+            1,
+            "{seen:?}"
+        );
+        assert_eq!(
+            reconnect_rows(&seen)
+                .into_iter()
+                .map(|(_, complete)| complete)
+                .collect::<Vec<_>>(),
+            [false, true],
+            "{seen:?}"
+        );
+        let reply = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::TextDelta(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert!(reply.contains("DONE"), "{reply:?}");
+        let history =
+            crate::opencode_session::provider_session_history(&binary, &session_id, 10).unwrap();
+        assert_eq!(history.turns.len(), 1, "{:#?}", history.messages);
+        drop(driver);
+
+        let endpoint = opencode_service::shared(&binary).unwrap().endpoint();
+        let _ = opencode_api::delete_session(&endpoint, &session_id);
+        let _ = std::fs::remove_dir_all(workspace);
     }
 }

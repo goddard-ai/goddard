@@ -5,9 +5,9 @@
 //! naming convention (which doubles as the UI attribution key on
 //! `BackgroundWorkItem.role`), the fixed agent roster, and the text that
 //! teaches a session's model when to delegate. Each driver turns the spec
-//! into its own launch-time mechanism: CLI flags for Claude, a config env
-//! for OpenCode, an extension file for Pi, a session instruction entry for
-//! the adopted OpenCode 2 service, and a thread-start hint for Codex.
+//! into its own launch-time mechanism: CLI flags for Claude, an extension
+//! file for Pi, a session instruction entry for the adopted OpenCode
+//! service, and a thread-start hint for Codex.
 //!
 //! The roster is fixed — `goddard-explore` plus one agent per task class —
 //! and class agents resolve their model (and optional effort) through the
@@ -42,11 +42,8 @@ pub(crate) enum SupportLevel {
 
 pub(crate) fn support_for(provider: ProviderKind) -> SupportLevel {
     match provider {
-        ProviderKind::Claude
-        | ProviderKind::Copilot
-        | ProviderKind::OpenCode
-        | ProviderKind::Pi => SupportLevel::Supported,
-        ProviderKind::Codex | ProviderKind::OpenCode2 => SupportLevel::Advisory,
+        ProviderKind::Claude | ProviderKind::Copilot | ProviderKind::Pi => SupportLevel::Supported,
+        ProviderKind::Codex | ProviderKind::OpenCode => SupportLevel::Advisory,
         ProviderKind::Antigravity
         | ProviderKind::Amp
         | ProviderKind::Cursor
@@ -215,54 +212,10 @@ pub(crate) fn claude_agents_json(spec: &SubagentSpec) -> Option<String> {
     Some(Value::Object(agents).to_string())
 }
 
-/// OpenCode's `OPENCODE_CONFIG_CONTENT` payload: `agent.*` entries merged over
-/// the user's config files. The definitions carry the session's resolved
-/// model/variant, so the driver must start a private server for this config.
-pub(crate) fn opencode_config_json(spec: &SubagentSpec) -> Option<String> {
-    if spec.agents.is_empty() {
-        return None;
-    }
-    let agents = spec
-        .agents
-        .iter()
-        .map(|agent| {
-            let mut def = json!({
-                "description": agent.description,
-                "prompt": agent.prompt,
-                "mode": "subagent",
-            });
-            if agent.read_only {
-                def["tools"] = json!({
-                    "bash": false,
-                    "write": false,
-                    "edit": false,
-                    "patch": false
-                });
-                def["permission"] = json!({
-                    "bash": "deny",
-                    "edit": "deny",
-                    "patch": "deny"
-                });
-            }
-            if let Some(model) = &agent.model {
-                def["model"] = json!(model);
-            }
-            if let Some(effort) = &agent.effort {
-                // OpenCode calls the model's reasoning-effort selection a
-                // variant, and accepts it on an agent definition as well as
-                // on an individual task call.
-                def["variant"] = json!(effort);
-            }
-            (agent.name.clone(), def)
-        })
-        .collect::<serde_json::Map<String, Value>>();
-    Some(json!({"agent": agents}).to_string())
-}
-
-/// OpenCode 2's adopted service cannot register agents over its API, so the
+/// The adopted OpenCode service cannot register agents over its API, so the
 /// hint is a session instruction entry naming whatever subagent-mode agents
 /// the user's own config already defines.
-pub(crate) fn opencode2_hint(available_subagents: &[String]) -> String {
+pub(crate) fn opencode_hint(available_subagents: &[String]) -> String {
     let roster = if available_subagents.is_empty() {
         "No subagent agents are currently configured.".to_owned()
     } else {
@@ -280,7 +233,7 @@ pub(crate) fn opencode2_hint(available_subagents: &[String]) -> String {
          agents via the `subagent`/`task` tool instead of doing everything \
          inline; the helper's reply returns into this turn. {roster} Trivial \
          lookups answerable in one or two tool calls are not worth delegating. \
-         OpenCode 2 cannot receive Goddard's per-tier model, effort, or \
+         OpenCode cannot receive Goddard's per-tier model, effort, or \
          read-only policy over its adopted service, so treat these names as \
          advisory and use the configured provider-native agent when available."
     )
@@ -511,24 +464,6 @@ mod tests {
     }
 
     #[test]
-    fn opencode_definitions_are_subagent_mode_and_deny_writes() {
-        let classes = classes(&[(
-            TaskClass::Routine,
-            entry(ProviderKind::OpenCode, Some("openai/gpt-5"), Some("high")),
-        )]);
-        let json = opencode_config_json(&spec_for(ProviderKind::OpenCode, None, &classes))
-            .expect("config serializes");
-        let value: Value = serde_json::from_str(&json).unwrap();
-        let explore = &value["agent"]["goddard-explore"];
-        assert_eq!(explore["mode"], "subagent");
-        assert_eq!(explore["permission"]["edit"], "deny");
-        assert_eq!(explore["permission"]["bash"], "deny");
-        assert_eq!(explore["tools"]["bash"], false);
-        assert_eq!(value["agent"]["goddard-fast"]["model"], "openai/gpt-5");
-        assert_eq!(value["agent"]["goddard-fast"]["variant"], "high");
-    }
-
-    #[test]
     fn class_agents_resolve_models_through_the_class_map() {
         let classes = classes(&[
             (
@@ -601,9 +536,9 @@ mod tests {
     }
 
     #[test]
-    fn opencode2_hint_lists_only_what_exists() {
-        assert!(opencode2_hint(&[]).contains("No subagent agents are currently configured"));
-        let hint = opencode2_hint(&["explore".into()]);
+    fn opencode_hint_lists_only_what_exists() {
+        assert!(opencode_hint(&[]).contains("No subagent agents are currently configured"));
+        let hint = opencode_hint(&["explore".into()]);
         assert!(hint.contains("`explore`"));
         assert!(hint.contains("advisory"));
     }
@@ -658,11 +593,10 @@ mod tests {
     #[test]
     fn support_level_matches_the_actual_injection_paths() {
         assert_eq!(support_for(ProviderKind::Claude), SupportLevel::Supported);
-        assert_eq!(support_for(ProviderKind::OpenCode), SupportLevel::Supported);
         assert_eq!(support_for(ProviderKind::Copilot), SupportLevel::Supported);
         assert_eq!(support_for(ProviderKind::Pi), SupportLevel::Supported);
         assert_eq!(support_for(ProviderKind::Codex), SupportLevel::Advisory);
-        assert_eq!(support_for(ProviderKind::OpenCode2), SupportLevel::Advisory);
+        assert_eq!(support_for(ProviderKind::OpenCode), SupportLevel::Advisory);
         assert_eq!(support_for(ProviderKind::OhMyPi), SupportLevel::Unsupported);
         assert_eq!(support_for(ProviderKind::Amp), SupportLevel::Unsupported);
     }

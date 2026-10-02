@@ -4696,13 +4696,13 @@ fn auto_route_seed_and_filter_follow_the_picker_row() {
 }
 
 #[test]
-fn only_opencode_providers_offer_an_explicit_reasoning_default_reset() {
+fn only_opencode_offers_an_explicit_reasoning_default_reset() {
     for provider in ProviderKind::ALL {
         assert_eq!(
             supports_reasoning_default_reset(provider),
-            matches!(provider, ProviderKind::OpenCode | ProviderKind::OpenCode2),
+            matches!(provider, ProviderKind::OpenCode),
             "{provider:?} should{} offer the Default row",
-            if matches!(provider, ProviderKind::OpenCode | ProviderKind::OpenCode2) {
+            if matches!(provider, ProviderKind::OpenCode) {
                 ""
             } else {
                 " not"

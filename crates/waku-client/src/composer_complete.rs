@@ -111,8 +111,8 @@ pub fn is_land_submission(prompt: &str) -> bool {
 }
 
 /// Whether the catalog advertises a compact path: the reserved Waku builtin
-/// (Codex, OpenCode 2) or a provider-reported builtin (Pi, Claude, OpenCode,
-/// DeepSeek, an ACP agent). A project or user command that deliberately owns
+/// (Codex, OpenCode) or a provider-reported builtin (Pi, Claude, DeepSeek,
+/// an ACP agent). A project or user command that deliberately owns
 /// `/compact` doesn't count — resolution precedence keeps it.
 pub fn has_compact_path(commands: &[SlashCommand]) -> bool {
     commands.iter().any(|command| {

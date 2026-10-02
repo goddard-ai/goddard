@@ -212,11 +212,11 @@ pub(super) fn model_picker_subtitle(provider: ProviderKind, sub_provider: Option
 }
 
 /// Whether the provider can return a live session to the base model after a
-/// reasoning-effort pick. Both OpenCode majors express effort as a per-model
-/// `variant` whose base selection is `default`, so the picker gets an explicit
-/// Default row; other providers keep auto-selecting a catalog effort instead.
+/// reasoning-effort pick. OpenCode expresses effort as a per-model `variant`
+/// whose base selection is `default`, so the picker gets an explicit Default
+/// row; other providers keep auto-selecting a catalog effort instead.
 pub(super) fn supports_reasoning_default_reset(provider: ProviderKind) -> bool {
-    matches!(provider, ProviderKind::OpenCode | ProviderKind::OpenCode2)
+    matches!(provider, ProviderKind::OpenCode)
 }
 
 /// Whether the picker has nothing left to offer, so the composer's trigger

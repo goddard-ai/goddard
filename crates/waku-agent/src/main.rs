@@ -117,7 +117,7 @@ fn schema() -> serde_json::Value {
         "create": {
             "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation. The task inherits this task's access mode and run environment — a sandboxed task spawns sandboxed tasks.",
             "fields": {
-                "provider": {"type": "string", "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "goose", "grok", "kimi", "muse", "ohmypi", "pi"], "notes": "omit to run the new task on this task's provider; run `goddard-agent models` for the usable providers"},
+                "provider": {"type": "string", "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "goose", "grok", "kimi", "muse", "ohmypi", "pi"], "notes": "omit to run the new task on this task's provider; run `goddard-agent models` for the usable providers"},
                 "model": {"type": "string", "notes": "explicit provider model id — run `goddard-agent models` for the preference-ordered list of usable ids instead of guessing; \"auto\" routes the first prompt through Jev to pick provider and model (omit `provider`); \"default\" selects the provider's own default; omit to inherit this task's model when it runs the resolved provider"},
                 "project": {"type": "string", "required": true, "notes": "absolute path; resolves an existing project or registers a primary Git checkout (linked worktrees are rejected)"},
                 "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},

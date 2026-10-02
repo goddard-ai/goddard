@@ -15,7 +15,6 @@ export const PROVIDER_MENU_ICONS: Record<ProviderKind, ImageSourcePropType> = {
   droid: require('@/assets/images/providers/droid.png'),
   fx: require('@/assets/images/providers/fx.png'),
   openCode: require('@/assets/images/providers/openCode.png'),
-  openCode2: require('@/assets/images/providers/openCode2.png'),
   goose: require('@/assets/images/providers/goose.png'),
   grok: require('@/assets/images/providers/grok.png'),
   kimi: require('@/assets/images/providers/kimi.png'),

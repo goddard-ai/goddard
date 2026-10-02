@@ -313,32 +313,6 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_owned()).to_string()
 }
 
-/// OpenCode's `mcp` map entries for a set of launch MCP servers.
-pub(crate) fn opencode_config_entries(servers: &[McpServerSpec]) -> Map<String, Value> {
-    let mut mcp = Map::new();
-    for server in servers {
-        let value = if let Some((_, command, env)) = server.stdio_parts() {
-            serde_json::json!({
-                "type": "local",
-                "command": [command.display().to_string()],
-                "enabled": true,
-                "environment": env,
-            })
-        } else if let Some((_, url, token)) = server.http_parts() {
-            serde_json::json!({
-                "type": "remote",
-                "url": url,
-                "enabled": true,
-                "headers": { "Authorization": format!("Bearer {token}") },
-            })
-        } else {
-            continue;
-        };
-        mcp.insert(server.name().to_owned(), value);
-    }
-    mcp
-}
-
 /// One DeepSeek Cordis overlay row per integration — `dsh web --patch` takes
 /// the generated file at launch.
 pub(crate) fn deepseek_overlay_yaml(servers: &[McpServerSpec]) -> String {

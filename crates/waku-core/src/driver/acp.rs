@@ -113,10 +113,6 @@ fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow:
             args: vec!["exec".into(), "--output-format".into(), "acp".into()],
             env: Vec::new(),
         }),
-        ProviderKind::OpenCode => Ok(AcpLaunch {
-            args: vec!["acp".into()],
-            env: Vec::new(),
-        }),
         ProviderKind::Goose => Ok(AcpLaunch {
             args: vec!["acp".into()],
             env: Vec::new(),
@@ -2083,10 +2079,11 @@ async fn apply_model(
         }
     }
 
-    // Grok, Kimi, OpenCode, and Cursor agents that do not advertise a model
-    // config option retain the legacy request unchanged. Devin prefers
+    // Grok, Kimi, and Cursor agents that do not advertise a model config
+    // option retain the legacy request unchanged. Devin prefers
     // session/set_config_option above and only reaches this fallback when
-    // that method is itself missing. Fx stays on session/set_config_option.
+    // that method is itself missing. Fx intentionally stays on
+    // session/set_config_option, its documented model API.
     let request = match UntypedMessage::new(
         "session/set_model",
         set_model_params(session_id, model, reasoning_effort, provider),

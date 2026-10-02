@@ -76,7 +76,7 @@ argument**; `NO_COLOR=1` and `CI=1` are set for all of them.
 | DeepSeek Harness | `dsh` | `--profile headless` | — | — |
 | Devin CLI | `devin` | `--respect-workspace-trust false --print --` | `--model` | — |
 | Fx | `fx ask` | `--no-save --no-color --` | — | — |
-| OpenCode | `opencode run` | `--pure --agent plan` | `--model` | `--variant` |
+| OpenCode | `opencode run` | `--standalone --agent plan` | `--model` | `#<variant>` suffix on the model |
 | Grok Build | `grok` | `--single <prompt> --output-format plain --permission-mode plan --tools "" --no-memory --no-subagents --disable-web-search --verbatim` | `--model` | `--reasoning-effort` |
 | Pi | `pi` | `--print --no-session --no-tools --no-context-files --no-extensions --no-skills --no-prompt-templates --no-approve` | `--model` | `--thinking` |
 | Oh My Pi | `omp` | `--print --no-session --no-tools --no-rules --no-extensions --no-skills` | `--model` | `--thinking` |
@@ -122,6 +122,12 @@ Where a provider is not simply "flags plus prompt":
 - **Oh My Pi** rejects unknown flags outright, so it gets its own list rather
   than Pi's: context files are `--no-rules`, and it has no prompt-template or
   project-trust switch to turn off.
+- **OpenCode** runs `plan`, its read-only agent, on a private `--standalone`
+  server rather than on the user's background service, so a commit subject
+  neither starts that service nor queues behind it. The run is still an
+  ordinary session in OpenCode's history. Effort is the model's variant, sent
+  as `--model provider/model#low`; OpenCode rejects a variant without a model,
+  so effort is dropped when no model is chosen.
 - **Pi** needs the long list because each capability is its own switch.
   `--no-context-files` is its "disable `AGENTS.md` and `CLAUDE.md` discovery"
   flag, so repo instructions cannot contradict the fixed prompt.

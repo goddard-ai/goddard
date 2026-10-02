@@ -1756,7 +1756,7 @@ fn status_notice_icon(
         TranscriptNoticeStatus::Goal => "icons/goal.svg",
         TranscriptNoticeStatus::ProjectSwitched => "icons/folder.svg",
         TranscriptNoticeStatus::ModelSwitched => {
-            return crate::ui::provider_mark(theme, provider, size, color).into_any_element();
+            return crate::ui::provider_mark(provider, size, color).into_any_element();
         }
     };
     icon(path, size, color).into_any_element()

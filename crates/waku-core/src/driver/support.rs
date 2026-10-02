@@ -2,7 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use parking_lot::Mutex;
 use serde_json::Value;
 
 use crate::model::ActivityKind;
@@ -81,15 +80,14 @@ pub(super) fn classify_tool(name: &str) -> ActivityKind {
     ActivityKind::from_tool_name(name)
 }
 
-/// The permission policy both OpenCode majors share.
+/// OpenCode's permission policy.
 ///
 /// `permission_responses` translates every durable "always" choice into a
-/// one-shot provider reply and keeps the rule in driver-local state. On v1
-/// that protected a per-workspace pooled server. On v2 it is more
-/// load-bearing still: an `always` reply writes into `/api/permission/saved`,
-/// a GLOBAL store shared with the user's own terminal, so a Full Access Goddard
-/// task would silently disarm prompts in every other workspace and in the
-/// user's TUI. `always` is never put on the wire.
+/// one-shot provider reply and keeps the rule in driver-local state. An
+/// `always` reply would write into `/api/permission/saved`, a GLOBAL store
+/// shared with the user's own terminal, so a Full Access Goddard task would
+/// silently disarm prompts in every other workspace and in the user's TUI.
+/// `always` is never put on the wire.
 #[derive(Clone, Debug)]
 pub(super) struct OpenCodePermissionRequest {
     pub(super) permission: String,
@@ -167,18 +165,10 @@ fn opencode_wildcard_matches(input: &str, pattern: &str) -> bool {
     previous[input.len()]
 }
 
+/// The provider replies one answer to a permission card produces. The driver
+/// runs commands and events on one worker, so its permission state is
+/// thread-local and there is nothing to serialize against.
 pub(super) fn permission_responses(
-    permissions: &Mutex<OpenCodePermissionState>,
-    request_id: &str,
-    option_id: &str,
-) -> Vec<(String, String)> {
-    permission_responses_in(&mut permissions.lock(), request_id, option_id)
-}
-
-/// The same policy without the lock, for a driver whose permission state is
-/// already thread-local. OpenCode 2 runs commands and events on one worker, so
-/// there is nothing to serialize against.
-pub(super) fn permission_responses_in(
     permissions: &mut OpenCodePermissionState,
     request_id: &str,
     option_id: &str,
@@ -262,8 +252,8 @@ mod tests {
     }
     #[test]
     fn always_without_provider_rules_does_not_broaden_future_access() {
-        let permissions = Mutex::new(OpenCodePermissionState::default());
-        permissions.lock().pending.insert(
+        let mut permissions = OpenCodePermissionState::default();
+        permissions.pending.insert(
             "per_once".into(),
             OpenCodePermissionRequest {
                 permission: "bash".into(),
@@ -273,41 +263,37 @@ mod tests {
         );
 
         assert_eq!(
-            permission_responses(&permissions, "per_once", "always"),
+            permission_responses(&mut permissions, "per_once", "always"),
             [("per_once".into(), "once".into())]
         );
-        assert!(permissions.lock().approved.is_empty());
+        assert!(permissions.approved.is_empty());
     }
 
     #[test]
     fn always_resolves_matching_requests_that_are_already_pending() {
-        let permissions = Mutex::new(OpenCodePermissionState::default());
+        let mut permissions = OpenCodePermissionState::default();
         let request = |patterns: &[&str]| OpenCodePermissionRequest {
             permission: "bash".into(),
             patterns: patterns.iter().map(|pattern| (*pattern).into()).collect(),
             always: vec!["cargo *".into()],
         };
         permissions
-            .lock()
             .pending
             .insert("per_first".into(), request(&["cargo test"]));
         permissions
-            .lock()
             .pending
             .insert("per_matching".into(), request(&["cargo check"]));
         permissions
-            .lock()
             .pending
             .insert("per_other".into(), request(&["git status"]));
 
         assert_eq!(
-            permission_responses(&permissions, "per_first", "always"),
+            permission_responses(&mut permissions, "per_first", "always"),
             [
                 ("per_first".into(), "once".into()),
                 ("per_matching".into(), "once".into()),
             ]
         );
-        let permissions = permissions.lock();
         assert!(!permissions.pending.contains_key("per_matching"));
         assert!(permissions.pending.contains_key("per_other"));
     }

@@ -1300,7 +1300,7 @@ fn model_option_row(
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(provider_mark(&theme, kind, 12.0, theme.text_tertiary))
+                    .child(provider_mark(kind, 12.0, theme.text_tertiary))
                     .child(
                         div()
                             .min_w_0()

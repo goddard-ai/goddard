@@ -108,9 +108,9 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // subscription login. An invented fallback could expose an unusable
         // route, so discovery is authoritative.
         ProviderKind::Fx => Vec::new(),
-        // Discovery through the adopted v2 service is authoritative; a
-        // fabricated catalog would offer models the server rejects.
-        ProviderKind::OpenCode | ProviderKind::OpenCode2 => Vec::new(),
+        // Discovery through the adopted background service is authoritative;
+        // a fabricated catalog would offer models the server rejects.
+        ProviderKind::OpenCode => Vec::new(),
         // Grok's catalog comes from `grok models`, which includes any custom
         // model the user configured. An invented fallback would offer a model
         // the CLI rejects, so discovery is authoritative.
@@ -168,8 +168,7 @@ pub fn discover_catalog(
         ProviderKind::Devin => (discover_devin_models(binary), None),
         ProviderKind::Droid => (discover_droid_models(binary), None),
         ProviderKind::Fx => (discover_fx_models(binary), None),
-        ProviderKind::OpenCode => (discover_opencode_models(binary), None),
-        ProviderKind::OpenCode2 => crate::opencode2_session::discover_catalog(binary),
+        ProviderKind::OpenCode => crate::opencode_session::discover_catalog(binary),
         ProviderKind::Grok => (discover_grok_models(binary), None),
         // Goose's model lives in its own `goose configure` config; there is
         // no catalog to probe.
@@ -1084,79 +1083,6 @@ pub(crate) fn fold_packed_aliases(listings: Vec<ProviderModel>) -> Vec<ProviderM
     models
 }
 
-fn discover_opencode_models(binary: &Path) -> Vec<ProviderModel> {
-    let mut command = crate::command_env::command(binary);
-    // `--verbose` prints each model's full metadata as JSON, which is the only
-    // place the CLI exposes `variants` — the reasoning-effort ladder. The bare
-    // listing is ids alone, so parsing it left every OpenCode model without an
-    // effort control.
-    let command = command.args(["models", "--verbose"]);
-    let Ok(output) = command.output() else {
-        return Vec::new();
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let verbose = parse_opencode_verbose_models(&stdout);
-    if verbose.is_empty() {
-        // An older CLI without `--verbose` still prints the plain listing.
-        return parse_opencode_models(&stdout);
-    }
-    verbose
-}
-
-/// Reads the JSON blocks `opencode models --verbose` prints, one per model.
-///
-/// Each block is preceded by a `provider/model` heading, but the block itself
-/// carries `providerID` and `id`, so the headings are ignored and only
-/// balanced top-level objects are decoded. A block that fails to parse is
-/// skipped rather than failing the whole catalogue.
-fn parse_opencode_verbose_models(output: &str) -> Vec<ProviderModel> {
-    let cleaned = strip_ansi(output);
-    let mut models = Vec::new();
-    let mut block = String::new();
-    let mut depth = 0_usize;
-    for line in cleaned.lines() {
-        let trimmed = line.trim_end();
-        if depth == 0 && trimmed.trim() != "{" {
-            continue;
-        }
-        depth += trimmed.matches('{').count();
-        depth = depth.saturating_sub(trimmed.matches('}').count());
-        block.push_str(trimmed);
-        block.push('\n');
-        if depth == 0 {
-            if let Some(model) = parse_opencode_verbose_model(&block) {
-                models.push(model);
-            }
-            block.clear();
-        }
-    }
-    models
-}
-
-fn parse_opencode_verbose_model(block: &str) -> Option<ProviderModel> {
-    let value: Value = serde_json::from_str(block).ok()?;
-    let provider = value.get("providerID").and_then(Value::as_str)?.trim();
-    let id = value.get("id").and_then(Value::as_str)?.trim();
-    if provider.is_empty() || id.is_empty() {
-        return None;
-    }
-    let name = value
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| display_name_from_slug(id));
-    let model = ProviderModel::new(format!("{provider}/{id}"), name)
-        .sub_provider(display_name_from_slug(provider));
-    let variants = value
-        .get("variants")
-        .and_then(Value::as_object)
-        .map(|variants| variants.keys().map(String::as_str).collect::<Vec<_>>())
-        .unwrap_or_default();
-    Some(with_variant_efforts(model, variants))
-}
-
 fn discover_deepseek_catalog(
     binary: &Path,
 ) -> (Vec<ProviderModel>, Option<Vec<ProviderAgentPreset>>) {
@@ -1750,26 +1676,6 @@ fn parse_devin_model(value: &Value) -> Option<ProviderModel> {
         }
     }
     Some(model)
-}
-
-fn parse_opencode_models(output: &str) -> Vec<ProviderModel> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let id = strip_ansi(line).trim().to_owned();
-            if id.is_empty() || id.split_whitespace().count() != 1 || !id.contains('/') {
-                return None;
-            }
-            let (provider, model) = id.split_once('/')?;
-            if provider.is_empty() || model.is_empty() {
-                return None;
-            }
-            Some(
-                ProviderModel::new(id.clone(), display_name_from_slug(model))
-                    .sub_provider(display_name_from_slug(provider)),
-            )
-        })
-        .collect()
 }
 
 /// `agy models` prints `id<TAB>name` rows on stdout — the account's actual
@@ -2458,12 +2364,12 @@ pub(crate) fn reasoning_effort_pair(
 
 /// Attaches a model's OpenCode "variants" as its reasoning-effort ladder.
 ///
-/// Both OpenCode majors express reasoning effort as a per-model variant whose
-/// id is drawn from the same vocabulary Goddard already labels
+/// OpenCode expresses reasoning effort as a per-model variant whose id is
+/// drawn from the same vocabulary Goddard already labels
 /// (`none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`, plus provider-specific
-/// ones such as `thinking`), and the chosen id is sent verbatim — as the v1
-/// message body's `variant` and as v2's `ModelRef::variant`. Models with no
-/// variants keep an empty ladder, which is what hides the control.
+/// ones such as `thinking`), and the chosen id is sent verbatim as
+/// `ModelRef::variant`. Models with no variants keep an empty ladder, which is
+/// what hides the control.
 ///
 /// The default is the strongest offered rather than the weakest: a variant
 /// list is opt-in per model, so a model that publishes one is a reasoning
@@ -2899,73 +2805,6 @@ printf '%s\n' '{"type":"control_response","response":{"request_id":"waku-initial
         assert!(models[0].is_default);
     }
 
-    /// The exact shape `opencode models --verbose` prints, trimmed to the
-    /// fields Goddard reads. `variants` is the reasoning-effort ladder and is the
-    /// only reason to parse the verbose form at all.
-    #[test]
-    fn opencode_verbose_models_expose_their_variants_as_reasoning_efforts() {
-        let output = r#"opencode-go/deepseek-v4-flash
-{
-  "id": "deepseek-v4-flash",
-  "providerID": "opencode-go",
-  "name": "DeepSeek V4 Flash",
-  "variants": {
-    "low": { "reasoningEffort": "low" },
-    "high": { "reasoningEffort": "high" },
-    "max": { "reasoningEffort": "max" }
-  }
-}
-opencode/big-pickle
-{
-  "id": "big-pickle",
-  "providerID": "opencode",
-  "name": "Big Pickle",
-  "variants": {}
-}
-"#;
-        let models = parse_opencode_verbose_models(output);
-        assert_eq!(models.len(), 2, "{models:?}");
-
-        let flash = &models[0];
-        assert_eq!(flash.id, "opencode-go/deepseek-v4-flash");
-        assert_eq!(flash.name, "DeepSeek V4 Flash");
-        assert_eq!(
-            flash
-                .reasoning_efforts
-                .iter()
-                .map(|effort| effort.id.as_str())
-                .collect::<Vec<_>>(),
-            ["low", "high", "max"],
-            "provider ordering is preserved"
-        );
-        assert_eq!(flash.default_reasoning_effort.as_deref(), Some("max"));
-
-        // A model with no ladder keeps none, which is what hides the control.
-        assert!(models[1].reasoning_efforts.is_empty());
-        assert!(models[1].default_reasoning_effort.is_none());
-    }
-
-    /// A CLI too old for `--verbose` still prints the plain listing, so the
-    /// parser must not turn that into an empty catalogue.
-    #[test]
-    fn opencode_verbose_parsing_ignores_a_plain_listing() {
-        assert!(
-            parse_opencode_verbose_models(
-                "opencode-go/deepseek-v4-flash
-"
-            )
-            .is_empty()
-        );
-        assert_eq!(
-            parse_opencode_models(
-                "opencode-go/deepseek-v4-flash
-"
-            )
-            .len(),
-            1
-        );
-    }
-
     #[test]
     fn variant_efforts_default_to_the_strongest_offered() {
         let model = with_variant_efforts(ProviderModel::new("a/b", "B"), ["none", "thinking"]);
@@ -2980,17 +2819,6 @@ opencode/big-pickle
         // `thinking` is not on the known strength ladder, so the only ranked
         // id wins; an unranked id never becomes the default while one ranks.
         assert_eq!(model.default_reasoning_effort.as_deref(), Some("none"));
-    }
-
-    #[test]
-    fn parses_opencode_provider_qualified_models() {
-        let models = parse_opencode_models(
-            "opencode/big-pickle\n\u{1b}[32mgithub-copilot/gpt-5.4\u{1b}[0m\nnoise here\n",
-        );
-        assert_eq!(models.len(), 2);
-        assert_eq!(models[1].id, "github-copilot/gpt-5.4");
-        assert_eq!(models[1].name, "GPT-5.4");
-        assert_eq!(models[1].sub_provider.as_deref(), Some("Github Copilot"));
     }
 
     #[test]
@@ -4005,42 +3833,5 @@ done
                     .join(",")
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod opencode_effort_smoke {
-    /// Proves against the real CLI that the effort ladder is populated, which
-    /// canned JSON cannot.
-    #[test]
-    #[ignore = "requires an installed, authenticated opencode"]
-    fn discovers_reasoning_efforts_from_the_installed_cli() {
-        let models = super::discover_opencode_models(std::path::Path::new("opencode"));
-        let with_efforts: Vec<_> = models
-            .iter()
-            .filter(|model| !model.reasoning_efforts.is_empty())
-            .collect();
-        println!(
-            "models={} with efforts={}",
-            models.len(),
-            with_efforts.len()
-        );
-        for model in with_efforts.iter().take(4) {
-            println!(
-                "  {} -> {:?} (default {:?})",
-                model.id,
-                model
-                    .reasoning_efforts
-                    .iter()
-                    .map(|effort| effort.id.as_str())
-                    .collect::<Vec<_>>(),
-                model.default_reasoning_effort
-            );
-        }
-        assert!(!models.is_empty(), "expected a catalogue");
-        assert!(
-            !with_efforts.is_empty(),
-            "expected some models to expose variants"
-        );
     }
 }

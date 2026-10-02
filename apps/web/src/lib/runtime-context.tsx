@@ -1609,7 +1609,6 @@ function providerName(provider: AgentSession['provider']) {
       droid: 'Droid',
       fx: 'Fx',
       openCode: 'OpenCode',
-      openCode2: 'OpenCode 2',
       goose: 'Goose',
       grok: 'Grok',
       kimi: 'Kimi',

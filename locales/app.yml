@@ -542,7 +542,7 @@ settings.appearance_keywords:
 settings.terminal_keywords:
   en: terminal shell console font size text monospace link modifier command option alt ctrl click open mouse mode program vim htop copy select selection clipboard paste
 settings.providers_keywords:
-  en: providers agents models cli version install detect claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
+  en: providers agents models cli version install detect claude codex cursor opencode amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills:
   en: Skills
 settings.skills_keywords:
@@ -896,7 +896,7 @@ experiments.review_queue_description:
 experiments.subagents_title:
   en: Subagents
 experiments.subagents_description:
-  en: Let a session delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript. Claude Code, OpenCode, GitHub Copilot, and Pi support the full roster; Codex and OpenCode 2 are advisory-only, and other providers remain disabled. Read-only helpers are enforced only where the provider exposes a tool policy. Applies to sessions started after turning it on.
+  en: Let a session delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript. Claude Code, GitHub Copilot, and Pi support the full roster; Codex and OpenCode are advisory-only, and other providers remain disabled. Read-only helpers are enforced only where the provider exposes a tool policy. Applies to sessions started after turning it on.
 experiments.computer_use_title:
   en: Computer Use
 experiments.computer_use_description:
@@ -1927,7 +1927,7 @@ inference.context_speech:
 computer_use.allow_apps:
   en: Let Goddard use apps
 computer_use.availability:
-  en: Computer Use is available with Codex, OpenCode, OpenCode 2, Grok, and Pi
+  en: Computer Use is available with Codex, OpenCode, Grok, and Pi
 computer_use.desktop_access:
   en: Desktop access
 computer_use.windows_access_description:
@@ -2850,6 +2850,10 @@ activity.provider_retrying:
   en: Retrying the request
 activity.provider_retry_exhausted:
   en: Retries exhausted
+activity.provider_service_waiting:
+  en: Waiting for the %{provider} service
+activity.provider_service_reconnected:
+  en: Reconnected to the %{provider} service
 activity.background_shell:
   en: Background shell
 activity.output_truncated:

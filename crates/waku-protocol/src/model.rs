@@ -26,8 +26,11 @@ pub enum ProviderKind {
     Devin,
     Droid,
     Fx,
+    /// OpenCode 2 shipped as its own `opencode2` provider while it was in beta.
+    /// Its release took over the `opencode` command, so those sessions now
+    /// load as OpenCode.
+    #[serde(alias = "openCode2")]
     OpenCode,
-    OpenCode2,
     Goose,
     Grok,
     Kimi,
@@ -37,7 +40,7 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 17] = [
         Self::Antigravity,
         Self::Amp,
         Self::Claude,
@@ -49,7 +52,6 @@ impl ProviderKind {
         Self::Droid,
         Self::Fx,
         Self::OpenCode,
-        Self::OpenCode2,
         Self::Goose,
         Self::Grok,
         Self::Kimi,
@@ -71,7 +73,6 @@ impl ProviderKind {
             Self::Droid => "droid",
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
-            Self::OpenCode2 => "opencode2",
             Self::Goose => "goose",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
@@ -94,7 +95,6 @@ impl ProviderKind {
             Self::Droid => "Droid",
             Self::Fx => "Fx",
             Self::OpenCode => "OpenCode",
-            Self::OpenCode2 => "OpenCode 2",
             Self::Goose => "Goose",
             Self::Grok => "Grok Build",
             Self::Kimi => "Kimi Code",
@@ -110,7 +110,7 @@ impl ProviderKind {
     ///
     /// Providers are excluded when their transport cannot ride the guest's
     /// stdio channel: DeepSeek and Muse multiplex every session on one
-    /// resident host process, OpenCode and OpenCode 2 speak loopback HTTP
+    /// resident host process, OpenCode speaks loopback HTTP
     /// to a server the daemon must reach over TCP, Copilot's SDK owns its
     /// process spawn, and Antigravity is its own terminal TUI with no
     /// daemon driver at all.
@@ -176,7 +176,6 @@ impl ProviderKind {
             Self::Droid => "Droid",
             Self::Fx => "Fx",
             Self::OpenCode => "OpenCode",
-            Self::OpenCode2 => "OpenCode 2",
             Self::Goose => "Goose",
             Self::Grok => "Grok",
             Self::Kimi => "Kimi",
@@ -201,7 +200,6 @@ impl ProviderKind {
             Self::Droid => "droid",
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
-            Self::OpenCode2 => "opencode2",
             Self::Goose => "goose",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
@@ -311,13 +309,6 @@ impl ProviderKind {
                 api_key_env: None,
                 docs_url: "https://opencode.ai/docs",
             },
-            Self::OpenCode2 => ProviderSetup {
-                install: "curl -fsSL https://opencode.ai/v2/install | bash",
-                update: Some("opencode2 upgrade"),
-                sign_in: Some("opencode2 auth login"),
-                api_key_env: None,
-                docs_url: "https://opencode.ai/v2/docs",
-            },
             // Goose is multi-provider; `goose configure` interactively picks
             // the provider and model and stores credentials in its own config.
             Self::Goose => ProviderSetup {
@@ -389,7 +380,6 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
-                | Self::OpenCode2
                 | Self::Grok
                 | Self::Muse
                 | Self::OhMyPi
@@ -407,7 +397,6 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
-                | Self::OpenCode2
                 | Self::Grok
                 | Self::Muse
                 | Self::OhMyPi
@@ -428,7 +417,6 @@ impl ProviderKind {
                 | Self::Droid
                 | Self::Fx
                 | Self::OpenCode
-                | Self::OpenCode2
                 | Self::Grok
                 | Self::Kimi
                 | Self::Muse
@@ -438,13 +426,13 @@ impl ProviderKind {
     }
 
     /// Transports with a dedicated compact RPC the daemon calls directly —
-    /// Codex's `thread/compact/start` and OpenCode 2's
+    /// Codex's `thread/compact/start` and OpenCode's
     /// `POST /api/session/{id}/compact`. For every other provider a compact
     /// path exists only when the provider's own command catalog reports one,
     /// so this predicate marks the transports whose composer `/compact` entry
     /// is a Waku-reserved builtin that shadows any provider-reported command.
     pub fn supports_compact(self) -> bool {
-        matches!(self, Self::Codex | Self::OpenCode2)
+        matches!(self, Self::Codex | Self::OpenCode)
     }
 }
 
@@ -506,10 +494,11 @@ pub enum ProviderResumeCursor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fork_context: Option<String>,
     },
+    /// `directory` is the canonical workspace path the service stored for
+    /// the session. It is absent from cursors written before OpenCode 2, whose
+    /// sessions the service migrates under their original ids.
+    #[serde(alias = "openCode2")]
     OpenCode {
-        session_id: String,
-    },
-    OpenCode2 {
         session_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         directory: Option<String>,
@@ -578,8 +567,7 @@ impl ProviderResumeCursor {
             ProviderKind::Devin => Self::Devin { session_id: id },
             ProviderKind::Droid => Self::Droid { session_id: id },
             ProviderKind::Fx => Self::Fx { session_id: id },
-            ProviderKind::OpenCode => Self::OpenCode { session_id: id },
-            ProviderKind::OpenCode2 => Self::OpenCode2 {
+            ProviderKind::OpenCode => Self::OpenCode {
                 session_id: id,
                 directory: None,
             },
@@ -614,7 +602,6 @@ impl ProviderResumeCursor {
             Self::Droid { .. } => ProviderKind::Droid,
             Self::Fx { .. } => ProviderKind::Fx,
             Self::OpenCode { .. } => ProviderKind::OpenCode,
-            Self::OpenCode2 { .. } => ProviderKind::OpenCode2,
             Self::Goose { .. } => ProviderKind::Goose,
             Self::Grok { .. } => ProviderKind::Grok,
             Self::Kimi { .. } => ProviderKind::Kimi,
@@ -635,8 +622,7 @@ impl ProviderResumeCursor {
             | Self::Devin { session_id }
             | Self::Droid { session_id }
             | Self::Fx { session_id }
-            | Self::OpenCode { session_id }
-            | Self::OpenCode2 { session_id, .. }
+            | Self::OpenCode { session_id, .. }
             | Self::Goose { session_id }
             | Self::Grok { session_id }
             | Self::Kimi { session_id }
@@ -3718,7 +3704,7 @@ pub fn tool_name_leaf(name: &str) -> String {
 }
 
 /// Whether a provider tool name dispatches a subagent rather than running
-/// inline — `task` (Claude/OpenCode), `subagent` (OpenCode 2), `spawn_agent`
+/// inline — `task` (Claude/OpenCode), `subagent` (OpenCode), `spawn_agent`
 /// (Codex), `goddard_delegate` (Goddard's Pi extension). Exact-leaf match only;
 /// an MCP `create_task` does not qualify. `wakudelegate` stays so transcripts
 /// recorded before the rename still attribute their tool calls.
@@ -4885,7 +4871,7 @@ fn title_in_any_locale(title: &str, keys: &[&str]) -> bool {
 
 /// Whether the activity is a context-compaction receipt: drivers stamp the
 /// `contextCompaction` item (Codex) and `session.compaction.*` reports
-/// (OpenCode 2) with these keys. Compaction is a session event rather than
+/// (OpenCode) with these keys. Compaction is a session event rather than
 /// turn work — renderers keep its row visible after the turn folds so
 /// `/compact` leaves a durable record.
 pub fn is_context_compaction(activity: &ActivityItem) -> bool {
@@ -6782,9 +6768,8 @@ mod tests {
         assert_eq!(ProviderKind::Droid.command(), "droid");
         assert_eq!(ProviderKind::Droid.display_name(), "Droid");
         assert_eq!(ProviderKind::Fx.command(), "fx");
+        assert_eq!(ProviderKind::OpenCode.id(), "opencode");
         assert_eq!(ProviderKind::OpenCode.command(), "opencode");
-        assert_eq!(ProviderKind::OpenCode2.id(), "opencode2");
-        assert_eq!(ProviderKind::OpenCode2.command(), "opencode2");
         assert_eq!(ProviderKind::Grok.command(), "grok");
         assert_eq!(ProviderKind::Pi.command(), "pi");
     }
@@ -6836,14 +6821,12 @@ mod tests {
         assert!(ProviderKind::Fx.supports_model_discovery());
         assert!(!ProviderKind::Goose.supports_model_discovery());
         assert!(ProviderKind::OpenCode.supports_model_discovery());
-        assert!(ProviderKind::OpenCode2.supports_model_discovery());
         assert!(ProviderKind::Grok.supports_model_discovery());
         assert!(ProviderKind::Kimi.supports_model_discovery());
         assert!(ProviderKind::OhMyPi.supports_model_discovery());
         assert!(ProviderKind::Pi.supports_model_discovery());
     }
 
-    #[test]
     fn devin_cursor_round_trips_with_its_wire_tag() {
         let cursor = ProviderResumeCursor::from_session_id(ProviderKind::Devin, "ses_dev".into());
         let json = serde_json::to_string(&cursor).unwrap();
@@ -6872,37 +6855,71 @@ mod tests {
     }
 
     #[test]
-    fn opencode2_cursor_round_trips_with_its_wire_tag() {
-        let cursor =
-            ProviderResumeCursor::from_session_id(ProviderKind::OpenCode2, "ses_abc".into());
+    fn opencode_cursor_round_trips_with_its_wire_tag() {
+        let cursor = ProviderResumeCursor::OpenCode {
+            session_id: "ses_abc".into(),
+            directory: Some("/work/waku".into()),
+        };
         let json = serde_json::to_string(&cursor).unwrap();
-        assert!(json.contains("\"provider\":\"openCode2\""), "{json}");
+        assert!(json.contains("\"provider\":\"openCode\""), "{json}");
         assert!(json.contains("\"sessionId\":\"ses_abc\""), "{json}");
-        assert_eq!(cursor.provider(), ProviderKind::OpenCode2);
+        assert!(json.contains("\"directory\":\"/work/waku\""), "{json}");
+        assert_eq!(cursor.provider(), ProviderKind::OpenCode);
         assert_eq!(cursor.native_id(), "ses_abc");
         assert_eq!(
-            serde_json::to_value(ProviderKind::OpenCode2).unwrap(),
-            serde_json::json!("openCode2")
+            serde_json::from_str::<ProviderResumeCursor>(&json).unwrap(),
+            cursor
         );
     }
 
-    /// OpenCode 2 must not share v1's cursor variant: every driver asserts
-    /// `cursor.provider() == provider` before resuming, and a shared variant
-    /// would let a v1 session resume against the v2 server.
+    /// Sessions saved while OpenCode 2 was a separate beta provider, and
+    /// OpenCode 1 cursors without a directory, both resume as OpenCode: the
+    /// released `opencode` command is OpenCode 2, and it migrates OpenCode 1
+    /// history under the original session ids.
     #[test]
-    fn opencode_cursors_are_distinct_per_major_version() {
-        let v1 = ProviderResumeCursor::from_session_id(ProviderKind::OpenCode, "ses_x".into());
-        let v2 = ProviderResumeCursor::from_session_id(ProviderKind::OpenCode2, "ses_x".into());
-        assert_ne!(v1.provider(), v2.provider());
-        assert_ne!(
-            serde_json::to_value(&v1).unwrap(),
-            serde_json::to_value(&v2).unwrap()
+    fn earlier_opencode_providers_and_cursors_load_as_opencode() {
+        assert_eq!(
+            serde_json::from_value::<ProviderKind>(serde_json::json!("openCode2")).unwrap(),
+            ProviderKind::OpenCode
+        );
+        assert_eq!(
+            serde_json::to_value(ProviderKind::OpenCode).unwrap(),
+            serde_json::json!("openCode")
+        );
+        let beta: ProviderResumeCursor = serde_json::from_value(serde_json::json!({
+            "provider": "openCode2",
+            "sessionId": "ses_beta",
+            "directory": "/work/waku",
+        }))
+        .unwrap();
+        assert_eq!(
+            beta,
+            ProviderResumeCursor::OpenCode {
+                session_id: "ses_beta".into(),
+                directory: Some("/work/waku".into()),
+            }
+        );
+        let v1: ProviderResumeCursor = serde_json::from_value(serde_json::json!({
+            "provider": "openCode",
+            "sessionId": "ses_v1",
+        }))
+        .unwrap();
+        assert_eq!(
+            v1,
+            ProviderResumeCursor::OpenCode {
+                session_id: "ses_v1".into(),
+                directory: None,
+            }
+        );
+        assert!(
+            !serde_json::to_string(&v1).unwrap().contains("directory"),
+            "an unknown directory is omitted rather than written as null"
         );
     }
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 18);
+        assert_eq!(ProviderKind::ALL.len(), 17);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(

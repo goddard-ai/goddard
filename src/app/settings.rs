@@ -8022,7 +8022,7 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(provider_mark(&theme, provider, 15.0, theme.text_secondary))
+                    .child(provider_mark(provider, 15.0, theme.text_secondary))
                     .child(
                         div()
                             .min_w_0()
@@ -8088,7 +8088,7 @@ impl Waku {
                                 ),
                                 PickerRow::Policy(_) => return div().into_any_element(),
                             };
-                            let mark = provider_mark(&theme, provider, 12.0, theme.text_tertiary)
+                            let mark = provider_mark(provider, 12.0, theme.text_tertiary)
                                 .into_any_element();
                             let selected = match row {
                                 PickerRow::ProviderDefault(kind) => {
@@ -9178,8 +9178,7 @@ impl Waku {
                             });
                             picker_provider_rail_item(
                                 kind,
-                                provider_mark(&theme, kind, 18.0, theme.text_tertiary)
-                                    .into_any_element(),
+                                provider_mark(kind, 18.0, theme.text_tertiary).into_any_element(),
                                 active,
                                 route_class_picker_state,
                             )
@@ -9204,13 +9203,13 @@ impl Waku {
                         let (mark, title, subtitle) = match row {
                             PickerRow::Policy(policy) => policy_row_parts(*policy, &theme),
                             PickerRow::ProviderDefault(provider) => (
-                                provider_mark(&theme, *provider, 12.0, theme.text_tertiary)
+                                provider_mark(*provider, 12.0, theme.text_tertiary)
                                     .into_any_element(),
                                 provider.short_name().to_owned(),
                                 tr!("routing.provider_default"),
                             ),
                             PickerRow::Combo(row) => (
-                                provider_mark(&theme, row.provider, 12.0, theme.text_tertiary)
+                                provider_mark(row.provider, 12.0, theme.text_tertiary)
                                     .into_any_element(),
                                 row.model
                                     .name_i18n
@@ -12077,7 +12076,6 @@ impl Waku {
                         .items_center()
                         .justify_center()
                         .child(provider_mark(
-                            &theme,
                             kind,
                             16.0,
                             theme
@@ -12885,7 +12883,7 @@ impl Waku {
                                 ),
                                 PickerRow::Policy(_) => return div().into_any_element(),
                             };
-                            let mark = provider_mark(&theme, provider, 12.0, theme.text_tertiary)
+                            let mark = provider_mark(provider, 12.0, theme.text_tertiary)
                                 .into_any_element();
                             let selected = match row {
                                 PickerRow::ProviderDefault(kind) => {
@@ -15324,7 +15322,7 @@ fn provider_class_header(provider: ProviderKind, theme: Theme) -> AnyElement {
         .flex()
         .items_center()
         .gap(px(8.0))
-        .child(provider_mark(&theme, provider, 15.0, theme.text_secondary))
+        .child(provider_mark(provider, 15.0, theme.text_secondary))
         .child(
             div()
                 .text_size(sp(12.5))

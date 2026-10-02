@@ -1454,7 +1454,7 @@ impl Waku {
                 .label(selected_model_name)
                 .suffix("Jev")
         } else {
-            chip.provider(&theme, provider, theme.text_tertiary)
+            chip.provider(provider, theme.text_tertiary)
                 .label(selected_model_name)
         };
 
@@ -1679,7 +1679,7 @@ impl Waku {
                 });
                 picker_provider_rail_item(
                     kind,
-                    provider_mark(&theme, kind, 18.0, theme.text_tertiary).into_any_element(),
+                    provider_mark(kind, 18.0, theme.text_tertiary).into_any_element(),
                     active,
                     model_picker_state,
                 )
@@ -1808,8 +1808,7 @@ impl Waku {
                     .child(model_picker_row_body(
                         provider.short_name().to_owned(),
                         [],
-                        provider_mark(&theme, *provider, 12.0, theme.text_tertiary)
-                            .into_any_element(),
+                        provider_mark(*provider, 12.0, theme.text_tertiary).into_any_element(),
                         tr!("routing.provider_default"),
                         &theme,
                     ))
@@ -1931,7 +1930,7 @@ impl Waku {
                                 .flex()
                                 .items_center()
                                 .gap(px(8.0))
-                                .child(provider_mark(&theme, kind, 12.0, theme.text_tertiary))
+                                .child(provider_mark(kind, 12.0, theme.text_tertiary))
                                 .child(
                                     div()
                                         .min_w_0()

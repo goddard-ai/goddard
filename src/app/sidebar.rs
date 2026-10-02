@@ -5886,12 +5886,7 @@ impl Waku {
                     .line_height(sp(15.0))
                     .when_some(model_detail, |element, label| {
                         element
-                            .child(provider_mark(
-                                &theme,
-                                session.provider,
-                                12.5,
-                                theme.text_tertiary,
-                            ))
+                            .child(provider_mark(session.provider, 12.5, theme.text_tertiary))
                             .child(
                                 div()
                                     .flex_1()

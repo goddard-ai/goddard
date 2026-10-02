@@ -5393,7 +5393,28 @@ impl Waku {
                                 .child(hint),
                         )
                     })
-                    .when(resume_view, |empty| {
+                    .when(show_loading_state, |empty| {
+                        let provider = self.command_palette.resume_provider;
+                        empty.child(
+                            div()
+                                .mt(px(12.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(7.0))
+                                .child(provider_mark(
+                                    provider,
+                                    13.0,
+                                    provider_color(&theme, provider),
+                                ))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_secondary)
+                                        .child(provider.display_name().to_owned()),
+                                ),
+                        )
+                    })
+                    .when(resume_view && !show_loading_state, |empty| {
                         let provider = self.command_palette.resume_provider;
                         empty.child(
                             div()
@@ -5410,7 +5431,11 @@ impl Waku {
                                 .cursor_default()
                                 .hover(|button| button.bg(theme.overlay))
                                 .active(|button| button.opacity(0.82))
-                                .child(provider_mark(&theme, provider, 13.0, theme.text_secondary))
+                                .child(provider_mark(
+                                    provider,
+                                    13.0,
+                                    provider_color(&theme, provider),
+                                ))
                                 .child(
                                     div()
                                         .text_size(sp(12.5))
@@ -5452,13 +5477,16 @@ impl Waku {
                 }
 
                 let highlighted = index == selected;
-                let icon_color = theme.text_secondary;
-                // A provider row renders through `provider_mark` so OpenCode 2
-                // keeps its badge; an asset row stays a plain tinted icon.
+                let icon_color = match item.icon {
+                    PaletteIcon::Asset(_) => theme.text_secondary,
+                    PaletteIcon::Provider(provider) => provider_color(&theme, provider),
+                };
+                // A provider row renders through `provider_mark`; an asset row
+                // stays a plain tinted icon.
                 let row_mark = match item.icon {
                     PaletteIcon::Asset(path) => icon(path, 16.0, icon_color).into_any_element(),
                     PaletteIcon::Provider(provider) => {
-                        provider_mark(&theme, provider, 16.0, icon_color).into_any_element()
+                        provider_mark(provider, 16.0, icon_color).into_any_element()
                     }
                 };
                 let importing = match &item.action {

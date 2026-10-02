@@ -1,6 +1,6 @@
 //! Session instructions for the CLI on an adopted OpenCode service.
-use crate::opencode2_api;
-use crate::opencode2_service::Opencode2Service;
+use crate::opencode_api;
+use crate::opencode_service::OpenCodeService;
 use std::sync::Arc;
 
 pub(super) const INSTRUCTION_KEY: &str = "goddard-computer-use";
@@ -16,17 +16,17 @@ pub(super) fn tool_identity(name: &str) -> Option<(&str, &str)> {
 
 /// Retire only the random, reserved names emitted by the former bridge.
 /// User server names and all connected integration registrations are retained.
-pub(super) fn cleanup_legacy(service: &Arc<Opencode2Service>, directory: &str, session: &str) {
+pub(super) fn cleanup_legacy(service: &Arc<OpenCodeService>, directory: &str, session: &str) {
     let endpoint = service.endpoint();
-    let _ = opencode2_api::remove_instruction_entry(&endpoint, session, INSTRUCTION_KEY);
-    match opencode2_api::list_mcp(&endpoint, directory) {
+    let _ = opencode_api::remove_instruction_entry(&endpoint, session, INSTRUCTION_KEY);
+    match opencode_api::list_mcp(&endpoint, directory) {
         Ok(servers) => {
             for server in servers {
                 if let Some(name) = server["name"]
                     .as_str()
                     .filter(|name| legacy_server_name(name))
                 {
-                    if let Err(error) = opencode2_api::remove_mcp(&endpoint, directory, name) {
+                    if let Err(error) = opencode_api::remove_mcp(&endpoint, directory, name) {
                         eprintln!("could not remove legacy Goddard Computer Use server: {error}");
                     }
                 }

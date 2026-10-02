@@ -12,8 +12,7 @@ mod deepseek;
 mod mcp;
 mod muse;
 mod opencode;
-mod opencode2;
-mod opencode2_computer_use;
+mod opencode_computer_use;
 mod pi;
 mod support;
 mod title_refresh;
@@ -422,13 +421,10 @@ pub(crate) fn start_local(
         | ProviderKind::Droid
         | ProviderKind::Goose => Arc::new(acp::AcpDriver::start(provider, options, events)?),
         ProviderKind::DeepSeek => Arc::new(deepseek::DeepSeekDriver::start(options, events)?),
-        // OpenCode's own server is its real API, and it is what exposes
-        // interactive permission requests.
-        ProviderKind::OpenCode => Arc::new(opencode::OpenCodeDriver::start(options, events)?),
-        // OpenCode 2 is not a per-workspace server: one adopted background
+        // OpenCode is not a per-workspace server: one adopted background
         // service carries every workspace, and every Goddard task rides its one
         // event stream.
-        ProviderKind::OpenCode2 => Arc::new(opencode2::OpenCode2Driver::start(options, events)?),
+        ProviderKind::OpenCode => Arc::new(opencode::OpenCodeDriver::start(options, events)?),
         // Muse is the same shape but Goddard owns the host: one `muse serve`
         // multiplexes every session's MSP view over a single stdio connection.
         ProviderKind::Muse => Arc::new(muse::MuseDriver::start(options, events)?),

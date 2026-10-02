@@ -113,8 +113,8 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
 /// - Claude Code: `.claude/commands` and `.claude/skills` in the project and
 ///   the config dir (`$CLAUDE_CONFIG_DIR`, default `~/.claude`).
 /// - Codex: `~/.codex/prompts`, expanded by Goddard at submit.
-/// - OpenCode: `.opencode/command` and `~/.config/opencode/command`, resolved
-///   by the server's native command endpoint.
+/// - OpenCode: `.opencode/command(s)` and `~/.config/opencode/command(s)`,
+///   resolved by the server's native command endpoint.
 /// - Cursor: `.cursor/commands` in the project and home, expanded by Goddard.
 /// - Pi: prompt templates in `.pi/prompts` and `~/.pi/agent/prompts`,
 ///   expanded by Goddard, plus skills in `.pi/skills` and `~/.pi/agent/skills`.
@@ -200,20 +200,18 @@ fn assemble_slash_commands(
                 scan_skill_files(provider, &home.join(".codex/skills"), &mut commands);
             }
         }
-        // OpenCode 2 publishes commands and skills over its v2 API
-        // (`GET /api/command`, `GET /api/skill`), so it seeds nothing from
-        // the filesystem here. The shared `.agents/skills` + `.goddard/commands`
-        // layer below still applies.
-        ProviderKind::OpenCode2 => {}
         // Antigravity keeps plugins and skills inside its own TUI surface.
         ProviderKind::Antigravity => {}
         ProviderKind::OpenCode => {
-            scan_command_files(
-                &project_root.join(".opencode/command"),
-                CommandScope::Project,
-                false,
-                &mut commands,
-            );
+            // OpenCode reads both spellings of its command directory.
+            for directory in [".opencode/command", ".opencode/commands"] {
+                scan_command_files(
+                    &project_root.join(directory),
+                    CommandScope::Project,
+                    false,
+                    &mut commands,
+                );
+            }
             scan_skill_files(
                 provider,
                 &project_root.join(".opencode/skills"),
@@ -226,12 +224,14 @@ fn assemble_slash_commands(
                 &mut commands,
             );
             if let Some(home) = home.as_deref() {
-                scan_command_files(
-                    &home.join(".config/opencode/command"),
-                    CommandScope::User,
-                    false,
-                    &mut commands,
-                );
+                for directory in [".config/opencode/command", ".config/opencode/commands"] {
+                    scan_command_files(
+                        &home.join(directory),
+                        CommandScope::User,
+                        false,
+                        &mut commands,
+                    );
+                }
                 scan_skill_files(
                     provider,
                     &home.join(".config/opencode/skills"),
@@ -1423,10 +1423,10 @@ mod tests {
     fn opencode_commands_use_native_dispatch_while_waku_templates_still_expand() {
         let root =
             std::env::temp_dir().join(format!("waku-native-commands-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join(".opencode/command")).unwrap();
+        std::fs::create_dir_all(root.join(".opencode/commands")).unwrap();
         std::fs::create_dir_all(root.join(".waku/commands")).unwrap();
         std::fs::write(
-            root.join(".opencode/command/native-review.md"),
+            root.join(".opencode/commands/native-review.md"),
             "Review $ARGUMENTS",
         )
         .unwrap();

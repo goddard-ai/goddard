@@ -284,7 +284,7 @@ settings.group_agents: エージェント
 settings.group_git: Git
 settings.group_notifications: 通知
 settings.group_transcript: トランスクリプト
-settings.providers_keywords: プロバイダー エージェント モデル CLI バージョン インストール 検出 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
+settings.providers_keywords: プロバイダー エージェント モデル CLI バージョン インストール 検出 claude codex cursor opencode amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: スキル
 settings.skills_keywords: スキル ライブラリ エージェント 無効 有効 削除 claude codex cursor opencode pi amp 共有 fx devin
 settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシュ 日別 グラフ モデル 内訳 履歴 claude codex
@@ -602,7 +602,7 @@ inference.context_text: テキスト
 inference.context_speech: 音声
 
 computer_use.allow_apps: Goddard にアプリの操作を許可
-computer_use.availability: コンピュータ操作は Codex、OpenCode、OpenCode 2、Grok、Pi で利用できます
+computer_use.availability: コンピュータ操作は Codex、OpenCode、Grok、Pi で利用できます
 computer_use.macos_access: macOS のアクセス権
 computer_use.helper_access: Goddard の分離された操作ヘルパー %{helper} にアクセスを許可してください
 computer_use.screen_recording: 画面収録
@@ -1004,6 +1004,13 @@ activity.activity: アクティビティ
 activity.tool: ツール
 activity.subagent: "サブエージェント：%{title}"
 activity.plan_updated: プランを更新しました
+activity.compacting_context: コンテキストを圧縮しています
+activity.compacted_context: コンテキストを圧縮しました
+activity.compaction_failed: コンテキストの圧縮に失敗しました
+activity.provider_retrying: リクエストを再試行しています
+activity.provider_service_waiting: "%{provider} サービスを待機しています"
+activity.provider_service_reconnected: "%{provider} サービスに再接続しました"
+activity.background_shell: バックグラウンドシェル
 activity.output_truncated: "\n\n… 出力は省略されました"
 activity.thought: 思考
 activity.thoughts: 思考
@@ -1024,12 +1031,7 @@ activity.plan_step: プランのステップ
 activity.plan_steps: プランのステップ
 activity.tool_call: ツール呼び出し
 activity.tool_calls: ツール呼び出し
-activity.compacting_context: コンテキストを圧縮中
-activity.compacted_context: コンテキストを圧縮しました
-activity.compaction_failed: コンテキストの圧縮に失敗しました
-activity.provider_retrying: リクエストを再試行中
 activity.provider_retry_exhausted: 再試行が尽きました
-activity.background_shell: バックグラウンドシェル
 
 mode.supervised: 監督モード
 mode.auto_accept_edits: 編集を自動承認
@@ -2289,7 +2291,7 @@ experiments.sandbox_description: 入力欄のアクセスメニューに環境�
 experiments.sandbox_title: サンドボックス VM
 experiments.sidebar_dock_description: ホバーでサイドバーのフッターの上に現れるクイックアクションドックです — 受信トレイ、アーカイブ、キーボードショートカット、設定にワンクリックでアクセスできます。
 experiments.sidebar_dock_title: サイドバードック
-experiments.subagents_description: セッションが実行を名前付きサブエージェントに委任できるようにします。Claude Code、OpenCode、GitHub Copilot、Pi は完全対応、Codex と OpenCode 2 は助言のみ、それ以外のプロバイダーでは無効です。読み取り専用ヘルパーの強制は、ツールポリシーを提供するプロバイダーに限られます。有効化後に開始したセッションに適用されます。
+experiments.subagents_description: セッションが実行を名前付きサブエージェントに委任できるようにします。Claude Code、GitHub Copilot、Pi は完全対応、Codex と OpenCode は助言のみ、それ以外のプロバイダーでは無効です。読み取り専用ヘルパーの強制は、ツールポリシーを提供するプロバイダーに限られます。有効化後に開始したセッションに適用されます。
 experiments.subagents_title: サブエージェント
 experiments.voice_briefing_title: 音声ブリーフィング
 experiments.voice_briefing_description: 最新の返信が長いタスクを開くと、約45秒の要約を読み上げます — エージェントが行ったことと、あなたに必要な判断や対応を伝えます。設定済みの推論プロバイダーと下のモデルを使います。

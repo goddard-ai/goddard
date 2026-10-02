@@ -282,7 +282,7 @@ settings.group_agents: 智能体
 settings.group_git: Git
 settings.group_notifications: 通知
 settings.group_transcript: 转录
-settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
+settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: 技能
 settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude codex cursor opencode pi amp 共享 fx devin
 settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型 明细 历史 claude codex
@@ -595,7 +595,7 @@ inference.context_eval: 评估
 inference.context_text: 文本
 inference.context_speech: 语音
 computer_use.allow_apps: 允许 Goddard 操作其他应用
-computer_use.availability: Codex、OpenCode、OpenCode 2、Grok 和 Pi 支持电脑操作功能
+computer_use.availability: Codex、OpenCode、Grok 和 Pi 支持电脑操作功能
 computer_use.macos_access: macOS 权限
 computer_use.helper_access: 请向 Goddard 的独立控制助手 %{helper} 授予权限
 computer_use.screen_recording: 屏幕录制
@@ -990,6 +990,13 @@ activity.activity: 操作
 activity.tool: 工具
 activity.subagent: "子智能体：%{title}"
 activity.plan_updated: 计划已更新
+activity.compacting_context: 正在压缩上下文
+activity.compacted_context: 已压缩上下文
+activity.compaction_failed: 上下文压缩失败
+activity.provider_retrying: 正在重试请求
+activity.provider_service_waiting: "正在等待 %{provider} 服务"
+activity.provider_service_reconnected: "已重新连接 %{provider} 服务"
+activity.background_shell: 后台终端
 activity.output_truncated: "\n\n… 输出已截断"
 activity.thought: 思考
 activity.thoughts: 思考
@@ -1010,12 +1017,7 @@ activity.plan_step: 计划步骤
 activity.plan_steps: 计划步骤
 activity.tool_call: 工具调用
 activity.tool_calls: 工具调用
-activity.compacting_context: 正在压缩上下文
-activity.compacted_context: 已压缩上下文
-activity.compaction_failed: 上下文压缩失败
-activity.provider_retrying: 正在重试请求
 activity.provider_retry_exhausted: 重试次数已用尽
-activity.background_shell: 后台 shell
 mode.supervised: 监督
 mode.auto_accept_edits: 自动接受修改
 mode.auto: 自动
@@ -2240,7 +2242,7 @@ experiments.sandbox_description: 在输入框的访问菜单中显示环境选�
 experiments.sandbox_title: 沙箱 VM
 experiments.sidebar_dock_description: 一个悬停时在侧边栏底部升起的快捷操作坞 — 收件箱、归档、键盘快捷键和设置一键可达。
 experiments.sidebar_dock_title: 侧边栏操作坞
-experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。Claude Code、OpenCode、GitHub Copilot 和 Pi 完全支持；Codex 和 OpenCode 2 仅提供建议；其他服务商保持禁用。只有提供工具策略的服务商会强制执行只读助手。对开启后启动的会话生效。
+experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。Claude Code、GitHub Copilot 和 Pi 完全支持；Codex 和 OpenCode 仅提供建议；其他服务商保持禁用。只有提供工具策略的服务商会强制执行只读助手。对开启后启动的会话生效。
 experiments.subagents_title: 子智能体
 experiments.voice_briefing_title: 语音简报
 experiments.voice_briefing_description: 打开最新回复较长的任务时，会朗读约 45 秒的摘要 — 说明智能体做了什么，以及需要你作出的决定或采取的行动。使用已配置的推理服务商和下方模型运行。
