@@ -3005,6 +3005,11 @@ pub struct Waku {
     /// Groups the user has folded in either sidebar view. This is
     /// intentionally runtime-only, like transcript disclosure state.
     sidebar_collapsed_groups: HashSet<SidebarGroup>,
+    /// The Terminals group was opened by a deliberate gesture — its sidebar
+    /// row or the Terminals chord — rather than unfolding to reveal a
+    /// terminal selection. While held, picking a chat or a page leaves the
+    /// group open; any fold releases the hold.
+    terminals_group_held_open: bool,
     /// The project "Focus project…" pinned the sidebar to: its rows are the
     /// only session history shown, ⌘D's sweep and the palette's task
     /// results stay inside it, and new tasks land there by default.
@@ -6734,6 +6739,7 @@ impl Waku {
                     SidebarGroup::Terminals,
                     SidebarGroup::Dormant,
                 ]),
+                terminals_group_held_open: false,
                 focused_project: None,
                 sidebar_alt_held: false,
                 sidebar_alt_modifier_down: false,

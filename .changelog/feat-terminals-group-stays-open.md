@@ -1,0 +1,1 @@
+- Opening the Terminals sidebar group now keeps it open while you switch to a task, Inbox, Drafts, Automations, or a project page — it folds again only when you collapse it yourself or close its last terminal.

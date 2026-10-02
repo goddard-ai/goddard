@@ -451,14 +451,7 @@ impl Waku {
         // not use — the Dormant group holds it until a prompt's `updated_at`
         // bump overtakes `dormant_at`. Explicit restores (the context menu,
         // ⌥-click) still go through `restore_dormant_sessions`.
-        // Selecting a chat folds the Terminals group; the terminal keeps its
-        // last-visible memory for the next expand.
-        if self
-            .sidebar_collapsed_groups
-            .insert(SidebarGroup::Terminals)
-        {
-            self.sidebar_rows_fingerprint.set(None);
-        }
+        self.fold_terminals_group_for_navigation();
         // Dormant containers stay put — the reveal only makes the selected
         // row exist inside them.
         self.reveal_dormant_sidebar_session(session_id, cx);

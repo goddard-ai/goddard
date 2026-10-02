@@ -4529,6 +4529,7 @@ impl Waku {
                 .remove(&group)
                 .is_some();
         }
+        self.terminals_group_held_open = false;
         if changed {
             self.sidebar_rows_fingerprint.set(None);
             cx.notify();
@@ -4546,6 +4547,11 @@ impl Waku {
         } else {
             self.sidebar_collapsed_groups.remove(&group)
         };
+        // Any fold of the Terminals group releases the hold a deliberate
+        // open set — the user has put it away.
+        if collapsed && group == SidebarGroup::Terminals {
+            self.terminals_group_held_open = false;
+        }
         let reveal_reset = collapsed
             && (self.sidebar_project_reveal_counts.remove(&group).is_some()
                 | self

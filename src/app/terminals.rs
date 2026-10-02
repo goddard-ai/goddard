@@ -1021,8 +1021,10 @@ impl Waku {
 
     /// Fold the group open and land on the last terminal that was on
     /// screen — the newest one if none has been shown yet, or a fresh
-    /// global terminal in ~ when the group is empty.
+    /// global terminal in ~ when the group is empty. Deliberate opens hold
+    /// the group against the fold that selections and pages apply.
     pub(super) fn expand_terminals_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.terminals_group_held_open = true;
         self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
         let target = self
             .last_visible_terminal
@@ -1100,6 +1102,20 @@ impl Waku {
                 self.show_inbox(window, cx);
             }
             Some(NavigationLocation::Settings) | None => {}
+        }
+    }
+
+    /// Picking a chat or opening a page folds the Terminals group — the
+    /// terminal keeps its last-visible memory for the next expand — unless
+    /// the user opened the group deliberately, in which case the rows stay
+    /// on screen.
+    pub(super) fn fold_terminals_group_for_navigation(&mut self) {
+        if !self.terminals_group_held_open
+            && self
+                .sidebar_collapsed_groups
+                .insert(SidebarGroup::Terminals)
+        {
+            self.sidebar_rows_fingerprint.set(None);
         }
     }
 

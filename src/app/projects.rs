@@ -747,21 +747,17 @@ impl Waku {
         self.settings_page = None;
         self.notifications.open = false;
         // The page claims the main area — a selected terminal gives way and
-        // the Terminals group folds, same as picking a chat does. The
-        // selected task stays selected underneath, the same contract the
-        // Drafts, Automations, and Inbox pages share: closing the page
-        // uncovers it, and any activation clears the page.
+        // the Terminals group folds, same as picking a chat does, unless the
+        // user opened the group deliberately. The selected task stays
+        // selected underneath, the same contract the Drafts, Automations,
+        // and Inbox pages share: closing the page uncovers it, and any
+        // activation clears the page.
         self.selected_terminal = None;
         self.pending_session_activation = None;
         self.drafts_page = false;
         self.automations_page = false;
         self.automations_detail = None;
-        if self
-            .sidebar_collapsed_groups
-            .insert(SidebarGroup::Terminals)
-        {
-            self.sidebar_rows_fingerprint.set(None);
-        }
+        self.fold_terminals_group_for_navigation();
         self.projects_page = Some(project_id);
         self.last_projects_page_project = Some(project_id);
         // Whatever owned the strip — a session, a terminal, another page —

@@ -758,12 +758,7 @@ impl Waku {
         // An activation still in flight must not hand the area back once
         // its hydration lands — same guard the Projects page takes.
         self.pending_session_activation = None;
-        if self
-            .sidebar_collapsed_groups
-            .insert(SidebarGroup::Terminals)
-        {
-            self.sidebar_rows_fingerprint.set(None);
-        }
+        self.fold_terminals_group_for_navigation();
         self.notifications.open = true;
         // The page owns its own strip — whatever was mounted (a session's,
         // a terminal's) parks until it comes back.
