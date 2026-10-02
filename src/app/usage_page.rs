@@ -190,11 +190,21 @@ impl Waku {
             // mid-render.
             self.seed_inference_inputs(cx);
         }
-        // The sidebar's search field holds real focus for the whole settings
-        // visit, so landing on any page — from the sidebar, the palette, or a
-        // link — leaves typing ready to filter. The Keybindings page returned
-        // above and focuses its own search instead.
-        let focus = self.settings_search.read(cx).focus_handle(cx);
+        // Archived has its own filter, so landing there leaves typing ready
+        // to search archived chats. Other settings pages keep the sidebar
+        // search focused. The Keybindings page returned above focuses its own
+        // search instead.
+        let archive_search_available = page == SettingsPage::Archived
+            && self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.archived_at.is_some());
+        let focus = if archive_search_available {
+            self.archived_search.read(cx).focus()
+        } else {
+            self.settings_search.read(cx).focus_handle(cx)
+        };
         window.focus(&focus, cx);
         cx.notify();
     }
