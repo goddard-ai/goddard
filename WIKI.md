@@ -722,3 +722,8 @@ hands-off runs (required for Pi, Oh My Pi, and Amp).
 The project is open source (GPL-3.0) on GitHub — open an issue there, or join
 the Discord linked from the site's menu. See [Contributing](CONTRIBUTING.md)
 for the development workflow.
+
+## Coordinate parallel native tests
+
+Use [resource reservations](docs/resource-reservations.md) to queue native builds,
+simulators, emulators, and shared desktop input across Goddard tasks.
