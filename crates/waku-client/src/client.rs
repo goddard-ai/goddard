@@ -1,16 +1,16 @@
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Message, WebSocket};
+use tungstenite::{HandshakeError, Message, WebSocket};
 use uuid::Uuid;
 
 use waku_protocol::MAX_WIRE_MESSAGE_BYTES;
@@ -20,6 +20,11 @@ use waku_protocol::{
 };
 
 const READ_POLL_INTERVAL: Duration = Duration::from_millis(25);
+/// One complete connection establishment budget: TCP connect, TLS, the
+/// WebSocket upgrade, and the `Hello` exchange share it. A healthy daemon
+/// answers in milliseconds; the bound exists so a saturated or half-dead
+/// peer costs one bounded attempt rather than an unbounded wait.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Operations that walk or rebuild an entire worktree — snapshots,
 /// checkouts, restores — legitimately take minutes on a large repository.
@@ -100,6 +105,154 @@ struct LastSequence {
     sequence: u64,
 }
 
+/// A `TcpStream` whose blocking operations are each clamped to the time
+/// left before `deadline`, so the TLS/WebSocket handshake and the daemon
+/// `Hello` exchange share the caller's complete budget instead of holding
+/// one timeout apiece. `disarm` clears the deadline once the connection is
+/// established — the steady-state read loop then polls on the socket's own
+/// configured timeout.
+struct DeadlineStream {
+    stream: TcpStream,
+    deadline: Option<Instant>,
+}
+
+impl DeadlineStream {
+    /// The budget left, `None` once disarmed. An expired deadline reads as a
+    /// socket timeout so callers see an ordinary `io::Error`.
+    fn budget(&self) -> io::Result<Option<Duration>> {
+        match self.deadline {
+            None => Ok(None),
+            Some(deadline) => deadline
+                .checked_duration_since(Instant::now())
+                .filter(|left| !left.is_zero())
+                .map(Some)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Goddard daemon connection deadline expired",
+                    )
+                }),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.deadline = None;
+    }
+
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.stream.set_read_timeout(timeout)
+    }
+}
+
+impl io::Read for DeadlineStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let Some(budget) = self.budget()? {
+            self.stream.set_read_timeout(Some(budget))?;
+        }
+        self.stream.read(buf)
+    }
+}
+
+impl io::Write for DeadlineStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(budget) = self.budget()? {
+            self.stream.set_write_timeout(Some(budget))?;
+        }
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if let Some(budget) = self.budget()? {
+            self.stream.set_write_timeout(Some(budget))?;
+        }
+        self.stream.flush()
+    }
+}
+
+/// The socket type a daemon connection runs on.
+type DaemonSocket = WebSocket<MaybeTlsStream<DeadlineStream>>;
+
+/// The time `deadline` leaves, or a timeout error once it has passed.
+fn deadline_remaining(deadline: Instant) -> io::Result<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|left| !left.is_zero())
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::TimedOut, "Goddard daemon connection deadline expired")
+        })
+}
+
+/// Open the daemon socket under one deadline: hostname resolution aside —
+/// managed daemon addresses are IP literals that resolve inline — every
+/// blocking stage (TCP connect, TLS, the WebSocket upgrade) shares the
+/// caller's budget, and an interrupted handshake is resumed only while
+/// budget remains.
+fn connect_socket(
+    url: &url::Url,
+    config: WebSocketConfig,
+    deadline: Instant,
+) -> anyhow::Result<DaemonSocket> {
+    let host = url.host_str().context("Goddard daemon address has no host")?;
+    let port = url
+        .port_or_known_default()
+        .context("Goddard daemon address has no port")?;
+    let mut last_error = None;
+    let mut stream = None;
+    for address in (host, port).to_socket_addrs()? {
+        match TcpStream::connect_timeout(&address, deadline_remaining(deadline)?) {
+            Ok(connected) => {
+                stream = Some(connected);
+                break;
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    let stream = match stream {
+        Some(stream) => stream,
+        None => match last_error {
+            Some(error) => return Err(error).context("could not connect to Goddard daemon"),
+            None => bail!("Goddard daemon address resolved no usable address"),
+        },
+    };
+    stream.set_nodelay(true)?;
+    let stream = DeadlineStream {
+        stream,
+        deadline: Some(deadline),
+    };
+    // Socket timeouts turn a stalled handshake step into a `WouldBlock` —
+    // `Interrupted` — resumable while the deadline still has budget, so the
+    // exchange can never outlive it no matter how the peer dribbles.
+    let mut attempt = tungstenite::client_tls_with_config(
+        url.as_str(),
+        stream,
+        Some(config),
+        None,
+    );
+    loop {
+        attempt = match attempt {
+            Ok((socket, _)) => return Ok(socket),
+            Err(HandshakeError::Interrupted(mid)) => {
+                deadline_remaining(deadline)?;
+                mid.handshake()
+            }
+            Err(HandshakeError::Failure(error)) => {
+                return Err(error).context("could not connect to Goddard daemon")
+            }
+        };
+    }
+}
+
+/// Clear the connect deadline once the socket is established — steady-state
+/// traffic polls on the socket's configured timeouts instead.
+fn disarm_deadline(socket: &mut DaemonSocket) {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => stream.disarm(),
+        MaybeTlsStream::Rustls(stream) => stream.sock.disarm(),
+        #[allow(unreachable_patterns)]
+        _ => {}
+    }
+}
+
 #[derive(Clone)]
 pub struct DaemonClient {
     inner: Arc<ClientInner>,
@@ -114,6 +267,24 @@ impl DaemonClient {
         address: &str,
         token: String,
         resume_from: Vec<ReplayCursor>,
+    ) -> anyhow::Result<Self> {
+        Self::connect_before(
+            address,
+            token,
+            resume_from,
+            Instant::now() + CONNECT_TIMEOUT,
+        )
+    }
+
+    /// Connect under a caller-owned deadline covering the whole
+    /// establishment phase — resolution aside, every blocking stage shares
+    /// it: TCP connect, TLS, the WebSocket upgrade, and the `Hello`
+    /// exchange.
+    pub fn connect_before(
+        address: &str,
+        token: String,
+        resume_from: Vec<ReplayCursor>,
+        deadline: Instant,
     ) -> anyhow::Result<Self> {
         let last_sequences = resume_from
             .iter()
@@ -131,10 +302,7 @@ impl DaemonClient {
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_WIRE_MESSAGE_BYTES))
             .max_frame_size(Some(MAX_WIRE_MESSAGE_BYTES));
-        let (mut socket, _) =
-            tungstenite::client::connect_with_config(url.as_str(), Some(config), 3)
-                .context("could not connect to Goddard daemon")?;
-        set_client_read_timeout(&mut socket, Some(Duration::from_secs(5)))?;
+        let mut socket = connect_socket(&url, config, deadline)?;
         write_json(
             &mut socket,
             &ClientMessage::Hello {
@@ -162,6 +330,7 @@ impl DaemonClient {
             ServerMessage::Rejected { message } => bail!("daemon rejected connection: {message}"),
             other => bail!("daemon sent an invalid handshake response: {other:?}"),
         };
+        disarm_deadline(&mut socket);
         set_client_read_timeout(&mut socket, Some(READ_POLL_INTERVAL))?;
 
         let (outgoing, outgoing_rx) = unbounded();
@@ -187,7 +356,11 @@ impl DaemonClient {
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
-        let thread_inner = inner.clone();
+        // The reader holds a `Weak` so dropping every client handle —
+        // including a probe client that was never asked to shut down —
+        // ends the loop instead of leaving a 25ms-poll thread orphaned on
+        // a live socket.
+        let thread_inner = Arc::downgrade(&inner);
         std::thread::Builder::new()
             .name("goddard-daemon-client".into())
             .spawn(move || run_client(socket, outgoing_rx, bulk_rx, thread_inner))
@@ -496,8 +669,11 @@ pub fn pair(address: &str, device_name: &str, timeout: Duration) -> anyhow::Resu
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_WIRE_MESSAGE_BYTES))
         .max_frame_size(Some(MAX_WIRE_MESSAGE_BYTES));
-    let (mut socket, _) = tungstenite::client::connect_with_config(url.as_str(), Some(config), 3)
+    let mut socket = connect_socket(&url, config, Instant::now() + CONNECT_TIMEOUT)
         .context("could not connect to Goddard daemon")?;
+    // The connect deadline covered establishment only — the approval wait
+    // below is bounded by `timeout` instead.
+    disarm_deadline(&mut socket);
     write_json(
         &mut socket,
         &ClientMessage::PairRequest {
@@ -540,7 +716,7 @@ pub fn pair(address: &str, device_name: &str, timeout: Duration) -> anyhow::Resu
     }
 }
 
-fn daemon_url(address: &str) -> anyhow::Result<String> {
+fn daemon_url(address: &str) -> anyhow::Result<url::Url> {
     let normalized = if address.starts_with("ws://") || address.starts_with("wss://") {
         address.to_owned()
     } else {
@@ -550,7 +726,7 @@ fn daemon_url(address: &str) -> anyhow::Result<String> {
     url.set_path("/v1");
     url.set_query(None);
     url.set_fragment(None);
-    Ok(url.into())
+    Ok(url)
 }
 
 /// The next queued frame to write: interactive traffic first, then bulk.
@@ -567,12 +743,12 @@ fn next_outgoing(
 }
 
 fn run_client(
-    mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    mut socket: DaemonSocket,
     outgoing: Receiver<Outgoing>,
     bulk: Receiver<ClientMessage>,
-    inner: Arc<ClientInner>,
+    weak_inner: std::sync::Weak<ClientInner>,
 ) {
-    'connection: loop {
+    'connection: while let Some(inner) = weak_inner.upgrade() {
         while let Some(message) = next_outgoing(&outgoing, &bulk) {
             match message {
                 Outgoing::Message(message) => {
@@ -712,7 +888,11 @@ fn run_client(
         }
     }
 
-    fail_connection(&inner);
+    // Exiting because every handle dropped leaves no one to fail; exiting
+    // because the socket died still releases its waiters and subscribers.
+    if let Some(inner) = weak_inner.upgrade() {
+        fail_connection(&inner);
+    }
 }
 
 fn fail_connection(inner: &ClientInner) {
@@ -741,7 +921,7 @@ fn fail_connection(inner: &ClientInner) {
 }
 
 fn set_client_read_timeout(
-    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    socket: &mut DaemonSocket,
     timeout: Option<Duration>,
 ) -> io::Result<()> {
     match socket.get_mut() {
@@ -783,9 +963,7 @@ fn write_json<S: io::Read + io::Write, T: serde::Serialize>(
     Ok(())
 }
 
-fn read_server_message(
-    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
-) -> anyhow::Result<ServerMessage> {
+fn read_server_message(socket: &mut DaemonSocket) -> anyhow::Result<ServerMessage> {
     loop {
         match socket.read()? {
             Message::Text(text) => return Ok(serde_json::from_str(text.as_ref())?),
@@ -963,11 +1141,13 @@ mod tests {
     #[test]
     fn daemon_endpoint_accepts_addresses_and_secure_urls() {
         assert_eq!(
-            daemon_url("127.0.0.1:4312").unwrap(),
+            daemon_url("127.0.0.1:4312").unwrap().as_str(),
             "ws://127.0.0.1:4312/v1"
         );
         assert_eq!(
-            daemon_url("wss://waku.example.test/old?ignored=1").unwrap(),
+            daemon_url("wss://waku.example.test/old?ignored=1")
+                .unwrap()
+                .as_str(),
             "wss://waku.example.test/v1"
         );
     }

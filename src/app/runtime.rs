@@ -1661,6 +1661,7 @@ impl Waku {
                 cause: report.cause,
                 outcome: report.outcome,
                 exit: report.exit,
+                replaced: report.replaced,
                 sessions_resumed: 0,
                 flush_at: Instant::now() + DAEMON_RECOVERY_COUNT_WINDOW,
             });
@@ -1748,6 +1749,7 @@ impl Waku {
                     "exitCode": exit_code,
                     "exitSignal": exit_signal,
                     "previousBootClean": previous_boot_clean,
+                    "replaced": episode.replaced,
                 }));
                 analytics.track(crate::analytics::Event::DaemonRecovery {
                     cause,
@@ -1758,6 +1760,7 @@ impl Waku {
                     exit_code,
                     exit_signal,
                     previous_boot_clean,
+                    replaced: episode.replaced,
                 });
             })
             .detach();

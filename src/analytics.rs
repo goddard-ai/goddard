@@ -219,6 +219,9 @@ pub enum Event {
         /// clean-exit marker — `false` reads as an abnormal death.
         /// Absent when the daemon can't be asked.
         previous_boot_clean: Option<bool>,
+        /// Recovery swapped in a freshly spawned daemon — `false` means the
+        /// same process was reconnected and its provider runtimes survived.
+        replaced: bool,
     },
     /// A crash report the OS wrote for a daemon process — scanned once at
     /// launch, one event per report the app has not seen. `termination` is
@@ -453,11 +456,13 @@ impl Event {
                 exit_code,
                 exit_signal,
                 previous_boot_clean,
+                replaced,
             } => {
                 let mut data = json!({
                     "cause": cause,
                     "outcome": outcome,
                     "sessionsResumed": sessions_resumed,
+                    "replaced": replaced,
                 });
                 if let Some(rss) = daemon_rss_mb {
                     data["daemonRssMb"] = json!(rss);
@@ -713,6 +718,7 @@ mod tests {
                 exit_code: None,
                 exit_signal: Some(9),
                 previous_boot_clean: Some(false),
+                replaced: true,
             },
             Event::DaemonCrash {
                 termination: "exc_resource",

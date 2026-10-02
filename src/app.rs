@@ -1475,6 +1475,9 @@ struct DaemonRecoveryEpisode {
     /// The process's exit detail when the cause was a real exit — `None`
     /// for connection loss and rebuilds.
     exit: Option<waku_client::DaemonExit>,
+    /// The recovered connection runs a freshly spawned daemon — `false`
+    /// means the same process was reconnected and its runtimes survived.
+    replaced: bool,
     sessions_resumed: usize,
     flush_at: Instant,
 }

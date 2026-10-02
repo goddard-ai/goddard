@@ -19,11 +19,19 @@ use waku_protocol::{
     APP_EXECUTABLE_ENV, Command, DAEMON_TOKEN_ENV, DaemonReady, DaemonSettings, PROTOCOL_VERSION,
     ResponsePayload,
 };
+/// The whole startup budget — process spawn, the daemon's ready line, the
+/// control-socket connect, and the first settings read share it — so a
+/// machine too contended to boot a daemon fails one bounded attempt instead
+/// of hanging mid-phase.
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const REBUILD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const PROBE_INTERVAL: Duration = Duration::from_secs(5);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+/// A reconnect or second-opinion probe gets this long to reach a live
+/// daemon — longer than a probe answer itself, short enough that the next
+/// retry starts promptly on a genuinely dead endpoint.
+const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 const STABLE_UPTIME: Duration = Duration::from_secs(30);
@@ -124,12 +132,20 @@ pub struct DaemonProcess {
 
 impl DaemonProcess {
     pub fn spawn(executable: &Path) -> anyhow::Result<Self> {
-        Self::spawn_configured(executable, DaemonExposureSettings::default())
+        Self::spawn_configured(
+            executable,
+            DaemonExposureSettings::default(),
+            Instant::now() + START_TIMEOUT,
+        )
     }
 
+    /// Spawn under a caller-owned deadline: the child spawn, the daemon's
+    /// ready line, and the control-socket connect share `deadline`, so one
+    /// failed attempt costs at most the budget and always reaps the child.
     fn spawn_configured(
         executable: &Path,
         settings: DaemonExposureSettings,
+        deadline: Instant,
     ) -> anyhow::Result<Self> {
         let settings = settings.validate()?;
         let token = settings.token.clone();
@@ -220,7 +236,7 @@ impl DaemonProcess {
                 let _ = ready_tx.send(result);
             })
             .context("could not start Goddard daemon readiness reader")?;
-        let ready = match ready_rx.recv_timeout(START_TIMEOUT) {
+        let ready = match ready_rx.recv_timeout(remaining_budget(deadline)) {
             Ok(Ok(ready)) => ready,
             Ok(Err(error)) => {
                 let _ = child.kill();
@@ -250,7 +266,12 @@ impl DaemonProcess {
                 return Err(error);
             }
         };
-        let client = match DaemonClient::connect(&client_address, token.clone()) {
+        let client = match DaemonClient::connect_before(
+            &client_address,
+            token.clone(),
+            Vec::new(),
+            deadline,
+        ) {
             Ok(client) => client,
             Err(error) => {
                 let _ = child.kill();
@@ -701,12 +722,21 @@ pub enum DaemonRecoveryOutcome {
 /// connection is back.
 #[derive(Clone, Copy, Debug)]
 pub struct DaemonRecovery {
+    /// What the supervisor first observed take the daemon out. An episode
+    /// that began as a dropped connection keeps `Disconnect` even if the
+    /// process later exits or is replaced — [`Self::exit`] and
+    /// [`Self::replaced`] carry what happened next.
     pub cause: DaemonRecoveryCause,
     pub outcome: DaemonRecoveryOutcome,
-    /// The managed process's exit detail — `Some` only when the daemon
-    /// actually exited, which is what separates a crash from a dropped
-    /// connection.
+    /// The latest confirmed process exit observed during the episode —
+    /// `Some` even for episodes that began as connection loss when the
+    /// daemon subsequently died, `None` when no process ever exited.
     pub exit: Option<DaemonExit>,
+    /// The recovered connection runs against a freshly spawned daemon —
+    /// `false` means the same process was reconnected in place and its
+    /// provider runtimes survived. Always `false` for daemons this app
+    /// does not manage.
+    pub replaced: bool,
 }
 
 struct SupervisorInner {
@@ -723,6 +753,9 @@ struct SupervisorInner {
     settings_updates: Sender<DaemonSettings>,
     client_updates: Mutex<Vec<Sender<DaemonClient>>>,
     recovery_reports: Mutex<Vec<Sender<DaemonRecovery>>>,
+    /// Every status transition — subscribers get the current status at
+    /// subscribe time, then each change as it happens.
+    status_updates: Mutex<Vec<Sender<DaemonStatus>>>,
     status: Mutex<DaemonStatus>,
     running: AtomicBool,
 }
@@ -769,14 +802,22 @@ impl DaemonSupervisor {
         exposure: DaemonExposureSettings,
     ) -> anyhow::Result<Self> {
         let exposure = exposure.validate()?;
-        let process = DaemonProcess::spawn_configured(executable, exposure.clone())?;
+        // One deadline covers the daemon's whole startup: process launch,
+        // its ready line, the control-socket connect, and the settings
+        // read. Every phase shares it so a contended boot fails bounded
+        // instead of stretching per phase.
+        let startup_deadline = Instant::now() + START_TIMEOUT;
+        let process =
+            DaemonProcess::spawn_configured(executable, exposure.clone(), startup_deadline)?;
         // A stuck exposure port must not keep the daemon itself down — the
         // local listener is the product, the exposed one is recoverable
         // through the next reconfigure.
-        if let Err(error) = apply_daemon_exposure(&process.client(), &exposure) {
+        if let Err(error) =
+            apply_daemon_exposure(&process.client(), &exposure, startup_deadline)
+        {
             eprintln!("could not expose the Goddard daemon: {error:#}");
         }
-        let settings = read_settings(&process.client())?;
+        let settings = read_settings(&process.client(), remaining_budget(startup_deadline))?;
         let initial_stamp = ExecutableStamp::read(executable)?;
         let supervisor = Self::from_target(
             DaemonTarget::Local(process),
@@ -796,8 +837,10 @@ impl DaemonSupervisor {
     /// Connect to a daemon managed on another host (or by an external local
     /// service manager). Dropping the desktop never shuts this daemon down.
     pub fn connect(address: &str, token: String) -> anyhow::Result<Self> {
-        let client = DaemonClient::connect(address, token.clone())?;
-        let settings = read_settings(&client)?;
+        let deadline = Instant::now() + CONNECT_ATTEMPT_TIMEOUT;
+        let client =
+            DaemonClient::connect_before(address, token.clone(), Vec::new(), deadline)?;
+        let settings = read_settings(&client, remaining_budget(deadline))?;
         let supervisor = Self::from_target(
             DaemonTarget::Remote {
                 client,
@@ -838,6 +881,7 @@ impl DaemonSupervisor {
             settings_updates,
             client_updates: Mutex::new(Vec::new()),
             recovery_reports: Mutex::new(Vec::new()),
+            status_updates: Mutex::new(Vec::new()),
             status: Mutex::new(DaemonStatus::Connected),
             running: AtomicBool::new(true),
         });
@@ -891,6 +935,16 @@ impl DaemonSupervisor {
         *self.inner.status.lock()
     }
 
+    /// Subscribe to daemon status transitions. The current status is sent
+    /// immediately, then each change — a degraded daemon stays announced
+    /// until a working connection is back.
+    pub fn subscribe_status(&self) -> Receiver<DaemonStatus> {
+        let (updates, receiver) = unbounded();
+        let _ = updates.send(self.status());
+        self.inner.status_updates.lock().push(updates);
+        receiver
+    }
+
     pub fn settings(&self) -> DaemonSettings {
         self.inner.settings.lock().clone()
     }
@@ -906,7 +960,7 @@ impl DaemonSupervisor {
         }
         let _restart = self.inner.restart.lock();
         let client = self.inner.target.lock().client();
-        set_daemon_exposure(&client, exposure.wire())?;
+        set_daemon_exposure(&client, exposure.wire(), CONNECT_ATTEMPT_TIMEOUT)?;
         *self.inner.exposure.lock() = Some(exposure);
         Ok(())
     }
@@ -948,6 +1002,38 @@ enum LocalDown {
     Exited(Option<std::process::ExitStatus>),
     /// The process is alive but its connection is dead.
     Disconnected,
+    /// The slot is deliberately empty while a replacement spawns — a
+    /// supervisor action, not a fresh observation about the process.
+    Respawning,
+}
+
+/// The monitor's record of one continuous outage. The episode opens on the
+/// first observed failure and closes when a working connection is back, so
+/// a stretch of retries reports one unreachable transition and one
+/// recovery — never a report per attempt.
+struct RecoveryEpisode {
+    /// What the supervisor first observed — a process exit, a dropped
+    /// connection, or a rebuild swap. Pinned for the episode so the first
+    /// failure's meaning survives later transitions.
+    cause: DaemonRecoveryCause,
+    /// The most recent confirmed process exit — an episode that opened on
+    /// a disconnect can still end in a real exit during respawn attempts.
+    exit: Option<DaemonExit>,
+    /// A spawned daemon took the downed one's place.
+    replaced: bool,
+    /// The unreachable crossing was already announced this episode.
+    unreachable_announced: bool,
+}
+
+impl RecoveryEpisode {
+    fn new(cause: DaemonRecoveryCause, exit: Option<DaemonExit>) -> Self {
+        Self {
+            cause,
+            exit,
+            replaced: false,
+            unreachable_announced: false,
+        }
+    }
 }
 
 fn monitor_daemon(
@@ -959,10 +1045,10 @@ fn monitor_daemon(
     let mut healthy_since = Instant::now();
     let mut consecutive_failures = 0_u32;
     let mut next_retry = Instant::now();
-    // The open episode's cause and exit detail, captured at first
-    // detection — mid-respawn the target reads `Restarting`, which has no
-    // process to inspect, so later iterations would report the wrong cause.
-    let mut outage: Option<(DaemonRecoveryCause, Option<DaemonExit>)> = None;
+    // The open episode, captured at first failure detection — mid-respawn
+    // the target reads `Restarting`, which has no process to inspect, so
+    // later iterations would report the wrong cause.
+    let mut episode: Option<RecoveryEpisode> = None;
     // The client armed by one dead probe round. A second consecutive dead
     // round on the same connection severs it; an answer or a replacement
     // client disarms it.
@@ -1004,8 +1090,17 @@ fn monitor_daemon(
             if !still_current {
                 continue;
             }
-            set_status(&inner, DaemonStatus::Recovering);
-            match DaemonClient::connect_with_resume(&address, token.clone(), resume_from) {
+            // The remote daemon's process is out of reach — a dropped
+            // connection is all the episode can record.
+            episode
+                .get_or_insert_with(|| RecoveryEpisode::new(DaemonRecoveryCause::Disconnect, None));
+            mark_outage(&inner);
+            match DaemonClient::connect_before(
+                &address,
+                token.clone(),
+                resume_from,
+                Instant::now() + CONNECT_ATTEMPT_TIMEOUT,
+            ) {
                 Ok(replacement) => {
                     *inner.target.lock() = DaemonTarget::Remote {
                         client: replacement.clone(),
@@ -1018,7 +1113,7 @@ fn monitor_daemon(
                         .retain(|subscriber| subscriber.send(replacement.clone()).is_ok());
                     consecutive_failures = 0;
                     healthy_since = Instant::now();
-                    mark_connected(&inner, DaemonRecoveryCause::Disconnect, None);
+                    mark_connected(&inner, episode.take());
                 }
                 Err(error) => {
                     consecutive_failures += 1;
@@ -1026,9 +1121,8 @@ fn monitor_daemon(
                     eprintln!("could not reconnect to Goddard daemon: {error:#}");
                     note_recovery_failure(
                         &inner,
+                        episode.as_mut().expect("an episode opened above"),
                         consecutive_failures,
-                        DaemonRecoveryCause::Disconnect,
-                        None,
                     );
                 }
             }
@@ -1043,7 +1137,7 @@ fn monitor_daemon(
                     Some((process.address.clone(), process.token.clone())),
                 ),
                 DaemonTarget::Restarting(client) => {
-                    (Some(LocalDown::Exited(None)), client.clone(), None)
+                    (Some(LocalDown::Respawning), client.clone(), None)
                 }
                 DaemonTarget::Remote {
                     client,
@@ -1060,53 +1154,73 @@ fn monitor_daemon(
                 if Instant::now() < next_retry {
                     continue;
                 }
-                set_status(&inner, DaemonStatus::Recovering);
                 let _restart = inner.restart.lock();
                 // Re-check under the restart lock: `reconfigure` may have
                 // swapped in a fresh daemon while this thread waited.
                 let still_down = match &mut *inner.target.lock() {
                     DaemonTarget::Local(process) => local_down(process),
-                    DaemonTarget::Restarting(_) => Some(LocalDown::Exited(None)),
+                    DaemonTarget::Restarting(_) => Some(LocalDown::Respawning),
                     DaemonTarget::Remote { .. } => None,
                 };
+                if still_down.is_none() && !executable_changed {
+                    mark_connected(&inner, episode.take());
+                    continue;
+                }
+                mark_outage(&inner);
                 // A downed daemon owns the cause even when a rebuild is also
-                // pending: the process exit is what interrupted sessions.
-                let (cause, exit) = match still_down {
-                    Some(LocalDown::Exited(status)) => (
-                        DaemonRecoveryCause::UnexpectedExit,
-                        Some(status.map_or(
+                // pending: the process exit is what interrupted sessions. A
+                // later observed exit updates the episode's exit detail — an
+                // opening disconnect can still end in a real death, or a
+                // replacement can crash-loop.
+                let fresh = episode.is_none();
+                match still_down {
+                    Some(LocalDown::Exited(status)) => {
+                        let exit = status.map_or(
                             DaemonExit {
                                 code: None,
                                 signal: None,
                             },
                             |status| DaemonExit::from_status(&status),
-                        )),
-                    ),
-                    Some(LocalDown::Disconnected) => (DaemonRecoveryCause::Disconnect, None),
-                    None => (DaemonRecoveryCause::Rebuild, None),
-                };
-                if still_down.is_none() && !executable_changed {
-                    mark_connected(&inner, cause, exit);
-                    continue;
+                        );
+                        match &mut episode {
+                            Some(open) => open.exit = Some(exit),
+                            slot @ None => {
+                                *slot = Some(RecoveryEpisode::new(
+                                    DaemonRecoveryCause::UnexpectedExit,
+                                    Some(exit),
+                                ));
+                            }
+                        }
+                    }
+                    Some(LocalDown::Disconnected) => {
+                        episode.get_or_insert_with(|| {
+                            RecoveryEpisode::new(DaemonRecoveryCause::Disconnect, None)
+                        });
+                    }
+                    Some(LocalDown::Respawning) | None => {
+                        episode.get_or_insert_with(|| {
+                            RecoveryEpisode::new(DaemonRecoveryCause::Rebuild, None)
+                        });
+                    }
                 }
-                if still_down.is_some() && outage.is_none() {
-                    // Pin the episode's cause and exit detail at first
-                    // detection — respawn retries observe `Restarting`, not
-                    // the dead process.
-                    outage = Some((cause, exit));
-                    // A daemon that dies within STABLE_UPTIME of its own
-                    // launch is crash-looping; an older one had a stable run
-                    // and gets an immediate replacement.
+                // A daemon that dies within STABLE_UPTIME of its own launch
+                // is crash-looping; an older one had a stable run and gets
+                // an immediate replacement. `Respawning` can't be fresh —
+                // an episode is always open by the time a swap started.
+                if fresh && still_down.is_some() {
                     if healthy_since.elapsed() < STABLE_UPTIME {
                         consecutive_failures += 1;
                     }
                     if consecutive_failures > 0 {
                         next_retry = Instant::now() + retry_delay(consecutive_failures);
-                        note_recovery_failure(&inner, consecutive_failures, cause, exit);
+                        note_recovery_failure(
+                            &inner,
+                            episode.as_mut().expect("an episode opened above"),
+                            consecutive_failures,
+                        );
                         continue;
                     }
                 }
-                let (cause, exit) = outage.unwrap_or((cause, exit));
                 // A daemon whose process is still alive only lost its
                 // connection — reconnect in place; killing it would take
                 // every provider runtime down for nothing. The failure count
@@ -1120,13 +1234,17 @@ fn monitor_daemon(
                     match reconnect_local_daemon(&inner) {
                         Ok(()) => {
                             healthy_since = Instant::now();
-                            mark_connected(&inner, cause, exit);
+                            mark_connected(&inner, episode.take());
                         }
                         Err(error) => {
                             consecutive_failures += 1;
                             next_retry = Instant::now() + retry_delay(consecutive_failures);
                             eprintln!("could not reconnect to the Goddard daemon: {error:#}");
-                            note_recovery_failure(&inner, consecutive_failures, cause, exit);
+                            note_recovery_failure(
+                                &inner,
+                                episode.as_mut().expect("an episode opened above"),
+                                consecutive_failures,
+                            );
                         }
                     }
                     continue;
@@ -1134,10 +1252,16 @@ fn monitor_daemon(
                 let Some(exposure) = inner.exposure.lock().clone() else {
                     return;
                 };
+                // The replacement kills the old process whether or not the
+                // spawn succeeds — the episode's `replaced` reflects that
+                // commitment from the attempt onward.
+                if let Some(open) = episode.as_mut() {
+                    open.replaced = true;
+                }
                 match replace_local_daemon(&inner, executable, &exposure) {
                     Ok(()) => {
                         healthy_since = Instant::now();
-                        mark_connected(&inner, cause, exit);
+                        mark_connected(&inner, episode.take());
                         queue_settings_refresh(&inner);
                         if let Some(observed_stamp) = observed_stamp {
                             active_stamp = Some(observed_stamp);
@@ -1147,12 +1271,16 @@ fn monitor_daemon(
                         consecutive_failures += 1;
                         next_retry = Instant::now() + retry_delay(consecutive_failures);
                         eprintln!("could not restart the Goddard daemon: {error:#}");
-                        note_recovery_failure(&inner, consecutive_failures, cause, exit);
+                        note_recovery_failure(
+                            &inner,
+                            episode.as_mut().expect("an episode opened above"),
+                            consecutive_failures,
+                        );
                     }
                 }
                 continue;
             }
-            outage = None;
+            episode = None;
             if consecutive_failures > 0 && healthy_since.elapsed() > STABLE_UPTIME {
                 consecutive_failures = 0;
                 set_status(&inner, DaemonStatus::Connected);
@@ -1203,7 +1331,8 @@ fn dead_probe_escalates(pending: &mut Option<DaemonClient>, client: &DaemonClien
 
 /// A second opinion on daemon liveness through a brand-new connection —
 /// the accept loop plus one request — run on a helper thread so a wedged
-/// listener cannot stall the supervisor past `timeout`.
+/// listener cannot stall the supervisor past `timeout`. The connect and
+/// the probe share the deadline, so the helper always exits with it.
 fn probe_daemon_endpoint(address: &str, token: &str, timeout: Duration) -> bool {
     let (done, done_rx) = mpsc::sync_channel(1);
     let _ = std::thread::Builder::new()
@@ -1212,9 +1341,11 @@ fn probe_daemon_endpoint(address: &str, token: &str, timeout: Duration) -> bool 
             let address = address.to_owned();
             let token = token.to_owned();
             move || {
-                let answered = DaemonClient::connect(&address, token)
-                    .map(|client| client.probe(timeout))
-                    .unwrap_or(false);
+                let deadline = Instant::now() + timeout;
+                let answered =
+                    DaemonClient::connect_before(&address, token, Vec::new(), deadline)
+                        .map(|client| client.probe(remaining_budget(deadline)))
+                        .unwrap_or(false);
                 let _ = done.send(answered);
             }
         });
@@ -1226,8 +1357,40 @@ fn retry_delay(failures: u32) -> Duration {
     (RETRY_BASE_DELAY * 2_u32.pow(shift)).min(RETRY_MAX_DELAY)
 }
 
+/// The budget left before `deadline`, collapsed to a zero wait once it has
+/// passed — the operation then fails immediately, which is the deadline's
+/// job.
+fn remaining_budget(deadline: Instant) -> Duration {
+    deadline
+        .checked_duration_since(Instant::now())
+        .unwrap_or(Duration::ZERO)
+}
+
 fn set_status(inner: &SupervisorInner, status: DaemonStatus) {
-    *inner.status.lock() = status;
+    let mut current = inner.status.lock();
+    if *current != status {
+        *current = status;
+        drop(current);
+        inner
+            .status_updates
+            .lock()
+            .retain(|subscriber| subscriber.send(status).is_ok());
+    }
+}
+
+/// A retry attempt is starting: Connected degrades to Recovering, but an
+/// already-announced Unreachable is never walked back by the next attempt
+/// in the same outage.
+fn mark_outage(inner: &SupervisorInner) {
+    let mut status = inner.status.lock();
+    if *status == DaemonStatus::Connected {
+        *status = DaemonStatus::Recovering;
+        drop(status);
+        inner
+            .status_updates
+            .lock()
+            .retain(|subscriber| subscriber.send(DaemonStatus::Recovering).is_ok());
+    }
 }
 
 /// The managed daemon's down state, if any — a real exit beats a dead
@@ -1242,56 +1405,47 @@ fn local_down(process: &mut DaemonProcess) -> Option<LocalDown> {
 
 fn report_recovery(
     inner: &SupervisorInner,
-    cause: DaemonRecoveryCause,
+    episode: &RecoveryEpisode,
     outcome: DaemonRecoveryOutcome,
-    exit: Option<DaemonExit>,
 ) {
     inner.recovery_reports.lock().retain(|subscriber| {
         subscriber
             .send(DaemonRecovery {
-                cause,
+                cause: episode.cause,
                 outcome,
-                exit,
+                exit: episode.exit,
+                replaced: episode.replaced,
             })
             .is_ok()
     });
 }
 
 /// Recovery succeeded — report it only when the daemon was actually
-/// recovering, so steady-state bookkeeping never reads as an outage.
-fn mark_connected(inner: &SupervisorInner, cause: DaemonRecoveryCause, exit: Option<DaemonExit>) {
-    let recovered = {
-        let mut status = inner.status.lock();
-        let recovered = *status != DaemonStatus::Connected;
-        *status = DaemonStatus::Connected;
-        recovered
-    };
-    if recovered {
-        report_recovery(inner, cause, DaemonRecoveryOutcome::Recovered, exit);
+/// recovering, so steady-state bookkeeping never reads as an outage. The
+/// episode is consumed: one recovery transition per continuous outage.
+fn mark_connected(inner: &SupervisorInner, episode: Option<RecoveryEpisode>) {
+    let recovered = *inner.status.lock() != DaemonStatus::Connected;
+    set_status(inner, DaemonStatus::Connected);
+    if recovered && let Some(episode) = episode {
+        report_recovery(inner, &episode, DaemonRecoveryOutcome::Recovered);
     }
 }
 
-fn note_recovery_failure(
-    inner: &SupervisorInner,
-    failures: u32,
-    cause: DaemonRecoveryCause,
-    exit: Option<DaemonExit>,
-) {
-    let newly_unreachable = {
-        let mut status = inner.status.lock();
-        let unreachable = failures >= UNREACHABLE_AFTER_FAILURES;
-        let newly = unreachable && *status != DaemonStatus::Unreachable;
-        *status = if unreachable {
-            DaemonStatus::Unreachable
-        } else {
-            DaemonStatus::Recovering
-        };
-        newly
+/// A recovery attempt failed. The status ratchets Connected → Recovering →
+/// Unreachable and the crossing is announced once per episode — slow
+/// retries keep calling this and must not repeat the same report.
+fn note_recovery_failure(inner: &SupervisorInner, episode: &mut RecoveryEpisode, failures: u32) {
+    let unreachable = failures >= UNREACHABLE_AFTER_FAILURES;
+    // Retries never regress an announced Unreachable back to Recovering —
+    // the outage ends only on a working connection.
+    let degraded = match (unreachable, *inner.status.lock()) {
+        (true, _) | (_, DaemonStatus::Unreachable) => DaemonStatus::Unreachable,
+        _ => DaemonStatus::Recovering,
     };
-    // Report the crossing once per episode — slow retries keep calling this
-    // and would otherwise repeat the same report.
-    if newly_unreachable {
-        report_recovery(inner, cause, DaemonRecoveryOutcome::Unreachable, exit);
+    set_status(inner, degraded);
+    if unreachable && !episode.unreachable_announced {
+        episode.unreachable_announced = true;
+        report_recovery(inner, episode, DaemonRecoveryOutcome::Unreachable);
     }
 }
 
@@ -1312,7 +1466,12 @@ fn reconnect_local_daemon(inner: &SupervisorInner) -> anyhow::Result<()> {
             _ => bail!("the daemon no longer needs reconnecting"),
         }
     };
-    let client = DaemonClient::connect_with_resume(&address, token, resume_from)?;
+    let client = DaemonClient::connect_before(
+        &address,
+        token,
+        resume_from,
+        Instant::now() + CONNECT_ATTEMPT_TIMEOUT,
+    )?;
     let mut target = inner.target.lock();
     let DaemonTarget::Local(process) = &mut *target else {
         bail!("the daemon changed while reconnecting");
@@ -1354,8 +1513,11 @@ fn replace_local_daemon(
     // Dropping can wait briefly for graceful shutdown, but the target lock is
     // already released so UI actions never block behind process teardown.
     drop(previous);
-    let replacement = DaemonProcess::spawn_configured(executable, exposure.clone())?;
-    if let Err(error) = apply_daemon_exposure(&replacement.client(), exposure) {
+    // One deadline covers the replacement's whole startup — spawn, ready
+    // line, and control-socket connect share it.
+    let deadline = Instant::now() + START_TIMEOUT;
+    let replacement = DaemonProcess::spawn_configured(executable, exposure.clone(), deadline)?;
+    if let Err(error) = apply_daemon_exposure(&replacement.client(), exposure, deadline) {
         eprintln!("could not expose the Goddard daemon: {error:#}");
     }
     let client = replacement.client();
@@ -1369,26 +1531,30 @@ fn replace_local_daemon(
 
 /// Push the exposure half of a launch configuration onto a freshly spawned
 /// daemon. Disabled means the daemon keeps its startup loopback-only
-/// listener, so there is nothing to send.
+/// listener, so there is nothing to send. The request shares the startup
+/// `deadline` so a slow daemon fails bounded.
 fn apply_daemon_exposure(
     client: &DaemonClient,
     exposure: &DaemonExposureSettings,
+    deadline: Instant,
 ) -> anyhow::Result<()> {
     if !exposure.enabled {
         return Ok(());
     }
-    set_daemon_exposure(client, exposure.wire())
+    set_daemon_exposure(client, exposure.wire(), remaining_budget(deadline))
 }
 
 /// Send `setDaemonExposure` and verify the daemon understood it.
 fn set_daemon_exposure(
     client: &DaemonClient,
     exposure: Option<waku_protocol::DaemonExposure>,
+    timeout: Duration,
 ) -> anyhow::Result<()> {
-    match client.request(
+    match client.request_with_timeout(
         Uuid::nil(),
         Uuid::nil(),
         Command::SetDaemonExposure { exposure },
+        Some(timeout),
     )? {
         ResponsePayload::Exposure { .. } => Ok(()),
         _ => bail!("Goddard daemon returned an invalid exposure response"),
@@ -1401,8 +1567,13 @@ fn queue_settings_refresh(inner: &SupervisorInner) {
     let _ = inner.settings_updates.send(settings);
 }
 
-fn read_settings(client: &DaemonClient) -> anyhow::Result<DaemonSettings> {
-    match client.request(Uuid::nil(), Uuid::nil(), Command::GetSettings)? {
+fn read_settings(client: &DaemonClient, timeout: Duration) -> anyhow::Result<DaemonSettings> {
+    match client.request_with_timeout(
+        Uuid::nil(),
+        Uuid::nil(),
+        Command::GetSettings,
+        Some(timeout),
+    )? {
         ResponsePayload::Settings { settings } => Ok(settings),
         _ => bail!("Goddard daemon returned an invalid settings response"),
     }
@@ -1560,5 +1731,191 @@ mod tests {
         ] {
             assert!(!daemon_address_is_loopback(remote), "{remote}");
         }
+    }
+
+    /// A listener that accepts every connection and holds it open, silent —
+    /// the client's own deadline is what ends each attempt.
+    fn black_hole_endpoint() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        std::thread::spawn(move || {
+            while let Ok((stream, _)) = listener.accept() {
+                std::thread::spawn(move || {
+                    let _stream = stream;
+                    loop {
+                        std::thread::sleep(Duration::from_secs(60));
+                    }
+                });
+            }
+        });
+        address
+    }
+
+    /// A supervisor with nothing behind it but a connected remote client —
+    /// enough for the reporting helpers to fan out to subscribers.
+    fn test_supervisor(address: &str) -> DaemonSupervisor {
+        let client = DaemonClient::connect(address, "token".into()).unwrap();
+        DaemonSupervisor::from_target(
+            DaemonTarget::Remote {
+                client,
+                address: address.to_owned(),
+                token: "token".into(),
+            },
+            None,
+            true,
+            None,
+            DaemonSettings::default(),
+        )
+        .unwrap()
+    }
+
+    /// TCP connect succeeds against a silent listener, so only the deadline
+    /// bounds the handshake — the attempt must fail at the deadline, not
+    /// hang on the OS's own connect timeout.
+    #[test]
+    fn a_stalled_connect_fails_at_its_deadline() {
+        let address = black_hole_endpoint();
+        let deadline = Duration::from_millis(400);
+        let started = Instant::now();
+        let result = DaemonClient::connect_before(
+            &address,
+            "token".into(),
+            Vec::new(),
+            Instant::now() + deadline,
+        );
+        assert!(result.is_err());
+        assert!(
+            started.elapsed() < deadline * 4,
+            "connect outlived its deadline"
+        );
+    }
+
+    /// The second-opinion probe must fail inside its timeout against a
+    /// daemon that accepts but never answers — and its helper thread must
+    /// exit with the attempt rather than linger on a dead socket.
+    #[test]
+    fn a_stalled_endpoint_probe_fails_inside_its_timeout() {
+        let address = black_hole_endpoint();
+        let started = Instant::now();
+        assert!(!probe_daemon_endpoint(
+            &address,
+            "token".into(),
+            Duration::from_millis(500)
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "the probe helper outlived its timeout"
+        );
+    }
+
+    /// Dropping the last client handle must end the socket thread — a
+    /// wedged-daemon probe's abandoned client used to spin on a 25ms poll
+    /// forever, holding the daemon's connection open.
+    #[test]
+    fn a_dropped_client_lets_its_reader_close_the_socket() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (closed, closed_rx) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            let Ok(mut socket) = tungstenite::accept(stream) else {
+                return;
+            };
+            loop {
+                match socket.read() {
+                    Ok(tungstenite::Message::Text(text)) => {
+                        if serde_json::from_str::<waku_protocol::ClientMessage>(text.as_ref())
+                            .is_ok_and(|message| {
+                                matches!(message, waku_protocol::ClientMessage::Hello { .. })
+                            })
+                        {
+                            let reply = serde_json::to_string(
+                                &waku_protocol::ServerMessage::Hello {
+                                    protocol_version: PROTOCOL_VERSION,
+                                    daemon_version: "test".into(),
+                                    daemon_commit: None,
+                                    agent_cli_available: false,
+                                },
+                            )
+                            .unwrap();
+                            if socket
+                                .send(tungstenite::Message::Text(reply.into()))
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                    }
+                    // The socket going away is the assertion signal.
+                    Ok(tungstenite::Message::Close(_)) | Err(_) => {
+                        let _ = closed.send(());
+                        return;
+                    }
+                    Ok(_) => {}
+                }
+            }
+        });
+        let client = DaemonClient::connect(&address, "token".into()).unwrap();
+        drop(client);
+        closed_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a dropped client's socket stayed open");
+    }
+
+    /// One continuous outage crosses the unreachable threshold exactly
+    /// once; retries inside the episode neither re-announce it nor walk
+    /// the status back to Recovering.
+    #[test]
+    fn an_outage_reports_unreachable_once_then_recovery_once() {
+        let supervisor = test_supervisor(&hello_endpoint());
+        let reports = supervisor.subscribe_recovery();
+        let mut episode = RecoveryEpisode::new(DaemonRecoveryCause::Disconnect, None);
+        for failures in 1..8 {
+            note_recovery_failure(&supervisor.inner, &mut episode, failures);
+        }
+        let seen: Vec<DaemonRecovery> = reports.try_iter().collect();
+        assert_eq!(seen.len(), 1, "the episode re-announced the crossing");
+        assert_eq!(seen[0].outcome, DaemonRecoveryOutcome::Unreachable);
+        assert!(matches!(seen[0].cause, DaemonRecoveryCause::Disconnect));
+        assert!(!seen[0].replaced);
+        assert_eq!(supervisor.status(), DaemonStatus::Unreachable);
+
+        // A retry inside the same outage never regresses the status.
+        note_recovery_failure(&supervisor.inner, &mut episode, 1);
+        assert_eq!(supervisor.status(), DaemonStatus::Unreachable);
+        assert!(reports.try_iter().next().is_none());
+
+        // Connectivity back: one recovery transition carries the episode.
+        episode.replaced = true;
+        mark_connected(&supervisor.inner, Some(episode));
+        let seen: Vec<DaemonRecovery> = reports.try_iter().collect();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].outcome, DaemonRecoveryOutcome::Recovered);
+        assert!(seen[0].replaced);
+        assert_eq!(supervisor.status(), DaemonStatus::Connected);
+    }
+
+    /// A process still running with a dead connection is `Disconnected`,
+    /// not `Exited` — the distinction that keeps reconnect-in-place ahead
+    /// of a kill.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_process_with_a_dead_connection_is_disconnected_not_exited() {
+        let address = hello_endpoint();
+        let client = DaemonClient::connect(&address, "token".into()).unwrap();
+        client.force_disconnect();
+        let child = ProcessCommand::new("sleep").arg("60").spawn().unwrap();
+        let mut process = DaemonProcess {
+            client,
+            child,
+            address,
+            token: "token".into(),
+        };
+        assert!(matches!(
+            local_down(&mut process),
+            Some(LocalDown::Disconnected)
+        ));
     }
 }

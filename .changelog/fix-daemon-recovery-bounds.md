@@ -1,0 +1,1 @@
+- Reconnecting to an unresponsive daemon and spawning a replacement are now bounded operations instead of hanging on a stalled socket or a slow boot, and the daemon outage log records one "unreachable" entry per continuous outage — including whether recovery kept the same daemon alive rather than restarting it.
