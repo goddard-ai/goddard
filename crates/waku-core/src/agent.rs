@@ -95,6 +95,7 @@ pub struct AgentState {
     /// Scoped bearer token → the session owning the runtime it was minted
     /// for. Several tokens can name the same session when a task restarts.
     tokens: Mutex<HashMap<String, Uuid>>,
+    resource_ids: Mutex<HashMap<Uuid, Vec<Uuid>>>,
     /// The `goddard-agent` scopes each live runtime launched with, for
     /// sessions the provider did not tell about the CLI itself.
     surfaces: Mutex<HashMap<Uuid, AgentSurface>>,
@@ -142,6 +143,27 @@ impl AgentState {
         })
     }
 
+    pub fn note_resource(&self, session_id: Uuid, id: Uuid) {
+        let tokens = self.tokens.lock();
+        if tokens.values().any(|owner| *owner == session_id) {
+            let mut resources = self.resource_ids.lock();
+            let ids = resources.entry(session_id).or_default();
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        } else {
+            // Acquisition raced with runtime exit. Cancel this exact old request,
+            // never a reservation belonging to a newly minted runtime.
+            crate::resource_broker::Broker::cancel_owned_async(session_id, vec![id]);
+        }
+    }
+
+    pub fn cancel_resources(&self, session_id: Uuid) {
+        if let Some(ids) = self.resource_ids.lock().remove(&session_id) {
+            crate::resource_broker::Broker::cancel_owned_async(session_id, ids);
+        }
+    }
+
     /// Drop every credential minted for the session's runtimes. Called when a
     /// runtime is closed, replaced, or reported exited — the token is valid
     /// only while the provider process that carries it lives. The surface
@@ -149,6 +171,7 @@ impl AgentState {
     /// fresh provider process.
     pub fn revoke_session(&self, session_id: Uuid) {
         self.tokens.lock().retain(|_, owner| *owner != session_id);
+        self.cancel_resources(session_id);
         self.surfaces.lock().remove(&session_id);
         // A revoked runtime loses everything its steers carried — the
         // restarted process gets the parent index again.
@@ -233,6 +256,9 @@ impl AgentState {
     /// Forget every credential and queue. Called on daemon shutdown.
     pub fn clear(&self) {
         self.tokens.lock().clear();
+        for (task, ids) in std::mem::take(&mut *self.resource_ids.lock()) {
+            crate::resource_broker::Broker::cancel_owned_async(task, ids);
+        }
         self.surfaces.lock().clear();
         self.queues.lock().clear();
         self.pending_steers.lock().clear();
@@ -827,6 +853,15 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
         " Link a task in your reply as `[title]({}<task_id>)` and Goddard \
          renders it as a link that opens it.",
         waku_protocol::TASK_LINK_PREFIX
+    ));
+    instruction.push_str(&format!(
+        "\n- `resource` — reserve host resources before simulator/emulator, expensive native build, or shared desktop input work. \
+         Use `{command} resource run '{{\"resources\":{{\"native_builds\":1}},\"purpose\":\"native build\"}}' -- COMMAND ARGS`. \
+         Acquire the full resource set once; nested commands reuse subsets automatically. \
+         iOS uses `exclusive:[\"ios:<UDID>\"]` plus `resident_devices:1`; Android uses `android:<AVD>`. \
+         Add `desktop_input:1` for shared focus/input, not for isolated app processes. \
+         Shut down owned virtual devices before ending a reservation; idle devices still consume capacity. \
+         `resource status` shows owners and queues; waits need no model retries. Raw shell launches can bypass this cooperative broker."
     ));
     instruction.push_str("\n</goddard-agent>");
     instruction

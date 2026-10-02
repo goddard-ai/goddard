@@ -3111,11 +3111,48 @@ impl Backend for WakuBackend {
             Command::AgentComputerUseReset => {
                 self.agent_computer_use(session_id, agent, None, None, None)
             }
+            Command::AgentResources { operation } => {
+                let owner =
+                    agent.context("resource reservations require a scoped task credential")?;
+                let status = crate::resource_broker::Broker::host()?.operate(owner, operation)?;
+                if let Some(id) = status.request_id {
+                    self.agent.note_resource(owner, id);
+                    if let Some(reservation) = status.reservations.iter().find(|r| r.id == id) {
+                        let waiting = reservation.granted_at.is_none() && !reservation.cancelled;
+                        let title = if waiting {
+                            crate::resource_broker::waiting_title(reservation, &status)
+                        } else {
+                            format!("Resources: {}", reservation.purpose)
+                        };
+                        if let Ok(event) = event_to_wire(DriverEvent::Activity {
+                            id: Some(format!("resource-{id}")),
+                            kind: crate::model::ActivityKind::Tool,
+                            title,
+                            detail: None,
+                            complete: !waiting,
+                        }) {
+                            let _ = events.send(event);
+                        }
+                    } else if let Ok(event) = event_to_wire(DriverEvent::Activity {
+                        id: Some(format!("resource-{id}")),
+                        kind: crate::model::ActivityKind::Tool,
+                        title: "Resource reservation ended".into(),
+                        detail: None,
+                        complete: true,
+                    }) {
+                        let _ = events.send(event);
+                    }
+                }
+                Ok(ResponsePayload::AgentResources { status })
+            }
             Command::AgentListModels => self.agent_model_options(),
             Command::CancelQueuedPrompt { queued_message_id } => {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
             }
             command => {
+                if matches!(command, Command::Cancel) {
+                    self.agent.cancel_resources(session_id);
+                }
                 // Daemon-owned `agentAsk`/`agentRenameSelf` requests resolve
                 // here — their request ids never reached the provider, so
                 // the driver has nothing parked under them. Every attached
@@ -6525,6 +6562,7 @@ fn handle_driver_command(
         | Command::AgentSearchSessions { .. }
         | Command::AgentProjectMap { .. }
         | Command::AgentAsk { .. }
+        | Command::AgentResources { .. }
         | Command::AgentListModels
         | Command::AgentComputerUse { .. }
         | Command::AgentComputerUseReset

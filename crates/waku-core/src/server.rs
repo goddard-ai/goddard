@@ -2205,6 +2205,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentSearchSessions { .. }
             | Command::AgentProjectMap { .. }
             | Command::AgentAsk { .. }
+            | Command::AgentResources { .. }
             | Command::AgentListModels
             | Command::AgentComputerUse { .. }
             | Command::AgentComputerUseReset
@@ -2258,6 +2259,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
             | Command::AgentAsk { .. }
+            | Command::AgentResources { .. }
             | Command::AgentProjectMap { .. }
             | Command::StartIntegrationAuth { .. }
             | Command::ConnectIntegration { .. }
@@ -2597,6 +2599,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AgentSearchSessions { .. } => "agentSearchSessions",
         Command::AgentProjectMap { .. } => "agentProjectMap",
         Command::AgentAsk { .. } => "agentAsk",
+        Command::AgentResources { .. } => "agentResources",
         Command::AgentListModels => "agentListModels",
         Command::AgentComputerUse { .. } => "agentComputerUse",
         Command::AgentComputerUseReset => "agentComputerUseReset",
