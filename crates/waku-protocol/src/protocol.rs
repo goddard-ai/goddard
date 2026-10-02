@@ -787,6 +787,10 @@ pub enum Command {
         title: Option<String>,
     },
     AgentComputerUseReset,
+    /// Host-wide cooperative broker, authenticated task ownership only.
+    AgentResources {
+        operation: crate::resources::ResourceOperation,
+    },
     /// Share one of my projects with a friend. The daemon resolves the
     /// project's name and `origin` URL from `project_path` and re-sends
     /// the friend our full shared set.
@@ -1261,6 +1265,9 @@ pub struct SubprocessLabelSample {
     rename_all_fields = "camelCase"
 )]
 pub enum ResponsePayload {
+    AgentResources {
+        status: crate::resources::ResourceStatus,
+    },
     Ack,
     ManagedGoalTurnClaimed {
         claimed: bool,
