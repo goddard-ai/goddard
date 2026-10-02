@@ -510,22 +510,22 @@ function progressLine(
   return `[goddard-dev] Compiling ${label} ${bar} ${count} crate${done === 1 ? "" : "s"}${detail}${issues ? ` · ${issues}${hint}` : ""} · ${elapsedLabel(startedAt)}`;
 }
 
-// Runs cargo with a live one-line progress bar on a TTY by parsing the
-// compiler's JSON stream. Diagnostics stay buffered behind the bar — the
+// Runs cargo through Mr Boxington with a live one-line progress bar on a TTY
+// by parsing the compiler's JSON stream. Diagnostics stay buffered behind the bar — the
 // line reports warning/error counts — and 'e' expands them live or replays
 // them afterward. A failed build always dumps its full output. Off a TTY
 // cargo's own output passes straight through.
 async function cargoBuild(label: string, args: string[]): Promise<boolean> {
   if (!stdoutIsTTY) {
     console.log(`[goddard-dev] Building ${label}...`);
-    const result = await $`cargo build ${args}`.nothrow();
+    const result = await $`mbx build ${args}`.nothrow();
     return result.exitCode === 0;
   }
 
   const expected = readBuildStats()[label];
   const child = Bun.spawn(
     [
-      "cargo",
+      "mbx",
       "build",
       "--message-format=json-diagnostic-rendered-ansi",
       ...args,
