@@ -195,6 +195,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "hourglass",
     "hexagon",
     "inbox",
+    "inbox-sidebar",
     "info",
     "integration-atlassian",
     "integration-figma",
