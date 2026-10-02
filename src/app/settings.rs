@@ -4387,6 +4387,9 @@ impl Waku {
                     waku_client::DaemonStatus::Recovering => {
                         (tr!("daemon.phase_connecting"), theme.warning)
                     }
+                    waku_client::DaemonStatus::Degraded => {
+                        (tr!("daemon.phase_degraded"), theme.warning)
+                    }
                     waku_client::DaemonStatus::Unreachable => {
                         (tr!("daemon.phase_disconnected"), theme.danger)
                     }

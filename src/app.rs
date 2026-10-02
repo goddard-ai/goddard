@@ -2766,6 +2766,19 @@ pub struct Waku {
     /// source for the `daemon.recovery` analytics event.
     daemon_recovery_tx: Sender<(waku_client::DaemonKey, waku_client::DaemonRecovery)>,
     daemon_recovery_events: Receiver<(waku_client::DaemonKey, waku_client::DaemonRecovery)>,
+    /// The local supervisor's reachability stream — drives the degraded
+    /// banner; remote hosts read their supervisor directly instead.
+    daemon_status_tx: Sender<waku_client::DaemonStatus>,
+    daemon_status_events: Receiver<waku_client::DaemonStatus>,
+    /// The local daemon's latest announced reachability — mirrors the
+    /// supervisor's status for the banner.
+    local_daemon_status: waku_client::DaemonStatus,
+    /// The restart confirmation is open — the only path that replaces a
+    /// still-alive daemon.
+    daemon_restart_dialog: Option<daemon_degraded::DaemonRestartDialogState>,
+    /// A confirmed restart is spawning its replacement on a background
+    /// thread — the banner action goes inert until it lands.
+    daemon_restart_pending: bool,
     /// `friendsChanged` broadcasts forwarded by the task-state sync worker:
     /// the authoritative daemon document each time a friend request, offer,
     /// or transfer update lands.
@@ -3924,6 +3937,7 @@ mod command_palette;
 mod commit_dialog;
 mod components;
 mod composer;
+mod daemon_degraded;
 mod diagnostics_page;
 mod drafts;
 mod element_inspector;
@@ -3995,6 +4009,7 @@ pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 use components::*;
 pub use composer::init as init_composer_keys;
+pub use daemon_degraded::init as init_daemon_degraded_keys;
 pub use element_inspector::init as init_element_inspector;
 pub use file_finder::init as init_file_finder;
 pub use full_access_dialog::init as init_full_access_dialog_keys;
@@ -5438,6 +5453,7 @@ impl Waku {
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (daemon_recovery_tx, daemon_recovery_events) = unbounded();
+        let (daemon_status_tx, daemon_status_events) = unbounded();
         let (friends_tx, friends_events) = unbounded();
         let (pairing_tx, pairing_events) = unbounded();
         let (automations_tx, automations_events) = unbounded();
@@ -6660,6 +6676,11 @@ impl Waku {
                 daemon_settings_events,
                 daemon_recovery_tx,
                 daemon_recovery_events,
+                daemon_status_tx,
+                daemon_status_events,
+                local_daemon_status: waku_client::DaemonStatus::Connected,
+                daemon_restart_dialog: None,
+                daemon_restart_pending: false,
                 friends_state: waku_client::friends::FriendsState::default(),
                 friends_tx,
                 friends_events,

@@ -1359,8 +1359,22 @@ daemon.forget:
   en: Forget daemon
 daemon.reconnect:
   en: Reconnect
+daemon.restart:
+  en: Restart daemon
+daemon.restart_pending:
+  en: Restarting…
+daemon.degraded_banner:
+  en: The daemon is alive but not answering — Goddard keeps trying to reach it, so running tasks are left alone.
+daemon.restart_confirm_title:
+  en: Restart the daemon?
+daemon.restart_confirm_body:
+  en: Restarting stops every running task and terminal on this machine. Turns that can resume continue after the daemon comes back.
+daemon.restart_confirm_action:
+  en: Restart daemon
 daemon.phase_booting:
   en: Starting
+daemon.phase_degraded:
+  en: Not answering
 daemon.phase_disconnected:
   en: Disconnected
 daemon.phase_connecting:

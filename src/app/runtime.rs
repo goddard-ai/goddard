@@ -1433,6 +1433,24 @@ impl Waku {
                 }
             })
             .ok();
+        // Only the local daemon gets a status surface — remote outages
+        // belong to the host settings row, not a workspace banner.
+        if key == waku_client::DaemonKey::Local {
+            let statuses = supervisor.subscribe_status();
+            let status_updates = self.daemon_status_tx.clone();
+            let status_wake = self.event_wake_tx.clone();
+            std::thread::Builder::new()
+                .name("waku-daemon-status".into())
+                .spawn(move || {
+                    while let Ok(status) = statuses.recv() {
+                        if status_updates.send(status).is_err() {
+                            return;
+                        }
+                        signal_event_pump(&status_wake);
+                    }
+                })
+                .ok();
+        }
         std::thread::Builder::new()
             .name(format!("waku-task-state-sync-{key:?}"))
             .spawn(move || {
@@ -1644,6 +1662,17 @@ impl Waku {
             self.apply_remote_daemon_settings(key, settings, cx);
         }
         true
+    }
+
+    /// The local supervisor's reachability stream — the banner follows the
+    /// latest announced status.
+    fn drain_daemon_status_events(&mut self, _cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while let Ok(status) = self.daemon_status_events.try_recv() {
+            changed |= self.local_daemon_status != status;
+            self.local_daemon_status = status;
+        }
+        changed
     }
 
     /// Supervisor recovery reports. Each opens a [`DaemonRecoveryEpisode`]
@@ -7440,6 +7469,7 @@ impl Waku {
         // driver events in the same batch, and must open their episode before
         // resume counting runs.
         if self.drain_daemon_recovery_events(cx)
+            | self.drain_daemon_status_events(cx)
             | self.drain_driver_events(cx)
             | self.drain_provider_probe_events()
             | self.drain_provider_version_events()

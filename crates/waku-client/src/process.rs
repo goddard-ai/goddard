@@ -36,9 +36,6 @@ const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 const STABLE_UPTIME: Duration = Duration::from_secs(30);
 const UNREACHABLE_AFTER_FAILURES: u32 = 4;
-/// Reconnect attempts an alive-but-disconnected daemon earns before the
-/// supervisor falls back to killing and respawning it.
-const LOCAL_RECONNECT_ATTEMPTS: u32 = 3;
 const DAEMON_STDERR_LOG_CAP: u64 = 256 * 1024;
 const MAX_DAEMON_STDERR_LINE_BYTES: usize = 8 * 1024;
 static DAEMON_STDERR_LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -664,7 +661,13 @@ pub enum DaemonStatus {
     Connected,
     /// A restart or reconnect is under way.
     Recovering,
+    /// A managed local daemon that stays alive while its connection stays
+    /// dead — the app keeps trying to reconnect in place, and only an
+    /// explicit restart or a confirmed exit replaces it.
+    Degraded,
     /// Repeated recovery attempts have failed; retries continue slowly.
+    /// A daemon whose process is unreachable — dead, respawn-failing, or
+    /// managed on another host.
     Unreachable,
 }
 
@@ -965,6 +968,23 @@ impl DaemonSupervisor {
         Ok(())
     }
 
+    /// The user asked for the local daemon to be replaced — the only path
+    /// besides a confirmed process exit that kills a live daemon. Runs the
+    /// whole swap on the caller's thread (the monitor serializes through
+    /// the same restart lock); callers dispatch off the UI thread.
+    pub fn restart_local_daemon(&self) -> anyhow::Result<()> {
+        let Some(executable) = self.inner.executable.clone() else {
+            bail!("the connected daemon is managed outside Goddard Desktop");
+        };
+        let Some(exposure) = self.inner.exposure.lock().clone() else {
+            bail!("the desktop does not manage this daemon's settings");
+        };
+        let _restart = self.inner.restart.lock();
+        // `Restarting` can't be observed here — holding the restart lock
+        // means no swap is in flight; whatever the target is gets replaced.
+        replace_local_daemon(&self.inner, &executable, &exposure)
+    }
+
     /// Queue a daemon settings update without blocking the desktop UI thread.
     pub fn update_settings(&self, settings: DaemonSettings) -> anyhow::Result<()> {
         *self.inner.settings.lock() = settings.clone();
@@ -1123,6 +1143,7 @@ fn monitor_daemon(
                         &inner,
                         episode.as_mut().expect("an episode opened above"),
                         consecutive_failures,
+                        false,
                     );
                 }
             }
@@ -1217,20 +1238,22 @@ fn monitor_daemon(
                             &inner,
                             episode.as_mut().expect("an episode opened above"),
                             consecutive_failures,
+                            false,
                         );
                         continue;
                     }
                 }
                 // A daemon whose process is still alive only lost its
                 // connection — reconnect in place; killing it would take
-                // every provider runtime down for nothing. The failure count
-                // survives a successful reconnect: it only clears after a
-                // stable stretch, so a daemon that accepts connections but
-                // keeps failing probes is replaced instead of flapping
-                // forever.
-                if matches!(still_down, Some(LocalDown::Disconnected))
-                    && consecutive_failures < LOCAL_RECONNECT_ATTEMPTS
-                {
+                // every provider runtime down for nothing. Connection
+                // health alone never earns a replacement no matter how long
+                // the outage runs: only a confirmed process exit (above)
+                // or an explicit restart reaches `replace_local_daemon`.
+                // The failure count survives a successful reconnect — it
+                // clears only after a stable stretch — so a daemon that
+                // flaps still degrades the status and the report, it just
+                // is never killed for it.
+                if matches!(still_down, Some(LocalDown::Disconnected)) {
                     match reconnect_local_daemon(&inner) {
                         Ok(()) => {
                             healthy_since = Instant::now();
@@ -1244,6 +1267,7 @@ fn monitor_daemon(
                                 &inner,
                                 episode.as_mut().expect("an episode opened above"),
                                 consecutive_failures,
+                                true,
                             );
                         }
                     }
@@ -1275,6 +1299,7 @@ fn monitor_daemon(
                             &inner,
                             episode.as_mut().expect("an episode opened above"),
                             consecutive_failures,
+                            false,
                         );
                     }
                 }
@@ -1432,18 +1457,28 @@ fn mark_connected(inner: &SupervisorInner, episode: Option<RecoveryEpisode>) {
 }
 
 /// A recovery attempt failed. The status ratchets Connected → Recovering →
-/// Unreachable and the crossing is announced once per episode — slow
+/// the episode's outage status — `Degraded` for a managed daemon still
+/// alive under a dead connection, `Unreachable` for a dead, respawning, or
+/// remote daemon — and the crossing is announced once per episode; slow
 /// retries keep calling this and must not repeat the same report.
-fn note_recovery_failure(inner: &SupervisorInner, episode: &mut RecoveryEpisode, failures: u32) {
-    let unreachable = failures >= UNREACHABLE_AFTER_FAILURES;
-    // Retries never regress an announced Unreachable back to Recovering —
-    // the outage ends only on a working connection.
-    let degraded = match (unreachable, *inner.status.lock()) {
-        (true, _) | (_, DaemonStatus::Unreachable) => DaemonStatus::Unreachable,
+fn note_recovery_failure(
+    inner: &SupervisorInner,
+    episode: &mut RecoveryEpisode,
+    failures: u32,
+    process_alive: bool,
+) {
+    let past_threshold = failures >= UNREACHABLE_AFTER_FAILURES;
+    let current = *inner.status.lock();
+    // Retries never regress an announced outage back to Recovering — the
+    // episode ends only on a working connection.
+    let degraded = match (past_threshold, current) {
+        (true, _) if process_alive => DaemonStatus::Degraded,
+        (true, _) => DaemonStatus::Unreachable,
+        (_, DaemonStatus::Unreachable | DaemonStatus::Degraded) => current,
         _ => DaemonStatus::Recovering,
     };
     set_status(inner, degraded);
-    if unreachable && !episode.unreachable_announced {
+    if past_threshold && !episode.unreachable_announced {
         episode.unreachable_announced = true;
         report_recovery(inner, episode, DaemonRecoveryOutcome::Unreachable);
     }
@@ -1864,37 +1899,58 @@ mod tests {
             .expect("a dropped client's socket stayed open");
     }
 
-    /// One continuous outage crosses the unreachable threshold exactly
-    /// once; retries inside the episode neither re-announce it nor walk
-    /// the status back to Recovering.
+    /// One continuous outage on a live-but-silent daemon crosses the
+    /// threshold into `Degraded` exactly once; retries inside the episode
+    /// neither re-announce it nor walk the status back to Recovering.
     #[test]
-    fn an_outage_reports_unreachable_once_then_recovery_once() {
+    fn a_live_daemon_outage_degrades_once_then_recovers_once() {
         let supervisor = test_supervisor(&hello_endpoint());
         let reports = supervisor.subscribe_recovery();
         let mut episode = RecoveryEpisode::new(DaemonRecoveryCause::Disconnect, None);
         for failures in 1..8 {
-            note_recovery_failure(&supervisor.inner, &mut episode, failures);
+            note_recovery_failure(&supervisor.inner, &mut episode, failures, true);
         }
         let seen: Vec<DaemonRecovery> = reports.try_iter().collect();
         assert_eq!(seen.len(), 1, "the episode re-announced the crossing");
         assert_eq!(seen[0].outcome, DaemonRecoveryOutcome::Unreachable);
         assert!(matches!(seen[0].cause, DaemonRecoveryCause::Disconnect));
         assert!(!seen[0].replaced);
-        assert_eq!(supervisor.status(), DaemonStatus::Unreachable);
+        assert_eq!(supervisor.status(), DaemonStatus::Degraded);
 
         // A retry inside the same outage never regresses the status.
-        note_recovery_failure(&supervisor.inner, &mut episode, 1);
-        assert_eq!(supervisor.status(), DaemonStatus::Unreachable);
+        note_recovery_failure(&supervisor.inner, &mut episode, 1, true);
+        assert_eq!(supervisor.status(), DaemonStatus::Degraded);
         assert!(reports.try_iter().next().is_none());
 
         // Connectivity back: one recovery transition carries the episode.
-        episode.replaced = true;
         mark_connected(&supervisor.inner, Some(episode));
         let seen: Vec<DaemonRecovery> = reports.try_iter().collect();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].outcome, DaemonRecoveryOutcome::Recovered);
-        assert!(seen[0].replaced);
+        assert!(!seen[0].replaced, "an in-place reconnect is not a replacement");
         assert_eq!(supervisor.status(), DaemonStatus::Connected);
+    }
+
+    /// An episode for a daemon that actually died — or whose process the
+    /// supervisor cannot see — crosses to `Unreachable` instead.
+    #[test]
+    fn a_dead_or_unmanaged_daemon_outage_is_unreachable_not_degraded() {
+        let supervisor = test_supervisor(&hello_endpoint());
+        let reports = supervisor.subscribe_recovery();
+        let mut episode = RecoveryEpisode::new(
+            DaemonRecoveryCause::UnexpectedExit,
+            Some(DaemonExit {
+                code: None,
+                signal: Some(9),
+            }),
+        );
+        for failures in 1..8 {
+            note_recovery_failure(&supervisor.inner, &mut episode, failures, false);
+        }
+        let seen: Vec<DaemonRecovery> = reports.try_iter().collect();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(supervisor.status(), DaemonStatus::Unreachable);
+        assert_eq!(seen[0].exit.unwrap().signal, Some(9));
     }
 
     /// A process still running with a dead connection is `Disconnected`,

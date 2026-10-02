@@ -535,6 +535,7 @@ impl Render for Waku {
             let incognito_dialog = self.render_incognito_dialog(window, cx);
             let terminal_close_dialog = self.render_terminal_close_dialog(cx);
             let close_dialog = self.render_close_dialog(cx);
+            let daemon_restart_dialog = self.render_daemon_restart_dialog(cx);
             let provider_switch_dialog = self.render_provider_switch_dialog(cx);
             let push_base_dialog = self.render_push_base_dialog(window, cx);
             let reset_credit_dialog = self.render_reset_credit_dialog(cx);
@@ -594,6 +595,7 @@ impl Render for Waku {
                 .children(incognito_dialog)
                 .children(terminal_close_dialog)
                 .children(close_dialog)
+                .children(daemon_restart_dialog)
                 .children(provider_switch_dialog)
                 .children(push_base_dialog)
                 .children(reset_credit_dialog)
@@ -642,6 +644,7 @@ impl Render for Waku {
         let incognito_dialog = self.render_incognito_dialog(window, cx);
         let terminal_close_dialog = self.render_terminal_close_dialog(cx);
         let close_dialog = self.render_close_dialog(cx);
+        let daemon_restart_dialog = self.render_daemon_restart_dialog(cx);
         let provider_switch_dialog = self.render_provider_switch_dialog(cx);
         let push_base_dialog = self.render_push_base_dialog(window, cx);
         let reset_credit_dialog = self.render_reset_credit_dialog(cx);
@@ -835,6 +838,7 @@ impl Render for Waku {
                         |element| element.child(self.render_header(window, cx)),
                     )
                     .children(self.friend_watch_banner(cx))
+                    .children(self.daemon_degraded_banner(cx))
                     // A selected terminal takes the column in place of the
                     // transcript, the Projects page, or the new-task prompt.
                     .child(
@@ -1046,6 +1050,7 @@ impl Render for Waku {
             .children(incognito_dialog)
             .children(terminal_close_dialog)
             .children(close_dialog)
+            .children(daemon_restart_dialog)
             .children(provider_switch_dialog)
             .children(push_base_dialog)
             .children(reset_credit_dialog)
