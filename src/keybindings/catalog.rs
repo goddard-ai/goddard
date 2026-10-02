@@ -2975,6 +2975,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("app.open_localhost_tab", All, "secondary-alt-shift-o", ""),
     e("app.view_unarchived_task", All, "secondary-alt-o", ""),
     e("app.open_created_issue", All, "secondary-alt-i", ""),
+    e("text.submit_steer", All, "secondary-enter", Workspace),
     // === crate::bind_keys — macOS only ==========================================
     e("app.hide", MacOS, "cmd-h", ""),
     e("app.hide_others", MacOS, "alt-cmd-h", ""),
