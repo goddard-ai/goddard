@@ -1789,7 +1789,7 @@ impl Waku {
         let row = self
             .render_sidebar_action_row(
                 "sidebar-automations",
-                "icons/folder-clock.svg",
+                "icons/automations.svg",
                 tr!("sidebar.automations"),
                 ShortcutHint::action(&ToggleAutomationsPage),
                 window,

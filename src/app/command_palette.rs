@@ -2604,7 +2604,7 @@ impl Waku {
             commands.push(CommandPaletteItem::command(
                 PaletteSection::Commands,
                 tr!("command_palette.go_to_automations"),
-                "icons/folder-clock.svg",
+                "icons/automations.svg",
                 Some(ShortcutHint::action(&ToggleAutomationsPage)),
                 PaletteAction::GoToAutomations,
                 "go to automations scheduled tasks runs",
