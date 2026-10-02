@@ -799,16 +799,16 @@ export function WakuApp() {
     queryClient.setQueryData<TaskState>(stateKey, (currentState) => currentState && ({
       ...currentState,
       sessions: currentState.sessions.map((session) => session.id === sessionId
-        ? { ...session, title, updated_at: updatedAt }
+        ? { ...session, title, agent_rename_allowed: false, updated_at: updatedAt }
         : session),
     }))
     queryClient.setQueryData<AgentSession>(sessionKey, (session) => session
-      ? { ...session, title, updated_at: updatedAt }
+      ? { ...session, title, agent_rename_allowed: false, updated_at: updatedAt }
       : session)
     try {
       const hydrated = await hydrateSession(client, sessionId)
       if (!hydrated) throw new Error(t('errors.task_not_found'))
-      await saveSession({ ...hydrated, title, updated_at: updatedAt })
+      await saveSession({ ...hydrated, title, agent_rename_allowed: false, updated_at: updatedAt })
     } catch (error) {
       if (previousSummary) {
         queryClient.setQueryData<TaskState>(stateKey, (currentState) => currentState && ({

@@ -3693,7 +3693,7 @@ impl Waku {
             if self
                 .state
                 .session_mut(session_id)
-                .is_some_and(|session| session.set_title(title))
+                .is_some_and(|session| session.set_title_from_user(title))
             {
                 self.save();
                 cx.notify();
@@ -4020,7 +4020,7 @@ impl Waku {
         if self
             .state
             .session_mut(session_id)
-            .is_some_and(|session| session.set_title(title))
+            .is_some_and(|session| session.set_title_from_user(title))
         {
             self.save();
             cx.notify();

@@ -411,7 +411,7 @@ export function Composer({
     if (title === null) {
       return false
     }
-    savePatch({ title })
+    savePatch({ title, agent_rename_allowed: false })
     clearComposerDraft()
     return true
   }

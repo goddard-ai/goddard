@@ -2364,6 +2364,15 @@ impl AgentSession {
         true
     }
 
+    /// Sets a title the user typed — a sidebar inline rename or
+    /// `/rename <title>`. A human-chosen title revokes the standing
+    /// agent-rename grant, so the next `goddard-agent rename` parks a fresh
+    /// permission request. Returns whether anything changed.
+    pub fn set_title_from_user(&mut self, title: impl AsRef<str>) -> bool {
+        let revoked = std::mem::take(&mut self.agent_rename_allowed);
+        self.set_title(title) || revoked
+    }
+
     pub fn set_title_from_prompt(&mut self, prompt: &str) {
         if self.messages.len() > 1 || self.title != Self::DEFAULT_TITLE || self.auto_title.is_some()
         {
@@ -6602,6 +6611,27 @@ mod tests {
         assert_eq!(session.display_title(), "My title");
         assert!(!session.set_title("   "));
         assert_eq!(session.display_title(), "My title");
+    }
+
+    #[test]
+    fn user_rename_revokes_the_agent_rename_grant() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let mut session = AgentSession::new(project.id, ProviderKind::OpenCode);
+        session.agent_rename_allowed = true;
+
+        assert!(session.set_title_from_user("My title"));
+        assert!(!session.agent_rename_allowed);
+        assert_eq!(session.title, "My title");
+
+        // An agent-approved rename is not a user title and keeps the grant.
+        session.agent_rename_allowed = true;
+        assert!(session.set_title("Agent title"));
+        assert!(session.agent_rename_allowed);
+
+        session.agent_rename_allowed = true;
+        assert!(session.set_title_from_user("My title"));
+        assert!(!session.agent_rename_allowed);
+        assert!(!session.set_title_from_user("My title"));
     }
 
     #[test]

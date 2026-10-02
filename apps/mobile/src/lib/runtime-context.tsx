@@ -1086,6 +1086,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const next = {
       ...current,
       title: trimmed || 'New task',
+      agent_rename_allowed: false,
       updated_at: clock.nowSeconds(),
     };
     cacheSession(next);
