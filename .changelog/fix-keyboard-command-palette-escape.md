@@ -1,0 +1,1 @@
+- Fixed Escape sometimes failing to close the command palette or file finder when it was pressed before the picker's search field had taken focus.
