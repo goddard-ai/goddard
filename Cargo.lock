@@ -11106,8 +11106,10 @@ name = "waku-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "serde",
  "serde_json",
+ "tungstenite 0.30.0",
  "uuid",
  "waku-client",
  "waku-protocol",

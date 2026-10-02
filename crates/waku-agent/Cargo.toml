@@ -16,3 +16,9 @@ serde_json = "1.0"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 waku-client = { path = "../waku-client" }
 waku-protocol = { path = "../waku-protocol" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }

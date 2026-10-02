@@ -18,6 +18,8 @@
 //! write with this task's id so agent-originated changes stay visible to the
 //! user.
 
+mod resources;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -48,6 +50,11 @@ USAGE
     goddard-agent computer js '<json>'       Execute JavaScript in this task's persistent CUA kernel
     goddard-agent computer js --stdin        Read that JSON payload from stdin
     goddard-agent computer reset             Reset this task's CUA kernel
+    goddard-agent resource acquire '<json>'   Acquire resources (waits, prints id)
+    goddard-agent resource run '<json>' -- COMMAND [ARGS]   Run with supervised resources
+    goddard-agent resource release '{\"id\":\"UUID\"}'  Release a reservation
+    goddard-agent resource cancel '{\"id\":\"UUID\"}'   Cancel a queue entry or workload
+    goddard-agent resource status            Print host owners, queue, capacity, and observations
     goddard-agent models                     List the provider/model options `create` accepts
     goddard-agent command list               List the user's custom commands
     goddard-agent command upsert '<json>'    Add or update a custom command
@@ -94,6 +101,13 @@ USAGE CONTRACT
     file paths to open with your image reader. App, browser, clipboard, and
     desktop access keep their Goddard approval prompts. No actions are
     automatically retried after a lost response.
+    `resource` reserves contended host resources — native builds, iOS/Android
+    virtual devices, and shared desktop input — across every Goddard task on
+    this machine. Wrap the workload in `resource run '<json>' -- COMMAND` so
+    the reservation queues without retries and supervises the command's
+    process group. `resource status` shows owners, queues, and user-owned
+    devices. Enforcement is cooperative; commands launched outside a
+    reservation bypass the broker.
     There is no per-call approval gate for task/settings writes; the daemon records
     this task's id on every accepted write, so agent-originated commands and
     turns are visibly attributed to it.
@@ -114,6 +128,11 @@ fn schema() -> serde_json::Value {
     json!({
         "computer": {"js": {"code": "string (required)", "timeout_ms": "integer 1..300000 (default 300000)", "title": "string (optional)"}, "reset": "no payload; resets only this task", "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"},
         "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate for task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
+        "resource": {
+            "syntax": "resource acquire '<json>' | resource run '<json>' -- COMMAND [ARGS] | resource release/cancel '{\"id\":\"UUID\"}' | resource status",
+            "acquire": {"resources": {"exclusive": ["ios:SIMULATOR-UDID"], "resident_devices": 1, "native_builds": 1, "desktop_input": 0}, "purpose": "iOS smoke test", "wait_seconds": 600},
+            "notes": "FIFO atomic allocation across projects. run inherits standard streams and exit status. Use ios:<UDID>, android:<AVD>, or device:<id> exclusivity; resident_devices must equal ios/android resource count. Nested run inherits subset ownership, cannot expand. Reservations remain while workloads or named devices live. Cooperative enforcement; raw launches bypass scheduling."
+        },
         "create": {
             "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation. The task inherits this task's access mode and run environment — a sandboxed task spawns sandboxed tasks.",
             "fields": {
@@ -388,6 +407,9 @@ fn run() -> anyhow::Result<()> {
             }
         }
         "computer" => computer(arguments.collect()),
+        "resource" => resources::command(arguments),
+        #[cfg(unix)]
+        "__resource_exec" => resources::exec_child(arguments),
         "command" => command(arguments.next().as_deref(), arguments.next()),
         "create" | "prompt" | "read" | "search" | "map" | "rename" | "ask" => {
             let payload = arguments
