@@ -1838,7 +1838,7 @@ impl Waku {
         ))
     }
 
-    fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.command_palette.view {
             CommandPaletteView::Commands => self.close_command_palette(window, cx),
             CommandPaletteView::Resume => self.leave_command_palette_resume_view(cx),

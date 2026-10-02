@@ -4193,6 +4193,18 @@ impl Waku {
             self.dismiss_keyboard_options(true, window, cx);
             return;
         }
+        // The pickers' search focus lands on the same two-frame defer —
+        // an Escape in that gap, or while anything else holds focus,
+        // resolves to this root binding. Route it through the picker's
+        // dismiss rather than the draft/stop paths below the scrim.
+        if self.command_palette.is_open() {
+            self.dismiss_command_palette(window, cx);
+            return;
+        }
+        if self.file_finder.is_open() {
+            self.close_file_finder(window, cx);
+            return;
+        }
         // Bare Escape never reaches here — the overlay's Dismiss binding is
         // deeper in the context stack — but ⌥Escape does, and it must stop
         // the armed card's turn, never the session idling underneath.

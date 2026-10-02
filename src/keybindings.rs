@@ -417,6 +417,47 @@ mod tests {
         );
     }
 
+    /// The pickers' Escape follows the same contract: under their stacks the
+    /// field's `Clear` clears a filled query first, the card's `Dismiss`
+    /// closes next, and the root `CancelTurn` stays reachable last — where
+    /// `cancel_turn_action` routes it back to the picker's dismiss while
+    /// the overlay is open but its deferred focus has not landed.
+    #[gpui::test]
+    fn picker_escape_resolves_clear_dismiss_then_cancel(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::input::init(cx);
+            crate::app::init_command_palette(cx);
+            crate::app::init_file_finder(cx);
+            crate::bind_keys(cx);
+        });
+
+        for picker in ["CommandPalette", "FileFinder"] {
+            let stack = [
+                gpui::KeyContext::parse("Workspace").unwrap(),
+                gpui::KeyContext::parse(picker).unwrap(),
+                gpui::KeyContext::parse("TextInput").unwrap(),
+            ];
+            let (bindings, _) = cx.update(|cx| {
+                cx.key_bindings()
+                    .borrow()
+                    .bindings_for_input(&[gpui::Keystroke::parse("escape").unwrap()], &stack)
+            });
+            let position = |action: &dyn gpui::Action| {
+                bindings
+                    .iter()
+                    .position(|binding| binding.action().partial_eq(action))
+            };
+            let clear = position(&crate::input::Clear).expect("field Clear must match escape");
+            let dismiss = position(&crate::app::Dismiss).expect("picker Dismiss must match escape");
+            let cancel = position(&crate::CancelTurn { immediate: false })
+                .expect("root CancelTurn still matches");
+            assert!(
+                clear < dismiss && dismiss < cancel,
+                "escape under {picker} must resolve Clear → Dismiss → CancelTurn"
+            );
+        }
+    }
+
     /// Parity gate: the generated keymap must be identical — action,
     /// sequence, platform, predicate, and precedence order — to the
     /// hand-written registrations it replaces. This must pass on every
