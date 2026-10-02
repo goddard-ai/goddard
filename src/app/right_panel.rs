@@ -288,10 +288,7 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
 /// the path — while everything else copies the link target itself.
 fn transcript_link_copy(url: &str) -> (String, &'static str) {
     match markdown_file_link_path(url) {
-        Some(path) => (
-            path.to_string_lossy().into_owned(),
-            "common.copy_file_path",
-        ),
+        Some(path) => (path.to_string_lossy().into_owned(), "common.copy_file_path"),
         None => (url.to_owned(), "common.copy_url"),
     }
 }
@@ -1436,7 +1433,10 @@ mod tests {
             (file.to_string_lossy().into_owned(), "common.copy_file_path")
         );
         let url = "https://example.com/file.rs:12";
-        assert_eq!(transcript_link_copy(url), (url.to_owned(), "common.copy_url"));
+        assert_eq!(
+            transcript_link_copy(url),
+            (url.to_owned(), "common.copy_url")
+        );
     }
 
     #[test]
@@ -6580,80 +6580,85 @@ impl Waku {
                             });
                         }
                     })
-                    .child(canvas(
-                        move |bounds, window, cx| {
-                            let natural =
-                                image
-                                    .clone()
-                                    .use_render_image(window, cx)
-                                    .and_then(|render| {
-                                        let size = render.size(0);
-                                        (size.width.0 > 0 && size.height.0 > 0)
-                                            .then(|| (size.width.0 as f32, size.height.0 as f32))
-                                    });
-                            weak.update(cx, |this, _| {
-                                let editor = this.right_panel_file_editors.get_mut(&path)?;
-                                editor.image_viewport = Some(bounds);
-                                editor.image_natural = natural;
-                                if editor.image_zoom == 0.0
-                                    && let Some((width, height)) = natural
-                                {
-                                    // First view fits the whole image, but
-                                    // never upscales past its pixel size.
-                                    editor.image_zoom = (f32::from(bounds.size.width) / width)
-                                        .min(f32::from(bounds.size.height) / height)
-                                        .min(1.0);
-                                }
-                                let (width, height) = natural?;
-                                let scaled_w = px(width * editor.image_zoom);
-                                let scaled_h = px(height * editor.image_zoom);
-                                let left = (bounds.size.width - scaled_w) / 2.0;
-                                let top = if scaled_h > bounds.size.height {
-                                    editor
-                                        .image_pan_y
-                                        .clamp(bounds.size.height - scaled_h, px(0.0))
-                                } else {
-                                    (bounds.size.height - scaled_h) / 2.0
-                                };
-                                Some((left, top, scaled_w, scaled_h))
-                            })
-                            .ok()
-                            .flatten()
-                            .map(|(left, top, width, height)| {
-                                let mut element = div()
-                                    .size_full()
-                                    .child(
-                                        div()
-                                            .absolute()
-                                            .left(left)
-                                            .top(top)
-                                            .w(width)
-                                            .h(height)
+                    .child(
+                        canvas(
+                            move |bounds, window, cx| {
+                                let natural =
+                                    image
+                                        .clone()
+                                        .use_render_image(window, cx)
+                                        .and_then(|render| {
+                                            let size = render.size(0);
+                                            (size.width.0 > 0 && size.height.0 > 0).then(|| {
+                                                (size.width.0 as f32, size.height.0 as f32)
+                                            })
+                                        });
+                                weak.update(cx, |this, _| {
+                                    let editor = this.right_panel_file_editors.get_mut(&path)?;
+                                    editor.image_viewport = Some(bounds);
+                                    editor.image_natural = natural;
+                                    if editor.image_zoom == 0.0
+                                        && let Some((width, height)) = natural
+                                    {
+                                        // First view fits the whole image, but
+                                        // never upscales past its pixel size.
+                                        editor.image_zoom = (f32::from(bounds.size.width) / width)
+                                            .min(f32::from(bounds.size.height) / height)
+                                            .min(1.0);
+                                    }
+                                    let (width, height) = natural?;
+                                    let scaled_w = px(width * editor.image_zoom);
+                                    let scaled_h = px(height * editor.image_zoom);
+                                    let left = (bounds.size.width - scaled_w) / 2.0;
+                                    let top = if scaled_h > bounds.size.height {
+                                        editor
+                                            .image_pan_y
+                                            .clamp(bounds.size.height - scaled_h, px(0.0))
+                                    } else {
+                                        (bounds.size.height - scaled_h) / 2.0
+                                    };
+                                    Some((left, top, scaled_w, scaled_h))
+                                })
+                                .ok()
+                                .flatten()
+                                .map(
+                                    |(left, top, width, height)| {
+                                        let mut element = div()
+                                            .size_full()
                                             .child(
-                                                img(image.clone())
-                                                    .id(SharedString::from(format!(
-                                                        "file-image-{path}"
-                                                    )))
-                                                    .size_full(),
-                                            ),
-                                    )
-                                    .into_any_element();
-                                element.prepaint_as_root(
-                                    bounds.origin,
-                                    bounds.size.into(),
-                                    window,
-                                    cx,
-                                );
-                                element
-                            })
-                        },
-                        |_, element, window, cx| {
-                            if let Some(mut element) = element {
-                                element.paint(window, cx);
-                            }
-                        },
+                                                div()
+                                                    .absolute()
+                                                    .left(left)
+                                                    .top(top)
+                                                    .w(width)
+                                                    .h(height)
+                                                    .child(
+                                                        img(image.clone())
+                                                            .id(SharedString::from(format!(
+                                                                "file-image-{path}"
+                                                            )))
+                                                            .size_full(),
+                                                    ),
+                                            )
+                                            .into_any_element();
+                                        element.prepaint_as_root(
+                                            bounds.origin,
+                                            bounds.size.into(),
+                                            window,
+                                            cx,
+                                        );
+                                        element
+                                    },
+                                )
+                            },
+                            |_, element, window, cx| {
+                                if let Some(mut element) = element {
+                                    element.paint(window, cx);
+                                }
+                            },
+                        )
+                        .size_full(),
                     )
-                    .size_full())
                     .into_any_element()
             }
             Some(Err(error)) => message(error).into_any_element(),

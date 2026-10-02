@@ -406,11 +406,10 @@ pub fn resume_briefing_audio() -> Option<std::time::Duration> {
 pub fn briefing_audio_status() -> Option<(bool, std::time::Duration)> {
     PLAYING_BRIEFING.with_borrow(|slot| {
         let player = slot.as_ref()?;
-        let (playing, current_time, duration) = unsafe {
-            (player.isPlaying(), player.currentTime(), player.duration())
-        };
-        let remaining = std::time::Duration::try_from_secs_f64((duration - current_time).max(0.0))
-            .ok()?;
+        let (playing, current_time, duration) =
+            unsafe { (player.isPlaying(), player.currentTime(), player.duration()) };
+        let remaining =
+            std::time::Duration::try_from_secs_f64((duration - current_time).max(0.0)).ok()?;
         Some((playing, remaining))
     })
 }

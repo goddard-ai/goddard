@@ -2488,9 +2488,7 @@ impl Waku {
                     .inference
                     .get(&self.state.voice_briefing_provider)
                     .is_some_and(|entry| entry.credential_configured)
-                && self
-                    .voice_briefing_last_reply(session_id)
-                    .is_some()
+                && self.voice_briefing_last_reply(session_id).is_some()
             {
                 commands.push(CommandPaletteItem::command(
                     display_section(PaletteSection::Suggested),

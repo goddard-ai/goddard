@@ -7724,8 +7724,7 @@ impl Waku {
                 .child(gate_examples)
             })
             .when(
-                self.state.voice_briefing_gate_enabled
-                    && !self.daemon.settings().eval_ready(),
+                self.state.voice_briefing_gate_enabled && !self.daemon.settings().eval_ready(),
                 |card| {
                     card.child(
                         div()
@@ -8052,7 +8051,8 @@ impl Waku {
                     if rail_recents {
                         rail_sections.push(picker_section_rail_item(
                             format!("memory-model-rail-recents-{}", provider.id()),
-                            icon("icons/hourglass.svg", 17.0, theme.text_tertiary).into_any_element(),
+                            icon("icons/hourglass.svg", 17.0, theme.text_tertiary)
+                                .into_any_element(),
                             PickerSection::Recents,
                             move |this| this.memory_model_picker_rows(provider, ""),
                             route_class_picker_state,

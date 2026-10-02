@@ -299,7 +299,9 @@ pub(super) fn render_message_footer(
         let cancel_waku = waku.clone();
         footer = footer.child(
             div()
-                .id(SharedString::from(format!("voice-briefing-pending-{message_id}")))
+                .id(SharedString::from(format!(
+                    "voice-briefing-pending-{message_id}"
+                )))
                 .h(px(27.0))
                 .px(px(6.0))
                 .rounded(px(10.0))
@@ -308,7 +310,11 @@ pub(super) fn render_message_footer(
                 .gap(px(6.0))
                 .cursor_default()
                 .hover(|element| element.bg(theme.overlay_strong))
-                .child(motion::spin(icon("icons/loader-circle.svg", 14.0, footer_color)))
+                .child(motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    14.0,
+                    footer_color,
+                )))
                 .child(
                     div()
                         .text_size(sp(12.5))

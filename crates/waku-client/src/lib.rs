@@ -14,8 +14,8 @@ pub mod discover;
 pub mod driver;
 mod mnemonic;
 pub mod persistence;
-pub mod routing;
 mod process;
+pub mod routing;
 mod workspace_client;
 
 pub use client::{DaemonClient, PairReply, pair};

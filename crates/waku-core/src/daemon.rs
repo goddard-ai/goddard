@@ -5546,7 +5546,9 @@ impl WakuBackend {
                 .position(|queued| queued.id == queued_message_id);
             if let Some(index) = index {
                 if !session.queued_messages[index].is_agent_owned() {
-                    bail!("queued message {queued_message_id} is owned by the client, not the daemon");
+                    bail!(
+                        "queued message {queued_message_id} is owned by the client, not the daemon"
+                    );
                 }
                 session.queued_messages.remove(index);
                 session.updated_at = crate::model::unix_time();

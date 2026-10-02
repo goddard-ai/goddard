@@ -1606,9 +1606,8 @@ fn codex_notification_matches_active_thread(
     thread_id: &Mutex<Option<String>>,
     turn_id: &Mutex<Option<String>>,
 ) -> bool {
-    let thread_scoped = method.starts_with("thread/")
-        || method.starts_with("turn/")
-        || method.starts_with("item/");
+    let thread_scoped =
+        method.starts_with("thread/") || method.starts_with("turn/") || method.starts_with("item/");
     if !thread_scoped {
         return true;
     }

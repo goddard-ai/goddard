@@ -1433,7 +1433,17 @@ impl StateStore {
             .map_err(to_io_error)?
             .filter_map(Result::ok)
             .filter_map(
-                |(id, name, path, created_at, bookmark, temporary, starred, friend_peer_id, kind)| {
+                |(
+                    id,
+                    name,
+                    path,
+                    created_at,
+                    bookmark,
+                    temporary,
+                    starred,
+                    friend_peer_id,
+                    kind,
+                )| {
                     Some(Project {
                         id: Uuid::parse_str(&id).ok()?,
                         name,

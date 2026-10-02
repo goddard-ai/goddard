@@ -630,9 +630,10 @@ mod tests {
         cx.run_until_parked();
 
         assert!(
-            outcomes.borrow().iter().all(|(width, height, _)| {
-                *width > 0.0 && *height > 0.0
-            }),
+            outcomes
+                .borrow()
+                .iter()
+                .all(|(width, height, _)| { *width > 0.0 && *height > 0.0 }),
             "canvas bounds collapsed: {:?}",
             outcomes.borrow()
         );

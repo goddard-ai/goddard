@@ -88,9 +88,7 @@ impl Waku {
     /// under automatic playback — manual mode leaves generation to the
     /// footer's on-demand button.
     pub(super) fn prefetch_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if !self.state.voice_briefing_autoplay
-            || self.state.selected_session == Some(session_id)
-        {
+        if !self.state.voice_briefing_autoplay || self.state.selected_session == Some(session_id) {
             return;
         }
         let Some((message_id, turn_id, response)) = self.voice_briefing_candidate(session_id)
@@ -143,10 +141,7 @@ impl Waku {
     /// enough that its latest reply is final, and that reply long enough
     /// to be worth hearing. Returns the message id, its turn id for the
     /// Jev gate's state, and the tail excerpt the summarizer sees.
-    fn voice_briefing_candidate(
-        &self,
-        session_id: Uuid,
-    ) -> Option<(Uuid, Option<Uuid>, String)> {
+    fn voice_briefing_candidate(&self, session_id: Uuid) -> Option<(Uuid, Option<Uuid>, String)> {
         if !self.state.voice_briefing_enabled {
             return None;
         }
@@ -219,7 +214,11 @@ impl Waku {
             && self.briefing_gate_pending.len() < BRIEFING_PENDING_CAP
             && let Some((daemon, state)) = self.voice_briefing_gate_request(session_id, turn_id)
         {
-            let custom = self.state.voice_briefing_gate_instructions.trim().to_owned();
+            let custom = self
+                .state
+                .voice_briefing_gate_instructions
+                .trim()
+                .to_owned();
             let instructions = if custom.is_empty() {
                 "Should the user proactively hear a short spoken briefing when they return \
                  to this task? Answer true when the turn's reply warrants the interruption \
