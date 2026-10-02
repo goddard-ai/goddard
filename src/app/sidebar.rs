@@ -2170,8 +2170,16 @@ impl Waku {
         }
         // The magnification bump is anchored to each button's *resting*
         // center — the real centers reflow as diameters change, and a moving
-        // field would chase its own tail.
+        // field would chase its own tail. Its strength rides the slide's
+        // eased progress, and `mouse_x` keeps its last tracked position
+        // through the drop, so the buttons shrink around a frozen bump as
+        // the dock falls — and grow back in with it — instead of snapping
+        // to rest the instant the pointer leaves.
         let mouse_x = self.sidebar_dock_mouse_x;
+        let bump = match self.sidebar_dock_motion.get() {
+            SidebarDockMotion::Moving { progress, .. } => ease_out_quint()(progress),
+            _ => 1.0,
+        };
         let rest_pitch = DOCK_ITEM_REST + DOCK_ITEM_GAP;
         let diameter_at = |index: usize| -> f32 {
             let Some(mouse_x) = mouse_x else {
@@ -2184,7 +2192,7 @@ impl Waku {
             }
             let influence =
                 (1.0 + (std::f32::consts::PI * distance / DOCK_MAGNIFY_RADIUS).cos()) * 0.5;
-            DOCK_ITEM_REST + (DOCK_ITEM_PEAK - DOCK_ITEM_REST) * influence
+            DOCK_ITEM_REST + (DOCK_ITEM_PEAK - DOCK_ITEM_REST) * influence * bump
         };
         // Sketch "Dock": the buttons overlap the bar that raised them — their
         // bottoms land 3.5px above the window's bottom edge, and the row is
@@ -2208,9 +2216,6 @@ impl Waku {
                     this.sidebar_dock_hovered = *hovered;
                     if !*hovered {
                         this.sidebar_dock_hover_item = None;
-                        if !this.sidebar_dock_zone_hovered {
-                            this.sidebar_dock_mouse_x = None;
-                        }
                     }
                     cx.notify();
                 }))
@@ -3102,9 +3107,6 @@ impl Waku {
                             .cursor_default()
                             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                                 this.sidebar_dock_zone_hovered = *hovered;
-                                if !*hovered && !this.sidebar_dock_hovered {
-                                    this.sidebar_dock_mouse_x = None;
-                                }
                                 cx.notify();
                             }))
                             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {

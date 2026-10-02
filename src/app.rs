@@ -3119,8 +3119,10 @@ pub struct Waku {
     sidebar_dock_hovered: bool,
     /// Dock item under the pointer — its label pill floats above the button.
     sidebar_dock_hover_item: Option<SidebarDockItem>,
-    /// Pointer x in window coordinates while inside the dock's zone or the
-    /// dock itself — the center of the magnification bump.
+    /// Last tracked pointer x in window coordinates over the dock's zone or
+    /// the dock itself — the center of the magnification bump. Kept after
+    /// the pointer leaves so the bump eases out around its frozen center as
+    /// the dock drops rather than snapping to rest.
     sidebar_dock_mouse_x: Option<f32>,
     /// The dock's slide up from (and back down off) the window's bottom
     /// edge. A `Cell` because the sidebar renders through `&self` paths —

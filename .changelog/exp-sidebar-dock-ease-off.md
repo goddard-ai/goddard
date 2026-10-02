@@ -1,0 +1,1 @@
+- The sidebar's quick-action dock now shrinks its magnified buttons back to normal size as it slides away when the pointer leaves, instead of snapping them to rest size mid-drop.
