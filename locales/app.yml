@@ -5920,6 +5920,12 @@ boss.group:
   en: Boss
 boss.brain:
   en: Memory and personas
+boss.pause_voice:
+  en: Pause boss voice message
+boss.resume_voice:
+  en: Resume boss voice message
+boss.replay_voice:
+  en: Replay last boss voice message
 boss.chat:
   en: Chat with boss
 boss.history:

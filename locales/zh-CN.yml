@@ -2937,6 +2937,9 @@ transcript.model_handoff: 自动路由已从 %{from} 切换到 %{to}。
 
 boss.group: "老板"
 boss.brain: "记忆和角色设定"
+boss.pause_voice: "暂停 Boss 语音消息"
+boss.resume_voice: "继续播放 Boss 语音消息"
+boss.replay_voice: "重播上一条 Boss 语音消息"
 boss.chat: "与老板聊天"
 boss.history: "员工"
 boss.memory: "记忆和文件"

@@ -344,6 +344,11 @@ impl Waku {
         if !credential_configured {
             return;
         }
+        let request_id = Uuid::new_v4();
+        self.last_speech_key = Some(key);
+        self.last_speech_request = Some(request_id);
+        self.last_speech_clips.clear();
+        cx.notify();
         let tts_model = self.state.voice_briefing_tts_model;
         let model_id = match tts_model {
             VoiceBriefingTtsModel::Custom => {
@@ -394,15 +399,42 @@ impl Waku {
             let result = work.await;
             let _ = this.update(cx, |this, cx| match result {
                 Ok(clips) => {
-                    this.speech_clip_queue.extend(clips);
+                    if this.last_speech_request == Some(request_id) {
+                        this.last_speech_clips = clips.clone();
+                    }
+                    this.speech_clip_queue
+                        .extend(clips.into_iter().map(|clip| (key, clip)));
                     this.pump_speech_queue(cx);
+                    cx.notify();
                 }
                 Err(error) => {
                     eprintln!("boss speech pipeline failed: {error:#}");
+                    if this.last_speech_request == Some(request_id) {
+                        this.last_speech_key = None;
+                        this.last_speech_clips.clear();
+                        cx.notify();
+                    }
                 }
             });
         })
         .detach();
+    }
+
+    pub(super) fn toggle_boss_speech_transport(
+        &mut self,
+        key: waku_client::DaemonKey,
+        cx: &mut Context<Self>,
+    ) {
+        if self.speech_playback_key == Some(key) && self.voice_briefing_playback.is_some() {
+            self.toggle_voice_briefing_playback(cx);
+            return;
+        }
+        if self.last_speech_key == Some(key) && !self.last_speech_clips.is_empty() {
+            for clip in self.last_speech_clips.iter().rev() {
+                self.speech_clip_queue.push_front((key, clip.clone()));
+            }
+            self.pump_speech_queue(cx);
+        }
     }
 
     /// Sound the next queued speech clip when nothing is playing. Clip
@@ -412,14 +444,16 @@ impl Waku {
         if self.voice_briefing_playback.is_some() {
             return;
         }
-        while let Some(bytes) = self.speech_clip_queue.pop_front() {
+        while let Some((key, bytes)) = self.speech_clip_queue.pop_front() {
             if let Some(duration) =
                 crate::platform::play_briefing_audio(&bytes, self.state.completion_sound_volume)
             {
+                self.speech_playback_key = Some(key);
                 self.track_voice_briefing_playback(duration, cx);
                 return;
             }
         }
+        self.speech_playback_key = None;
     }
 }
 

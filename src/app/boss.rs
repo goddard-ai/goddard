@@ -1208,6 +1208,17 @@ impl Waku {
                 id,
             )
         });
+        let speech_visible = self.last_speech_key == Some(key);
+        let speech_playing = speech_visible
+            && self.speech_playback_key == Some(key)
+            && self
+                .voice_briefing_playback
+                .is_some_and(|playback| playback.playing);
+        let speech_paused = speech_visible
+            && self.speech_playback_key == Some(key)
+            && self
+                .voice_briefing_playback
+                .is_some_and(|playback| !playback.playing);
         div()
             .id(format!("boss-{key:?}"))
             .tab_index(0)
@@ -1237,6 +1248,47 @@ impl Waku {
                 None,
                 &theme,
             ))
+            .when(speech_visible, |row| {
+                let label = if speech_playing {
+                    tr!("boss.pause_voice")
+                } else if speech_paused {
+                    tr!("boss.resume_voice")
+                } else {
+                    tr!("boss.replay_voice")
+                };
+                row.child(
+                    div()
+                        .id(format!("boss-voice-transport-{key:?}"))
+                        .tab_index(0)
+                        .w(px(20.0))
+                        .h(px(20.0))
+                        .flex_shrink_0()
+                        .rounded(px(8.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .hover(|style| style.bg(theme.overlay))
+                        .active(|style| style.bg(theme.overlay_strong))
+                        .aria_label(label.clone())
+                        .tooltip(Tooltip::text(label))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.toggle_boss_speech_transport(key, cx)
+                        })
+                        .child(icon(
+                            if speech_playing {
+                                "icons/pause.svg"
+                            } else if speech_paused {
+                                "icons/play.svg"
+                            } else {
+                                "icons/rotate-cw.svg"
+                            },
+                            13.0,
+                            theme.text_secondary,
+                        )),
+                )
+            })
             .child(
                 div()
                     .id(format!("boss-brain-{key:?}"))

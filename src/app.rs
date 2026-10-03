@@ -2388,7 +2388,13 @@ pub struct Waku {
     voice_briefing_playback_generation: u64,
     /// `boss speak` clips waiting behind whatever the briefing player is
     /// sounding now — the playback tick dequeues them in order.
-    speech_clip_queue: VecDeque<Vec<u8>>,
+    speech_clip_queue: VecDeque<(waku_client::DaemonKey, Vec<u8>)>,
+    /// Most recent Boss utterance, retained for replay while its sidebar
+    /// transport is visible.
+    last_speech_clips: Vec<Vec<u8>>,
+    last_speech_key: Option<waku_client::DaemonKey>,
+    last_speech_request: Option<Uuid>,
+    speech_playback_key: Option<waku_client::DaemonKey>,
     /// `bossSpeechRequested` ids already handled this run — reconnects and
     /// repeat broadcasts must not replay an utterance.
     speech_requests_seen: VecDeque<Uuid>,
@@ -6587,6 +6593,10 @@ impl Waku {
                 briefing_pending: HashMap::new(),
                 briefing_gate_pending: HashMap::new(),
                 speech_clip_queue: VecDeque::new(),
+                last_speech_clips: Vec::new(),
+                last_speech_key: None,
+                last_speech_request: None,
+                speech_playback_key: None,
                 speech_requests_seen: VecDeque::new(),
                 eval_probe_pending: false,
                 eval_probe_result: None,

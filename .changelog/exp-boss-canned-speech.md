@@ -1,1 +1,1 @@
-- Added canned speech for the Boss: the `speak` operation voices a message through connected clients while the voice briefings experiment is on, splitting utterances into reusable fragments so generated clips play instantly on repeat.
+- Added canned speech for the Boss: the `speak` operation voices a message through connected clients while the voice briefings experiment is on, splitting utterances into reusable fragments so generated clips play instantly on repeat. Pause playback or replay the last utterance from the Boss row in the sidebar.

@@ -461,6 +461,7 @@ impl Waku {
         }) else {
             return false;
         };
+        self.speech_playback_key = None;
         self.mark_briefed(message_id);
         self.track_voice_briefing_playback(duration, cx);
         true

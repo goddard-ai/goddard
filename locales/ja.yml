@@ -2985,6 +2985,9 @@ transcript.model_handoff: Auto ルーティングが %{from} から %{to} に切
 
 boss.group: "ボス"
 boss.brain: "メモリとペルソナ"
+boss.pause_voice: "Boss の音声メッセージを一時停止"
+boss.resume_voice: "Boss の音声メッセージを再開"
+boss.replay_voice: "最後の Boss 音声メッセージを再生"
 boss.chat: "ボスとチャット"
 boss.history: "従業員"
 boss.memory: "メモリとファイル"
