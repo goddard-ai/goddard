@@ -3187,6 +3187,18 @@ impl Backend for WakuBackend {
             Command::AgentResources { operation } => {
                 let owner =
                     agent.context("resource reservations require a scoped task credential")?;
+                // An acquire can park its caller in a wait for minutes; the
+                // human-facing boss delegates waits to employees instead.
+                if self.boss.is_boss(owner)
+                    && matches!(
+                        operation,
+                        waku_protocol::resources::ResourceOperation::Acquire { .. }
+                    )
+                {
+                    bail!(
+                        "the boss stays available to the human — summon an employee to run workloads that reserve host resources"
+                    );
+                }
                 let status = crate::resource_broker::Broker::host()?.operate(owner, operation)?;
                 if let Some(id) = status.request_id {
                     self.agent.note_resource(owner, id);
@@ -11328,6 +11340,46 @@ mod tests {
         assert!(prompts[0].contains("Turn 1"));
         assert!(prompts[0].contains("Tests passed"));
         assert!(backend.boss.require_active(employee_id).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An acquire parks its caller in the broker wait; the human-facing boss
+    /// hands waits to employees instead, so the daemon refuses and redirects.
+    #[test]
+    fn the_boss_delegates_resource_acquires_to_employees() {
+        let root = std::env::temp_dir().join(format!("boss-resources-{}", Uuid::new_v4()));
+        let (backend, boss) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let error = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: boss,
+                    runtime_id: Uuid::nil(),
+                    command: Command::AgentResources {
+                        operation: waku_protocol::resources::ResourceOperation::Acquire {
+                            resources: Default::default(),
+                            purpose: "wait for a device".into(),
+                            holder_pid: 1,
+                            wait_seconds: 600,
+                            parent: None,
+                        },
+                    },
+                },
+                EventSink::detached(),
+                Some(boss),
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("summon an employee"),
+            "boss acquire should redirect to delegation: {error:#}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }
