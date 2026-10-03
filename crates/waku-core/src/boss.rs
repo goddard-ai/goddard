@@ -42,10 +42,18 @@ impl BossService {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => fresh_state(),
             Err(error) => return Err(error.into()),
         };
-        for employee in &mut state.employees {
-            if employee.job_title.is_empty() {
-                employee.job_title = employee.identity.name.clone();
-                employee.identity.name = employee_human_name(employee.identity.id);
+        for index in 0..state.employees.len() {
+            if state.employees[index].job_title.is_empty() {
+                state.employees[index].job_title = state.employees[index].identity.name.clone();
+                let id = state.employees[index].identity.id;
+                let existing_names = state
+                    .employees
+                    .iter()
+                    .enumerate()
+                    .filter(|(other_index, _)| *other_index != index)
+                    .map(|(_, employee)| employee.identity.name.as_str())
+                    .collect::<Vec<_>>();
+                state.employees[index].identity.name = employee_human_name(id, existing_names);
             }
         }
         let service = Self {
@@ -199,7 +207,13 @@ impl BossService {
             supervisor_id: caller,
             identity: BossIdentity {
                 id,
-                name: employee_human_name(id),
+                name: employee_human_name(
+                    id,
+                    state
+                        .employees
+                        .iter()
+                        .map(|employee| employee.identity.name.as_str()),
+                ),
                 avatar_seed: id.to_string(),
             },
             job_title: job_title.trim().to_owned(),
@@ -618,15 +632,49 @@ fn validate_relative(path: &str, allow_empty: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn employee_human_name(id: Uuid) -> String {
+fn employee_human_name<'a>(id: Uuid, existing_names: impl IntoIterator<Item = &'a str>) -> String {
     const NAMES: &[&str] = &[
         "Alden", "Ansel", "Blythe", "Celia", "Dorian", "Edith", "Elin", "Emery", "Estelle",
         "Flora", "Galen", "Hugo", "Ida", "Inez", "Ivo", "Leander", "Lenora", "Linus", "Lucian",
         "Maren", "Mavis", "Milo", "Nell", "Orson", "Otis", "Petra", "Rhea", "Rosalind", "Rufus",
         "Selma", "Soren", "Sylvie", "Thalia", "Thea", "Tobin", "Vera", "Willa", "Cleo", "Ada",
-        "Ambrose",
+        "Ambrose", "Abigail", "Adelaide", "Agnes", "Alma", "Amara", "Amos", "Arthur", "Astrid",
+        "Beatrice", "Beckett", "Benedict", "Bernadette", "Calder", "Calliope", "Cassian", "Cecily",
+        "Clementine", "Conrad", "Cordelia", "Cosima", "Desmond", "Dorothea", "Eleanor", "Elias",
+        "Eliza", "Emmeline", "Ephraim", "Etta", "Evelyn", "Felix", "Fern", "Finch", "Florence",
+        "Frances", "Frederick", "Genevieve", "Georgia", "Greta", "Gwendolyn", "Harriet", "Hazel",
+        "Heath", "Henrietta", "Isadora", "Isidore", "Jasper", "Josephine", "Julian", "Juniper",
+        "Lavinia", "Lazarus", "Lillian", "Lottie", "Louisa", "Magnus", "Matilda", "Maude", "Maxwell",
+        "Mirabel", "Nico", "Nina", "Noel", "Octavia", "Opal", "Oscar", "Penelope", "Percival",
+        "Phoebe", "Quentin", "Quincy", "Ramona", "Reuben", "Rowan", "Sabine", "Silas", "Simone",
+        "Sterling", "Tamsin", "Theodore", "Ulysses", "Valentina", "Victor", "Viola", "Vivian", "Wallace",
+        "Wilfred", "Winifred", "Xanthe", "Yvette", "Zelda", "Zinnia", "Aurelia", "Basil", "Cyrus",
+        "Delphine", "Evander", "Felicity", "Gideon", "Hollis", "Imogen", "Juno", "Kit", "Lydia",
+        "Marcel", "Nadia", "Odette", "Peregrine", "Romy", "Sasha", "Tilda", "Una", "Violet", "Wesley",
+        "Yara", "Zachary", "Alistair", "Briony", "Cora", "Daphne", "Edmund", "Freya", "Graham", "Iris",
+        "Jonah", "Kieran", "Margot", "Nora", "Rafael", "Stella", "Thomas", "Wren", "Ari", "Bram",
+        "Caspian", "Della", "Esme", "Faye", "Harlan", "Ivolette", "Lyle", "Mina", "Niles", "Rory",
     ];
-    NAMES[(id.as_u128() % NAMES.len() as u128) as usize].into()
+    let base = NAMES[(id.as_u128() % NAMES.len() as u128) as usize];
+    let existing_names = existing_names.into_iter().collect::<std::collections::HashSet<_>>();
+    if !existing_names.contains(base) {
+        return base.into();
+    }
+
+    for suffix_len in 1.. {
+        let mut suffix = String::with_capacity(suffix_len);
+        let mut value = suffix_len;
+        while value > 0 {
+            value -= 1;
+            suffix.insert(0, (b'A' + (value % 26) as u8) as char);
+            value /= 26;
+        }
+        let candidate = format!("{base} {suffix}.");
+        if !existing_names.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    unreachable!("there is always an unused employee name suffix")
 }
 
 fn validate_name(name: &str) -> anyhow::Result<()> {
