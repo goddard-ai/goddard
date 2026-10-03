@@ -13,7 +13,7 @@
 //                           (default: 8976)
 
 import { $ } from "bun";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { extname, join, normalize } from "node:path";
 import { generateAppcast } from "./appcast";
@@ -205,6 +205,7 @@ export async function startDevServe(options: {
   const port = Number(process.env.GODDARD_DEV_SERVE_PORT ?? 8976);
   const workDir = join(targetDir, "dev-serve");
   const updatesDir = join(workDir, "updates");
+  let lastBuildTimestamp = 0;
   await mkdir(updatesDir, { recursive: true });
 
   const server = Bun.serve({
@@ -235,26 +236,40 @@ export async function startDevServe(options: {
       // Every deploy must out-version the last: the derived release number
       // keeps dev builds ahead of released versions while staying behind the
       // next real release, and the epoch suffix orders builds of one version.
-      const buildNumber = `${derivedBuildNumber(version)}.${Math.floor(
-        Date.now() / 1000,
-      )}`;
+      lastBuildTimestamp = Math.max(Date.now(), lastBuildTimestamp + 1);
+      const buildNumber = `${derivedBuildNumber(version)}.${lastBuildTimestamp}`;
       const plist = join(appBundle, "Contents", "Info.plist");
       await $`plutil -replace CFBundleShortVersionString -string ${shortVersion} ${plist}`;
       await $`plutil -replace CFBundleVersion -string ${buildNumber} ${plist}`;
       await resignBundle(appBundle);
 
-      await rm(updatesDir, { force: true, recursive: true });
-      await mkdir(updatesDir, { recursive: true });
-      const zipName = `Goddard-${version}.zip`;
-      await $`ditto -c -k --keepParent ${appBundle} ${join(updatesDir, zipName)}`;
+      // Build each publication off to the side. The live directory contains
+      // immutable archives plus one atomically replaced appcast, so readers
+      // never observe a partially written ZIP or feed.
+      const stagingDir = join(workDir, `.staging-${buildNumber}`);
+      await rm(stagingDir, { force: true, recursive: true });
+      await mkdir(stagingDir, { recursive: true });
+      const zipName = `Goddard-${version}-${buildNumber}.zip`;
       try {
-        await generateAppcast(updatesDir, `https://${hostname}/`);
+        await $`ditto -c -k --keepParent ${appBundle} ${join(stagingDir, zipName)}`;
+        await generateAppcast(stagingDir, `https://${hostname}/`);
+        // The archive is immutable and must exist before the feed starts
+        // advertising it. Keeping prior archives also lets an in-flight
+        // download from the previous feed finish across a deployment.
+        await rename(join(stagingDir, zipName), join(updatesDir, zipName));
+        await rename(
+          join(stagingDir, "appcast.xml"),
+          join(updatesDir, "appcast.xml"),
+        );
       } catch (error) {
+        await rm(join(updatesDir, zipName), { force: true });
         log(
-          `Appcast generation failed (is the Sparkle key in the keychain?): ` +
+          `Dev channel publish failed (is the Sparkle key in the keychain?): ` +
             `${error instanceof Error ? error.message : error}`,
         );
         return false;
+      } finally {
+        await rm(stagingDir, { force: true, recursive: true });
       }
       log(`Deployed ${zipName} as build ${buildNumber} to ${appcastUrl}.`);
       return true;
