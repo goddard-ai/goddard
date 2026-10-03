@@ -689,30 +689,28 @@ impl Waku {
         };
         let theme = Theme::current(cx);
         div()
+            .id(format!("boss-{key:?}"))
+            .tab_index(0)
             .h(px(42.0))
             .w_full()
             .px(px(8.0))
             .flex()
             .items_center()
-            .gap(px(4.0))
+            .gap(px(8.0))
+            .rounded(px(6.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, window, cx| {
+                this.open_boss_page(key, BossTab::History, window, cx)
+            })
+            .child(self.boss_avatar(&state.identity, cx))
             .child(
                 div()
-                    .id(format!("boss-{key:?}"))
-                    .tab_index(0)
                     .flex_1()
                     .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(px(6.0))
-                    .cursor_pointer()
-                    .hover(|style| style.bg(theme.overlay))
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .on_activation(cx, move |this, window, cx| {
-                        this.open_boss_page(key, BossTab::History, window, cx)
-                    })
-                    .child(self.boss_avatar(&state.identity, cx))
-                    .child(div().truncate().child(state.identity.name.clone())),
+                    .truncate()
+                    .child(state.identity.name.clone()),
             )
             .child(
                 div()
