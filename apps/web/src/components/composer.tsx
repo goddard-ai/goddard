@@ -1718,7 +1718,9 @@ function QueuedMessages({
   onRemove: (messageId: string) => void
 }) {
   const { t } = useI18n()
-  const messages = session.queued_messages ?? []
+  // Hidden entries are provider-facing text — internal nudges and goal
+  // reminders — and never render a chip.
+  const messages = (session.queued_messages ?? []).filter((message) => !message.hidden)
   if (!messages.length) return null
   return (
     <div className="px-3.5">

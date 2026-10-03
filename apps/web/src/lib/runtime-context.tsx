@@ -17,6 +17,7 @@ import {
   managedGoalEvaluation,
   managedGoalOperation,
   MANAGED_GOAL_QUESTION,
+  queuedMessageIsManagedGoal,
   sessionAcceptsImmediateSteer,
 } from '@waku/client'
 import {
@@ -131,6 +132,7 @@ interface RuntimeContextValue {
     prompt: string,
     attachments?: MessageAttachment[],
     providerPromptOverride?: string,
+    hidden?: boolean,
   ) => Promise<void>
   steerPrompt: (
     session: AgentSession,
@@ -460,6 +462,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             nextQueued.display_content ?? nextQueued.content,
             nextQueued.attachments ?? [],
             nextQueued.content,
+            nextQueued.hidden,
           )
         })
         .catch((error) => toast.error(errorMessage(error)))
@@ -678,6 +681,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       rawPrompt: string,
       attachments: MessageAttachment[] = [],
       providerPromptOverride?: string,
+      hidden = false,
     ) => {
       if (!client || !config || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
@@ -701,7 +705,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         currentSession.status === 'waiting' ||
         checkpointCaptures.current.has(currentSession.id)
       ) {
-        const queued = queueSubmission(currentSession, prompt, providerPrompt, attachments)
+        const queued = queueSubmission(currentSession, prompt, providerPrompt, attachments, hidden)
         cacheSession(queued)
         await persistOrdered(queued)
         return
@@ -711,7 +715,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         await attachSession(currentSession)
       }
 
-      let session = beginTurn(currentSession, prompt, attachments)
+      let session = beginTurn(currentSession, prompt, attachments, hidden)
       cacheSession(session)
       // The ids ride along with the prompt so every other client attached to
       // the runtime mirrors this turn and its user message under the same rows.
@@ -828,6 +832,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             prompt: providerPrompt,
             turnId: submittedTurn?.id ?? null,
             messageId: submittedMessage?.id ?? null,
+            hidden,
             attachments,
           },
           session.id,
@@ -897,7 +902,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         const updated = managedGoalOperation(base, operation)
         cacheSession(updated.session)
         const saved = await persistOrdered(updated.session)
-        if (updated.prompt) await sendPromptRef.current?.(saved, updated.prompt)
+        if (updated.prompt) await sendPromptRef.current?.(saved, updated.prompt, [], undefined, true)
         return
       }
       // Activating a goal on an idle thread makes Codex pursue it right away,
@@ -1094,6 +1099,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (!client || !config) return
     const plan = managedGoalEvaluation(settled)
     if (!plan) return
+    // A parked follow-up means the task is still working through the user's
+    // queue, not resting: that prompt drains next and its own settle re-runs
+    // this check, so the goal is only evaluated — and a reminder only
+    // decided — once the queue is actually empty.
+    const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, settled.id))
+    if (!current || current.thread_goal?.managedId !== plan.goalId
+      || current.thread_goal.status !== 'active'
+      || current.turns.at(-1)?.id !== plan.turnId
+      || current.messages.length !== settled.messages.length
+      || current.queued_messages?.length) return
     let shouldEvaluate = !plan.stop
     if (shouldEvaluate) {
       try {
@@ -1106,12 +1121,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         shouldEvaluate = false
       }
     }
-    const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, settled.id))
-    if (!current || current.thread_goal?.managedId !== plan.goalId
-      || current.thread_goal.status !== 'active'
-      || current.turns.at(-1)?.id !== plan.turnId
-      || current.messages.length !== settled.messages.length
-      || current.queued_messages?.length) return
     const marked: AgentSession = {
       ...current,
       thread_goal: { ...current.thread_goal, managedLastTurn: plan.turnId },
@@ -1141,7 +1150,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       || latest.turns.at(-1)?.id !== plan.turnId
       || latest.queued_messages?.length) return
     if (decision === 'continue') {
-      await sendPromptRef.current?.(latest, continuationPrompt(latest.thread_goal.objective))
+      await sendPromptRef.current?.(latest, continuationPrompt(latest.thread_goal.objective), [], undefined, true)
     } else {
       const updated = { ...latest, thread_goal: { ...latest.thread_goal, status: decision } }
       cacheSession(updated)
@@ -1515,12 +1524,18 @@ function queueSubmission(
   displayContent: string,
   providerPrompt: string,
   attachments: MessageAttachment[],
+  hidden = false,
 ): AgentSession {
   return {
     ...session,
     updated_at: Math.floor(Date.now() / 1_000),
     queued_messages: [
-      ...(session.queued_messages ?? []),
+      // A user's follow-up outranks an automatic goal reminder: pull the
+      // parked reminder and let the next resting settle re-decide whether
+      // the goal still needs one.
+      ...(session.queued_messages ?? []).filter(
+        (message) => hidden || !queuedMessageIsManagedGoal(message),
+      ),
       {
         id: crypto.randomUUID(),
         content: providerPrompt,
@@ -1528,6 +1543,7 @@ function queueSubmission(
           ? displayContent
           : null,
         attachments,
+        ...(hidden ? { hidden } : {}),
         created_at: Math.floor(Date.now() / 1_000),
       },
     ],

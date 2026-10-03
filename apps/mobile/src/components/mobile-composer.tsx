@@ -218,7 +218,9 @@ export function MobileComposer({
     ? null
     : runtimeError;
   const visibleError = visibleLocalError || visibleRuntimeError;
-  const queued = session.queued_messages ?? [];
+  // Hidden entries are provider-facing text — internal nudges and goal
+  // reminders — and never render a chip.
+  const queued = (session.queued_messages ?? []).filter((message) => !message.hidden);
   const taskState = useTaskState();
   const project = taskState.data?.projects.find((item) => item.id === session.project_id);
 

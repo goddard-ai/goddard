@@ -8,7 +8,7 @@ import type {
   RuntimeMode,
   SequencedEvent,
 } from '@waku/client';
-import { attachmentPromptToken } from '@waku/client';
+import { attachmentPromptToken, queuedMessageIsManagedGoal } from '@waku/client';
 
 export interface MobileRuntimeClock {
   nowSeconds: () => number;
@@ -31,6 +31,7 @@ export function beginTurn(
   clock: MobileRuntimeClock,
   attachments: MessageAttachment[] = [],
   providerPromptOverride?: string,
+  hidden = false,
 ): AgentSession {
   const now = clock.nowSeconds();
   const turnId = clock.randomUUID();
@@ -41,7 +42,7 @@ export function beginTurn(
   return {
     ...session,
     auto_title:
-      session.messages.length === 0 && session.title === 'New task' && !session.auto_title
+      !hidden && session.messages.length === 0 && session.title === 'New task' && !session.auto_title
         ? promptTitle(visiblePrompt || attachments[0]?.name || '')
         : session.auto_title,
     status: 'connecting',
@@ -57,6 +58,7 @@ export function beginTurn(
         display_content:
           attachments.length || providerPrompt !== visiblePrompt ? visiblePrompt : null,
         attachments,
+        ...(hidden ? { hidden } : {}),
         created_at: now,
         streaming: false,
       },
@@ -144,6 +146,7 @@ export function queueSubmission(
   clock: MobileRuntimeClock,
   attachments: MessageAttachment[] = [],
   providerPromptOverride?: string,
+  hidden = false,
 ): AgentSession {
   const now = clock.nowSeconds();
   const visiblePrompt = prompt.trim();
@@ -154,13 +157,19 @@ export function queueSubmission(
     ...session,
     updated_at: now,
     queued_messages: [
-      ...(session.queued_messages ?? []),
+      // A user's follow-up outranks an automatic goal reminder: pull the
+      // parked reminder and let the next resting settle re-decide whether
+      // the goal still needs one.
+      ...(session.queued_messages ?? []).filter(
+        (message) => hidden || !queuedMessageIsManagedGoal(message),
+      ),
       {
         id: clock.randomUUID(),
         content: providerPrompt,
         display_content:
           attachments.length || providerPrompt !== visiblePrompt ? visiblePrompt : null,
         attachments,
+        ...(hidden ? { hidden } : {}),
         created_at: now,
       },
     ],

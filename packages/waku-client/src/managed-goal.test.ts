@@ -63,7 +63,7 @@ test('pausing removes a queued goal continuation', () => {
   }, () => 'goal-1')
   const queued = {
     ...started.session,
-    queued_messages: [{ id: 'goal-prompt', content: started.prompt! },
+    queued_messages: [{ id: 'goal-prompt', content: started.prompt!, hidden: true },
       { id: 'human-prompt', content: 'Please also check the docs' }],
   } as AgentSession
   const paused = managedGoalOperation(queued, {

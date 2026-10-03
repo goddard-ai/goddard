@@ -115,6 +115,7 @@ interface RuntimeContextValue {
     prompt: string,
     attachments?: MessageAttachment[],
     providerPromptOverride?: string,
+    hidden?: boolean,
   ) => Promise<AgentSession>;
   steerPrompt: (
     session: AgentSession,
@@ -196,6 +197,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       prompt: string,
       attachments?: MessageAttachment[],
       providerPromptOverride?: string,
+      hidden?: boolean,
     ) => Promise<AgentSession>) | null
   >(null);
   const managedGoalSettleRef = useRef<((session: AgentSession) => Promise<void>) | null>(null);
@@ -343,6 +345,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         next.display_content ?? next.content,
         next.attachments ?? [],
         next.content,
+        next.hidden,
       );
     } catch (cause) {
       setErrors((values) => ({ ...values, [sessionId]: errorMessage(cause) }));
@@ -586,6 +589,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     rawPrompt: string,
     attachments: MessageAttachment[] = [],
     providerPromptOverride?: string,
+    hidden = false,
   ): Promise<AgentSession> => {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
@@ -602,7 +606,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     // with only the new messages. Always start from the full session.
     let current = await loadFullSession(inputSession.id);
     if (sessionBusy(current)) {
-      const queued = queueSubmission(current, prompt, clock, attachments, providerPrompt);
+      const queued = queueSubmission(current, prompt, clock, attachments, providerPrompt, hidden);
       cacheSession(queued);
       return persistOrdered(queued);
     }
@@ -636,7 +640,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       startup = { binary: probe.path, cwd: sessionCwd(current, project) };
     }
 
-    current = beginTurn(current, prompt, clock, attachments, providerPrompt);
+    current = beginTurn(current, prompt, clock, attachments, providerPrompt, hidden);
     // The ids beginTurn gave the turn and its user message ride along with
     // the prompt, so every other client attached to the runtime mirrors the
     // same rows instead of minting its own.
@@ -680,6 +684,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           prompt: providerPrompt,
           turnId: submitted.turnId,
           messageId: submitted.messageId,
+          hidden,
           attachments,
         },
         current.id,
@@ -717,6 +722,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (!client || !profileId) return;
     const plan = managedGoalEvaluation(settled);
     if (!plan) return;
+    // A parked follow-up means the task is still working through the user's
+    // queue, not resting: that prompt drains next and its own settle re-runs
+    // this check, so the goal is only evaluated — and a reminder only
+    // decided — once the queue is actually empty.
+    const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, settled.id));
+    if (!current || current.thread_goal?.managedId !== plan.goalId
+      || current.thread_goal.status !== 'active'
+      || current.turns.at(-1)?.id !== plan.turnId
+      || current.messages.length !== settled.messages.length
+      || current.queued_messages?.length) return;
     let shouldEvaluate = !plan.stop;
     if (shouldEvaluate) {
       try {
@@ -729,12 +744,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         shouldEvaluate = false;
       }
     }
-    const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, settled.id));
-    if (!current || current.thread_goal?.managedId !== plan.goalId
-      || current.thread_goal.status !== 'active'
-      || current.turns.at(-1)?.id !== plan.turnId
-      || current.messages.length !== settled.messages.length
-      || current.queued_messages?.length) return;
     const marked: AgentSession = {
       ...current,
       thread_goal: { ...current.thread_goal, managedLastTurn: plan.turnId },
@@ -764,7 +773,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       || latest.turns.at(-1)?.id !== plan.turnId
       || latest.queued_messages?.length) return;
     if (decision === 'continue') {
-      await sendPromptRef.current?.(latest, continuationPrompt(latest.thread_goal.objective));
+      await sendPromptRef.current?.(latest, continuationPrompt(latest.thread_goal.objective), [], undefined, true);
     } else {
       const updated: AgentSession = {
         ...latest,
@@ -852,7 +861,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const updated = managedGoalOperation(base, operation, Crypto.randomUUID);
       cacheSession(updated.session);
       const saved = await persistOrdered(updated.session);
-      if (updated.prompt) await sendPromptRef.current?.(saved, updated.prompt);
+      if (updated.prompt) await sendPromptRef.current?.(saved, updated.prompt, [], undefined, true);
       return;
     }
     if (!entries.current.has(current.id)) await attachSession(current);

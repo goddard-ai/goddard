@@ -6498,6 +6498,14 @@ impl Waku {
             self.queued_annotations.insert(message.id, annotations);
         }
         if let Some(session) = self.state.session_mut(session_id) {
+            // A user's follow-up outranks an automatic goal reminder: pull
+            // the parked reminder and let the next resting settle re-decide
+            // whether the goal still needs one.
+            if !message.hidden {
+                session
+                    .queued_messages
+                    .retain(|queued| !goal_dialog::queued_message_is_managed_goal(queued));
+            }
             session.queued_messages.push(message);
             session.updated_at = unix_time();
         }

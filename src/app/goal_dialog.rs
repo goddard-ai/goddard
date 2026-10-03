@@ -32,8 +32,23 @@ fn managed_goal_prompt(objective: &str, continuing: bool) -> String {
         "Start working toward this goal."
     };
     format!(
-        "{MANAGED_GOAL_PROMPT_PREFIX}{objective}\n{instruction} If you need a decision or information from the user, ask and stop."
+        "{MANAGED_GOAL_PROMPT_PREFIX}{objective}\n{instruction}{MANAGED_GOAL_PROMPT_SUFFIX}"
     )
+}
+
+/// The trailing sentence every managed-goal prompt shares — with the prefix
+/// it identifies a parked reminder regardless of objective or instruction,
+/// so a stale entry can be pulled out of the follow-up queue.
+const MANAGED_GOAL_PROMPT_SUFFIX: &str =
+    " If you need a decision or information from the user, ask and stop.";
+
+/// A queued entry holding an automatic goal reminder: provider-facing text
+/// the user never typed and never sees as a chip. User submissions are never
+/// `hidden`, so the prefix match cannot eat one.
+pub(super) fn queued_message_is_managed_goal(message: &QueuedMessage) -> bool {
+    message.hidden
+        && message.content.starts_with(MANAGED_GOAL_PROMPT_PREFIX)
+        && message.content.ends_with(MANAGED_GOAL_PROMPT_SUFFIX)
 }
 
 pub fn init(cx: &mut App) {
@@ -193,18 +208,17 @@ impl Waku {
         let Some(session) = self.state.session_mut(session_id) else {
             return;
         };
-        if !matches!(&operation, GoalOperation::Refresh) {
-            if let Some(goal) = session
+        // A parked reminder is stale the moment the goal changes: drop it so
+        // the settled-turn evaluation re-decides with the new objective.
+        if !matches!(&operation, GoalOperation::Refresh)
+            && session
                 .thread_goal
                 .as_ref()
-                .filter(|goal| goal.managed_id.is_some())
-            {
-                let initial = managed_goal_prompt(&goal.objective, false);
-                let continuation = managed_goal_prompt(&goal.objective, true);
-                session.queued_messages.retain(|message| {
-                    message.content != initial && message.content != continuation
-                });
-            }
+                .is_some_and(|goal| goal.managed_id.is_some())
+        {
+            session
+                .queued_messages
+                .retain(|message| !queued_message_is_managed_goal(message));
         }
         match operation {
             GoalOperation::Refresh => return,
@@ -263,7 +277,11 @@ impl Waku {
         self.save();
         cx.notify();
         if let Some(prompt) = initial_prompt {
-            self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
+            self.submit_composer_submission_to(
+                session_id,
+                ComposerSubmission::hidden_prompt(prompt),
+                cx,
+            );
         }
     }
 
@@ -279,6 +297,13 @@ impl Waku {
         let Some(session) = self.state.session_mut(session_id) else {
             return;
         };
+        // A parked follow-up means the task is still working through the
+        // user's queue, not resting: that prompt drains next and its own
+        // settle re-runs this check, so the goal is only evaluated — and a
+        // reminder only decided — once the queue is actually empty.
+        if !session.queued_messages.is_empty() {
+            return;
+        }
         let Some(goal) = session.thread_goal.as_mut().filter(|goal| {
             goal.status == ThreadGoalStatus::Active
                 && goal.managed_id.is_some()
@@ -443,7 +468,11 @@ impl Waku {
         self.save();
         cx.notify();
         if let Some(prompt) = continue_prompt {
-            self.submit_composer_submission_to(session_id, ComposerSubmission::plain(prompt), cx);
+            self.submit_composer_submission_to(
+                session_id,
+                ComposerSubmission::hidden_prompt(prompt),
+                cx,
+            );
         }
     }
 
@@ -1089,6 +1118,23 @@ mod tests {
             managed_goal_decision(Some(&answer("continue", 0.9))),
             ManagedGoalDecision::Continue
         );
+    }
+
+    #[test]
+    fn managed_goal_marker_names_only_hidden_reminders() {
+        let mut reminder = QueuedMessage::new(managed_goal_prompt("Ship it", true));
+        assert!(!queued_message_is_managed_goal(&reminder));
+        reminder.hidden = true;
+        assert!(queued_message_is_managed_goal(&reminder));
+
+        // A hidden nudge that happens to share neither edge of the prompt
+        // shape, and user text echoing the prefix, both stay untouched.
+        let mut nudge = QueuedMessage::new(CONTINUE_PROMPT);
+        nudge.hidden = true;
+        assert!(!queued_message_is_managed_goal(&nudge));
+        assert!(!queued_message_is_managed_goal(&QueuedMessage::new(format!(
+            "{MANAGED_GOAL_PROMPT_PREFIX}Ship it"
+        ))));
     }
 
     #[test]

@@ -743,6 +743,7 @@ export function beginTurn(
   session: AgentSession,
   prompt: string,
   attachments: MessageAttachment[] = [],
+  hidden = false,
 ): AgentSession {
   const now = unixTime()
   const turnId = crypto.randomUUID()
@@ -750,7 +751,7 @@ export function beginTurn(
   const mentions = attachments.map(attachmentPromptToken).join(' ')
   const providerPrompt = [visiblePrompt, mentions].filter(Boolean).join(' ')
   const autoTitle =
-    session.messages.length === 0 && session.title === 'New task' && !session.auto_title
+    !hidden && session.messages.length === 0 && session.title === 'New task' && !session.auto_title
       ? promptTitle(visiblePrompt || attachments[0]?.name || '')
       : session.auto_title
   return {
@@ -768,6 +769,7 @@ export function beginTurn(
         content: providerPrompt,
         display_content: attachments.length ? visiblePrompt : null,
         attachments,
+        ...(hidden ? { hidden } : {}),
         created_at: now,
         streaming: false,
       },

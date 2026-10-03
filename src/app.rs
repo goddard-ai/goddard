@@ -579,11 +579,17 @@ impl ComposerSubmission {
         }
     }
 
-    fn hidden_continue() -> Self {
+    /// Provider-facing text that renders no queued chip or transcript row —
+    /// the continue nudge and the managed-goal reminder share the shape.
+    fn hidden_prompt(prompt: String) -> Self {
         Self {
             hidden: true,
-            ..Self::plain(CONTINUE_PROMPT.to_owned())
+            ..Self::plain(prompt)
         }
+    }
+
+    fn hidden_continue() -> Self {
+        Self::hidden_prompt(CONTINUE_PROMPT.to_owned())
     }
 
     fn into_queued_message(self) -> QueuedMessage {

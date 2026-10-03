@@ -15,11 +15,25 @@ export const MANAGED_GOAL_QUESTION = {
 
 export const MANAGED_GOAL_PROMPT_PREFIX = 'Goddard goal: '
 
+const MANAGED_GOAL_PROMPT_SUFFIX =
+  ' If you need a decision or information from the user, ask and stop.'
+
+/** A queued entry holding an automatic goal reminder. Hidden entries are
+ * provider-facing text the user never typed, so the content match cannot
+ * eat a real follow-up. */
+export function queuedMessageIsManagedGoal(
+  message: { content: string; hidden?: boolean },
+): boolean {
+  return Boolean(message.hidden)
+    && message.content.startsWith(MANAGED_GOAL_PROMPT_PREFIX)
+    && message.content.endsWith(MANAGED_GOAL_PROMPT_SUFFIX)
+}
+
 export function managedGoalPrompt(objective: string, continuing: boolean): string {
   const instruction = continuing
     ? 'Build on the work already done in this task.'
     : 'Start working toward this goal.'
-  return `${MANAGED_GOAL_PROMPT_PREFIX}${objective}\n${instruction} If you need a decision or information from the user, ask and stop.`
+  return `${MANAGED_GOAL_PROMPT_PREFIX}${objective}\n${instruction}${MANAGED_GOAL_PROMPT_SUFFIX}`
 }
 
 export function managedGoalOperation(
@@ -29,12 +43,12 @@ export function managedGoalOperation(
 ): { session: AgentSession; prompt: string | null } {
   if (operation.kind === 'refresh') return { session, prompt: null }
   const previousObjective = session.thread_goal?.managedId ? session.thread_goal.objective : null
+  // A parked reminder is stale the moment the goal changes: drop it so the
+  // settled-turn evaluation re-decides with the new objective.
   const base = {
     ...session,
     queued_messages: session.queued_messages?.filter(
-      (message) => previousObjective === null
-        || (message.content !== managedGoalPrompt(previousObjective, false)
-          && message.content !== managedGoalPrompt(previousObjective, true)),
+      (message) => previousObjective === null || !queuedMessageIsManagedGoal(message),
     ),
   }
   if (operation.kind === 'clear') return { session: { ...base, thread_goal: null }, prompt: null }
