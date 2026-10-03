@@ -2082,6 +2082,20 @@ fn handle_connection(
                 // authenticated connection — pairing only lives pre-hello.
                 Ok(ClientMessage::Hello { .. } | ClientMessage::PairRequest { .. }) => {}
                 Err(error) => {
+                    // A request that fails to decode — a client speaking a
+                    // protocol variant this daemon predates, for example —
+                    // still carries a request id worth answering; otherwise
+                    // the caller waits out its whole response timeout.
+                    if let Some(request_id) = undecodable_request_id(&text) {
+                        let _ = outgoing.send(ServerMessage::Response {
+                            request_id,
+                            outcome: ResponseOutcome::Error {
+                                error: RpcError::from(anyhow::anyhow!(
+                                    "daemon could not decode request: {error}"
+                                )),
+                            },
+                        });
+                    }
                     eprintln!("goddard-daemon ignored invalid message: {error}");
                 }
             },
@@ -2861,6 +2875,15 @@ fn retryable_error(error: &(dyn std::error::Error + 'static)) -> bool {
     error.source().is_some_and(retryable_error)
 }
 
+/// Recover the `requestId` a frame carried when its body failed to decode
+/// as a `ClientMessage` — enough to answer the caller, nothing more. A nil
+/// id marks a fire-and-forget request that nobody awaits.
+fn undecodable_request_id(text: &str) -> Option<Uuid> {
+    let value = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let id = value.get("requestId")?.as_str()?;
+    Uuid::parse_str(id).ok().filter(|id| !id.is_nil())
+}
+
 fn read_client_message(socket: &mut WebSocket<TcpStream>) -> anyhow::Result<ClientMessage> {
     loop {
         match socket.read()? {
@@ -3579,6 +3602,108 @@ mod tests {
         assert_eq!(client.daemon_version(), env!("CARGO_PKG_VERSION"));
 
         client.shutdown();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn undecodable_requests_are_answered_with_an_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(TestBackend::default()),
+                server_shutdown,
+                ServerOptions::default(),
+            )
+            .unwrap()
+        });
+        // Speak the wire protocol by hand so the request can carry a
+        // command this daemon cannot decode — the shape a rebuilt
+        // `goddard-agent` sends a daemon that predates its `boss`
+        // operations. The caller still owns a request id and must not be
+        // left waiting out its response timeout.
+        let stream = TcpStream::connect(address).unwrap();
+        let (mut socket, _) =
+            tungstenite::client(format!("ws://{address}/v1"), stream).unwrap();
+        write_json(
+            &mut socket,
+            &ClientMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                token: "secret".into(),
+                client_id: Uuid::new_v4(),
+                resume_from: Vec::new(),
+            },
+        )
+        .unwrap();
+        let request_id = Uuid::new_v4();
+        write_json(
+            &mut socket,
+            &json!({
+                "type": "request",
+                "requestId": request_id,
+                "sessionId": Uuid::nil(),
+                "runtimeId": Uuid::nil(),
+                "command": {
+                    "type": "boss",
+                    "operation": {"type": "anOperationThisDaemonPredates"},
+                },
+            }),
+        )
+        .unwrap();
+        // A request with a nil id is fire-and-forget and gets no answer;
+        // sending one before the malformed request also proves the daemon
+        // does not answer it.
+        write_json(
+            &mut socket,
+            &json!({
+                "type": "request",
+                "requestId": Uuid::nil(),
+                "sessionId": Uuid::nil(),
+                "runtimeId": Uuid::nil(),
+                "command": {
+                    "type": "boss",
+                    "operation": {"type": "anOperationThisDaemonPredates"},
+                },
+            }),
+        )
+        .unwrap();
+        socket
+            .get_mut()
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut responses = Vec::new();
+        loop {
+            match socket.read() {
+                Ok(Message::Text(text)) => {
+                    if let Ok(ServerMessage::Response { request_id: id, outcome }) =
+                        serde_json::from_str(text.as_ref())
+                    {
+                        responses.push((id, outcome));
+                        if id == request_id {
+                            break;
+                        }
+                    }
+                }
+                other => {
+                    panic!("connection died before the error response arrived: {other:?}")
+                }
+            }
+        }
+        match responses.as_slice() {
+            [(id, ResponseOutcome::Error { error })] => {
+                assert_eq!(id, &request_id);
+                assert!(
+                    error.message.contains("could not decode"),
+                    "{error:?}"
+                );
+            }
+            other => panic!("expected one error response, got {other:?}"),
+        }
+        shutdown.store(true, Ordering::Release);
         server.join().unwrap();
     }
 

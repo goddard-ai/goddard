@@ -1,0 +1,1 @@
+- Fixed `goddard-agent` commands hanging for up to two minutes when the daemon could not decode the request — e.g. a `boss` operation newer than the running daemon build — which now gets an immediate error naming the failure.
