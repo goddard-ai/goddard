@@ -1,0 +1,1 @@
+- The Boss's `search` now spans every project's task transcripts instead of only its own, `project:` filters may name any registered project, and each hit reports its project — so the Boss can find and `read` tasks anywhere on the daemon, not just in the project a chat happens to live in.

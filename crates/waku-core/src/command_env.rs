@@ -1571,6 +1571,7 @@ mod tests {
             }),
             task_tools: true,
             settings_writes: true,
+            boss: false,
         }
     }
 

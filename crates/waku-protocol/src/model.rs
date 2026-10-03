@@ -3537,6 +3537,10 @@ pub struct AgentTranscriptItem {
 pub struct AgentSessionSearchHit {
     pub task_id: Uuid,
     pub title: String,
+    /// The task's project name — the same value a `project:` filter
+    /// accepts. Boss searches span projects, so hits need it to be told
+    /// apart; project-scoped searches report it too.
+    pub project: String,
     pub provider: ProviderKind,
     pub status: SessionStatus,
     pub updated_at: u64,

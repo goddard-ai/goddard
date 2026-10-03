@@ -8,7 +8,13 @@ import type { SessionStatus } from "./SessionStatus";
  * caller: enough of a matching task to decide whether its transcript is
  * worth reading in full.
  */
-export type AgentSessionSearchHit = { taskId: string, title: string, provider: ProviderKind, status: SessionStatus, updatedAt: number,
+export type AgentSessionSearchHit = { taskId: string, title: string,
+/**
+ * The task's project name — the same value a `project:` filter
+ * accepts. Boss searches span projects, so hits need it to be told
+ * apart; project-scoped searches report it too.
+ */
+project: string, provider: ProviderKind, status: SessionStatus, updatedAt: number,
 /**
  * Which side of the conversation `snippet` came from.
  */

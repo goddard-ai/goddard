@@ -5241,6 +5241,7 @@ impl WakuBackend {
             shim_directory,
             task_tools: settings.agent_tools_enabled || self.boss.is_managed(session_id),
             settings_writes: settings.agent_settings_enabled && !self.boss.is_managed(session_id),
+            boss: self.boss.is_boss(session_id),
         })
     }
 
@@ -6611,7 +6612,9 @@ impl WakuBackend {
     /// The scoped credential's transcript search: the same corpus and
     /// filters as `SearchSessionMessages`, confined to the calling task's
     /// project. A scoped caller may still write `project:` — it just has to
-    /// name that project.
+    /// name that project. The boss is the exception: its own project holds
+    /// only its session, so it searches every project the daemon knows and
+    /// `project:` may name any of them.
     fn agent_search_sessions(
         &self,
         agent: Option<Uuid>,
@@ -6641,11 +6644,26 @@ impl WakuBackend {
                 "employees retrieve authorized transcripts through the Boss transcript operation"
             );
         }
+        // Resolve the boss's `project:` filters up front so a misspelling
+        // errors like the scoped branch instead of silently scanning
+        // nothing.
+        let project_scope = if self.boss.is_boss(caller) {
+            let parsed = parse_session_message_search(query);
+            let state = self.task_state.lock();
+            for value in &parsed.projects {
+                if resolve_named_search_project(&state.projects, value).is_none() {
+                    bail!("project `{value}` is unknown to the daemon");
+                }
+            }
+            None
+        } else {
+            Some(project_id)
+        };
         let matches = self.search_session_messages(
             query,
             AGENT_SEARCH_DEFAULT_LIMIT,
             SessionMessageSearchScope::Active,
-            Some(project_id),
+            project_scope,
             last_turns,
         )?;
         let state = self.task_state.lock();
@@ -6659,6 +6677,12 @@ impl WakuBackend {
                     .map(|session| AgentSessionSearchHit {
                         task_id: session.id,
                         title: session.display_title().to_owned(),
+                        project: state
+                            .projects
+                            .iter()
+                            .find(|project| project.id == session.project_id)
+                            .map(|project| project.name.clone())
+                            .unwrap_or_default(),
                         provider: session.provider,
                         status: session.status,
                         updated_at: session.updated_at,
@@ -10979,6 +11003,7 @@ mod tests {
                 task_tools: true,
                 settings_writes: true,
                 parent_task_id: None,
+                boss: false,
             },
         );
         (backend, session_id)
@@ -11036,6 +11061,7 @@ mod tests {
                 task_tools: false,
                 settings_writes: false,
                 parent_task_id: Some(session_id),
+                boss: false,
             },
         );
         let capture = Arc::new(CaptureDriver::default());
@@ -11771,6 +11797,89 @@ mod tests {
 
         std::fs::remove_dir_all(root).ok();
     }
+
+    #[test]
+    fn boss_search_spans_every_project() {
+        let root = std::env::temp_dir().join(format!("waku-boss-search-{}", Uuid::new_v4()));
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("repo"));
+        // The boss's own task carries no needle.
+        let boss_id = state.sessions[0].id;
+        let project_id = state.projects[0].id;
+        state.sessions[0].begin_turn("boss prompt");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        // A sibling project task and a foreign project task both match.
+        let mut sibling = AgentSession::new(project_id, ProviderKind::Codex);
+        sibling.begin_turn("the rare needle phrase");
+        sibling.finish_active_turn(crate::model::TurnStatus::Completed);
+        let sibling_id = sibling.id;
+        state.push_session(sibling);
+        let other_project = Project::from_path(root.join("other"));
+        let mut other = AgentSession::new(other_project.id, ProviderKind::Codex);
+        other.begin_turn("the rare needle phrase");
+        other.finish_active_turn(crate::model::TurnStatus::Completed);
+        let other_id = other.id;
+        state.projects.push(other_project.clone());
+        state.push_session(other);
+        store.save(&mut state).unwrap();
+
+        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+        let mut daemon_settings = settings.get();
+        daemon_settings.agent_tools_enabled = true;
+        settings.replace(daemon_settings).unwrap();
+        let backend = WakuBackend::new(settings, store).unwrap();
+        backend
+            .boss
+            .update(|document| {
+                document.session_id = Some(boss_id);
+                Ok(())
+            })
+            .unwrap();
+
+        let search = |query: &str| match backend
+            .agent_search_sessions(Some(boss_id), Uuid::nil(), query, None)
+            .unwrap()
+        {
+            ResponsePayload::AgentSessionSearch { hits } => hits,
+            other => panic!("unexpected payload {other:?}"),
+        };
+
+        // One query reaches both projects, and each hit names its project.
+        let hits = search("rare needle");
+        let mut found = hits.iter().map(|hit| hit.task_id).collect::<Vec<_>>();
+        found.sort();
+        let mut expected = vec![sibling_id, other_id];
+        expected.sort();
+        assert_eq!(found, expected);
+        assert_eq!(
+            hits.iter()
+                .find(|hit| hit.task_id == other_id)
+                .map(|hit| hit.project.as_str()),
+            Some("other")
+        );
+        // `project:` may name any registered project, not just the boss's.
+        assert_eq!(
+            search("project:other rare needle")
+                .iter()
+                .map(|hit| hit.task_id)
+                .collect::<Vec<_>>(),
+            vec![other_id]
+        );
+        // An unknown project name is an error, not a silent empty result.
+        assert!(
+            backend
+                .agent_search_sessions(
+                    Some(boss_id),
+                    Uuid::nil(),
+                    "project:ghost rare needle",
+                    None
+                )
+                .is_err()
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
     #[test]
     fn boss_transcripts_capture_unopened_employee_turns_and_tool_output() {
         let root = std::env::temp_dir().join(format!("boss-transcript-{}", Uuid::new_v4()));

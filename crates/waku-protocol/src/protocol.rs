@@ -752,7 +752,9 @@ pub enum Command {
     },
     /// Scoped agent credential only: search the transcripts of the tasks in
     /// the caller's own project — the same corpus the command palette's
-    /// session search scans. `query` is free text plus `field:value`
+    /// session search scans. The boss credential is the exception: its
+    /// search spans every project the daemon knows, and its `project:`
+    /// filters may name any of them. `query` is free text plus `field:value`
     /// filters (`project:`, `status:`, `archived:`, `limit:`); see
     /// [`crate::persistence::parse_session_message_search`]. `last_turns`
     /// narrows each task's corpus to its most recent turns — the units

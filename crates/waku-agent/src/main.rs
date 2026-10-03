@@ -45,7 +45,7 @@ USAGE
     goddard-agent rename '<json>'            Rename this task after the user approves the request
     goddard-agent archive '<json>'           Propose archiving tasks after the user approves the request
     goddard-agent read '<json>'              Read a task's transcript
-    goddard-agent search '<json>'            Search this project's task transcripts
+    goddard-agent search '<json>'            Search task transcripts — this project's, or every project's for the boss
     goddard-agent map '<json>'               Find relevant code in this workspace
     goddard-agent ask '<json>'               Ask the user a structured question
     goddard-agent computer js '<json>'       Execute JavaScript in this task's persistent CUA kernel
@@ -81,9 +81,10 @@ USAGE CONTRACT
     and status. With no address fields it reads this task's own data; use it
     when another task's transcript holds context you need, for example when
     GODDARD_PARENT_TASK_ID names the task this session is a side chat of.
-    `search` is read-only within this task's project; use it to find sibling
-    tasks worth `read`ing. Use `create` and `prompt` only when the human you
-    are working for has explicitly asked — never for exploration,
+    `search` is read-only within this task's project — daemon-wide for the
+    boss, whose `project:` filters may name any registered project; use it
+    to find tasks worth `read`ing. Use `create` and `prompt` only when the
+    human you are working for has explicitly asked — never for exploration,
     convenience, or self-orchestration.
     `map` searches this workspace's indexed declarations for code relevant to
     the current task. Ask a specific question, add `anchors` for known symbol
@@ -209,13 +210,13 @@ fn schema() -> serde_json::Value {
             "returns": {"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "items": [{"turn": "1-based turn number when the entry belongs to one", "kind": "message|activity", "role": "user|assistant|system on message items", "content": "string"}], "truncated": "true when the size cap dropped the oldest items"}
         },
         "search": {
-            "description": "Search the transcripts of every task in this task's project. `query` is free text — a single case-insensitive substring over user and assistant messages — plus `field:value` filters: `project:<name>` (may only name this project), `status:<idle|connecting|working|waiting|background|failed|busy>` (`busy` unions the working set), `archived:<true|false|any>` (default: active tasks only), `limit:<n>` (default 20). Repeated project:/status: tokens union; different filters intersect; unrecognized tokens stay literal text. A filters-only query lists matching tasks. `last_turns` narrows each task's corpus to its N most recent turns — the units `read` numbers — so a stale hit in an early turn cannot outrank recent work.",
+            "description": "Search the transcripts of every task in this task's project — for the boss, every task on this daemon. `query` is free text — a single case-insensitive substring over user and assistant messages — plus `field:value` filters: `project:<name>` (must name this project; the boss may name any registered project), `status:<idle|connecting|working|waiting|background|failed|busy>` (`busy` unions the working set), `archived:<true|false|any>` (default: active tasks only), `limit:<n>` (default 20). Repeated project:/status: tokens union; different filters intersect; unrecognized tokens stay literal text. A filters-only query lists matching tasks. `last_turns` narrows each task's corpus to its N most recent turns — the units `read` numbers — so a stale hit in an early turn cannot outrank recent work.",
             "fields": {
                 "query": {"type": "string", "required": true},
                 "last_turns": {"type": "number", "notes": "search only each task's last N turns; omit to scan whole transcripts"}
             },
             "example": "{\"query\":\"status:idle retry logic\"}",
-            "returns": {"results": [{"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
+            "returns": {"results": [{"task_id": "uuid", "title": "string", "project": "project name", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
         },
         "map": {
             "description": "Ask Jev to rank source evidence from this session's indexed workspace, then return relevant declarations and locations. Use for code discovery and query again as you learn more. Requires the Project Map experiment to be enabled.",

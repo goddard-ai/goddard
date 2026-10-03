@@ -671,6 +671,9 @@ pub struct AgentLaunchEnv {
     /// this credential. On by default; off only when the user disabled the
     /// agent settings surface outright.
     pub settings_writes: bool,
+    /// Whether this credential belongs to the Boss — its `search` scans
+    /// every project's tasks rather than only its own project's.
+    pub boss: bool,
 }
 
 impl AgentLaunchEnv {
@@ -681,6 +684,7 @@ impl AgentLaunchEnv {
             task_tools: self.task_tools,
             settings_writes: self.settings_writes,
             parent_task_id: self.parent_task_id,
+            boss: self.boss,
         }
     }
 }
@@ -693,6 +697,9 @@ pub struct AgentSurfaceScope {
     pub task_tools: bool,
     pub settings_writes: bool,
     pub parent_task_id: Option<Uuid>,
+    /// Boss credentials search every project the daemon knows; ordinary
+    /// credentials search only their own project.
+    pub boss: bool,
 }
 
 /// Locate the `goddard-agent` binary to place on a provider's `PATH`.
@@ -796,7 +803,12 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              - `prompt` — when the user asks you to send a message to \
              another task\n\
              - `read` — to read a task's transcript\n\
-             - `search` — to search this project's task transcripts"
+             - `search` — to search {} task transcripts",
+            if scope.boss {
+                "every project's"
+            } else {
+                "this project's"
+            }
         ));
     } else {
         // Every scoped credential reads its own task's transcript — the
@@ -832,14 +844,20 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              purpose, not recent steps or progress."
     ));
     if scope.task_tools {
-        instruction.push_str(
+        instruction.push_str(&format!(
             "\n\n`create`, `prompt`, and `read` act on the user's other \
              tasks under this task's name — use them only when the user \
              asks, never for exploration, convenience, or \
              self-orchestration. `search` is read-only and confined to \
-             this task's project — use it to find which sibling tasks are \
+             {} — use it to find which {} tasks are \
              worth `read`ing.",
-        );
+            if scope.boss {
+                "no project: it spans every project this daemon knows"
+            } else {
+                "this task's project"
+            },
+            if scope.boss { "matching" } else { "sibling" }
+        ));
         instruction.push_str(
             " `ask` renders a structured question in the user's client and \
              blocks until they answer, clarify, or dismiss it — use it when \
@@ -1317,6 +1335,7 @@ mod tests {
             shim_directory: directory.to_path_buf(),
             task_tools: true,
             settings_writes: true,
+            boss: false,
         }
     }
 
@@ -1421,6 +1440,7 @@ mod tests {
             task_tools: true,
             settings_writes: false,
             parent_task_id: None,
+            boss: false,
         };
         assert!(state.surface_block(session).is_none());
 
