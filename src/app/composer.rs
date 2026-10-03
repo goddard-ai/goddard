@@ -412,6 +412,7 @@ pub(super) fn undelivered_turn_resend(
             message_atoms: message.atoms.clone(),
             atoms: Vec::new(),
             annotations: Vec::new(),
+            queued_id: None,
             hidden: message.hidden,
         },
     ))
@@ -3660,6 +3661,7 @@ impl Waku {
             message_atoms: atoms.iter().map(ComposerInlineAtom::message_atom).collect(),
             atoms,
             annotations,
+            queued_id: None,
             hidden: false,
         })
     }
@@ -3941,6 +3943,7 @@ impl Waku {
             message_atoms: atoms.iter().map(ComposerInlineAtom::message_atom).collect(),
             atoms,
             annotations,
+            queued_id: None,
             hidden: false,
         })
     }

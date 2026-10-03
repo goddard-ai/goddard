@@ -22,7 +22,8 @@ use super::sidebar::SidebarRow;
 use super::streaming::session_accepts_steer_result;
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
-    CONTINUE_PROMPT, ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress,
+    CONTINUE_PROMPT, ComposerSubmission, ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation,
+    EscapeStopPress,
     EscapeStopTarget, NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationLocation,
     PendingUserInput, SessionNavigation, SettingsHistoryEntry, SettingsNavigation, StreamDeltaKind,
     TranscriptLanding, TranscriptRowKind::*, TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT,
@@ -3851,6 +3852,29 @@ fn queued_message_is_continue_names_only_the_hidden_nudge() {
     let mut other = QueuedMessage::new(format!("{CONTINUE_PROMPT} please"));
     other.hidden = true;
     assert!(!queued_message_is_continue(&other));
+}
+
+/// A queued follow-up delivers under its chip's id — the delivered message
+/// claims it so the daemon's stored copy retires the parked entry in the
+/// same write. A deferred or rejected submission re-parks the same chip
+/// rather than minting a duplicate the stored entry cannot match.
+#[test]
+fn a_queued_submission_keeps_its_chip_id_through_delivery_and_reparking() {
+    let queued = QueuedMessage::new("follow up");
+    let queued_id = queued.id;
+    let submission = ComposerSubmission::from_queued_message(queued);
+    assert_eq!(submission.queued_id, Some(queued_id));
+
+    let reparked = submission.into_queued_message();
+    assert_eq!(reparked.id, queued_id);
+
+    // A daemon-owned chip never rides a client submission — the daemon owns
+    // its delivery and consumes the mirrored entry itself.
+    let agent = QueuedMessage::agent("parked", None);
+    assert_eq!(
+        ComposerSubmission::from_queued_message(agent).queued_id,
+        None
+    );
 }
 
 /// A daemon restart auto-resumes only a session whose turn the provider

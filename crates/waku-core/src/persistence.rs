@@ -2292,6 +2292,12 @@ pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSess
     session.quarantined = stored.quarantined;
     session.environment = stored_environment;
     session.messages = stored.messages;
+    // A queue entry whose id already runs in the transcript was delivered —
+    // the chip's id doubles as its sent message's id. Restoring it as
+    // parked would drain and resend the same prompt.
+    session
+        .queued_messages
+        .retain(|queued| !session.messages.iter().any(|message| message.id == queued.id));
     session.details_pruned = stored.details_pruned;
     session.detail_loaded = true;
 }
@@ -3379,6 +3385,33 @@ mod tests {
 
         transaction.rollback().unwrap();
         drop(guard);
+        fs::remove_dir_all(directory).ok();
+    }
+
+    /// A queued follow-up sends under its chip's id, so a hydrated document
+    /// that still parks the entry beside its delivered message would drain
+    /// and resend the same prompt on open. Hydrate drops the consumed half.
+    #[test]
+    fn hydrate_drops_a_queue_entry_whose_id_ran_in_the_transcript() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let turn_id = state.sessions[0].begin_turn("first");
+        let mut delivered =
+            crate::model::Message::new_for_turn(MessageRole::User, "follow up", turn_id);
+        let consumed = crate::model::QueuedMessage::new("follow up");
+        delivered.id = consumed.id;
+        let pending = crate::model::QueuedMessage::new("still waiting");
+        state.sessions[0].messages.push(delivered);
+        state.sessions[0].queued_messages = vec![consumed, pending.clone()];
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert_eq!(restored.sessions[0].queued_messages, vec![pending]);
+
         fs::remove_dir_all(directory).ok();
     }
 

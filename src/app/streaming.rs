@@ -656,6 +656,7 @@ impl Waku {
                 // of the boundary.
                 let sent_message_id = if let Some(session) = self.state.session_mut(session_id) {
                     settle_stream_segment(session);
+                    let queued_id = submission.queued_id;
                     let message_id = session.push_user_message_with_presentation(
                         message,
                         submission.display_content,
@@ -663,8 +664,18 @@ impl Waku {
                         submission.message_atoms,
                         sent_by_task,
                     );
+                    // A steered queued follow-up converts under its chip's
+                    // id, the same convention a queue drain follows.
+                    if let Some(queued_id) = queued_id
+                        && let Some(stored) = session
+                            .messages
+                            .iter_mut()
+                            .find(|stored| stored.id == message_id)
+                    {
+                        stored.id = queued_id;
+                    }
                     session.updated_at = unix_time();
-                    Some(message_id)
+                    Some(queued_id.unwrap_or(message_id))
                 } else {
                     None
                 };

@@ -3792,6 +3792,13 @@ impl StateStore {
                     },
                 );
                 *session = stored;
+                // A queue entry whose id already runs in the transcript was
+                // delivered — the chip's id doubles as its sent message's
+                // id. Rehydrating it as parked would drain and resend the
+                // same prompt.
+                session.queued_messages.retain(|queued| {
+                    !session.messages.iter().any(|message| message.id == queued.id)
+                });
                 Ok(())
             }
             None => {

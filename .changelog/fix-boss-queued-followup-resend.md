@@ -1,0 +1,1 @@
+- Queued follow-ups in the Boss chat no longer send a second time after restarting the app — a delivered message now leaves the prompt queue for good.

@@ -5307,6 +5307,7 @@ impl Waku {
                 message_atoms: Vec::new(),
                 atoms: Vec::new(),
                 annotations: Vec::new(),
+                queued_id: None,
                 hidden: false,
             },
             cx,
@@ -7003,6 +7004,18 @@ impl Waku {
                         submission.message_atoms.clone(),
                     )
                 };
+                // A submission drained out of the follow-up queue sends under
+                // its chip's id: `adopt_submitted_prompt` retires a queue
+                // entry whose id arrives as the delivered message id, so the
+                // daemon's stored copy consumes the chip in the same write —
+                // a restart can no longer rehydrate and resend it.
+                if let Some(queued_id) = submission.queued_id
+                    && let Some(message) = session.messages.iter_mut().rev().find(|message| {
+                        message.turn_id == Some(turn_id) && message.role == MessageRole::User
+                    })
+                {
+                    message.id = queued_id;
+                }
                 session.status = SessionStatus::Connecting;
                 session.updated_at = unix_time();
                 (

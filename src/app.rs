@@ -556,6 +556,12 @@ struct ComposerSubmission {
     /// Transcript annotations already folded into `prompt`'s header, kept so a
     /// failed submission can restore them alongside the draft text.
     annotations: Vec<TranscriptAnnotation>,
+    /// The follow-up chip this submission delivers out of, if any. The id
+    /// doubles as the sent message's id — the convention daemon agent
+    /// prompts already follow — so every `adopt_submitted_prompt` consumer,
+    /// the daemon's stored copy included, retires the queue entry in the
+    /// same write that records the delivery instead of rehydrating it.
+    queued_id: Option<Uuid>,
     /// Provider-facing text no transcript renders — the internal "continue"
     /// nudge. Never user input: no title, no restored draft, no bubble.
     hidden: bool,
@@ -575,6 +581,7 @@ impl ComposerSubmission {
             message_atoms: Vec::new(),
             atoms: Vec::new(),
             annotations: Vec::new(),
+            queued_id: None,
             hidden: false,
         }
     }
@@ -597,10 +604,18 @@ impl ComposerSubmission {
             QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments);
         message.atoms = self.message_atoms;
         message.hidden = self.hidden;
+        // A re-parked submission keeps the chip it came from: the stored
+        // queue entry stays the same row delivery will later consume.
+        if let Some(queued_id) = self.queued_id {
+            message.id = queued_id;
+        }
         message
     }
 
     fn from_queued_message(message: QueuedMessage) -> Self {
+        // A daemon-owned chip converts under an id the daemon assigned;
+        // only a client-owned entry follows this submission's send.
+        let queued_id = (!message.is_agent_owned()).then_some(message.id);
         Self {
             prompt: message.content,
             display_content: message.display_content,
@@ -619,6 +634,7 @@ impl ComposerSubmission {
             // reattaches it. Queueing counts as sent, so the highlights stay
             // cleared.
             annotations: Vec::new(),
+            queued_id,
             hidden: message.hidden,
         }
     }

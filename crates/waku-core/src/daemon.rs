@@ -8882,6 +8882,57 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    /// A queued follow-up drains under its chip's id, so the same write
+    /// that records the delivery retires the parked entry. Without the
+    /// consumption the document keeps the chip — the next hydrate drains it
+    /// again and the prompt arrives twice.
+    #[test]
+    fn a_delivered_follow_up_leaves_the_persisted_queue() {
+        let root = std::env::temp_dir().join(format!("waku-queue-{}", Uuid::new_v4()));
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("repo"));
+        state.sessions[0].begin_turn("seed");
+        state.sessions[0].finish_active_turn(TurnStatus::Completed);
+        state.sessions[0]
+            .queued_messages
+            .push(crate::model::QueuedMessage::new("follow up"));
+        let queued_id = state.sessions[0].queued_messages[0].id;
+        store.save(&mut state).unwrap();
+        let session_id = state.sessions[0].id;
+        let task_state = Arc::new(Mutex::new(state));
+        let task_store = Arc::new(store);
+
+        record_boss_event(
+            &task_state,
+            &task_store,
+            session_id,
+            &DriverEvent::PromptSubmitted {
+                message: "follow up".into(),
+                turn_id: Uuid::new_v4(),
+                message_id: queued_id,
+                sent_by_task: None,
+                hidden: false,
+            },
+        )
+        .unwrap();
+
+        {
+            let locked = task_state.lock();
+            let session = &locked.sessions[0];
+            assert!(session.queued_messages.is_empty());
+            assert_eq!(session.messages.last().unwrap().id, queued_id);
+        }
+
+        // The write already landed: a restart hydrates no parked entry.
+        let detail = task_store
+            .load_session_detail(session_id)
+            .unwrap()
+            .unwrap();
+        assert!(detail.queued_messages.is_empty());
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
     #[test]
     fn client_saves_cannot_resurrect_or_erase_daemon_queue_entries() {
         let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);

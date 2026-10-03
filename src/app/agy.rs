@@ -112,9 +112,20 @@ impl Waku {
                 session.set_title_from_prompt(&submission.human_prompt());
             }
             let message_id = session.push_message(MessageRole::User, &submission.human_prompt());
+            // A queued follow-up sends under its chip's id — the same
+            // convention the driver path follows — so the stored copy
+            // retires the parked entry.
+            if let Some(queued_id) = submission.queued_id
+                && let Some(stored) = session
+                    .messages
+                    .iter_mut()
+                    .find(|stored| stored.id == message_id)
+            {
+                stored.id = queued_id;
+            }
             session.status = SessionStatus::Connecting;
             session.updated_at = unix_time();
-            Some(message_id)
+            Some(submission.queued_id.unwrap_or(message_id))
         } else {
             None
         };
