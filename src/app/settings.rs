@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use super::model_picker::{
     ModelPickerPanel, PickerGranularity, PickerRow, PickerRowSpec, PickerSection, PolicyRowId,
@@ -809,6 +809,7 @@ fn settings_group(
 /// surfaces.
 pub(super) fn filter_archived_sessions(
     sessions: &[&AgentSession],
+    managed_sessions: &HashSet<Uuid>,
     query: &str,
     project_filter: Option<Uuid>,
     project_names: &HashMap<Uuid, String>,
@@ -817,7 +818,9 @@ pub(super) fn filter_archived_sessions(
     sessions
         .iter()
         .filter(|session| {
-            if project_filter.is_some_and(|id| session.project_id != id) {
+            if managed_sessions.contains(&session.id)
+                || project_filter.is_some_and(|id| session.project_id != id)
+            {
                 return false;
             }
             query.is_empty()
@@ -9786,7 +9789,9 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .filter(|session| session.archived_at.is_some())
+            .filter(|session| {
+                session.archived_at.is_some() && !self.boss_ui.managed.contains(&session.id)
+            })
             .collect::<Vec<_>>();
         archived.sort_by_key(|session| std::cmp::Reverse(session.archived_at));
         let any_archived = !archived.is_empty();
@@ -9825,6 +9830,7 @@ impl Waku {
         .then_some(&self.archived_message_matches);
         let visible = filter_archived_sessions(
             &archived,
+            &self.boss_ui.managed,
             &query,
             project_filter,
             &project_names,

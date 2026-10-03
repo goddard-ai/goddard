@@ -4878,26 +4878,55 @@ fn archived_filter_matches_titles_and_projects() {
 
     // No query and no project filter keeps every row in the given order.
     assert_eq!(
-        filter_archived_sessions(&sessions, "", None, &names, None),
+        filter_archived_sessions(&sessions, &HashSet::new(), "", None, &names, None),
         vec![alpha.id, beta.id]
     );
     // Titles match a normalized query; the project name matches too.
     assert_eq!(
-        filter_archived_sessions(&sessions, "sidebar", None, &names, None),
+        filter_archived_sessions(&sessions, &HashSet::new(), "sidebar", None, &names, None),
         vec![alpha.id]
     );
     assert_eq!(
-        filter_archived_sessions(&sessions, "waku", None, &names, None),
+        filter_archived_sessions(&sessions, &HashSet::new(), "waku", None, &names, None),
         vec![beta.id]
     );
     // The project filter narrows before the query runs.
     assert_eq!(
-        filter_archived_sessions(&sessions, "", Some(project_a), &names, None),
+        filter_archived_sessions(
+            &sessions,
+            &HashSet::new(),
+            "",
+            Some(project_a),
+            &names,
+            None
+        ),
         vec![alpha.id]
     );
     assert_eq!(
-        filter_archived_sessions(&sessions, "sidebar", Some(project_b), &names, None),
+        filter_archived_sessions(
+            &sessions,
+            &HashSet::new(),
+            "sidebar",
+            Some(project_b),
+            &names,
+            None
+        ),
         Vec::<Uuid>::new()
+    );
+}
+
+#[test]
+fn archived_filter_excludes_boss_managed_sessions() {
+    let project = Uuid::new_v4();
+    let names: HashMap<Uuid, String> = [(project, "goddard".to_string())].into_iter().collect();
+    let ordinary = AgentSession::new(project, ProviderKind::Codex);
+    let managed = AgentSession::new(project, ProviderKind::Claude);
+    let sessions = vec![&ordinary, &managed];
+    let managed_sessions = HashSet::from([managed.id]);
+
+    assert_eq!(
+        filter_archived_sessions(&sessions, &managed_sessions, "", None, &names, None),
+        vec![ordinary.id]
     );
 }
 
@@ -4926,7 +4955,14 @@ fn archived_filter_matches_transcript_hits() {
     .into_iter()
     .collect();
     assert_eq!(
-        filter_archived_sessions(&sessions, "needle", None, &names, Some(&matches)),
+        filter_archived_sessions(
+            &sessions,
+            &HashSet::new(),
+            "needle",
+            None,
+            &names,
+            Some(&matches)
+        ),
         vec![beta.id]
     );
 
@@ -4935,6 +4971,7 @@ fn archived_filter_matches_transcript_hits() {
     assert_eq!(
         filter_archived_sessions(
             &sessions,
+            &HashSet::new(),
             "needle",
             Some(other_project),
             &names,
