@@ -435,12 +435,14 @@ impl Waku {
         let Some(remaining) = remaining else {
             crate::platform::stop_briefing_audio();
             self.voice_briefing_playback = None;
+            self.pump_speech_queue(cx);
             cx.notify();
             return;
         };
         if remaining.is_zero() {
             crate::platform::stop_briefing_audio();
             self.voice_briefing_playback = None;
+            self.pump_speech_queue(cx);
             cx.notify();
             return;
         }
@@ -464,7 +466,11 @@ impl Waku {
         true
     }
 
-    fn track_voice_briefing_playback(&mut self, remaining: Duration, cx: &mut Context<Self>) {
+    pub(super) fn track_voice_briefing_playback(
+        &mut self,
+        remaining: Duration,
+        cx: &mut Context<Self>,
+    ) {
         self.voice_briefing_playback_generation =
             self.voice_briefing_playback_generation.wrapping_add(1);
         self.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
@@ -491,6 +497,9 @@ impl Waku {
                         this.voice_briefing_playback = None;
                         this.voice_briefing_playback_generation =
                             this.voice_briefing_playback_generation.wrapping_add(1);
+                        // A queued `speak` chain hands off here — pumping
+                        // starts the next clip and its own tick.
+                        this.pump_speech_queue(cx);
                         cx.notify();
                         return false;
                     };
@@ -499,6 +508,7 @@ impl Waku {
                         this.voice_briefing_playback = None;
                         this.voice_briefing_playback_generation =
                             this.voice_briefing_playback_generation.wrapping_add(1);
+                        this.pump_speech_queue(cx);
                         cx.notify();
                         return false;
                     }
@@ -699,7 +709,7 @@ async fn summarize(
 /// Voice the transcript through the provider's speech endpoint. Vercel
 /// answers a JSON envelope whose `audio` field is base64 audio; OpenRouter's
 /// OpenAI-compatible `/audio/speech` answers the raw byte stream.
-async fn synthesize(
+pub(super) async fn synthesize(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
     provider: InferenceProvider,
@@ -759,7 +769,7 @@ async fn synthesize(
     }
 }
 
-fn speech_parameters(model_id: &str) -> (&'static str, &'static str) {
+pub(super) fn speech_parameters(model_id: &str) -> (&'static str, &'static str) {
     match model_id {
         "openai/tts-1" | "openai/tts-1-hd" => ("alloy", "mp3"),
         // Grok voices its own names — "eve" on both spellings (Vercel's

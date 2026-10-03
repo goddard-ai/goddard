@@ -1223,6 +1223,10 @@ routing.feature_voice_briefing_gate:
   en: Voice briefing gate
 routing.feature_voice_briefing_gate_description:
   en: Whether a settled reply warrants a spoken briefing
+routing.feature_boss_speech:
+  en: Boss canned speech
+routing.feature_boss_speech_description:
+  en: Whether a saved voice clip already voices a fragment the boss wants to speak
 jev.tab_suggestions:
   en: Suggestions
 jev.tab_automation:

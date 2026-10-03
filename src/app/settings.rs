@@ -15170,6 +15170,7 @@ fn eval_feature_label(feature: &str) -> String {
         "auto-prompt-preview" => tr!("auto_prompts.try_task"),
         "managed-goal" => tr!("routing.feature_managed_goal"),
         "voice-briefing-gate" => tr!("routing.feature_voice_briefing_gate"),
+        "boss-speech" => tr!("routing.feature_boss_speech"),
         _ => return feature.to_owned(),
     }
 }
@@ -15200,6 +15201,7 @@ fn eval_feature_description(feature: &str) -> Option<String> {
         "auto-prompt-preview" => tr!("routing.feature_auto_prompt_preview_description"),
         "managed-goal" => tr!("routing.feature_managed_goal_description"),
         "voice-briefing-gate" => tr!("routing.feature_voice_briefing_gate_description"),
+        "boss-speech" => tr!("routing.feature_boss_speech_description"),
         _ => return None,
     })
 }

@@ -29,7 +29,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
@@ -1050,6 +1050,14 @@ pub enum ServerMessage {
         session_id: Uuid,
         revoked: bool,
     },
+    /// The boss asked its clients to voice an utterance: the ordered
+    /// fragments of a `boss speak` operation. Live-only like the session
+    /// stream — a client that missed the broadcast missed the moment, and
+    /// clients without the voice feature ignore it.
+    BossSpeechRequested {
+        request_id: Uuid,
+        parts: Vec<String>,
+    },
     /// The pairing document changed — a pair request arrived or resolved,
     /// or a paired client was revoked. Carries the whole document.
     PairingChanged {
@@ -1702,7 +1710,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 14);
+        assert_eq!(PROTOCOL_VERSION, 15);
     }
 
     #[test]
@@ -1711,7 +1719,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 14);
+        assert_eq!(PROTOCOL_VERSION, 15);
     }
 
     #[test]

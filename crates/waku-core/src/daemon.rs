@@ -5719,6 +5719,11 @@ impl WakuBackend {
                 };
                 Ok(BossResult::Transcript { transcript })
             }
+            BossOperation::Speak { parts } => {
+                let parts = self.boss.speak_parts(caller, parts)?;
+                let delivered = events.speech_requested(Uuid::new_v4(), parts);
+                Ok(BossResult::Speak { delivered })
+            }
             operation => {
                 let rename = matches!(operation, BossOperation::Rename { .. });
                 let refresh_persona = matches!(&operation, BossOperation::UpsertPersona { persona }

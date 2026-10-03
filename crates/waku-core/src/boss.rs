@@ -13,6 +13,13 @@ use waku_protocol::boss::{
 
 const MAX_FILE_BYTES: usize = 256 * 1024;
 
+/// `speak` bounds: an utterance is a handful of short fragments, so a
+/// malformed or oversized request fails at the daemon rather than reaching
+/// clients as a TTS spend.
+const MAX_SPEECH_PARTS: usize = 8;
+const MAX_SPEECH_PART_CHARS: usize = 160;
+const MAX_SPEECH_TOTAL_CHARS: usize = 480;
+
 pub struct BossService {
     root: PathBuf,
     state: Mutex<BossState>,
@@ -253,7 +260,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, upsertPersona, listFiles, readFile, writeFile, createFolder, rename. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
+                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, speak. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. Your persona is {}. You can access every memory folder. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -337,6 +344,38 @@ impl BossService {
         Ok(())
     }
 
+    /// Authorize and normalize a `speak` request: only the boss session or a
+    /// human client may voice an utterance, and the fragments stay small —
+    /// speak is for short canned phrases, not narration.
+    pub fn speak_parts(
+        &self,
+        caller: Option<Uuid>,
+        parts: Vec<String>,
+    ) -> anyhow::Result<Vec<String>> {
+        if caller.is_some_and(|caller| !self.is_boss(caller)) {
+            bail!("only the boss or a human can speak");
+        }
+        if parts.is_empty() || parts.len() > MAX_SPEECH_PARTS {
+            bail!("speak takes between 1 and {MAX_SPEECH_PARTS} parts");
+        }
+        let parts: Vec<String> = parts.iter().map(|part| part.trim().to_owned()).collect();
+        let mut total = 0;
+        for part in &parts {
+            let chars = part.chars().count();
+            if chars == 0 {
+                bail!("speak parts cannot be empty");
+            }
+            if chars > MAX_SPEECH_PART_CHARS {
+                bail!("a speak part exceeds {MAX_SPEECH_PART_CHARS} characters");
+            }
+            total += chars;
+        }
+        if total > MAX_SPEECH_TOTAL_CHARS {
+            bail!("speak exceeds {MAX_SPEECH_TOTAL_CHARS} characters");
+        }
+        Ok(parts)
+    }
+
     pub fn handle(
         &self,
         caller: Option<Uuid>,
@@ -346,7 +385,8 @@ impl BossService {
             BossOperation::Open { .. }
             | BossOperation::Summon { .. }
             | BossOperation::Control { .. }
-            | BossOperation::Transcript { .. } => {
+            | BossOperation::Transcript { .. }
+            | BossOperation::Speak { .. } => {
                 bail!("runtime operation requires daemon dispatch")
             }
             BossOperation::View => {
@@ -918,6 +958,60 @@ mod tests {
             matches!(operation, BossOperation::Summon { job_title, .. } if job_title == "Release engineer")
         );
         drop(migrated);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn speak_parts_authorizes_and_bounds_fragments() {
+        let root = std::env::temp_dir().join(format!("boss-speak-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        // Humans and the boss session may speak; other callers may not.
+        assert!(service.speak_parts(None, vec!["Heads up".into()]).is_ok());
+        assert!(service
+            .speak_parts(Some(boss), vec!["Heads up".into()])
+            .is_ok());
+        assert!(
+            service
+                .speak_parts(Some(Uuid::new_v4()), vec!["Heads up".into()])
+                .is_err()
+        );
+        // Trimming normalizes; empties, oversize parts, and totals are refused.
+        assert_eq!(
+            service
+                .speak_parts(None, vec![" a ".into(), "b".into()])
+                .unwrap(),
+            vec!["a".to_owned(), "b".to_owned()]
+        );
+        assert!(service.speak_parts(None, vec![]).is_err());
+        assert!(service.speak_parts(None, vec![" ".into()]).is_err());
+        assert!(service
+            .speak_parts(None, vec!["x".repeat(MAX_SPEECH_PART_CHARS + 1)])
+            .is_err());
+        assert!(service
+            .speak_parts(None, vec!["ok".into(); MAX_SPEECH_PARTS + 1])
+            .is_err());
+        assert!(service
+            .speak_parts(
+                None,
+                vec!["x".repeat(100); (MAX_SPEECH_TOTAL_CHARS / 100) + 1],
+            )
+            .is_err());
+        // `speak` is a runtime operation — the plain handler refuses it.
+        assert!(service
+            .handle(
+                None,
+                BossOperation::Speak {
+                    parts: vec!["hi".into()],
+                },
+            )
+            .is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

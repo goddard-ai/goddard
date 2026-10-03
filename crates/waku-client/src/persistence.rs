@@ -3278,6 +3278,17 @@ pub fn shell_integration_scripts_directory() -> PathBuf {
     }
 }
 
+/// The canned-speech clip library a `boss speak` request resolves against:
+/// `index.json` maps each spoken fragment's text to its audio file under
+/// `clips/`, so a fragment is synthesized once and replayed after.
+pub fn speech_clips_directory() -> PathBuf {
+    if uses_development_data_dir() {
+        StateStore::default_path().with_file_name("speech")
+    } else {
+        configuration_directory().join("speech")
+    }
+}
+
 fn read_app_state_file(path: &Path) -> Option<AppState> {
     let bytes = fs::read(path).ok()?;
     let app_state = serde_json::from_slice::<AppState>(&bytes).ok()?;

@@ -2370,6 +2370,12 @@ pub struct Waku {
     briefing_clip_order: VecDeque<Uuid>,
     voice_briefing_playback: Option<VoiceBriefingPlayback>,
     voice_briefing_playback_generation: u64,
+    /// `boss speak` clips waiting behind whatever the briefing player is
+    /// sounding now — the playback tick dequeues them in order.
+    speech_clip_queue: VecDeque<Vec<u8>>,
+    /// `bossSpeechRequested` ids already handled this run — reconnects and
+    /// repeat broadcasts must not replay an utterance.
+    speech_requests_seen: VecDeque<Uuid>,
     /// Pipelines in flight per reply message; the bool marks an activation
     /// waiting on the clip, which plays the moment it lands.
     briefing_pending: HashMap<Uuid, bool>,
@@ -3650,6 +3656,10 @@ pub struct Waku {
     boss_ui: boss::BossUi,
     boss_tx: Sender<(waku_client::DaemonKey, waku_client::boss::BossState)>,
     boss_events: Receiver<(waku_client::DaemonKey, waku_client::boss::BossState)>,
+    /// `bossSpeechRequested` broadcasts, tagged with their daemon —
+    /// `(daemon, request id, utterance fragments)` for the speech pipeline.
+    speech_tx: Sender<(waku_client::DaemonKey, Uuid, Vec<String>)>,
+    speech_events: Receiver<(waku_client::DaemonKey, Uuid, Vec<String>)>,
     automations_page: bool,
     /// Schedules vs Runs — which list the page body shows.
     automations_tab: automations::AutomationsTab,
@@ -3999,6 +4009,7 @@ mod settings;
 mod shortcuts_dialog;
 mod sidebar;
 mod skills_page;
+mod speech;
 mod speed_reader;
 mod status_markers;
 mod streaming;
@@ -5478,6 +5489,7 @@ impl Waku {
         let (pairing_tx, pairing_events) = unbounded();
         let (automations_tx, automations_events) = unbounded();
         let (boss_tx, boss_events) = unbounded();
+        let (speech_tx, speech_events) = unbounded();
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
@@ -6542,6 +6554,8 @@ impl Waku {
                 voice_briefing_playback_generation: 0,
                 briefing_pending: HashMap::new(),
                 briefing_gate_pending: HashMap::new(),
+                speech_clip_queue: VecDeque::new(),
+                speech_requests_seen: VecDeque::new(),
                 eval_probe_pending: false,
                 eval_probe_result: None,
                 eval_usage_stats: None,
@@ -7073,6 +7087,8 @@ impl Waku {
                 boss_ui: boss::BossUi::default(),
                 boss_tx,
                 boss_events,
+                speech_tx,
+                speech_events,
                 automations_page: false,
                 automations_tab: automations::AutomationsTab::default(),
                 automations_detail: None,

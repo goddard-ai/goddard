@@ -95,6 +95,9 @@ struct ClientInner {
     review_subscribers: Mutex<Vec<Sender<String>>>,
     /// `(session_id, revoked)` — a watched friend session's stream ended.
     friend_session_closed_subscribers: Mutex<Vec<Sender<(Uuid, bool)>>>,
+    /// `bossSpeechRequested` broadcasts — `(request_id, parts)` for the
+    /// client's voice pipeline.
+    speech_subscribers: Mutex<Vec<Sender<(Uuid, Vec<String>)>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -353,6 +356,7 @@ impl DaemonClient {
             automations_subscribers: Mutex::new(Vec::new()),
             review_subscribers: Mutex::new(Vec::new()),
             friend_session_closed_subscribers: Mutex::new(Vec::new()),
+            speech_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -542,6 +546,16 @@ impl DaemonClient {
             .friend_session_closed_subscribers
             .lock()
             .push(events);
+        receiver
+    }
+
+    /// Every `bossSpeechRequested` broadcast — `(request_id, parts)` — the
+    /// boss asking connected clients to voice an utterance. Live-only:
+    /// broadcasts missed while disconnected are gone, matching the moment
+    /// the boss meant to interrupt.
+    pub fn subscribe_speech(&self) -> Receiver<(Uuid, Vec<String>)> {
+        let (events, receiver) = unbounded();
+        self.inner.speech_subscribers.lock().push(events);
         receiver
     }
 
@@ -860,6 +874,11 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(origin_url.clone()).is_ok());
                     }
+                    ServerMessage::BossSpeechRequested { request_id, parts } => {
+                        inner.speech_subscribers.lock().retain(|subscriber| {
+                            subscriber.send((request_id, parts.clone())).is_ok()
+                        });
+                    }
                     ServerMessage::FriendSessionClosed {
                         session_id,
                         revoked,
@@ -918,6 +937,7 @@ fn fail_connection(inner: &ClientInner) {
     inner.automations_subscribers.lock().clear();
     inner.review_subscribers.lock().clear();
     inner.friend_session_closed_subscribers.lock().clear();
+    inner.speech_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(

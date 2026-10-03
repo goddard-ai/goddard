@@ -120,6 +120,14 @@ pub enum BossOperation {
     CreateFolder {
         path: String,
     },
+    /// Voice an utterance through every connected client's speech pipeline.
+    /// `parts` are the spoken fragments in order: one element speaks a
+    /// whole message, while several chain into a sentence — splitting on
+    /// reusable boundaries (proper nouns, stock phrases) lets clients reuse
+    /// previously synthesized clips instead of generating fresh audio.
+    Speak {
+        parts: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -149,6 +157,12 @@ pub enum BossResult {
     },
     Transcript {
         transcript: crate::model::AgentSessionTranscript,
+    },
+    /// The `speak` request was broadcast to this many client connections.
+    /// Each receiving client decides whether its voice settings voice it —
+    /// zero means no client could possibly have heard it.
+    Speak {
+        delivered: usize,
     },
 }
 

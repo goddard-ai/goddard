@@ -466,6 +466,14 @@ impl EventSink {
         self
     }
 
+    /// Broadcast a `boss speak` request to every subscribed client but the
+    /// caller's own connection. Returns the connection count it reached;
+    /// clients with no voice feature receive it and ignore it.
+    pub fn speech_requested(&self, request_id: Uuid, parts: Vec<String>) -> usize {
+        self.hub
+            .broadcast_speech(request_id, parts, Some(self.source_subscriber_id))
+    }
+
     /// Broadcast a live-only event without retaining it in the replay journal.
     /// High-volume PTY output is meaningful only to a terminal emulator that
     /// is currently attached; replaying raw chunks into a fresh emulator would
@@ -1050,6 +1058,37 @@ impl Hub {
             &ServerMessage::FriendsChanged { state },
             None,
         );
+    }
+
+    /// A `boss speak` request: broadcast to every connected client except
+    /// the caller's own connection, applying `broadcast`'s kick policy to
+    /// stalled queues. Returns how many subscribers accepted the request —
+    /// a `speak` reporting zero reached no client that could voice it.
+    fn broadcast_speech(&self, request_id: Uuid, parts: Vec<String>, skip: Option<u64>) -> usize {
+        let mut state = self.state.lock();
+        let message = ServerMessage::BossSpeechRequested { request_id, parts };
+        let mut delivered = 0;
+        let mut overwhelmed = Vec::new();
+        for (&subscriber_id, subscriber) in &state.subscribers {
+            if Some(subscriber_id) == skip || !subscriber.accepts(&message) {
+                continue;
+            }
+            if subscriber.messages.len() >= MAX_QUEUED_MESSAGES_PER_SUBSCRIBER
+                || subscriber.messages.try_send(message.clone()).is_err()
+            {
+                overwhelmed.push((subscriber_id, subscriber.kicked.clone()));
+            } else {
+                delivered += 1;
+            }
+        }
+        for (subscriber_id, kicked) in overwhelmed {
+            state.subscribers.remove(&subscriber_id);
+            state
+                .terminal_owners
+                .retain(|_, owner| *owner != subscriber_id);
+            let _ = kicked.send(());
+        }
+        delivered
     }
 
     /// The pairing document changed outside any request — a pair request
