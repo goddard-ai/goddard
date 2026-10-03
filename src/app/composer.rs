@@ -6031,14 +6031,17 @@ impl Waku {
                             .h(px(28.0))
                             .flex_none()
                             .rounded_full()
+                            .relative()
                             .flex()
                             .items_center()
                             .justify_center()
-                            .bg(if can_send {
-                                theme.inverse
-                            } else {
-                                theme.overlay_strong
-                            })
+                            .child(
+                                img("images/send-button-chrome.webp")
+                                    .absolute()
+                                    .inset_0()
+                                    .size_full()
+                                    .opacity(if can_send { 1.0 } else { 0.5 }),
+                            )
                             .when(can_send, |element| {
                                 element
                                     .cursor_default()

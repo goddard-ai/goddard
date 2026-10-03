@@ -1,0 +1,1 @@
+- The chat composer's send button now uses the designed chrome styling; it appears dimmed until the draft can be sent.

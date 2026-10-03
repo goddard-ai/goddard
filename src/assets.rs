@@ -322,6 +322,10 @@ const IMAGES: &[(&str, &[u8])] = &[
         "images/dock-ind-orb-right.webp",
         include_bytes!("../assets/images/dock-ind-orb-right.webp").as_slice(),
     ),
+    (
+        "images/send-button-chrome.webp",
+        include_bytes!("../assets/images/send-button-chrome.webp").as_slice(),
+    ),
 ];
 
 const TEXT_FONTS: &[&[u8]] = &[
