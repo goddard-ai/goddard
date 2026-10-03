@@ -876,7 +876,7 @@ daemon.build_daemon:
 experiments.big_picture_title:
   en: Big Picture
 experiments.big_picture_description:
-  en: Press ⌥` for a full-window grid of session cards with live transcripts, per-card composers, and ⌘1–9 arming.
+  en: Press ⌃` for a full-window grid of session cards with live transcripts, per-card composers, and ⌘1–9 arming.
 experiments.git_panel_title:
   en: Git panel
 experiments.git_panel_description:

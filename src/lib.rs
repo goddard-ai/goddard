@@ -608,10 +608,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-7", SelectSidebarSession { index: 6 }, None),
         KeyBinding::new("secondary-8", SelectSidebarSession { index: 7 }, None),
         KeyBinding::new("secondary-9", SelectSidebarSession { index: 8 }, None),
-        // ⌥` zooms out to Big Picture mode: the sessions most worth a
+        // ⌃` zooms out to Big Picture mode: the sessions most worth a
         // glance, side by side, with the composer docked underneath.
         // ⌘0 belongs to font-size reset.
-        KeyBinding::new("alt-`", ToggleBigPicture, None),
+        KeyBinding::new("ctrl-`", ToggleBigPicture, None),
         // ⌘⇧P opens the Projects page; pressed while open, it starts
         // the recent-project cycle the modifier release commits.
         KeyBinding::new("secondary-shift-p", ToggleProjectsPage, None),

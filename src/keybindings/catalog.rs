@@ -2767,7 +2767,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("sidebar.task.7", All, "secondary-7", ""),
     e("sidebar.task.8", All, "secondary-8", ""),
     e("sidebar.task.9", All, "secondary-9", ""),
-    e("app.big_picture", All, "alt-`", ""),
+    e("app.big_picture", All, "ctrl-`", ""),
     e("app.projects_page", All, "secondary-shift-p", ""),
     e("app.inbox_page", All, "secondary-shift-i", ""),
     e("app.automations_page", All, "secondary-shift-u", ""),

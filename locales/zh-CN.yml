@@ -2206,7 +2206,7 @@ errors.voice_briefing: 无法生成语音简报
 errors.voice_briefing_playback: 语音简报已生成，但无法开始播放
 experiments.automations_description: 新增“自动化”页面，可按计划定时运行提示词 — 每小时、每天、工作日、每周或 cron — 每次运行可作为独立任务或进入现有任务，并带有运行历史和单次手动运行。
 experiments.automations_title: 自动化
-experiments.big_picture_description: 按 ⌥` 打开全窗口的会话卡片网格，带实时转录、每张卡片的输入框，以及 ⌘1–9 选定。
+experiments.big_picture_description: 按 ⌃` 打开全窗口的会话卡片网格，带实时转录、每张卡片的输入框，以及 ⌘1–9 选定。
 experiments.big_picture_title: 概览
 experiments.computer_use_description: 显示“电脑操作”设置页，并让会话通过内置助手驱动 Cua Driver 的截屏与输入。关闭此项会同时关闭电脑操作本身。
 experiments.computer_use_title: 电脑操作
