@@ -69,11 +69,11 @@ impl Default for DaemonExposureSettings {
 
 impl DaemonExposureSettings {
     /// The bearer credential shown in daemon settings and typed into
-    /// connecting clients — a mnemonic phrase, still just an exact-match
-    /// string on the daemon. Older hex tokens keep working; nothing
-    /// rewrites a stored one.
+    /// connecting clients — a random UUID, still just an exact-match
+    /// string on the daemon. Older mnemonic and hex tokens keep working;
+    /// nothing rewrites a stored one.
     pub fn new_token() -> String {
-        crate::mnemonic::generate()
+        Uuid::new_v4().to_string()
     }
 
     pub fn ensure_token(&mut self) -> bool {

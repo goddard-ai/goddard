@@ -9597,7 +9597,7 @@ impl Waku {
 
     /// The `goddard://connect` link the QR encodes — the LAN IPv4 a phone
     /// can dial (this machine's hostname does not resolve for it), the
-    /// exposed port, the mnemonic token, and the hostname as a label hint.
+    /// exposed port, the bearer token, and the hostname as a label hint.
     fn daemon_connect_url(&self) -> String {
         let host = self
             .daemon_lan_ip
