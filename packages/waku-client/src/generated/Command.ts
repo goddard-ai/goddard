@@ -4,6 +4,7 @@ import type { AgentSession } from "./AgentSession";
 import type { AgentWorkspace } from "./AgentWorkspace";
 import type { AttachmentUpload } from "./AttachmentUpload";
 import type { AutomationInput } from "./AutomationInput";
+import type { BossOperation } from "./BossOperation";
 import type { ComposerDraftChange } from "./ComposerDraftChange";
 import type { ComposerDrafts } from "./ComposerDrafts";
 import type { CustomCommand } from "./CustomCommand";
@@ -35,7 +36,7 @@ import type { WireSessionOptions } from "./WireSessionOptions";
 import type { WorkspaceOperation } from "./WorkspaceOperation";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type Command = { "type": "attachSession" } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
+export type Command = { "type": "boss", operation: BossOperation, } | { "type": "attachSession" } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
 /**
  * The ids the submitting client already gave this turn and its user
  * message. The daemon republishes them with the submission so every

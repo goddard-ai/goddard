@@ -34,6 +34,7 @@ pub mod attachments;
 pub mod auto_prompts;
 pub mod automations;
 pub mod blob;
+pub mod boss;
 pub mod checkpoint;
 pub mod composer;
 pub mod computer_use;

@@ -143,6 +143,10 @@ pub struct SessionDetailTail {
     rename_all_fields = "camelCase"
 )]
 pub enum Command {
+    /// Boss operations use the scoped caller identity for authorization.
+    Boss {
+        operation: crate::boss::BossOperation,
+    },
     /// Resolve the daemon-owned provider runtime for an existing task.
     ///
     /// Clients use this after reconnecting or opening the same daemon from a
@@ -1267,6 +1271,9 @@ pub struct SubprocessLabelSample {
 pub enum ResponsePayload {
     AgentResources {
         status: crate::resources::ResourceStatus,
+    },
+    Boss {
+        result: crate::boss::BossResult,
     },
     Ack,
     ManagedGoalTurnClaimed {

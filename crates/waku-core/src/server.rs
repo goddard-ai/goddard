@@ -2198,7 +2198,8 @@ fn token_matches(expected: &str, candidate: &str) -> bool {
 fn is_agent_command(command: &Command) -> bool {
     matches!(
         command,
-        Command::AgentCreateSession { .. }
+        Command::Boss { .. }
+            | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
             | Command::AgentRenameSelf { .. }
             | Command::AgentReadSession { .. }
@@ -2501,6 +2502,7 @@ fn handle_request(
 /// serializing payloads (prompt text, attachments) just to read the tag.
 fn command_kind(command: &Command) -> &'static str {
     match command {
+        Command::Boss { .. } => "boss",
         Command::AttachSession => "attachSession",
         Command::Start { .. } => "start",
         Command::Prompt { .. } => "prompt",

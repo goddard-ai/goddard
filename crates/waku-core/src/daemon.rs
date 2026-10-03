@@ -475,6 +475,7 @@ pub struct WakuBackend {
     /// Scheduled automations — definitions, run history, and the tick that
     /// dispatches them whether or not a client is attached.
     automations: Arc<AutomationService>,
+    boss: Arc<crate::boss::BossService>,
     auto_prompts: Arc<AutoPromptService>,
 }
 
@@ -537,6 +538,7 @@ impl WakuBackend {
             AutomationService::open(data_dir.join("automations.json"))
                 .context("could not load Goddard automations")?,
         );
+        let boss = Arc::new(crate::boss::BossService::open(data_dir.join("boss"))?);
         let auto_prompts = Arc::new(
             AutoPromptService::open(data_dir.join("auto-prompts.json"))
                 .context("could not load Goddard auto prompt history")?,
@@ -590,6 +592,7 @@ impl WakuBackend {
             data_dir,
             our_name,
             automations,
+            boss,
             auto_prompts,
         };
         backend.purge_expired_archived_sessions();
@@ -1562,6 +1565,7 @@ impl Backend for WakuBackend {
 
     fn set_task_state_sink(&self, sink: crate::share::TaskNotifier) {
         self.share.set_task_notifier(sink.clone());
+        self.boss.set_task_notifier(sink.clone());
         self.automations.set_task_notifier(sink);
     }
 
@@ -1714,6 +1718,9 @@ impl Backend for WakuBackend {
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
         match request.command {
+            Command::Boss { operation } => Ok(ResponsePayload::Boss {
+                result: self.boss.handle(agent, operation)?,
+            }),
             Command::ClaimManagedGoalTurn { goal_id, turn_id } => {
                 let mut claims = self.managed_goal_claims.lock();
                 let claimed = claim_managed_goal_turn(&mut claims, session_id, goal_id, turn_id);
@@ -6632,6 +6639,7 @@ fn handle_driver_command(
         | Command::SetFriendDisplayName { .. }
         | Command::SetFriendNickname { .. }
         | Command::GetAutomations
+        | Command::Boss { .. }
         | Command::GetDaemonStats
         | Command::UpsertAutomation { .. }
         | Command::RemoveAutomation { .. }

@@ -55,6 +55,7 @@ USAGE
     goddard-agent resource release '{\"id\":\"UUID\"}'  Release a reservation
     goddard-agent resource cancel '{\"id\":\"UUID\"}'   Cancel a queue entry or workload
     goddard-agent resource status            Print host owners, queue, capacity, and observations
+    goddard-agent boss '<json>'               Manage Boss personas, employees, and files
     goddard-agent models                     List the provider/model options `create` accepts
     goddard-agent command list               List the user's custom commands
     goddard-agent command upsert '<json>'    Add or update a custom command
@@ -63,6 +64,9 @@ USAGE
     goddard-agent --help                     Show this text
 
 USAGE CONTRACT
+    `boss` exposes role-scoped Boss operations. Only the boss or a human
+    can edit personas and Boss files; employees read only granted memory
+    and knowledge. Delegation is permitted only by the assigned persona.
     `command` manages the user's settings — today their custom commands —
     and is available whenever changing a setting would help them.
     `create`, `prompt`, and foreign `read` are the cross-task surface. When
@@ -126,6 +130,7 @@ fn schema() -> serde_json::Value {
         .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
         .collect();
     json!({
+        "boss": {"description": "Role-scoped Boss operations; payload uses a type tag", "operations": ["view", "rename", "upsertPersona", "listFiles", "readFile", "writeFile", "createFolder"], "examples": [{"type": "view"}, {"type": "readFile", "path": "memory/work/notes.md"}, {"type": "writeFile", "path": "memory/work/notes.md", "content": "A durable fact"}], "persona": {"id": "UUID; nil creates a persona", "name": "string", "markdown": "Markdown personality", "knowledgeFiles": "relative paths", "permissions": {"memoryFolders": "relative folder names under memory/", "integrationIds": "connected integration ids", "summonEmployees": "boolean", "computerUse": "boolean"}}},
         "computer": {"js": {"code": "string (required)", "timeout_ms": "integer 1..300000 (default 300000)", "title": "string (optional)"}, "reset": "no payload; resets only this task", "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"},
         "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate for task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
         "resource": {
@@ -411,7 +416,7 @@ fn run() -> anyhow::Result<()> {
         #[cfg(unix)]
         "__resource_exec" => resources::exec_child(arguments),
         "command" => command(arguments.next().as_deref(), arguments.next()),
-        "create" | "prompt" | "read" | "search" | "map" | "rename" | "ask" => {
+        "create" | "prompt" | "read" | "search" | "map" | "rename" | "ask" | "boss" => {
             let payload = arguments
                 .next()
                 .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
@@ -429,6 +434,9 @@ fn run() -> anyhow::Result<()> {
                 client.request(request_session_id(), Uuid::nil(), command)?
             };
             match response {
+                ResponsePayload::Boss { result } => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
                 ResponsePayload::AgentSessionCreated { session_id } => {
                     println!("{}", serde_json::json!({ "task_id": session_id }));
                 }
@@ -574,6 +582,10 @@ fn upsert_payload(payload: &Option<String>) -> anyhow::Result<CustomCommand> {
 
 fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
     match subcommand {
+        "boss" => Ok(Command::Boss {
+            operation: serde_json::from_str(payload)
+                .context("`boss` takes a typed JSON operation; run `goddard-agent schema`")?,
+        }),
         "create" => {
             let payload: CreatePayload = serde_json::from_str(payload).context(
                 "`create` takes a JSON object; run `goddard-agent schema` for its shape",
