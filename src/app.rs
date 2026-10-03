@@ -456,6 +456,23 @@ enum ToastActionKind {
         number: Option<u64>,
         url: SharedString,
     },
+    /// Accept a pending boss utterance and open its chat.
+    BossSpeech,
+}
+
+/// Cross-thread events from the platform voice listener — "go ahead"
+/// detections, consent-task ends, and async permission answers all land on
+/// the event pump as if they were daemon traffic.
+pub(super) enum VoiceGateEvent {
+    /// The on-device recognizer heard the consent phrase.
+    ConsentHeard,
+    /// The consent recognition task ended — an error or a natural utterance
+    /// end; the app restarts it while consent is still wanted.
+    ConsentTaskEnded,
+    /// `AVCaptureDevice.requestAccessForMediaType` answered the mic prompt.
+    MicAccess(bool),
+    /// `SFSpeechRecognizer.requestAuthorization` answered.
+    SpeechAuth(bool),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2396,6 +2413,23 @@ pub struct Waku {
     last_speech_key: Option<waku_client::DaemonKey>,
     last_speech_request: Option<Uuid>,
     speech_playback_key: Option<waku_client::DaemonKey>,
+    /// Requests received while the user is outside the boss chat. Playback
+    /// waits for an explicit consent — the attention toast, entering the
+    /// boss chat, or a spoken "go ahead" — and falls back to immediate
+    /// playback when the mic can't listen.
+    pending_boss_speech: VecDeque<(waku_client::DaemonKey, Vec<String>)>,
+    speech_waiting_for_ambient: bool,
+    /// Consent and permission answers landing from the voice listener's own
+    /// threads — drained with the rest of the pump's traffic.
+    boss_voice_gate_tx: Sender<VoiceGateEvent>,
+    boss_voice_gate_events: Receiver<VoiceGateEvent>,
+    /// TCC prompts fire once per run; their answers arrive as pump events.
+    voice_mic_requested: bool,
+    speech_auth_requested: bool,
+    /// Consent-task restarts used this session, and the generation of the
+    /// current consent listen window — each gated utterance bumps it.
+    voice_consent_restarts: u8,
+    voice_consent_timer_gen: u64,
     /// `bossSpeechRequested` ids already handled this run — reconnects and
     /// repeat broadcasts must not replay an utterance.
     speech_requests_seen: VecDeque<Uuid>,
@@ -5530,6 +5564,7 @@ impl Waku {
         let (automations_tx, automations_events) = unbounded();
         let (boss_tx, boss_events) = unbounded();
         let (speech_tx, speech_events) = unbounded();
+        let (boss_voice_gate_tx, boss_voice_gate_events) = unbounded();
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
@@ -6599,6 +6634,14 @@ impl Waku {
                 last_speech_key: None,
                 last_speech_request: None,
                 speech_playback_key: None,
+                pending_boss_speech: VecDeque::new(),
+                speech_waiting_for_ambient: false,
+                boss_voice_gate_tx,
+                boss_voice_gate_events,
+                voice_mic_requested: false,
+                speech_auth_requested: false,
+                voice_consent_restarts: 0,
+                voice_consent_timer_gen: 0,
                 speech_requests_seen: VecDeque::new(),
                 eval_probe_pending: false,
                 eval_probe_result: None,

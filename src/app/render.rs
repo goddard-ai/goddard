@@ -1300,6 +1300,7 @@ impl Waku {
                             } => {
                                 this.open_created_issue(*project, *number, url.as_ref(), window, cx)
                             }
+                            ToastActionKind::BossSpeech => this.accept_pending_boss_speech(cx),
                         }
                         cx.stop_propagation();
                     }
@@ -1329,6 +1330,7 @@ impl Waku {
                             } => {
                                 this.open_created_issue(*project, *number, url.as_ref(), window, cx)
                             }
+                            ToastActionKind::BossSpeech => this.accept_pending_boss_speech(cx),
                         }
                         cx.stop_propagation();
                     }

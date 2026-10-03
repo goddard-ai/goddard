@@ -6002,6 +6002,10 @@ boss.unexpected_response:
   en: The daemon returned an unexpected Boss response.
 boss.failed:
   en: 'Boss operation failed: %{error}'
+boss.voice_waiting:
+  en: The boss has a voice message waiting — say “Go ahead” or open its chat.
+boss.voice_play:
+  en: Open boss chat and play
 
 bundle.open:
   en: Open

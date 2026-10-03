@@ -635,6 +635,10 @@ impl Waku {
         self.drain_pending_status_marker_turns(session_id, cx);
         self.drain_pending_action_prediction_turns(session_id, cx);
         self.drain_pending_inbox_suggestions(session_id, cx);
+        // Landing on a boss chat consents to whatever voice it was holding.
+        if let Some(key) = self.boss_chat_key() {
+            self.flush_pending_boss_speech_for(key, cx);
+        }
         // Session selection and terminal selection are mutually exclusive —
         // the transcript takes the main area back from the terminal.
         self.selected_terminal = None;

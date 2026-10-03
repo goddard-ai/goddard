@@ -47,6 +47,15 @@ const REUSE_CONFIDENCE: f64 = 0.5;
 /// The `Choice` option meaning "no saved clip fits — synthesize one".
 /// Deliberately a sentence, not an id: option names are what the model sees.
 const NEW_CLIP_OPTION: &str = "synthesize a new clip";
+/// How many utterances may sit gated behind consent before the oldest
+/// drop — an overflowing queue must not grow without bound.
+const PENDING_BOSS_SPEECH_CAP: usize = 8;
+/// How long "go ahead" stays armed after the latest gated utterance — the
+/// mic never keeps listening on a prompt nobody is answering.
+const VOICE_CONSENT_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+/// Restarts for a consent task that ended on its own before the feature
+/// degrades to click-only consent.
+const VOICE_CONSENT_RESTARTS: u8 = 3;
 
 /// The persisted clip library: `index.json` beside the `clips/` audio files
 /// it names. Entries append oldest-first; past `SPEECH_EXPIRY_THRESHOLD`
@@ -396,10 +405,11 @@ impl Waku {
         changed
     }
 
-    /// Fire one utterance through the library → eval → synthesis pipeline,
-    /// then queue the resolved clips behind whatever is already playing.
-    /// Runs only while the voice briefing experiment is on and its provider
-    /// has a credential — speak borrows the briefing voice wholesale.
+    /// Fire one utterance through the gate and then the library → eval →
+    /// synthesis pipeline, queueing resolved clips behind whatever is
+    /// already playing. Runs only while the voice briefing experiment is on
+    /// and its provider has a credential — speak borrows the briefing voice
+    /// wholesale.
     fn start_speech_request(
         &mut self,
         key: waku_client::DaemonKey,
@@ -409,6 +419,47 @@ impl Waku {
         if parts.is_empty() || !self.state.voice_briefing_enabled {
             return;
         }
+        // Outside the boss's own chat, speech waits for a deliberate consent:
+        // the attention toast, entering the boss chat, or a spoken "go
+        // ahead". A denied mic can't listen for any of that, so the request
+        // plays as it always has.
+        let mic = crate::platform::microphone_access();
+        if self.boss_chat_key() != Some(key) && mic != crate::platform::CaptureAccess::Denied {
+            if self.pending_boss_speech.len() == PENDING_BOSS_SPEECH_CAP {
+                self.pending_boss_speech.pop_front();
+            }
+            if self.pending_boss_speech.is_empty() {
+                self.show_toast_for(
+                    tr!("boss.voice_waiting"),
+                    super::ToastTone::Notice,
+                    Some(super::ToastAction {
+                        label: tr!("boss.voice_play").into(),
+                        kind: super::ToastActionKind::BossSpeech,
+                    }),
+                    std::time::Duration::from_secs(10),
+                );
+            }
+            self.pending_boss_speech.push_back((key, parts));
+            if mic == crate::platform::CaptureAccess::Undetermined {
+                self.request_voice_mic_access();
+            } else {
+                self.arm_voice_consent(cx);
+            }
+            return;
+        }
+        self.dispatch_speech_request(key, parts, mic, cx);
+    }
+
+    /// The resolve-and-play half of a speech request. The attention gate
+    /// lives in `start_speech_request`; consented replays enter here
+    /// directly so a spoken "go ahead" plays where the user already is.
+    fn dispatch_speech_request(
+        &mut self,
+        key: waku_client::DaemonKey,
+        parts: Vec<String>,
+        mic: crate::platform::CaptureAccess,
+        cx: &mut Context<Self>,
+    ) {
         let provider = self.state.voice_briefing_provider;
         let Some(daemon) = self.daemons.supervisor(key) else {
             return;
@@ -431,6 +482,16 @@ impl Waku {
         };
         if !credential_configured {
             return;
+        }
+        // Ambient detection runs only once macOS has granted the mic; the
+        // undetermined case asks now and the answer lands as a pump event.
+        // A missing or silent detector always fails open to playback.
+        match mic {
+            crate::platform::CaptureAccess::Granted => {
+                crate::platform::start_voice_listener();
+            }
+            crate::platform::CaptureAccess::Undetermined => self.request_voice_mic_access(),
+            crate::platform::CaptureAccess::Denied => {}
         }
         let request_id = Uuid::new_v4();
         self.last_speech_key = Some(key);
@@ -502,6 +563,7 @@ impl Waku {
                         this.last_speech_clips.clear();
                         cx.notify();
                     }
+                    this.maybe_stop_voice_listener();
                 }
             });
         })
@@ -535,11 +597,251 @@ impl Waku {
         self.pump_speech_queue(cx);
     }
 
-    /// Sound the next queued speech clip when nothing is playing. Clip
-    /// completion hands off through the playback tick, so a queued chain
-    /// keeps voicing until the queue runs dry; undecodable clips drop.
+    /// The toast action's consent: opening the chat is itself the ask, so
+    /// select it before replaying.
+    pub(super) fn accept_pending_boss_speech(&mut self, cx: &mut Context<Self>) {
+        self.consent_pending_boss_speech(true, cx);
+    }
+
+    /// Flush the gated queue: drop the offer, end "go ahead" listening, and
+    /// replay each utterance through the pipeline. A spoken consent just
+    /// plays where the user already is; the toast also selects the chat.
+    fn consent_pending_boss_speech(&mut self, open_chat: bool, cx: &mut Context<Self>) {
+        self.hide_boss_speech_toast();
+        if self.pending_boss_speech.is_empty() {
+            return;
+        }
+        if open_chat {
+            let session_id = self.pending_boss_speech.front().and_then(|(key, _)| {
+                self.boss_ui
+                    .states
+                    .get(key)
+                    .and_then(|state| state.session_id)
+            });
+            if let Some(session_id) = session_id {
+                self.select_session(session_id, cx);
+            }
+        }
+        crate::platform::end_consent_recognition();
+        self.replay_pending_boss_speech(cx);
+    }
+
+    /// Entering a boss's chat is itself consent for its waiting queue —
+    /// replay only that boss's gated utterances and leave other daemons'.
+    pub(super) fn flush_pending_boss_speech_for(
+        &mut self,
+        key: waku_client::DaemonKey,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pending_boss_speech.is_empty() {
+            return;
+        }
+        let (ready, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending_boss_speech)
+            .into_iter()
+            .partition(|(owner, _)| *owner == key);
+        self.pending_boss_speech = kept.into_iter().collect();
+        if self.pending_boss_speech.is_empty() {
+            crate::platform::end_consent_recognition();
+            self.hide_boss_speech_toast();
+        }
+        for (key, parts) in ready {
+            self.dispatch_speech_request(key, parts, crate::platform::microphone_access(), cx);
+        }
+    }
+
+    /// Dismiss the attention toast only when the one showing is the boss
+    /// voice offer — consent arriving late must not eat an unrelated toast.
+    fn hide_boss_speech_toast(&mut self) {
+        if matches!(
+            self.toast
+                .as_ref()
+                .and_then(|toast| toast.action.as_ref())
+                .map(|action| &action.kind),
+            Some(super::ToastActionKind::BossSpeech)
+        ) {
+            self.hide_toast();
+        }
+    }
+
+    fn replay_pending_boss_speech(&mut self, cx: &mut Context<Self>) {
+        let pending = std::mem::take(&mut self.pending_boss_speech);
+        for (key, parts) in pending {
+            self.dispatch_speech_request(key, parts, crate::platform::microphone_access(), cx);
+        }
+    }
+
+    /// Arm the mic-side consent path for gated utterances: the "go ahead"
+    /// recognizer plus the bounded window that keeps the mic from staying
+    /// hot on a prompt nobody is answering.
+    fn arm_voice_consent(&mut self, cx: &mut Context<Self>) {
+        self.voice_consent_timer_gen = self.voice_consent_timer_gen.wrapping_add(1);
+        self.voice_consent_restarts = 0;
+        let generation = self.voice_consent_timer_gen;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(VOICE_CONSENT_WINDOW).await;
+            let _ = this.update(cx, |this, _| this.expire_voice_consent(generation));
+        })
+        .detach();
+        if crate::platform::microphone_access() != crate::platform::CaptureAccess::Granted {
+            return;
+        }
+        if crate::platform::start_voice_listener() {
+            self.start_consent_recognition();
+        }
+    }
+
+    /// The consent window lapsed: stop listening. Gated items still flush
+    /// on a click or on entering the boss chat.
+    fn expire_voice_consent(&mut self, generation: u64) {
+        if generation != self.voice_consent_timer_gen {
+            return;
+        }
+        crate::platform::end_consent_recognition();
+        self.maybe_stop_voice_listener();
+    }
+
+    /// Start the on-device consent recognizer, asking for speech-recognition
+    /// permission first when macOS hasn't decided yet. Denial degrades the
+    /// feature to click-only consent — the toast keeps working.
+    fn start_consent_recognition(&mut self) {
+        match crate::platform::speech_recognition_access() {
+            crate::platform::CaptureAccess::Granted => {
+                let tx = self.boss_voice_gate_tx.clone();
+                let wake = self.event_wake_tx.clone();
+                crate::platform::begin_consent_recognition(Box::new(move |signal| {
+                    let event = match signal {
+                        crate::platform::ConsentSignal::Heard => VoiceGateEvent::ConsentHeard,
+                        crate::platform::ConsentSignal::Ended => VoiceGateEvent::ConsentTaskEnded,
+                    };
+                    if tx.try_send(event).is_ok() {
+                        signal_event_pump(&wake);
+                    }
+                }));
+            }
+            crate::platform::CaptureAccess::Undetermined => self.request_speech_auth(),
+            crate::platform::CaptureAccess::Denied => {}
+        }
+    }
+
+    /// Ask macOS for the mic once; the answer lands on the pump as
+    /// `VoiceGateEvent::MicAccess`.
+    fn request_voice_mic_access(&mut self) {
+        if std::mem::replace(&mut self.voice_mic_requested, true) {
+            return;
+        }
+        let tx = self.boss_voice_gate_tx.clone();
+        let wake = self.event_wake_tx.clone();
+        crate::platform::request_microphone_access(Box::new(move |granted| {
+            if tx.try_send(VoiceGateEvent::MicAccess(granted)).is_ok() {
+                signal_event_pump(&wake);
+            }
+        }));
+    }
+
+    /// Ask macOS for speech recognition once; the answer lands on the pump
+    /// as `VoiceGateEvent::SpeechAuth`.
+    fn request_speech_auth(&mut self) {
+        if std::mem::replace(&mut self.speech_auth_requested, true) {
+            return;
+        }
+        let tx = self.boss_voice_gate_tx.clone();
+        let wake = self.event_wake_tx.clone();
+        crate::platform::request_speech_recognition_access(Box::new(move |granted| {
+            if tx.try_send(VoiceGateEvent::SpeechAuth(granted)).is_ok() {
+                signal_event_pump(&wake);
+            }
+        }));
+    }
+
+    /// Consent and permission answers from the voice listener's threads.
+    pub(super) fn drain_voice_gate_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while let Ok(event) = self.boss_voice_gate_events.try_recv() {
+            changed = true;
+            match event {
+                VoiceGateEvent::ConsentHeard => self.consent_pending_boss_speech(false, cx),
+                VoiceGateEvent::ConsentTaskEnded => {
+                    if !self.pending_boss_speech.is_empty()
+                        && self.voice_consent_restarts < VOICE_CONSENT_RESTARTS
+                    {
+                        self.voice_consent_restarts += 1;
+                        crate::platform::end_consent_recognition();
+                        self.start_consent_recognition();
+                    }
+                }
+                VoiceGateEvent::MicAccess(true) => {
+                    crate::platform::start_voice_listener();
+                    if !self.pending_boss_speech.is_empty() {
+                        self.arm_voice_consent(cx);
+                    }
+                }
+                VoiceGateEvent::MicAccess(false) => {
+                    // No mic means nothing to gate with — speak as today.
+                    self.replay_pending_boss_speech(cx);
+                }
+                VoiceGateEvent::SpeechAuth(true) => {
+                    if !self.pending_boss_speech.is_empty() {
+                        self.start_consent_recognition();
+                    }
+                }
+                VoiceGateEvent::SpeechAuth(false) => {}
+            }
+        }
+        changed
+    }
+
+    /// The mic goes off when nothing is queued for playback and no consent
+    /// session is still listening — gated items alone never hold it open.
+    fn maybe_stop_voice_listener(&mut self) {
+        if self.speech_clip_queue.is_empty()
+            && self.voice_briefing_playback.is_none()
+            && !crate::platform::consent_recognition_active()
+        {
+            crate::platform::stop_voice_listener();
+        }
+    }
+
+    /// Sound the next queued speech clip when nothing is playing — and only
+    /// once the mic says the room is quiet, so the boss never talks over the
+    /// user. Clip completion hands off through the playback tick, so a
+    /// queued chain keeps voicing until the queue runs dry; undecodable
+    /// clips drop. A missing or silent detector fails open to playback.
     pub(super) fn pump_speech_queue(&mut self, cx: &mut Context<Self>) {
         if self.voice_briefing_playback.is_some() {
+            return;
+        }
+        if self.speech_clip_queue.is_empty() {
+            self.maybe_stop_voice_listener();
+            return;
+        }
+        if crate::platform::ambient_speech_active() {
+            if self.speech_waiting_for_ambient {
+                return;
+            }
+            self.speech_waiting_for_ambient = true;
+            let weak = cx.weak_entity();
+            cx.spawn(async move |_, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(250))
+                        .await;
+                    let should_continue = weak
+                        .update(cx, |this, cx| {
+                            if !crate::platform::ambient_speech_active() {
+                                this.speech_waiting_for_ambient = false;
+                                this.pump_speech_queue(cx);
+                                false
+                            } else {
+                                true
+                            }
+                        })
+                        .unwrap_or(false);
+                    if !should_continue {
+                        break;
+                    }
+                }
+            })
+            .detach();
             return;
         }
         while let Some((key, bytes)) = self.speech_clip_queue.pop_front() {
@@ -552,6 +854,7 @@ impl Waku {
             }
         }
         self.speech_playback_key = None;
+        self.maybe_stop_voice_listener();
     }
 }
 

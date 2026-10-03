@@ -2974,6 +2974,8 @@ boss.unreachable: "无法连接到老板的守护进程。"
 boss.project_required: "打开老板聊天前，请在此守护进程上添加一个项目。"
 boss.unexpected_response: "守护进程返回了意外的老板响应。"
 boss.failed: "老板操作失败：%{error}"
+boss.voice_waiting: "老板有一条语音消息等待播放 —— 说“Go ahead”或打开它的聊天。"
+boss.voice_play: "打开老板聊天并播放"
 
 bundle.open: "打开"
 bundle.dismiss: "从边栏移除"

@@ -94,7 +94,34 @@ gpui = { git = "https://github.com/goddard-ai/zed", branch = "main", features = 
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-avf-audio = { version = "0.3.2", features = ["AVAudioPlayer"] }
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "AVCaptureDevice",
+  "AVMediaFormat",
+  "block2",
+] }
+objc2-avf-audio = { version = "0.3.2", features = [
+  "AVAudioBuffer",
+  "AVAudioEngine",
+  "AVAudioFormat",
+  "AVAudioIONode",
+  "AVAudioNode",
+  "AVAudioPlayer",
+  "AVAudioTime",
+  "AVAudioTypes",
+  "block2",
+] }
+objc2-speech = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "SFSpeechRecognitionRequest",
+  "SFSpeechRecognitionResult",
+  "SFSpeechRecognitionTask",
+  "SFSpeechRecognitionTaskHint",
+  "SFSpeechRecognizer",
+  "SFTranscription",
+  "block2",
+  "objc2-avf-audio",
+] }
 wry = { version = "0.56", features = ["devtools"] }
 block2 = "0.6"
 # Matches the version GPUI itself renders with, so RenderImage frames are the

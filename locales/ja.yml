@@ -3022,6 +3022,8 @@ boss.unreachable: "ボスのデーモンに接続できません。"
 boss.project_required: "ボスとのチャットを開く前に、このデーモンにプロジェクトを追加してください。"
 boss.unexpected_response: "デーモンから予期しないボスの応答が返されました。"
 boss.failed: "ボスの操作に失敗しました: %{error}"
+boss.voice_waiting: "ボスから音声メッセージが届いています — 「Go ahead」と話すか、チャットを開いてください。"
+boss.voice_play: "ボスチャットを開いて再生"
 
 bundle.open: "開く"
 bundle.dismiss: "サイドバーから削除"

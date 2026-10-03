@@ -1,5 +1,498 @@
 use gpui::Window;
 
+/// Whether the app may use capture permission at all — mic access gates the
+/// boss-voice listener, and speech-recognition access gates "go ahead"
+/// consent. Both fail open: denied means boss speech behaves as if the gate
+/// did not exist.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CaptureAccess {
+    Granted,
+    Denied,
+    Undetermined,
+}
+
+/// What the consent recognizer observed — the app turns these into events on
+/// its event pump, off the recognition thread.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConsentSignal {
+    /// The on-device recognizer heard the consent phrase.
+    Heard,
+    /// The recognition task ended on its own — an error or the natural end
+    /// of an utterance. The app restarts it while consent is still wanted.
+    Ended,
+}
+
+/// True when running inside an app bundle. TCC-backed capture and
+/// recognition APIs are unsafe to touch from a bare executable — tests and
+/// `cargo run` must take the denied path so playback still works.
+#[cfg(target_os = "macos")]
+fn in_app_bundle() -> bool {
+    objc2_foundation::NSBundle::mainBundle()
+        .bundleIdentifier()
+        .is_some()
+}
+
+/// The app's microphone permission as macOS reports it. No prompt is ever
+/// shown by asking — `Undetermined` means `request_microphone_access` would
+/// have to ask.
+#[cfg(target_os = "macos")]
+pub fn microphone_access() -> CaptureAccess {
+    use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+
+    if !in_app_bundle() {
+        return CaptureAccess::Denied;
+    }
+    let Some(media_type) = (unsafe { AVMediaTypeAudio }) else {
+        return CaptureAccess::Denied;
+    };
+    match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
+        status if status == AVAuthorizationStatus::Authorized => CaptureAccess::Granted,
+        status if status == AVAuthorizationStatus::NotDetermined => CaptureAccess::Undetermined,
+        _ => CaptureAccess::Denied,
+    }
+}
+
+/// Ask macOS for mic access; `done` fires once on an arbitrary queue with
+/// the answer. Call only when `microphone_access()` is `Undetermined`.
+#[cfg(target_os = "macos")]
+pub fn request_microphone_access(done: Box<dyn Fn(bool) + Send + Sync + 'static>) {
+    use objc2::runtime::Bool;
+    use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
+
+    if !in_app_bundle() {
+        done(false);
+        return;
+    }
+    let Some(media_type) = (unsafe { AVMediaTypeAudio }) else {
+        done(false);
+        return;
+    };
+    let done = std::sync::Mutex::new(Some(done));
+    let handler = block2::RcBlock::new(move |granted: Bool| {
+        if let Some(done) = done.lock().unwrap().take() {
+            done(granted.as_bool());
+        }
+    });
+    unsafe { AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler) };
+}
+
+/// The app's speech-recognition permission — a separate TCC item from the
+/// mic, required before the consent recognizer may run.
+#[cfg(target_os = "macos")]
+pub fn speech_recognition_access() -> CaptureAccess {
+    use objc2_speech::{SFSpeechRecognizer, SFSpeechRecognizerAuthorizationStatus};
+
+    if !in_app_bundle() {
+        return CaptureAccess::Denied;
+    }
+    match unsafe { SFSpeechRecognizer::authorizationStatus() } {
+        status if status == SFSpeechRecognizerAuthorizationStatus::Authorized => {
+            CaptureAccess::Granted
+        }
+        status if status == SFSpeechRecognizerAuthorizationStatus::NotDetermined => {
+            CaptureAccess::Undetermined
+        }
+        _ => CaptureAccess::Denied,
+    }
+}
+
+/// Ask macOS for speech-recognition access; `done` fires once with the
+/// answer. Call only when `speech_recognition_access()` is `Undetermined` —
+/// without `NSSpeechRecognitionUsageDescription` in the bundle's plist this
+/// crashes, which is also why bare executables must not reach it.
+#[cfg(target_os = "macos")]
+pub fn request_speech_recognition_access(done: Box<dyn Fn(bool) + Send + Sync + 'static>) {
+    use objc2_speech::{SFSpeechRecognizer, SFSpeechRecognizerAuthorizationStatus};
+
+    if !in_app_bundle() {
+        done(false);
+        return;
+    }
+    let done = std::sync::Mutex::new(Some(done));
+    let handler =
+        block2::RcBlock::new(move |status: SFSpeechRecognizerAuthorizationStatus| {
+            if let Some(done) = done.lock().unwrap().take() {
+                done(status == SFSpeechRecognizerAuthorizationStatus::Authorized);
+            }
+        });
+    unsafe { SFSpeechRecognizer::requestAuthorization(&handler) };
+}
+
+/// Whether a lowercase, punctuation-normalized transcript contains the
+/// spoken consent — "go ahead" with any words around it.
+#[cfg(target_os = "macos")]
+fn hears_consent(text: &str) -> bool {
+    let normalized: String = text
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    normalized
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .contains("go ahead")
+}
+
+#[cfg(target_os = "macos")]
+mod voice_gate {
+    use std::cell::RefCell;
+    use std::ptr::NonNull;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2_avf_audio::{AVAudioEngine, AVAudioPCMBuffer, AVAudioTime};
+    use objc2_foundation::{NSArray, NSError, NSString};
+    use objc2_speech::{
+        SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult,
+        SFSpeechRecognitionTask, SFSpeechRecognitionTaskHint, SFSpeechRecognizer,
+    };
+
+    use super::ConsentSignal;
+
+    /// Loud input refreshes this many ~100 ms tap blocks of "someone is
+    /// speaking" — an ~800 ms release tail so the gate does not flap on
+    /// pauses between words.
+    const AMBIENT_RELEASE_WINDOWS: u32 = 8;
+    /// RMS of a quarter-sampled block that counts as speech — above room
+    /// noise, below normal voice at arm's length.
+    const AMBIENT_RMS_THRESHOLD: f32 = 0.012;
+
+    static AMBIENT_WINDOWS: AtomicU32 = AtomicU32::new(0);
+    /// One consent per listen session — the handler can report the same
+    /// "go ahead" across partial and final results back to back.
+    static CONSENT_HEARD: AtomicBool = AtomicBool::new(false);
+
+    /// The request the live tap feeds. `Retained` is `!Send`, so this
+    /// crosses threads under a mutex; the tap only `try_lock`s — it drops a
+    /// buffer rather than block an audio I/O thread on recognition setup.
+    struct Feed(Option<Retained<SFSpeechAudioBufferRecognitionRequest>>);
+    unsafe impl Send for Feed {}
+    static CONSENT_FEED: Mutex<Feed> = Mutex::new(Feed(None));
+
+    type ConsentHook = Box<dyn Fn(ConsentSignal) + Send + Sync>;
+    static CONSENT_HOOK: Mutex<Option<ConsentHook>> = Mutex::new(None);
+
+    /// The recognizer objects — created and retired on the main thread only.
+    /// The recognizer is only held, never called: the task may not retain it.
+    struct ConsentSession {
+        request: Retained<SFSpeechAudioBufferRecognitionRequest>,
+        task: Retained<SFSpeechRecognitionTask>,
+        _recognizer: Retained<SFSpeechRecognizer>,
+    }
+
+    struct VoiceListener {
+        engine: Retained<AVAudioEngine>,
+        consent: Option<ConsentSession>,
+    }
+
+    thread_local! {
+        static VOICE_LISTENER: RefCell<Option<VoiceListener>> = const { RefCell::new(None) };
+    }
+
+    /// Fold one tap block into the ambient-energy window. Planar float PCM
+    /// is the input node's normal capture format; one channel and every
+    /// fourth sample is plenty for an energy read.
+    fn observe_ambient_level(buffer: &AVAudioPCMBuffer) {
+        let frames = unsafe { buffer.frameLength() } as usize;
+        let channels = unsafe { buffer.floatChannelData() };
+        if frames == 0 || channels.is_null() {
+            return;
+        }
+        let samples = unsafe { *channels }.as_ptr();
+        let energy = (0..frames)
+            .step_by(4)
+            .map(|index| {
+                let sample = unsafe { *samples.add(index) };
+                sample * sample
+            })
+            .sum::<f32>()
+            / (frames.div_ceil(4) as f32);
+        if energy.sqrt() >= AMBIENT_RMS_THRESHOLD {
+            AMBIENT_WINDOWS.store(AMBIENT_RELEASE_WINDOWS, Ordering::Relaxed);
+        } else {
+            let _ = AMBIENT_WINDOWS.fetch_update(
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+                |windows| Some(windows.saturating_sub(1)),
+            );
+        }
+    }
+
+    /// The recognizer's answer to one callback: consent heard, task ended,
+    /// or an unremarkable partial result.
+    fn consent_signal(
+        result: *mut SFSpeechRecognitionResult,
+        error: *mut NSError,
+    ) -> Option<ConsentSignal> {
+        unsafe {
+            if !error.is_null() {
+                eprintln!("boss voice consent recognition failed: {:?}", *error);
+                return Some(ConsentSignal::Ended);
+            }
+            if result.is_null() {
+                return None;
+            }
+            let result = &*result;
+            if super::hears_consent(&result.bestTranscription().formattedString().to_string()) {
+                return Some(ConsentSignal::Heard);
+            }
+            result.isFinal().then_some(ConsentSignal::Ended)
+        }
+    }
+
+    /// Start the capture engine and its tap. Audio is only inspected for
+    /// short-term energy and forwarded to any live consent request — samples
+    /// are never retained or sent anywhere. Returns false when the engine
+    /// cannot start; callers keep fail-open playback in that case.
+    pub fn start() -> bool {
+        VOICE_LISTENER.with_borrow_mut(|slot| {
+            if slot.is_some() {
+                return true;
+            }
+            let engine = unsafe { AVAudioEngine::new() };
+            let input = unsafe { engine.inputNode() };
+            let tap = RcBlock::new(
+                |buffer: NonNull<AVAudioPCMBuffer>, _time: NonNull<AVAudioTime>| {
+                    let buffer = unsafe { buffer.as_ref() };
+                    if let Ok(feed) = CONSENT_FEED.try_lock()
+                        && let Some(request) = feed.0.as_ref()
+                    {
+                        unsafe { request.appendAudioPCMBuffer(buffer) };
+                    }
+                    observe_ambient_level(buffer);
+                },
+            );
+            let tap_pointer = &*tap as *const _ as *mut _;
+            unsafe { input.installTapOnBus_bufferSize_format_block(0, 4_800, None, tap_pointer) };
+            if unsafe { engine.startAndReturnError() }.is_err() {
+                unsafe { input.removeTapOnBus(0) };
+                return false;
+            }
+            *slot = Some(VoiceListener {
+                engine,
+                consent: None,
+            });
+            true
+        })
+    }
+
+    /// Stop the engine and any consent session, and reset the VAD window.
+    pub fn stop() {
+        end_consent();
+        VOICE_LISTENER.with_borrow_mut(|slot| {
+            if let Some(listener) = slot.take() {
+                let input = unsafe { listener.engine.inputNode() };
+                unsafe {
+                    input.removeTapOnBus(0);
+                    listener.engine.stop();
+                }
+            }
+        });
+        AMBIENT_WINDOWS.store(0, Ordering::Relaxed);
+    }
+
+    /// Whether the detector has recently seen sustained mic energy. A
+    /// missing or silent detector reads as inactive so playback stays
+    /// fail-open.
+    pub fn ambient_active() -> bool {
+        AMBIENT_WINDOWS.load(Ordering::Relaxed) > 0
+    }
+
+    /// Whether a consent session is currently live — the sole reason to
+    /// keep the engine running when nothing is playing.
+    pub fn consent_active() -> bool {
+        VOICE_LISTENER.with_borrow(|slot| {
+            slot.as_ref().is_some_and(|listener| listener.consent.is_some())
+        })
+    }
+
+    /// Begin listening for the spoken consent phrase on-device. `hook` fires
+    /// on the recognizer's own queue, so it must be cheap and thread-safe —
+    /// the app forwards it into its event pump. Requires the engine and the
+    /// speech-recognition grant already in place; returns false otherwise.
+    pub fn begin_consent(hook: Box<dyn Fn(ConsentSignal) + Send + Sync + 'static>) -> bool {
+        VOICE_LISTENER.with_borrow_mut(|slot| {
+            let Some(listener) = slot.as_mut() else {
+                return false;
+            };
+            if listener.consent.is_some() {
+                *CONSENT_HOOK.lock().unwrap() = Some(hook);
+                return true;
+            }
+            use objc2::AnyThread;
+            let Some(recognizer) = (unsafe { SFSpeechRecognizer::init(SFSpeechRecognizer::alloc()) })
+            else {
+                return false;
+            };
+            if !(unsafe { recognizer.isAvailable() }
+                && unsafe { recognizer.supportsOnDeviceRecognition() })
+            {
+                return false;
+            }
+            let request = unsafe { SFSpeechAudioBufferRecognitionRequest::new() };
+            unsafe {
+                request.setRequiresOnDeviceRecognition(true);
+                request.setShouldReportPartialResults(true);
+                request.setTaskHint(SFSpeechRecognitionTaskHint::Dictation);
+                // Bias the language model toward the only phrase we accept.
+                let phrases = [
+                    NSString::from_str("go ahead"),
+                    NSString::from_str("go-ahead"),
+                ];
+                let phrase_refs: Vec<&NSString> = phrases.iter().map(|p| &**p).collect();
+                request.setContextualStrings(&NSArray::from_slice(&phrase_refs));
+            }
+            let handler = RcBlock::new(
+                |result: *mut SFSpeechRecognitionResult, error: *mut NSError| {
+                    if CONSENT_HEARD.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    // A cleared hook means the session is being torn down —
+                    // the events `endAudio`/`cancel` fire are not real ends.
+                    let Ok(hook) = CONSENT_HOOK.lock() else {
+                        return;
+                    };
+                    let Some(hook) = hook.as_ref() else {
+                        return;
+                    };
+                    let Some(signal) = consent_signal(result, error) else {
+                        return;
+                    };
+                    if signal == ConsentSignal::Heard {
+                        CONSENT_HEARD.store(true, Ordering::Relaxed);
+                    }
+                    hook(signal);
+                },
+            );
+            let task = unsafe {
+                recognizer.recognitionTaskWithRequest_resultHandler(&request, &handler)
+            };
+            CONSENT_HEARD.store(false, Ordering::Relaxed);
+            *CONSENT_HOOK.lock().unwrap() = Some(hook);
+            CONSENT_FEED.lock().unwrap().0 = Some(request.clone());
+            listener.consent = Some(ConsentSession {
+                request,
+                task,
+                _recognizer: recognizer,
+            });
+            true
+        })
+    }
+
+    /// End the consent session but leave the engine running — playback still
+    /// wants the ambient check. Feed and hook clear before `endAudio`/`cancel`
+    /// so the handler they synchronously fire sees nothing to report.
+    pub fn end_consent() {
+        let session = VOICE_LISTENER
+            .with_borrow_mut(|slot| slot.as_mut().and_then(|listener| listener.consent.take()));
+        CONSENT_FEED.lock().unwrap().0 = None;
+        *CONSENT_HOOK.lock().unwrap() = None;
+        CONSENT_HEARD.store(false, Ordering::Relaxed);
+        if let Some(session) = session {
+            unsafe {
+                session.request.endAudio();
+                session.task.cancel();
+            }
+        }
+    }
+}
+
+/// Start the local voice listener (ambient detection plus whatever consent
+/// session is active). Safe to call repeatedly — the engine starts once.
+#[cfg(target_os = "macos")]
+pub fn start_voice_listener() -> bool {
+    if !in_app_bundle() {
+        return false;
+    }
+    voice_gate::start()
+}
+
+/// Stop the voice listener entirely — engine, tap, and consent session.
+#[cfg(target_os = "macos")]
+pub fn stop_voice_listener() {
+    voice_gate::stop()
+}
+
+/// Whether the on-device detector has recently seen sustained mic energy.
+/// A missing detector is treated as inactive so playback remains available.
+#[cfg(target_os = "macos")]
+pub fn ambient_speech_active() -> bool {
+    voice_gate::ambient_active()
+}
+
+/// Whether "go ahead" recognition is live — the engine should stay up for
+/// it even while nothing plays.
+#[cfg(target_os = "macos")]
+pub fn consent_recognition_active() -> bool {
+    voice_gate::consent_active()
+}
+
+/// Begin on-device recognition of the spoken consent phrase. `hook` is
+/// invoked off the UI thread for each `ConsentSignal`.
+#[cfg(target_os = "macos")]
+pub fn begin_consent_recognition(
+    hook: Box<dyn Fn(ConsentSignal) + Send + Sync + 'static>,
+) -> bool {
+    voice_gate::begin_consent(hook)
+}
+
+/// End consent recognition without stopping ambient detection.
+#[cfg(target_os = "macos")]
+pub fn end_consent_recognition() {
+    voice_gate::end_consent()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn microphone_access() -> CaptureAccess {
+    CaptureAccess::Denied
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_microphone_access(done: Box<dyn Fn(bool) + Send + Sync + 'static>) {
+    done(false);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn speech_recognition_access() -> CaptureAccess {
+    CaptureAccess::Denied
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_speech_recognition_access(done: Box<dyn Fn(bool) + Send + Sync + 'static>) {
+    done(false);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn start_voice_listener() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn stop_voice_listener() {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn ambient_speech_active() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn consent_recognition_active() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn begin_consent_recognition(
+    _: Box<dyn Fn(ConsentSignal) + Send + Sync + 'static>,
+) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn end_consent_recognition() {}
+
 #[cfg(target_os = "macos")]
 pub fn show_about_panel() {
     use objc2::MainThreadMarker;
@@ -1186,6 +1679,21 @@ mod macos_tests {
             let sound = NSSound::initWithData(NSSound::alloc(), &data)
                 .unwrap_or_else(|| panic!("{} should decode", variant.label()));
             assert!(sound.duration() > 0.0, "{}", variant.label());
+        }
+    }
+
+    #[test]
+    fn hears_consent_matches_spoken_variants() {
+        for text in [
+            "Go ahead.",
+            "go-ahead",
+            "okay, GO AHEAD please",
+            "sure — go ahead",
+        ] {
+            assert!(super::hears_consent(text), "{text} should consent");
+        }
+        for text in ["go", "hold on", "go-a", "gopher", "", "no thank you"] {
+            assert!(!super::hears_consent(text), "{text} should not consent");
         }
     }
 }

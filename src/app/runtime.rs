@@ -7615,6 +7615,7 @@ impl Waku {
             | self.drain_automations_events(cx)
             | self.drain_boss_events(cx)
             | self.drain_speech_events(cx)
+            | self.drain_voice_gate_events(cx)
             | self.drain_review_events(cx)
             | self.drain_friend_session_closed_events(cx)
             | self.drain_status_marker_events()

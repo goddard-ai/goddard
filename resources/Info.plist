@@ -35,6 +35,10 @@
     </array>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Goddard listens locally for speech so boss voice messages can wait until you finish talking.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Goddard recognizes "Go ahead" on-device so you can release a waiting boss voice message hands-free. Speech never leaves your Mac.</string>
     <!-- Sparkle auto-update configuration. Stable appcasts and release assets
          are served from GitHub Releases; the private half of SUPublicEDKey
          signs each archive during `bun run release` (see RELEASING.md). -->
