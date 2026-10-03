@@ -3903,7 +3903,20 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
-        let focus_handle = self.typing_target_composer().read(cx).focus();
+        // With a side chat open, ⌘L hands focus between its composer and the
+        // main one. Elsewhere it keeps its original main-composer behavior.
+        let focus_handle = self
+            .visible_side_chat_id()
+            .and_then(|session_id| self.side_chat_composers.get(&session_id))
+            .map(|side_chat| {
+                let side_focus = side_chat.composer.read(cx).focus();
+                if side_focus.is_focused(window) {
+                    self.composer.read(cx).focus()
+                } else {
+                    side_focus
+                }
+            })
+            .unwrap_or_else(|| self.composer.read(cx).focus());
         window.focus(&focus_handle, cx);
         cx.notify();
     }
