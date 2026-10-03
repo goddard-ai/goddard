@@ -404,6 +404,7 @@ pub fn flatten(
     let mut scan = Scan::Text;
     let mut atom_font = font(families.ui.clone());
     atom_font.weight = base_weight;
+    let slot_font = crate::input::atom_slot_font(base_weight);
 
     for run in runs {
         if run.text.is_empty() {
@@ -465,11 +466,12 @@ pub fn flatten(
                         let start = flat.text.len();
                         // The label's icon slot — the same leading
                         // whitespace the composer field paints its chip
-                        // icon into.
+                        // icon into. Its own face: the label's font may
+                        // not carry the em/en spaces at all.
                         flat.emit(
                             crate::input::ATOM_ICON_SLOT,
                             &run.style,
-                            &atom_font,
+                            &slot_font,
                             base_color,
                             palette,
                             true,
@@ -3948,7 +3950,10 @@ mod tests {
         let flat = flatten(
             &runs,
             &palette(),
-            &Fonts::default(),
+            &Fonts {
+                ui: SharedString::from("Test Sans"),
+                ..Fonts::default()
+            },
             FontWeight::NORMAL,
             palette().text,
         );
@@ -3976,6 +3981,26 @@ mod tests {
         // affordances.
         assert!(commit_references(&flat).is_empty());
         assert!(flat.runs.iter().any(|run| run.color == palette().accent));
+        // Each chip's icon slot shapes in the platform UI face, not the
+        // label's family — a face without em/en space glyphs collapses the
+        // slot under the icon.
+        let family_at = |offset: usize| {
+            let mut position = 0;
+            flat.runs
+                .iter()
+                .find(|run| {
+                    let covers = offset < position + run.len;
+                    position += run.len;
+                    covers
+                })
+                .map(|run| run.font.family.as_ref())
+        };
+        assert_eq!(
+            family_at(4),
+            Some(crate::fonts::DEFAULT_UI_FAMILY),
+            "icon slot must not inherit the label font"
+        );
+        assert_eq!(family_at(10), Some("Test Sans"));
     }
 
     #[test]

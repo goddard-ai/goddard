@@ -9,11 +9,11 @@ use crate::ui::scrollbar::{self, ScrollbarState};
 use gpui::{
     App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners, CursorStyle, DispatchPhase,
     Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding, LayoutId,
-    Length, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
-    UTF16Selection, UnderlineStyle, Window, accesskit, actions, div, fill, point, prelude::*, px,
-    size,
+    Focusable, Font, FontWeight, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding,
+    LayoutId, Length, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
+    Point, ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
+    UTF16Selection, UnderlineStyle, Window, accesskit, actions, div, fill, font, point, prelude::*,
+    px, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -3105,6 +3105,17 @@ pub(crate) const ATOM_CHIP_RADIUS: Pixels = px(4.0);
 pub(crate) const ATOM_ICON_SCALE: f32 = 0.62;
 pub(crate) const ATOM_ICON_INSET_X: Pixels = px(1.0);
 
+/// The face [`ATOM_ICON_SLOT`] shapes in: the platform's UI font, whose
+/// em/en spaces carry their nominal advances on every supported system.
+/// The label's own family can't be trusted — a face without those glyphs
+/// substitutes a fallback whose advances are a fraction of an em, and the
+/// slot collapses under the icon it reserves.
+pub(crate) fn atom_slot_font(weight: FontWeight) -> Font {
+    let mut slot = font(crate::fonts::DEFAULT_UI_FAMILY);
+    slot.weight = weight;
+    slot
+}
+
 /// The painted bounds a chip's leading icon takes inside [`ATOM_ICON_SLOT`]'s
 /// reserved width: a step in from the chip's edge, vertically centered. The
 /// remainder of the slot is the gap between icon and label text.
@@ -3426,6 +3437,11 @@ impl SearchPaint<'static> {
 /// [`TextInput::display_text_and_atom_ranges`].
 struct AtomPaint<'a> {
     ranges: &'a [Range<usize>],
+    /// The icon-reserving whitespace at the head of each `ranges` entry
+    /// that leads with an icon — shaped in `slot_font` so its advance
+    /// doesn't depend on the label font's glyph coverage.
+    slots: &'a [Range<usize>],
+    slot_font: Font,
     color: Hsla,
 }
 
@@ -3433,6 +3449,8 @@ impl AtomPaint<'static> {
     fn none() -> Self {
         Self {
             ranges: &[],
+            slots: &[],
+            slot_font: Font::default(),
             color: gpui::transparent_black(),
         }
     }
@@ -3490,6 +3508,10 @@ fn input_text_runs(
         boundaries.push(range.end.min(display_len));
     }
     for range in atoms.ranges {
+        boundaries.push(range.start.min(display_len));
+        boundaries.push(range.end.min(display_len));
+    }
+    for range in atoms.slots {
         boundaries.push(range.start.min(display_len));
         boundaries.push(range.end.min(display_len));
     }
@@ -3552,18 +3574,28 @@ fn input_text_runs(
                     }
                 })
             };
-            (start < end).then(|| TextRun {
-                len: end - start,
-                color,
-                background_color,
-                underline: marked_range
-                    .filter(|range| range.start < end && range.end > start)
-                    .map(|_| UnderlineStyle {
-                        color: Some(base_run.color),
-                        thickness: px(1.0),
-                        wavy: false,
-                    }),
-                ..base_run.clone()
+            (start < end).then(|| {
+                let mut run = base_run.clone();
+                if atoms
+                    .slots
+                    .iter()
+                    .any(|range| range.start <= start && range.end >= end)
+                {
+                    run.font = atoms.slot_font.clone();
+                }
+                TextRun {
+                    len: end - start,
+                    color,
+                    background_color,
+                    underline: marked_range
+                        .filter(|range| range.start < end && range.end > start)
+                        .map(|_| UnderlineStyle {
+                            color: Some(base_run.color),
+                            thickness: px(1.0),
+                            wavy: false,
+                        }),
+                    ..run
+                }
             })
         })
         .collect()
@@ -3696,9 +3728,23 @@ impl Element for InputElement {
                 emphasized_color: annotation_wash.opacity((annotation_wash.a * 1.75).min(1.0)),
             }
         };
+        let atom_icons: Vec<Option<&'static str>> = atom_ranges
+            .iter()
+            .enumerate()
+            .map(|(index, _)| input.inline_atoms.get(index).and_then(|atom| atom.icon))
+            .collect();
+        let atom_slots: Vec<Range<usize>> = atom_ranges
+            .iter()
+            .zip(&atom_icons)
+            .filter_map(|(range, icon)| {
+                icon.map(|_| range.start..range.start + ATOM_ICON_SLOT.len())
+            })
+            .collect();
         let atoms = if has_atoms {
             AtomPaint {
                 ranges: &atom_ranges,
+                slots: &atom_slots,
+                slot_font: atom_slot_font(style.font().weight),
                 color: theme.accent,
             }
         } else {
@@ -3720,11 +3766,6 @@ impl Element for InputElement {
             annotations,
             atoms,
         );
-        let atom_icons = atom_ranges
-            .iter()
-            .enumerate()
-            .map(|(index, _)| input.inline_atoms.get(index).and_then(|atom| atom.icon))
-            .collect();
         let mut text = StyledText::new(display_text).with_runs(runs);
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
         (
@@ -4438,7 +4479,7 @@ mod tests {
         previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
         word_range_at,
     };
-    use super::{AtomPaint, TokenClass};
+    use super::{ATOM_ICON_SLOT, AtomPaint, TokenClass};
 
     struct InputHarness {
         input: Entity<TextInput>,
@@ -6071,6 +6112,50 @@ mod tests {
         assert_eq!(background_at(8), Some(active_color));
         assert_eq!(background_at(14), Some(match_color));
         assert_eq!(background_at(6), None);
+    }
+
+    /// An atom's icon slot shapes in `slot_font` — the platform face whose
+    /// em/en spaces always advance — while the label keeps the field's font.
+    /// A label family without those glyphs collapses the slot under the icon.
+    #[test]
+    fn atom_icon_slots_take_the_slot_font() {
+        let plain = hsla(0.0, 0.0, 1.0, 1.0);
+        let accent = hsla(0.5, 1.0, 0.5, 1.0);
+        let slot = 4..4 + ATOM_ICON_SLOT.len();
+        let ranges = [slot.clone()];
+        let slots = [slot];
+        let runs = input_text_runs(
+            16,
+            TextRun {
+                len: 16,
+                font: font("Test Sans"),
+                color: plain,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            },
+            None,
+            None,
+            hsla(0.0, 0.0, 1.0, 0.18),
+            &[],
+            |_| plain,
+            SearchPaint::none(),
+            AnnotationPaint::none(),
+            AtomPaint {
+                ranges: &ranges,
+                slots: &slots,
+                slot_font: font("Slot Face"),
+                color: accent,
+            },
+        );
+
+        assert_eq!(
+            runs.iter().map(|run| run.len).collect::<Vec<_>>(),
+            [4, 6, 6]
+        );
+        assert_eq!(runs[1].font.family.as_ref(), "Slot Face");
+        assert_eq!(runs[1].color, accent);
+        assert_eq!(runs[2].font.family.as_ref(), "Test Sans");
     }
 
     /// The single-line scroll follows the caret with an em of lookahead and

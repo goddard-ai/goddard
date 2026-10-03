@@ -1,0 +1,1 @@
+- Inline chips in the composer and sent messages — session mentions and collapsed pastes — no longer draw their leading icon over the label's first letter when the interface font lacks em and en space glyphs.
