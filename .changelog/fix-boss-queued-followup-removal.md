@@ -1,0 +1,1 @@
+- Removing a queued follow-up in the Boss chat now sticks — the chip no longer reappears when you return to the conversation.

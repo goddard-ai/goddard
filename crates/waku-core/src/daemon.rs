@@ -3547,6 +3547,21 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
         existing.dormant_exempt_until = incoming.dormant_exempt_until;
         existing.landed_at = incoming.landed_at;
     }
+    if incoming.detail_loaded {
+        // A detail-loaded projection carries the client's queue edits:
+        // every save of a managed session lands here, so a user-owned
+        // entry missing from `incoming` was removed, and keeping it would
+        // resurrect the chip on the next hydration. Skeletons cleared
+        // their queue without seeing it, and agent-owned mirrors stay
+        // daemon-owned either way.
+        existing.queued_messages.retain(|queued| {
+            queued.is_agent_owned()
+                || incoming
+                    .queued_messages
+                    .iter()
+                    .any(|candidate| candidate.id == queued.id)
+        });
+    }
     for queued in incoming.queued_messages {
         // Client saves never create daemon-owned entries: a mirrored agent
         // prompt absent from the daemon's copy was delivered or cancelled,
@@ -8655,6 +8670,35 @@ mod tests {
             vec![user_entry, agent_entry],
             "the daemon's agent slice survives a fresh client save"
         );
+    }
+
+    #[test]
+    fn a_managed_merge_drops_client_removed_queue_entries() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let agent_entry = crate::model::QueuedMessage::agent("parked", None);
+        let user_entry = crate::model::QueuedMessage::new("mine");
+        existing.queued_messages = vec![user_entry, agent_entry.clone()];
+
+        // Every client save of a managed session takes this path: the
+        // projection that dropped its own follow-up is a removal, and the
+        // stored copy must drop it too or the chip resurrects when the
+        // session next hydrates.
+        let mut removal = existing.clone();
+        removal
+            .queued_messages
+            .retain(|queued| queued.is_agent_owned());
+        merge_stale_session_metadata(&mut existing, removal);
+        assert_eq!(existing.queued_messages, vec![agent_entry.clone()]);
+
+        // A skeleton carries no queue truth — its cleared slice must not
+        // strip a user entry the client still holds.
+        let mut skeleton = existing.clone();
+        skeleton.detail_loaded = false;
+        skeleton.queued_messages.clear();
+        existing.queued_messages.push(crate::model::QueuedMessage::new("queued later"));
+        merge_stale_session_metadata(&mut existing, skeleton);
+        assert_eq!(existing.queued_messages.len(), 2);
+        assert_eq!(existing.queued_messages[0], agent_entry);
     }
 
     #[test]
