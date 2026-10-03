@@ -92,13 +92,14 @@ impl Waku {
         )
     }
 
-    /// The dormant sweep's confirmation — same warnings, different outcome
-    /// and no archive-landing bookkeeping.
+    /// The dormant sweep's confirmation — same warnings and the same
+    /// landing-row bookkeeping as archive, different outcome.
     pub(super) fn open_dormant_dialog(
         &mut self,
         session_id: Uuid,
         preview: crate::git_commit::ArchivePreview,
         active_turn: bool,
+        landing_row: Option<usize>,
         cx: &mut Context<Self>,
     ) -> FocusHandle {
         self.open_kind_dialog(
@@ -106,7 +107,7 @@ impl Waku {
             ArchiveDialogKind::Dormant,
             preview,
             active_turn,
-            None,
+            landing_row,
             cx,
         )
     }
@@ -157,7 +158,9 @@ impl Waku {
             ArchiveDialogKind::Archive => {
                 self.finish_archive_session(dialog.session_id, dialog.landing_row, window, cx)
             }
-            ArchiveDialogKind::Dormant => self.finish_sweep_session(dialog.session_id, cx),
+            ArchiveDialogKind::Dormant => {
+                self.finish_sweep_session(dialog.session_id, dialog.landing_row, window, cx)
+            }
         }
         self.focus_next_archive_dialog(window, cx);
     }

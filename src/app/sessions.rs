@@ -2473,6 +2473,10 @@ impl Waku {
         if self.session_dormant_now(session) {
             return;
         }
+        let landing_row = sidebar::sidebar_session_row_index(
+            &self.sidebar_rows_cached(Local::now().date_naive()),
+            session_id,
+        );
         let busy = session.is_busy();
         // Same split as archive: only a worktree gets a preview. A local
         // checkout is the user's own git state — sweeping never touches it.
@@ -2487,6 +2491,7 @@ impl Waku {
                     session_id,
                     crate::git_commit::ArchivePreview::default(),
                     true,
+                    landing_row,
                     cx,
                 );
                 // Like the other deferred surfaces, focus lands two frames
@@ -2495,7 +2500,7 @@ impl Waku {
                     window.on_next_frame(move |window, cx| window.focus(&focus, cx));
                 });
             } else if !busy {
-                self.finish_sweep_session(session_id, cx);
+                self.finish_sweep_session(session_id, landing_row, window, cx);
             }
             return;
         };
@@ -2504,7 +2509,7 @@ impl Waku {
         }
         let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
             self.archive_preview_pending.remove(&session_id);
-            self.finish_sweep_session(session_id, cx);
+            self.finish_sweep_session(session_id, landing_row, window, cx);
             return;
         };
         let window_handle = window.window_handle();
@@ -2537,7 +2542,8 @@ impl Waku {
                     let preview = preview.unwrap_or_default();
                     if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
                         let focus_new_dialog = waku.archive_dialog.is_none();
-                        let focus = waku.open_dormant_dialog(session_id, preview, busy, cx);
+                        let focus =
+                            waku.open_dormant_dialog(session_id, preview, busy, landing_row, cx);
                         Some((focus, focus_new_dialog))
                     } else {
                         None
@@ -2555,8 +2561,9 @@ impl Waku {
                     }
                     Some((_, false)) => {}
                     None => {
-                        let _ =
-                            waku.update(cx, |waku, cx| waku.finish_sweep_session(session_id, cx));
+                        let _ = waku.update(cx, |waku, cx| {
+                            waku.finish_sweep_session(session_id, landing_row, window, cx)
+                        });
                     }
                 }
             });
@@ -2567,15 +2574,25 @@ impl Waku {
     /// The point every sweep path reaches once the checkout proved clean or
     /// the user confirmed. Stamps `dormant_at` as the newest mutation so the
     /// next activity wakes the task, drops the pin, and queues the worktree
-    /// for the same snapshot-and-remove archive uses.
-    pub(super) fn finish_sweep_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let Some(is_busy) = self
+    /// for the same snapshot-and-remove archive uses. `landing_row` is the
+    /// sidebar position the session's row occupied, so a swept task that was
+    /// selected hands selection to the neighbor that slid into its slot —
+    /// the same landing archive computes — or a fresh composer when no live
+    /// row remains.
+    pub(super) fn finish_sweep_session(
+        &mut self,
+        session_id: Uuid,
+        landing_row: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((project_id, is_busy)) = self
             .state
             .sessions
             .iter()
             .find(|session| session.id == session_id)
             .filter(|session| session.has_started() && session.archived_at.is_none())
-            .map(|session| session.is_busy())
+            .map(|session| (session.project_id, session.is_busy()))
         else {
             return;
         };
@@ -2583,6 +2600,19 @@ impl Waku {
             self.cancel_session_turn(session_id, cx);
         }
         self.evict_session_runtime(session_id);
+        let was_selected = self.state.selected_session == Some(session_id);
+        let projectless = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .is_some_and(Project::is_projectless);
+        if self
+            .pending_session_activation
+            .is_some_and(|pending| pending.session_id == session_id)
+        {
+            self.pending_session_activation = None;
+        }
         let now = unix_time();
         if let Some(session) = self.state.session_mut(session_id) {
             session.pinned_at = None;
@@ -2596,6 +2626,22 @@ impl Waku {
             .borrow_mut()
             .remove(&session_id);
         self.queue_archived_workspace_cleanup(session_id, cx);
+        if was_selected {
+            self.state.selected_session = None;
+            self.settings_page = None;
+            // The departing session's strip is already stored; whatever the
+            // navigation below lands on gets its own.
+            self.sync_right_panel_owner(cx);
+            // The row that followed the swept one now sits at its index;
+            // dormant rows are never a landing, so the scan skips the swept
+            // session wherever its group placed it.
+            let next = self.next_sidebar_session_from_row(landing_row.unwrap_or(0));
+            if let Some(next_id) = next {
+                self.request_session_activation(next_id, SessionActivationTransition::Visit, cx);
+            } else {
+                self.compose_new_task(project_id, projectless, window, cx);
+            }
+        }
         self.save();
         cx.notify();
     }
