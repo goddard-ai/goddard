@@ -360,6 +360,39 @@ const DOCK_LABEL_HEIGHT: f32 = 20.5;
 /// against it from outside its element tree.
 const DOCK_STRIP_HEIGHT: f32 = DOCK_LABEL_HEIGHT + DOCK_ITEM_PEAK + DOCK_BOTTOM_INSET;
 
+/// Sketch "Dock Indicator": the resting hint the footer shows while the
+/// quick-action dock is enabled — a cluster of mini orbs standing in for
+/// the settings and keybinding buttons the risen dock replaces. Its box
+/// in the footer, measured from the footer's left content edge.
+const DOCK_IND_LEFT: f32 = 1.78;
+const DOCK_IND_TOP: f32 = 6.78;
+const DOCK_IND_WIDTH: f32 = 45.86;
+const DOCK_IND_HEIGHT: f32 = 27.72;
+/// Each orb's theme circle is a 22.68px disc — (x, y) of its top-left in
+/// indicator space. The right one sits left of its tile's frame origin:
+/// the Sketch tile is rotated +10° about its center, and the circle is
+/// off-center inside it.
+const DOCK_IND_ORB: f32 = 22.68;
+const DOCK_IND_CIRCLES: [(f32, f32); 3] =
+    [(2.016, 3.024), (12.096, 0.252), (21.168, 2.016)];
+/// The exported orb webps per tile: (path, canvas, x, y). The canvases
+/// are bigger than the orb — baked padding around the gradient art — so
+/// each image is anchored by the offset that lands its painted disc on
+/// the circle rather than inset_0.
+const DOCK_IND_ORBS: [(&str, f32, f32, f32); 3] = [
+    ("images/dock-ind-orb-left.webp", 30.0, -1.644, -0.466),
+    ("images/dock-ind-orb-mid.webp", 27.0, 10.436, -1.908),
+    ("images/dock-ind-orb-right.webp", 30.0, 17.508, -1.474),
+];
+/// The exported glyph sheets per tile: (path, w, h, x, y) — their
+/// canvases keep the authored drop shadows and the ±10° tile rotations
+/// baked into the svg transforms.
+const DOCK_IND_GLYPHS: [(&str, f32, f32, f32, f32); 3] = [
+    ("icons/dock-ind-glyph-left.svg", 27.0, 27.0, 0.219, 1.219),
+    ("icons/dock-ind-glyph-mid.svg", 24.0, 23.0, 11.219, 0.219),
+    ("icons/dock-ind-glyph-right.svg", 27.0, 27.0, 19.219, 0.219),
+];
+
 /// A dock glyph recolored to the theme's body text. The source SVGs draw the
 /// mark twice — a blurred drop shadow under the solid fill — so the glyph's
 /// `fill` is rewritten and the result rendered as an `img()` to keep those
@@ -2004,8 +2037,74 @@ impl Waku {
         )
     }
 
+    /// The resting dock hint the footer shows while the experimental dock
+    /// is on: a cluster of mini orbs marking the spot where hovering the
+    /// bottom strip raises the real thing. Each orb stacks a
+    /// theme-colored circle (the Sketch "Change to color to match theme"
+    /// layer — the dock's composer surface) under the exported gradient
+    /// art and a glyph recolored to the body text, matching the dock
+    /// buttons; orbs layer in tile order so the right stack covers the
+    /// middle and the middle the left, as authored.
+    fn render_dock_indicator(&self, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let orb_shadow = vec![gpui::BoxShadow {
+            color: gpui::black().opacity(0.196).into(),
+            offset: point(px(0.0), px(0.0)),
+            blur_radius: px(1.0),
+            spread_radius: px(0.0),
+            inset: false,
+        }];
+        let mut cluster = div()
+            .absolute()
+            .left(px(DOCK_IND_LEFT))
+            .top(px(DOCK_IND_TOP))
+            .w(px(DOCK_IND_WIDTH))
+            .h(px(DOCK_IND_HEIGHT));
+        for index in 0..3 {
+            let (circle_x, circle_y) = DOCK_IND_CIRCLES[index];
+            let (orb_path, orb_size, orb_x, orb_y) = DOCK_IND_ORBS[index];
+            let (glyph_path, glyph_w, glyph_h, glyph_x, glyph_y) = DOCK_IND_GLYPHS[index];
+            let glyph = match dock_glyph_image(glyph_path, theme.text, cx) {
+                Some(image) => img(image),
+                None => img(glyph_path),
+            };
+            cluster = cluster
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(circle_x))
+                        .top(px(circle_y))
+                        .size(px(DOCK_IND_ORB))
+                        .rounded_full()
+                        .bg(theme.composer)
+                        .shadow(orb_shadow.clone()),
+                )
+                .child(
+                    img(orb_path)
+                        .absolute()
+                        .left(px(orb_x))
+                        .top(px(orb_y))
+                        .size(px(orb_size)),
+                )
+                .child(
+                    glyph
+                        .absolute()
+                        .left(px(glyph_x))
+                        .top(px(glyph_y))
+                        .w(px(glyph_w))
+                        .h(px(glyph_h)),
+                );
+        }
+        div()
+            .relative()
+            .w(px(DOCK_IND_LEFT + DOCK_IND_WIDTH))
+            .h_full()
+            .child(cluster)
+    }
+
     fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let dock_enabled = self.state.sidebar_dock_enabled;
         div()
             .id("sidebar-footer")
             .flex_none()
@@ -2013,59 +2112,67 @@ impl Waku {
             .px(px(10.0))
             .flex()
             .items_center()
-            .child(
-                div()
-                    .id("open-settings")
-                    .tab_index(0)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .w(px(26.0))
-                    .h(px(26.0))
-                    .flex_none()
-                    .rounded(px(8.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .tooltip(Tooltip::text_with_action(
-                        tr_cow!("common.settings"),
-                        &OpenSettings,
-                    ))
-                    .child(icon("icons/settings.svg", 14.0, theme.text_tertiary))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_settings_action(&OpenSettings, window, cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("open-shortcuts")
-                    .tab_index(0)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .w(px(26.0))
-                    .h(px(26.0))
-                    .flex_none()
-                    .rounded(px(8.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .tooltip(Tooltip::text(tr!("shortcuts.title")))
-                    .child(icon("icons/keyboard.svg", 14.0, theme.text_tertiary))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_shortcuts(window, cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.open_shortcuts(window, cx);
-                            cx.stop_propagation();
-                        }
-                    })),
-            )
+            .when(dock_enabled, |footer| {
+                footer.child(self.render_dock_indicator(cx))
+            })
+            .when(!dock_enabled, |footer| {
+                footer
+                    .child(
+                        div()
+                            .id("open-settings")
+                            .tab_index(0)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .w(px(26.0))
+                            .h(px(26.0))
+                            .flex_none()
+                            .rounded(px(8.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.bg(theme.overlay_strong))
+                            .tooltip(Tooltip::text_with_action(
+                                tr_cow!("common.settings"),
+                                &OpenSettings,
+                            ))
+                            .child(icon("icons/settings.svg", 14.0, theme.text_tertiary))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_settings_action(&OpenSettings, window, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("open-shortcuts")
+                            .tab_index(0)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .w(px(26.0))
+                            .h(px(26.0))
+                            .flex_none()
+                            .rounded(px(8.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.bg(theme.overlay_strong))
+                            .tooltip(Tooltip::text(tr!("shortcuts.title")))
+                            .child(icon("icons/keyboard.svg", 14.0, theme.text_tertiary))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_shortcuts(window, cx);
+                            }))
+                            .on_key_down(
+                                cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                                    if !event.keystroke.modifiers.modified()
+                                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                    {
+                                        this.open_shortcuts(window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            ),
+                    )
+            })
             .when_some(self.render_transfer_indicator(cx), |footer, ring| {
                 footer.child(ring)
             })

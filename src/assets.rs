@@ -58,6 +58,9 @@ const ICONS: &[(&str, &[u8])] = icons![
     "corner-down-right",
     "cursor-spark",
     "dock-archive",
+    "dock-ind-glyph-left",
+    "dock-ind-glyph-mid",
+    "dock-ind-glyph-right",
     "dock-keyboard",
     "download",
     "ellipsis",
@@ -304,10 +307,24 @@ const ICONS: &[(&str, &[u8])] = icons![
 
 /// Raster art embedded the same way — anything `img()` loads that is not a
 /// monochrome icon.
-const IMAGES: &[(&str, &[u8])] = &[(
-    "images/dock-button-bkg.webp",
-    include_bytes!("../assets/images/dock-button-bkg.webp").as_slice(),
-)];
+const IMAGES: &[(&str, &[u8])] = &[
+    (
+        "images/dock-button-bkg.webp",
+        include_bytes!("../assets/images/dock-button-bkg.webp").as_slice(),
+    ),
+    (
+        "images/dock-ind-orb-left.webp",
+        include_bytes!("../assets/images/dock-ind-orb-left.webp").as_slice(),
+    ),
+    (
+        "images/dock-ind-orb-mid.webp",
+        include_bytes!("../assets/images/dock-ind-orb-mid.webp").as_slice(),
+    ),
+    (
+        "images/dock-ind-orb-right.webp",
+        include_bytes!("../assets/images/dock-ind-orb-right.webp").as_slice(),
+    ),
+];
 
 const TEXT_FONTS: &[&[u8]] = &[
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
