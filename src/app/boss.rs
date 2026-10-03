@@ -19,7 +19,7 @@ pub(super) struct BossUi {
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
     pub identities: HashMap<Uuid, BossIdentity>,
-    job_titles: HashMap<Uuid, String>,
+    pub(super) job_titles: HashMap<Uuid, String>,
     pub active: HashMap<DaemonKey, Vec<Uuid>>,
     pub working: HashSet<Uuid>,
     pub expired: HashSet<Uuid>,
@@ -751,6 +751,7 @@ impl Waku {
             .child(boss_sidebar_label(
                 state.identity.name.clone(),
                 tr!("boss.group"),
+                false,
                 &theme,
             ))
             .child(
@@ -808,6 +809,7 @@ impl Waku {
                     .get(&id)
                     .cloned()
                     .unwrap_or_default(),
+                true,
                 &theme,
             ))
             .child(
@@ -1309,7 +1311,7 @@ fn lines(text: &str) -> Vec<String> {
 }
 
 #[track_caller]
-fn boss_sidebar_label(name: String, job_title: String, theme: &Theme) -> Div {
+fn boss_sidebar_label(name: String, job_title: String, show_job_icon: bool, theme: &Theme) -> Div {
     div()
         .flex_1()
         .min_w_0()
@@ -1325,12 +1327,278 @@ fn boss_sidebar_label(name: String, job_title: String, theme: &Theme) -> Div {
         )
         .child(
             div()
+                .flex()
+                .items_center()
+                .gap(px(4.0))
                 .text_size(sp(13.0))
                 .line_height(sp(15.0))
                 .text_color(theme.text_tertiary)
-                .truncate()
-                .child(job_title),
+                .when(show_job_icon && !job_title.is_empty(), |row| {
+                    row.child(icon(job_title_icon(&job_title), 12.0, theme.text_tertiary))
+                })
+                .child(div().min_w_0().truncate().child(job_title)),
         )
+}
+
+pub(super) fn job_title_icon(title: &str) -> &'static str {
+    let categories: &[(&[&str], &str)] = &[
+        (
+            &[
+                "engineer",
+                "developer",
+                "programmer",
+                "software",
+                "coder",
+                "architect",
+                "devops",
+                "sre",
+            ],
+            "icons/terminal-square.svg",
+        ),
+        (
+            &[
+                "research",
+                "scientist",
+                "analyst",
+                "data",
+                "statistician",
+                "economist",
+            ],
+            "icons/beaker.svg",
+        ),
+        (
+            &[
+                "builder",
+                "build",
+                "construction",
+                "fabricator",
+                "maker",
+                "mechanic",
+            ],
+            "icons/hammer.svg",
+        ),
+        (
+            &[
+                "artist",
+                "creative",
+                "illustrator",
+                "brand",
+                "fashion",
+                "ux",
+                "ui",
+                "user experience",
+                "user interface",
+            ],
+            "icons/pencil.svg",
+        ),
+        (
+            &[
+                "writer",
+                "editor",
+                "author",
+                "journalist",
+                "copywriter",
+                "documentation",
+            ],
+            "icons/file-text.svg",
+        ),
+        (
+            &[
+                "manager",
+                "lead",
+                "director",
+                "executive",
+                "chief",
+                "supervisor",
+                "producer",
+            ],
+            "icons/compass.svg",
+        ),
+        (
+            &[
+                "product",
+                "project",
+                "program",
+                "operations",
+                "coordinator",
+                "planner",
+            ],
+            "icons/list.svg",
+        ),
+        (
+            &[
+                "security",
+                "safety",
+                "trust",
+                "compliance",
+                "privacy",
+                "auditor",
+            ],
+            "icons/lock.svg",
+        ),
+        (
+            &[
+                "teacher",
+                "educator",
+                "instructor",
+                "tutor",
+                "trainer",
+                "professor",
+            ],
+            "icons/book-open.svg",
+        ),
+        (
+            &[
+                "doctor",
+                "medical",
+                "nurse",
+                "health",
+                "therapist",
+                "caregiver",
+                "clinical",
+            ],
+            "icons/hand.svg",
+        ),
+        (
+            &["lawyer", "legal", "counsel", "attorney", "paralegal"],
+            "icons/sigma.svg",
+        ),
+        (
+            &[
+                "sales",
+                "account executive",
+                "business development",
+                "seller",
+            ],
+            "icons/target.svg",
+        ),
+        (
+            &[
+                "marketing",
+                "growth",
+                "communications",
+                "public relations",
+                "community",
+                "social media",
+            ],
+            "icons/message-square.svg",
+        ),
+        (
+            &[
+                "finance",
+                "accountant",
+                "bookkeeper",
+                "investment",
+                "treasury",
+                "controller",
+            ],
+            "icons/chart-column.svg",
+        ),
+        (
+            &[
+                "support",
+                "customer success",
+                "service",
+                "help desk",
+                "concierge",
+            ],
+            "icons/headphones.svg",
+        ),
+        (
+            &[
+                "recruit",
+                "talent",
+                "human resources",
+                "people operations",
+                "hr ",
+            ],
+            "icons/user-round.svg",
+        ),
+        (
+            &["test", "qa", "quality assurance", "quality engineer"],
+            "icons/check.svg",
+        ),
+        (
+            &[
+                "network",
+                "infrastructure",
+                "systems administrator",
+                "database",
+                "cloud",
+            ],
+            "icons/server.svg",
+        ),
+        (
+            &[
+                "logistics",
+                "supply chain",
+                "warehouse",
+                "shipping",
+                "delivery",
+            ],
+            "icons/package.svg",
+        ),
+        (
+            &[
+                "environment",
+                "sustainability",
+                "ecologist",
+                "agriculture",
+                "farmer",
+                "botanist",
+            ],
+            "icons/globe.svg",
+        ),
+        (
+            &["chef", "cook", "culinary", "hospitality", "barista"],
+            "icons/coffee.svg",
+        ),
+        (&["founder", "entrepreneur", "startup"], "icons/zap.svg"),
+        (
+            &["assistant", "administrator", "secretary", "office", "clerk"],
+            "icons/inbox.svg",
+        ),
+        (
+            &["translator", "interpreter", "linguist", "localization"],
+            "icons/languages.svg",
+        ),
+        (
+            &[
+                "video",
+                "film",
+                "photographer",
+                "camera",
+                "animator",
+                "media",
+            ],
+            "icons/monitor.svg",
+        ),
+        (
+            &["musician", "music", "sound", "audio", "composer"],
+            "icons/volume-2.svg",
+        ),
+    ];
+    categories
+        .iter()
+        .find(|(keywords, _)| {
+            keywords
+                .iter()
+                .any(|keyword| title.contains_ascii_case_insensitive(keyword))
+        })
+        .map(|(_, icon)| *icon)
+        .unwrap_or("icons/bot.svg")
+}
+
+trait ContainsAsciiCaseInsensitive {
+    fn contains_ascii_case_insensitive(&self, needle: &str) -> bool;
+}
+
+impl ContainsAsciiCaseInsensitive for str {
+    fn contains_ascii_case_insensitive(&self, needle: &str) -> bool {
+        self.as_bytes()
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+    }
 }
 
 #[track_caller]

@@ -6124,6 +6124,12 @@ impl Waku {
                 })
                 .unwrap_or_else(|| tr!("session.new_task"))
         };
+        let employee_job_title = session.and_then(|session| {
+            self.boss_ui
+                .job_titles
+                .get(&session.id)
+                .filter(|title| !title.is_empty())
+        });
         let agent_preset_label = session
             .filter(|session| session.provider == ProviderKind::DeepSeek && session.has_started())
             .and_then(|session| self.agent_preset_label_for_session(session));
@@ -6247,6 +6253,26 @@ impl Waku {
                                 .text_color(theme.text)
                                 .child(SharedString::from(title)),
                         )
+                        .children(employee_job_title.map(|job_title| {
+                            div()
+                                .h(px(22.0))
+                                .max_w(px(180.0))
+                                .px(px(6.0))
+                                .rounded(px(8.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .bg(theme.overlay)
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(icon(
+                                    super::boss::job_title_icon(job_title),
+                                    11.0,
+                                    theme.text_tertiary,
+                                ))
+                                .child(div().min_w_0().truncate().child(job_title.clone()))
+                        }))
                         .children(header_phase.map(|(icon_path, label_key)| {
                             div()
                                 .h(px(22.0))
