@@ -7471,6 +7471,37 @@ mod tests {
     }
 
     #[test]
+    fn hidden_submitted_prompt_stays_in_session_context_without_a_transcript_cue() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let turn_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+        let prompt_text = "employee completion index and transcript lookup";
+
+        assert!(session.adopt_submitted_prompt(
+            prompt_text,
+            turn_id,
+            message_id,
+            Some(Uuid::new_v4()),
+            true,
+        ));
+        let prompt = session
+            .messages
+            .iter()
+            .find(|message| message.id == message_id)
+            .unwrap();
+        assert_eq!(prompt.content, prompt_text);
+        assert!(prompt.hidden);
+
+        session.push_message(MessageRole::Assistant, "I will inspect the relevant turn.");
+        session.finish_active_turn(TurnStatus::Completed);
+        let index = session.transcript_index();
+        assert!(!index.iter().any(|(_, cues)| {
+            cues.iter()
+                .any(|cue| cue.contains("employee completion index"))
+        }));
+    }
+
+    #[test]
     fn planned_worktree_base_branch_is_optional_and_round_trips() {
         let legacy: SessionWorkspace =
             serde_json::from_value(serde_json::json!({ "kind": "newWorktree" })).unwrap();

@@ -6286,7 +6286,7 @@ impl WakuBackend {
                 employee.identity.name
             );
             let events = self.event_source.lock().clone();
-            self.queue_agent_prompt(supervisor, prompt, Some(session_id), &events)?;
+            self.queue_agent_prompt_hidden(supervisor, prompt, Some(session_id), &events)?;
         }
         Ok(())
     }
@@ -6370,6 +6370,27 @@ impl WakuBackend {
         sender: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
+        self.queue_agent_prompt_with_visibility(target, prompt, sender, false, events)
+    }
+
+    fn queue_agent_prompt_hidden(
+        &self,
+        target: Uuid,
+        prompt: String,
+        sender: Option<Uuid>,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        self.queue_agent_prompt_with_visibility(target, prompt, sender, true, events)
+    }
+
+    fn queue_agent_prompt_with_visibility(
+        &self,
+        target: Uuid,
+        prompt: String,
+        sender: Option<Uuid>,
+        hidden: bool,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
         let queued_id = Uuid::new_v4();
         self.agent.enqueue(
             target,
@@ -6381,7 +6402,7 @@ impl WakuBackend {
                 sender,
                 queued_id: Some(queued_id),
                 context: None,
-                hidden: false,
+                hidden,
             },
         );
         let managed = self.boss.is_managed(target);
@@ -6395,6 +6416,7 @@ impl WakuBackend {
                 queued_id,
                 &prompt,
                 sender,
+                hidden,
             )?;
         }
         if self.agent.is_working(target) {
@@ -6410,6 +6432,7 @@ impl WakuBackend {
                     queued_id,
                     &prompt,
                     sender,
+                    hidden,
                 )?;
             }
             if let Some(runtime_id) = self.runtime_id_for(target) {
@@ -8309,13 +8332,14 @@ fn deliver_agent_prompt(
         message_id,
         entry.sender,
         entry.queued_id,
+        entry.hidden,
     )?;
     sink.send(event_to_wire(DriverEvent::PromptSubmitted {
         message: entry.prompt.clone(),
         turn_id,
         message_id,
         sent_by_task: entry.sender,
-        hidden: false,
+        hidden: entry.hidden,
     })?)?;
     send_agent_queue_changed(task_state, sink, session_id);
     let prompt = agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt)
@@ -8365,6 +8389,7 @@ fn persist_agent_prompt(
     message_id: Uuid,
     sent_by_task: Option<Uuid>,
     queued_id: Option<Uuid>,
+    hidden: bool,
 ) -> anyhow::Result<()> {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -8382,7 +8407,8 @@ fn persist_agent_prompt(
             .retain(|queued| queued.id != queued_id);
         session.queued_messages.len() != before
     });
-    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task, false) || dequeued
+    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task, hidden)
+        || dequeued
     {
         state.mark_session_dirty(session_id);
         task_store.save(&mut state)?;
@@ -8400,6 +8426,7 @@ fn mirror_agent_queued_prompt(
     queued_id: Uuid,
     prompt: &str,
     sent_by: Option<Uuid>,
+    hidden: bool,
 ) -> anyhow::Result<()> {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -8419,6 +8446,7 @@ fn mirror_agent_queued_prompt(
     }
     let mut entry = crate::model::QueuedMessage::agent(prompt, sent_by);
     entry.id = queued_id;
+    entry.hidden = hidden;
     session.queued_messages.push(entry);
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
@@ -8489,7 +8517,7 @@ fn rehydrate_agent_queue(
                         sender: sent_by,
                         queued_id: Some(queued.id),
                         context: None,
-                        hidden: false,
+                        hidden: queued.hidden,
                     })
                 }
                 crate::model::QueuedMessageSource::User => None,

@@ -1,0 +1,1 @@
+- Employee completion updates stay in the boss's context without appearing as system messages in the chat transcript.
