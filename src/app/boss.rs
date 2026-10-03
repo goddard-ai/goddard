@@ -44,6 +44,7 @@ pub(super) struct BossUi {
     editor: Option<BossEditor>,
     generation: u64,
     pending: bool,
+    pending_reply: Option<BossReply>,
     list: ListState,
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
@@ -80,6 +81,7 @@ impl Default for BossUi {
             editor: None,
             generation: 0,
             pending: false,
+            pending_reply: None,
             list: ListState::new(0, ListAlignment::Top, px(640.0)),
             scrollbar: ScrollbarState::new(),
             rows: Vec::new(),
@@ -142,7 +144,7 @@ enum BossEditorKind {
     Folder,
     Name,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum BossReply {
     Open,
     List,
@@ -391,6 +393,7 @@ impl Waku {
         self.boss_ui.generation = self.boss_ui.generation.wrapping_add(1);
         let generation = self.boss_ui.generation;
         self.boss_ui.pending = true;
+        self.boss_ui.pending_reply = Some(reply);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -407,6 +410,7 @@ impl Waku {
                     return;
                 }
                 this.boss_ui.pending = false;
+                this.boss_ui.pending_reply = None;
                 match result {
                     Ok(waku_client::ResponsePayload::Boss { result }) => {
                         match result {
@@ -1846,7 +1850,13 @@ impl Waku {
     /// Task affordances on a bundle row are daemon mutations — the bundle
     /// record is boss state, so the pin, sweep, and archive the row shows
     /// round-trip through the owning daemon like a publish or dismiss.
-    fn set_bundle_pinned(&mut self, key: DaemonKey, id: Uuid, pinned: bool, cx: &mut Context<Self>) {
+    fn set_bundle_pinned(
+        &mut self,
+        key: DaemonKey,
+        id: Uuid,
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.boss_request(
             key,
             BossOperation::PinBundle { id, pinned },
@@ -2120,9 +2130,10 @@ impl Waku {
             .flex_col()
             .child(header)
             .child(toolbar.border_b_1().border_color(theme.separator))
-            .when(self.boss_ui.pending, |element| {
-                element.child(div().px(px(20.0)).child(tr!("boss.loading")))
-            })
+            .when(
+                boss_loading_label_visible(self.boss_ui.pending, self.boss_ui.pending_reply),
+                |element| element.child(div().px(px(20.0)).child(tr!("boss.loading"))),
+            )
             .child(
                 div()
                     .flex_1()
@@ -2390,6 +2401,10 @@ impl Waku {
         )
         .into_any_element()
     }
+}
+
+fn boss_loading_label_visible(pending: bool, reply: Option<BossReply>) -> bool {
+    pending && reply != Some(BossReply::Read)
 }
 
 fn lines(text: &str) -> Vec<String> {
@@ -2729,6 +2744,18 @@ mod job_title_icon_tests {
         assert_eq!(job_title_icon("Reviewer"), "icons/eye.svg");
         assert_eq!(job_title_icon("Tester"), "icons/beaker.svg");
         assert_eq!(job_title_icon("Uncategorized role"), "icons/user-round.svg");
+    }
+}
+
+#[cfg(test)]
+mod loading_indicator_tests {
+    use super::{BossReply, boss_loading_label_visible};
+
+    #[test]
+    fn reading_a_memory_file_keeps_the_loading_label_hidden() {
+        assert!(!boss_loading_label_visible(true, Some(BossReply::Read)));
+        assert!(boss_loading_label_visible(true, Some(BossReply::List)));
+        assert!(!boss_loading_label_visible(false, Some(BossReply::List)));
     }
 }
 

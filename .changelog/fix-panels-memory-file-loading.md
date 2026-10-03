@@ -1,0 +1,1 @@
+- Opening a memory file no longer flashes a loading label over the document already on screen.
