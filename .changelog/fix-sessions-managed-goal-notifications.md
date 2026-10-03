@@ -1,0 +1,1 @@
+- Managed goals no longer add unread completion markers or play completion sounds for off-screen intermediate turns.

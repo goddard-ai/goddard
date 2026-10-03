@@ -4046,6 +4046,20 @@ impl Waku {
     /// stamps nothing — but ⌘⇧D remembers it: parking a task whose turn
     /// finished while it was selected restores the unread marker.
     fn mark_unseen_turn_settled(&mut self, session_id: Uuid) {
+        if self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| {
+                session.thread_goal.as_ref().is_some_and(|goal| {
+                    goal.managed_id.is_some()
+                        && goal.status == crate::model::ThreadGoalStatus::Active
+                })
+            })
+        {
+            return;
+        }
         if sidebar::sidebar_session_selected(
             self.state.selected_session,
             self.pending_session_activation

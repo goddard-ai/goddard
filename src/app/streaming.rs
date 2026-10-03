@@ -1014,10 +1014,19 @@ impl Waku {
                 let inside_focus = self.focused_project_id().is_none_or(|focused| {
                     finished.is_some_and(|session| session.project_id == focused)
                 });
+                let managed_goal_turn = finished.is_some_and(|session| {
+                    session.thread_goal.as_ref().is_some_and(|goal| {
+                        goal.managed_id.is_some()
+                            && (goal.status == crate::model::ThreadGoalStatus::Active
+                                || finished_turn_id
+                                    .is_some_and(|turn_id| Some(turn_id) == goal.managed_last_turn))
+                    })
+                });
                 if self.state.completion_sound_enabled
                     && self.state.selected_session != Some(session_id)
                     && finished.is_some_and(|session| session.queued_messages.is_empty())
                     && inside_focus
+                    && !managed_goal_turn
                 {
                     // A starred project's finish plays its own sound unless
                     // the user disabled the override.
