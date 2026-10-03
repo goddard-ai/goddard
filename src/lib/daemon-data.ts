@@ -106,14 +106,16 @@ export function daemonQueryEntry<T>(
   return entry;
 }
 
-/** Push data straight into the cache (daemon broadcasts). */
-export function setDaemonQueryData<T>(key: readonly unknown[], data: T) {
+/** Push data straight into the cache (daemon broadcasts, updater fns). */
+export function setDaemonQueryData<T>(key: readonly unknown[], data: T | ((current: T | undefined) => T | undefined)) {
   const id = serializedKey(key);
   const entry = entries.get(id) as DaemonQueryEntry<T> | undefined;
   if (!entry) {return;}
   entry.set({
     status: 'success',
-    data,
+    data: typeof data === 'function'
+      ? (data as (c: T | undefined) => T | undefined)(entry.get().data) ?? entry.get().data
+      : data,
     error: undefined,
     dataUpdatedAt: Date.now(),
     isFetching: false,
@@ -157,4 +159,35 @@ export function removeDaemonQueries(profileId: string) {
 
     if (parsed[0] === 'daemon' && parsed[1] === profileId) {entries.delete(id);}
   }
+}
+
+/** Refetch observed entries whose key starts with `prefix` and passes
+ * `predicate` (react-query invalidateQueries({queryKey, predicate})). */
+export function invalidateDaemonQueriesMatching(
+  prefix: readonly unknown[],
+  predicate?: (query: { queryKey: readonly unknown[] }) => boolean,
+) {
+  const prefixId = JSON.stringify(prefix).slice(0, -1);
+  for (const [id, entry] of entries) {
+    if (entry.observers === 0) {continue;}
+    let parsed: unknown[];
+    try {
+      parsed = JSON.parse(id);
+    } catch {
+      continue;
+    }
+
+    const keyMatches = parsed.length === prefix.length
+      ? JSON.stringify(parsed) === JSON.stringify(prefix)
+      : id.startsWith(prefixId);
+
+    if (!keyMatches) {continue;}
+    if (predicate && !predicate({ queryKey: parsed })) {continue;}
+    void entry.refetch();
+  }
+}
+
+/** Remove one exact cached entry (react-query removeQueries({queryKey})). */
+export function removeDaemonQuery(key: readonly unknown[]) {
+  entries.delete(serializedKey(key));
 }

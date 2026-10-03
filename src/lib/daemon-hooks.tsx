@@ -32,6 +32,7 @@ export interface DaemonQueryResult<T> {
   isPending: boolean;
   isFetching: boolean;
   dataUpdatedAt: number;
+  refetch: () => Promise<T | undefined>;
 }
 
 /** Subscribed cached query — the react-query useQuery port. Subscribing
@@ -59,6 +60,7 @@ export function useDaemonQuery<T>(
     isPending: enabled && snapshot.status === 'pending',
     isFetching: enabled && snapshot.isFetching,
     dataUpdatedAt: snapshot.dataUpdatedAt,
+    refetch: entry.refetch,
   };
 }
 
