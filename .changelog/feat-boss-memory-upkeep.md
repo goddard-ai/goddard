@@ -1,0 +1,1 @@
+- The boss now maintains its memory on its own initiative: it records durable facts and decisions as they come up, files them under per-topic or per-project folders in the brain's memory, and prunes or reconciles stale notes instead of letting duplicates pile up.
