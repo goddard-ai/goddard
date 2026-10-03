@@ -1208,7 +1208,13 @@ impl Waku {
                 id,
             )
         });
-        let speech_visible = self.last_speech_key == Some(key);
+        let speech_visible = self.last_speech_key == Some(key)
+            && (!self.last_speech_clips.is_empty()
+                || self.speech_playback_key == Some(key)
+                || self
+                    .speech_clip_queue
+                    .iter()
+                    .any(|(queued, _)| *queued == key));
         let speech_playing = speech_visible
             && self.speech_playback_key == Some(key)
             && self

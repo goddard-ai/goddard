@@ -517,12 +517,22 @@ impl Waku {
             self.toggle_voice_briefing_playback(cx);
             return;
         }
-        if self.last_speech_key == Some(key) && !self.last_speech_clips.is_empty() {
-            for clip in self.last_speech_clips.iter().rev() {
-                self.speech_clip_queue.push_front((key, clip.clone()));
-            }
-            self.pump_speech_queue(cx);
+        if self.last_speech_key != Some(key) || self.last_speech_clips.is_empty() {
+            return;
         }
+        // Clips already waiting behind the current playback voice on their
+        // own — requeueing the retained utterance would sound it twice.
+        if self
+            .speech_clip_queue
+            .iter()
+            .any(|(queued, _)| *queued == key)
+        {
+            return;
+        }
+        for clip in self.last_speech_clips.iter().rev() {
+            self.speech_clip_queue.push_front((key, clip.clone()));
+        }
+        self.pump_speech_queue(cx);
     }
 
     /// Sound the next queued speech clip when nothing is playing. Clip
