@@ -2265,7 +2265,9 @@ impl Waku {
     /// same flags `navigation_location` reads — a page beats the selection
     /// parked underneath it.
     pub(super) fn active_right_panel_owner(&self) -> RightPanelOwner {
-        if let Some((key, _)) = self.boss_ui.page {
+        if let Some(key) = self.boss_chat_key() {
+            RightPanelOwner::Boss(key)
+        } else if let Some((key, _)) = self.boss_ui.page {
             RightPanelOwner::Boss(key)
         } else if self.notifications.open {
             RightPanelOwner::Inbox

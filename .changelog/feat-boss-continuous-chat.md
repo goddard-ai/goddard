@@ -1,0 +1,1 @@
+- Opened the continuous Boss chat directly from the sidebar, with a private automatic workspace, the shared composer, and an avatar greeting without a project picker.

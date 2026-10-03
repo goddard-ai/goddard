@@ -2272,13 +2272,21 @@ impl Backend for WakuBackend {
             Command::LoadTaskState => {
                 self.purge_expired_archived_sessions();
                 self.start_archive_detail_prune();
+                let boss = self.boss.document();
                 let state = self.task_state.lock();
                 Ok(ResponsePayload::TaskState {
-                    projects: state.projects.clone(),
+                    projects: state
+                        .projects
+                        .iter()
+                        .filter(|project| project.id != boss.identity.id)
+                        .cloned()
+                        .collect(),
                     sessions: state
                         .sessions
                         .iter()
-                        .filter(|session| session.has_started())
+                        .filter(|session| {
+                            session.has_started() || boss.session_id == Some(session.id)
+                        })
                         .map(AgentSession::list_projection)
                         .collect(),
                     default_cwd: self.default_cwd.clone(),
@@ -5524,7 +5532,6 @@ impl WakuBackend {
         use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl};
         match operation {
             BossOperation::Open {
-                project_id,
                 provider,
                 model,
                 mode,
@@ -5535,23 +5542,35 @@ impl WakuBackend {
                 let _lock = self.boss.operation_lock.lock();
                 let boss = self.boss.document();
                 let mut state = self.task_state.lock();
+                let mut project = Project::from_path(self.boss.owned_workspace()?);
+                project.id = boss.identity.id;
+                project.name = "Boss".into();
+                if let Some(existing) = state
+                    .projects
+                    .iter_mut()
+                    .find(|entry| entry.id == project.id)
+                {
+                    *existing = project.clone();
+                } else {
+                    state.projects.push(project.clone());
+                }
                 if let Some(id) = boss.session_id {
                     if let Some(session) =
                         state.sessions.iter_mut().find(|session| session.id == id)
                     {
                         self.task_store.hydrate(session)?;
+                        session.project_id = project.id;
+                        session.workspace = SessionWorkspace::default();
+                        let session = session.clone();
+                        state.mark_session_dirty(id);
+                        self.task_store.save(&mut state)?;
                         return Ok(BossResult::Session {
-                            session: Box::new(session.clone()),
+                            session: Box::new(session),
+                            project: Box::new(project),
                         });
                     }
                 }
-                if !state
-                    .projects
-                    .iter()
-                    .any(|project| project.id == project_id)
-                {
-                    bail!("unknown project for boss chat");
-                }
+                let project_id = project.id;
                 let mut session = AgentSession::new(project_id, provider);
                 session.model = model;
                 session.runtime_mode = mode;
@@ -5567,6 +5586,7 @@ impl WakuBackend {
                 })?;
                 Ok(BossResult::Session {
                     session: Box::new(session),
+                    project: Box::new(project),
                 })
             }
             BossOperation::Summon {
@@ -10955,6 +10975,75 @@ mod tests {
         assert!(!session.transcript_index().is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
+    #[test]
+    fn boss_chat_is_continuous_and_uses_a_private_workspace_without_user_projects() {
+        use waku_protocol::boss::{BossOperation, BossResult};
+        let root = std::env::temp_dir().join(format!("boss-chat-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        backend.task_state.lock().projects.clear();
+        let open = || {
+            backend
+                .handle_boss_operation(
+                    None,
+                    BossOperation::Open {
+                        provider: ProviderKind::Codex,
+                        model: None,
+                        mode: Default::default(),
+                    },
+                    &EventSink::detached(),
+                )
+                .unwrap()
+        };
+        let BossResult::Session { session, project } = open() else {
+            panic!("expected boss session")
+        };
+        let id = session.id;
+        assert_eq!(session.project_id, backend.boss.document().identity.id);
+        assert_eq!(project.path, backend.boss.owned_workspace().unwrap());
+        assert!(project.path.is_dir());
+        assert_eq!(project.path.file_name().unwrap(), "workspace");
+        {
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(id).unwrap();
+            session.begin_turn("Remember our conversation");
+            session.push_message(crate::model::MessageRole::Assistant, "Ready to help");
+            session.finish_active_turn(TurnStatus::Completed);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let BossResult::Session {
+            session: reopened,
+            project: reopened_project,
+        } = open()
+        else {
+            panic!("expected boss session")
+        };
+        assert_eq!(reopened.id, id);
+        assert_eq!(reopened.messages.len(), 2);
+        assert_eq!(reopened_project.id, project.id);
+        let response = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::LoadTaskState,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        let ResponsePayload::TaskState {
+            projects, sessions, ..
+        } = response
+        else {
+            panic!("expected catalog")
+        };
+        assert!(projects.is_empty());
+        assert!(sessions.iter().any(|session| session.id == id));
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn boss_completion_retires_runtime_revokes_token_and_delivers_one_index() {
         let root = std::env::temp_dir().join(format!("boss-finish-{}", Uuid::new_v4()));

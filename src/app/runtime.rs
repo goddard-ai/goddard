@@ -2544,6 +2544,16 @@ impl Waku {
                     .map(|session| session.id)
                     .collect::<Vec<_>>(),
             );
+            for project in self.boss_ui.projects.values() {
+                if self
+                    .boss_ui
+                    .states
+                    .get(&key)
+                    .is_some_and(|state| state.identity.id == project.id)
+                {
+                    self.daemons.claim_project(project.id, key);
+                }
+            }
             self.remote_catalogs.insert(host, snapshot);
             self.save_remote_catalogs();
         }
@@ -2682,7 +2692,12 @@ impl Waku {
     pub(super) fn daemon_key_for_path(&self, path: &std::path::Path) -> waku_client::DaemonKey {
         let mut remote_match = None;
         let mut remote_len = 0;
-        for project in &self.state.projects {
+        for project in self
+            .state
+            .projects
+            .iter()
+            .chain(self.boss_ui.projects.values())
+        {
             if path == project.path || path.starts_with(&project.path) {
                 match self.daemons.project_owner(project.id) {
                     waku_client::DaemonKey::Local => return waku_client::DaemonKey::Local,
@@ -3944,7 +3959,11 @@ impl Waku {
 
     pub(super) fn selected_project(&self) -> Option<&Project> {
         let id = self.state.selected_project?;
-        self.state.projects.iter().find(|project| project.id == id)
+        self.state
+            .projects
+            .iter()
+            .find(|project| project.id == id)
+            .or_else(|| self.boss_ui.projects.get(&id))
     }
 
     pub(super) fn selected_session(&self) -> Option<&AgentSession> {
@@ -4050,7 +4069,8 @@ impl Waku {
             .state
             .projects
             .iter()
-            .find(|project| project.id == session.project_id)?;
+            .find(|project| project.id == session.project_id)
+            .or_else(|| self.boss_ui.projects.get(&session.project_id))?;
         Some(session.workspace.path().unwrap_or(&project.path))
     }
 
@@ -5960,6 +5980,7 @@ impl Waku {
             .projects
             .iter()
             .find(|project| project.id == project_id)
+            .or_else(|| self.boss_ui.projects.get(&project_id))
             .cloned()
         else {
             self.pending_goal_operations.remove(&session_id);
@@ -6828,6 +6849,7 @@ impl Waku {
             .projects
             .iter()
             .find(|project| project.id == project_id)
+            .or_else(|| self.boss_ui.projects.get(&project_id))
             .cloned()
         else {
             if selected {

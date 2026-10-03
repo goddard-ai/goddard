@@ -834,6 +834,7 @@ impl Render for Waku {
                     })
                     .when(
                         self.boss_ui.page.is_none()
+                            && self.boss_chat_key().is_none()
                             && (!self.drafts_page
                                 || self.selected_terminal.is_some_and(|id| {
                                     self.right_panel_terminals.contains_key(&id)
@@ -866,6 +867,8 @@ impl Render for Waku {
                             self.render_inbox_page(window, cx)
                         } else if agy_surface {
                             self.render_agy_surface(self.chat_viewport_width(window), cx)
+                        } else if empty && self.boss_chat_key().is_some() {
+                            self.render_boss_chat_empty_state(cx).into_any_element()
                         } else if empty {
                             self.render_empty_state(cx).into_any_element()
                         } else {

@@ -3010,3 +3010,5 @@ boss.unreachable: "ボスのデーモンに接続できません。"
 boss.project_required: "ボスとのチャットを開く前に、このデーモンにプロジェクトを追加してください。"
 boss.unexpected_response: "デーモンから予期しないボスの応答が返されました。"
 boss.failed: "ボスの操作に失敗しました: %{error}"
+
+boss.greeting: 今日は何をしましょうか？

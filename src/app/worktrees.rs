@@ -210,6 +210,14 @@ impl Waku {
     /// already moving. A move during a turn could split one turn's files
     /// across two directories, so busy tasks wait.
     pub(super) fn can_move_session_to_worktree(&self, session_id: Uuid) -> bool {
+        if self
+            .boss_ui
+            .states
+            .values()
+            .any(|state| state.session_id == Some(session_id))
+        {
+            return false;
+        }
         let Some(session) = self
             .state
             .sessions
@@ -437,6 +445,14 @@ impl Waku {
     /// switch rebinds metadata now and the move notice reaches the provider
     /// as a hidden steer or a folded preamble on the next prompt.
     pub(super) fn can_switch_session_project(&self, session_id: Uuid) -> bool {
+        if self
+            .boss_ui
+            .states
+            .values()
+            .any(|state| state.session_id == Some(session_id))
+        {
+            return false;
+        }
         let Some(session) = self
             .state
             .sessions

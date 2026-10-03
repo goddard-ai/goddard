@@ -3,5 +3,6 @@ import type { AgentSession } from "./AgentSession";
 import type { AgentSessionTranscript } from "./AgentSessionTranscript";
 import type { BossFile } from "./BossFile";
 import type { BossState } from "./BossState";
+import type { Project } from "./Project";
 
-export type BossResult = { "type": "state", state: BossState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, } | { "type": "summoned", sessionId: string, } | { "type": "transcript", transcript: AgentSessionTranscript, };
+export type BossResult = { "type": "state", state: BossState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, project: Project, } | { "type": "summoned", sessionId: string, } | { "type": "transcript", transcript: AgentSessionTranscript, };

@@ -15,6 +15,7 @@ pub(super) enum BossTab {
 
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
+    pub projects: HashMap<Uuid, Project>,
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
     pub identities: HashMap<Uuid, BossIdentity>,
@@ -47,6 +48,7 @@ impl Default for BossUi {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
+            projects: HashMap::new(),
             hosts: Vec::new(),
             managed: HashSet::new(),
             identities: HashMap::new(),
@@ -177,6 +179,16 @@ impl Waku {
             }
             self.boss_ui.revision = self.boss_ui.revision.wrapping_add(1);
             self.sync_boss_page_rows();
+            if let Some(key) = self.boss_chat_key() {
+                if self
+                    .boss_ui
+                    .states
+                    .get(&key)
+                    .is_some_and(|state| !self.boss_ui.projects.contains_key(&state.identity.id))
+                {
+                    self.chat_with_boss(key, cx);
+                }
+            }
         }
         self.pump_boss_avatars(cx);
         changed
@@ -354,7 +366,10 @@ impl Waku {
                                 let _ = this.boss_tx.send((key, state));
                                 signal_event_pump(&this.event_wake_tx);
                             }
-                            BossResult::Session { session } if matches!(reply, BossReply::Open) => {
+                            BossResult::Session { session, project } if matches!(reply, BossReply::Open) => {
+                                this.daemons.claim_project(project.id, key);
+                                this.boss_ui.projects.insert(project.id, *project);
+                                if let Some(state) = this.boss_ui.states.get_mut(&key) { state.session_id = Some(session.id); }
                                 let id = session.id;
                                 this.daemons.claim_session(id, key);
                                 if let Some(existing) =
@@ -412,18 +427,43 @@ impl Waku {
         cx.notify();
     }
 
-    fn chat_with_boss(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
-        let Some(project) = self
-            .state
-            .projects
+    pub(super) fn boss_chat_key(&self) -> Option<DaemonKey> {
+        let id = self.state.selected_session?;
+        self.boss_ui
+            .states
             .iter()
-            .find(|project| self.daemons.project_owner(project.id) == key)
-        else {
-            self.show_toast(tr!("boss.project_required"));
-            cx.notify();
-            return;
-        };
-        let project_id = project.id;
+            .find_map(|(key, state)| (state.session_id == Some(id)).then_some(*key))
+    }
+
+    pub(super) fn render_boss_chat_empty_state(&self, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let identity = self
+            .boss_chat_key()
+            .and_then(|key| self.boss_ui.states.get(&key))
+            .map(|state| &state.identity);
+        div()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .px_8()
+            .pt(px(HEADER_HEIGHT * 2.0))
+            .pb(px(52.0))
+            .children(identity.map(|identity| self.boss_avatar(identity, 54.0, cx)))
+            .child(
+                div()
+                    .mt(px(14.0))
+                    .text_size(sp(20.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .text_center()
+                    .child(tr!("boss.greeting")),
+            )
+            .child(div().h(px(38.0)).flex_none())
+    }
+
+    fn chat_with_boss(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
         let provider = self
             .selected_session()
             .map(|session| session.provider)
@@ -438,7 +478,6 @@ impl Waku {
         self.boss_request(
             key,
             BossOperation::Open {
-                project_id,
                 provider,
                 model,
                 mode,
@@ -576,10 +615,10 @@ impl Waku {
         self.boss_request(key, operation, BossReply::Saved, cx);
     }
 
-    fn boss_avatar(&self, identity: &BossIdentity, cx: &App) -> AnyElement {
+    fn boss_avatar(&self, identity: &BossIdentity, size: f32, cx: &App) -> AnyElement {
         if let Some(image) = self.boss_ui.avatars.get(&identity.avatar_seed) {
             return gpui::img(image.clone())
-                .size(px(24.0))
+                .size(px(size))
                 .rounded(px(6.0))
                 .into_any_element();
         }
@@ -596,7 +635,7 @@ impl Waku {
             signal_event_pump(&self.event_wake_tx);
         }
         div()
-            .size(px(24.0))
+            .size(px(size))
             .rounded(px(6.0))
             .bg(Theme::current(cx).overlay)
             .flex()
@@ -707,10 +746,8 @@ impl Waku {
             .cursor_pointer()
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .on_activation(cx, move |this, window, cx| {
-                this.open_boss_page(key, BossTab::History, window, cx)
-            })
-            .child(self.boss_avatar(&state.identity, cx))
+            .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx))
+            .child(self.boss_avatar(&state.identity, 24.0, cx))
             .child(boss_sidebar_label(
                 state.identity.name.clone(),
                 tr!("boss.group"),
@@ -763,7 +800,7 @@ impl Waku {
             .on_activation(cx, move |this, _, cx| {
                 this.request_session_activation(id, SessionActivationTransition::Visit, cx)
             })
-            .child(self.boss_avatar(identity, cx))
+            .child(self.boss_avatar(identity, 24.0, cx))
             .child(boss_sidebar_label(
                 identity.name.clone(),
                 self.boss_ui

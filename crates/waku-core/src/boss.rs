@@ -203,9 +203,15 @@ impl BossService {
         })
     }
 
+    pub fn owned_workspace(&self) -> anyhow::Result<PathBuf> {
+        let path = self.root.join("workspace");
+        fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
     pub fn workspace(&self, session: Uuid) -> anyhow::Result<PathBuf> {
         let path = if self.is_boss(session) {
-            self.root.join("files")
+            return self.owned_workspace();
         } else {
             self.root.join("workspaces").join(session.to_string())
         };

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::model::{AgentSession, ProviderKind, RuntimeMode};
+use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode};
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -77,7 +77,6 @@ pub struct BossFile {
 pub enum BossOperation {
     View,
     Open {
-        project_id: Uuid,
         provider: ProviderKind,
         model: Option<String>,
         mode: RuntimeMode,
@@ -143,6 +142,7 @@ pub enum BossResult {
     Saved,
     Session {
         session: Box<AgentSession>,
+        project: Box<Project>,
     },
     Summoned {
         session_id: Uuid,

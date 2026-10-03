@@ -5970,3 +5970,6 @@ boss.unexpected_response:
   en: The daemon returned an unexpected Boss response.
 boss.failed:
   en: 'Boss operation failed: %{error}'
+
+boss.greeting:
+  en: What should we do today?

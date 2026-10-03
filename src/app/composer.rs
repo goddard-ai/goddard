@@ -7725,9 +7725,10 @@ impl Waku {
         // chip and drops out entirely. A bound worktree keeps it — "Local"
         // remains a way back to the checkout — and an open menu stays mounted
         // until its own dismissal runs.
-        let hide_workspace_selector = (projectless_selected || project_gitless)
-            && !matches!(workspace, SessionWorkspace::Worktree { .. })
-            && !worktree_handle.is_open();
+        let hide_workspace_selector = self.boss_chat_key().is_some()
+            || (projectless_selected || project_gitless)
+                && !matches!(workspace, SessionWorkspace::Worktree { .. })
+                && !worktree_handle.is_open();
         let creating_worktree = self.worktree_creation_pending;
         let worktree_trigger = MenuChip::new("workspace-worktree")
             .icon(
@@ -8082,10 +8083,10 @@ impl Waku {
                             .tab_index(0)
                             .tab_group()
                             .tab_stop(false)
-                            .child(project_selector)
-                            .when(!hide_workspace_selector, |row| {
-                                row.child(worktree_selector)
+                            .when(self.boss_chat_key().is_none(), |row| {
+                                row.child(project_selector)
                             })
+                            .when(!hide_workspace_selector, |row| row.child(worktree_selector))
                             .children(branch_selector)
                             .child(div().flex_1())
                             .children(usage_meter),
