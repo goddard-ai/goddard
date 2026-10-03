@@ -13,4 +13,16 @@ directory: boolean, createdAt: number,
 /**
  * Re-publishing a path bumps this; the sidebar's recency window reads it.
  */
-updatedAt: number, };
+updatedAt: number,
+/**
+ * A pinned bundle keeps its sidebar row past the recency window.
+ */
+pinnedAt: number | null,
+/**
+ * A swept bundle hides behind the group's dormant fold until restored.
+ */
+dormantAt: number | null,
+/**
+ * An archived bundle leaves the sidebar entirely.
+ */
+archivedAt: number | null, };

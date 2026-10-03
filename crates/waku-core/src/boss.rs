@@ -761,6 +761,9 @@ impl BossService {
                             directory,
                             created_at: now,
                             updated_at: now,
+                            pinned_at: None,
+                            dormant_at: None,
+                            archived_at: None,
                         });
                     }
                     Ok(())
@@ -775,6 +778,53 @@ impl BossService {
                     if state.bundles.len() == count {
                         bail!("unknown bundle");
                     }
+                    Ok(())
+                })?;
+                Ok(BossResult::Saved)
+            }
+            BossOperation::PinBundle { id, pinned } => {
+                self.require_owner(caller)?;
+                let now = waku_protocol::model::unix_time();
+                self.update(|state| {
+                    let bundle = state
+                        .bundles
+                        .iter_mut()
+                        .find(|bundle| bundle.id == id)
+                        .ok_or_else(|| anyhow!("unknown bundle"))?;
+                    bundle.pinned_at = pinned.then_some(now);
+                    Ok(())
+                })?;
+                Ok(BossResult::Saved)
+            }
+            BossOperation::SweepBundle { id, dormant } => {
+                self.require_owner(caller)?;
+                let now = waku_protocol::model::unix_time();
+                self.update(|state| {
+                    let bundle = state
+                        .bundles
+                        .iter_mut()
+                        .find(|bundle| bundle.id == id)
+                        .ok_or_else(|| anyhow!("unknown bundle"))?;
+                    bundle.dormant_at = dormant.then_some(now);
+                    if !dormant {
+                        // Restoring re-enters the recency window the way a
+                        // re-publish does — a dormant bundle can outlive it.
+                        bundle.updated_at = now;
+                    }
+                    Ok(())
+                })?;
+                Ok(BossResult::Saved)
+            }
+            BossOperation::ArchiveBundle { id, archived } => {
+                self.require_owner(caller)?;
+                let now = waku_protocol::model::unix_time();
+                self.update(|state| {
+                    let bundle = state
+                        .bundles
+                        .iter_mut()
+                        .find(|bundle| bundle.id == id)
+                        .ok_or_else(|| anyhow!("unknown bundle"))?;
+                    bundle.archived_at = archived.then_some(now);
                     Ok(())
                 })?;
                 Ok(BossResult::Saved)
@@ -1719,6 +1769,18 @@ mod tests {
                 name: None,
             },
             BossOperation::DismissBundle { id: Uuid::nil() },
+            BossOperation::PinBundle {
+                id: Uuid::nil(),
+                pinned: true,
+            },
+            BossOperation::SweepBundle {
+                id: Uuid::nil(),
+                dormant: true,
+            },
+            BossOperation::ArchiveBundle {
+                id: Uuid::nil(),
+                archived: true,
+            },
         ] {
             assert!(service.handle(Some(employee_id), op).is_err());
         }
@@ -1805,6 +1867,81 @@ mod tests {
         assert_eq!(republished.name, "Report");
         assert_eq!(republished.created_at, file_created);
         assert!(republished.updated_at >= file_created);
+
+        // Sidebar affordances ride the same owner gate: pin, sweep, and
+        // archive mutate the bundle in place and refuse unknown ids.
+        for op in [
+            BossOperation::PinBundle {
+                id: Uuid::new_v4(),
+                pinned: true,
+            },
+            BossOperation::SweepBundle {
+                id: Uuid::new_v4(),
+                dormant: true,
+            },
+            BossOperation::ArchiveBundle {
+                id: Uuid::new_v4(),
+                archived: true,
+            },
+        ] {
+            assert!(service.handle(None, op).is_err());
+        }
+        service
+            .handle(
+                None,
+                BossOperation::PinBundle {
+                    id: file_id,
+                    pinned: true,
+                },
+            )
+            .unwrap();
+        service
+            .handle(
+                None,
+                BossOperation::SweepBundle {
+                    id: file_id,
+                    dormant: true,
+                },
+            )
+            .unwrap();
+        service
+            .handle(
+                None,
+                BossOperation::ArchiveBundle {
+                    id: file_id,
+                    archived: true,
+                },
+            )
+            .unwrap();
+        let bundle = service.document().bundles[0].clone();
+        assert_eq!(bundle.id, file_id);
+        assert!(bundle.pinned_at.is_some());
+        assert!(bundle.dormant_at.is_some());
+        assert!(bundle.archived_at.is_some());
+        // The same operations clear their flags — and unarchiving keeps the
+        // row's other state.
+        service
+            .handle(
+                None,
+                BossOperation::ArchiveBundle {
+                    id: file_id,
+                    archived: false,
+                },
+            )
+            .unwrap();
+        service
+            .handle(
+                None,
+                BossOperation::SweepBundle {
+                    id: file_id,
+                    dormant: false,
+                },
+            )
+            .unwrap();
+        let bundle = service.document().bundles[0].clone();
+        assert_eq!(bundle.archived_at, None);
+        assert_eq!(bundle.dormant_at, None);
+        assert!(bundle.pinned_at.is_some());
 
         drop(service);
         let restored = BossService::open(root.clone()).unwrap();

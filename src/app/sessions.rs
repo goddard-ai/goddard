@@ -757,6 +757,10 @@ impl Waku {
         } else {
             self.ensure_right_panel_terminals(cx);
         }
+        // A bundle row's own navigation re-arms its composer context and
+        // opens its file preview once the boss chat it opened is on
+        // screen — the click parks both behind this landing.
+        self.complete_bundle_activation(session_id, cx);
         self.reset_visible_state();
         if session_changed {
             // Each materialized worktree has its own cache entry. A task that

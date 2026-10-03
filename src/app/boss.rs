@@ -31,6 +31,11 @@ pub(super) struct BossUi {
     /// composer submission commands the boss with this file attached.
     /// Cleared by a send or a session selection.
     pub command_bundle: Option<(DaemonKey, Uuid)>,
+    /// The bundle whose row click is still navigating to its task page —
+    /// the boss chat. Session activation clears `command_bundle` as stale
+    /// context, so the click parks its bundle here and the finish reapplies
+    /// the arm once the boss chat is on screen.
+    pub pending_bundle: Option<(DaemonKey, Uuid)>,
     pub revision: u64,
     pub page: Option<(DaemonKey, BossTab)>,
     files: Vec<BossFile>,
@@ -66,6 +71,7 @@ impl Default for BossUi {
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
             command_bundle: None,
+            pending_bundle: None,
             revision: 0,
             page: None,
             files: Vec::new(),
@@ -1421,17 +1427,133 @@ impl Waku {
             DaemonKey::Local => file_name,
         };
         let age = sidebar::format_time_ago(unix_time().saturating_sub(bundle.updated_at));
+        let pinned = bundle.pinned_at.is_some();
+        let dormant = bundle.dormant_at.is_some() && !pinned;
         let menu = self.menu_handle(format!("bundle-{key:?}-{bundle_id}"), cx);
         let keyboard_menu = menu.clone();
         let row_focus = menu.trigger_focus_handle().clone();
-        let open_path = path.clone();
-        let key_path = path.clone();
-        // A clicked bundle arms the composer: the next submission commands
-        // the publishing boss with the file attached, so the row keeps a
-        // selected highlight until a send or session switch clears it.
+        // A clicked bundle opens its task page — the boss chat that
+        // published it — with the file armed as composer context; a
+        // previewable local file also opens in the strip's file viewer
+        // once the chat lands. The row keeps a selected highlight until a
+        // send or session switch clears the arm.
         let armed = self.boss_ui.command_bundle == Some((key, bundle_id));
+        let group_name = SharedString::from(format!("bundle-row-{key:?}-{bundle_id}"));
+        // The mini controls share the task row's chrome: zero-width until
+        // the row is hovered or the button takes keyboard focus. The
+        // Finder button is the escape hatch the in-app preview replaced —
+        // remote bundles keep it out since the path is not local.
+        let finder_button = (key == DaemonKey::Local).then(|| {
+            let focus = self
+                .sidebar_bundle_finder_focuses
+                .borrow_mut()
+                .entry((key, bundle_id))
+                .or_insert_with(|| cx.focus_handle())
+                .clone();
+            let finder_path = path.clone();
+            let key_path = path.clone();
+            self.sidebar_bundle_button(
+                &group_name,
+                format!("bundle-finder-{key:?}-{bundle_id}"),
+                &focus,
+                "icons/folder-open.svg",
+                tr!("common.reveal_in_finder"),
+                cx,
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                crate::platform::reveal_in_file_manager(&finder_path, cx);
+            })
+            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    cx.stop_propagation();
+                    crate::platform::reveal_in_file_manager(&key_path, cx);
+                }
+            })
+        });
+        let pin_focus = self
+            .sidebar_bundle_pin_focuses
+            .borrow_mut()
+            .entry((key, bundle_id))
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        // Holding Option retasks the pin control the way a task row's
+        // does: on a live row it sweeps to the dormant fold, on a dormant
+        // row it restores.
+        let pin_button = self
+            .sidebar_bundle_button(
+                &group_name,
+                format!("bundle-pin-{key:?}-{bundle_id}"),
+                &pin_focus,
+                if self.sidebar_alt_held {
+                    if dormant {
+                        "icons/rotate-cw.svg"
+                    } else {
+                        "icons/broom.svg"
+                    }
+                } else if pinned {
+                    "icons/pin-filled.svg"
+                } else {
+                    "icons/pin.svg"
+                },
+                if self.sidebar_alt_held {
+                    if dormant {
+                        tr!("session.restore")
+                    } else {
+                        tr!("session.sweep")
+                    }
+                } else if pinned {
+                    tr!("session.unpin")
+                } else {
+                    tr!("session.pin")
+                },
+                cx,
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                cx.stop_propagation();
+                if event.modifiers().alt || this.sidebar_alt_held {
+                    this.set_bundle_dormant(key, bundle_id, !dormant, cx);
+                } else {
+                    this.set_bundle_pinned(key, bundle_id, !pinned, cx);
+                }
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.set_bundle_pinned(key, bundle_id, !pinned, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        let archive_focus = self
+            .sidebar_bundle_archive_focuses
+            .borrow_mut()
+            .entry((key, bundle_id))
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        let archive_button = self
+            .sidebar_bundle_button(
+                &group_name,
+                format!("bundle-archive-{key:?}-{bundle_id}"),
+                &archive_focus,
+                "icons/archive.svg",
+                tr!("session.archive"),
+                cx,
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.set_bundle_archived(key, bundle_id, true, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.set_bundle_archived(key, bundle_id, true, cx);
+                    cx.stop_propagation();
+                }
+            }));
         let row = div()
             .id(SharedString::from(format!("bundle-{key:?}-{bundle_id}")))
+            .group(group_name.clone())
             .w_full()
             .min_w_0()
             .pl(px(8.0))
@@ -1447,17 +1569,12 @@ impl Waku {
             .active(|element| element.bg(theme.sidebar_item_background))
             .tooltip(Tooltip::text(bundle.path.clone()))
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.boss_ui.command_bundle = Some((key, bundle_id));
-                this.sync_composer_placeholder(cx);
-                crate::platform::open_with_default_app(&open_path, cx);
-                cx.notify();
+                this.open_bundle_task(key, bundle_id, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key_name = event.keystroke.key.as_str();
                 if matches!(key_name, "enter" | "space") {
-                    this.boss_ui.command_bundle = Some((key, bundle_id));
-                    this.sync_composer_placeholder(cx);
-                    crate::platform::open_with_default_app(&key_path, cx);
+                    this.open_bundle_task(key, bundle_id, cx);
                     cx.stop_propagation();
                 } else if key_name == "f10" && event.keystroke.modifiers.shift {
                     keyboard_menu.open_context_menu(window, cx);
@@ -1473,12 +1590,23 @@ impl Waku {
                     .gap(px(4.0))
                     .child(
                         div()
-                            .min_w_0()
-                            .truncate()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .overflow_hidden()
                             .line_height(sp(18.0))
-                            .text_size(sp(13.5))
-                            .text_color(theme.text)
-                            .child(bundle.name.clone()),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(sp(13.5))
+                                    .text_color(theme.text)
+                                    .child(bundle.name.clone()),
+                            )
+                            .children(finder_button)
+                            .child(pin_button)
+                            .child(archive_button),
                     )
                     .child(
                         div()
@@ -1498,6 +1626,17 @@ impl Waku {
                                     .child(div().min_w_0().truncate().child(file_name))
                                     .child(div().flex_1()),
                             )
+                            // The pin marker keeps a pinned row's state
+                            // visible outside hover — the group no longer
+                            // explains it the way the Pinned header does
+                            // for tasks.
+                            .when(pinned, |line| {
+                                line.child(icon(
+                                    "icons/pin-filled.svg",
+                                    12.0,
+                                    theme.text_tertiary,
+                                ))
+                            })
                             .child(
                                 div()
                                     .flex_none()
@@ -1516,8 +1655,11 @@ impl Waku {
             SharedString::from(format!("bundle-menu-{key:?}-{bundle_id}")),
             &menu,
             move |_cx| {
+                let pin_waku = waku.clone();
+                let sweep_waku = waku.clone();
+                let archive_waku = waku.clone();
                 let remove_waku = waku.clone();
-                vec![
+                let mut items = vec![
                     MenuItem::new(tr!("bundle.open"), {
                         let path = path.clone();
                         move |_, cx| crate::platform::open_with_default_app(&path, cx)
@@ -1528,6 +1670,53 @@ impl Waku {
                         move |_, cx| crate::platform::reveal_in_file_manager(&path, cx)
                     })
                     .icon("icons/folder-open.svg"),
+                    MenuItem::Separator,
+                    MenuItem::new(
+                        if pinned {
+                            tr!("session.unpin")
+                        } else {
+                            tr!("session.pin")
+                        },
+                        move |_, cx| {
+                            let _ = pin_waku.update(cx, |waku, cx| {
+                                waku.set_bundle_pinned(key, bundle_id, !pinned, cx);
+                            });
+                        },
+                    )
+                    .icon(if pinned {
+                        "icons/pin-off.svg"
+                    } else {
+                        "icons/pin.svg"
+                    }),
+                ];
+                // Sweep and restore are complementary halves of the same
+                // lifecycle, the same split a task row's menu makes.
+                if dormant {
+                    items.push(
+                        MenuItem::new(tr!("session.restore"), move |_, cx| {
+                            let _ = sweep_waku.update(cx, |waku, cx| {
+                                waku.set_bundle_dormant(key, bundle_id, false, cx);
+                            });
+                        })
+                        .icon("icons/rotate-cw.svg"),
+                    );
+                } else {
+                    items.push(
+                        MenuItem::new(tr!("session.sweep"), move |_, cx| {
+                            let _ = sweep_waku.update(cx, |waku, cx| {
+                                waku.set_bundle_dormant(key, bundle_id, true, cx);
+                            });
+                        })
+                        .icon("icons/broom.svg"),
+                    );
+                }
+                items.extend([
+                    MenuItem::new(tr!("session.archive"), move |_, cx| {
+                        let _ = archive_waku.update(cx, |waku, cx| {
+                            waku.set_bundle_archived(key, bundle_id, true, cx);
+                        });
+                    })
+                    .icon("icons/archive.svg"),
                     MenuItem::Separator,
                     MenuItem::new(tr!("bundle.dismiss"), move |_, cx| {
                         let _ = remove_waku.update(cx, |waku, cx| {
@@ -1540,9 +1729,160 @@ impl Waku {
                         });
                     })
                     .icon("icons/trash.svg"),
-                ]
+                ]);
+                items
             },
         )
+    }
+
+    /// A bundle row's hover-revealed mini control — the same zero-width
+    /// chrome a task row's pin and archive buttons use: it expands under
+    /// row hover or its own keyboard focus.
+    fn sidebar_bundle_button(
+        &self,
+        group_name: &SharedString,
+        id: String,
+        focus: &FocusHandle,
+        icon_path: &'static str,
+        tooltip_text: String,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        div()
+            .id(SharedString::from(id))
+            .track_focus(focus)
+            .tab_index(0)
+            .flex_none()
+            .w_0()
+            .h(px(18.0))
+            .overflow_hidden()
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(0.0)
+            .group_hover(group_name.clone(), |style| {
+                style.w(px(20.0)).opacity(1.0)
+            })
+            .focus_visible(|style| {
+                style
+                    .w(px(20.0))
+                    .opacity(1.0)
+                    .bg(theme.focus_highlight())
+            })
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text(tooltip_text))
+            .child(icon(icon_path, 12.0, theme.text_secondary))
+    }
+
+    /// A bundle row's click or Enter: the bundle's task page is the boss
+    /// chat that published it, opened with the file armed as composer
+    /// context. The arm parks in `pending_bundle` so the session switch
+    /// the open triggers cannot clear it before the chat lands.
+    pub(super) fn open_bundle_task(
+        &mut self,
+        key: DaemonKey,
+        bundle_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        self.boss_ui.command_bundle = Some((key, bundle_id));
+        self.boss_ui.pending_bundle = Some((key, bundle_id));
+        self.sync_composer_placeholder(cx);
+        self.chat_with_boss(key, cx);
+        cx.notify();
+    }
+
+    /// The deferred half of a bundle row click, fired when the activation
+    /// it triggered lands. If the chat on screen is the bundle's own
+    /// boss, the armed composer context — which a session switch clears
+    /// as belonging to the previous view — comes back, and a previewable
+    /// local file opens in the strip's file viewer.
+    pub(super) fn complete_bundle_activation(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((key, bundle_id)) = self.boss_ui.pending_bundle.take() else {
+            return;
+        };
+        let Some((directory, path)) = self
+            .boss_ui
+            .states
+            .get(&key)
+            .filter(|state| state.session_id == Some(session_id))
+            .and_then(|state| {
+                state
+                    .bundles
+                    .iter()
+                    .find(|bundle| bundle.id == bundle_id)
+                    .map(|bundle| (bundle.directory, PathBuf::from(&bundle.path)))
+            })
+        else {
+            return;
+        };
+        self.boss_ui.command_bundle = Some((key, bundle_id));
+        self.sync_composer_placeholder(cx);
+        if directory || key != DaemonKey::Local {
+            return;
+        }
+        if !right_panel::transfer_file_is_previewable(&path) {
+            return;
+        }
+        let Some(parent) = path.parent().map(Path::to_path_buf) else {
+            return;
+        };
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return;
+        };
+        self.sync_right_panel_files_root(cx);
+        if self.right_panel_files_root.as_deref() != Some(parent.as_path()) {
+            return;
+        }
+        self.open_right_panel_file(name.to_owned(), cx);
+    }
+
+    /// Task affordances on a bundle row are daemon mutations — the bundle
+    /// record is boss state, so the pin, sweep, and archive the row shows
+    /// round-trip through the owning daemon like a publish or dismiss.
+    fn set_bundle_pinned(&mut self, key: DaemonKey, id: Uuid, pinned: bool, cx: &mut Context<Self>) {
+        self.boss_request(
+            key,
+            BossOperation::PinBundle { id, pinned },
+            BossReply::List,
+            cx,
+        );
+    }
+
+    fn set_bundle_dormant(
+        &mut self,
+        key: DaemonKey,
+        id: Uuid,
+        dormant: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.boss_request(
+            key,
+            BossOperation::SweepBundle { id, dormant },
+            BossReply::List,
+            cx,
+        );
+    }
+
+    fn set_bundle_archived(
+        &mut self,
+        key: DaemonKey,
+        id: Uuid,
+        archived: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.boss_request(
+            key,
+            BossOperation::ArchiveBundle { id, archived },
+            BossReply::List,
+            cx,
+        );
     }
 
     pub(super) fn render_boss_page(&mut self, cx: &mut Context<Self>) -> AnyElement {

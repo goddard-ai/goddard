@@ -1010,7 +1010,7 @@ pub(super) fn file_highlighter_language(relative_path: &str) -> &'static str {
     }
 }
 
-fn transfer_file_is_previewable(path: &Path) -> bool {
+pub(super) fn transfer_file_is_previewable(path: &Path) -> bool {
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -8122,8 +8122,32 @@ impl Waku {
                 .iter()
                 .find(|project| project.id == project_id)
                 .map(|project| project.path.clone()),
+            RightPanelOwner::Boss(key) => {
+                // An armed sidebar bundle roots the boss chat's file
+                // surfaces at the path the boss published — a previewable
+                // file opens in place. Remote bundles have no local slice.
+                if key != waku_client::DaemonKey::Local {
+                    return None;
+                }
+                let (bundle_key, bundle_id) = self.boss_ui.command_bundle?;
+                if bundle_key != key {
+                    return None;
+                }
+                let bundle = self
+                    .boss_ui
+                    .states
+                    .get(&key)?
+                    .bundles
+                    .iter()
+                    .find(|bundle| bundle.id == bundle_id)?;
+                let path = PathBuf::from(&bundle.path);
+                if bundle.directory {
+                    Some(path)
+                } else {
+                    path.parent().map(Path::to_path_buf)
+                }
+            }
             RightPanelOwner::Inbox
-            | RightPanelOwner::Boss(_)
             | RightPanelOwner::Drafts
             | RightPanelOwner::Automations
             | RightPanelOwner::Bare => None,

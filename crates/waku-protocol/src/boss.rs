@@ -75,6 +75,15 @@ pub struct BossBundle {
     pub created_at: u64,
     /// Re-publishing a path bumps this; the sidebar's recency window reads it.
     pub updated_at: u64,
+    /// A pinned bundle keeps its sidebar row past the recency window.
+    #[serde(default)]
+    pub pinned_at: Option<u64>,
+    /// A swept bundle hides behind the group's dormant fold until restored.
+    #[serde(default)]
+    pub dormant_at: Option<u64>,
+    /// An archived bundle leaves the sidebar entirely.
+    #[serde(default)]
+    pub archived_at: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -192,6 +201,24 @@ pub enum BossOperation {
     },
     DismissBundle {
         id: Uuid,
+    },
+    /// Pin or unpin a bundle's sidebar row; pinned bundles lead the group
+    /// and never age out of it.
+    PinBundle {
+        id: Uuid,
+        pinned: bool,
+    },
+    /// Sweep a bundle behind the group's dormant fold, or restore it to the
+    /// live list.
+    SweepBundle {
+        id: Uuid,
+        dormant: bool,
+    },
+    /// Archive or unarchive a bundle — archived bundles leave the sidebar
+    /// but keep their record.
+    ArchiveBundle {
+        id: Uuid,
+        archived: bool,
     },
 }
 

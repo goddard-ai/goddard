@@ -270,30 +270,60 @@ fn append_sidebar_group_rows(
     rows.push(SidebarRow::GroupSpacer);
 }
 
-/// The published bundles young enough for the Recent bundles group, newest
-/// first. A bundle keeps its row for twelve hours after its last publish —
-/// an older one ages out of the sidebar entirely rather than falling into a
-/// date or project group.
+/// The published bundles the sidebar lists, split like a project group's
+/// sessions: live rows first, then the dormant tail a "Show dormant" row
+/// reveals. A live bundle keeps its row for twelve hours after its last
+/// publish — an older one ages out of the sidebar entirely rather than
+/// falling into a date or project group. Pinned and dormant bundles are
+/// user-managed state and never age out; a pin outranks a sweep the way a
+/// pinned task cannot be dormant; archived bundles leave the list entirely.
 fn sidebar_recent_bundles(
     states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
     now: u64,
-) -> Vec<(waku_client::DaemonKey, Uuid)> {
-    let mut bundles: Vec<_> = states
+) -> (
+    Vec<(waku_client::DaemonKey, Uuid)>,
+    Vec<(waku_client::DaemonKey, Uuid)>,
+) {
+    let mut live = Vec::new();
+    let mut dormant = Vec::new();
+    for (key, bundle) in states
         .iter()
         .flat_map(|(key, state)| state.bundles.iter().map(move |bundle| (*key, bundle)))
-        .filter(|(_, bundle)| now.saturating_sub(bundle.updated_at) < SIDEBAR_BUNDLE_RECENT_SECS)
-        .collect();
+    {
+        if bundle.archived_at.is_some() {
+            continue;
+        }
+        let pinned = bundle.pinned_at.is_some();
+        if !pinned && bundle.dormant_at.is_some() {
+            dormant.push((key, bundle));
+        } else if pinned
+            || now.saturating_sub(bundle.updated_at) < SIDEBAR_BUNDLE_RECENT_SECS
+        {
+            live.push((key, bundle));
+        }
+    }
     // Hosts come out of a HashMap, so ties need a stable key or the order
-    // would churn with every rebuild.
-    bundles.sort_by(|(a_key, a), (b_key, b)| {
-        b.updated_at
-            .cmp(&a.updated_at)
-            .then((*a_key, a.id).cmp(&(*b_key, b.id)))
+    // would churn with every rebuild. Pinned rows lead the live list the
+    // way pinned tasks lead the sidebar.
+    let order = |(key, bundle): &(waku_client::DaemonKey, &waku_client::boss::BossBundle)| {
+        (std::cmp::Reverse(bundle.updated_at), *key, bundle.id)
+    };
+    live.sort_by(|a, b| {
+        b.1.pinned_at
+            .is_some()
+            .cmp(&a.1.pinned_at.is_some())
+            .then(order(a).cmp(&order(b)))
     });
-    bundles
-        .into_iter()
-        .map(|(key, bundle)| (key, bundle.id))
-        .collect()
+    dormant.sort_by(|a, b| order(a).cmp(&order(b)));
+    (
+        live.into_iter()
+            .map(|(key, bundle)| (key, bundle.id))
+            .collect(),
+        dormant
+            .into_iter()
+            .map(|(key, bundle)| (key, bundle.id))
+            .collect(),
+    )
 }
 
 fn updater_button_available_content(
@@ -3630,15 +3660,31 @@ impl Waku {
         }
         // Bundle content rides the boss-state revision mixed above; the one
         // transition it cannot see is a bundle aging out of the recency
-        // window, so the recent count joins the fingerprint.
+        // window, so the recent count joins the fingerprint. Pinned,
+        // dormant, and archived rows cannot age out — only an untouched
+        // live bundle counts.
         let recent_bundles = self
             .boss_ui
             .states
             .values()
             .flat_map(|state| &state.bundles)
-            .filter(|bundle| now.saturating_sub(bundle.updated_at) < SIDEBAR_BUNDLE_RECENT_SECS)
+            .filter(|bundle| {
+                bundle.archived_at.is_none()
+                    && bundle.dormant_at.is_none()
+                    && bundle.pinned_at.is_none()
+                    && now.saturating_sub(bundle.updated_at) < SIDEBAR_BUNDLE_RECENT_SECS
+            })
             .count() as u64;
         fingerprint = mix(fingerprint, recent_bundles);
+        // The dormant fold's reveal count drives row membership too — the
+        // project-grouping map fold above only runs under project grouping.
+        fingerprint = mix(
+            fingerprint,
+            self.sidebar_project_dormant_reveals
+                .get(&SidebarGroup::Bundles)
+                .copied()
+                .unwrap_or_default() as u64,
+        );
         // A set has no stable iteration order; combine order-independently.
         let collapsed = self
             .sidebar_collapsed_groups
@@ -3784,8 +3830,8 @@ impl Waku {
         // section directly above Pinned in either grouping. Under project
         // grouping they keep this dedicated group rather than folding into a
         // project — a bundle's detail line names its file, not a project.
-        let recent_bundles = sidebar_recent_bundles(&self.boss_ui.states, now);
-        if !recent_bundles.is_empty() {
+        let (recent_bundles, dormant_bundles) = sidebar_recent_bundles(&self.boss_ui.states, now);
+        if !recent_bundles.is_empty() || !dormant_bundles.is_empty() {
             rows.push(SidebarRow::Header(SidebarGroup::Bundles));
             if !self
                 .sidebar_collapsed_groups
@@ -3797,6 +3843,24 @@ impl Waku {
                         .copied()
                         .map(|(key, id)| SidebarRow::Bundle(key, id)),
                 );
+                // A swept bundle keeps a fold row rather than vanishing —
+                // the same "Show dormant" reveal a project group's dormant
+                // tail uses.
+                let revealed = self
+                    .sidebar_project_dormant_reveals
+                    .get(&SidebarGroup::Bundles)
+                    .copied()
+                    .unwrap_or_default();
+                rows.extend(
+                    dormant_bundles
+                        .iter()
+                        .take(revealed)
+                        .copied()
+                        .map(|(key, id)| SidebarRow::Bundle(key, id)),
+                );
+                if dormant_bundles.len() > revealed {
+                    rows.push(SidebarRow::ShowDormant(SidebarGroup::Bundles));
+                }
             }
             rows.push(SidebarRow::GroupSpacer);
         }
@@ -7195,6 +7259,9 @@ mod tests {
             directory: false,
             created_at: now - age,
             updated_at: now - age,
+            pinned_at: None,
+            dormant_at: None,
+            archived_at: None,
         };
         let hour = 3600;
         let fresh = bundle(hour);
@@ -7210,8 +7277,9 @@ mod tests {
         );
         // A second host's bundles merge into the same newest-first ordering.
         states.insert(remote, boss_state_with_bundles(vec![remote_fresh.clone()]));
+        let (live, dormant) = sidebar_recent_bundles(&states, now);
         assert_eq!(
-            sidebar_recent_bundles(&states, now),
+            live,
             vec![
                 (remote, remote_fresh.id),
                 (waku_client::DaemonKey::Local, fresh.id),
@@ -7219,6 +7287,72 @@ mod tests {
                 (waku_client::DaemonKey::Local, edge.id),
             ]
         );
+        assert!(dormant.is_empty());
+    }
+
+    #[test]
+    fn bundle_flags_gate_the_recency_window() {
+        let now = 1_000_000_000;
+        let stale = SIDEBAR_BUNDLE_RECENT_SECS + 1;
+        let pinned = BossBundle {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            path: String::new(),
+            directory: false,
+            created_at: now - stale,
+            updated_at: now - stale,
+            pinned_at: Some(now),
+            dormant_at: None,
+            archived_at: None,
+        };
+        let mut swept = pinned.clone();
+        swept.id = Uuid::new_v4();
+        swept.pinned_at = None;
+        swept.dormant_at = Some(now);
+        let mut archived = pinned.clone();
+        archived.id = Uuid::new_v4();
+        archived.pinned_at = None;
+        archived.dormant_at = None;
+        archived.archived_at = Some(now);
+        // A pin outranks a sweep: the pinned-dormant row stays live — and
+        // its newer publish wins the pinned tier's recency ordering.
+        let mut pinned_and_swept = pinned.clone();
+        pinned_and_swept.id = Uuid::new_v4();
+        pinned_and_swept.dormant_at = Some(now);
+        pinned_and_swept.updated_at += 1;
+        let fresh = BossBundle {
+            pinned_at: None,
+            dormant_at: None,
+            archived_at: None,
+            ..pinned.clone()
+        };
+        let fresh = BossBundle {
+            id: Uuid::new_v4(),
+            updated_at: now,
+            created_at: now,
+            ..fresh
+        };
+        let mut states = HashMap::new();
+        states.insert(
+            waku_client::DaemonKey::Local,
+            boss_state_with_bundles(vec![
+                swept.clone(),
+                archived,
+                pinned_and_swept.clone(),
+                fresh.clone(),
+                pinned.clone(),
+            ]),
+        );
+        let (live, dormant) = sidebar_recent_bundles(&states, now);
+        assert_eq!(
+            live,
+            vec![
+                (waku_client::DaemonKey::Local, pinned_and_swept.id),
+                (waku_client::DaemonKey::Local, pinned.id),
+                (waku_client::DaemonKey::Local, fresh.id),
+            ]
+        );
+        assert_eq!(dormant, vec![(waku_client::DaemonKey::Local, swept.id)]);
     }
 
     #[test]
