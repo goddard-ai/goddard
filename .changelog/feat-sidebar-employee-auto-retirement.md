@@ -1,0 +1,1 @@
+- Finished employees leave the sidebar and release their names after an hour if the boss has not assigned them another prompt.

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode};
 use crate::AgentWorkspace;
+use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode};
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +55,10 @@ pub struct BossEmployee {
     #[serde(default)]
     pub knowledge_files: Vec<String>,
     pub expired: bool,
+    /// Unix timestamp when the employee finished. Retired after one hour
+    /// unless the boss assigns the employee another prompt first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expired_at: Option<u64>,
 }
 
 /// A file or folder of employee output the boss published to the user's

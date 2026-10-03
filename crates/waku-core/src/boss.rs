@@ -41,6 +41,7 @@ struct BossRouter {
 const MAX_SPEECH_PARTS: usize = 8;
 const MAX_SPEECH_PART_CHARS: usize = 160;
 const MAX_SPEECH_TOTAL_CHARS: usize = 480;
+const EMPLOYEE_RETIREMENT_SECONDS: u64 = 60 * 60;
 
 pub struct BossService {
     root: PathBuf,
@@ -77,6 +78,15 @@ impl BossService {
                     .map(|(_, employee)| employee.identity.name.as_str())
                     .collect::<Vec<_>>();
                 state.employees[index].identity.name = employee_human_name(id, existing_names);
+            }
+        }
+        // Older documents recorded only the expired flag, not when the
+        // employee finished. Give those entries a full reuse window after
+        // this version first sees them.
+        let now = waku_protocol::model::unix_time();
+        for employee in &mut state.employees {
+            if employee.expired && employee.expired_at.is_none() {
+                employee.expired_at = Some(now);
             }
         }
         let service = Self {
@@ -246,6 +256,7 @@ impl BossService {
             permissions,
             knowledge_files,
             expired: false,
+            expired_at: None,
         })
     }
 
@@ -426,6 +437,7 @@ impl BossService {
                 .find(|entry| entry.session_id == session && entry.expired)
             {
                 entry.expired = false;
+                entry.expired_at = None;
                 revived = true;
             }
             Ok(())
@@ -442,6 +454,7 @@ impl BossService {
                 .find(|entry| entry.session_id == session && !entry.expired)
             {
                 entry.expired = true;
+                entry.expired_at = Some(waku_protocol::model::unix_time());
                 employee = Some(entry.clone());
             }
             Ok(())
@@ -450,6 +463,36 @@ impl BossService {
         self.projects.lock().remove(&session);
         self.interrupted.lock().retain(|id| *id != session);
         Ok(employee)
+    }
+
+    /// Remove finished employees once their one-hour reuse window has elapsed.
+    /// Their task sessions remain in task storage, including full transcripts.
+    pub fn retire_expired(&self, now: u64) -> anyhow::Result<Vec<BossEmployee>> {
+        let _operation = self.operation_lock.lock();
+        let cutoff = now.saturating_sub(EMPLOYEE_RETIREMENT_SECONDS);
+        if !self.state.lock().employees.iter().any(|employee| {
+            employee.expired
+                && employee
+                    .expired_at
+                    .is_some_and(|expired_at| expired_at <= cutoff)
+        }) {
+            return Ok(Vec::new());
+        }
+        let mut retired = Vec::new();
+        self.update(|state| {
+            state.employees.retain(|employee| {
+                let should_retire = employee.expired
+                    && employee
+                        .expired_at
+                        .is_some_and(|expired_at| expired_at <= cutoff);
+                if should_retire {
+                    retired.push(employee.clone());
+                }
+                !should_retire
+            });
+            Ok(())
+        })?;
+        Ok(retired)
     }
 
     fn require_owner(&self, caller: Option<Uuid>) -> anyhow::Result<()> {
@@ -1104,6 +1147,61 @@ mod tests {
     use waku_protocol::custom_commands::CustomCommandIcon;
 
     #[test]
+    fn retirement_releases_employee_name_and_keeps_roster_persisted() {
+        let root = std::env::temp_dir().join(format!("boss-retire-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let state = service.document();
+        let employee = service
+            .prepare_employee(boss, state.personas[0].id, "Review".into())
+            .unwrap();
+        let session_id = employee.session_id;
+        let name = employee.identity.name.clone();
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        service.expire(session_id).unwrap();
+        service
+            .update(|state| {
+                state.employees[0].expired_at = Some(100);
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(service.retire_expired(3_699).unwrap().is_empty());
+        assert!(service.is_employee(session_id));
+        let retired = service.retire_expired(3_700).unwrap();
+        assert_eq!(retired.len(), 1);
+        assert_eq!(retired[0].identity.name, name);
+        assert!(!service.is_employee(session_id));
+        assert_eq!(
+            employee_human_name(
+                session_id,
+                service
+                    .document()
+                    .employees
+                    .iter()
+                    .map(|e| e.identity.name.as_str())
+            ),
+            name,
+            "the released name can be assigned again"
+        );
+
+        let restored = BossService::open(root.clone()).unwrap();
+        assert!(!restored.is_employee(session_id));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn default_boss_persona_prioritizes_delegation_and_commit_verification() {
         let state = fresh_state();
         let employee = state
@@ -1160,6 +1258,7 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     knowledge_files: Vec::new(),
                     expired: false,
+                    expired_at: None,
                 });
                 Ok(())
             })
@@ -1246,6 +1345,7 @@ mod tests {
                     },
                     knowledge_files: Vec::new(),
                     expired: false,
+                    expired_at: None,
                 });
                 Ok(())
             })
@@ -1566,6 +1666,7 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     knowledge_files: Vec::new(),
                     expired: false,
+                    expired_at: None,
                 });
                 Ok(())
             })
@@ -1727,6 +1828,7 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     knowledge_files: Vec::new(),
                     expired: false,
+                    expired_at: None,
                 });
                 Ok(())
             })

@@ -1787,6 +1787,7 @@ impl Backend for WakuBackend {
         let task_state = self.task_state.clone();
         let settings = self.settings.clone();
         let agent = self.agent.clone();
+        let boss = self.boss.clone();
         let repo_maps = self.repo_maps.clone();
         // A platform memory-pressure signal, when this OS has one, lets the
         // reaper shed safely evictable runtimes ahead of the age cutoff —
@@ -1796,6 +1797,11 @@ impl Backend for WakuBackend {
         let _ = std::thread::Builder::new()
             .name("waku-idle-reaper".into())
             .spawn(move || {
+                let retire_employees = || {
+                    if let Err(error) = boss.retire_expired(crate::model::unix_time()) {
+                        eprintln!("could not retire finished Boss employees: {error:#}");
+                    }
+                };
                 // A pressure shed pass just ran — shed at most once per
                 // cooldown so a persistent-pressure stream cannot churn
                 // through teardown-and-reopen cycles.
@@ -1817,6 +1823,7 @@ impl Backend for WakuBackend {
                     let Some(pressure) = &pressure else {
                         std::thread::sleep(IDLE_REAPER_INTERVAL);
                         shed(false);
+                        retire_employees();
                         continue;
                     };
                     crossbeam_channel::select! {
@@ -1827,9 +1834,11 @@ impl Backend for WakuBackend {
                                 last_pressure_shed = Some(std::time::Instant::now());
                                 shed(true);
                             }
+                            retire_employees();
                         }
                         recv(crossbeam_channel::after(IDLE_REAPER_INTERVAL)) -> _ => {
                             shed(false);
+                            retire_employees();
                         }
                     }
                 }
@@ -6089,6 +6098,7 @@ impl WakuBackend {
                 }
             }
             BossOperation::Control { session_id, action } => {
+                let _operation = self.boss.operation_lock.lock();
                 self.boss.require_control(caller, session_id)?;
                 // A prompt to a finished employee resurrects it: the boss
                 // sends the same worker another job instead of summoning a
@@ -6271,14 +6281,16 @@ impl WakuBackend {
                 body.push_str(&format!("  {cue}\n"));
             }
         }
+        // Reports escalate to the boss whenever the supervisor cannot take
+        // them — expired, retired from the roster, or never an employee.
         let supervisor = if self
             .boss
             .employee(employee.supervisor_id)
-            .is_some_and(|entry| entry.expired)
+            .is_some_and(|entry| !entry.expired)
         {
-            self.boss.document().session_id
-        } else {
             Some(employee.supervisor_id)
+        } else {
+            self.boss.document().session_id
         };
         if let Some(supervisor) = supervisor {
             let prompt = format!(
@@ -12314,10 +12326,43 @@ mod tests {
             )
             .unwrap();
         assert!(!backend.boss.employee(employee_id).unwrap().expired);
+        assert!(
+            backend
+                .boss
+                .employee(employee_id)
+                .unwrap()
+                .expired_at
+                .is_none()
+        );
         assert!(backend.boss.require_active(employee_id).is_ok());
         let prompts = capture.prompts.lock();
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].contains("One more check"));
+        drop(prompts);
+
+        backend.finish_boss_employee(employee_id).unwrap();
+        backend
+            .boss
+            .update(|state| {
+                state
+                    .employees
+                    .iter_mut()
+                    .find(|employee| employee.session_id == employee_id)
+                    .unwrap()
+                    .expired_at = Some(1);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(backend.boss.retire_expired(3_601).unwrap().len(), 1);
+        assert!(backend.boss.employee(employee_id).is_none());
+        assert!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .any(|session| session.id == employee_id)
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
