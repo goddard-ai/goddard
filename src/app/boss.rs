@@ -878,6 +878,7 @@ impl Waku {
             .child(div().flex_1().text_size(sp(18.0)).child(name.clone()))
             .child(
                 boss_button("boss-chat", tr!("boss.chat"), &theme)
+                    .child(icon("icons/message-square.svg", 14.0, theme.text_secondary))
                     .child(tr!("boss.chat"))
                     .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
             )
@@ -889,8 +890,14 @@ impl Waku {
                 ]
                 .into_iter()
                 .map(|(target, label)| {
+                    let glyph = match target {
+                        BossTab::History => "icons/folder-clock.svg",
+                        BossTab::Memory => "icons/brain.svg",
+                        BossTab::Personas => "icons/user-round.svg",
+                    };
                     boss_button(label, tr!(label), &theme)
                         .when(tab == target, |button| button.bg(theme.overlay))
+                        .child(icon(glyph, 14.0, theme.text_secondary))
                         .child(tr!(label))
                         .on_activation(cx, move |this, window, cx| {
                             this.open_boss_page(key, target, window, cx)
@@ -954,9 +961,17 @@ impl Waku {
             }
             BossTab::Memory => {
                 toolbar = toolbar
-                    .child(div().flex_1().truncate().child(self.boss_ui.folder.clone()))
+                    .child(icon("icons/folder-open.svg", 15.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .truncate()
+                            .text_color(theme.text_secondary)
+                            .child(self.boss_ui.folder.clone()),
+                    )
                     .child(
                         boss_button("boss-parent", tr!("boss.parent"), &theme)
+                            .child(icon("icons/arrow-up.svg", 14.0, theme.text_secondary))
                             .child(tr!("boss.parent"))
                             .on_activation(cx, move |this, _, cx| {
                                 if this.boss_editor_dirty(cx) {
@@ -983,6 +998,15 @@ impl Waku {
                             .into_iter()
                             .map(|(folder, label)| {
                                 boss_button(label, tr!(label), &theme)
+                                    .child(icon(
+                                        if folder {
+                                            "icons/folder-new.svg"
+                                        } else {
+                                            "icons/plus.svg"
+                                        },
+                                        14.0,
+                                        theme.text_secondary,
+                                    ))
                                     .child(tr!(label))
                                     .on_activation(cx, move |this, window, cx| {
                                         let path = format!("{}/", this.boss_ui.folder)
@@ -1033,7 +1057,7 @@ impl Waku {
             .flex()
             .flex_col()
             .child(header)
-            .child(toolbar)
+            .child(toolbar.border_b_1().border_color(theme.separator))
             .when(self.boss_ui.pending, |element| {
                 element.child(div().px(px(20.0)).child(tr!("boss.loading")))
             })
@@ -1042,7 +1066,16 @@ impl Waku {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .child(div().w(px(300.0)).flex().flex_col().min_h_0().child(list))
+                    .child(
+                        div()
+                            .w(px(300.0))
+                            .flex()
+                            .flex_col()
+                            .min_h_0()
+                            .border_r_1()
+                            .border_color(theme.separator)
+                            .child(list),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -1164,21 +1197,21 @@ impl Waku {
             .flex_col()
             .gap(px(12.0))
             .child(tr!("boss.name_path"))
-            .child(editor.name.clone());
+            .child(boss_input(editor.name.clone(), &theme));
         if matches!(
             editor.kind,
             BossEditorKind::Persona(_) | BossEditorKind::File
         ) {
             form = form
                 .child(tr!("boss.markdown"))
-                .child(editor.content.clone());
+                .child(boss_input(editor.content.clone(), &theme));
         }
         if is_persona {
             form = form
                 .child(tr!("boss.knowledge"))
-                .child(editor.knowledge.clone())
+                .child(boss_input(editor.knowledge.clone(), &theme))
                 .child(tr!("boss.memory_grants"))
-                .child(editor.memory.clone())
+                .child(boss_input(editor.memory.clone(), &theme))
                 .child(tr!("boss.permissions_hint"));
             for (computer, label, enabled) in [
                 (false, "boss.delegate", editor.permissions.summon_employees),
@@ -1186,11 +1219,16 @@ impl Waku {
             ] {
                 form = form.child(
                     boss_button(label, tr!(label), &theme)
-                        .child(format!(
-                            "{} {}",
-                            if enabled { "☑" } else { "☐" },
-                            tr!(label)
+                        .child(icon(
+                            if enabled {
+                                "icons/check.svg"
+                            } else {
+                                "icons/x.svg"
+                            },
+                            13.0,
+                            theme.text_secondary,
                         ))
+                        .child(tr!(label))
                         .on_activation(cx, move |this, _, cx| {
                             if let Some(editor) = &mut this.boss_ui.editor {
                                 if computer {
@@ -1211,7 +1249,16 @@ impl Waku {
                     let enabled = editor.permissions.integration_ids.contains(&id);
                     form = form.child(
                         boss_button(format!("boss-integration-{id}"), id.clone(), &theme)
-                            .child(format!("{} {}", if enabled { "☑" } else { "☐" }, id))
+                            .child(icon(
+                                if enabled {
+                                    "icons/check.svg"
+                                } else {
+                                    "icons/x.svg"
+                                },
+                                13.0,
+                                theme.text_secondary,
+                            ))
+                            .child(id.clone())
                             .on_activation(cx, move |this, _, cx| {
                                 if let Some(editor) = &mut this.boss_ui.editor {
                                     if editor.permissions.integration_ids.contains(&id) {
@@ -1235,11 +1282,13 @@ impl Waku {
                 .gap(px(8.0))
                 .child(
                     boss_button("boss-save", tr!("boss.save"), &theme)
+                        .child(icon("icons/check.svg", 14.0, theme.text_secondary))
                         .child(tr!("boss.save"))
                         .on_activation(cx, |this, _, cx| this.save_boss_document(cx)),
                 )
                 .child(
                     boss_button("boss-discard", tr!("boss.discard"), &theme)
+                        .child(icon("icons/x.svg", 14.0, theme.text_secondary))
                         .child(tr!("boss.discard"))
                         .on_activation(cx, |this, _, cx| {
                             this.boss_ui.editor = None;
@@ -1297,7 +1346,10 @@ fn boss_button(
         .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
         .px(px(10.0))
         .py(px(6.0))
-        .rounded(px(6.0))
+        .rounded(px(8.0))
+        .border(hairline())
+        .border_color(theme.border)
+        .bg(theme.inset)
         .flex()
         .items_center()
         .gap(px(6.0))
@@ -1306,4 +1358,16 @@ fn boss_button(
         .cursor_pointer()
         .hover(|style| style.bg(theme.overlay))
         .focus_visible(|style| style.bg(theme.focus_highlight()))
+}
+
+#[track_caller]
+fn boss_input(input: Entity<TextInput>, theme: &Theme) -> Div {
+    div()
+        .w_full()
+        .rounded(px(8.0))
+        .border(hairline())
+        .border_color(theme.border)
+        .bg(theme.inset)
+        .p(px(8.0))
+        .child(input)
 }
