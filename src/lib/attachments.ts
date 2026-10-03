@@ -117,3 +117,27 @@ function imageMimeType(name: string): string {
 function attachmentTooLarge(name: string): Error {
   return new Error(`${name} is too large to attach (32 MB maximum)`);
 }
+
+/** Cached attachment image loader — the react-query recipe minus the
+ * library: immutable blobs get Infinity staleness like the reference. */
+export function attachmentImageQuery(
+  client: WakuClient | null,
+  profile: { id: string; address: string } | null,
+  attachment: MessageAttachment,
+  connected: boolean,
+) {
+  return {
+    queryKey: [
+      'daemon', profile?.id ?? 'disconnected', 'attachment-image',
+      profile?.address, attachment.blob_reference, attachment.path, attachment.name,
+    ] as const,
+    queryFn: () => {
+      if (!client) throw new Error('Goddard daemon is disconnected');
+      return readAttachmentImage(client, attachment);
+    },
+    enabled: connected && Boolean(
+      client && profile && attachment.is_image && !attachment.is_dir && attachment.blob_reference,
+    ),
+    staleTime: Infinity,
+  };
+}

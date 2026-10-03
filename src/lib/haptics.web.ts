@@ -15,3 +15,7 @@ export const Haptics = {
     Heavy: 'heavy',
   },
 } as const;
+
+export function selectionHaptic() {}
+export function successHaptic() {}
+export function errorHaptic() {}
