@@ -834,7 +834,6 @@ impl Render for Waku {
                     })
                     .when(
                         self.boss_ui.page.is_none()
-                            && self.boss_chat_key().is_none()
                             && (!self.drafts_page
                                 || self.selected_terminal.is_some_and(|id| {
                                     self.right_panel_terminals.contains_key(&id)

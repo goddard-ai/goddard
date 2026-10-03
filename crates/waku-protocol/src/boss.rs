@@ -140,6 +140,16 @@ pub enum BossOperation {
     Rename {
         name: String,
     },
+    /// Rename an employee's identity. The boss itself uses `Rename`.
+    RenameEmployee {
+        session_id: Uuid,
+        name: String,
+    },
+    /// Re-roll a managed identity's avatar seed so it draws a new face.
+    /// `None` — or the boss's own session id — targets the boss.
+    RegenerateAvatar {
+        session_id: Option<Uuid>,
+    },
     UpsertPersona {
         persona: BossPersona,
     },

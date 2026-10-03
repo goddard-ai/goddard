@@ -2996,6 +2996,11 @@ impl Waku {
             if !session.has_started() || session.archived_at.is_some() {
                 continue;
             }
+            // Managed sessions never render pull-request affordances, so
+            // their checkouts are not worth a scan.
+            if self.boss_ui.managed.contains(&session.id) {
+                continue;
+            }
             let (cwd, branch) = match &session.workspace {
                 SessionWorkspace::Worktree { path, branch, .. } => (path.clone(), branch.clone()),
                 SessionWorkspace::Local => match self
@@ -4986,18 +4991,24 @@ impl Waku {
         cx.notify();
     }
 
-    fn begin_session_rename(
+    pub(super) fn begin_session_rename(
         &mut self,
         session_id: Uuid,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A managed session's editable name is its Boss identity's, not the
+        // session title the daemon derived from it.
         let Some(title) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .map(localized_session_title)
+            .managed_session_meta(session_id)
+            .map(|(_, identity, _)| identity.name)
+            .or_else(|| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .map(localized_session_title)
+            })
         else {
             return;
         };
@@ -5023,6 +5034,17 @@ impl Waku {
             .content()
             .trim()
             .to_owned();
+        if title.is_empty() {
+            cx.notify();
+            return;
+        }
+        // Managed names live in the daemon's Boss document; the operation
+        // retitles the session there as well.
+        if self.boss_ui.managed.contains(&session_id) {
+            self.rename_managed_session(session_id, title, cx);
+            cx.notify();
+            return;
+        }
         let should_update = !title.is_empty()
             && self
                 .state
@@ -5041,7 +5063,7 @@ impl Waku {
         cx.notify();
     }
 
-    fn cancel_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn cancel_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.session_rename.take().is_none() {
             return;
         }
@@ -6265,6 +6287,18 @@ impl Waku {
             && self.boss_ui.page.is_none()
             && self.projects_page.is_none()
             && !self.notifications.open;
+        // A managed session's header leads with its Boss identity —
+        // avatar, name, and job title — in place of the session title the
+        // daemon keeps in sync with it.
+        let managed_identity = session_surface
+            .then(|| {
+                session.and_then(|session| {
+                    self.managed_session_meta(session.id).map(|(_, identity, job_title)| {
+                        (session.id, identity, job_title)
+                    })
+                })
+            })
+            .flatten();
         let header_phase = session_surface
             .then(|| {
                 session.and_then(|session| {
@@ -6366,16 +6400,26 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(7.0))
-                        .child(
-                            div()
+                        .child(match &managed_identity {
+                            Some((session_id, identity, job_title)) => self
+                                .render_managed_session_identity(
+                                    *session_id, identity, job_title, cx,
+                                ),
+                            None => div()
                                 .min_w_0()
                                 .truncate()
                                 .text_size(sp(13.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text)
-                                .child(SharedString::from(title)),
-                        )
-                        .children(employee_job_title.map(|job_title| {
+                                .child(SharedString::from(title.clone()))
+                                .into_any_element(),
+                        })
+                        .children(
+                            managed_identity
+                                .is_none()
+                                .then_some(employee_job_title)
+                                .flatten()
+                                .map(|job_title| {
                             div()
                                 .h(px(22.0))
                                 .max_w(px(180.0))
@@ -6403,7 +6447,8 @@ impl Waku {
                                     theme.text_tertiary,
                                 ))
                                 .child(div().min_w_0().truncate().child(job_title.clone()))
-                        }))
+                        }),
+                        )
                         .children(header_phase.map(|(icon_path, label_key)| {
                             div()
                                 .h(px(22.0))

@@ -532,6 +532,42 @@ impl BossService {
                     state: self.document(),
                 })
             }
+            BossOperation::RenameEmployee { session_id, name } => {
+                self.require_owner(caller)?;
+                validate_name(&name)?;
+                self.update(|state| {
+                    let employee = state
+                        .employees
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session_id)
+                        .ok_or_else(|| anyhow!("not a Boss employee"))?;
+                    employee.identity.name = name.trim().to_owned();
+                    Ok(())
+                })?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::RegenerateAvatar { session_id } => {
+                self.require_owner(caller)?;
+                let seed = Uuid::new_v4().to_string();
+                self.update(|state| {
+                    if session_id.is_none() || session_id == state.session_id {
+                        state.identity.avatar_seed = seed;
+                    } else {
+                        let employee = state
+                            .employees
+                            .iter_mut()
+                            .find(|entry| Some(entry.session_id) == session_id)
+                            .ok_or_else(|| anyhow!("not a Boss employee"))?;
+                        employee.identity.avatar_seed = seed;
+                    }
+                    Ok(())
+                })?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
             BossOperation::UpsertPersona { mut persona } => {
                 self.require_owner(caller)?;
                 validate_name(&persona.name)?;
@@ -1626,5 +1662,80 @@ mod tests {
         assert!(
             matches!(operation, BossOperation::Summon { workspace: None, base_branch: None, .. })
         );
+    }
+
+    #[test]
+    fn employee_rename_and_avatar_regeneration_are_owner_only() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let session_id = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.employees.push(BossEmployee {
+                    session_id,
+                    supervisor_id: Uuid::new_v4(),
+                    identity: BossIdentity {
+                        id: session_id,
+                        name: "Quinn".into(),
+                        avatar_seed: session_id.to_string(),
+                    },
+                    job_title: "Release engineer".into(),
+                    persona_id: state.personas[1].id,
+                    permissions: PersonaPermissions::default(),
+                    knowledge_files: Vec::new(),
+                    expired: false,
+                });
+                Ok(())
+            })
+            .unwrap();
+        // Employees cannot rename themselves or re-roll their own face.
+        for operation in [
+            BossOperation::RenameEmployee {
+                session_id,
+                name: "Rogue".into(),
+            },
+            BossOperation::RegenerateAvatar {
+                session_id: Some(session_id),
+            },
+        ] {
+            assert!(service.handle(Some(session_id), operation).is_err());
+        }
+        let BossResult::State { state } = service
+            .handle(
+                None,
+                BossOperation::RenameEmployee {
+                    session_id,
+                    name: "Scout".into(),
+                },
+            )
+            .unwrap()
+        else {
+            panic!("employee rename returns the updated state");
+        };
+        assert_eq!(state.employees[0].identity.name, "Scout");
+        let seed = state.employees[0].identity.avatar_seed.clone();
+        let BossResult::State { state } = service
+            .handle(
+                None,
+                BossOperation::RegenerateAvatar {
+                    session_id: Some(session_id),
+                },
+            )
+            .unwrap()
+        else {
+            panic!("avatar regeneration returns the updated state");
+        };
+        assert_ne!(state.employees[0].identity.avatar_seed, seed);
+        // A missing target — or the boss's own session — re-rolls the
+        // boss's face instead.
+        let boss_seed = state.identity.avatar_seed;
+        let BossResult::State { state } = service
+            .handle(None, BossOperation::RegenerateAvatar { session_id: None })
+            .unwrap()
+        else {
+            panic!("avatar regeneration returns the updated state");
+        };
+        assert_ne!(state.identity.avatar_seed, boss_seed);
+        fs::remove_dir_all(root).unwrap();
     }
 }

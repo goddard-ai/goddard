@@ -972,9 +972,15 @@ impl Waku {
                         .child(pulse_dot(5.0, theme.accent)),
                 )
             });
-        let git_status = change_counts.map(|(additions, deletions)| {
+        // A managed session's strip hosts no review or work-item surfaces —
+        // chips that would open them stay off rather than dead-clicking.
+        let managed = session.is_some_and(|session| self.boss_ui.managed.contains(&session.id));
+        let git_status = change_counts.and_then(|(additions, deletions)| {
+            if managed {
+                return None;
+            }
             let focus = self.transcript_control_focus("header-git-status", cx);
-            div()
+            Some(div()
                 .id("header-git-status")
                 .track_focus(&focus)
                 .tab_index(0)
@@ -1019,9 +1025,12 @@ impl Waku {
                         cx.stop_propagation();
                     }
                 }))
-                .into_any_element()
+                .into_any_element())
         });
         let pull_request = session.and_then(|session| {
+            if managed {
+                return None;
+            }
             let entries = self
                 .sidebar_pull_requests
                 .borrow()

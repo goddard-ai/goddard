@@ -5912,25 +5912,46 @@ impl WakuBackend {
             }
             operation => {
                 let rename = matches!(operation, BossOperation::Rename { .. });
+                let employee_rename = match &operation {
+                    BossOperation::RenameEmployee { session_id, .. } => Some(*session_id),
+                    _ => None,
+                };
                 let refresh_persona = matches!(&operation, BossOperation::UpsertPersona { persona }
                     if persona.id == self.boss.document().persona_id);
                 let result = self.boss.handle(caller, operation)?;
+                let boss = self.boss.document();
                 if (rename || refresh_persona)
-                    && let Some(session) = self.boss.document().session_id
+                    && let Some(session) = boss.session_id
                 {
                     self.boss.reset_context(session);
                 }
-                if rename {
-                    let boss = self.boss.document();
+                if let Some(session_id) = employee_rename {
+                    // The renamed employee's next prompt re-injects its
+                    // persona block so the new name reaches it.
+                    self.boss.reset_context(session_id);
+                }
+                // A rename retitles the managed session so the sidebar and
+                // top bar agree with the identity.
+                let retitle = if rename {
+                    boss.session_id
+                        .map(|id| (id, boss.identity.name.clone()))
+                } else {
+                    employee_rename.and_then(|id| {
+                        boss.employees
+                            .iter()
+                            .find(|employee| employee.session_id == id)
+                            .map(|employee| (id, employee.identity.name.clone()))
+                    })
+                };
+                if let Some((session_id, title)) = retitle {
                     let mut state = self.task_state.lock();
                     if let Some(session) = state
                         .sessions
                         .iter_mut()
-                        .find(|session| Some(session.id) == boss.session_id)
+                        .find(|session| session.id == session_id)
                     {
-                        session.title = boss.identity.name;
-                        let id = session.id;
-                        state.mark_session_dirty(id);
+                        session.title = title;
+                        state.mark_session_dirty(session_id);
                         self.task_store.save(&mut state)?;
                     }
                 }

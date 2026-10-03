@@ -502,6 +502,192 @@ impl Waku {
         (Rc::new(mentions), Rc::new(avatars))
     }
 
+    /// The `(daemon, identity, job title)` a managed session's top bar
+    /// draws — the boss's own for its chat session, the employee's for
+    /// theirs. `None` for unmanaged sessions and daemons that have not
+    /// reported Boss state yet.
+    pub(super) fn managed_session_meta(
+        &self,
+        session_id: Uuid,
+    ) -> Option<(DaemonKey, BossIdentity, String)> {
+        self.boss_ui.states.iter().find_map(|(key, state)| {
+            if state.session_id == Some(session_id) {
+                return Some((*key, state.identity.clone(), tr!("boss.group")));
+            }
+            state
+                .employees
+                .iter()
+                .find(|employee| employee.session_id == session_id)
+                .map(|employee| {
+                    (*key, employee.identity.clone(), employee.job_title.clone())
+                })
+        })
+    }
+
+    fn managed_session_is_boss(&self, key: DaemonKey, session_id: Uuid) -> bool {
+        self.boss_ui
+            .states
+            .get(&key)
+            .is_some_and(|state| state.session_id == Some(session_id))
+    }
+
+    /// Rename the managed session's identity — the boss through `Rename`,
+    /// an employee through `RenameEmployee` — so the sidebar, top bar, and
+    /// session title all move together.
+    pub(super) fn rename_managed_session(
+        &mut self,
+        session_id: Uuid,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((key, identity, _)) = self.managed_session_meta(session_id) else {
+            return;
+        };
+        if identity.name == name {
+            return;
+        }
+        let operation = if self.managed_session_is_boss(key, session_id) {
+            BossOperation::Rename { name }
+        } else {
+            BossOperation::RenameEmployee { session_id, name }
+        };
+        self.boss_request(key, operation, BossReply::List, cx);
+    }
+
+    /// Re-roll the managed session's avatar seed — the top bar's
+    /// double-click on the face. The boss passes `None`; an employee its
+    /// own session id.
+    pub(super) fn regenerate_managed_avatar(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((key, ..)) = self.managed_session_meta(session_id) else {
+            return;
+        };
+        let employee = (!self.managed_session_is_boss(key, session_id)).then_some(session_id);
+        self.boss_request(
+            key,
+            BossOperation::RegenerateAvatar {
+                session_id: employee,
+            },
+            BossReply::List,
+            cx,
+        );
+    }
+
+    /// The identity block a managed session's top bar shows in place of the
+    /// plain title: avatar, name, and job title. Double-clicking the name
+    /// swaps in the shared inline rename field; double-clicking the avatar
+    /// deals a new face. Both carry focus stops so the actions are also
+    /// keyboard-operable.
+    pub(super) fn render_managed_session_identity(
+        &self,
+        session_id: Uuid,
+        identity: &BossIdentity,
+        job_title: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let avatar_focus = self.transcript_control_focus("managed-avatar-regenerate", cx);
+        let avatar = div()
+            .id(SharedString::from(format!("managed-avatar-{session_id}")))
+            .track_focus(&avatar_focus)
+            .tab_index(0)
+            .flex_none()
+            .rounded(px(8.0))
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .tooltip(Tooltip::text(tr!("boss.new_face")))
+            .on_click(cx.listener(
+                move |this, event: &gpui::ClickEvent, _, cx| {
+                    if event.click_count() == 2 {
+                        this.regenerate_managed_avatar(session_id, cx);
+                        cx.stop_propagation();
+                    }
+                },
+            ))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.regenerate_managed_avatar(session_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(self.boss_avatar(identity, 24.0, cx));
+        let name: AnyElement = if self.session_rename == Some(session_id) {
+            div()
+                .id(SharedString::from(format!(
+                    "session-rename-field-{session_id}"
+                )))
+                .key_context(sidebar::SESSION_RENAME_PARENT_CONTEXT)
+                .on_action(cx.listener(
+                    |this, _: &sidebar::CancelSessionRename, window, cx| {
+                        this.cancel_session_rename(window, cx);
+                    },
+                ))
+                .h(px(22.0))
+                .w(px(200.0))
+                .px(px(4.0))
+                .rounded(px(4.0))
+                .border(hairline())
+                .border_color(theme.accent)
+                .bg(theme.inset)
+                .flex()
+                .items_center()
+                .text_size(sp(13.0))
+                .text_color(theme.text)
+                .child(self.session_rename_input.clone())
+                .into_any_element()
+        } else {
+            let focus = self.transcript_control_focus("managed-name-rename", cx);
+            div()
+                .id(SharedString::from(format!("managed-name-{session_id}")))
+                .track_focus(&focus)
+                .tab_index(0)
+                .min_w_0()
+                .truncate()
+                .rounded(px(4.0))
+                .text_size(sp(13.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .cursor_default()
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .tooltip(Tooltip::text(tr!("common.rename")))
+                .on_click(cx.listener(
+                    move |this, event: &gpui::ClickEvent, window, cx| {
+                        if event.click_count() == 2 {
+                            this.begin_session_rename(session_id, window, cx);
+                            cx.stop_propagation();
+                        }
+                    },
+                ))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "enter" {
+                        this.begin_session_rename(session_id, window, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .child(SharedString::from(identity.name.clone()))
+                .into_any_element()
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .min_w_0()
+            .child(avatar)
+            .child(name)
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(job_title.to_owned())),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_boss_chat_empty_state(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let identity = self
@@ -515,7 +701,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .px_8()
-            .pt(px(HEADER_HEIGHT * 2.0))
+            .pt(px(HEADER_HEIGHT))
             .pb(px(52.0))
             .children(identity.map(|identity| self.boss_avatar(identity, 54.0, cx)))
             .child(

@@ -1230,6 +1230,19 @@ fn right_panel_tab_icon(
     }
 }
 
+/// What a boss-managed session's strip may host — file previews opened
+/// from the transcript, webview tabs, and side chats. Terminals, the file
+/// tree, and code review stay out.
+fn managed_panel_surface(surface: &RightPanelSurface) -> bool {
+    matches!(
+        surface,
+        RightPanelSurface::Browser(_)
+            | RightPanelSurface::File(_)
+            | RightPanelSurface::FileAtRef { .. }
+            | RightPanelSurface::SideChat(_)
+    )
+}
+
 pub(super) fn reusable_surface_index(
     surfaces: &[RightPanelSurface],
     requested: &RightPanelSurface,
@@ -2303,11 +2316,28 @@ impl Waku {
         self.restore_right_panel_state(incoming, cx);
     }
 
+    /// Whether the live strip belongs to a boss-managed session — an
+    /// employee's, or the boss's own chat. (The Boss page's strip still
+    /// admits nothing.)
+    pub(super) fn managed_panel_owner(&self) -> bool {
+        match self.active_right_panel_owner() {
+            RightPanelOwner::Session(id) => self.boss_ui.managed.contains(&id),
+            RightPanelOwner::Boss(_) => {
+                self.boss_ui.page.is_none() && self.boss_chat_key().is_some()
+            }
+            _ => false,
+        }
+    }
+
     /// What the current owner lets into its strip: sessions and main-area
-    /// terminals take everything, a project page takes its issue/PR details
-    /// and files rooted at the project, and pages without their own surface
-    /// take nothing.
+    /// terminals take everything, a managed session takes only file
+    /// previews, webviews, and side chats, a project page takes its issue/PR
+    /// details and files rooted at the project, and pages without their own
+    /// surface take nothing.
     fn right_panel_owner_allows(&self, surface: &RightPanelSurface) -> bool {
+        if self.managed_panel_owner() {
+            return managed_panel_surface(surface);
+        }
         match self.active_right_panel_owner() {
             RightPanelOwner::Session(_) | RightPanelOwner::Terminal(_) | RightPanelOwner::Bare => {
                 true
@@ -2328,9 +2358,25 @@ impl Waku {
 
     pub(super) fn restore_right_panel_state(
         &mut self,
-        state: RightPanelSessionState,
+        mut state: RightPanelSessionState,
         cx: &mut Context<Self>,
     ) {
+        // A strip parked before its owner became managed — or written by a
+        // build without the gate — sheds whatever managed sessions cannot
+        // host rather than re-mounting a disallowed tab.
+        if self.managed_panel_owner() {
+            let active = state
+                .active_surface
+                .and_then(|index| state.surfaces.get(index).cloned());
+            state.surfaces.retain(managed_panel_surface);
+            state.active_surface = active.and_then(|surface| {
+                state.surfaces.iter().position(|entry| *entry == surface)
+            });
+            state.git_panel_open = false;
+            state.git_panel = None;
+            state.git_panel_commit_diff = None;
+            state.drop_dead_fullscreen();
+        }
         self.replace_active_right_panel_state(state);
         // A Git panel that parked with the strip comes back whole — refresh
         // it for whatever moved underneath while it was away, since fetches
@@ -3194,9 +3240,10 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .when(self.state.git_panel_enabled, |element| {
-                element.child(self.render_git_panel_toggle(cx))
-            })
+            .when(
+                self.state.git_panel_enabled && !self.managed_panel_owner(),
+                |element| element.child(self.render_git_panel_toggle(cx)),
+            )
             .child(self.render_right_panel_toggle(cx))
     }
 
@@ -4898,12 +4945,17 @@ impl Waku {
         if !self.right_panel_surfaces.is_empty() {
             let weak = cx.entity().downgrade();
             let existing_surfaces = self.right_panel_surfaces.clone();
-            let options = [
+            // Managed sessions get no terminal, file-tree, or review tabs —
+            // the menu only offers what the owner's strip can host.
+            let options: Vec<RightPanelSurface> = [
                 RightPanelSurface::new_browser(),
                 RightPanelSurface::new_terminal(),
                 RightPanelSurface::Files,
                 RightPanelSurface::Diff,
-            ];
+            ]
+            .into_iter()
+            .filter(|surface| self.right_panel_owner_allows(surface))
+            .collect();
             let handle = self.menu_handle("add-right-panel-surface", cx);
             tabs = tabs.child(
                 div()
@@ -5051,6 +5103,29 @@ impl Waku {
 
     fn render_right_panel_chooser(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        // The owner decides which cards the chooser shows — a managed
+        // session offers just the webview.
+        let cards: Vec<(RightPanelSurface, String)> = [
+            (
+                RightPanelSurface::new_browser(),
+                tr!("right_panel.browser_description"),
+            ),
+            (
+                RightPanelSurface::new_terminal(),
+                tr!("right_panel.terminal_description"),
+            ),
+            (
+                RightPanelSurface::Files,
+                tr!("right_panel.files_description"),
+            ),
+            (
+                RightPanelSurface::Diff,
+                tr!("right_panel.diff_description"),
+            ),
+        ]
+        .into_iter()
+        .filter(|(surface, _)| self.right_panel_owner_allows(surface))
+        .collect();
         div()
             .id("right-panel-chooser")
             .flex_1()
@@ -5081,40 +5156,20 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(tr!("right_panel.choose_surface")),
                     )
-                    .child(
+                    .children(cards.chunks(2).enumerate().map(|(row, cards)| {
                         div()
-                            .mt(px(18.0))
+                            .mt(px(if row == 0 { 18.0 } else { 8.0 }))
                             .w_full()
                             .flex()
                             .gap(px(8.0))
-                            .child(self.render_right_panel_card(
-                                RightPanelSurface::new_browser(),
-                                tr!("right_panel.browser_description"),
-                                cx,
-                            ))
-                            .child(self.render_right_panel_card(
-                                RightPanelSurface::new_terminal(),
-                                tr!("right_panel.terminal_description"),
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .mt(px(8.0))
-                            .w_full()
-                            .flex()
-                            .gap(px(8.0))
-                            .child(self.render_right_panel_card(
-                                RightPanelSurface::Files,
-                                tr!("right_panel.files_description"),
-                                cx,
-                            ))
-                            .child(self.render_right_panel_card(
-                                RightPanelSurface::Diff,
-                                tr!("right_panel.diff_description"),
-                                cx,
-                            )),
-                    ),
+                            .children(cards.iter().map(|(surface, description)| {
+                                self.render_right_panel_card(
+                                    surface.clone(),
+                                    description.clone(),
+                                    cx,
+                                )
+                            }))
+                    })),
             )
     }
 

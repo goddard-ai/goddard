@@ -555,8 +555,9 @@ impl Waku {
         if self.git_panel_visible == visible {
             return;
         }
-        // Experimental — the Git panel only opens while its opt-in is on.
-        if visible && !self.state.git_panel_enabled {
+        // Experimental — the Git panel only opens while its opt-in is on,
+        // and never for a managed session: their strip hosts no code review.
+        if visible && (!self.state.git_panel_enabled || self.managed_panel_owner()) {
             return;
         }
         if visible {
