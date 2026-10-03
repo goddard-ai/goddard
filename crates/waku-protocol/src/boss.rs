@@ -50,6 +50,22 @@ pub struct BossEmployee {
     pub expired: bool,
 }
 
+/// A file or folder of employee output the boss published to the user's
+/// sidebar. `path` is absolute on the daemon's host — employees run in their
+/// assigned project directory, so bundles point outside the Boss files root.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BossBundle {
+    pub id: Uuid,
+    pub name: String,
+    pub path: String,
+    /// Recorded at publish time so renderers never stat the filesystem.
+    pub directory: bool,
+    pub created_at: u64,
+    /// Re-publishing a path bumps this; the sidebar's recency window reads it.
+    pub updated_at: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
@@ -58,6 +74,8 @@ pub struct BossState {
     pub session_id: Option<Uuid>,
     pub personas: Vec<BossPersona>,
     pub employees: Vec<BossEmployee>,
+    #[serde(default)]
+    pub bundles: Vec<BossBundle>,
     pub revision: u64,
 }
 
@@ -130,6 +148,16 @@ pub enum BossOperation {
     /// previously synthesized clips instead of generating fresh audio.
     Speak {
         parts: Vec<String>,
+    },
+    /// Publish a file or folder to the user's sidebar. `path` is absolute on
+    /// this daemon's host; `name` defaults to the path's file name.
+    PublishBundle {
+        path: String,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    DismissBundle {
+        id: Uuid,
     },
 }
 

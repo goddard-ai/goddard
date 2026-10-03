@@ -111,6 +111,9 @@ pub(super) enum SidebarGroup {
     /// Swept and stale tasks, always the last section regardless of
     /// grouping. Starts collapsed like Terminals.
     Dormant,
+    /// Boss-published files and folders from the last twelve hours, always
+    /// directly above the Pinned section in either grouping.
+    Bundles,
     Planning,
     Date(SessionDateGroup),
     Project(Uuid),
@@ -123,6 +126,7 @@ impl SidebarGroup {
             Self::Pinned => "pinned".into(),
             Self::Terminals => "terminals".into(),
             Self::Dormant => "dormant".into(),
+            Self::Bundles => "bundles".into(),
             Self::Planning => "phase-planning".into(),
             Self::Date(group) => format!("date-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
@@ -137,6 +141,7 @@ impl SidebarGroup {
             Self::Pinned => PersistedSidebarGroup::Pinned,
             Self::Terminals => PersistedSidebarGroup::Terminals,
             Self::Dormant => PersistedSidebarGroup::Dormant,
+            Self::Bundles => PersistedSidebarGroup::Bundles,
             Self::Planning => PersistedSidebarGroup::Planning,
             Self::Date(group) => PersistedSidebarGroup::Date(group.index()),
             Self::Project(project_id) => PersistedSidebarGroup::Project(project_id),
@@ -152,6 +157,7 @@ impl SidebarGroup {
             PersistedSidebarGroup::Pinned => Self::Pinned,
             PersistedSidebarGroup::Terminals => Self::Terminals,
             PersistedSidebarGroup::Dormant => Self::Dormant,
+            PersistedSidebarGroup::Bundles => Self::Bundles,
             PersistedSidebarGroup::Planning => Self::Planning,
             PersistedSidebarGroup::Date(index) => Self::Date(*SessionDateGroup::ALL.get(index)?),
             PersistedSidebarGroup::Project(project_id) => Self::Project(project_id),
@@ -164,6 +170,7 @@ impl SidebarGroup {
             Self::Pinned => mix(fingerprint, 0x300),
             Self::Terminals => mix(fingerprint, 0x400),
             Self::Dormant => mix(fingerprint, 0x500),
+            Self::Bundles => mix(fingerprint, 0x700),
             Self::Planning => mix(fingerprint, 0x601),
             Self::Date(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
@@ -263,6 +270,32 @@ fn append_sidebar_group_rows(
     rows.push(SidebarRow::GroupSpacer);
 }
 
+/// The published bundles young enough for the Recent bundles group, newest
+/// first. A bundle keeps its row for twelve hours after its last publish —
+/// an older one ages out of the sidebar entirely rather than falling into a
+/// date or project group.
+fn sidebar_recent_bundles(
+    states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
+    now: u64,
+) -> Vec<(waku_client::DaemonKey, Uuid)> {
+    let mut bundles: Vec<_> = states
+        .iter()
+        .flat_map(|(key, state)| state.bundles.iter().map(move |bundle| (*key, bundle)))
+        .filter(|(_, bundle)| now.saturating_sub(bundle.updated_at) < SIDEBAR_BUNDLE_RECENT_SECS)
+        .collect();
+    // Hosts come out of a HashMap, so ties need a stable key or the order
+    // would churn with every rebuild.
+    bundles.sort_by(|(a_key, a), (b_key, b)| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then((*a_key, a.id).cmp(&(*b_key, b.id)))
+    });
+    bundles
+        .into_iter()
+        .map(|(key, bundle)| (key, bundle.id))
+        .collect()
+}
+
 fn updater_button_available_content(
     foreground: Hsla,
     label: SharedString,
@@ -298,7 +331,7 @@ fn updater_button_available_content(
 /// virtualized sidebar list. Keep the gap inside the list row so measured and
 /// estimated heights stay identical for off-screen sessions.
 const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 51.0;
-const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
+pub(super) const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 30.0;
 /// Separation above each action button in the sidebar stack. Kept inside the
@@ -310,6 +343,10 @@ const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 /// The spacer a project group carries between its rows and the next group.
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
+
+/// How long a published bundle keeps its row in the Recent bundles group —
+/// measured from its last publish, so a re-published bundle jumps back in.
+const SIDEBAR_BUNDLE_RECENT_SECS: u64 = 12 * 60 * 60;
 const SIDEBAR_GROUP_HEADER_INSET: f32 = 8.0;
 const SIDEBAR_GROUP_ICON_WIDTH: f32 = 14.0;
 const SIDEBAR_GROUP_ICON_GAP: f32 = 5.0;
@@ -988,6 +1025,8 @@ pub(super) enum SidebarRow {
     BossShowMore(waku_client::DaemonKey),
     Boss(waku_client::DaemonKey),
     Employee(Uuid),
+    /// A boss-published file or folder in the Recent bundles group.
+    Bundle(waku_client::DaemonKey, Uuid),
     /// Group header; the first row also carries the sidebar actions.
     Header(SidebarGroup),
     /// A started session.
@@ -1088,7 +1127,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
-        SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
+        SidebarRow::Session(_) | SidebarRow::Bundle(..) => SIDEBAR_SESSION_ROW_HEIGHT,
         SidebarRow::Boss(_) | SidebarRow::Employee(_) => 42.0,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::BossShowMore(_) | SidebarRow::ShowMore(_) | SidebarRow::ShowDormant(_) => {
@@ -3583,6 +3622,17 @@ impl Waku {
                 revealed.wrapping_add(dormant_revealed),
             );
         }
+        // Bundle content rides the boss-state revision mixed above; the one
+        // transition it cannot see is a bundle aging out of the recency
+        // window, so the recent count joins the fingerprint.
+        let recent_bundles = self
+            .boss_ui
+            .states
+            .values()
+            .flat_map(|state| &state.bundles)
+            .filter(|bundle| now.saturating_sub(bundle.updated_at) < SIDEBAR_BUNDLE_RECENT_SECS)
+            .count() as u64;
+        fingerprint = mix(fingerprint, recent_bundles);
         // A set has no stable iteration order; combine order-independently.
         let collapsed = self
             .sidebar_collapsed_groups
@@ -3720,6 +3770,27 @@ impl Waku {
             rows.push(SidebarRow::GroupSpacer);
         }
 
+        // Bundles an employee produced and the boss published get their own
+        // section directly above Pinned in either grouping. Under project
+        // grouping they keep this dedicated group rather than folding into a
+        // project — a bundle's detail line names its file, not a project.
+        let recent_bundles = sidebar_recent_bundles(&self.boss_ui.states, now);
+        if !recent_bundles.is_empty() {
+            rows.push(SidebarRow::Header(SidebarGroup::Bundles));
+            if !self
+                .sidebar_collapsed_groups
+                .contains(&SidebarGroup::Bundles)
+            {
+                rows.extend(
+                    recent_bundles
+                        .iter()
+                        .copied()
+                        .map(|(key, id)| SidebarRow::Bundle(key, id)),
+                );
+            }
+            rows.push(SidebarRow::GroupSpacer);
+        }
+
         // Pinned tasks lead the sidebar in both groupings, ordered by the same
         // recency the row displays — newest first, independent of the ordering
         // preference applied to the ordinary groups below.
@@ -3832,9 +3903,9 @@ impl Waku {
             }
         }
 
-        let has_session_header = rows.iter().any(
-            |row| matches!(row, SidebarRow::Header(group) if *group != SidebarGroup::Terminals),
-        );
+        let has_session_header = rows.iter().any(|row| {
+            matches!(row, SidebarRow::Header(group) if !matches!(group, SidebarGroup::Terminals | SidebarGroup::Bundles))
+        });
         if !has_session_header {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
@@ -4065,12 +4136,14 @@ impl Waku {
             }
             SidebarRow::Boss(key) => self.render_boss_sidebar_row(key, cx),
             SidebarRow::Employee(id) => self.render_boss_employee_row(id, cx),
+            SidebarRow::Bundle(key, id) => self.render_sidebar_bundle_row(key, id, cx),
             SidebarRow::Header(group) => {
                 // The header actions belong to the session history — the
-                // Terminals group sits above it but never carries them.
-                let first = group != SidebarGroup::Terminals
+                // Terminals and Recent bundles groups sit above it but never
+                // carry them.
+                let first = !matches!(group, SidebarGroup::Terminals | SidebarGroup::Bundles)
                     && !rows[..index].iter().any(|row| {
-                        matches!(row, SidebarRow::Header(other) if *other != SidebarGroup::Terminals)
+                        matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Bundles))
                     });
                 self.render_sidebar_group_header(group, first, cx)
                     .into_any_element()
@@ -4209,6 +4282,7 @@ impl Waku {
             SidebarGroup::Pinned => tr!("sidebar.pinned"),
             SidebarGroup::Terminals => tr!("sidebar.terminals"),
             SidebarGroup::Dormant => tr!("sidebar.dormant"),
+            SidebarGroup::Bundles => tr!("sidebar.recent_bundles"),
             SidebarGroup::Planning => tr!("phase.planning"),
             SidebarGroup::Date(group) => group.label(),
             SidebarGroup::Project(_) if project_is_projectless => tr!("sidebar.chats"),
@@ -4249,6 +4323,7 @@ impl Waku {
                 | SidebarGroup::Pinned
                 | SidebarGroup::Terminals
                 | SidebarGroup::Dormant
+                | SidebarGroup::Bundles
         )
         .then(|| {
             icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
@@ -4589,7 +4664,8 @@ impl Waku {
             SidebarGroup::Pinned
             | SidebarGroup::Planning
             | SidebarGroup::Date(_)
-            | SidebarGroup::Dormant => return,
+            | SidebarGroup::Dormant
+            | SidebarGroup::Bundles => return,
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -6978,6 +7054,59 @@ pub(super) fn sidebar_session_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waku_client::boss::{BossBundle, BossIdentity, BossState};
+
+    fn boss_state_with_bundles(bundles: Vec<BossBundle>) -> BossState {
+        BossState {
+            identity: BossIdentity {
+                id: Uuid::new_v4(),
+                name: "Boss".into(),
+                avatar_seed: String::new(),
+            },
+            persona_id: Uuid::new_v4(),
+            session_id: None,
+            personas: Vec::new(),
+            employees: Vec::new(),
+            bundles,
+            revision: 0,
+        }
+    }
+
+    #[test]
+    fn recent_bundles_stay_within_twelve_hours_sorted_newest_first() {
+        let now = 1_000_000_000;
+        let bundle = |age: u64| BossBundle {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            path: String::new(),
+            directory: false,
+            created_at: now - age,
+            updated_at: now - age,
+        };
+        let hour = 3600;
+        let fresh = bundle(hour);
+        let older = bundle(2 * hour);
+        let edge = bundle(SIDEBAR_BUNDLE_RECENT_SECS - 1);
+        let expired = bundle(SIDEBAR_BUNDLE_RECENT_SECS);
+        let remote = waku_client::DaemonKey::Remote(Uuid::new_v4());
+        let remote_fresh = bundle(30 * 60);
+        let mut states = HashMap::new();
+        states.insert(
+            waku_client::DaemonKey::Local,
+            boss_state_with_bundles(vec![older.clone(), expired, edge.clone(), fresh.clone()]),
+        );
+        // A second host's bundles merge into the same newest-first ordering.
+        states.insert(remote, boss_state_with_bundles(vec![remote_fresh.clone()]));
+        assert_eq!(
+            sidebar_recent_bundles(&states, now),
+            vec![
+                (remote, remote_fresh.id),
+                (waku_client::DaemonKey::Local, fresh.id),
+                (waku_client::DaemonKey::Local, older.id),
+                (waku_client::DaemonKey::Local, edge.id),
+            ]
+        );
+    }
 
     #[test]
     fn jump_flash_uses_session_neighbors_across_group_headers() {

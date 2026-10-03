@@ -32,6 +32,7 @@ export type { AutomationTrigger } from "./AutomationTrigger";
 export type { AutomationWorkspace } from "./AutomationWorkspace";
 export type { AutomationsState } from "./AutomationsState";
 export type { BasePushState } from "./BasePushState";
+export type { BossBundle } from "./BossBundle";
 export type { BossEmployee } from "./BossEmployee";
 export type { BossFile } from "./BossFile";
 export type { BossIdentity } from "./BossIdentity";

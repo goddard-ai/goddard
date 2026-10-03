@@ -8,8 +8,8 @@ use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
 use uuid::Uuid;
 use waku_protocol::boss::{
-    BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossResult, BossState,
-    PersonaPermissions,
+    BossBundle, BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossResult,
+    BossState, PersonaPermissions,
 };
 
 const MAX_FILE_BYTES: usize = 256 * 1024;
@@ -353,7 +353,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, speak. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
+                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishBundle, dismissBundle, speak. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -599,6 +599,62 @@ impl BossService {
                 self.require_owner(caller)?;
                 fs::create_dir_all(self.file_path(&path, false)?)?;
                 self.update(|_| Ok(()))?;
+                Ok(BossResult::Saved)
+            }
+            BossOperation::PublishBundle { path, name } => {
+                self.require_owner(caller)?;
+                let target = PathBuf::from(&path);
+                if !target.is_absolute() {
+                    bail!("bundle paths must be absolute");
+                }
+                let metadata = fs::metadata(&target).context("bundle path does not exist")?;
+                let directory = metadata.is_dir();
+                let name = match name {
+                    Some(name) => {
+                        let name = name.trim().to_owned();
+                        validate_name(&name)?;
+                        name
+                    }
+                    None => target
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(&path)
+                        .to_owned(),
+                };
+                let now = waku_protocol::model::unix_time();
+                self.update(|state| {
+                    // Re-publishing a path refreshes the bundle in place —
+                    // it jumps back into the sidebar's recency window.
+                    if let Some(bundle) =
+                        state.bundles.iter_mut().find(|bundle| bundle.path == path)
+                    {
+                        bundle.name = name;
+                        bundle.directory = directory;
+                        bundle.updated_at = now;
+                    } else {
+                        state.bundles.push(BossBundle {
+                            id: Uuid::new_v4(),
+                            name,
+                            path,
+                            directory,
+                            created_at: now,
+                            updated_at: now,
+                        });
+                    }
+                    Ok(())
+                })?;
+                Ok(BossResult::Saved)
+            }
+            BossOperation::DismissBundle { id } => {
+                self.require_owner(caller)?;
+                self.update(|state| {
+                    let count = state.bundles.len();
+                    state.bundles.retain(|bundle| bundle.id != id);
+                    if state.bundles.len() == count {
+                        bail!("unknown bundle");
+                    }
+                    Ok(())
+                })?;
                 Ok(BossResult::Saved)
             }
         }
@@ -963,6 +1019,7 @@ fn fresh_state() -> BossState {
             BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Delegate execution promptly and keep your hands free for their next request. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Prefer employees for internet access and work outside your own storage. You control all employees and personas.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } },
         ],
         employees: Vec::new(),
+        bundles: Vec::new(),
         revision: 0,
     }
 }
@@ -1316,5 +1373,148 @@ mod tests {
                 .is_err()
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bundles_publish_dismiss_and_survive_restart() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let output = std::env::temp_dir().join(format!("boss-bundle-{}", Uuid::new_v4()));
+        fs::create_dir_all(&output).unwrap();
+        let file = output.join("report.md");
+        fs::write(&file, "report").unwrap();
+        let file_path = file.to_string_lossy().into_owned();
+        let dir_path = output.to_string_lossy().into_owned();
+        let service = BossService::open(root.clone()).unwrap();
+
+        // Only the boss or a human manages bundles — an employee is refused.
+        let employee_id = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.employees.push(BossEmployee {
+                    session_id: employee_id,
+                    supervisor_id: Uuid::new_v4(),
+                    identity: BossIdentity {
+                        id: employee_id,
+                        name: "Release".into(),
+                        avatar_seed: employee_id.to_string(),
+                    },
+                    job_title: "Release".into(),
+                    persona_id: state.personas[1].id,
+                    permissions: PersonaPermissions::default(),
+                    knowledge_files: Vec::new(),
+                    expired: false,
+                });
+                Ok(())
+            })
+            .unwrap();
+        for op in [
+            BossOperation::PublishBundle {
+                path: file_path.clone(),
+                name: None,
+            },
+            BossOperation::DismissBundle { id: Uuid::nil() },
+        ] {
+            assert!(service.handle(Some(employee_id), op).is_err());
+        }
+        // Bundles carry absolute paths to real outputs — relative paths and
+        // missing files are both refused.
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::PublishBundle {
+                        path: "outputs/report.md".into(),
+                        name: None,
+                    },
+                )
+                .is_err()
+        );
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::PublishBundle {
+                        path: "/definitely/missing".into(),
+                        name: None,
+                    },
+                )
+                .is_err()
+        );
+
+        service
+            .handle(
+                None,
+                BossOperation::PublishBundle {
+                    path: file_path.clone(),
+                    name: None,
+                },
+            )
+            .unwrap();
+        service
+            .handle(
+                None,
+                BossOperation::PublishBundle {
+                    path: dir_path.clone(),
+                    name: Some("Deliverables".into()),
+                },
+            )
+            .unwrap();
+        let state = service.document();
+        assert_eq!(state.bundles.len(), 2);
+        let file_bundle = state
+            .bundles
+            .iter()
+            .find(|bundle| bundle.path == file_path)
+            .unwrap();
+        assert_eq!(file_bundle.name, "report.md");
+        assert!(!file_bundle.directory);
+        let dir_bundle = state
+            .bundles
+            .iter()
+            .find(|bundle| bundle.path == dir_path)
+            .unwrap();
+        assert_eq!(dir_bundle.name, "Deliverables");
+        assert!(dir_bundle.directory);
+        let file_id = file_bundle.id;
+        let file_created = file_bundle.created_at;
+
+        // Re-publishing refreshes the same bundle rather than stacking rows.
+        service
+            .handle(
+                None,
+                BossOperation::PublishBundle {
+                    path: file_path.clone(),
+                    name: Some("Report".into()),
+                },
+            )
+            .unwrap();
+        let state = service.document();
+        assert_eq!(state.bundles.len(), 2);
+        let republished = state
+            .bundles
+            .iter()
+            .find(|bundle| bundle.path == file_path)
+            .unwrap();
+        assert_eq!(republished.id, file_id);
+        assert_eq!(republished.name, "Report");
+        assert_eq!(republished.created_at, file_created);
+        assert!(republished.updated_at >= file_created);
+
+        drop(service);
+        let restored = BossService::open(root.clone()).unwrap();
+        assert_eq!(restored.document().bundles.len(), 2);
+        assert!(
+            restored
+                .handle(None, BossOperation::DismissBundle { id: Uuid::new_v4() })
+                .is_err()
+        );
+        restored
+            .handle(None, BossOperation::DismissBundle { id: file_id })
+            .unwrap();
+        assert_eq!(restored.document().bundles.len(), 1);
+        drop(restored);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(output).unwrap();
+    }
     }
 }

@@ -1,0 +1,1 @@
+- The boss can publish files and folders its employees produce as bundles with `goddard-agent boss publishBundle`; bundles appear in a Recent bundles section above Pinned for twelve hours, open with their default app when clicked, and can be removed from the sidebar through their right-click menu.

@@ -825,6 +825,160 @@ impl Waku {
             .into_any_element()
     }
 
+    /// A Recent bundles row: the card chrome matches a task row, with the
+    /// bundle's display name on the title line and its file name in the
+    /// detail slot a task would spend on its project. Everything the row
+    /// needs was recorded at publish — no filesystem reads on the frame path.
+    pub(super) fn render_sidebar_bundle_row(
+        &self,
+        key: DaemonKey,
+        bundle_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bundle) = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| state.bundles.iter().find(|bundle| bundle.id == bundle_id))
+        else {
+            return div().into_any_element();
+        };
+        let theme = Theme::current(cx);
+        let path = PathBuf::from(&bundle.path);
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&bundle.path)
+            .to_owned();
+        let detail_icon = if bundle.directory {
+            "icons/folder.svg"
+        } else {
+            right_panel::file_icon_for_path(&bundle.path)
+        };
+        // A remote daemon's path names its host's filesystem — the row keeps
+        // the host in the detail line rather than pretending it is local.
+        let file_name = match key {
+            DaemonKey::Remote(host) => match self.remote_host_name(host) {
+                Some(host) => format!("{file_name} · {host}"),
+                None => file_name,
+            },
+            DaemonKey::Local => file_name,
+        };
+        let age = sidebar::format_time_ago(unix_time().saturating_sub(bundle.updated_at));
+        let menu = self.menu_handle(format!("bundle-{key:?}-{bundle_id}"), cx);
+        let keyboard_menu = menu.clone();
+        let row_focus = menu.trigger_focus_handle().clone();
+        let open_path = path.clone();
+        let key_path = path.clone();
+        let row = div()
+            .id(SharedString::from(format!("bundle-{key:?}-{bundle_id}")))
+            .w_full()
+            .min_w_0()
+            .pl(px(8.0))
+            .pr(px(8.0))
+            .py(px(7.0))
+            .rounded(px(9.0))
+            .cursor_default()
+            .track_focus(&row_focus)
+            .tab_index(0)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|element| element.bg(theme.sidebar_item_background))
+            .active(|element| element.bg(theme.sidebar_item_background))
+            .tooltip(Tooltip::text(bundle.path.clone()))
+            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                crate::platform::open_with_default_app(&open_path, cx);
+            }))
+            .on_key_down(cx.listener(move |_, event: &KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.as_str();
+                if matches!(key, "enter" | "space") {
+                    crate::platform::open_with_default_app(&key_path, cx);
+                    cx.stop_propagation();
+                } else if key == "f10" && event.keystroke.modifiers.shift {
+                    keyboard_menu.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .line_height(sp(18.0))
+                            .text_size(sp(13.5))
+                            .text_color(theme.text)
+                            .child(bundle.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .min_h(sp(15.0))
+                            .text_size(sp(13.0))
+                            .line_height(sp(15.0))
+                            .child(icon(detail_icon, 12.5, theme.text_tertiary))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .text_color(theme.text_tertiary)
+                                    .child(div().min_w_0().truncate().child(file_name))
+                                    .child(div().flex_1()),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(age),
+                            ),
+                    ),
+            );
+        let waku = cx.entity().downgrade();
+        context_menu(
+            div()
+                .w_full()
+                .pb(px(sidebar::SIDEBAR_SESSION_ROW_GAP))
+                .child(row),
+            SharedString::from(format!("bundle-menu-{key:?}-{bundle_id}")),
+            &menu,
+            move |_cx| {
+                let remove_waku = waku.clone();
+                vec![
+                    MenuItem::new(tr!("bundle.open"), {
+                        let path = path.clone();
+                        move |_, cx| crate::platform::open_with_default_app(&path, cx)
+                    })
+                    .icon("icons/external-link.svg"),
+                    MenuItem::new(tr!("common.reveal_in_finder"), {
+                        let path = path.clone();
+                        move |_, cx| crate::platform::reveal_in_file_manager(&path, cx)
+                    })
+                    .icon("icons/folder-open.svg"),
+                    MenuItem::Separator,
+                    MenuItem::new(tr!("bundle.dismiss"), move |_, cx| {
+                        let _ = remove_waku.update(cx, |waku, cx| {
+                            waku.boss_request(
+                                key,
+                                BossOperation::DismissBundle { id: bundle_id },
+                                BossReply::List,
+                                cx,
+                            );
+                        });
+                    })
+                    .icon("icons/trash.svg"),
+                ]
+            },
+        )
+    }
+
     pub(super) fn render_boss_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
         if self
             .boss_ui

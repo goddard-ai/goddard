@@ -972,6 +972,7 @@ pub enum PersistedSidebarGroup {
     Date(usize),
     Project(Uuid),
     Projectless,
+    Bundles,
 }
 
 /// A virtualized list's logical scroll position — row index plus the pixel

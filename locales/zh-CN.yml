@@ -693,6 +693,7 @@ sidebar.pinned: 已置顶
 sidebar.terminals: 终端
 sidebar.dormant: 休眠
 sidebar.chats: 聊天
+sidebar.recent_bundles: 最近的文件包
 sidebar.yesterday: 昨天
 sidebar.this_week: 本周
 sidebar.this_month: 本月
@@ -2966,5 +2967,8 @@ boss.unreachable: "无法连接到老板的守护进程。"
 boss.project_required: "打开老板聊天前，请在此守护进程上添加一个项目。"
 boss.unexpected_response: "守护进程返回了意外的老板响应。"
 boss.failed: "老板操作失败：%{error}"
+
+bundle.open: "打开"
+bundle.dismiss: "从边栏移除"
 
 boss.greeting: 今天我们做些什么？

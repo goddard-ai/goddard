@@ -2150,6 +2150,8 @@ sidebar.dormant:
   en: Dormant
 sidebar.chats:
   en: Chats
+sidebar.recent_bundles:
+  en: Recent bundles
 sidebar.yesterday:
   en: Yesterday
 sidebar.this_week:
@@ -5978,6 +5980,11 @@ boss.unexpected_response:
   en: The daemon returned an unexpected Boss response.
 boss.failed:
   en: 'Boss operation failed: %{error}'
+
+bundle.open:
+  en: Open
+bundle.dismiss:
+  en: Remove from sidebar
 
 boss.greeting:
   en: What should we do today?
