@@ -471,6 +471,8 @@ pub(super) struct MessageRender<'a> {
     /// against session state before layout — `None` when the source task is
     /// archived or deleted, leaving the chip inert.
     pub(super) sent_by_task_link: Option<Uuid>,
+    /// Boss avatar for a user message whose sender session is a Boss.
+    pub(super) sent_by_boss: Option<(AnyElement, String)>,
     /// An enabled auto prompt identified from its labeled transcript row.
     pub(super) auto_prompt_rule: Option<(Uuid, String)>,
     pub(super) waku: gpui::WeakEntity<Waku>,
@@ -1198,6 +1200,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         ctx,
         menu,
         sent_by_task_link,
+        sent_by_boss,
         auto_prompt_rule,
         waku,
         composer,
@@ -1227,7 +1230,18 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 .items_end()
                 .gap(px(3.0))
                 .group(group_name.clone());
-            if message.sent_by_task.is_some() {
+            if let Some((avatar, name)) = sent_by_boss {
+                column = column.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(5.0))
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_tertiary)
+                        .child(avatar)
+                        .child(tr!("transcript.sent_by_boss", name = name)),
+                );
+            } else if message.sent_by_task.is_some() {
                 // The chip looks the same whether or not its source task can
                 // still be opened; a live target only adds activation.
                 let chip = div()

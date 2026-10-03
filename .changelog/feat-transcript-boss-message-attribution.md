@@ -1,0 +1,1 @@
+- Boss messages in employee transcripts and task previews now show the Boss avatar and name above the message.

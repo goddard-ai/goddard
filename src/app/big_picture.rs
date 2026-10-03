@@ -1547,6 +1547,11 @@ impl Waku {
                             sent_by_task_link: message
                                 .sent_by_task
                                 .filter(|id| self.sent_by_task_openable(*id)),
+                            sent_by_boss: message.sent_by_task.and_then(|id| {
+                                self.boss_session_identity(id).map(|identity| {
+                                    (self.boss_avatar(&identity, 18.0, cx), identity.name.clone())
+                                })
+                            }),
                             auto_prompt_rule: self
                                 .enabled_auto_prompt_for_content(message.visible_content()),
                             waku: cx.entity().downgrade(),
