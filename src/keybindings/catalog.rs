@@ -2100,6 +2100,43 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "font.all_increase",
+        action: || {
+            Box::new(crate::AdjustFontSize {
+                target: crate::FontSizeTarget::All,
+                direction: crate::FontSizeDirection::Increase,
+            })
+        },
+        title_key: "shortcuts.font_bigger",
+        title_index: None,
+        category: C::Global,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "font.all_decrease",
+        action: || {
+            Box::new(crate::AdjustFontSize {
+                target: crate::FontSizeTarget::All,
+                direction: crate::FontSizeDirection::Decrease,
+            })
+        },
+        title_key: "shortcuts.font_smaller",
+        title_index: None,
+        category: C::Global,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "font.reset",
+        action: || Box::new(crate::ResetFontSizes),
+        title_key: "shortcuts.font_reset",
+        title_index: None,
+        category: C::Global,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "font.ui_increase",
         action: || {
             Box::new(crate::AdjustFontSize {
@@ -2730,7 +2767,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("sidebar.task.7", All, "secondary-7", ""),
     e("sidebar.task.8", All, "secondary-8", ""),
     e("sidebar.task.9", All, "secondary-9", ""),
-    e("app.big_picture", All, "secondary-0", ""),
+    e("app.big_picture", All, "alt-`", ""),
     e("app.projects_page", All, "secondary-shift-p", ""),
     e("app.inbox_page", All, "secondary-shift-i", ""),
     e("app.automations_page", All, "secondary-shift-u", ""),
@@ -2899,20 +2936,10 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("workspace.toggle_workspace", All, "secondary-alt-n", ""),
     e("app.usage_panel", All, "secondary-u", ""),
     e("app.save_file", All, "secondary-s", ""),
-    e("font.terminal_increase", All, "secondary-=", Terminal),
-    e("font.terminal_increase", All, "secondary-shift-=", Terminal),
-    e("font.terminal_decrease", All, "secondary--", Terminal),
-    e("font.code_increase", All, "secondary-=", ReviewDiffOrEditor),
-    e(
-        "font.code_increase",
-        All,
-        "secondary-shift-=",
-        ReviewDiffOrEditor,
-    ),
-    e("font.code_decrease", All, "secondary--", ReviewDiffOrEditor),
-    e("font.ui_increase", All, "secondary-=", NotBrowser),
-    e("font.ui_increase", All, "secondary-shift-=", NotBrowser),
-    e("font.ui_decrease", All, "secondary--", NotBrowser),
+    e("font.all_increase", All, "secondary-=", NotBrowser),
+    e("font.all_increase", All, "secondary-shift-=", NotBrowser),
+    e("font.all_decrease", All, "secondary--", NotBrowser),
+    e("font.reset", All, "secondary-0", NotBrowser),
     e("workspace.stop_turn", All, "escape", WorkspaceNotTerminal),
     e("workspace.stop_turn_now", All, "alt-escape", Workspace),
     e(
@@ -3051,8 +3078,6 @@ mod ctx {
     pub const ProjectSwitcherInput: &str = "ProjectSwitcher > TextInput";
     pub const KeyboardOptions: &str = "KeyboardOptions";
     pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";
-    pub const Terminal: &str = "Terminal";
-    pub const ReviewDiffOrEditor: &str = "ReviewDiff || FileEditorPane";
     pub const NotBrowser: &str = "!Browser";
     pub const WorkspaceTextInput: &str = "Workspace > TextInput";
     pub const FileEditorPane: &str = "FileEditorPane";

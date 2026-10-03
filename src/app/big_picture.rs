@@ -1,4 +1,4 @@
-//! Big Picture mode: a ⌘0 overlay of the sessions most worth a glance.
+//! Big Picture mode: a ⌥` overlay of the sessions most worth a glance.
 //!
 //! Cards fill as much of a grid as the window affords — up to eight across
 //! on a wide screen, further rows when it's tall — tasks waiting on input

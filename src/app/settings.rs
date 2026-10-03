@@ -11799,24 +11799,60 @@ impl Waku {
     }
 
     /// `secondary-=` / `secondary--`: step one `FONT_SIZES` preset in the
-    /// direction given, against whichever surface the binding's key context
-    /// routed the chord to.
+    /// direction given. `All` is what the global ⌘± bindings carry — each
+    /// surface steps from its own current size, so a user-set offset
+    /// between them survives; an explicit terminal size steps too, while
+    /// a `None` terminal keeps following code through `set_code_font_size`.
     pub(super) fn adjust_font_size_action(
         &mut self,
         action: &crate::AdjustFontSize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if action.target == crate::FontSizeTarget::All {
+            self.set_ui_font_size(
+                stepped_font_size(self.state.ui_font_size, action.direction),
+                window,
+                cx,
+            );
+            self.set_code_font_size(
+                stepped_font_size(self.state.code_font_size, action.direction),
+                cx,
+            );
+            if let Some(size) = self.state.terminal_font_size {
+                self.set_terminal_font_size(stepped_font_size(size, action.direction), cx);
+            }
+            return;
+        }
         let current = match action.target {
             crate::FontSizeTarget::Ui => self.state.ui_font_size,
             crate::FontSizeTarget::Code => self.state.code_font_size,
             crate::FontSizeTarget::Terminal => self.state.terminal_font_size(),
+            crate::FontSizeTarget::All => unreachable!(),
         };
         let size = stepped_font_size(current, action.direction);
         match action.target {
             crate::FontSizeTarget::Ui => self.set_ui_font_size(size, window, cx),
             crate::FontSizeTarget::Code => self.set_code_font_size(size, cx),
             crate::FontSizeTarget::Terminal => self.set_terminal_font_size(size, cx),
+            crate::FontSizeTarget::All => unreachable!(),
+        }
+    }
+
+    /// `secondary-0`: restore every font size to its default — the terminal
+    /// default is `None`, which re-links it to the code size.
+    pub(super) fn reset_font_sizes_action(
+        &mut self,
+        _: &crate::ResetFontSizes,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_ui_font_size(waku_client::persistence::DEFAULT_UI_FONT_SIZE, window, cx);
+        self.set_code_font_size(waku_client::persistence::DEFAULT_CODE_FONT_SIZE, cx);
+        if self.state.terminal_font_size.take().is_some() {
+            crate::terminal::install_font_size(self.state.code_font_size, cx);
+            self.save();
+            cx.notify();
         }
     }
 

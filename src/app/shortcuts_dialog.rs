@@ -19,7 +19,8 @@ use crate::{
     AdjustFontSize, BrowserAddressCancel, BrowserBack, BrowserDevtools, BrowserForward,
     BrowserHardReload, BrowserReload, BrowserStop, FocusBrowserAddress, FontSizeDirection,
     FontSizeTarget, OpenCreatedIssueInGitHub, OpenLocalhostUrl, OpenLocalhostUrlInTab,
-    OpenToastSession, Quit, WebviewCopy, WebviewCut, WebviewPaste, WebviewSelectAll,
+    OpenToastSession, Quit, ResetFontSizes, WebviewCopy, WebviewCut, WebviewPaste,
+    WebviewSelectAll,
 };
 #[cfg(target_os = "macos")]
 use crate::{Hide, HideOthers};
@@ -141,19 +142,24 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         ),
         bound(tr!("shortcuts.open_settings"), OpenSettings, None),
         bound(
-            tr!("shortcuts.font_bigger_ui"),
+            tr!("shortcuts.font_bigger"),
             AdjustFontSize {
-                target: FontSizeTarget::Ui,
+                target: FontSizeTarget::All,
                 direction: FontSizeDirection::Increase,
             },
             Some("!Browser"),
         ),
         bound(
-            tr!("shortcuts.font_smaller_ui"),
+            tr!("shortcuts.font_smaller"),
             AdjustFontSize {
-                target: FontSizeTarget::Ui,
+                target: FontSizeTarget::All,
                 direction: FontSizeDirection::Decrease,
             },
+            Some("!Browser"),
+        ),
+        bound(
+            tr!("shortcuts.font_reset"),
+            ResetFontSizes,
             Some("!Browser"),
         ),
     ];
@@ -477,22 +483,6 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         (
             "shortcuts.section.terminal",
             vec![
-                bound(
-                    tr!("shortcuts.font_bigger"),
-                    AdjustFontSize {
-                        target: FontSizeTarget::Terminal,
-                        direction: FontSizeDirection::Increase,
-                    },
-                    Some("Terminal"),
-                ),
-                bound(
-                    tr!("shortcuts.font_smaller"),
-                    AdjustFontSize {
-                        target: FontSizeTarget::Terminal,
-                        direction: FontSizeDirection::Decrease,
-                    },
-                    Some("Terminal"),
-                ),
                 text_row(
                     tr!("shortcuts.clear_scrollback"),
                     crate::platform::primary_shortcut("⇧⌘K", "Ctrl+Shift+K"),
@@ -711,22 +701,6 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         (
             "shortcuts.section.editor",
             vec![
-                bound(
-                    tr!("shortcuts.font_bigger"),
-                    AdjustFontSize {
-                        target: FontSizeTarget::Code,
-                        direction: FontSizeDirection::Increase,
-                    },
-                    Some("ReviewDiff || FileEditorPane"),
-                ),
-                bound(
-                    tr!("shortcuts.font_smaller"),
-                    AdjustFontSize {
-                        target: FontSizeTarget::Code,
-                        direction: FontSizeDirection::Decrease,
-                    },
-                    Some("ReviewDiff || FileEditorPane"),
-                ),
                 bound(
                     tr!("shortcuts.exit_fullscreen_panel"),
                     ExitPanelFullscreen,

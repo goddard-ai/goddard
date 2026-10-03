@@ -130,6 +130,7 @@ actions!(
         ToggleUsagePanel,
         ToggleWorkspace,
         SaveFile,
+        ResetFontSizes,
         SyncBranch,
         ArchiveSession,
         PushBaseBranch,
@@ -241,10 +242,10 @@ pub enum EffortCycleDirection {
     Backward,
 }
 
-/// Step a surface's font size one preset in `direction`. The same ⌘= / ⌘-
-/// chords bind it once per key context — Terminal, the code surfaces, or
-/// everywhere else for the interface — so the chord resizes whatever the
-/// user is looking at.
+/// Step a font size one preset in `direction`. ⌘= / ⌘- bind the `All`
+/// target — interface, code, and terminal step together wherever they
+/// land. The per-surface targets stay dispatchable so a user keymap can
+/// still scope the chord to one surface.
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = waku, no_json)]
 pub struct AdjustFontSize {
@@ -254,6 +255,7 @@ pub struct AdjustFontSize {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum FontSizeTarget {
+    All,
     Ui,
     Code,
     Terminal,
@@ -606,9 +608,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-7", SelectSidebarSession { index: 6 }, None),
         KeyBinding::new("secondary-8", SelectSidebarSession { index: 7 }, None),
         KeyBinding::new("secondary-9", SelectSidebarSession { index: 8 }, None),
-        // ⌘0 zooms out to Big Picture mode: the sessions most worth a
+        // ⌥` zooms out to Big Picture mode: the sessions most worth a
         // glance, side by side, with the composer docked underneath.
-        KeyBinding::new("secondary-0", ToggleBigPicture, None),
+        // ⌘0 belongs to font-size reset.
+        KeyBinding::new("alt-`", ToggleBigPicture, None),
         // ⌘⇧P opens the Projects page; pressed while open, it starts
         // the recent-project cycle the modifier release commits.
         KeyBinding::new("secondary-shift-p", ToggleProjectsPage, None),
@@ -920,64 +923,15 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-alt-n", ToggleWorkspace, None),
         KeyBinding::new("secondary-u", ToggleUsagePanel, None),
         KeyBinding::new("secondary-s", SaveFile, None),
-        // Font-size zoom follows focus: in the terminal it sizes the
-        // terminal, on a code surface the code setting, and anywhere
-        // else the interface. `secondary-=` covers ⌘= while
-        // `secondary-shift-=` catches the ⌘+ spelling on layouts
-        // where + is shift-=.
+        // Font-size zoom is global: ⌘± steps the interface, code, and
+        // terminal sizes together wherever focus sits, and ⌘0 resets all
+        // three. `secondary-=` covers ⌘= while `secondary-shift-=` catches
+        // the ⌘+ spelling on layouts where + is shift-=. The browser
+        // webview keeps ⌘± and ⌘0 for its own page zoom.
         KeyBinding::new(
             "secondary-=",
             AdjustFontSize {
-                target: FontSizeTarget::Terminal,
-                direction: FontSizeDirection::Increase,
-            },
-            Some("Terminal"),
-        ),
-        KeyBinding::new(
-            "secondary-shift-=",
-            AdjustFontSize {
-                target: FontSizeTarget::Terminal,
-                direction: FontSizeDirection::Increase,
-            },
-            Some("Terminal"),
-        ),
-        KeyBinding::new(
-            "secondary--",
-            AdjustFontSize {
-                target: FontSizeTarget::Terminal,
-                direction: FontSizeDirection::Decrease,
-            },
-            Some("Terminal"),
-        ),
-        KeyBinding::new(
-            "secondary-=",
-            AdjustFontSize {
-                target: FontSizeTarget::Code,
-                direction: FontSizeDirection::Increase,
-            },
-            Some("ReviewDiff || FileEditorPane"),
-        ),
-        KeyBinding::new(
-            "secondary-shift-=",
-            AdjustFontSize {
-                target: FontSizeTarget::Code,
-                direction: FontSizeDirection::Increase,
-            },
-            Some("ReviewDiff || FileEditorPane"),
-        ),
-        KeyBinding::new(
-            "secondary--",
-            AdjustFontSize {
-                target: FontSizeTarget::Code,
-                direction: FontSizeDirection::Decrease,
-            },
-            Some("ReviewDiff || FileEditorPane"),
-        ),
-        // The browser webview keeps ⌘± for its own page zoom.
-        KeyBinding::new(
-            "secondary-=",
-            AdjustFontSize {
-                target: FontSizeTarget::Ui,
+                target: FontSizeTarget::All,
                 direction: FontSizeDirection::Increase,
             },
             Some("!Browser"),
@@ -985,7 +939,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "secondary-shift-=",
             AdjustFontSize {
-                target: FontSizeTarget::Ui,
+                target: FontSizeTarget::All,
                 direction: FontSizeDirection::Increase,
             },
             Some("!Browser"),
@@ -993,11 +947,12 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "secondary--",
             AdjustFontSize {
-                target: FontSizeTarget::Ui,
+                target: FontSizeTarget::All,
                 direction: FontSizeDirection::Decrease,
             },
             Some("!Browser"),
         ),
+        KeyBinding::new("secondary-0", ResetFontSizes, Some("!Browser")),
         // Escape is real input for a focused terminal — vim, fzf, and
         // agent TUIs all need it — so bare Escape is excluded from
         // CancelTurn there. ⌥Escape remains the one-press stop and

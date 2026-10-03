@@ -553,7 +553,7 @@ in-app shortcuts dialog — resolved from the live keymap — is authoritative.
 | Copy selection / working directory | ⌘C / ⌘⇧C |
 | Save file | ⌘S |
 | Send / newline / steer | Enter / ⇧Enter / ⌘Enter |
-| Font size (follows focus: UI, code, terminal) | ⌘= / ⌘− |
+| Font size (UI, code, and terminal together) / reset | ⌘= / ⌘− / ⌘0 |
 | Clear terminal scrollback | ⇧⌘K |
 | Browser: address bar, back/forward, reload, devtools | ⌘L, ⌘[/⌘], ⌘R (⌘⇧R hard), ⌘⌥I |
 | Settings | ⌘, |
