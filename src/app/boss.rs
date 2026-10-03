@@ -22,6 +22,7 @@ pub(super) struct BossUi {
     pub working: HashSet<Uuid>,
     pub expired: HashSet<Uuid>,
     pub recent: HashMap<DaemonKey, Vec<Uuid>>,
+    pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
     pub revision: u64,
     pub page: Option<(DaemonKey, BossTab)>,
     files: Vec<BossFile>,
@@ -52,6 +53,7 @@ impl Default for BossUi {
             working: HashSet::new(),
             expired: HashSet::new(),
             recent: HashMap::new(),
+            sidebar_idle_visible: HashMap::new(),
             revision: 0,
             page: None,
             files: Vec::new(),
@@ -746,7 +748,9 @@ impl Waku {
             .id(format!("boss-employee-{id}"))
             .tab_index(0)
             .h(px(42.0))
-            .px(px(12.0))
+            .w_full()
+            .pl(px(sidebar::SIDEBAR_GROUP_CHILD_PADDING))
+            .pr(px(8.0))
             .flex()
             .items_center()
             .gap(px(8.0))

@@ -3,6 +3,7 @@ use gpui::{KeyBinding, actions};
 
 use super::composer::project_picker_order;
 use super::*;
+use crate::ui::ActivationExt;
 use crate::ui::shortcut::ShortcutHint;
 use waku_client::friends::TransferStatus;
 use waku_client::persistence::SidebarProjectOrderEntry;
@@ -314,7 +315,7 @@ const SIDEBAR_GROUP_ICON_WIDTH: f32 = 14.0;
 const SIDEBAR_GROUP_ICON_GAP: f32 = 5.0;
 /// A grouped row indents just far enough to align its title's first glyph
 /// with the group label's: header inset + icon width + icon-to-label gap.
-const SIDEBAR_GROUP_CHILD_PADDING: f32 =
+pub(super) const SIDEBAR_GROUP_CHILD_PADDING: f32 =
     SIDEBAR_GROUP_HEADER_INSET + SIDEBAR_GROUP_ICON_WIDTH + SIDEBAR_GROUP_ICON_GAP;
 /// Chats shown under a project group before the rest fold behind "Show more".
 const SIDEBAR_PROJECT_DEFAULT_VISIBLE: usize = 16;
@@ -984,7 +985,7 @@ pub(super) enum SidebarRow {
     Inbox,
     /// Opens the Automations page and scrolls with history.
     Automations,
-    BossHeader,
+    BossShowMore(waku_client::DaemonKey),
     Boss(waku_client::DaemonKey),
     Employee(Uuid),
     /// Group header; the first row also carries the sidebar actions.
@@ -1086,13 +1087,13 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Header(SidebarGroup::Terminals) => {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
-        SidebarRow::BossHeader | SidebarRow::Header(_) => {
-            SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
-        }
+        SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
         SidebarRow::Boss(_) | SidebarRow::Employee(_) => 42.0,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
-        SidebarRow::ShowMore(_) | SidebarRow::ShowDormant(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
+        SidebarRow::BossShowMore(_) | SidebarRow::ShowMore(_) | SidebarRow::ShowDormant(_) => {
+            SIDEBAR_SHOW_MORE_ROW_HEIGHT
+        }
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
     })
 }
@@ -3691,11 +3692,29 @@ impl Waku {
         rows.push(SidebarRow::GroupSpacer);
 
         if !self.boss_ui.hosts.is_empty() {
-            rows.push(SidebarRow::BossHeader);
             for key in &self.boss_ui.hosts {
                 rows.push(SidebarRow::Boss(*key));
                 if let Some(active) = self.boss_ui.active.get(key) {
                     rows.extend(active.iter().copied().map(SidebarRow::Employee));
+                }
+                let idle = self
+                    .boss_ui
+                    .recent
+                    .get(key)
+                    .into_iter()
+                    .flatten()
+                    .filter(|id| !self.boss_ui.working.contains(id))
+                    .copied()
+                    .collect::<Vec<_>>();
+                let visible = self
+                    .boss_ui
+                    .sidebar_idle_visible
+                    .get(key)
+                    .copied()
+                    .unwrap_or(0);
+                rows.extend(idle.iter().take(visible).copied().map(SidebarRow::Employee));
+                if idle.len() > visible {
+                    rows.push(SidebarRow::BossShowMore(*key));
                 }
             }
             rows.push(SidebarRow::GroupSpacer);
@@ -4017,15 +4036,33 @@ impl Waku {
             SidebarRow::Automations => self
                 .render_sidebar_automations(window, cx)
                 .into_any_element(),
-            SidebarRow::BossHeader => div()
-                .px(px(12.0))
-                .h(px(
-                    SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
-                ))
-                .text_size(sp(11.0))
-                .text_color(Theme::current(cx).text_tertiary)
-                .child(tr!("boss.group"))
-                .into_any_element(),
+            SidebarRow::BossShowMore(key) => {
+                let theme = Theme::current(cx);
+                div()
+                    .w_full()
+                    .h(px(SIDEBAR_SHOW_MORE_ROW_HEIGHT))
+                    .pl(px(SIDEBAR_GROUP_CHILD_PADDING))
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .id(format!("boss-show-more-{key:?}"))
+                            .tab_index(0)
+                            .cursor_default()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .hover(|style| style.text_color(theme.text))
+                            .child(tr!("sidebar.show_more"))
+                            .on_activation(cx, move |this, _, cx| {
+                                *this.boss_ui.sidebar_idle_visible.entry(key).or_default() +=
+                                    SIDEBAR_PROJECT_REVEAL_BATCH;
+                                this.sidebar_rows_fingerprint.set(None);
+                                cx.notify();
+                            }),
+                    )
+                    .into_any_element()
+            }
             SidebarRow::Boss(key) => self.render_boss_sidebar_row(key, cx),
             SidebarRow::Employee(id) => self.render_boss_employee_row(id, cx),
             SidebarRow::Header(group) => {

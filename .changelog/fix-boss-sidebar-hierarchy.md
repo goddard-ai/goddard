@@ -1,0 +1,1 @@
+- Made the Boss row its own sidebar heading, indented employees beneath it, and collapsed completed employees behind Show more.
