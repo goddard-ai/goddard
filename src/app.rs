@@ -4552,6 +4552,22 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let terminal = view.entity_id();
+        // A terminal that announces a localhost URL is hosting something the
+        // user may want to open. Keep its row visible even when the
+        // Terminals group is folded; session-created terminals are included
+        // in that group too, so leave their session ownership intact.
+        let terminal_id = self
+            .right_panel_terminals
+            .iter()
+            .find_map(|(id, candidate)| (candidate.entity_id() == terminal).then_some(*id));
+        if let Some(record) = terminal_id.and_then(|id| self.terminal_records.get_mut(&id))
+            && !record.pinned
+        {
+            record.pinned = true;
+            self.sidebar_rows_fingerprint.set(None);
+            self.save();
+            cx.notify();
+        }
         let url = SharedString::from(url);
         if let Some(active) = self
             .toast
