@@ -1225,6 +1225,14 @@ impl Waku {
             && self
                 .voice_briefing_playback
                 .is_some_and(|playback| !playback.playing);
+        let machine_name = match key {
+            DaemonKey::Local => None,
+            DaemonKey::Remote(host) => self.remote_host_name(host),
+        };
+        let subtitle = machine_name.map_or_else(
+            || tr!("boss.group"),
+            |name| format!("{} · {name}", tr!("boss.group")),
+        );
         div()
             .id(format!("boss-{key:?}"))
             .tab_index(0)
@@ -1250,7 +1258,7 @@ impl Waku {
             .child(self.boss_avatar(&state.identity, 24.0, cx))
             .child(boss_sidebar_label(
                 state.identity.name.clone(),
-                tr!("boss.group"),
+                subtitle,
                 None,
                 &theme,
             ))
