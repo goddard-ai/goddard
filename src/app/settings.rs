@@ -15171,6 +15171,7 @@ fn eval_feature_label(feature: &str) -> String {
         "managed-goal" => tr!("routing.feature_managed_goal"),
         "voice-briefing-gate" => tr!("routing.feature_voice_briefing_gate"),
         "boss-speech" => tr!("routing.feature_boss_speech"),
+        "boss-context-router" => tr!("routing.feature_boss_context_router"),
         _ => return feature.to_owned(),
     }
 }
@@ -15202,6 +15203,7 @@ fn eval_feature_description(feature: &str) -> Option<String> {
         "managed-goal" => tr!("routing.feature_managed_goal_description"),
         "voice-briefing-gate" => tr!("routing.feature_voice_briefing_gate_description"),
         "boss-speech" => tr!("routing.feature_boss_speech_description"),
+        "boss-context-router" => tr!("routing.feature_boss_context_router_description"),
         _ => return None,
     })
 }

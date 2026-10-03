@@ -3303,6 +3303,9 @@ impl Backend for WakuBackend {
                         )?;
                     }
                     events.send(event_to_wire(submitted)?)?;
+                    if !*hidden && self.boss.is_boss(session_id) {
+                        self.route_boss_prompt(session_id, prompt);
+                    }
                 }
                 let mut command = command;
                 if let Command::Prompt { prompt, hidden, .. } = &mut command
@@ -3314,9 +3317,7 @@ impl Backend for WakuBackend {
                         // clean — and the session's context blocks follow as
                         // a hidden steer.
                         let task = prompt.clone();
-                        *prompt = self
-                            .boss
-                            .prompt_with_context(session_id, std::mem::take(prompt));
+                        *prompt = self.boss_outbound_prompt(session_id, std::mem::take(prompt));
                         let result = handle_driver_command(&driver, command);
                         self.steer_first_prompt_context(session_id, &task, &driver, &events);
                         return result;
@@ -3336,8 +3337,7 @@ impl Backend for WakuBackend {
                         self.agent.mark_parent_index_prepended(session_id);
                     }
                     *prompt = if self.boss.is_managed(session_id) {
-                        self.boss
-                            .prompt_with_context(session_id, std::mem::take(prompt))
+                        self.boss_outbound_prompt(session_id, std::mem::take(prompt))
                     } else {
                         self.memory.prompt_with_memory(session_id, prompt)
                     };
@@ -5333,12 +5333,12 @@ impl WakuBackend {
             // The prompt reaches the provider exactly as typed — title
             // generation and first-prompt echoes stay clean — and the
             // session's context blocks follow as a hidden steer.
-            driver.prompt(self.boss.prompt_with_context(session_id, prompt.clone()));
+            driver.prompt(self.boss_outbound_prompt(session_id, prompt.clone()));
             self.steer_first_prompt_context(session_id, &prompt, &driver, &sink);
         } else {
             let prompt = self.prepend_agent_surface(session_id, &driver, prompt);
             let prompt = if self.boss.is_managed(session_id) {
-                self.boss.prompt_with_context(session_id, prompt)
+                self.boss_outbound_prompt(session_id, prompt)
             } else {
                 self.memory.prompt_with_memory(session_id, &prompt)
             };
@@ -5538,6 +5538,135 @@ impl WakuBackend {
         state.sessions[index].quarantined
     }
 
+    /// The daemon's snapshot of the user's work — projects, live tasks,
+    /// employees, and automations — as the context router both evaluates
+    /// against and attaches.
+    fn boss_work_context(&self) -> crate::boss_context::WorkContext {
+        crate::boss_context::work_context(
+            &self.task_state.lock(),
+            &self.boss.document(),
+            &self.automations.document(),
+        )
+    }
+
+    /// The boss-facing wrap for an outbound prompt: the persona injection
+    /// first, then a deferred work digest when the context router asked for
+    /// one a steer-less or already-settled turn could not take.
+    fn boss_outbound_prompt(&self, session_id: Uuid, prompt: String) -> String {
+        wrap_boss_outbound_prompt(
+            &self.task_state,
+            &self.automations.document(),
+            &self.boss,
+            session_id,
+            prompt,
+        )
+    }
+
+    /// Route one user prompt to the boss through Jev: remember it for focus
+    /// continuity, evaluate it against the current focus inference and the
+    /// work snapshot, then apply the verdict off-thread. Jev decides, code
+    /// applies — an unconfigured or failed evaluation attaches nothing and
+    /// changes nothing.
+    fn route_boss_prompt(&self, session_id: Uuid, prompt: &str) {
+        let (focus, recent_prompts) = self.boss.router_snapshot(session_id);
+        self.boss.router_note_prompt(session_id, prompt);
+        let work = self.boss_work_context();
+        // No spend without something to attach or a backend to judge it.
+        if work.digest.is_empty() || self.resolved_eval().is_none() {
+            return;
+        }
+        let state =
+            crate::boss_context::router_state(prompt, focus.as_deref(), &recent_prompts, &work);
+        let questions = crate::boss_context::router_questions(&work.projects);
+        let settings = self.settings.clone();
+        let secrets = self.inference_secrets.clone();
+        let boss = self.boss.clone();
+        let agent = self.agent.clone();
+        let sessions = self.sessions.clone();
+        let task_state = self.task_state.clone();
+        let automations = self.automations.clone();
+        let _ = std::thread::Builder::new()
+            .name("boss-context-router".into())
+            .spawn(move || {
+                let Ok(evaluation) = evaluate_with_feature(
+                    &settings,
+                    &secrets,
+                    state,
+                    questions,
+                    crate::boss_context::FEATURE,
+                    None,
+                ) else {
+                    return;
+                };
+                let verdict = crate::boss_context::apply_verdict(&evaluation);
+                if let Some(focus) = verdict.focus {
+                    boss.router_set_focus(session_id, focus);
+                }
+                if !verdict.attach {
+                    return;
+                }
+                // Rebuild rather than reuse the evaluated snapshot — work may
+                // have moved during the call, and the attachment should
+                // describe now, not the moment the prompt arrived.
+                let digest = crate::boss_context::work_context(
+                    &task_state.lock(),
+                    &boss.document(),
+                    &automations.document(),
+                )
+                .digest;
+                if digest.is_empty() {
+                    return;
+                }
+                let driver = sessions
+                    .lock()
+                    .get(&session_id)
+                    .map(|entry| entry.driver.clone());
+                let Some(driver) = driver else {
+                    boss.router_defer_context(session_id);
+                    return;
+                };
+                if !driver.supports_steer() || !agent.has_open_turn(session_id) {
+                    boss.router_defer_context(session_id);
+                    return;
+                }
+                // A mid-turn steer arrives as user input — frame the digest
+                // as context so the provider does not read it as a new
+                // instruction. Its `Blocks` tag keeps the echo out of the
+                // transcript, and an accepted echo also settles the agent
+                // surface — so the steer carries that block when it is owed.
+                let surface = (driver.agent_surface_delivery()
+                    == crate::driver::AgentSurfaceDelivery::Silent)
+                    .then(|| agent.surface_block(session_id))
+                    .flatten();
+                let block = [
+                    Some(format!(
+                        "<goddard-boss-context>\n{digest}\n</goddard-boss-context>"
+                    )),
+                    surface,
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("\n\n");
+                let steer = format!(
+                    "Session context — background information only, not a new \
+                     instruction. Continue the conversation you are already in.\n\n{block}"
+                );
+                agent.record_pending_steer(
+                    session_id,
+                    crate::agent::AgentPrompt {
+                        prompt: steer.clone(),
+                        transport: None,
+                        sender: None,
+                        queued_id: None,
+                        context: Some(crate::agent::ContextSteer::Blocks),
+                        hidden: false,
+                    },
+                );
+                driver.steer(steer);
+            });
+    }
+
     fn handle_boss_operation(
         &self,
         caller: Option<Uuid>,
@@ -5723,6 +5852,14 @@ impl WakuBackend {
                 let parts = self.boss.speak_parts(caller, parts)?;
                 let delivered = events.speech_requested(Uuid::new_v4(), parts);
                 Ok(BossResult::Speak { delivered })
+            }
+            BossOperation::Context => {
+                if caller.is_some_and(|id| !self.boss.is_boss(id)) {
+                    bail!("only the boss or a human can read the work digest");
+                }
+                Ok(BossResult::Context {
+                    context: self.boss_work_context().digest,
+                })
             }
             operation => {
                 let rename = matches!(operation, BossOperation::Rename { .. });
@@ -6014,6 +6151,7 @@ impl WakuBackend {
                 &self.task_state,
                 &self.task_store,
                 &self.boss,
+                &self.automations,
             )?;
         }
         Ok(())
@@ -7582,6 +7720,7 @@ fn forward_driver_events(
                     &task_state,
                     &task_store,
                     &boss,
+                    &automations,
                 ) {
                     eprintln!(
                         "goddard-daemon could not deliver a queued agent prompt for task {session_id}: {error:#}"
@@ -7774,6 +7913,7 @@ fn deliver_agent_prompt(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     boss: &crate::boss::BossService,
+    automations: &AutomationService,
 ) -> anyhow::Result<()> {
     boss.require_active(session_id)?;
     if agent.has_parked_turn(session_id) && driver.supports_steer() {
@@ -7814,8 +7954,36 @@ fn deliver_agent_prompt(
     send_agent_queue_changed(task_state, sink, session_id);
     let prompt = agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt)
         .unwrap_or(entry.prompt);
-    driver.prompt(boss.prompt_with_context(session_id, prompt));
+    driver.prompt(wrap_boss_outbound_prompt(
+        task_state,
+        &automations.document(),
+        boss,
+        session_id,
+        prompt,
+    ));
     Ok(())
+}
+
+/// The deferred-digest half of an outbound boss prompt: the persona wrap
+/// always applies, and a work snapshot the router asked for but could not
+/// steer rides the next prompt — whichever path sends it.
+fn wrap_boss_outbound_prompt(
+    task_state: &Mutex<PersistedState>,
+    automations: &waku_protocol::automations::AutomationsState,
+    boss: &crate::boss::BossService,
+    session_id: Uuid,
+    prompt: String,
+) -> String {
+    let prompt = boss.prompt_with_context(session_id, prompt);
+    if !boss.is_boss(session_id) || !boss.router_take_pending(session_id) {
+        return prompt;
+    }
+    let digest =
+        crate::boss_context::work_context(&task_state.lock(), &boss.document(), automations).digest;
+    if digest.is_empty() {
+        return prompt;
+    }
+    format!("<goddard-boss-context>\n{digest}\n</goddard-boss-context>\n\n{prompt}")
 }
 
 /// Mirror an accepted agent prompt into the daemon's stored copy of the

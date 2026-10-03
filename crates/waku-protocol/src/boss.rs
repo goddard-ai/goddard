@@ -76,6 +76,9 @@ pub struct BossFile {
 )]
 pub enum BossOperation {
     View,
+    /// A bounded digest of the user's projects, tasks, and automations —
+    /// the same snapshot the context router attaches to boss prompts.
+    Context,
     Open {
         provider: ProviderKind,
         model: Option<String>,
@@ -139,6 +142,9 @@ pub enum BossOperation {
 pub enum BossResult {
     State {
         state: BossState,
+    },
+    Context {
+        context: String,
     },
     Files {
         files: Vec<BossFile>,

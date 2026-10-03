@@ -1227,6 +1227,10 @@ routing.feature_boss_speech:
   en: Boss canned speech
 routing.feature_boss_speech_description:
   en: Whether a saved voice clip already voices a fragment the boss wants to speak
+routing.feature_boss_context_router:
+  en: Boss context router
+routing.feature_boss_context_router_description:
+  en: Decides whether a boss message should carry the projects-and-tasks snapshot and tracks the conversation's focus
 jev.tab_suggestions:
   en: Suggestions
 jev.tab_automation:

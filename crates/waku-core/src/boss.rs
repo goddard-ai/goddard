@@ -1,5 +1,6 @@
 //! Persistent Boss state and compartment-aware file access.
 
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -12,6 +13,27 @@ use waku_protocol::boss::{
 };
 
 const MAX_FILE_BYTES: usize = 256 * 1024;
+/// User prompts the router's focus inference sees at once.
+const ROUTER_RECENT_PROMPTS: usize = 6;
+/// A stored prompt's budget inside the router's eval state.
+const ROUTER_PROMPT_CAP: usize = 300;
+
+/// The context router's memory of a boss conversation — session-scoped, so a
+/// reopened or replaced boss chat starts fresh rather than inheriting a
+/// predecessor's inferred focus.
+#[derive(Default)]
+struct BossRouter {
+    session: Option<Uuid>,
+    /// The project Jev last inferred the user's attention centers on.
+    focus: Option<String>,
+    /// Recent user prompts, oldest first — the continuity the focus
+    /// question judges each new message against.
+    recent_prompts: VecDeque<String>,
+    /// Jev asked for the work digest on a prompt that could not take it
+    /// (no steer support, or the turn already settled); the next outbound
+    /// boss prompt prepends it instead.
+    pending_context: bool,
+}
 
 /// `speak` bounds: an utterance is a handful of short fragments, so a
 /// malformed or oversized request fails at the daemon rather than reaching
@@ -29,6 +51,7 @@ pub struct BossService {
     interrupted: Mutex<Vec<Uuid>>,
     projects: Mutex<std::collections::HashMap<Uuid, PathBuf>>,
     injected: Mutex<std::collections::HashSet<Uuid>>,
+    router: Mutex<BossRouter>,
 }
 
 impl BossService {
@@ -72,6 +95,7 @@ impl BossService {
             backend: Mutex::new(std::sync::Weak::new()),
             projects: Mutex::new(std::collections::HashMap::new()),
             injected: Mutex::new(std::collections::HashSet::new()),
+            router: Mutex::new(BossRouter::default()),
         };
         service.save(&service.state.lock())?;
         Ok(service)
@@ -248,6 +272,61 @@ impl BossService {
         self.injected.lock().remove(&session);
     }
 
+    /// The session-scoped router slot — a different boss session resets it
+    /// so a replaced chat never inherits its predecessor's focus.
+    fn router_entry(&self, session: Uuid) -> parking_lot::MutexGuard<'_, BossRouter> {
+        let mut router = self.router.lock();
+        if router.session != Some(session) {
+            *router = BossRouter {
+                session: Some(session),
+                ..Default::default()
+            };
+        }
+        router
+    }
+
+    /// Remember a user prompt for the focus question's continuity.
+    pub fn router_note_prompt(&self, session: Uuid, prompt: &str) {
+        let mut router = self.router_entry(session);
+        router
+            .recent_prompts
+            .push_back(waku_protocol::model::truncate_chars(
+                prompt,
+                ROUTER_PROMPT_CAP,
+            ));
+        while router.recent_prompts.len() > ROUTER_RECENT_PROMPTS {
+            router.recent_prompts.pop_front();
+        }
+    }
+
+    /// The focus inference plus the recent prompts the next evaluation
+    /// judges against.
+    pub fn router_snapshot(&self, session: Uuid) -> (Option<String>, Vec<String>) {
+        let router = self.router_entry(session);
+        (
+            router.focus.clone(),
+            router.recent_prompts.iter().cloned().collect(),
+        )
+    }
+
+    /// Store a focus transition the verdict cleared — `None` means Jev
+    /// decided the user's attention sits on no particular project.
+    pub fn router_set_focus(&self, session: Uuid, focus: Option<String>) {
+        self.router_entry(session).focus = focus;
+    }
+
+    /// Defer an attachment the just-prompted turn could not take; the next
+    /// outbound boss prompt prepends the digest instead.
+    pub fn router_defer_context(&self, session: Uuid) {
+        self.router_entry(session).pending_context = true;
+    }
+
+    /// Consume the deferred-attachment flag — one prompt carries it, never
+    /// more.
+    pub fn router_take_pending(&self, session: Uuid) -> bool {
+        std::mem::take(&mut self.router_entry(session).pending_context)
+    }
+
     pub fn prompt_with_context(&self, session: Uuid, prompt: String) -> String {
         if !self.is_managed(session) || !self.injected.lock().insert(session) {
             return prompt;
@@ -274,7 +353,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, speak. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. Your persona is {}. You can access every memory folder. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
+                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, speak. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -396,7 +475,8 @@ impl BossService {
         operation: BossOperation,
     ) -> anyhow::Result<BossResult> {
         match operation {
-            BossOperation::Open { .. }
+            BossOperation::Context
+            | BossOperation::Open { .. }
             | BossOperation::Summon { .. }
             | BossOperation::Control { .. }
             | BossOperation::Transcript { .. }
