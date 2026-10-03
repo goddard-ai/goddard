@@ -1,0 +1,1 @@
+- Bosses can build a reusable library of purpose-specific employee personas and refine existing roles as recurring work patterns emerge.
