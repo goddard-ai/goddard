@@ -1,0 +1,1 @@
+- The composer no longer offers "New worktree" or "Move to worktree" for projects whose folder is not a Git repository, where those choices would fail when the task starts. The workspace and branch chips drop out of the composer's footer, and a draft that was already planning a worktree there falls back to the project folder.

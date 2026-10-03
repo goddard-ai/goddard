@@ -7068,6 +7068,12 @@ impl Waku {
             )
         };
         let projectless_selected = subject_projectless;
+        // A checkout the daemon's branch probe already proved holds no Git
+        // repository cannot fork worktrees — Local is the only workspace the
+        // picker could ever offer.
+        let project_gitless = subject_project_path
+            .as_deref()
+            .is_some_and(|path| self.workspace_path_confirmed_non_git(path));
         // The overlay's untargeted composer has no draft session to inspect
         // yet — its new task is configurable by definition.
         let can_configure_workspace =
@@ -7713,6 +7719,13 @@ impl Waku {
                 }
             })
         };
+        // With no workspace choice to make, the selector follows the branch
+        // chip and drops out entirely. A bound worktree keeps it — "Local"
+        // remains a way back to the checkout — and an open menu stays mounted
+        // until its own dismissal runs.
+        let hide_workspace_selector = (projectless_selected || project_gitless)
+            && !matches!(workspace, SessionWorkspace::Worktree { .. })
+            && !worktree_handle.is_open();
         let creating_worktree = self.worktree_creation_pending;
         let worktree_trigger = MenuChip::new("workspace-worktree")
             .icon(
@@ -7759,7 +7772,7 @@ impl Waku {
             if can_move_to_worktree {
                 actions.push(worktrees::WorktreePickerAction::Move);
             }
-            if !projectless_selected && can_configure_workspace {
+            if !projectless_selected && can_configure_workspace && !project_gitless {
                 let current_ref = project_snapshot
                     .as_ref()
                     .and_then(|snapshot| snapshot.current.clone())
@@ -8068,7 +8081,9 @@ impl Waku {
                             .tab_group()
                             .tab_stop(false)
                             .child(project_selector)
-                            .child(worktree_selector)
+                            .when(!hide_workspace_selector, |row| {
+                                row.child(worktree_selector)
+                            })
                             .children(branch_selector)
                             .child(div().flex_1())
                             .children(usage_meter),
@@ -8154,6 +8169,11 @@ impl Waku {
                     .unwrap_or_else(|| tr!("branches.detached_head")),
                 SessionWorkspace::Local => tr!("branches.detached_head"),
             });
+        let workspace_gitless = session
+            .workspace
+            .path()
+            .or_else(|| project.as_ref().map(|project| project.path.as_path()))
+            .is_some_and(|path| self.workspace_path_confirmed_non_git(path));
         let branch_chip = MenuChip::new(format!("side-chat-{session_id}-workspace-branch"))
             .icon("icons/git-branch.svg", theme.text_tertiary)
             .label(branch_label)
@@ -8187,7 +8207,10 @@ impl Waku {
                     .gap(px(2.0))
                     .child(project_chip)
                     .child(workspace_chip)
-                    .child(branch_chip)
+                    // A workspace that is not a Git repository has no branch
+                    // to describe — the chip would otherwise read "Detached
+                    // HEAD" as a fallback.
+                    .when(!workspace_gitless, |row| row.child(branch_chip))
                     .child(div().flex_1())
                     .children(usage_meter),
             )

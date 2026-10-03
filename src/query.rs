@@ -136,8 +136,11 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
     }
 
     /// Reads without claiming a fetch, for callers that only want a hit.
-    #[cfg(test)]
-    pub fn peek(&self, key: &K) -> Option<Arc<V>> {
+    pub fn peek<Q>(&self, key: &Q) -> Option<Arc<V>>
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: Eq + std::hash::Hash + ?Sized,
+    {
         match self.entries.get(key) {
             Some(Cached {
                 slot: Slot::Ready(value),

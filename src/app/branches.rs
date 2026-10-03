@@ -83,6 +83,25 @@ impl Waku {
             .map(|(_, snapshot)| snapshot)
     }
 
+    /// Whether the daemon's branch probe already confirmed `path` holds no
+    /// Git repository — a pending, missing, or failed probe is not a verdict,
+    /// so Git affordances stay until the answer is in.
+    pub(super) fn workspace_path_confirmed_non_git(&self, path: &std::path::Path) -> bool {
+        matches!(
+            self.branch_snapshots.peek(path).as_deref(),
+            Some(Ok(None))
+        )
+    }
+
+    /// The same verdict for `project_id`'s ordinary checkout.
+    pub(super) fn project_workspace_confirmed_non_git(&self, project_id: Uuid) -> bool {
+        self.state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .is_some_and(|project| self.workspace_path_confirmed_non_git(&project.path))
+    }
+
     pub(super) fn sync_branch_picker_rows(&self, rows: &[crate::git_branch::BranchEntry]) {
         let mut cached = self.branch_picker_row_cache.borrow_mut();
         if cached.as_slice() == rows {
@@ -132,6 +151,7 @@ impl Waku {
             Query::Pending => fallback,
             Query::Missing(token) => {
                 let fetch_path = workspace_path.clone();
+                let fetch_owner = self.daemon_key_for_path(&fetch_path);
                 let Some(workspace) = self.workspace_client_for_path(&fetch_path) else {
                     // Offline remote owner: leave the miss uncached so the
                     // next read retries once the host reconnects — dropping
@@ -172,6 +192,12 @@ impl Waku {
                             Ok(None) => waku.cache_sidebar_branch_label(&fetch_path, None),
                             Err(_) => {}
                         }
+                        // A directory the probe just proved holds no repository
+                        // cannot host the worktree an unstarted draft plans —
+                        // the pick would fail at first submit.
+                        let downgraded = matches!(&result, Ok(None))
+                            && waku
+                                .downgrade_gitless_worktree_drafts(&fetch_path, fetch_owner);
                         let selected = waku
                             .selected_workspace_path()
                             .is_some_and(|path| path == fetch_path);
@@ -196,6 +222,8 @@ impl Waku {
                                 Ok(None) => waku.visible_branch_snapshot = None,
                                 Err(_) => {}
                             }
+                        }
+                        if selected || downgraded {
                             cx.notify();
                         }
                     });

@@ -1339,7 +1339,7 @@ impl Waku {
         } else {
             environment
         };
-        if local {
+        if local || self.project_workspace_confirmed_non_git(project_id) {
             session.workspace = SessionWorkspace::Local;
         }
         let id = session.id;
@@ -1424,6 +1424,9 @@ impl Waku {
     /// claim points it at the destination's daemon ahead of the first
     /// prompt.
     pub(super) fn retarget_draft_session(&mut self, session_id: Uuid, project_id: Uuid) {
+        // A destination the probe proved holds no repository cannot host
+        // the worktree a draft was planning.
+        let project_gitless = self.project_workspace_confirmed_non_git(project_id);
         let workspace = match self
             .state
             .sessions
@@ -1432,10 +1435,12 @@ impl Waku {
             .map(|session| &session.workspace)
         {
             Some(SessionWorkspace::NewWorktree { .. }) => Some(retargeted_workspace(
-                self.state
-                    .projects
-                    .iter()
-                    .any(|project| project.id == project_id && !project.is_projectless()),
+                !project_gitless
+                    && self
+                        .state
+                        .projects
+                        .iter()
+                        .any(|project| project.id == project_id && !project.is_projectless()),
                 self.state.remembered_base_branch(project_id),
             )),
             _ => None,
@@ -1549,6 +1554,9 @@ impl Waku {
             new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
         let mut session = self.state.new_session(project_id, self.state.last_provider);
         session.runtime_mode = runtime_mode;
+        if self.project_workspace_confirmed_non_git(project_id) {
+            session.workspace = SessionWorkspace::Local;
+        }
         let session_id = session.id;
         self.daemons
             .claim_session(session_id, self.daemons.project_owner(project_id));
@@ -1675,18 +1683,21 @@ impl Waku {
         let current = session
             .map(|session| session.workspace.clone())
             .unwrap_or_else(|| self.state.workspace_for_new_session(project_id));
-        let mut items = vec![
-            keyboard_options::KeyboardOptionItem::Choice(
-                keyboard_options::KeyboardOptionChoice::new(
-                    tr!("workspace.local"),
-                    None,
-                    Some("icons/local.svg"),
-                    current.is_local(),
-                    true,
-                    keyboard_options::KeyboardOptionAction::Workspace(SessionWorkspace::Local),
-                ),
+        // A checkout the probe proved holds no repository cannot offer a
+        // worktree choice — Local is the only destination left.
+        let project_gitless = self.project_workspace_confirmed_non_git(project_id);
+        let mut items = vec![keyboard_options::KeyboardOptionItem::Choice(
+            keyboard_options::KeyboardOptionChoice::new(
+                tr!("workspace.local"),
+                None,
+                Some("icons/local.svg"),
+                current.is_local(),
+                true,
+                keyboard_options::KeyboardOptionAction::Workspace(SessionWorkspace::Local),
             ),
-            keyboard_options::KeyboardOptionItem::Choice(
+        )];
+        if !project_gitless {
+            items.push(keyboard_options::KeyboardOptionItem::Choice(
                 keyboard_options::KeyboardOptionChoice::new(
                     tr!("workspace.new_worktree"),
                     None,
@@ -1697,8 +1708,8 @@ impl Waku {
                         SessionWorkspace::NewWorktree { base_branch: None },
                     ),
                 ),
-            ),
-        ];
+            ));
+        }
         if let SessionWorkspace::Worktree { branch, .. } = &current {
             let label = branch
                 .as_deref()

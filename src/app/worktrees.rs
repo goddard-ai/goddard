@@ -205,7 +205,8 @@ impl Waku {
     }
 
     /// Whether a task can move into a worktree right now: bound to the
-    /// project's ordinary checkout, idle, backed by a real project, and not
+    /// project's ordinary checkout, idle, backed by a real project whose
+    /// checkout the probe hasn't proved holds no repository, and not
     /// already moving. A move during a turn could split one turn's files
     /// across two directories, so busy tasks wait.
     pub(super) fn can_move_session_to_worktree(&self, session_id: Uuid) -> bool {
@@ -220,11 +221,49 @@ impl Waku {
         session.workspace.is_local()
             && !session.is_busy()
             && !self.worktree_move_pending.contains(&session_id)
-            && self
-                .state
-                .projects
-                .iter()
-                .any(|project| project.id == session.project_id && !project.is_projectless())
+            && self.state.projects.iter().any(|project| {
+                project.id == session.project_id
+                    && !project.is_projectless()
+                    && !self.workspace_path_confirmed_non_git(&project.path)
+            })
+    }
+
+    /// Drop unstarted drafts planning a worktree in `path` back to the local
+    /// checkout — a branch probe just proved `path` holds no Git repository,
+    /// so the worktree could never materialize and first submit would fail.
+    /// `owner` is the daemon the probe ran on: only its sessions apply (a
+    /// remote project's path can spell the same string on another host).
+    /// Returns whether anything changed.
+    pub(super) fn downgrade_gitless_worktree_drafts(
+        &mut self,
+        path: &std::path::Path,
+        owner: waku_client::DaemonKey,
+    ) -> bool {
+        let downgraded: Vec<Uuid> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                !session.has_started()
+                    && !session.is_busy()
+                    && matches!(session.workspace, SessionWorkspace::NewWorktree { .. })
+                    && self.daemons.session_owner(session.id) == owner
+                    && self.state.projects.iter().any(|project| {
+                        project.id == session.project_id && project.path == path
+                    })
+            })
+            .map(|session| session.id)
+            .collect();
+        for session_id in &downgraded {
+            if let Some(session) = self.state.session_mut(*session_id) {
+                session.workspace = SessionWorkspace::Local;
+            }
+        }
+        if downgraded.is_empty() {
+            return false;
+        }
+        self.save();
+        true
     }
 
     /// Move a local task into a newly created worktree that adopts the
