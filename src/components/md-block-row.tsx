@@ -7,10 +7,10 @@ import { useTheme } from '@/lib/use-theme';
 import type { MarkdownBlock } from '@/md/parse';
 import {
   openLinkExternally,
-  renderBlock,
+  RenderBlock,
   type MarkdownStyles,
   type RenderContext,
-} from '@/md/render';
+} from '@/md/render.tsrx';
 
 import type { TranscriptMarkdownCache } from '@/md/transcript-cache';
 import { RowVeil } from '@/md/veil';
@@ -193,7 +193,7 @@ export const MdBlockSettled = memo(
     source: string;
     styles: MarkdownStyles;
   }) {
-    return <>{renderBlock(node, staticContext(styles), 'b')}</>;
+    return <RenderBlock ctx={staticContext(styles)} node={node} />;
   },
   (previous, next) => previous.source === next.source && previous.styles === next.styles,
 );
@@ -241,7 +241,7 @@ export function MdBlockLive({
   };
 
   veil?.beginFrame();
-  const children = blocks.map((block, index) => renderBlock(block.node, ctx, index));
+  const children = blocks.map((block) => <RenderBlock ctx={ctx} node={block.node} />);
   veil?.finishFrame();
   const fading = veil?.isFading() ?? false;
   useEffect(() => {

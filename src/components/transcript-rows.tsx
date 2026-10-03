@@ -24,7 +24,7 @@ import { MonoFont } from '@/lib/theme-platform';
 import { Radius } from '@/lib/theme-colors';
 import { useTheme } from '@/lib/use-theme';
 import type { TranscriptRow } from '@/lib/session-presentation';
-import type { MarkdownStyles } from '@/md/render';
+import type { MarkdownStyles } from '@/md/render.tsrx';
 import type { TranscriptMarkdownCache } from '@/md/transcript-cache';
 
 /**

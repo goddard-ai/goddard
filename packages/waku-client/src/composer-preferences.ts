@@ -46,15 +46,6 @@ const PROVIDERS = new Set<ProviderKind>([
   'pi',
 ])
 
-export function browserComposerPreferenceStorage(): StorageLike | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
-
 export function readComposerPreferences(
   storage: StorageLike | null,
   daemonAddress: string,

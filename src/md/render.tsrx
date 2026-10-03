@@ -1,3 +1,4 @@
+/** @jsxImportSource @nativescript-community/octane */
 /**
  * mdast → xplat elements, with the streaming veil applied as paint-only
  * color fades.
@@ -7,6 +8,11 @@
  * gets a stable ordinal in document order and its *visible* text is the veil
  * key. Veil spans split leaf runs and multiply foreground/background alpha —
  * they can never change shaping, wrapping, or heights.
+ *
+ * Every render step is a component: the universal compiler only lowers JSX
+ * inside component declarations, so the reference's free render* functions
+ * become <RenderX> components. Shared InlineContext objects carry the veil
+ * cursor across children in document order.
  */
 
 import type {
@@ -101,7 +107,7 @@ export function openLinkExternally(url: string) {
     return;
   }
 
-  if (taskId !== null) {return;}
+  if (taskId !== null) return;
   try {
     openUrl(url);
   } catch {
@@ -109,7 +115,7 @@ export function openLinkExternally(url: string) {
   }
 }
 
-/** Visible text of an inline tree. Must mirror `renderInline`'s traversal
+/** Visible text of an inline tree. Must mirror `RenderInline`'s traversal
  * exactly — the veil's span offsets are positions in this string. */
 export function flattenInline(nodes: readonly PhrasingContent[]): string {
   let flat = '';
@@ -141,9 +147,9 @@ function inlineText(node: PhrasingContent): string {
 function beginTextElement(ctx: RenderContext, flat: string): readonly VeilSpan[] {
   const ordinal = ctx.ordinal.value;
   ctx.ordinal.value += 1;
-  if (!ctx.veil) {return [];}
+  if (!ctx.veil) return [];
   const spans = ctx.veil.advance(ordinal, flat, ctx.now);
-  if (spans.length) {ctx.hadSpans = true;}
+  if (spans.length) ctx.hadSpans = true;
   return spans;
 }
 
@@ -155,19 +161,21 @@ function inlineContext(
   return { block: ctx, spans: beginTextElement(ctx, flat), cursor: { value: 0 }, ink };
 }
 
-/**
- * Emit one leaf run, split at veil boundaries. Every piece is a
- * RichTextSpan — the native FormattedString host needs runs, not raw text
- * nodes.
- */
-function renderLeaf(
+/** The veil-split pieces of one leaf run — data, not elements, so the JSX
+ * that materializes them lives inside a component body. */
+interface LeafPiece {
+  text: string;
+  style: Style[];
+}
+
+function leafPieces(
   value: string,
   ictx: InlineContext,
   style?: Style & { color?: string; backgroundColor?: string },
-): ReactNode[] {
+): LeafPiece[] {
   const start = ictx.cursor.value;
   ictx.cursor.value += value.length;
-  if (!value) {return [];}
+  if (!value) return [];
   const pieces = splitRunAtSpans(start, value.length, ictx.spans);
   return pieces.map(([pieceStart, pieceEnd, opacity]) => {
     const slice = value.slice(pieceStart - start, pieceEnd - start);
@@ -179,42 +187,67 @@ function renderLeaf(
       }
     }
 
-    return (
-      <RichTextSpan text={slice} style={[style, faded]} />
-    );
+    return { text: slice, style: [style ?? {}, faded] };
   });
 }
 
-function renderInline(
-  nodes: readonly PhrasingContent[],
-  ictx: InlineContext,
-): ReactNode[] {
+/** Materialize a leaf run inside a formatted string. */
+function RenderLeaf({
+  value,
+  ictx,
+  style,
+}: {
+  value: string;
+  ictx: InlineContext;
+  style?: Style & { color?: string; backgroundColor?: string };
+}) {
+  return leafPieces(value, ictx, style).map((piece) => (
+    <RichTextSpan text={piece.text} style={piece.style} />
+  ));
+}
+
+function RenderInline({
+  nodes,
+  ictx,
+}: {
+  nodes: readonly PhrasingContent[];
+  ictx: InlineContext;
+}) {
   const { styles } = ictx.block;
-  return nodes.flatMap((node) => {
+  return nodes.map((node) => {
     switch (node.type) {
       case 'text':
       case 'html':
-        return renderLeaf(node.value, ictx);
+        return <RenderLeaf value={node.value} ictx={ictx} />;
       case 'inlineCode':
-        return renderLeaf(node.value, { ...ictx, ink: styles.codespan.color }, styles.codespan);
+        return (
+          <RenderLeaf
+            value={node.value}
+            ictx={{ ...ictx, ink: styles.codespan.color }}
+            style={styles.codespan}
+          />
+        );
       case 'break':
-        return renderLeaf('\n', ictx);
+        return <RenderLeaf value={'\n'} ictx={ictx} />;
       case 'strong':
         return (
           <RichTextSpan style={styles.strong}>
-            {renderInline(node.children, ictx)}
+            <RenderInline nodes={node.children} ictx={ictx} />
           </RichTextSpan>
         );
       case 'emphasis':
         return (
           <RichTextSpan style={styles.em}>
-            {renderInline(node.children, ictx)}
+            <RenderInline nodes={node.children} ictx={ictx} />
           </RichTextSpan>
         );
       case 'delete':
         return (
           <RichTextSpan style={styles.strikethrough}>
-            {renderInline(node.children, { ...ictx, ink: styles.strikethrough.color })}
+            <RenderInline
+              nodes={node.children}
+              ictx={{ ...ictx, ink: styles.strikethrough.color }}
+            />
           </RichTextSpan>
         );
       case 'link': {
@@ -225,7 +258,10 @@ function renderInline(
             onPress={pending ? undefined : () => ictx.block.onOpenLink(node.url)}
             style={styles.link}
           >
-            {renderInline(node.children, { ...ictx, ink: styles.link.color })}
+            <RenderInline
+              nodes={node.children}
+              ictx={{ ...ictx, ink: styles.link.color }}
+            />
           </RichTextSpan>
         );
       }
@@ -233,17 +269,23 @@ function renderInline(
         // Unresolved references render as link-styled text without a target.
         return (
           <RichTextSpan style={styles.link}>
-            {renderInline(node.children, { ...ictx, ink: styles.link.color })}
+            <RenderInline
+              nodes={node.children}
+              ictx={{ ...ictx, ink: styles.link.color }}
+            />
           </RichTextSpan>
         );
       case 'image':
       case 'imageReference':
       case 'footnoteReference':
-        return [];
+        return null;
       default:
-        return 'children' in node
-          ? renderInline((node as { children: PhrasingContent[] }).children, ictx)
-          : [];
+        return 'children' in node ? (
+          <RenderInline
+            nodes={(node as { children: PhrasingContent[] }).children}
+            ictx={ictx}
+          />
+        ) : null;
     }
   });
 }
@@ -258,7 +300,7 @@ function paragraphSegments(children: readonly PhrasingContent[]) {
 
   let run: PhrasingContent[] = [];
   const flushRun = () => {
-    if (run.length) {segments.push({ kind: 'text', nodes: run });}
+    if (run.length) segments.push({ kind: 'text', nodes: run });
     run = [];
   };
 
@@ -288,11 +330,13 @@ function paragraphSegments(children: readonly PhrasingContent[]) {
   return segments;
 }
 
-function renderParagraph(
-  children: readonly PhrasingContent[],
-  ctx: RenderContext,
-  _key: string | number,
-): ReactNode {
+function RenderParagraph({
+  children,
+  ctx,
+}: {
+  children: readonly PhrasingContent[];
+  ctx: RenderContext;
+}) {
   const { styles } = ctx;
   const ictx = inlineContext(ctx, flattenInline(children), styles.body.color);
   const segments = paragraphSegments(children);
@@ -301,7 +345,7 @@ function renderParagraph(
       {segments.map((segment) =>
         segment.kind === 'text' ? (
           <RichText style={styles.body}>
-            {renderInline(segment.nodes, ictx)}
+            <RenderInline nodes={segment.nodes} ictx={ictx} />
           </RichText>
         ) : (
           <MarkdownImage
@@ -340,7 +384,7 @@ function MarkdownImage({
     />
   );
 
-  if (!href || href === PENDING_LINK_URL) {return image;}
+  if (!href || href === PENDING_LINK_URL) return image;
   return (
     <Pressable accessibilityRole="link" onPress={() => onOpenLink(href)}>
       {image}
@@ -348,12 +392,15 @@ function MarkdownImage({
   );
 }
 
-function renderCode(
-  value: string,
-  language: string | null,
-  ctx: RenderContext,
-  _key: string | number,
-): ReactNode {
+function RenderCode({
+  value,
+  language,
+  ctx,
+}: {
+  value: string;
+  language: string | null;
+  ctx: RenderContext;
+}) {
   const { styles } = ctx;
   const spans = beginTextElement(ctx, value);
   const lines = value.split('\n');
@@ -376,12 +423,16 @@ function renderCode(
       <ScrollView horizontal>
         <View style={styles.codeContent}>
           {lines.map((line, index) => {
-            const pieces = renderLeaf(line, ictx);
+            const pieces = leafPieces(line, ictx);
             // The '\n' separating lines is part of the flattened text.
-            if (index < lines.length - 1) {ictx.cursor.value += 1;}
+            if (index < lines.length - 1) ictx.cursor.value += 1;
             return (
               <RichText style={styles.codeLine}>
-                {pieces.length ? pieces : <RichTextSpan text=" " />}
+                {pieces.length
+                  ? pieces.map((piece) => (
+                      <RichTextSpan text={piece.text} style={piece.style} />
+                    ))
+                  : <RichTextSpan text=" " />}
               </RichText>
             );
           })}
@@ -391,12 +442,15 @@ function renderCode(
   );
 }
 
-function renderListItem(
-  item: ListItem,
-  marker: string,
-  ctx: RenderContext,
-  _key: string | number,
-): ReactNode {
+function RenderListItem({
+  item,
+  marker,
+  ctx,
+}: {
+  item: ListItem;
+  marker: string;
+  ctx: RenderContext;
+}) {
   const { styles } = ctx;
   // The marker is a veil element of its own: a freshly streamed item must
   // dissolve in whole — a solid bullet floating over still-fading text reads
@@ -413,76 +467,108 @@ function renderListItem(
         <RichTextSpan text={marker} />
       </RichText>
       <View style={styles.listContent}>
-        {item.children.map((child, index) => renderBlock(child, ctx, index))}
+        {item.children.map((child) => <RenderBlock node={child} ctx={ctx} />)}
       </View>
     </View>
   );
 }
 
-function renderTable(
-  node: Extract<RootContent, { type: 'table' }>,
-  ctx: RenderContext,
-  _key: string | number,
-): ReactNode {
+function RenderTable({
+  node,
+  ctx,
+}: {
+  node: Extract<RootContent, { type: 'table' }>;
+  ctx: RenderContext;
+}) {
   const { styles } = ctx;
   const [head, ...rows] = node.children;
-  const renderRow = (
-    row: (typeof node.children)[number],
-    rowKey: string | number,
-    isHead: boolean,
-  ) => (
-    <View style={[styles.tableRow, isHead && styles.tableHeadRow]}>
-      {row.children.map((cell, cellIndex) => {
-        const textStyle = isHead ? styles.tableHeadText : styles.tableCellText;
-        const align = node.align?.[cellIndex];
-        const ictx = inlineContext(ctx, flattenInline(cell.children), textStyle.color);
-        return (
-          <View style={styles.tableCell}>
-            <RichText style={[textStyle, align ? { textAlign: align } : null]}>
-              {renderInline(cell.children, ictx)}
-            </RichText>
-          </View>
-        );
-      })}
-    </View>
-  );
-
   return (
     <View style={styles.table}>
       <ScrollView horizontal>
         <View>
-          {head && renderRow(head, 'head', true)}
-          {rows.map((row, index) => renderRow(row, index, false))}
+          {head ? (
+            <View style={[styles.tableRow, styles.tableHeadRow]}>
+              {head.children.map((cell, cellIndex) => (
+                <RenderTableCell
+                  cell={cell}
+                  cellIndex={cellIndex}
+                  ctx={ctx}
+                  head={node}
+                  isHead
+                />
+              ))}
+            </View>
+          ) : null}
+          {rows.map((row) => (
+            <View style={styles.tableRow}>
+              {row.children.map((cell, cellIndex) => (
+                <RenderTableCell
+                  cell={cell}
+                  cellIndex={cellIndex}
+                  ctx={ctx}
+                  head={node}
+                />
+              ))}
+            </View>
+          ))}
         </View>
       </ScrollView>
     </View>
   );
 }
 
-export function renderBlock(
-  node: RootContent | BlockContent | DefinitionContent,
-  ctx: RenderContext,
-  key: string | number,
-): ReactNode {
+function RenderTableCell({
+  cell,
+  cellIndex,
+  head,
+  isHead,
+  ctx,
+}: {
+  cell: Extract<RootContent, { type: 'table' }>['children'][number]['children'][number];
+  cellIndex: number;
+  head: Extract<RootContent, { type: 'table' }>;
+  isHead?: boolean;
+  ctx: RenderContext;
+}) {
+  const { styles } = ctx;
+  const textStyle = isHead ? styles.tableHeadText : styles.tableCellText;
+  const align = head.align?.[cellIndex];
+  const ictx = inlineContext(ctx, flattenInline(cell.children), textStyle.color);
+  return (
+    <View style={styles.tableCell}>
+      <RichText style={[textStyle, align ? { textAlign: align } : null]}>
+        <RenderInline nodes={cell.children} ictx={ictx} />
+      </RichText>
+    </View>
+  );
+}
+
+export function RenderBlock({
+  node,
+  ctx,
+}: {
+  node: RootContent | BlockContent | DefinitionContent;
+  ctx: RenderContext;
+}) {
   const { styles } = ctx;
   switch (node.type) {
     case 'paragraph':
-      return renderParagraph(node.children, ctx, key);
+      return <RenderParagraph children={node.children} ctx={ctx} />;
     case 'heading': {
       const style = styles.heading[node.depth - 1] ?? styles.heading[5]!;
       const ictx = inlineContext(ctx, flattenInline(node.children), style.color);
       return (
         <RichText style={style}>
-          {renderInline(node.children, ictx)}
+          <RenderInline nodes={node.children} ictx={ictx} />
         </RichText>
       );
     }
     case 'code':
-      return renderCode(node.value, node.lang ?? null, ctx, key);
+      return <RenderCode ctx={ctx} language={node.lang ?? null} value={node.value} />;
     case 'blockquote':
       return (
         <View style={styles.blockquote}>
-          {node.children.map((child, index) => renderBlock(child, ctx, index))}
+          {node.children.map((child) => <RenderBlock ctx={ctx} node={child} />)}
         </View>
       );
     case 'list': {
@@ -496,13 +582,13 @@ export function renderBlock(
                 ? `${start + index}.`
                 : '•';
 
-            return renderListItem(item, marker, ctx, index);
+            return <RenderListItem ctx={ctx} item={item} marker={marker} />;
           })}
         </View>
       );
     }
     case 'table':
-      return renderTable(node, ctx, key);
+      return <RenderTable ctx={ctx} node={node} />;
     case 'thematicBreak':
       return <View style={styles.hr} />;
     case 'html': {
@@ -511,7 +597,7 @@ export function renderBlock(
       return (
         <View style={styles.paragraph}>
           <RichText style={styles.body}>
-            {renderLeaf(node.value, ictx)}
+            <RenderLeaf value={node.value} ictx={ictx} />
           </RichText>
         </View>
       );

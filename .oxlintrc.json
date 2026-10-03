@@ -27,6 +27,8 @@
 	"ignorePatterns": [
 		"reference/**",
 		"packages/**",
-		"platforms/**"
+		"platforms/**",
+		".ns-vite-build/**",
+		"dist/**"
 	]
 }

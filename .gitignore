@@ -2,3 +2,5 @@ node_modules
 dist
 platforms/
 hooks/
+
+.ns-vite-build

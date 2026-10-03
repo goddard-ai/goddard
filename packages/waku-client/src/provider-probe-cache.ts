@@ -62,15 +62,6 @@ export function writeProviderProbeCache(
   }
 }
 
-export function browserProviderProbeStorage(): StorageLike | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
-
 function readState(storage: StorageLike | null): ProviderProbeCacheState | undefined {
   if (!storage) return undefined
   try {

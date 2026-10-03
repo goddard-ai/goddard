@@ -31,7 +31,7 @@ import {
   initialWindowStart,
 } from '@/lib/transcript-scroll';
 
-import type { MarkdownStyles } from '@/md/render';
+import type { MarkdownStyles } from '@/md/render.tsrx';
 import { TranscriptMarkdownCache } from '@/md/transcript-cache';
 
 /** Content column cap (iPad). */
