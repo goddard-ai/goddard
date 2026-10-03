@@ -6631,7 +6631,13 @@ impl Waku {
             .remove(&message_id)
             .unwrap_or_default();
         self.restore_composer_submission(session_id, submission, cx);
-        let focus_handle = self.composer_focus(cx);
+        // The restored draft lands in the composer the message was queued
+        // from — a side chat's lane when one holds the session's composer.
+        let focus_handle = self
+            .side_chat_composers
+            .get(&session_id)
+            .map(|chat| chat.composer.read(cx).focus())
+            .unwrap_or_else(|| self.composer_focus(cx));
         window.focus(&focus_handle, cx);
         self.save();
         cx.notify();
@@ -6665,7 +6671,7 @@ impl Waku {
             .remove(&message_id)
             .unwrap_or_default();
         self.save();
-        self.steer_composer_submission(submission, cx);
+        self.steer_session_submission(session_id, submission, cx);
     }
 
     /// Activate the same action as the oldest queued row's Steer control.

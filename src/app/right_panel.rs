@@ -3678,6 +3678,13 @@ impl Waku {
                     .flex_none()
                     .px(px(10.0))
                     .pt(px(8.0))
+                    // Parked follow-ups tuck against the composer card's top
+                    // edge, inset the same 14px the session column gives the
+                    // queue card inside its composer column.
+                    .children(
+                        self.queued_messages_card(&session, cx)
+                            .map(|card| div().px(px(14.0)).child(card)),
+                    )
                     .child(self.render_composer_card(
                         &composer::ComposerCard::SideChat {
                             session_id,

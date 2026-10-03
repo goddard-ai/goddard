@@ -4983,8 +4983,29 @@ impl Waku {
     /// row pulls its text back into the composer on click and carries
     /// steer/remove/more controls on the right; the nudge row only removes.
     pub(super) fn render_queued_messages(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let session_id = self.state.selected_session?;
         let session = self.selected_session()?;
+        let card = self.queued_messages_card(session, cx)?;
+        Some(
+            div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
+                div()
+                    .w_full()
+                    .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                    .mx_auto()
+                    .px(px(14.0))
+                    .child(card),
+            ),
+        )
+    }
+
+    /// `session`'s queue card — the bordered, top-rounded sheet of parked
+    /// follow-ups a lane insets above its composer card. Shared by the
+    /// session column and a side chat's lane.
+    pub(super) fn queued_messages_card(
+        &self,
+        session: &AgentSession,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let session_id = session.id;
         if !session
             .queued_messages
             .iter()
@@ -5215,27 +5236,18 @@ impl Waku {
             );
         }
         Some(
-            div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
-                div()
-                    .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
-                    .mx_auto()
-                    .px(px(14.0))
-                    .child(
-                        div()
-                            .rounded_tl(px(15.0))
-                            .rounded_tr(px(15.0))
-                            .border_t(hairline())
-                            .border_l(hairline())
-                            .border_r(hairline())
-                            .border_color(theme.separator)
-                            .bg(theme.composer)
-                            // Row hover fills are full-width rectangles; clip
-                            // them to the card's rounded corners.
-                            .overflow_hidden()
-                            .child(list),
-                    ),
-            ),
+            div()
+                .rounded_tl(px(15.0))
+                .rounded_tr(px(15.0))
+                .border_t(hairline())
+                .border_l(hairline())
+                .border_r(hairline())
+                .border_color(theme.separator)
+                .bg(theme.composer)
+                // Row hover fills are full-width rectangles; clip
+                // them to the card's rounded corners.
+                .overflow_hidden()
+                .child(list),
         )
     }
 
