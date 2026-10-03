@@ -1,0 +1,1 @@
+- Employees now start without memory folder access. The boss grants only the folders an employee needs for its role and task, keeping personal memory private by default.
