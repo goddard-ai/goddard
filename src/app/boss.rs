@@ -1268,6 +1268,7 @@ impl Waku {
                 None,
                 false,
                 &theme,
+                None,
             ))
             .when(speech_visible, |row| {
                 let label = if speech_playing {
@@ -1351,7 +1352,8 @@ impl Waku {
         );
         // Option trades the job title for the employee's model and effort,
         // the same reveal a task row's detail line performs.
-        let detail = if self.sidebar_alt_held {
+        let alt_held = self.sidebar_alt_held;
+        let detail = if alt_held {
             session.map(|session| self.session_sidebar_model_detail(session))
         } else {
             self.boss_ui.job_titles.get(&id).cloned()
@@ -1378,14 +1380,23 @@ impl Waku {
             .child(boss_sidebar_label(
                 identity.name.clone(),
                 detail.unwrap_or_default(),
-                self.boss_ui
-                    .employee_icons
-                    .get(&id)
-                    .copied()
-                    .flatten()
-                    .map(crate::custom_commands::icon_path),
+                if alt_held {
+                    None
+                } else {
+                    self.boss_ui
+                        .employee_icons
+                        .get(&id)
+                        .copied()
+                        .flatten()
+                        .map(crate::custom_commands::icon_path)
+                },
                 true,
                 &theme,
+                if alt_held {
+                    session.map(|session| session.provider)
+                } else {
+                    None
+                },
             ))
             .when_some(status_indicator, |row, indicator| row.child(indicator))
             .into_any_element()
@@ -2422,6 +2433,7 @@ fn boss_sidebar_label(
     job_icon: Option<&'static str>,
     show_job_icon: bool,
     theme: &Theme,
+    provider: Option<ProviderKind>,
 ) -> Div {
     div()
         .flex_1()
@@ -2444,13 +2456,23 @@ fn boss_sidebar_label(
                 .text_size(sp(13.0))
                 .line_height(sp(15.0))
                 .text_color(theme.text_tertiary)
-                .when(show_job_icon && !job_title.is_empty(), |row| {
-                    row.child(icon(
-                        job_icon.unwrap_or_else(|| job_title_icon(&job_title)),
+                .when_some(provider, |row, provider| {
+                    row.child(crate::ui::provider_mark(
+                        provider,
                         12.0,
                         theme.text_tertiary,
                     ))
                 })
+                .when(
+                    show_job_icon && !job_title.is_empty() && provider.is_none(),
+                    |row| {
+                        row.child(icon(
+                            job_icon.unwrap_or_else(|| job_title_icon(&job_title)),
+                            12.0,
+                            theme.text_tertiary,
+                        ))
+                    },
+                )
                 .child(div().min_w_0().truncate().child(job_title)),
         )
 }
