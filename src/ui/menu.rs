@@ -23,6 +23,9 @@
 //!   release picks whatever it lands on — or dismisses when it lands on
 //!   nothing. A release back where the press began reads as a click instead,
 //!   leaving the menu up for a second pick.
+//! - **Hover exit** applies only to hover-opened menus: once the pointer rests
+//!   on neither trigger nor card for [`HOVER_CLOSE_DELAY`], the menu retires.
+//!   Click-, drag- and keyboard-opens ignore it — a deliberate open stays.
 //! - **Focus** is taken two frames after opening. Deferred elements are not
 //!   linked into the dispatch tree until after the deferred draw runs, so
 //!   focusing any earlier silently does nothing — and then no key reaches the
@@ -67,6 +70,11 @@ const TRIGGER_GAP: f32 = 4.0;
 /// Dwell before a hover-open trigger's menu appears: long enough that a
 /// cursor crossing the strip never flashes it, short enough to feel instant.
 const HOVER_OPEN_DELAY: Duration = Duration::from_millis(150);
+
+/// Grace before a hover-opened menu retires once the pointer rests on neither
+/// trigger nor card: long enough to cross the gap between them — or to pass
+/// through a sibling en route — short enough a real exit still feels instant.
+const HOVER_CLOSE_DELAY: Duration = Duration::from_millis(300);
 
 /// How long a sibling row's hover takes to retire an open flyout. The flyout
 /// draws centered on its parent row, so the straight path to an entry above
@@ -386,6 +394,14 @@ struct MenuState {
     /// the handle, not the element: the element is rebuilt every frame, so a
     /// captured `Cell` would forget the hover a pending timer needs to see.
     trigger_hovered: bool,
+    /// The current open came from [`dropdown_menu_on_hover`]'s dwell timer, so
+    /// the pointer leaving both trigger and card retires it on a delay.
+    /// Click, drag and keyboard opens leave it `false` and stay until the
+    /// other dismissals fire — as does keyboard engagement inside the card.
+    hover_opened: bool,
+    /// Whether the pointer rests on the open card. Paired with
+    /// `trigger_hovered`, it decides a hover-opened menu's exit dismissal.
+    card_hovered: bool,
     /// Invalidates a delayed flyout teardown — bumped when the pointer
     /// reaches the flyout or the menu state resets, so a timer armed by a
     /// sibling hover it crossed en route fires into a stale serial.
@@ -463,7 +479,16 @@ impl ContextMenuHandle {
             .get()
             .map(|bounds| Point::new(bounds.left() + px(8.0), bounds.bottom()))
             .unwrap_or_else(|| window.mouse_position());
-        open_menu(self, position, SurfaceFocus::Card, false, None, window, cx);
+        open_menu(
+            self,
+            position,
+            SurfaceFocus::Card,
+            false,
+            false,
+            None,
+            window,
+            cx,
+        );
     }
 
     pub fn close(&self, window: &mut Window, cx: &mut App) {
@@ -479,6 +504,8 @@ impl ContextMenuHandle {
             state.submenu_highlighted = None;
             state.submenu_focused = false;
             state.trigger_click_toggles = false;
+            state.hover_opened = false;
+            state.card_hovered = false;
             state.flyout_close_serial += 1;
             was_open
         };
@@ -541,6 +568,7 @@ impl ContextMenuHandle {
         &self,
         position: Point<Pixels>,
         trigger_click_toggles: bool,
+        hover_opened: bool,
         held_press: Option<HeldPress>,
         window: &mut Window,
         cx: &mut App,
@@ -556,6 +584,8 @@ impl ContextMenuHandle {
             state.submenu_highlighted = None;
             state.submenu_focused = false;
             state.trigger_click_toggles = trigger_click_toggles;
+            state.hover_opened = hover_opened;
+            state.card_hovered = false;
             state.flyout_close_serial += 1;
             was_open
         };
@@ -587,6 +617,7 @@ fn open_menu(
     position: Point<Pixels>,
     focus_target: SurfaceFocus,
     trigger_click_toggles: bool,
+    hover_opened: bool,
     held_press: Option<HeldPress>,
     window: &mut Window,
     cx: &mut App,
@@ -594,7 +625,14 @@ fn open_menu(
     // Runs the toggle observers, which is where a content-focusing surface
     // schedules its own focus. Ours is scheduled after, so it would win — only
     // request it when the card is what should end up focused.
-    handle.open_at(position, trigger_click_toggles, held_press, window, cx);
+    handle.open_at(
+        position,
+        trigger_click_toggles,
+        hover_opened,
+        held_press,
+        window,
+        cx,
+    );
     if focus_target == SurfaceFocus::Card {
         let focus = handle.focus.clone();
         window.on_next_frame(move |window, _| {
@@ -1058,8 +1096,9 @@ where
 /// A [`dropdown_menu`] whose trigger also opens after the pointer rests on it
 /// for [`HOVER_OPEN_DELAY`] — for controls like a tab strip's add button,
 /// whose whole job is presenting the menu. Click and keyboard still toggle,
-/// and a deliberate close while still hovered is respected: reopening takes a
-/// fresh pointer entry.
+/// a deliberate close while still hovered is respected — reopening takes a
+/// fresh pointer entry — and a hover-opened menu retires once the pointer
+/// rests on neither trigger nor card for [`HOVER_CLOSE_DELAY`].
 pub fn dropdown_menu_on_hover<E>(
     trigger: E,
     id: impl Into<ElementId>,
@@ -1078,6 +1117,14 @@ where
             state.trigger_hovered = *hovered;
             entered
         };
+        if !*hovered {
+            // Off the trigger: the card keeps a hover-opened menu alive, but
+            // resting on neither retires it on a short delay.
+            if hover_handle.is_open() {
+                schedule_hover_dismiss(&hover_handle, window, cx);
+            }
+            return;
+        }
         if !entered || hover_handle.is_open() {
             return;
         }
@@ -1098,12 +1145,47 @@ where
                     .get()
                     .map(|bounds| align.anchor_point(bounds, px(TRIGGER_GAP)))
                     .unwrap_or_else(|| window.mouse_position());
-                open_menu(&handle, anchor, SurfaceFocus::Card, true, None, window, cx);
+                open_menu(
+                    &handle,
+                    anchor,
+                    SurfaceFocus::Card,
+                    true,
+                    true,
+                    None,
+                    window,
+                    cx,
+                );
             });
         })
         .detach();
     });
     dropdown_menu(trigger, id, handle, align, items)
+}
+
+/// Retire a hover-opened menu once the pointer rests on neither trigger nor
+/// card. The delay covers the gap crossing en route from one to the other —
+/// or a diagonal path through whatever sits between — and the flags are
+/// re-checked at fire time, so landing on either side cancels it. Menus
+/// opened any other way carry `hover_opened = false` and are left alone.
+fn schedule_hover_dismiss(handle: &ContextMenuHandle, window: &mut Window, cx: &mut App) {
+    let window_handle = window.window_handle();
+    let handle = handle.clone();
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(HOVER_CLOSE_DELAY).await;
+        let _ = window_handle.update(cx, |_, window, cx| {
+            let outside = {
+                let state = handle.state.borrow();
+                state.hover_opened && !state.trigger_hovered && !state.card_hovered
+            };
+            // A pointer resting on an open flyout still counts as inside:
+            // the flyout hangs outside the card's own hitbox.
+            if outside && !handle.over_flyout(window.mouse_position()) {
+                handle.close(window, cx);
+                window.refresh();
+            }
+        });
+    })
+    .detach();
 }
 
 /// A dropdown-anchored panel holding arbitrary content.
@@ -1171,7 +1253,16 @@ fn toggle_keyboard_anchored(
     else {
         return;
     };
-    open_menu(handle, anchor, focus_target, true, None, window, cx);
+    open_menu(
+        handle,
+        anchor,
+        focus_target,
+        true,
+        false,
+        None,
+        window,
+        cx,
+    );
 }
 
 /// The shared half of both dropdown surfaces: a trigger that records its bounds
@@ -1254,7 +1345,16 @@ fn toggle_anchored_surface(
         .get()
         .map(|bounds| align.anchor_point(bounds, px(TRIGGER_GAP)))
         .unwrap_or_else(|| window.mouse_position());
-    open_menu(handle, anchor, focus_target, true, held_press, window, cx);
+    open_menu(
+        handle,
+        anchor,
+        focus_target,
+        true,
+        false,
+        held_press,
+        window,
+        cx,
+    );
 }
 
 /// A chrome-less card: dismissal and the menu key context, nothing else.
@@ -1328,6 +1428,7 @@ where
                     &handle_for_down,
                     event.position,
                     SurfaceFocus::Card,
+                    false,
                     false,
                     Some(HeldPress {
                         button: MouseButton::Right,
@@ -1472,6 +1573,17 @@ impl RenderOnce for MenuCard {
 
         let mut root_card = div()
             .id(self.id)
+            // Hover of the whole card, padding included: leaving it retires a
+            // hover-opened menu once the trigger is not holding it either.
+            .on_hover({
+                let handle = self.handle.clone();
+                move |hovered, window, cx| {
+                    handle.state.borrow_mut().card_hovered = *hovered;
+                    if !*hovered {
+                        schedule_hover_dismiss(&handle, window, cx);
+                    }
+                }
+            })
             .min_w(px(176.0))
             .max_w(px(320.0))
             .py(px(4.0))
@@ -1999,6 +2111,10 @@ fn on_menu_key(
         cx.stop_propagation();
         return;
     }
+
+    // Keyboard engagement pins a hover-opened menu: pointer exit no longer
+    // retires it once the keys take over.
+    handle.state.borrow_mut().hover_opened = false;
 
     let (submenu_focused, active_submenu, submenu_current) = {
         let state = handle.state.borrow();
@@ -2987,6 +3103,93 @@ mod tests {
         cx.executor().advance_clock(FLYOUT_CLOSE_DELAY);
         cx.run_until_parked();
         assert_eq!(handle.state.borrow().active_submenu, None);
+    }
+
+    /// A `dropdown_menu_on_hover` trigger — the tab strip's add-button shape.
+    struct HoverHarness {
+        handle: ContextMenuHandle,
+    }
+
+    impl Render for HoverHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(dropdown_menu_on_hover(
+                div().id("hover-trigger").w(px(120.0)).h(px(32.0)),
+                "hover-dropdown",
+                &self.handle,
+                MenuAlign::BelowLeft,
+                |_| vec![MenuItem::new("Entry", |_, _| {})],
+            ))
+        }
+    }
+
+    #[gpui::test]
+    fn hover_opened_menu_retires_once_the_pointer_leaves(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let handle = cx.update(ContextMenuHandle::new);
+        let (_view, cx) = cx.add_window_view(|_, _| HoverHarness {
+            handle: handle.clone(),
+        });
+        let on_trigger = point(px(10.0), px(10.0));
+
+        // A resting pointer opens the menu after the dwell.
+        cx.simulate_mouse_move(on_trigger, None, Modifiers::none());
+        cx.executor().advance_clock(HOVER_OPEN_DELAY);
+        cx.run_until_parked();
+        assert!(
+            handle.is_open(),
+            "resting on the trigger should open the menu"
+        );
+
+        // Landing on the card inside the grace window keeps the menu open.
+        cx.simulate_mouse_move(point(px(10.0), px(40.0)), None, Modifiers::none());
+        cx.executor().advance_clock(HOVER_CLOSE_DELAY);
+        cx.run_until_parked();
+        assert!(
+            handle.is_open(),
+            "the card holds a hover-opened menu after the trigger lets go"
+        );
+
+        // Stepping off both starts the retirement; coming back cancels it.
+        cx.simulate_mouse_move(point(px(400.0), px(400.0)), None, Modifiers::none());
+        cx.executor().advance_clock(HOVER_CLOSE_DELAY / 2);
+        cx.run_until_parked();
+        cx.simulate_mouse_move(point(px(10.0), px(40.0)), None, Modifiers::none());
+        cx.executor().advance_clock(HOVER_CLOSE_DELAY);
+        cx.run_until_parked();
+        assert!(
+            handle.is_open(),
+            "re-entering the card inside the grace window keeps the menu open"
+        );
+
+        cx.simulate_mouse_move(point(px(400.0), px(400.0)), None, Modifiers::none());
+        cx.executor().advance_clock(HOVER_CLOSE_DELAY);
+        cx.run_until_parked();
+        assert!(
+            !handle.is_open(),
+            "resting on neither trigger nor card retires the menu"
+        );
+    }
+
+    #[gpui::test]
+    fn click_opened_menu_ignores_pointer_exit(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let handle = cx.update(ContextMenuHandle::new);
+        let (_view, cx) = cx.add_window_view(|_, _| HoverHarness {
+            handle: handle.clone(),
+        });
+        let on_trigger = point(px(10.0), px(10.0));
+
+        cx.simulate_click(on_trigger, Modifiers::none());
+        cx.run_until_parked();
+        assert!(handle.is_open());
+
+        cx.simulate_mouse_move(point(px(400.0), px(400.0)), None, Modifiers::none());
+        cx.executor().advance_clock(HOVER_CLOSE_DELAY);
+        cx.run_until_parked();
+        assert!(
+            handle.is_open(),
+            "a deliberate click-open stays up when the pointer leaves"
+        );
     }
 
     /// A popover hosting a virtualized `list()` — the model picker's shape.

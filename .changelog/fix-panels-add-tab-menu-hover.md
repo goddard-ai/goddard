@@ -1,0 +1,1 @@
+- The right panel's `+` add-tab menu now closes when the pointer leaves both the button and the menu, instead of staying open until a click or Escape.
