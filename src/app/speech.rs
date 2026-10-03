@@ -302,6 +302,28 @@ impl Waku {
             while self.speech_requests_seen.len() > SPEECH_SEEN_CAP {
                 self.speech_requests_seen.pop_front();
             }
+            // Keep the spoken text in the selected conversation at receipt
+            // time, before clip resolution can reorder the audible playback.
+            if let Some(session) = self
+                .state
+                .selected_session
+                .and_then(|id| self.state.session_mut(id))
+            {
+                let item = ActivityItem::new(
+                    None,
+                    ActivityKind::Tool,
+                    "Spoken aloud",
+                    Some(parts.join(" ")),
+                    true,
+                );
+                session.transcript_blocks.push(TranscriptBlock {
+                    after_message: session.messages.len(),
+                    turn_id: session.active_turn_id(),
+                    activities: vec![item],
+                });
+                session.updated_at = unix_time();
+                self.stream_state_dirty = true;
+            }
             self.start_speech_request(key, parts, cx);
             changed = true;
         }

@@ -3054,6 +3054,11 @@ pub(super) fn activity_header_title(
     live_group: bool,
     live_reasoning_id: Option<Uuid>,
 ) -> String {
+    if let [activity] = activities
+        && activity.title == "Spoken aloud"
+    {
+        return activity_display_title(activity);
+    }
     if live_group && let Some(activity) = activities.last() {
         return activity.reasoning.as_ref().map_or_else(
             || activity_display_title(activity),
