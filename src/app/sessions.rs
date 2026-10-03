@@ -742,6 +742,9 @@ impl Waku {
         // the page's strip is what needs parking.
         self.sync_right_panel_owner(cx);
         if session_changed {
+            // A new session is a new context: a bundle click's armed boss
+            // command belongs to whatever was on screen before.
+            self.boss_ui.command_bundle = None;
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
             self.restore_missing_worktree(session_id, cx);

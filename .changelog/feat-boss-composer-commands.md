@@ -1,0 +1,1 @@
+- Typing while viewing an employee's task — or after clicking a published bundle in the sidebar — now commands the boss instead: the composer reads "Command the boss..." and names the boss next to the model picker, and the message lands in the boss chat with the employee or file attached.

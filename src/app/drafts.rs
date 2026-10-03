@@ -542,6 +542,7 @@ impl Waku {
             .cloned()
             .unwrap_or_default();
         self.apply_composer_draft(key, draft, cx);
+        self.sync_composer_placeholder(cx);
     }
 
     /// Push a draft into the live composer — text and attachment chips alike.

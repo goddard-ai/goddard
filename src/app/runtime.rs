@@ -6278,6 +6278,18 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        // An armed boss command answers to the boss chat, not the
+        // selected task — the employee on screen or a clicked bundle
+        // rides along as the submission's context attachment. Hidden
+        // nudges (continue, goal reminders) stay on their own session.
+        if !submission.hidden
+            && let Some(command) = self.composer_boss_command()
+        {
+            let (session_id, submission) =
+                self.boss_command_submission_parts(command, submission, cx);
+            self.submit_composer_submission_to(session_id, submission, cx);
+            return;
+        }
         let Some(session) = self.selected_session() else {
             return;
         };
@@ -6394,6 +6406,16 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        // The armed boss command's steer lands in the boss's live turn —
+        // or queues behind it — the same retargeting a plain send takes.
+        if !submission.hidden
+            && let Some(command) = self.composer_boss_command()
+        {
+            let (session_id, submission) =
+                self.boss_command_submission_parts(command, submission, cx);
+            self.steer_session_submission(session_id, submission, cx);
+            return;
+        }
         let Some(session_id) = self.state.selected_session else {
             return;
         };

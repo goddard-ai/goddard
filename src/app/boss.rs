@@ -27,6 +27,10 @@ pub(super) struct BossUi {
     pub expired: HashSet<Uuid>,
     pub recent: HashMap<DaemonKey, Vec<Uuid>>,
     pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
+    /// The bundle a sidebar click armed the composer with: the next main-
+    /// composer submission commands the boss with this file attached.
+    /// Cleared by a send or a session selection.
+    pub command_bundle: Option<(DaemonKey, Uuid)>,
     pub revision: u64,
     pub page: Option<(DaemonKey, BossTab)>,
     files: Vec<BossFile>,
@@ -61,6 +65,7 @@ impl Default for BossUi {
             expired: HashSet::new(),
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
+            command_bundle: None,
             revision: 0,
             page: None,
             files: Vec::new(),
@@ -87,6 +92,27 @@ enum BossItem {
     Employee(Uuid),
     Persona(Uuid),
     File(String, bool),
+}
+
+/// An armed composer command: the boss chat that answers the next
+/// submission and the context it attaches.
+pub(super) struct BossCommand {
+    /// The boss's own chat session — where the submission lands.
+    pub session_id: Uuid,
+    /// The boss's identity — the composer's destination chip.
+    pub identity: BossIdentity,
+    pub context: BossCommandContext,
+}
+
+/// What a boss-command submission attaches: the live employee whose task
+/// is on screen, or the bundle a sidebar click armed.
+pub(super) enum BossCommandContext {
+    Employee(Uuid),
+    Bundle {
+        path: PathBuf,
+        name: String,
+        directory: bool,
+    },
 }
 
 struct BossEditor {
@@ -195,6 +221,9 @@ impl Waku {
             }
             self.boss_ui.revision = self.boss_ui.revision.wrapping_add(1);
             self.sync_boss_page_rows();
+            // A boss chat opening or an employee expiring can arm or
+            // disarm the composer's command target.
+            self.sync_composer_placeholder(cx);
             if let Some(key) = self.boss_chat_key() {
                 if self
                     .boss_ui
@@ -449,6 +478,179 @@ impl Waku {
             .states
             .iter()
             .find_map(|(key, state)| (state.session_id == Some(id)).then_some(*key))
+    }
+
+    /// The boss chat a main-composer submission answers to while armed —
+    /// a live employee's task is on screen or a sidebar bundle was
+    /// clicked — plus the context it attaches. `None` leaves the
+    /// submission aimed at the selected session.
+    pub(super) fn composer_boss_command(&self) -> Option<BossCommand> {
+        // Big Picture retargets the composer at its own card; its
+        // submission paths don't consult this either way.
+        if self.big_picture.is_open() {
+            return None;
+        }
+        if let Some((key, bundle_id)) = self.boss_ui.command_bundle {
+            let command = self.boss_ui.states.get(&key).and_then(|state| {
+                state
+                    .bundles
+                    .iter()
+                    .find(|bundle| bundle.id == bundle_id)
+                    .and_then(|bundle| {
+                        Some(BossCommand {
+                            session_id: state.session_id?,
+                            identity: state.identity.clone(),
+                            context: BossCommandContext::Bundle {
+                                path: PathBuf::from(&bundle.path),
+                                name: bundle.name.clone(),
+                                directory: bundle.directory,
+                            },
+                        })
+                    })
+            });
+            // A dismissed or aged-out bundle disarms silently, falling
+            // through to the viewed-employee check.
+            if let Some(command) = command {
+                return Some(command);
+            }
+        }
+        let employee_id = self.state.selected_session?;
+        // A finished employee swaps the composer for the resurrection
+        // footer, and the boss's own chat is already the destination —
+        // neither is a command context.
+        if self.boss_ui.expired.contains(&employee_id)
+            || !self.boss_ui.identities.contains_key(&employee_id)
+        {
+            return None;
+        }
+        let key = self.daemons.session_owner(employee_id);
+        let state = self.boss_ui.states.get(&key)?;
+        Some(BossCommand {
+            session_id: state.session_id?,
+            identity: state.identity.clone(),
+            context: BossCommandContext::Employee(employee_id),
+        })
+    }
+
+    /// The attachment a boss-command submission carries: a session
+    /// reference for the viewed employee, the published file itself for
+    /// an armed bundle. Its mention token splices into the provider-
+    /// facing prompt while the chip lands in the boss transcript's bubble.
+    fn boss_command_attachment(&self, context: &BossCommandContext) -> MessageAttachment {
+        match context {
+            BossCommandContext::Employee(session_id) => {
+                let name = self
+                    .boss_ui
+                    .identities
+                    .get(session_id)
+                    .map(|identity| identity.name.clone())
+                    .unwrap_or_default();
+                MessageAttachment {
+                    path: PathBuf::new(),
+                    mention: composer::session_token(*session_id, &name),
+                    name,
+                    is_dir: false,
+                    is_image: false,
+                    blob_reference: None,
+                    pasted_text_preview: None,
+                    session_id: Some(*session_id),
+                }
+            }
+            BossCommandContext::Bundle {
+                path,
+                name,
+                directory,
+            } => MessageAttachment {
+                mention: if *directory {
+                    format!("{}/", path.display())
+                } else {
+                    path.display().to_string()
+                },
+                path: path.clone(),
+                name: name.clone(),
+                is_dir: *directory,
+                is_image: image_preview::image_format_for_name(name).is_some(),
+                blob_reference: None,
+                pasted_text_preview: None,
+                session_id: None,
+            },
+        }
+    }
+
+    /// The armed boss command's shared landing: the context attachment
+    /// folds into the submission, the armed bundle clears, and the boss
+    /// chat comes on screen so the command's destination is visible.
+    /// Returns the boss chat session the caller submits or steers to.
+    pub(super) fn boss_command_submission_parts(
+        &mut self,
+        command: BossCommand,
+        mut submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) -> (Uuid, ComposerSubmission) {
+        let attachment = self.boss_command_attachment(&command.context);
+        // The same token `merged_submission` appends: a session
+        // reference's `[session ...]` form, a file's `@mention`.
+        let token = composer::session_attachment_token(&attachment)
+            .unwrap_or_else(|| format!("@{}", attachment.mention));
+        // The bubble keeps the typed text — the context rides as its
+        // attachment chip, not as mention syntax.
+        if submission.display_content.is_none() {
+            submission.display_content = Some(submission.prompt.trim_end().to_owned());
+        }
+        let prompt = submission.prompt.trim_end().to_owned();
+        submission.prompt = if prompt.is_empty() {
+            token
+        } else {
+            format!("{prompt} {token}")
+        };
+        submission.attachments.push(attachment);
+        self.boss_ui.command_bundle = None;
+        self.request_session_activation(command.session_id, SessionActivationTransition::Visit, cx);
+        // Activation only syncs the hint when the session actually changed;
+        // commanding the already-viewed boss chat leaves it to re-read.
+        self.sync_composer_placeholder(cx);
+        (command.session_id, submission)
+    }
+
+    /// Keep the composer hint honest about where Enter sends: an armed
+    /// boss command goes to the boss chat — the employee on screen or the
+    /// armed bundle riding along as its attachment — everything else to
+    /// the selected task.
+    pub(super) fn sync_composer_placeholder(&self, cx: &mut Context<Self>) {
+        // Big Picture writes its own hint while it holds the composer.
+        if self.big_picture.is_open() {
+            return;
+        }
+        let placeholder = if self.composer_boss_command().is_some() {
+            tr!("boss.command_placeholder")
+        } else {
+            tr!("input.do_anything")
+        };
+        self.composer
+            .update(cx, |composer, cx| composer.set_placeholder(placeholder, cx));
+    }
+
+    /// The chip an armed main composer draws before the model picker: the
+    /// boss the submission goes to, named so the destination is visible
+    /// while the pickers still describe the viewed session.
+    pub(super) fn render_boss_command_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let command = self.composer_boss_command()?;
+        Some(
+            div()
+                .id("boss-command-chip")
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .pr(px(4.0))
+                .tooltip(Tooltip::text(tr!(
+                    "boss.command_hint",
+                    name = command.identity.name.clone()
+                )))
+                .child(self.boss_avatar(&command.identity, 16.0, cx))
+                .child(SharedString::from(command.identity.name))
+                .into_any_element(),
+        )
     }
 
     /// The boss-side identity of a managed session: an employee's persona
@@ -998,6 +1200,14 @@ impl Waku {
             .session_id
             .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
             .and_then(|session| self.session_status_indicator(session, &theme));
+        let selected = state.session_id.is_some_and(|id| {
+            sidebar::sidebar_session_selected(
+                self.state.selected_session,
+                self.pending_session_activation
+                    .map(|pending| pending.session_id),
+                id,
+            )
+        });
         div()
             .id(format!("boss-{key:?}"))
             .tab_index(0)
@@ -1009,9 +1219,17 @@ impl Waku {
             .gap(px(8.0))
             .rounded(px(6.0))
             .cursor_pointer()
+            .when(selected, |row| row.bg(theme.sidebar_item_background))
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx))
+            .on_activation(cx, move |this, _, cx| {
+                // Clicking the boss also folds a finished-employee list the
+                // user expanded back down.
+                if this.boss_ui.sidebar_idle_visible.remove(&key).is_some() {
+                    this.sidebar_rows_fingerprint.set(None);
+                }
+                this.chat_with_boss(key, cx)
+            })
             .child(self.boss_avatar(&state.identity, 24.0, cx))
             .child(boss_sidebar_label(
                 state.identity.name.clone(),
@@ -1049,12 +1267,22 @@ impl Waku {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
-        let status_indicator = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == id)
-            .and_then(|session| self.session_status_indicator(session, &theme));
+        let session = self.state.sessions.iter().find(|session| session.id == id);
+        let status_indicator =
+            session.and_then(|session| self.session_status_indicator(session, &theme));
+        let selected = sidebar::sidebar_session_selected(
+            self.state.selected_session,
+            self.pending_session_activation
+                .map(|pending| pending.session_id),
+            id,
+        );
+        // Option trades the job title for the employee's model and effort,
+        // the same reveal a task row's detail line performs.
+        let detail = if self.sidebar_alt_held {
+            session.map(|session| self.session_sidebar_model_detail(session))
+        } else {
+            self.boss_ui.job_titles.get(&id).cloned()
+        };
         div()
             .id(format!("boss-employee-{id}"))
             .tab_index(0)
@@ -1067,6 +1295,7 @@ impl Waku {
             .gap(px(8.0))
             .rounded(px(6.0))
             .cursor_pointer()
+            .when(selected, |row| row.bg(theme.sidebar_item_background))
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_activation(cx, move |this, _, cx| {
@@ -1075,11 +1304,7 @@ impl Waku {
             .child(self.boss_avatar(identity, 24.0, cx))
             .child(boss_sidebar_label(
                 identity.name.clone(),
-                self.boss_ui
-                    .job_titles
-                    .get(&id)
-                    .cloned()
-                    .unwrap_or_default(),
+                detail.unwrap_or_default(),
                 self.boss_ui
                     .employee_icons
                     .get(&id)
@@ -1137,6 +1362,10 @@ impl Waku {
         let row_focus = menu.trigger_focus_handle().clone();
         let open_path = path.clone();
         let key_path = path.clone();
+        // A clicked bundle arms the composer: the next submission commands
+        // the publishing boss with the file attached, so the row keeps a
+        // selected highlight until a send or session switch clears it.
+        let armed = self.boss_ui.command_bundle == Some((key, bundle_id));
         let row = div()
             .id(SharedString::from(format!("bundle-{key:?}-{bundle_id}")))
             .w_full()
@@ -1149,18 +1378,24 @@ impl Waku {
             .track_focus(&row_focus)
             .tab_index(0)
             .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .when(armed, |element| element.bg(theme.sidebar_item_background))
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.sidebar_item_background))
             .tooltip(Tooltip::text(bundle.path.clone()))
-            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.boss_ui.command_bundle = Some((key, bundle_id));
+                this.sync_composer_placeholder(cx);
                 crate::platform::open_with_default_app(&open_path, cx);
+                cx.notify();
             }))
-            .on_key_down(cx.listener(move |_, event: &KeyDownEvent, window, cx| {
-                let key = event.keystroke.key.as_str();
-                if matches!(key, "enter" | "space") {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                let key_name = event.keystroke.key.as_str();
+                if matches!(key_name, "enter" | "space") {
+                    this.boss_ui.command_bundle = Some((key, bundle_id));
+                    this.sync_composer_placeholder(cx);
                     crate::platform::open_with_default_app(&key_path, cx);
                     cx.stop_propagation();
-                } else if key == "f10" && event.keystroke.modifiers.shift {
+                } else if key_name == "f10" && event.keystroke.modifiers.shift {
                     keyboard_menu.open_context_menu(window, cx);
                     cx.stop_propagation();
                 }

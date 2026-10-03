@@ -3579,6 +3579,7 @@ impl Waku {
                 || session.archived_at.is_some()
                 || session.is_side_chat()
                 || self.friend_sessions.contains_key(&session.id)
+                || self.boss_ui.managed.contains(&session.id)
             {
                 continue;
             }
@@ -3686,11 +3687,15 @@ impl Waku {
             // Side chats are panel content under their parent, never rows.
             // Watched friend sessions aren't sidebar rows either — they
             // open from the friends panel and stay out of local history.
+            // Boss-managed sessions have dedicated Boss/Employee rows in
+            // the boss section; repeating them as ordinary tasks is a
+            // duplicate.
             .filter(|session| {
                 session.has_started()
                     && session.archived_at.is_none()
                     && !session.is_side_chat()
                     && !self.friend_sessions.contains_key(&session.id)
+                    && !self.boss_ui.managed.contains(&session.id)
             })
             .collect::<Vec<_>>();
         // A focused project narrows the whole history to its tasks — the
@@ -5551,6 +5556,40 @@ impl Waku {
             .into_any_element()
     }
 
+    /// The Option-held detail a session row shows in place of its project:
+    /// the resolved model name plus its reasoning effort when set.
+    /// `session_options` resolves packed model suffixes and rejects traits
+    /// the selected model does not support, matching the driver options.
+    pub(super) fn session_sidebar_model_detail(&self, session: &AgentSession) -> String {
+        let options = self.session_options(session);
+        let model = self.model_display_name_on(
+            self.daemons.session_owner(session.id),
+            session.provider,
+            options.model.as_deref(),
+        );
+        let effort = options.reasoning_effort.as_deref().and_then(|effort| {
+            self.model_metadata_for_session(session)
+                .and_then(|model| {
+                    model
+                        .reasoning_efforts
+                        .iter()
+                        .find(|option| option.id == effort)
+                })
+                .map(|option| {
+                    option
+                        .label_i18n
+                        .as_ref()
+                        .map(waku_client::WireTranslation::render)
+                        .unwrap_or_else(|| option.label.clone())
+                })
+                .or_else(|| Some(effort.to_owned()))
+        });
+        match effort {
+            Some(effort) => format!("{model} · {effort}"),
+            None => model,
+        }
+    }
+
     /// The session row's right-edge status glyph — the classic task
     /// indicators: a spinner while a turn runs, the attention glyphs for
     /// parked states, the unseen-completion dot, and the idle Jev marker.
@@ -5834,35 +5873,9 @@ impl Waku {
         // model and reasoning effort this session is configured to use.
         // `session_options` resolves packed model suffixes and rejects traits
         // the selected model does not support, matching the driver options.
-        let model_detail = self.sidebar_alt_held.then(|| {
-            let options = self.session_options(session);
-            let model = self.model_display_name_on(
-                self.daemons.session_owner(session.id),
-                session.provider,
-                options.model.as_deref(),
-            );
-            let effort = options.reasoning_effort.as_deref().and_then(|effort| {
-                self.model_metadata_for_session(session)
-                    .and_then(|model| {
-                        model
-                            .reasoning_efforts
-                            .iter()
-                            .find(|option| option.id == effort)
-                    })
-                    .map(|option| {
-                        option
-                            .label_i18n
-                            .as_ref()
-                            .map(waku_client::WireTranslation::render)
-                            .unwrap_or_else(|| option.label.clone())
-                    })
-                    .or_else(|| Some(effort.to_owned()))
-            });
-            match effort {
-                Some(effort) => format!("{model} · {effort}"),
-                None => model,
-            }
-        });
+        let model_detail = self
+            .sidebar_alt_held
+            .then(|| self.session_sidebar_model_detail(session));
         let has_detail_label = detail_label.is_some() || model_detail.is_some();
         let group_name = SharedString::from(format!("session-row-{session_id}"));
         let archive_focus = self

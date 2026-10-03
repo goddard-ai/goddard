@@ -232,11 +232,11 @@ impl Render for PastedTextPreview {
 /// The provider-facing token a session reference contributes to the prompt:
 /// the task id `goddard-agent prompt` addresses, with the title for
 /// legibility.
-fn session_token(session_id: Uuid, name: &str) -> String {
+pub(super) fn session_token(session_id: Uuid, name: &str) -> String {
     format!("[session \"{name}\" (task_id: {session_id})]")
 }
 
-fn session_attachment_token(attachment: &MessageAttachment) -> Option<String> {
+pub(super) fn session_attachment_token(attachment: &MessageAttachment) -> Option<String> {
     attachment
         .session_id
         .map(|session_id| session_token(session_id, &attachment.name))
@@ -5924,6 +5924,14 @@ impl Waku {
                     .gap(px(4.0))
                     .text_size(sp(12.5))
                     .line_height(sp(14.0))
+                    // An armed boss command names its destination before
+                    // the model picker — the chips still describe the
+                    // viewed session.
+                    .children(if interactive {
+                        self.render_boss_command_chip(cx)
+                    } else {
+                        None
+                    })
                     .child(self.render_provider_model_control(&controls, cx))
                     .children(self.render_model_traits_control(&controls, cx))
                     .children(self.render_agent_preset_control(&controls, cx))

@@ -1,0 +1,1 @@
+- Boss and employee sessions no longer duplicate as ordinary tasks in the sidebar — they live only in the boss section, highlight when selected like tasks, and show their model under ⌥; clicking the boss also folds an expanded finished-employee list back up.
