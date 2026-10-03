@@ -1670,12 +1670,7 @@ impl Backend for WakuBackend {
                             under_pressure,
                         ) {
                             evict_idle_runtime(
-                                session_id,
-                                runtime_id,
-                                driver,
-                                &agent,
-                                &repo_maps,
-                                &events,
+                                session_id, runtime_id, driver, &agent, &repo_maps, &events,
                             );
                         }
                     };
@@ -8868,7 +8863,9 @@ mod tests {
         let mut skeleton = existing.clone();
         skeleton.detail_loaded = false;
         skeleton.queued_messages.clear();
-        existing.queued_messages.push(crate::model::QueuedMessage::new("queued later"));
+        existing
+            .queued_messages
+            .push(crate::model::QueuedMessage::new("queued later"));
         merge_stale_session_metadata(&mut existing, skeleton);
         assert_eq!(existing.queued_messages.len(), 2);
         assert_eq!(existing.queued_messages[0], agent_entry);

@@ -181,7 +181,10 @@ fn deadline_remaining(deadline: Instant) -> io::Result<Duration> {
         .checked_duration_since(Instant::now())
         .filter(|left| !left.is_zero())
         .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::TimedOut, "Goddard daemon connection deadline expired")
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Goddard daemon connection deadline expired",
+            )
         })
 }
 
@@ -195,7 +198,9 @@ fn connect_socket(
     config: WebSocketConfig,
     deadline: Instant,
 ) -> anyhow::Result<DaemonSocket> {
-    let host = url.host_str().context("Goddard daemon address has no host")?;
+    let host = url
+        .host_str()
+        .context("Goddard daemon address has no host")?;
     let port = url
         .port_or_known_default()
         .context("Goddard daemon address has no port")?;
@@ -225,12 +230,7 @@ fn connect_socket(
     // Socket timeouts turn a stalled handshake step into a `WouldBlock` —
     // `Interrupted` — resumable while the deadline still has budget, so the
     // exchange can never outlive it no matter how the peer dribbles.
-    let mut attempt = tungstenite::client_tls_with_config(
-        url.as_str(),
-        stream,
-        Some(config),
-        None,
-    );
+    let mut attempt = tungstenite::client_tls_with_config(url.as_str(), stream, Some(config), None);
     loop {
         attempt = match attempt {
             Ok((socket, _)) => return Ok(socket),
@@ -239,7 +239,7 @@ fn connect_socket(
                 mid.handshake()
             }
             Err(HandshakeError::Failure(error)) => {
-                return Err(error).context("could not connect to Goddard daemon")
+                return Err(error).context("could not connect to Goddard daemon");
             }
         };
     }
@@ -940,10 +940,7 @@ fn fail_connection(inner: &ClientInner) {
     inner.speech_subscribers.lock().clear();
 }
 
-fn set_client_read_timeout(
-    socket: &mut DaemonSocket,
-    timeout: Option<Duration>,
-) -> io::Result<()> {
+fn set_client_read_timeout(socket: &mut DaemonSocket, timeout: Option<Duration>) -> io::Result<()> {
     match socket.get_mut() {
         MaybeTlsStream::Plain(stream) => stream.set_read_timeout(timeout),
         MaybeTlsStream::Rustls(stream) => stream.sock.set_read_timeout(timeout),

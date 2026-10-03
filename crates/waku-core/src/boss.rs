@@ -714,29 +714,194 @@ fn validate_relative(path: &str, allow_empty: bool) -> anyhow::Result<()> {
 
 fn employee_human_name<'a>(id: Uuid, existing_names: impl IntoIterator<Item = &'a str>) -> String {
     const NAMES: &[&str] = &[
-        "Alden", "Ansel", "Blythe", "Celia", "Dorian", "Edith", "Elin", "Emery", "Estelle",
-        "Flora", "Galen", "Hugo", "Ida", "Inez", "Ivo", "Leander", "Lenora", "Linus", "Lucian",
-        "Maren", "Mavis", "Milo", "Nell", "Orson", "Otis", "Petra", "Rhea", "Rosalind", "Rufus",
-        "Selma", "Soren", "Sylvie", "Thalia", "Thea", "Tobin", "Vera", "Willa", "Cleo", "Ada",
-        "Ambrose", "Abigail", "Adelaide", "Agnes", "Alma", "Amara", "Amos", "Arthur", "Astrid",
-        "Beatrice", "Beckett", "Benedict", "Bernadette", "Calder", "Calliope", "Cassian", "Cecily",
-        "Clementine", "Conrad", "Cordelia", "Cosima", "Desmond", "Dorothea", "Eleanor", "Elias",
-        "Eliza", "Emmeline", "Ephraim", "Etta", "Evelyn", "Felix", "Fern", "Finch", "Florence",
-        "Frances", "Frederick", "Genevieve", "Georgia", "Greta", "Gwendolyn", "Harriet", "Hazel",
-        "Heath", "Henrietta", "Isadora", "Isidore", "Jasper", "Josephine", "Julian", "Juniper",
-        "Lavinia", "Lazarus", "Lillian", "Lottie", "Louisa", "Magnus", "Matilda", "Maude", "Maxwell",
-        "Mirabel", "Nico", "Nina", "Noel", "Octavia", "Opal", "Oscar", "Penelope", "Percival",
-        "Phoebe", "Quentin", "Quincy", "Ramona", "Reuben", "Rowan", "Sabine", "Silas", "Simone",
-        "Sterling", "Tamsin", "Theodore", "Ulysses", "Valentina", "Victor", "Viola", "Vivian", "Wallace",
-        "Wilfred", "Winifred", "Xanthe", "Yvette", "Zelda", "Zinnia", "Aurelia", "Basil", "Cyrus",
-        "Delphine", "Evander", "Felicity", "Gideon", "Hollis", "Imogen", "Juno", "Kit", "Lydia",
-        "Marcel", "Nadia", "Odette", "Peregrine", "Romy", "Sasha", "Tilda", "Una", "Violet", "Wesley",
-        "Yara", "Zachary", "Alistair", "Briony", "Cora", "Daphne", "Edmund", "Freya", "Graham", "Iris",
-        "Jonah", "Kieran", "Margot", "Nora", "Rafael", "Stella", "Thomas", "Wren", "Ari", "Bram",
-        "Caspian", "Della", "Esme", "Faye", "Harlan", "Ivolette", "Lyle", "Mina", "Niles", "Rory",
+        "Alden",
+        "Ansel",
+        "Blythe",
+        "Celia",
+        "Dorian",
+        "Edith",
+        "Elin",
+        "Emery",
+        "Estelle",
+        "Flora",
+        "Galen",
+        "Hugo",
+        "Ida",
+        "Inez",
+        "Ivo",
+        "Leander",
+        "Lenora",
+        "Linus",
+        "Lucian",
+        "Maren",
+        "Mavis",
+        "Milo",
+        "Nell",
+        "Orson",
+        "Otis",
+        "Petra",
+        "Rhea",
+        "Rosalind",
+        "Rufus",
+        "Selma",
+        "Soren",
+        "Sylvie",
+        "Thalia",
+        "Thea",
+        "Tobin",
+        "Vera",
+        "Willa",
+        "Cleo",
+        "Ada",
+        "Ambrose",
+        "Abigail",
+        "Adelaide",
+        "Agnes",
+        "Alma",
+        "Amara",
+        "Amos",
+        "Arthur",
+        "Astrid",
+        "Beatrice",
+        "Beckett",
+        "Benedict",
+        "Bernadette",
+        "Calder",
+        "Calliope",
+        "Cassian",
+        "Cecily",
+        "Clementine",
+        "Conrad",
+        "Cordelia",
+        "Cosima",
+        "Desmond",
+        "Dorothea",
+        "Eleanor",
+        "Elias",
+        "Eliza",
+        "Emmeline",
+        "Ephraim",
+        "Etta",
+        "Evelyn",
+        "Felix",
+        "Fern",
+        "Finch",
+        "Florence",
+        "Frances",
+        "Frederick",
+        "Genevieve",
+        "Georgia",
+        "Greta",
+        "Gwendolyn",
+        "Harriet",
+        "Hazel",
+        "Heath",
+        "Henrietta",
+        "Isadora",
+        "Isidore",
+        "Jasper",
+        "Josephine",
+        "Julian",
+        "Juniper",
+        "Lavinia",
+        "Lazarus",
+        "Lillian",
+        "Lottie",
+        "Louisa",
+        "Magnus",
+        "Matilda",
+        "Maude",
+        "Maxwell",
+        "Mirabel",
+        "Nico",
+        "Nina",
+        "Noel",
+        "Octavia",
+        "Opal",
+        "Oscar",
+        "Penelope",
+        "Percival",
+        "Phoebe",
+        "Quentin",
+        "Quincy",
+        "Ramona",
+        "Reuben",
+        "Rowan",
+        "Sabine",
+        "Silas",
+        "Simone",
+        "Sterling",
+        "Tamsin",
+        "Theodore",
+        "Ulysses",
+        "Valentina",
+        "Victor",
+        "Viola",
+        "Vivian",
+        "Wallace",
+        "Wilfred",
+        "Winifred",
+        "Xanthe",
+        "Yvette",
+        "Zelda",
+        "Zinnia",
+        "Aurelia",
+        "Basil",
+        "Cyrus",
+        "Delphine",
+        "Evander",
+        "Felicity",
+        "Gideon",
+        "Hollis",
+        "Imogen",
+        "Juno",
+        "Kit",
+        "Lydia",
+        "Marcel",
+        "Nadia",
+        "Odette",
+        "Peregrine",
+        "Romy",
+        "Sasha",
+        "Tilda",
+        "Una",
+        "Violet",
+        "Wesley",
+        "Yara",
+        "Zachary",
+        "Alistair",
+        "Briony",
+        "Cora",
+        "Daphne",
+        "Edmund",
+        "Freya",
+        "Graham",
+        "Iris",
+        "Jonah",
+        "Kieran",
+        "Margot",
+        "Nora",
+        "Rafael",
+        "Stella",
+        "Thomas",
+        "Wren",
+        "Ari",
+        "Bram",
+        "Caspian",
+        "Della",
+        "Esme",
+        "Faye",
+        "Harlan",
+        "Ivolette",
+        "Lyle",
+        "Mina",
+        "Niles",
+        "Rory",
     ];
     let base = NAMES[(id.as_u128() % NAMES.len() as u128) as usize];
-    let existing_names = existing_names.into_iter().collect::<std::collections::HashSet<_>>();
+    let existing_names = existing_names
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
     if !existing_names.contains(base) {
         return base.into();
     }
@@ -1102,9 +1267,11 @@ mod tests {
             .unwrap();
         // Humans and the boss session may speak; other callers may not.
         assert!(service.speak_parts(None, vec!["Heads up".into()]).is_ok());
-        assert!(service
-            .speak_parts(Some(boss), vec!["Heads up".into()])
-            .is_ok());
+        assert!(
+            service
+                .speak_parts(Some(boss), vec!["Heads up".into()])
+                .is_ok()
+        );
         assert!(
             service
                 .speak_parts(Some(Uuid::new_v4()), vec!["Heads up".into()])
@@ -1119,27 +1286,35 @@ mod tests {
         );
         assert!(service.speak_parts(None, vec![]).is_err());
         assert!(service.speak_parts(None, vec![" ".into()]).is_err());
-        assert!(service
-            .speak_parts(None, vec!["x".repeat(MAX_SPEECH_PART_CHARS + 1)])
-            .is_err());
-        assert!(service
-            .speak_parts(None, vec!["ok".into(); MAX_SPEECH_PARTS + 1])
-            .is_err());
-        assert!(service
-            .speak_parts(
-                None,
-                vec!["x".repeat(100); (MAX_SPEECH_TOTAL_CHARS / 100) + 1],
-            )
-            .is_err());
+        assert!(
+            service
+                .speak_parts(None, vec!["x".repeat(MAX_SPEECH_PART_CHARS + 1)])
+                .is_err()
+        );
+        assert!(
+            service
+                .speak_parts(None, vec!["ok".into(); MAX_SPEECH_PARTS + 1])
+                .is_err()
+        );
+        assert!(
+            service
+                .speak_parts(
+                    None,
+                    vec!["x".repeat(100); (MAX_SPEECH_TOTAL_CHARS / 100) + 1],
+                )
+                .is_err()
+        );
         // `speak` is a runtime operation — the plain handler refuses it.
-        assert!(service
-            .handle(
-                None,
-                BossOperation::Speak {
-                    parts: vec!["hi".into()],
-                },
-            )
-            .is_err());
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::Speak {
+                        parts: vec!["hi".into()],
+                    },
+                )
+                .is_err()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
