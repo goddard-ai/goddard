@@ -3130,6 +3130,26 @@ pub(crate) fn atom_icon_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
     )
 }
 
+/// A mention chip's avatar fills more of the icon slot than a stroked glyph
+/// does: a square face reads small at [`ATOM_ICON_SCALE`], and the extra
+/// width comes out of the slot's trailing en space, tightening the gap
+/// before the label so the chip reads as one unit.
+pub(crate) const ATOM_AVATAR_SCALE: f32 = 0.9;
+
+/// The painted bounds a session mention's avatar takes inside
+/// [`ATOM_ICON_SLOT`]'s reserved width — [`atom_icon_bounds`]'s anchor with
+/// the larger [`ATOM_AVATAR_SCALE`] box.
+pub(crate) fn atom_avatar_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
+    let avatar = chip.size.height * ATOM_AVATAR_SCALE;
+    Bounds::new(
+        point(
+            chip.origin.x + ATOM_CHIP_PADDING_X + ATOM_ICON_INSET_X,
+            chip.center().y - avatar / 2.0,
+        ),
+        size(avatar, avatar),
+    )
+}
+
 /// The chip rect a display-coordinate `range` paints behind an atom's
 /// label — one per visual row the label spans — in the window coordinates
 /// `layout` was laid out into.

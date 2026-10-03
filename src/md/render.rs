@@ -1958,18 +1958,19 @@ fn text_element_with_selection(
                     ));
                 }
                 if let Some(chip) = rects.first() {
-                    let bounds = crate::input::atom_icon_bounds(*chip);
                     let avatar = session.and_then(|id| mention_avatars.get(&id));
                     if let Some(avatar) = avatar {
+                        let bounds = crate::input::atom_avatar_bounds(*chip);
                         let _ = window.paint_image(
                             bounds,
                             bounds,
-                            gpui::Corners::all(px(2.0)),
+                            gpui::Corners::all(px(3.0)),
                             avatar.clone(),
                             0,
                             false,
                         );
                     } else {
+                        let bounds = crate::input::atom_icon_bounds(*chip);
                         let _ = window.paint_svg(
                             bounds,
                             (*icon).into(),
