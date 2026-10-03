@@ -5,6 +5,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode};
+use crate::AgentWorkspace;
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -118,6 +119,14 @@ pub enum BossOperation {
         provider: Option<ProviderKind>,
         #[serde(default)]
         model: Option<String>,
+        /// Where the employee's checkout runs; `None` uses the project
+        /// itself, `worktree` forks a daemon-managed Git worktree.
+        #[serde(default)]
+        workspace: Option<AgentWorkspace>,
+        /// The ref a worktree summon starts from; required when
+        /// `workspace` is `worktree`, ignored otherwise.
+        #[serde(default)]
+        base_branch: Option<String>,
     },
     Control {
         session_id: Uuid,

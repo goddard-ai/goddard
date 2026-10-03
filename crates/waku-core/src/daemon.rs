@@ -367,6 +367,41 @@ pub(crate) struct AgentCreateSelection {
     pub context_window: Option<String>,
 }
 
+/// A created task's first prompt. `Fixed` ships as sent. `Assignment` is
+/// the Boss employee wrapper: the job text follows an "Assigned project"
+/// line resolved against the task's run directory — the worktree path for
+/// a worktree summon, the project path for a local one — so the employee
+/// is pointed at the checkout it actually occupies, not the checkout its
+/// supervisor named.
+pub(crate) enum AgentTaskPrompt {
+    Fixed(String),
+    Assignment(String),
+}
+
+impl AgentTaskPrompt {
+    /// The job text as the caller wrote it — before `Assignment` wrapping —
+    /// which is what routing and blank validation judge.
+    fn text(&self) -> &str {
+        match self {
+            Self::Fixed(prompt) | Self::Assignment(prompt) => prompt,
+        }
+    }
+
+    fn is_blank(&self) -> bool {
+        self.text().trim().is_empty()
+    }
+
+    fn resolve(self, workspace: &SessionWorkspace, project: &Path) -> String {
+        match self {
+            Self::Fixed(prompt) => prompt,
+            Self::Assignment(prompt) => format!(
+                "Assigned project: {}\nWork in that project and read its AGENTS.md before beginning. If a sandbox mounts the project at another path, use the guest working directory.\n\n{prompt}",
+                workspace.path().unwrap_or(project).display()
+            ),
+        }
+    }
+}
+
 /// Resolve one `agent create` trait field. An explicit value wins as sent —
 /// `"default"` (or empty) selects the provider's own default, and an unknown
 /// id passes through untouched, matching how `model` is handled. An omitted
@@ -5108,7 +5143,7 @@ impl WakuBackend {
             project,
             workspace,
             base_branch,
-            prompt,
+            AgentTaskPrompt::Fixed(prompt),
             events,
             None,
         )
@@ -5121,11 +5156,11 @@ impl WakuBackend {
         project: PathBuf,
         workspace: AgentWorkspace,
         base_branch: Option<String>,
-        prompt: String,
+        prompt: AgentTaskPrompt,
         events: &EventSink,
         employee: Option<waku_protocol::boss::BossEmployee>,
     ) -> anyhow::Result<Uuid> {
-        if prompt.trim().is_empty() {
+        if prompt.is_blank() {
             bail!("agent sessions require a prompt");
         }
         if selection
@@ -5176,7 +5211,7 @@ impl WakuBackend {
                 if selection.provider.is_some() {
                     bail!("`model: \"auto\"` routes the provider too; omit `provider`");
                 }
-                Some(self.route_agent_task(&project, &prompt))
+                Some(self.route_agent_task(&project, prompt.text()))
             }
             _ => None,
         };
@@ -5302,6 +5337,7 @@ impl WakuBackend {
                 }
             }
         };
+        let prompt = prompt.resolve(&session.workspace, &project_path);
         if let Some(employee) = &employee {
             session.id = employee.session_id;
             session.set_title(&employee.identity.name);
@@ -5747,6 +5783,8 @@ impl WakuBackend {
                 project,
                 provider,
                 model,
+                workspace,
+                base_branch,
             } => {
                 let _lock = self.boss.operation_lock.lock();
                 let supervisor = caller
@@ -5764,16 +5802,13 @@ impl WakuBackend {
                     service_tier: None,
                     context_window: None,
                 };
-                let prompt = format!(
-                    "Assigned project: {project}\nWork in that project and read its AGENTS.md before beginning. If a sandbox mounts the project at another path, use the guest working directory.\n\n{prompt}"
-                );
                 match self.create_agent_task_inner(
                     Some(supervisor),
                     selection,
                     PathBuf::from(project),
-                    AgentWorkspace::Local,
-                    None,
-                    prompt,
+                    workspace.unwrap_or_default(),
+                    base_branch,
+                    AgentTaskPrompt::Assignment(prompt),
                     events,
                     Some(employee),
                 ) {
@@ -11475,6 +11510,105 @@ mod tests {
         let prompts = capture.prompts.lock();
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].contains("One more check"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A worktree summon is the same managed worktree `agent create` makes:
+    /// the employee task runs in the detached checkout and its assignment
+    /// names that path, not the supervisor's primary checkout. The launch
+    /// fails on a missing provider binary — after the task and worktree
+    /// persist — so the assertions read the persisted session.
+    #[test]
+    fn boss_summon_runs_the_employee_in_a_managed_worktree() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("boss-worktree-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let git = |args: &[&str]| {
+            let output = crate::command_env::search_path_command("git")
+                .args(args)
+                .current_dir(&project)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "--quiet", "-b", "main"]);
+        git(&["config", "core.autocrlf", "false"]);
+        std::fs::write(project.join("README.md"), "main\n").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=Goddard Tests",
+            "-c",
+            "user.email=waku@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "initial",
+        ]);
+
+        let (backend, boss) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+
+        let persona = backend.boss.document().personas[1].id;
+        let result = backend.handle_boss_operation(
+            Some(boss),
+            BossOperation::Summon {
+                persona_id: persona,
+                job_title: "Worktree job".into(),
+                prompt: "Summarize the diff".into(),
+                project: project.display().to_string(),
+                provider: Some(ProviderKind::Codex),
+                model: None,
+                workspace: Some(AgentWorkspace::Worktree),
+                base_branch: Some("main".into()),
+            },
+            &EventSink::detached(),
+        );
+        assert!(result.is_err());
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id != boss)
+            .expect("the employee task persisted before the failed launch");
+        backend.task_store.hydrate(session).unwrap();
+        let SessionWorkspace::Worktree {
+            path, base_branch, ..
+        } = &session.workspace
+        else {
+            panic!("expected a worktree workspace")
+        };
+        assert_eq!(base_branch.as_deref(), Some("main"));
+        let repository = dunce::canonicalize(&project).unwrap();
+        let worktrees = repository.parent().unwrap().join("worktrees");
+        assert!(path.starts_with(&worktrees));
+        assert!(path.is_dir());
+        assert!(crate::worktree::is_linked_worktree(path));
+        assert!(
+            session.messages[0]
+                .content
+                .contains(&format!("Assigned project: {}", path.display()))
+        );
+        assert!(backend.boss.is_employee(session.id));
+        drop(state);
+        drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }
 }
