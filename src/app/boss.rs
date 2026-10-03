@@ -451,6 +451,57 @@ impl Waku {
             .find_map(|(key, state)| (state.session_id == Some(id)).then_some(*key))
     }
 
+    /// The boss-side identity of a managed session: an employee's persona
+    /// identity, or the boss's own for its chat. Plain tasks get `None`.
+    pub(super) fn boss_session_identity(&self, session_id: Uuid) -> Option<BossIdentity> {
+        if let Some(identity) = self.boss_ui.identities.get(&session_id) {
+            return Some(identity.clone());
+        }
+        self.boss_ui
+            .states
+            .values()
+            .find(|state| state.session_id == Some(session_id))
+            .map(|state| state.identity.clone())
+    }
+
+    /// The employees a boss chat's transcript can name, paired with the
+    /// avatar images their chips paint — fed to the markdown renderer's
+    /// `with_session_mentions`.
+    pub(super) fn boss_session_mentions(
+        &self,
+        key: DaemonKey,
+    ) -> (
+        Rc<Vec<md::render::SessionMention>>,
+        Rc<HashMap<Uuid, Arc<gpui::RenderImage>>>,
+    ) {
+        let mut mentions = Vec::new();
+        let mut avatars = HashMap::new();
+        for id in self.boss_ui.recent.get(&key).into_iter().flatten() {
+            let Some(identity) = self.boss_ui.identities.get(id) else {
+                continue;
+            };
+            if let Some(image) = self.boss_ui.avatars.get(&identity.avatar_seed) {
+                avatars.insert(*id, image.clone());
+            } else if self
+                .boss_ui
+                .avatar_requested
+                .borrow_mut()
+                .insert(identity.avatar_seed.clone())
+            {
+                self.boss_ui
+                    .avatar_queue
+                    .borrow_mut()
+                    .push_back(identity.avatar_seed.clone());
+                signal_event_pump(&self.event_wake_tx);
+            }
+            mentions.push(md::render::SessionMention {
+                name: SharedString::from(identity.name.clone()),
+                session: *id,
+            });
+        }
+        (Rc::new(mentions), Rc::new(avatars))
+    }
+
     pub(super) fn render_boss_chat_empty_state(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let identity = self
@@ -639,7 +690,7 @@ impl Waku {
         self.boss_request(key, operation, BossReply::Saved, cx);
     }
 
-    fn boss_avatar(&self, identity: &BossIdentity, size: f32, cx: &App) -> AnyElement {
+    pub(super) fn boss_avatar(&self, identity: &BossIdentity, size: f32, cx: &App) -> AnyElement {
         if let Some(image) = self.boss_ui.avatars.get(&identity.avatar_seed) {
             return gpui::img(image.clone())
                 .size(px(size))
@@ -757,6 +808,10 @@ impl Waku {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
+        let status_indicator = state
+            .session_id
+            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
+            .and_then(|session| self.session_status_indicator(session, &theme));
         div()
             .id(format!("boss-{key:?}"))
             .tab_index(0)
@@ -799,6 +854,7 @@ impl Waku {
                     })
                     .child(icon("icons/brain.svg", 14.0, theme.text_secondary)),
             )
+            .when_some(status_indicator, |row, indicator| row.child(indicator))
             .into_any_element()
     }
 
@@ -807,7 +863,12 @@ impl Waku {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
-        let active = self.boss_ui.working.contains(&id);
+        let status_indicator = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .and_then(|session| self.session_status_indicator(session, &theme));
         div()
             .id(format!("boss-employee-{id}"))
             .tab_index(0)
@@ -841,16 +902,7 @@ impl Waku {
                     .map(crate::custom_commands::icon_path),
                 &theme,
             ))
-            .child(
-                div()
-                    .text_size(sp(10.0))
-                    .text_color(theme.text_tertiary)
-                    .child(if active {
-                        tr!("boss.working")
-                    } else {
-                        tr!("boss.finished")
-                    }),
-            )
+            .when_some(status_indicator, |row, indicator| row.child(indicator))
             .into_any_element()
     }
 

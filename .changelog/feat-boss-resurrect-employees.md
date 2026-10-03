@@ -1,0 +1,1 @@
+- The boss can send a finished employee another prompt to bring it back on duty — the employee reappears in the sidebar's working group while it runs, instead of needing a fresh summon for every follow-up.

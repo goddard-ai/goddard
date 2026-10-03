@@ -7733,11 +7733,26 @@ impl Waku {
                 }
             })
         };
+        // A boss-managed session (the boss chat or one of its employees)
+        // has no project, workspace, or branch to pick — its daemon owns
+        // the workspace. The pickers' slot shows who the session is instead.
+        let managed = subject_session_id
+            .and_then(|id| self.boss_session_identity(id))
+            .map(|identity| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .pl(px(2.0))
+                    .child(self.boss_avatar(&identity, 16.0, cx))
+                    .child(SharedString::from(identity.name))
+            });
         // With no workspace choice to make, the selector follows the branch
         // chip and drops out entirely. A bound worktree keeps it — "Local"
         // remains a way back to the checkout — and an open menu stays mounted
         // until its own dismissal runs.
-        let hide_workspace_selector = self.boss_chat_key().is_some()
+        let hide_workspace_selector = managed.is_some()
+            || self.boss_chat_key().is_some()
             || (projectless_selected || project_gitless)
                 && !matches!(workspace, SessionWorkspace::Worktree { .. })
                 && !worktree_handle.is_open();
@@ -8067,7 +8082,11 @@ impl Waku {
             worktree_trigger.into_any_element()
         };
 
-        let branch_selector = self.render_branch_selector(cx);
+        let branch_selector = if managed.is_some() {
+            None
+        } else {
+            self.render_branch_selector(cx)
+        };
 
         let usage_meter = self.render_usage_meter(cx);
         div()
@@ -8095,9 +8114,10 @@ impl Waku {
                             .tab_index(0)
                             .tab_group()
                             .tab_stop(false)
-                            .when(self.boss_chat_key().is_none(), |row| {
+                            .when(managed.is_none() && self.boss_chat_key().is_none(), |row| {
                                 row.child(project_selector)
                             })
+                            .when_some(managed, |row, chip| row.child(chip))
                             .when(!hide_workspace_selector, |row| row.child(worktree_selector))
                             .children(branch_selector)
                             .child(div().flex_1())

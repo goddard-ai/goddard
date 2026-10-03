@@ -5964,10 +5964,10 @@ boss.saved:
   en: Saved
 boss.loading:
   en: Loading…
-boss.working:
-  en: Working
-boss.finished:
-  en: Finished
+boss.finished_now:
+  en: "%{name} finished just now"
+boss.finished_ago:
+  en: "%{name} finished %{ago} ago"
 boss.expired_hint:
   en: This employee has finished. Send another request to the boss.
 boss.save_first:

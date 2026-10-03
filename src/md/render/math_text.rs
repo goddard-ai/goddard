@@ -1391,6 +1391,7 @@ mod tests {
                 &crate::fonts::Fonts::default(),
                 FontWeight::NORMAL,
                 palette.text,
+                &[],
             );
             let data = flat.math.as_ref().unwrap();
             let metrics = [Some(math::Metrics {

@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -382,6 +382,16 @@ pub struct SearchHighlights {
     pub active: Option<TextSearchMatch>,
 }
 
+/// A bare name in prose that resolves to a task — the way a boss transcript
+/// refers to an employee. A word-bounded match in an eligible run flattens
+/// into the same chip a submitted session atom paints: icon slot, accent
+/// text, and a `goddard://task/` link.
+#[derive(Clone, Debug)]
+pub struct SessionMention {
+    pub name: SharedString,
+    pub session: Uuid,
+}
+
 /// Flatten inline runs for shaping. Pure given the palette, families, and
 /// base weight.
 pub fn flatten(
@@ -390,6 +400,7 @@ pub fn flatten(
     families: &Fonts,
     base_weight: FontWeight,
     base_color: Hsla,
+    mentions: &[SessionMention],
 ) -> FlatText {
     let mut flat = FlatAcc::default();
     // Sentinels wrap a submitted atom's chip label and can straddle run
@@ -426,10 +437,77 @@ pub fn flatten(
             FontStyle::Normal
         };
 
+        // Prose runs can name a task bare — an employee's name in a boss
+        // reply. Code, links, and math keep their own meaning, the same
+        // exclusion `@`-mentions and commit SHAs apply.
+        let mention_hits: Vec<(usize, usize, Uuid)> = if mentions.is_empty()
+            || run.style.code
+            || run.style.link.is_some()
+            || run.style.math
+        {
+            Vec::new()
+        } else {
+            let prev_word = flat.text.chars().next_back().is_some_and(is_word_char);
+            find_session_mentions(&run.text, mentions, prev_word)
+        };
+        let mut mention_index = 0usize;
+
         let mut segment_start = 0usize;
         for (index, ch) in run.text.char_indices() {
             match &mut scan {
                 Scan::Text => {
+                    while mention_hits
+                        .get(mention_index)
+                        .is_some_and(|(start, _, _)| *start < index)
+                    {
+                        mention_index += 1;
+                    }
+                    if let Some(&(_, end, session)) = mention_hits
+                        .get(mention_index)
+                        .filter(|(start, _, _)| *start == index)
+                    {
+                        mention_index += 1;
+                        flat.emit(
+                            &run.text[segment_start..index],
+                            &run.style,
+                            &run_font,
+                            base_color,
+                            palette,
+                            false,
+                        );
+                        let start = flat.text.len();
+                        flat.emit(
+                            crate::input::ATOM_ICON_SLOT,
+                            &run.style,
+                            &slot_font,
+                            base_color,
+                            palette,
+                            true,
+                        );
+                        flat.emit(
+                            &run.text[index..end],
+                            &run.style,
+                            &atom_font,
+                            base_color,
+                            palette,
+                            true,
+                        );
+                        let range = start..flat.text.len();
+                        flat.fragments.push((
+                            range.clone(),
+                            Rc::from(
+                                &flat.text
+                                    [start + crate::input::ATOM_ICON_SLOT.len()..flat.text.len()],
+                            ),
+                        ));
+                        flat.atom_ranges.push((range.clone(), Some(session)));
+                        flat.links.push((
+                            range,
+                            format!("{}{session}", waku_protocol::TASK_LINK_PREFIX),
+                        ));
+                        segment_start = end;
+                        continue;
+                    }
                     if ch == waku_protocol::model::MESSAGE_ATOM_OPEN
                         || ch == waku_protocol::model::MESSAGE_ATOM_END
                     {
@@ -556,6 +634,56 @@ pub fn flatten(
 /// [`waku_protocol::model::encode_atom_session_id`].
 fn is_atom_id_char(ch: char) -> bool {
     ('\u{FE00}'..='\u{FE0F}').contains(&ch)
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+/// Word-bounded mention hits in one run's text, sorted and non-overlapping —
+/// the `(byte start, byte end, session)` triples [`flatten`] flattens into
+/// session chips. `prev_word` is whether the character before the run (the
+/// flat text's current tail) is a word character, since a run boundary is
+/// not a word boundary.
+fn find_session_mentions(
+    text: &str,
+    mentions: &[SessionMention],
+    prev_word: bool,
+) -> Vec<(usize, usize, Uuid)> {
+    let mut hits: Vec<(usize, usize, Uuid)> = Vec::new();
+    for mention in mentions {
+        let name = mention.name.as_ref();
+        if name.is_empty() {
+            continue;
+        }
+        let mut from = 0usize;
+        while let Some(offset) = text[from..].find(name) {
+            let start = from + offset;
+            let end = start + name.len();
+            let before_ok = if start == 0 {
+                !prev_word
+            } else {
+                !is_word_char(text[..start].chars().next_back().unwrap())
+            };
+            let after_ok = text[end..]
+                .chars()
+                .next()
+                .is_none_or(|ch| !is_word_char(ch));
+            if before_ok && after_ok {
+                hits.push((start, end, mention.session));
+            }
+            from = start + text[start..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    hits.sort_by_key(|(start, end, _)| (*start, std::cmp::Reverse(*end)));
+    let mut out: Vec<(usize, usize, Uuid)> = Vec::with_capacity(hits.len());
+    for hit in hits {
+        if out.last().is_some_and(|(_, end, _)| hit.0 < *end) {
+            continue;
+        }
+        out.push(hit);
+    }
+    out
 }
 
 /// The color of the run covering `offset` — an atom chip's leading icon
@@ -1394,6 +1522,12 @@ pub struct Ctx<'a> {
     /// Host handler that makes fenced code blocks runnable — `None` keeps
     /// the run control hidden everywhere.
     code_run: Option<CodeRunHandler>,
+    /// Bare-name task references this surface flattens into session chips —
+    /// the employees a boss transcript can name. Empty everywhere else.
+    session_mentions: Rc<Vec<SessionMention>>,
+    /// Session id → rendered avatar image, painted into a chip's icon slot
+    /// when the atom's session has one.
+    mention_avatars: Rc<HashMap<Uuid, Arc<gpui::RenderImage>>>,
     now: Instant,
 }
 
@@ -1433,6 +1567,8 @@ impl<'a> Ctx<'a> {
             context_menu_items: None,
             code_run_session: None,
             code_run: None,
+            session_mentions: Rc::default(),
+            mention_avatars: Rc::default(),
             now: Instant::now(),
         }
     }
@@ -1562,6 +1698,19 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// Flatten bare employee names into session chips — `mentions` pairs each
+    /// name with the task its chip opens; `avatars` maps a task to the image
+    /// painted into its chip's icon slot, falling back to the session icon.
+    pub fn with_session_mentions(
+        mut self,
+        mentions: Rc<Vec<SessionMention>>,
+        avatars: Rc<HashMap<Uuid, Arc<gpui::RenderImage>>>,
+    ) -> Self {
+        self.session_mentions = mentions;
+        self.mention_avatars = avatars;
+        self
+    }
+
     fn with_cache(&self, view: &'a MarkdownView) -> Self {
         Self {
             row: self.row.clone(),
@@ -1592,6 +1741,8 @@ impl<'a> Ctx<'a> {
             context_menu_items: self.context_menu_items.clone(),
             code_run_session: self.code_run_session,
             code_run: self.code_run.clone(),
+            session_mentions: self.session_mentions.clone(),
+            mention_avatars: self.mention_avatars.clone(),
             now: Instant::now(),
         }
     }
@@ -1712,6 +1863,7 @@ fn text_element_with_selection(
     annotation_wash: Hsla,
     ref_underline: Hsla,
     ref_underline_hovered: Hsla,
+    mention_avatars: Rc<HashMap<Uuid, Arc<gpui::RenderImage>>>,
     block_break: bool,
     copy: Rc<CopySpec>,
 ) -> AnyElement {
@@ -1748,10 +1900,10 @@ fn text_element_with_selection(
     let underlay = canvas(|_, _, _| (), {
         let text = flat.text.clone();
         let code_ranges = flat.code_ranges.clone();
-        // Each atom's chip range, its leading icon, and the icon's tint —
-        // the label's own run color, so the glyph reads as part of the
-        // chip's text.
-        let atom_chips: Vec<(Range<usize>, &'static str, Hsla)> = flat
+        // Each atom's chip range, its task, leading icon, and the icon's
+        // tint — the label's own run color, so the glyph reads as part of
+        // the chip's text.
+        let atom_chips: Vec<(Range<usize>, Option<Uuid>, &'static str, Hsla)> = flat
             .atom_ranges
             .iter()
             .map(|(range, session)| {
@@ -1760,7 +1912,12 @@ fn text_element_with_selection(
                 } else {
                     crate::input::ATOM_PASTED_ICON
                 };
-                (range.clone(), icon, run_color_at(&flat.runs, range.start))
+                (
+                    range.clone(),
+                    *session,
+                    icon,
+                    run_color_at(&flat.runs, range.start),
+                )
             })
             .collect();
         let annotation_refs = flat.annotation_refs.clone();
@@ -1783,7 +1940,7 @@ fn text_element_with_selection(
             }
             // The composer's chip chrome — the same inset wash and leading
             // icon a live atom paints in the field.
-            for (range, icon, color) in &atom_chips {
+            for (range, session, icon, color) in &atom_chips {
                 let rects = range_rects(
                     &layout,
                     range,
@@ -1801,14 +1958,27 @@ fn text_element_with_selection(
                     ));
                 }
                 if let Some(chip) = rects.first() {
-                    let _ = window.paint_svg(
-                        crate::input::atom_icon_bounds(*chip),
-                        (*icon).into(),
-                        None,
-                        gpui::TransformationMatrix::default(),
-                        *color,
-                        cx,
-                    );
+                    let bounds = crate::input::atom_icon_bounds(*chip);
+                    let avatar = session.and_then(|id| mention_avatars.get(&id));
+                    if let Some(avatar) = avatar {
+                        let _ = window.paint_image(
+                            bounds,
+                            bounds,
+                            gpui::Corners::all(px(2.0)),
+                            avatar.clone(),
+                            0,
+                            false,
+                        );
+                    } else {
+                        let _ = window.paint_svg(
+                            bounds,
+                            (*icon).into(),
+                            None,
+                            gpui::TransformationMatrix::default(),
+                            *color,
+                            cx,
+                        );
+                    }
                 }
             }
             if let Some(search) = &search {
@@ -2063,6 +2233,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.palette.annotation,
         ctx.palette.tertiary,
         ctx.palette.secondary,
+        ctx.mention_avatars.clone(),
         ctx.take_block_break(),
         ctx.copy_spec(flat),
     )
@@ -2100,6 +2271,7 @@ pub fn selectable_flat_text(
         gpui::transparent_black(),
         gpui::transparent_black(),
         gpui::transparent_black(),
+        Rc::default(),
         block_break,
         flat.copy.clone(),
     )
@@ -2781,6 +2953,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
                     &ctx.families,
                     FontWeight::NORMAL,
                     ctx.palette.text,
+                    &ctx.session_mentions,
                 )
             });
             div()
@@ -2795,7 +2968,14 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             let (size, line_height, weight) = heading_metrics(*level, &ctx.metrics);
             let key = ctx.next_key();
             let flat = ctx.flat(key.index, || {
-                let mut flat = flatten(runs, ctx.palette, &ctx.families, weight, ctx.palette.text);
+                let mut flat = flatten(
+                    runs,
+                    ctx.palette,
+                    &ctx.families,
+                    weight,
+                    ctx.palette.text,
+                    &ctx.session_mentions,
+                );
                 flat.copy = Rc::new(CopySpec {
                     prefix: Rc::from(format!("{} ", "#".repeat(*level as usize))),
                     ..(*flat.copy).clone()
@@ -3728,7 +3908,14 @@ fn table_row(
     for (index, cell) in cells.iter().enumerate() {
         let key = ctx.next_key();
         let flat = ctx.flat(key.index, || {
-            flatten(cell, ctx.palette, &ctx.families, weight, ctx.palette.text)
+            flatten(
+                cell,
+                ctx.palette,
+                &ctx.families,
+                weight,
+                ctx.palette.text,
+                &ctx.session_mentions,
+            )
         });
         let alignment = align.get(index).copied().unwrap_or_default();
         row = row.child(
@@ -3892,6 +4079,7 @@ mod tests {
             &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
+            &[],
         );
         assert_runs_tile(&flat);
         assert_eq!(flat.text.as_ref(), "plain bold code link gone");
@@ -3916,6 +4104,7 @@ mod tests {
             &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
+            &[],
         );
         let fragments = flat
             .copy
@@ -3956,6 +4145,7 @@ mod tests {
             },
             FontWeight::NORMAL,
             palette().text,
+            &[],
         );
         assert_runs_tile(&flat);
         assert_eq!(
@@ -4024,6 +4214,7 @@ mod tests {
             &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
+            &[],
         );
         assert_runs_tile(&flat);
         assert_eq!(
@@ -4034,6 +4225,58 @@ mod tests {
             )
         );
         assert_eq!(flat.atom_ranges, vec![(2..19, None)]);
+    }
+
+    #[test]
+    fn flatten_turns_session_mentions_into_chips() {
+        let session_id = Uuid::new_v4();
+        let mentions = [SessionMention {
+            name: SharedString::from("Rhea"),
+            session: session_id,
+        }];
+        // The name chips in prose, next to punctuation, and in bold — but
+        // not inside a longer word, not in code, and not inside a link.
+        let flat = flatten(
+            &runs_of("ask Rhea, **Rhea** `Rhea` [Rhea](https://x) and Rheana too"),
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+            &mentions,
+        );
+        assert_runs_tile(&flat);
+        let slot = crate::input::ATOM_ICON_SLOT;
+        assert_eq!(
+            flat.text.as_ref(),
+            format!("ask {slot}Rhea, {slot}Rhea Rhea Rhea and Rheana too")
+        );
+        assert_eq!(flat.atom_ranges.len(), 2);
+        assert!(
+            flat.atom_ranges
+                .iter()
+                .all(|(_, id)| *id == Some(session_id))
+        );
+        assert_eq!(flat.links.len(), 1 + 2);
+        assert!(flat.links.iter().any(|(_, url)| url == "https://x"));
+        assert_eq!(
+            flat.links
+                .iter()
+                .filter(|(_, url)| {
+                    url == &format!("{}{session_id}", waku_protocol::TASK_LINK_PREFIX)
+                })
+                .count(),
+            2
+        );
+        // The linked markdown range still resolves to the name.
+        let markdown_link = flat
+            .links
+            .iter()
+            .find(|(_, url)| url == "https://x")
+            .map(|(range, _)| range.clone())
+            .unwrap();
+        assert_eq!(&flat.text[markdown_link], "Rhea");
+        // Chips paint accent text — the mention emits with atom styling.
+        assert!(flat.runs.iter().any(|run| run.color == palette().accent));
     }
 
     /// `(slice, weight)` per run, in order — how a fixated flat reads.
@@ -4057,6 +4300,7 @@ mod tests {
             &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
+            &[],
         );
         apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_runs_tile(&flat);
@@ -4080,6 +4324,7 @@ mod tests {
             &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
+            &[],
         );
         apply_fixation(&mut flat, &Fonts::default().code, &GuidedReading::default());
         assert_runs_tile(&flat);
@@ -4291,6 +4536,7 @@ mod tests {
             &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
+            &[],
         );
         assert_runs_tile(&flat);
         assert!(
@@ -4311,6 +4557,7 @@ mod tests {
             &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
+            &[],
         );
         assert_runs_tile(&flat);
         assert_eq!(flat.links.len(), 1, "one link, not one per styled run");

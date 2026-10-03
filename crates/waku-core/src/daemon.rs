@@ -5795,12 +5795,19 @@ impl WakuBackend {
             }
             BossOperation::Control { session_id, action } => {
                 self.boss.require_control(caller, session_id)?;
+                // A prompt to a finished employee resurrects it: the boss
+                // sends the same worker another job instead of summoning a
+                // replacement. Steer and Stop stay gated on `require_active`
+                // — they only make sense against a live turn.
+                if let EmployeeControl::Prompt { prompt } = &action {
+                    if prompt.trim().is_empty() {
+                        bail!("employee prompts cannot be empty");
+                    }
+                    self.boss.resurrect(session_id)?;
+                }
                 self.boss.require_active(session_id)?;
                 match action {
                     EmployeeControl::Prompt { prompt } => {
-                        if prompt.trim().is_empty() {
-                            bail!("employee prompts cannot be empty");
-                        }
                         self.queue_agent_prompt(session_id, prompt, caller, events)?;
                     }
                     EmployeeControl::Steer { prompt } => {
@@ -5982,6 +5989,11 @@ impl WakuBackend {
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
         if sender.is_some_and(|id| self.boss.is_managed(id)) || self.boss.is_managed(target) {
             self.boss.require_control(sender, target)?;
+            // Queue delivery resurrects a finished employee; steer still
+            // requires a live turn to fold into.
+            if matches!(delivery, AgentPromptDelivery::Queue) {
+                self.boss.resurrect(target)?;
+            }
             self.boss.require_active(target)?;
         }
         if self.session_quarantined(target) {
@@ -11380,6 +11392,89 @@ mod tests {
             error.to_string().contains("summon an employee"),
             "boss acquire should redirect to delegation: {error:#}"
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_supervisor_prompt_resurrects_an_expired_employee() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("boss-revive-{}", Uuid::new_v4()));
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(supervisor);
+                Ok(())
+            })
+            .unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let employee = backend
+            .boss
+            .prepare_employee(supervisor, persona, "Release checks".into())
+            .unwrap();
+        let employee_id = employee.session_id;
+        backend
+            .boss
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        {
+            let mut state = backend.task_state.lock();
+            let mut child = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
+            child.id = employee_id;
+            state.push_session(child);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let parent_capture = Arc::new(CaptureDriver::default());
+        backend.sessions.lock().insert(
+            supervisor,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(parent_capture),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.clone(),
+            },
+        );
+        backend.finish_boss_employee(employee_id).unwrap();
+        assert!(backend.boss.employee(employee_id).unwrap().expired);
+        // The expiry pass dropped the employee's runtime; a resurrected
+        // prompt cold-starts one in production — a control driver stands
+        // in for it here.
+        let capture = Arc::new(CaptureDriver::default());
+        backend.sessions.lock().insert(
+            employee_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.clone(),
+            },
+        );
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "One more check".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert!(!backend.boss.employee(employee_id).unwrap().expired);
+        assert!(backend.boss.require_active(employee_id).is_ok());
+        let prompts = capture.prompts.lock();
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains("One more check"));
         let _ = std::fs::remove_dir_all(root);
     }
 }

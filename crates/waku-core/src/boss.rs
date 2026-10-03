@@ -412,6 +412,27 @@ impl BossService {
         }
     }
 
+    /// Return an expired employee to duty — the boss may send a finished
+    /// employee another prompt rather than summoning a replacement. The
+    /// state update notifies clients, so the sidebar's finished list gives
+    /// the row back to the working set as soon as a prompt lands.
+    /// Non-employees and employees still on the clock return `false`.
+    pub fn resurrect(&self, session: Uuid) -> anyhow::Result<bool> {
+        let mut revived = false;
+        self.update(|state| {
+            if let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session && entry.expired)
+            {
+                entry.expired = false;
+                revived = true;
+            }
+            Ok(())
+        })?;
+        Ok(revived)
+    }
+
     pub fn expire(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
         let mut employee = None;
         self.update(|state| {

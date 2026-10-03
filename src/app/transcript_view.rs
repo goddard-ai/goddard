@@ -1775,6 +1775,15 @@ impl Waku {
                                 .map(std::path::Path::to_path_buf),
                         );
                     }
+                    // A boss names its employees in prose — the names paint
+                    // as chips carrying the employee's avatar and a link to
+                    // its chat.
+                    if let Some(key) = self.boss_chat_key() {
+                        let (mentions, avatars) = self.boss_session_mentions(key);
+                        if !mentions.is_empty() {
+                            ctx = ctx.with_session_mentions(mentions, avatars);
+                        }
+                    }
                     if let Some(highlights) = self.transcript_search_highlights(message_index) {
                         ctx = ctx.with_search_highlights(highlights);
                     }

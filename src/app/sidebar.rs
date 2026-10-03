@@ -4109,6 +4109,46 @@ impl Waku {
                 .into_any_element(),
             SidebarRow::BossShowMore(key) => {
                 let theme = Theme::current(cx);
+                // The fold row names the finished employee it would reveal
+                // next — "Rhea finished 3m ago" — rather than a bare
+                // "Show more". The age is minute-granular like every
+                // sidebar time label; it never counts seconds.
+                let label = {
+                    let visible = self
+                        .boss_ui
+                        .sidebar_idle_visible
+                        .get(&key)
+                        .copied()
+                        .unwrap_or(0);
+                    let next = self
+                        .boss_ui
+                        .recent
+                        .get(&key)
+                        .into_iter()
+                        .flatten()
+                        .filter(|id| !self.boss_ui.working.contains(id))
+                        .nth(visible);
+                    next.and_then(|id| {
+                        let name = self.boss_ui.identities.get(&id)?.name.clone();
+                        let updated = self
+                            .state
+                            .sessions
+                            .iter()
+                            .find(|session| session.id == *id)?
+                            .updated_at;
+                        let elapsed = unix_time().saturating_sub(updated);
+                        Some(if elapsed < 60 {
+                            tr!("boss.finished_now", name = name)
+                        } else {
+                            tr!(
+                                "boss.finished_ago",
+                                name = name,
+                                ago = format_time_ago(elapsed)
+                            )
+                        })
+                    })
+                    .unwrap_or_else(|| tr!("sidebar.show_more"))
+                };
                 div()
                     .w_full()
                     .h(px(SIDEBAR_SHOW_MORE_ROW_HEIGHT))
@@ -4124,7 +4164,7 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .focus_visible(|style| style.bg(theme.focus_highlight()))
                             .hover(|style| style.text_color(theme.text))
-                            .child(tr!("sidebar.show_more"))
+                            .child(label)
                             .on_activation(cx, move |this, _, cx| {
                                 *this.boss_ui.sidebar_idle_visible.entry(key).or_default() +=
                                     SIDEBAR_PROJECT_REVEAL_BATCH;
@@ -5489,6 +5529,77 @@ impl Waku {
             .into_any_element()
     }
 
+    /// The session row's right-edge status glyph — the classic task
+    /// indicators: a spinner while a turn runs, the attention glyphs for
+    /// parked states, the unseen-completion dot, and the idle Jev marker.
+    /// Session rows, boss rows, and employee rows all draw from this one
+    /// mapping so the sidebar reads one status language.
+    pub(super) fn session_status_indicator(
+        &self,
+        session: &AgentSession,
+        theme: &Theme,
+    ) -> Option<AnyElement> {
+        let session_id = session.id;
+        if matches!(
+            session.status,
+            SessionStatus::Connecting | SessionStatus::Working
+        ) {
+            return Some(motion::spin_slow(icon(
+                "icons/loader-circle.svg",
+                12.0,
+                status_color(theme, session.status),
+            )));
+        }
+        match session.status {
+            SessionStatus::Background => Some(
+                icon(
+                    "icons/hourglass.svg",
+                    12.0,
+                    status_color(theme, session.status),
+                )
+                .into_any_element(),
+            ),
+            SessionStatus::Waiting => Some(
+                icon("icons/alert.svg", 12.0, status_color(theme, session.status))
+                    .into_any_element(),
+            ),
+            SessionStatus::Failed => Some(
+                icon(
+                    "icons/x-bold.svg",
+                    12.0,
+                    status_color(theme, session.status),
+                )
+                .into_any_element(),
+            ),
+            SessionStatus::Idle if self.state.unseen_completions.contains_key(&session_id) => Some(
+                div()
+                    .flex_none()
+                    .size(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(div().size(px(7.0)).rounded_full().bg(theme.info))
+                    .into_any_element(),
+            ),
+            // An idle, all-seen task can still carry its last turn's
+            // Jev verdict: the marker rides the slot as ambient state
+            // until the next turn is scored.
+            SessionStatus::Idle => self.session_sidebar_marker(session).map(|marker| {
+                div()
+                    .id(SharedString::from(format!("session-marker-{session_id}")))
+                    .flex_none()
+                    .size(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .tooltip(Tooltip::text(tr!(marker.label_key)))
+                    .child(icon(marker.icon, 12.0, marker.tone.color(theme)))
+                    .into_any_element()
+            }),
+            _ => None,
+        }
+    }
+
     /// The body a session row shares between the sidebar and a Big Picture
     /// card header: title plus status/archive on top, project or branch
     /// detail below, and — while the composer-drafts setting is on, the task
@@ -5511,10 +5622,6 @@ impl Waku {
         else {
             return div().into_any_element();
         };
-        let working = matches!(
-            session.status,
-            SessionStatus::Connecting | SessionStatus::Working
-        );
         let project = self
             .state
             .projects
@@ -5600,68 +5707,7 @@ impl Waku {
         } else {
             "icons/folder.svg"
         };
-        let status_indicator: Option<AnyElement> = if working {
-            Some(motion::spin_slow(icon(
-                "icons/loader-circle.svg",
-                12.0,
-                status_color(&theme, session.status),
-            )))
-        } else {
-            match session.status {
-                SessionStatus::Background => Some(
-                    icon(
-                        "icons/hourglass.svg",
-                        12.0,
-                        status_color(&theme, session.status),
-                    )
-                    .into_any_element(),
-                ),
-                SessionStatus::Waiting => Some(
-                    icon(
-                        "icons/alert.svg",
-                        12.0,
-                        status_color(&theme, session.status),
-                    )
-                    .into_any_element(),
-                ),
-                SessionStatus::Failed => Some(
-                    icon(
-                        "icons/x-bold.svg",
-                        12.0,
-                        status_color(&theme, session.status),
-                    )
-                    .into_any_element(),
-                ),
-                SessionStatus::Idle if self.state.unseen_completions.contains_key(&session_id) => {
-                    Some(
-                        div()
-                            .flex_none()
-                            .size(px(12.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(div().size(px(7.0)).rounded_full().bg(theme.info))
-                            .into_any_element(),
-                    )
-                }
-                // An idle, all-seen task can still carry its last turn's
-                // Jev verdict: the marker rides the slot as ambient state
-                // until the next turn is scored.
-                SessionStatus::Idle => self.session_sidebar_marker(session).map(|marker| {
-                    div()
-                        .id(SharedString::from(format!("session-marker-{session_id}")))
-                        .flex_none()
-                        .size(px(12.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .tooltip(Tooltip::text(tr!(marker.label_key)))
-                        .child(icon(marker.icon, 12.0, marker.tone.color(&theme)))
-                        .into_any_element()
-                }),
-                _ => None,
-            }
-        };
+        let status_indicator = self.session_status_indicator(session, &theme);
         let has_indicator = status_indicator.is_some() || session.incognito;
         // The pinned right-edge cluster holds the status indicator and the
         // incognito glyph — reserve room for both when a task shows each.
