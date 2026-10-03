@@ -709,13 +709,13 @@ impl Waku {
                 self.settings_memory_selection
                     .selection
                     .borrow()
-                    .selected_markdown()
+                    .clipboard_text()
             })
             .or_else(|| {
                 self.transcript_selection
                     .selection
                     .borrow()
-                    .selected_markdown()
+                    .clipboard_text()
             });
         match selected {
             Some(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),

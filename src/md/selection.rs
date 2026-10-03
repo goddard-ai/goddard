@@ -103,16 +103,21 @@ pub struct Span {
 }
 
 impl Span {
+    /// True when the span grabs the element's whole flat text.
+    fn covers_element(&self) -> bool {
+        self.range.start == 0 && self.range.end == self.text.len()
+    }
+
     /// The selected text as markdown: the element's wrap applies only when the
     /// span covers it whole, so partial selections never emit half a fence or
     /// a heading mark on a fragment of a word.
     pub fn markdown(&self) -> String {
         let mut out = String::new();
-        if self.range.start == 0 && self.range.end == self.text.len() {
+        if self.covers_element() {
             out.push_str(&self.copy.prefix);
         }
         out.push_str(&self.copy.render(&self.text, &self.range));
-        if self.range.start == 0 && self.range.end == self.text.len() {
+        if self.covers_element() {
             out.push_str(&self.copy.suffix);
         }
         out
@@ -318,11 +323,19 @@ impl Selection {
         (!self.is_empty()).then(|| self.text())
     }
 
-    /// The selection as markdown, or `None` when nothing is selected.
-    /// Elements without a [`CopySpec`] contribute their flat text, so a
-    /// selection spanning plain surfaces still copies what it always did.
-    pub fn selected_markdown(&self) -> Option<String> {
-        (!self.is_empty()).then(|| self.markdown())
+    /// The selection as the clipboard should get it: markdown once the grab
+    /// covers at least one element whole — a paragraph, list item, heading —
+    /// and flat text otherwise, so a word picked out mid-block keeps none of
+    /// the syntax it never painted.
+    pub fn clipboard_text(&self) -> Option<String> {
+        if self.is_empty() {
+            return None;
+        }
+        let whole = self
+            .spans
+            .iter()
+            .any(|span| !span.range.is_empty() && span.covers_element());
+        Some(if whole { self.markdown() } else { self.text() })
     }
 
     /// The selection as markdown, spans joined in document order.
@@ -1134,6 +1147,81 @@ mod tests {
         // And a lone code run per element is still more than one run.
         selection.set_spans(registry.resolve((0, 0), (1, 5)));
         assert_eq!(selection.markdown(), "`one` and `two`\n\n`three`");
+    }
+
+    #[test]
+    fn clipboard_copy_is_flat_until_an_element_is_grabbed_whole() {
+        let mut registry = SelectionRegistry::default();
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 0),
+            text: Rc::from("a bold call"),
+            block_break: false,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::new(CopySpec {
+                prefix: Rc::from("## "),
+                suffix: Rc::default(),
+                fragments: vec![(2..6, Rc::from("**bold**"))],
+            }),
+            geometry: (),
+        });
+        registry.push(RegisteredText {
+            key: TextKey::new("r1", 1),
+            text: Rc::from("see it"),
+            block_break: true,
+            annotation_refs: Vec::new(),
+            commit_refs: Vec::new(),
+            copy: Rc::default(),
+            geometry: (),
+        });
+        let mut selection = Selection::default();
+        // A grab inside one element — even one covering a whole styled run —
+        // copies the flat text it painted.
+        selection.set_spans(registry.resolve((0, 2), (0, 6)));
+        assert_eq!(selection.clipboard_text().as_deref(), Some("bold"));
+        // Partial grabs spanning elements stay flat too.
+        selection.set_spans(registry.resolve((0, 3), (1, 3)));
+        assert_eq!(
+            selection.clipboard_text().as_deref(),
+            Some("old call\n\nsee")
+        );
+        // Covering one element whole switches the copy to markdown.
+        selection.set_spans(registry.resolve((0, 0), (1, 3)));
+        assert_eq!(
+            selection.clipboard_text().as_deref(),
+            Some("## a **bold** call\n\nsee")
+        );
+    }
+
+    #[test]
+    fn a_crossed_empty_element_does_not_unlock_markdown_copy() {
+        let mut registry = SelectionRegistry::default();
+        for (index, (text, prefix)) in [("one", ""), ("", ""), ("two", "## ")].iter().enumerate() {
+            registry.push(RegisteredText {
+                key: TextKey::new("r1", index),
+                text: Rc::from(*text),
+                block_break: index > 0,
+                annotation_refs: Vec::new(),
+                commit_refs: Vec::new(),
+                copy: Rc::new(CopySpec {
+                    prefix: Rc::from(*prefix),
+                    suffix: Rc::default(),
+                    fragments: Vec::new(),
+                }),
+                geometry: (),
+            });
+        }
+        let mut selection = Selection::default();
+        // The crossed empty line resolves as a zero-width span that covers
+        // its element; surrounded by partials the copy still stays flat.
+        selection.set_spans(registry.resolve((0, 1), (2, 1)));
+        assert_eq!(selection.clipboard_text().as_deref(), Some("ne\n\n\n\nt"));
+        // Covering the real elements around it switches back to markdown.
+        selection.set_spans(registry.resolve((0, 0), (2, 3)));
+        assert_eq!(
+            selection.clipboard_text().as_deref(),
+            Some("one\n\n\n\n## two")
+        );
     }
 
     #[test]
