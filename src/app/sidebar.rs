@@ -6413,7 +6413,11 @@ impl Waku {
             .flex_none()
             .flex()
             .items_center()
-            .gap(px(8.0))
+            .gap(if self.sidebar_visible {
+                px(8.0)
+            } else {
+                px(2.0)
+            })
             .children(left_window_controls)
             // The header starts where the sidebar ends, so until the sidebar
             // is wide enough to host the traffic lights itself the header has
@@ -6423,7 +6427,7 @@ impl Waku {
             .pl(if self.sidebar_visible {
                 px(14.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0))
             } else {
-                px(0.0)
+                px(8.0)
             })
             .pr(px(14.0))
             .when(!self.sidebar_visible, |element| {
