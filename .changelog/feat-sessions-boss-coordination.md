@@ -1,0 +1,1 @@
+- The default Boss now delegates execution and long-running work to employees, tracks what is in flight, and checks their committed work before reporting it complete.

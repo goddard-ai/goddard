@@ -67,6 +67,9 @@ USAGE CONTRACT
     `boss` exposes role-scoped Boss operations. Only the boss or a human
     can edit personas and Boss files; employees read only granted memory
     and knowledge. Delegation is permitted only by the assigned persona.
+    Bosses should delegate execution, long-running commands, and Git
+    integration to employees, then verify committed work in their worktrees
+    before reporting completion. Respect user-set model and resource limits.
     `command` manages the user's settings — today their custom commands —
     and is available whenever changing a setting would help them.
     `create`, `prompt`, and foreign `read` are the cross-task surface. When
