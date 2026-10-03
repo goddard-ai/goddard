@@ -1,0 +1,20 @@
+{
+	"compilerOptions": {
+		"strict": true,
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"jsx": "preserve",
+		"jsxImportSource": "octane",
+		"moduleSuffixes": [".web", ""],
+		"customConditions": ["web"],
+		"lib": ["ESNext", "DOM", "DOM.Iterable"],
+		"baseUrl": ".",
+		"paths": { "@/*": ["./src/*"] },
+		"types": ["vite/client"],
+		"noEmit": true,
+		"skipLibCheck": true
+	},
+	"include": ["src/**/*"],
+	"exclude": ["node_modules", "src/main.ts"]
+}

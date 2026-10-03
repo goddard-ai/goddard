@@ -1,0 +1,52 @@
+{
+	"name": "octane-xplat-app",
+	"private": true,
+	"type": "module",
+	"main": "src/main.ts",
+	"scripts": {
+		"xplat": "xplat",
+		"dev": "vite",
+		"dev:ios": "ns run ios",
+		"dev:android": "ns run android",
+		"build": "vite build",
+		"build:ios": "ns build ios",
+		"build:android": "ns build android",
+		"lint": "xplat-lint",
+		"lint:fix": "xplat-lint --fix",
+		"typecheck": "tsrx-tsc --noEmit && tsrx-tsc --noEmit -p tsconfig.native.json"
+	},
+	"dependencies": {
+		"@nativescript-community/gesturehandler": "2.0.45",
+		"@nativescript-community/octane": "0.2.4",
+		"@nativescript-community/ui-drawer": "0.1.32",
+		"@nativescript/core": "9.1.2",
+		"@nativescript/haptics": "^3.1.0",
+		"@nativescript/secure-storage": "^4.0.2",
+		"@octane-xplat/effects": "^0.9.0",
+		"@octane-xplat/platform": "^0.9.0",
+		"@octane-xplat/ui": "^0.9.0",
+		"@valor/nativescript-websockets": "2.0.3",
+		"@waku/client": "workspace:*",
+		"mdast-util-from-markdown": "^2.0.3",
+		"mdast-util-gfm": "^3.1.0",
+		"micromark-extension-gfm": "^3.0.0",
+		"octane": "0.6.3"
+	},
+	"devDependencies": {
+		"@nativescript-community/vite-octane": "0.2.1",
+		"@nativescript/android": "9.1.1",
+		"@nativescript/ios": "9.1.0",
+		"@nativescript/types": "9.0.0",
+		"@nativescript/vite": "8.0.17",
+		"@octane-xplat/cli": "^0.9.0",
+		"@octane-xplat/lint": "^0.9.0",
+		"@octanejs/vite-plugin": "0.1.61",
+		"@tsrx/typescript-plugin": "0.4.11",
+		"@types/mdast": "^4.0.4",
+		"nativescript": "9.1.1",
+		"oxlint": "^1.74.0",
+		"typescript": "5.9.3",
+		"vite": "8.3.0"
+	},
+	"packageManager": "pnpm@11.24.0"
+}

@@ -1,0 +1,4 @@
+node_modules
+dist
+platforms/
+hooks/

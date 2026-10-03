@@ -1,0 +1,116 @@
+{
+	"version": 1,
+	"layouts": [
+		""
+	],
+	"screens": [
+		"connect",
+		"daemon-editor",
+		"daemon-scan",
+		"daemons",
+		"index",
+		"new-task",
+		"notifications",
+		"session/:id"
+	],
+	"routes": [
+		{
+			"name": "connect",
+			"path": "connect",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/connect.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "daemon-editor",
+			"path": "daemon-editor",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/daemon-editor.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "daemon-scan",
+			"path": "daemon-scan",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/daemon-scan.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "daemons",
+			"path": "daemons",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/daemons.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "index",
+			"path": "",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/index.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "new-task",
+			"path": "new-task",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/new-task.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "notifications",
+			"path": "notifications",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/notifications.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "session/:id",
+			"path": "session/:id",
+			"params": [
+				"id"
+			],
+			"layouts": [
+				""
+			],
+			"source": "src/app/session/[id].tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		}
+	]
+}
