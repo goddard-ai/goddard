@@ -87,6 +87,20 @@ and Linux use Cua's native overlay thread. Cursor movement, action animations,
 themes, and reduced-motion handling use the same implementation as standalone
 Cua Driver. Headless hosts still report unavailable graphics facilities.
 
+Every executable-relative resource the agent surface and Computer Use resolve —
+`goddard-agent`, `goddard_js_repl`, the helper bundle (or the flat helper plus
+its SDK library), and the skills tree — is also staged into a daemon-owned
+`Runtime/` directory under the per-build application-support root (for example
+`~/Library/Application Support/Goddard Debug/Runtime`). Resolvers refresh the
+staged copy whenever the packaged source is readable and fall back to it when
+the executable's directory was replaced or deleted under the running daemon —
+a collected build cache, a rebuilt target, a swapped app bundle. A startup
+pass stages all of it eagerly; resolvers also stage lazily per call, so only
+daemon boot to first resolve is unprotected. A session whose launch
+environment still cannot be minted carries an
+`errors.agent_surface_unavailable` transcript notice instead of failing
+silently.
+
 ## OpenCode 2
 
 OpenCode 2 uses the existing shared service. Goddard registers one temporary MCP

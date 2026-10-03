@@ -1,0 +1,1 @@
+- Fixed new tasks losing their `goddard-agent` commands when the daemon's own build or install directory was replaced or cleaned while it kept running — for example a build-cache cleanup; the daemon now keeps private copies of the binaries it hands to agents and tells the session when the surface can't start.

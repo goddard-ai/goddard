@@ -717,6 +717,16 @@ impl WakuBackend {
                 });
         }
         backend.apply_wake_setting();
+        // Stage daemon-owned copies of the packaged runtime resources while
+        // they still exist: a rebuilt or collected target directory can take
+        // the executable's neighbors away under a long-running daemon, and
+        // every executable-relative resolver then fails at once.
+        if let Err(error) = std::thread::Builder::new()
+            .name("goddard-runtime-stage".into())
+            .spawn(crate::computer_use::stage_runtime_resources)
+        {
+            eprintln!("goddard-daemon: could not spawn runtime staging thread: {error:#}");
+        }
         Ok(backend)
     }
 
@@ -4660,9 +4670,18 @@ impl WakuBackend {
                 Err(error) if managed => {
                     return Err(error.context("Boss requires its scoped agent surface"));
                 }
-                Err(error) => eprintln!(
-                    "goddard-daemon: agent surface unavailable for session {session_id}: {error:#}"
-                ),
+                Err(error) => {
+                    eprintln!(
+                        "goddard-daemon: agent surface unavailable for session {session_id}: {error:#}"
+                    );
+                    // Without the launch env no `goddard-agent` exists to
+                    // report this, so the transcript carries the reason.
+                    let detail = format!("{error:#}");
+                    let pair = localized!("errors.agent_surface_unavailable", error = &detail);
+                    if let Ok(wire) = event_to_wire(DriverEvent::localized_notice(pair)) {
+                        let _ = events.send(wire);
+                    }
+                }
             }
         }
         // Named subagents ride the launch with the runtime: the fixed roster

@@ -3781,6 +3781,8 @@ errors.codex_goals_unsupported:
   en: This Codex version does not support thread goals
 errors.computer_use_start_failed:
   en: "Computer Use could not start; the session will continue without it. Details: %{error}"
+errors.agent_surface_unavailable:
+  en: "The goddard-agent command surface could not start; the session will continue without it. Details: %{error}"
 errors.provider_receive_prompt:
   en: "%{provider} could not receive the prompt"
 errors.provider_start_turn:

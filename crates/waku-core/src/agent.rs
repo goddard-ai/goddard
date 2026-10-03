@@ -698,7 +698,9 @@ pub struct AgentSurfaceScope {
 ///
 /// Development and unpackaged installs keep it beside the daemon
 /// executable; a packaged macOS app keeps it in `Contents/Resources` like
-/// `goddard_js_repl`.
+/// `goddard_js_repl`. Resolution goes through the staged copy so a
+/// directory lost under a running daemon — a collected build cache, a
+/// swapped app bundle — does not strip every new session's agent surface.
 pub fn agent_cli_path() -> anyhow::Result<PathBuf> {
     let executable =
         std::env::current_exe().context("Goddard daemon executable path is unavailable")?;
@@ -711,10 +713,11 @@ pub fn agent_cli_path() -> anyhow::Result<PathBuf> {
         .parent()
         .and_then(|macos| macos.parent())
         .map(|contents| contents.join("Resources").join(name));
-    [Some(executable.with_file_name(name)), bundled]
+    let packaged = [Some(executable.with_file_name(name)), bundled]
         .into_iter()
         .flatten()
-        .find(|path| path.is_file())
+        .find(|path| path.is_file());
+    crate::computer_use::staged_resource(packaged.as_deref(), name, None)
         .ok_or_else(|| anyhow!("the goddard-agent CLI is missing from this Goddard build"))
 }
 

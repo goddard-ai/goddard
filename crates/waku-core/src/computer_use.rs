@@ -213,11 +213,11 @@ fn helper_app_path() -> anyhow::Result<PathBuf> {
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow!("Goddard executable name is invalid"))?;
     let helper_name = format!("{app_name} Computer Use");
-    let path = contents.join("Helpers").join(format!("{helper_name}.app"));
-    if !path.is_dir() {
-        bail!("Computer Use helper is missing from this Goddard build")
-    }
-    Ok(path)
+    let name = format!("{helper_name}.app");
+    let path = contents.join("Helpers").join(&name);
+    let packaged = path.is_dir().then_some(path.as_path());
+    staged_resource(packaged, &name, Some(Path::new(HELPER_FINGERPRINT_PATH)))
+        .ok_or_else(|| anyhow!("Computer Use helper is missing from this Goddard build"))
 }
 
 pub fn helper_display_name() -> String {
@@ -233,10 +233,21 @@ pub fn helper_display_name() -> String {
 
 pub fn mcp_server_command() -> anyhow::Result<PathBuf> {
     if !cfg!(target_os = "macos") {
-        return packaged_file(
-            &host_executable_path()?.with_file_name(helper_executable_name()),
-            "Cua Driver helper",
-        );
+        let executable = host_executable_path()?;
+        let name = helper_executable_name();
+        let path = executable.with_file_name(name);
+        let packaged = path.is_file().then_some(path.as_path());
+        let helper = staged_resource(packaged, name, None)
+            .ok_or_else(|| anyhow!("Cua Driver helper is missing from this Goddard build"))?;
+        // The helper loads its SDK library from its own directory — stage
+        // the siblings it needs beside the staged copy.
+        if let Some(directory) = packaged.and_then(Path::parent) {
+            for sibling in helper_sibling_names() {
+                let source = directory.join(sibling);
+                staged_resource(source.is_file().then_some(source.as_path()), sibling, None);
+            }
+        }
+        return Ok(helper);
     }
     let bundled_helper = helper_app_path()?;
     let helper = install_helper_app(&bundled_helper)?;
@@ -251,6 +262,18 @@ fn helper_executable_name() -> &'static str {
         "goddard_computer_use.exe"
     } else {
         "goddard_computer_use"
+    }
+}
+
+/// Files `goddard_computer_use` loads from its own directory — kept in sync
+/// with `library_name()` in crates/waku-computer-use and the packaging list
+/// in scripts/cua-driver.ts. Only consulted by the flat-layout branch:
+/// macOS carries the SDK inside the helper bundle instead.
+fn helper_sibling_names() -> &'static [&'static str] {
+    if cfg!(windows) {
+        &["cua_driver_sdk.dll", "cua-driver-uia.exe"]
+    } else {
+        &["libcua_driver_sdk.so"]
     }
 }
 
@@ -281,18 +304,130 @@ fn packaged_file(path: &Path, name: &str) -> anyhow::Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
+/// A daemon-owned copy of every resource the agent surface and Computer Use
+/// resolve beside the executable. The packaged directory can vanish under a
+/// running daemon — a build-cache garbage collection, a rebuilt target
+/// directory, a swapped app bundle — and each executable-relative lookup
+/// then fails at once. Resolvers refresh their staged copy whenever the
+/// packaged source exists and fall back to the last copy when it is gone.
+pub(crate) fn runtime_install_root() -> anyhow::Result<PathBuf> {
+    Ok(dirs::data_local_dir()
+        .or_else(dirs::data_dir)
+        .ok_or_else(|| anyhow!("application support directory is unavailable"))?
+        .join(crate::identity::DATA_DIRECTORY_NAME)
+        .join("Runtime"))
+}
+
+/// Resolve a packaged runtime resource to a stable path. With `packaged`
+/// present, the staged copy is refreshed and returned (the source itself on
+/// a failed refresh); without it, the last staged copy answers. `key` names
+/// a small file whose bytes version a staged directory — a helper bundle's
+/// build fingerprint, a skills tree's entry document.
+pub(crate) fn staged_resource(
+    packaged: Option<&Path>,
+    name: &str,
+    key: Option<&Path>,
+) -> Option<PathBuf> {
+    let staged = runtime_install_root().ok().map(|root| root.join(name));
+    resolve_staged(packaged, staged.as_deref(), key)
+}
+
+fn resolve_staged(
+    packaged: Option<&Path>,
+    staged: Option<&Path>,
+    key: Option<&Path>,
+) -> Option<PathBuf> {
+    match (packaged, staged) {
+        (Some(source), Some(staged)) => match refresh_staged(source, staged, key) {
+            Ok(()) => Some(staged.to_path_buf()),
+            Err(error) => {
+                eprintln!(
+                    "goddard-daemon: could not stage {}: {error:#}",
+                    source.display()
+                );
+                Some(source.to_path_buf())
+            }
+        },
+        (Some(source), None) => Some(source.to_path_buf()),
+        (None, Some(staged)) if staged.exists() => Some(staged.to_path_buf()),
+        (None, _) => None,
+    }
+}
+
+/// Copy `source` over `staged` when they differ, through a sibling staging
+/// name so a concurrent reader never sees a partial result. Files compare
+/// on size and mtime (the copy is stamped back to the source's); directories
+/// compare on `key`'s bytes.
+fn refresh_staged(source: &Path, staged: &Path, key: Option<&Path>) -> anyhow::Result<()> {
+    if source.is_dir() {
+        let key = key.context("a staged directory needs a key file to compare")?;
+        if fs::read(staged.join(key)).is_ok_and(|staged| Some(staged) == fs::read(source.join(key)).ok())
+        {
+            return Ok(());
+        }
+    } else {
+        let unchanged = fs::metadata(source)
+            .ok()
+            .zip(fs::metadata(staged).ok())
+            .is_some_and(|(source, staged)| {
+                source.len() == staged.len()
+                    && source.modified().ok() == staged.modified().ok()
+            });
+        if unchanged {
+            return Ok(());
+        }
+    }
+    crate::fs_ext::create_private_dir_all(staged.parent().unwrap_or(Path::new(".")))?;
+    let staging = staged.with_file_name(format!(".stage-{}", Uuid::new_v4().simple()));
+    let result = if source.is_dir() {
+        copy_directory(source, &staging)
+    } else {
+        fs::copy(source, &staging)
+            .map(|_| ())
+            .and_then(|()| {
+                fs::File::open(&staging)?.set_modified(fs::metadata(source)?.modified()?)
+            })
+            .map_err(anyhow::Error::from)
+    };
+    if let Err(error) = result {
+        let _ = fs::remove_dir_all(&staging).or_else(|_| fs::remove_file(&staging));
+        return Err(error);
+    }
+    if staged.is_dir() {
+        fs::remove_dir_all(staged)?;
+    } else if staged.exists() {
+        fs::remove_file(staged)?;
+    }
+    fs::rename(&staging, staged)?;
+    Ok(())
+}
+
+/// Refresh every staged runtime resource while the packaged copies still
+/// exist. Runs once at daemon startup so a later loss of the executable's
+/// directory leaves working fallbacks; resolvers also stage lazily on each
+/// call, so this only narrows the unprotected window after boot.
+pub(crate) fn stage_runtime_resources() {
+    let _ = crate::agent::agent_cli_path();
+    let _ = js_repl_server_path();
+    let _ = mcp_server_command();
+    let _ = skill_root_path();
+}
+
 pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
     let executable = host_executable_path()?;
-    let path = if cfg!(target_os = "macos") {
-        resources_directory(&executable, "macos")?.join("goddard_js_repl")
+    let name = if cfg!(windows) {
+        "goddard_js_repl.exe"
     } else {
-        executable.with_file_name(if cfg!(windows) {
-            "goddard_js_repl.exe"
-        } else {
-            "goddard_js_repl"
-        })
+        "goddard_js_repl"
     };
-    packaged_file(&path, "Goddard JavaScript REPL")
+    let path = if cfg!(target_os = "macos") {
+        resources_directory(&executable, "macos")?.join(name)
+    } else {
+        executable.with_file_name(name)
+    };
+    let packaged = path.is_file().then_some(path.as_path());
+    staged_resource(packaged, name, None)
+        .ok_or_else(|| anyhow!("Goddard JavaScript REPL is missing from this Goddard build"))
 }
 
 pub(crate) fn helper_install_root() -> anyhow::Result<PathBuf> {
@@ -483,7 +618,32 @@ fn copy_directory(source: &Path, destination: &Path) -> anyhow::Result<()> {
 }
 
 pub fn skill_root_path() -> anyhow::Result<PathBuf> {
-    let path = resources_directory(&host_executable_path()?, std::env::consts::OS)?.join("skills");
+    let resources = resources_directory(&host_executable_path()?, std::env::consts::OS)?;
+    // The skills tree is the whole payload on macOS; other platforms keep it
+    // inside a shared resources directory that also carries helper assets.
+    let (source, name, key) = if cfg!(target_os = "macos") {
+        (
+            resources.join("skills"),
+            "skills",
+            Path::new("goddard-computer-use/SKILL.md"),
+        )
+    } else {
+        (
+            resources.clone(),
+            "resources",
+            Path::new("skills/goddard-computer-use/SKILL.md"),
+        )
+    };
+    let packaged = source.is_dir().then_some(source.as_path());
+    let path = staged_resource(packaged, name, Some(key))
+        .map(|staged| {
+            if cfg!(target_os = "macos") {
+                staged
+            } else {
+                staged.join("skills")
+            }
+        })
+        .unwrap_or_else(|| resources.join("skills"));
     packaged_file(
         &path.join("goddard-computer-use/SKILL.md"),
         "Goddard Computer Use skill",
@@ -550,6 +710,86 @@ mod tests {
         };
         assert_eq!(target.grant_key(), grant.key());
         assert!(target.persistable());
+    }
+
+    #[test]
+    fn staged_resources_survive_a_lost_packaged_copy() {
+        let root = std::env::temp_dir().join(format!("runtime-stage-{}", Uuid::new_v4()));
+        let packaged_dir = root.join("packaged");
+        fs::create_dir_all(&packaged_dir).unwrap();
+        let packaged = packaged_dir.join("goddard-agent");
+        fs::write(&packaged, b"v1").unwrap();
+        let staged = root.join("runtime").join("goddard-agent");
+
+        // The packaged copy stages on first resolve...
+        assert_eq!(
+            resolve_staged(Some(&packaged), Some(&staged), None).unwrap(),
+            staged
+        );
+        assert_eq!(fs::read(&staged).unwrap(), b"v1");
+
+        // ...and keeps answering after the packaged copy is gone.
+        fs::remove_dir_all(&packaged_dir).unwrap();
+        assert_eq!(resolve_staged(None, Some(&staged), None).unwrap(), staged);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn staged_resources_refresh_when_the_packaged_copy_changes() {
+        let root = std::env::temp_dir().join(format!("runtime-stage-{}", Uuid::new_v4()));
+        let packaged_dir = root.join("packaged");
+        fs::create_dir_all(&packaged_dir).unwrap();
+        let packaged = packaged_dir.join("goddard-agent");
+        fs::write(&packaged, b"v1").unwrap();
+        let staged = root.join("runtime").join("goddard-agent");
+
+        resolve_staged(Some(&packaged), Some(&staged), None).unwrap();
+        // A changed size forces a refresh without depending on mtime
+        // granularity.
+        fs::write(&packaged, b"v2-rebuilt").unwrap();
+        assert_eq!(
+            resolve_staged(Some(&packaged), Some(&staged), None).unwrap(),
+            staged
+        );
+        assert_eq!(fs::read(&staged).unwrap(), b"v2-rebuilt");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn staged_directories_compare_on_their_key_file() {
+        let root = std::env::temp_dir().join(format!("runtime-stage-{}", Uuid::new_v4()));
+        let packaged = bundled_helper(&root, "aaaa1111");
+        let staged = root.join("runtime").join("Goddard Computer Use.app");
+        let key = Path::new(HELPER_FINGERPRINT_PATH);
+
+        assert_eq!(
+            resolve_staged(Some(&packaged), Some(&staged), Some(key)).unwrap(),
+            staged
+        );
+        assert_eq!(
+            fs::read_to_string(staged.join(key)).unwrap().trim(),
+            "aaaa1111"
+        );
+
+        // A rebuilt bundle stages over the old copy; a lost one falls back
+        // to what is already staged.
+        let rebuilt = bundled_helper(&root, "bbbb2222");
+        fs::remove_dir_all(packaged.parent().unwrap()).unwrap();
+        fs::rename(rebuilt.parent().unwrap(), packaged.parent().unwrap()).unwrap();
+        resolve_staged(Some(&packaged), Some(&staged), Some(key)).unwrap();
+        assert_eq!(
+            fs::read_to_string(staged.join(key)).unwrap().trim(),
+            "bbbb2222"
+        );
+        fs::remove_dir_all(packaged.parent().unwrap()).unwrap();
+        assert_eq!(
+            resolve_staged(None, Some(&staged), Some(key)).unwrap(),
+            staged
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn bundled_helper(root: &Path, fingerprint: &str) -> PathBuf {
