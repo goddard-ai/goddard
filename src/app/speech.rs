@@ -26,9 +26,14 @@ use super::*;
 
 /// The eval-decisions feature tag for clip-reuse judgments.
 const SPEECH_FEATURE: &str = "boss-speech";
-/// Bound on the persisted library — enough stock phrases and names that the
-/// eval candidates stay cheap, small enough that `clips/` stays tidy.
-const SPEECH_LIBRARY_CAP: usize = 64;
+/// Library size at which clip expiry starts pruning — deliberately
+/// generous: clips are tiny and every saved clip is a synthesis call
+/// never made again. Under the threshold nothing is evicted; past it
+/// expired clips drop first, then the least-recently-used.
+const SPEECH_EXPIRY_THRESHOLD: usize = 256;
+/// How long an unused clip stays live — every replay resets the clock,
+/// so only fragments that fell out of rotation expire.
+const SPEECH_CLIP_TTL_SECS: u64 = 30 * 24 * 60 * 60;
 /// How many candidate clips one fragment's reuse question may offer.
 const SPEECH_JEV_CANDIDATES: usize = 16;
 /// Request ids retained for dedupe — a broadcast arriving twice must not
@@ -44,7 +49,8 @@ const REUSE_CONFIDENCE: f64 = 0.5;
 const NEW_CLIP_OPTION: &str = "synthesize a new clip";
 
 /// The persisted clip library: `index.json` beside the `clips/` audio files
-/// it names. Entries append oldest-first so position implies recency.
+/// it names. Entries append oldest-first; past `SPEECH_EXPIRY_THRESHOLD`
+/// each clip's `expires_at` — refreshed on every use — decides what prunes.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 struct SpeechLibrary {
@@ -60,6 +66,12 @@ struct SpeechClip {
     /// File name inside `clips/` — never a path: the reader takes only the
     /// file-name component when loading.
     file: String,
+    /// Unix seconds at which this clip expires — every use resets it to
+    /// `now + SPEECH_CLIP_TTL_SECS`. Absent in libraries written before
+    /// expiry existed, so those clips read as already expired once the
+    /// library grows past the threshold and pruning engages.
+    #[serde(default)]
+    expires_at: u64,
 }
 
 impl SpeechLibrary {
@@ -113,15 +125,58 @@ impl SpeechLibrary {
             .collect()
     }
 
-    /// Append a synthesized clip, evicting the oldest entries (and their
-    /// files) past the cap.
-    fn push(&mut self, dir: &Path, clip: SpeechClip) {
+    /// Reset a clip's expiry after a use — replays keep a clip live, so
+    /// the least-recently-used clips are always next to prune.
+    fn touch(&mut self, id: Uuid, now: u64) {
+        if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == id) {
+            clip.expires_at = now + SPEECH_CLIP_TTL_SECS;
+        }
+    }
+
+    /// Append a synthesized clip and prune — over the threshold, expired
+    /// entries drop first, then the least-recently-used.
+    fn push(&mut self, dir: &Path, clip: SpeechClip, now: u64) {
         self.clips.push(clip);
-        while self.clips.len() > SPEECH_LIBRARY_CAP {
-            let evicted = self.clips.remove(0);
-            if let Some(path) = self.clip_path(dir, &evicted) {
-                let _ = std::fs::remove_file(path);
+        self.prune(dir, now);
+    }
+
+    /// Enforce expiry once the library is large. Under the threshold
+    /// nothing prunes — disk is cheap and each clip is a skipped
+    /// synthesis. Past it, expired clips go (deleting their files), then
+    /// the least-recently-used until the library fits again.
+    fn prune(&mut self, dir: &Path, now: u64) -> bool {
+        if self.clips.len() <= SPEECH_EXPIRY_THRESHOLD {
+            return false;
+        }
+        let mut index = 0;
+        while index < self.clips.len() {
+            if self.clips[index].expires_at <= now {
+                self.evict_at(dir, index);
+            } else {
+                index += 1;
             }
+        }
+        while self.clips.len() > SPEECH_EXPIRY_THRESHOLD {
+            let Some(oldest) = self
+                .clips
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, clip)| clip.expires_at)
+                .map(|(index, _)| index)
+            else {
+                break;
+            };
+            self.evict_at(dir, oldest);
+        }
+        true
+    }
+
+    /// Drop one entry and its audio file, keeping the index honest about
+    /// what `clips/` still holds.
+    fn evict_at(&mut self, dir: &Path, index: usize) {
+        let evicted = self.clips.remove(index);
+        if let Some(path) = self.clip_path(dir, &evicted) {
+            let _ = std::fs::remove_file(path);
         }
     }
 }
@@ -181,7 +236,8 @@ async fn resolve_speech_clips(
 ) -> anyhow::Result<Vec<Vec<u8>>> {
     let dir = waku_client::persistence::speech_clips_directory();
     let mut library = SpeechLibrary::load(&dir);
-    let mut library_changed = false;
+    let now = unix_time();
+    let mut library_changed = library.prune(&dir, now);
     let mut resolved: Vec<Option<SpeechClip>> = vec![None; parts.len()];
     for (index, part) in parts.iter().enumerate() {
         resolved[index] = library.exact_match(part).cloned();
@@ -249,6 +305,15 @@ async fn resolve_speech_clips(
         }
     }
 
+    // Every reuse resets the clip's expiry — a clip in rotation never
+    // prunes; only fragments nobody voices age out.
+    if resolved.iter().any(Option::is_some) {
+        for clip in resolved.iter().flatten() {
+            library.touch(clip.id, now);
+        }
+        library_changed = true;
+    }
+
     // Whatever stayed unresolved is generated once and banked for reuse.
     let extension = match provider {
         InferenceProvider::OpenRouter => "mp3",
@@ -264,12 +329,13 @@ async fn resolve_speech_clips(
             id,
             text: part.clone(),
             file: format!("{id}.{extension}"),
+            expires_at: now + SPEECH_CLIP_TTL_SECS,
         };
         std::fs::create_dir_all(dir.join("clips"))?;
         if let Some(path) = library.clip_path(&dir, &clip) {
             std::fs::write(path, bytes)?;
         }
-        library.push(&dir, clip.clone());
+        library.push(&dir, clip.clone(), now);
         resolved[index] = Some(clip);
         library_changed = true;
     }
@@ -484,10 +550,15 @@ mod tests {
     use super::*;
 
     fn clip(text: &str) -> SpeechClip {
+        clip_expiring(text, u64::MAX)
+    }
+
+    fn clip_expiring(text: &str, expires_at: u64) -> SpeechClip {
         SpeechClip {
             id: Uuid::new_v4(),
             text: text.to_owned(),
             file: format!("{}.mp3", Uuid::new_v4()),
+            expires_at,
         }
     }
 
@@ -512,14 +583,60 @@ mod tests {
     }
 
     #[test]
-    fn eviction_removes_oldest_clips() {
+    fn eviction_removes_least_recently_used_clips() {
         let dir = std::env::temp_dir().join(format!("speech-test-{}", Uuid::new_v4()));
+        let now = unix_time();
         let mut library = SpeechLibrary::default();
-        for index in 0..SPEECH_LIBRARY_CAP + 5 {
-            library.push(&dir, clip(&format!("phrase {index}")));
+        for index in 0..SPEECH_EXPIRY_THRESHOLD + 5 {
+            library.push(&dir, clip_expiring(&format!("phrase {index}"), now + index as u64), now);
         }
-        assert_eq!(library.clips.len(), SPEECH_LIBRARY_CAP);
+        assert_eq!(library.clips.len(), SPEECH_EXPIRY_THRESHOLD);
         assert_eq!(library.clips[0].text, "phrase 5");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_used_clip_leaves_the_eviction_tail() {
+        let dir = std::env::temp_dir().join(format!("speech-test-{}", Uuid::new_v4()));
+        let now = 1_000;
+        let mut library = SpeechLibrary::default();
+        for index in 0..SPEECH_EXPIRY_THRESHOLD {
+            library.push(
+                &dir,
+                clip_expiring(&format!("phrase {index}"), now + index as u64 + 1),
+                now,
+            );
+        }
+        // "phrase 0" sits on the tail; replaying it resets its expiry, so
+        // the next push evicts "phrase 1" instead.
+        library.touch(library.clips[0].id, now + 10_000);
+        library.push(&dir, clip_expiring("fresh", now + 20_000), now);
+        assert!(library.clips.iter().any(|clip| clip.text == "phrase 0"));
+        assert!(!library.clips.iter().any(|clip| clip.text == "phrase 1"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn expiry_prunes_only_past_the_threshold_and_drops_files() {
+        let dir = std::env::temp_dir().join(format!("speech-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("clips")).unwrap();
+        let now = 1_000;
+        let stale = clip_expiring("stale", now - 1);
+        let stale_path = dir.join("clips").join(&stale.file);
+        std::fs::write(&stale_path, b"clip").unwrap();
+        // Under the threshold even an expired clip and its file stay put.
+        let mut library = SpeechLibrary::default();
+        library.clips.push(stale);
+        assert!(!library.prune(&dir, now));
+        assert!(stale_path.exists());
+        // Crossing the threshold prunes the expired entry and its file
+        // while every live clip survives.
+        for index in 0..SPEECH_EXPIRY_THRESHOLD {
+            library.push(&dir, clip_expiring(&format!("live {index}"), now + 100), now);
+        }
+        assert_eq!(library.clips.len(), SPEECH_EXPIRY_THRESHOLD);
+        assert!(!library.clips.iter().any(|clip| clip.text == "stale"));
+        assert!(!stale_path.exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
