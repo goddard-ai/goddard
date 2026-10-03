@@ -30,11 +30,17 @@ impl BossService {
         let path = root.join("boss.json");
         // Fail closed on corruption: replacing the document would lose identity
         // and grants while leaving its private files behind.
-        let state = match fs::read(&path) {
+        let mut state: BossState = match fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes).context("invalid Boss document")?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => fresh_state(),
             Err(error) => return Err(error.into()),
         };
+        for employee in &mut state.employees {
+            if employee.job_title.is_empty() {
+                employee.job_title = employee.identity.name.clone();
+                employee.identity.name = employee_human_name(employee.identity.id);
+            }
+        }
         let service = Self {
             root,
             interrupted: Mutex::new(
@@ -141,9 +147,9 @@ impl BossService {
         &self,
         caller: Uuid,
         persona_id: Uuid,
-        name: String,
+        job_title: String,
     ) -> anyhow::Result<BossEmployee> {
-        validate_name(&name)?;
+        validate_name(&job_title)?;
         let state = self.document();
         let persona = state
             .personas
@@ -152,7 +158,7 @@ impl BossService {
             .ok_or_else(|| anyhow!("unknown persona"))?;
         let mut permissions = persona.permissions.clone();
         let mut knowledge_files = persona.knowledge_files.clone();
-        let name = if state.session_id != Some(caller) {
+        if state.session_id != Some(caller) {
             let parent = state
                 .employees
                 .iter()
@@ -179,19 +185,17 @@ impl BossService {
             permissions.summon_employees &= parent.permissions.summon_employees;
             permissions.computer_use &= parent.permissions.computer_use;
             knowledge_files.retain(|path| self.authorize_file(Some(caller), path, false).is_ok());
-            format!("{} helper", parent.identity.name)
-        } else {
-            name.trim().to_owned()
-        };
+        }
         let id = Uuid::new_v4();
         Ok(BossEmployee {
             session_id: id,
             supervisor_id: caller,
             identity: BossIdentity {
                 id,
-                name,
+                name: employee_human_name(id),
                 avatar_seed: id.to_string(),
             },
+            job_title: job_title.trim().to_owned(),
             persona_id,
             permissions,
             knowledge_files,
@@ -234,15 +238,16 @@ impl BossService {
         };
         let role = if let Some(employee) = employee {
             format!(
-                "You are employee {}. Your supervisor is task {}. You have no owned memory and must not write memory. Use `goddard-agent boss` to read granted files and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Knowledge files: {}. Finish this bounded job, return your results, and expire.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. You have no owned memory and must not write memory. Use `goddard-agent boss` to read granted files and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Knowledge files: {}. Finish this bounded job, return your results, and expire.",
                 employee.identity.name,
+                employee.job_title,
                 employee.supervisor_id,
                 serde_json::to_string(&employee.permissions).unwrap_or_default(),
                 employee.knowledge_files.join(", ")
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, upsertPersona, listFiles, readFile, writeFile, createFolder, rename. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
+                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, upsertPersona, listFiles, readFile, writeFile, createFolder, rename. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -567,6 +572,17 @@ fn validate_relative(path: &str, allow_empty: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn employee_human_name(id: Uuid) -> String {
+    const NAMES: &[&str] = &[
+        "Alden", "Ansel", "Blythe", "Celia", "Dorian", "Edith", "Elin", "Emery", "Estelle",
+        "Flora", "Galen", "Hugo", "Ida", "Inez", "Ivo", "Leander", "Lenora", "Linus", "Lucian",
+        "Maren", "Mavis", "Milo", "Nell", "Orson", "Otis", "Petra", "Rhea", "Rosalind", "Rufus",
+        "Selma", "Soren", "Sylvie", "Thalia", "Thea", "Tobin", "Vera", "Willa", "Cleo", "Ada",
+        "Ambrose",
+    ];
+    NAMES[(id.as_u128() % NAMES.len() as u128) as usize].into()
+}
+
 fn validate_name(name: &str) -> anyhow::Result<()> {
     if name.trim().is_empty() || name.chars().count() > 100 {
         bail!("name must contain 1–100 characters");
@@ -664,6 +680,7 @@ mod tests {
                         name: "Release".into(),
                         avatar_seed: session_id.to_string(),
                     },
+                    job_title: "Release".into(),
                     persona_id: state.personas[1].id,
                     permissions: PersonaPermissions {
                         memory_folders: vec!["work".into()],
@@ -837,6 +854,64 @@ mod tests {
                 .is_err()
         );
         assert!(service.require_active(parent_id).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn employee_job_titles_and_human_names_survive_legacy_migration() {
+        let root = std::env::temp_dir().join(format!("boss-names-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let supervisor = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(supervisor);
+                Ok(())
+            })
+            .unwrap();
+        let persona = service.document().personas[1].id;
+        let employee = service
+            .prepare_employee(supervisor, persona, "Release engineer".into())
+            .unwrap();
+        assert_eq!(employee.job_title, "Release engineer");
+        assert_ne!(employee.identity.name, employee.job_title);
+        let human_name = employee.identity.name.clone();
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        drop(service);
+        let restored = BossService::open(root.clone()).unwrap();
+        assert_eq!(restored.document().employees[0].identity.name, human_name);
+        assert_eq!(
+            restored.document().employees[0].job_title,
+            "Release engineer"
+        );
+        drop(restored);
+        let path = root.join("boss.json");
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        legacy["employees"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("jobTitle");
+        legacy["employees"][0]["identity"]["name"] = "Release engineer".into();
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let migrated = BossService::open(root.clone()).unwrap();
+        assert_eq!(
+            migrated.document().employees[0].job_title,
+            "Release engineer"
+        );
+        assert_eq!(migrated.document().employees[0].identity.name, human_name);
+        let operation: BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "summon", "personaId": persona, "name": "Release engineer",
+            "prompt": "Check release", "project": "/project"
+        }))
+        .unwrap();
+        assert!(
+            matches!(operation, BossOperation::Summon { job_title, .. } if job_title == "Release engineer")
+        );
+        drop(migrated);
         fs::remove_dir_all(root).unwrap();
     }
 }

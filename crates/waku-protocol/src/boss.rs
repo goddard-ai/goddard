@@ -40,6 +40,8 @@ pub struct BossEmployee {
     pub session_id: Uuid,
     pub supervisor_id: Uuid,
     pub identity: BossIdentity,
+    #[serde(default)]
+    pub job_title: String,
     pub persona_id: Uuid,
     /// The grants assigned when this employee was summoned.
     pub permissions: PersonaPermissions,
@@ -82,7 +84,8 @@ pub enum BossOperation {
     },
     Summon {
         persona_id: Uuid,
-        name: String,
+        #[serde(alias = "name")]
+        job_title: String,
         prompt: String,
         project: String,
         #[serde(default)]

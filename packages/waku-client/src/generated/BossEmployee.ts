@@ -2,7 +2,7 @@
 import type { BossIdentity } from "./BossIdentity";
 import type { PersonaPermissions } from "./PersonaPermissions";
 
-export type BossEmployee = { sessionId: string, supervisorId: string, identity: BossIdentity, personaId: string,
+export type BossEmployee = { sessionId: string, supervisorId: string, identity: BossIdentity, jobTitle: string, personaId: string,
 /**
  * The grants assigned when this employee was summoned.
  */

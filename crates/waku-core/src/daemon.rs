@@ -5571,7 +5571,7 @@ impl WakuBackend {
             }
             BossOperation::Summon {
                 persona_id,
-                name,
+                job_title,
                 prompt,
                 project,
                 provider,
@@ -5581,7 +5581,9 @@ impl WakuBackend {
                 let supervisor = caller
                     .or(self.boss.document().session_id)
                     .ok_or_else(|| anyhow!("open the boss before summoning employees"))?;
-                let employee = self.boss.prepare_employee(supervisor, persona_id, name)?;
+                let employee = self
+                    .boss
+                    .prepare_employee(supervisor, persona_id, job_title)?;
                 let id = employee.session_id;
                 let selection = AgentCreateSelection {
                     provider,

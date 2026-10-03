@@ -18,6 +18,7 @@ pub(super) struct BossUi {
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
     pub identities: HashMap<Uuid, BossIdentity>,
+    job_titles: HashMap<Uuid, String>,
     pub active: HashMap<DaemonKey, Vec<Uuid>>,
     pub working: HashSet<Uuid>,
     pub expired: HashSet<Uuid>,
@@ -49,6 +50,7 @@ impl Default for BossUi {
             hosts: Vec::new(),
             managed: HashSet::new(),
             identities: HashMap::new(),
+            job_titles: HashMap::new(),
             active: HashMap::new(),
             working: HashSet::new(),
             expired: HashSet::new(),
@@ -129,6 +131,7 @@ impl Waku {
             });
             self.boss_ui.managed.clear();
             self.boss_ui.identities.clear();
+            self.boss_ui.job_titles.clear();
             self.boss_ui.working.clear();
             self.boss_ui.expired.clear();
             let timestamps: HashMap<Uuid, u64> = self
@@ -158,6 +161,9 @@ impl Waku {
                         .collect(),
                 );
                 for employee in employees {
+                    self.boss_ui
+                        .job_titles
+                        .insert(employee.session_id, employee.job_title.clone());
                     self.boss_ui.managed.insert(employee.session_id);
                     if employee.expired {
                         self.boss_ui.expired.insert(employee.session_id);
@@ -705,13 +711,11 @@ impl Waku {
                 this.open_boss_page(key, BossTab::History, window, cx)
             })
             .child(self.boss_avatar(&state.identity, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(state.identity.name.clone()),
-            )
+            .child(boss_sidebar_label(
+                state.identity.name.clone(),
+                tr!("boss.group"),
+                &theme,
+            ))
             .child(
                 div()
                     .id(format!("boss-brain-{key:?}"))
@@ -760,13 +764,15 @@ impl Waku {
                 this.request_session_activation(id, SessionActivationTransition::Visit, cx)
             })
             .child(self.boss_avatar(identity, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(identity.name.clone()),
-            )
+            .child(boss_sidebar_label(
+                identity.name.clone(),
+                self.boss_ui
+                    .job_titles
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_default(),
+                &theme,
+            ))
             .child(
                 div()
                     .text_size(sp(10.0))
@@ -1214,6 +1220,31 @@ fn lines(text: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+#[track_caller]
+fn boss_sidebar_label(name: String, job_title: String, theme: &Theme) -> Div {
+    div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .text_size(sp(14.0))
+                .line_height(sp(17.0))
+                .text_color(theme.text)
+                .truncate()
+                .child(name),
+        )
+        .child(
+            div()
+                .text_size(sp(13.0))
+                .line_height(sp(15.0))
+                .text_color(theme.text_tertiary)
+                .truncate()
+                .child(job_title),
+        )
 }
 
 #[track_caller]
