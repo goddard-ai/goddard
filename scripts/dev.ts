@@ -1987,8 +1987,9 @@ if (laned) {
 }
 building = true;
 // A previous session's completed bundle is usable during the very first
-// rebuild too. Start its daemon and accept commands while the initial build
-// is running — lane copies mean the compile can't touch either binary.
+// rebuild too. Start its daemon before cargo replaces the daemon executable,
+// and accept commands while the initial build is running — lane copies mean
+// the compile can't touch either binary.
 if (
   latestLane !== undefined &&
   (externalDaemonAddress ||
