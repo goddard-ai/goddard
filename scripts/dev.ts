@@ -1731,25 +1731,47 @@ if (serveMode) {
 }
 if (laned) adoptAppLanes();
 building = true;
+// A previous session's completed bundle is usable during the very first
+// rebuild too. Start its daemon before cargo replaces the daemon executable,
+// and accept commands while the initial build is running.
+if (latestLane !== undefined && (externalDaemonAddress || existsSync(daemonPath))) {
+  try {
+    await ensureDaemon();
+  } catch (error) {
+    console.error("[goddard-dev] Could not start the previous daemon:", error);
+    // Retry with the freshly built daemon after the initial build.
+  }
+}
+if (stopping) process.exit(0);
+startCommandLoop();
+if (interactive) printShortcuts();
 const initialAppRevision = appChangeRevision;
 const initialBuildSucceeded = await build("app");
 daemonBuildDirty = false;
 building = false;
+if (stopping) process.exit(0);
 if (!initialBuildSucceeded) {
-  closeWatchers();
+  await cleanup();
   process.exit(1);
 }
 
 try {
-  await ensureDaemon();
+  if (daemonAddress === undefined) await ensureDaemon();
 } catch (error) {
   console.error("[goddard-dev]", error);
-  closeWatchers();
+  await cleanup();
   process.exit(1);
 }
 
+if (stopping) process.exit(0);
 if (appChangeRevision === initialAppRevision) {
-  await relaunchApp();
+  // An explicit launch during the build keeps running until the user asks
+  // for the new build, just like launches during later rebuilds.
+  if (app === undefined || relaunchAfterBuild) {
+    if (forceDaemonRestart) await restartDaemon("requested");
+    if (!stopping) await relaunchApp();
+  }
+  forceDaemonRestart = false;
 } else {
   console.log(
     "[goddard-dev] Changes arrived during the initial build; waiting to rebuild.",
@@ -1757,6 +1779,4 @@ if (appChangeRevision === initialAppRevision) {
   if (queuedBuild !== undefined) void drainBuildQueue();
 }
 
-startCommandLoop();
 printBanner();
-if (interactive) printShortcuts();
