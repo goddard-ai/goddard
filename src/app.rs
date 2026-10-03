@@ -2250,6 +2250,11 @@ pub struct Waku {
     /// Selection is committed only after this target's transcript arrives, so
     /// the currently visible task stays intact during daemon latency.
     pending_session_activation: Option<PendingSessionActivation>,
+    /// A `goddard://new-task?prompt=` payload waiting for its draft — the
+    /// destination may still be provisioning a projectless workspace, so the
+    /// text lands on the next blank-task activation rather than the moment
+    /// the link arrives.
+    pending_deep_link_prompt: Option<String>,
     /// Every session the current ⌘⇧D chain has shown — the session it
     /// started from plus each landing. The chain's jump never targets them,
     /// so repeated presses cannot revisit one, and the session-departure
@@ -3946,6 +3951,7 @@ mod commit_dialog;
 mod components;
 mod composer;
 mod daemon_degraded;
+mod deep_link;
 mod diagnostics_page;
 mod drafts;
 mod element_inspector;
@@ -6462,6 +6468,7 @@ impl Waku {
                 daemon_lan_ip,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
+                pending_deep_link_prompt: None,
                 sweep_visited: HashSet::new(),
                 sweep_target: None,
                 unread_sweep_visited: HashSet::new(),

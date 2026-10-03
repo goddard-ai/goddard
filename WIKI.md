@@ -402,6 +402,19 @@ Goddard is designed to be driven without a mouse:
   the sidebar's settings icon opens a shortcuts dialog resolved from the live
   keymap.
 
+### Deep links (macOS)
+
+Other apps and scripts can hand Goddard a `goddard://` URL:
+
+- `goddard://new-task?prompt=<text>` opens the new-task page with the
+  prompt already in the composer — for example
+  `open 'goddard://new-task?prompt=Summarize%20this%20diff'` from a
+  terminal. The text only fills the draft; it never sends on its own, so a
+  link cannot make a task run unattended. If the draft already holds text,
+  the prompt lands on its own paragraph beneath it.
+- `goddard://task/<id>` selects that task — the same link tasks use to
+  reference each other inside the app.
+
 ## Customization
 
 **Settings → Appearance:**

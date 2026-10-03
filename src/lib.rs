@@ -356,7 +356,12 @@ pub fn run() {
     let migration = waku_protocol::migration::migrate_home_directory();
     let daemon = crate::daemon::start_process()
         .unwrap_or_else(|error| panic!("failed to start Goddard daemon: {error:#}"));
-    gpui_platform::application()
+    // The platform's open-URL callback carries no app context, so each
+    // `goddard://` link queues here until the window's drain task picks it
+    // up — including a link that launched the app, which can arrive before
+    // the window exists.
+    let (deep_link_sender, deep_link_receiver) = smol::channel::unbounded::<String>();
+    let app = gpui_platform::application()
         .with_assets(crate::assets::Assets)
         // Remote `img()` sources (commit-author avatars) go through this
         // client; without one GPUI's null client fails every load silently.
@@ -368,199 +373,236 @@ pub fn run() {
             ))
             .expect("failed to build the app's HTTP user agent"),
         ))
-        .with_main_window_reopen()
-        .run(move |cx: &mut App| {
-            // Linux uses this for Wayland app_id/X11 WM_CLASS and notification
-            // attribution. Other platforms also benefit from one stable
-            // process identity.
-            cx.set_app_identity(APP_ID, APP_NAME);
-            crate::assets::register_fonts(cx).expect("failed to register bundled fonts");
-            // Enumerating the platform's families is too slow for startup;
-            // warm the settings pickers' list in the background.
-            crate::fonts::prefetch(cx);
-            crate::input::init(cx);
-            crate::ui::menu::init(cx);
-            crate::app::init_composer_autocomplete(cx);
-            crate::app::init_settings_keys(cx);
-            crate::app::init_command_palette(cx);
-            crate::app::init_element_inspector(cx);
-            crate::app::init_file_finder(cx);
-            crate::app::init_sync_branch(cx);
-            crate::app::init_commit_dialog_keys(cx);
-            crate::app::init_issue_dialog_keys(cx);
-            crate::app::init_git_panel_keys(cx);
-            crate::app::init_archive_dialog_keys(cx);
-            crate::app::init_reclaim_dialog_keys(cx);
-            crate::app::init_full_access_dialog_keys(cx);
-            crate::app::init_daemon_degraded_keys(cx);
-            crate::app::init_incognito_dialog_keys(cx);
-            crate::app::init_terminal_close_dialog_keys(cx);
-            crate::app::init_close_dialog_keys(cx);
-            crate::app::init_provider_switch_dialog_keys(cx);
-            crate::app::init_push_base_dialog_keys(cx);
-            crate::app::init_reset_credit_dialog_keys(cx);
-            crate::app::init_big_picture_keys(cx);
-            crate::app::init_goal_dialog_keys(cx);
-            crate::app::init_send_file_dialog_keys(cx);
-            crate::app::init_annotation_keys(cx);
-            crate::app::init_composer_keys(cx);
-            crate::app::init_automations_keys(cx);
-            crate::app::init_image_preview_keys(cx);
-            crate::app::init_sidebar_keys(cx);
-            crate::app::init_skills_keys(cx);
-            crate::app::init_drafts_keys(cx);
-            crate::app::init_shortcuts_dialog_keys(cx);
-            crate::terminal::init_command_bar_keys(cx);
-            crate::theme::init(cx);
-            crate::platform::init_reduce_motion(cx);
+        .with_main_window_reopen();
+    app.on_open_urls(move |urls| {
+        for url in urls {
+            if let Err(error) = deep_link_sender.try_send(url) {
+                eprintln!("Goddard: failed to queue a deep link: {error}");
+            }
+        }
+    });
+    app.run(move |cx: &mut App| {
+        // Linux uses this for Wayland app_id/X11 WM_CLASS and notification
+        // attribution. Other platforms also benefit from one stable
+        // process identity.
+        cx.set_app_identity(APP_ID, APP_NAME);
+        crate::assets::register_fonts(cx).expect("failed to register bundled fonts");
+        // Enumerating the platform's families is too slow for startup;
+        // warm the settings pickers' list in the background.
+        crate::fonts::prefetch(cx);
+        crate::input::init(cx);
+        crate::ui::menu::init(cx);
+        crate::app::init_composer_autocomplete(cx);
+        crate::app::init_settings_keys(cx);
+        crate::app::init_command_palette(cx);
+        crate::app::init_element_inspector(cx);
+        crate::app::init_file_finder(cx);
+        crate::app::init_sync_branch(cx);
+        crate::app::init_commit_dialog_keys(cx);
+        crate::app::init_issue_dialog_keys(cx);
+        crate::app::init_git_panel_keys(cx);
+        crate::app::init_archive_dialog_keys(cx);
+        crate::app::init_reclaim_dialog_keys(cx);
+        crate::app::init_full_access_dialog_keys(cx);
+        crate::app::init_daemon_degraded_keys(cx);
+        crate::app::init_incognito_dialog_keys(cx);
+        crate::app::init_terminal_close_dialog_keys(cx);
+        crate::app::init_close_dialog_keys(cx);
+        crate::app::init_provider_switch_dialog_keys(cx);
+        crate::app::init_push_base_dialog_keys(cx);
+        crate::app::init_reset_credit_dialog_keys(cx);
+        crate::app::init_big_picture_keys(cx);
+        crate::app::init_goal_dialog_keys(cx);
+        crate::app::init_send_file_dialog_keys(cx);
+        crate::app::init_annotation_keys(cx);
+        crate::app::init_composer_keys(cx);
+        crate::app::init_automations_keys(cx);
+        crate::app::init_image_preview_keys(cx);
+        crate::app::init_sidebar_keys(cx);
+        crate::app::init_skills_keys(cx);
+        crate::app::init_drafts_keys(cx);
+        crate::app::init_shortcuts_dialog_keys(cx);
+        crate::terminal::init_command_bar_keys(cx);
+        crate::theme::init(cx);
+        crate::platform::init_reduce_motion(cx);
 
-            // Platform updaters only run from a supported release layout (or
-            // when explicitly forced for development); everywhere else the
-            // menu item is omitted along with the updater itself.
-            let updater = crate::updater::Updater::init();
-            let updater_available = updater.is_some();
-            cx.set_global(crate::updater::UpdaterState(updater));
-            cx.on_action(|_: &CheckForUpdates, cx| {
-                if let Some(updater) = &cx.global::<crate::updater::UpdaterState>().0 {
-                    updater.check_for_updates();
-                }
-            });
-            cx.on_action(|_: &About, _| crate::platform::show_about_panel());
-            // AppKit's default Hide items live on the application menu. Replacing
-            // that menu without these actions leaves ⌘H / ⌥⌘H unbound.
-            cx.on_action(|_: &Hide, cx| cx.hide());
-            cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
-            cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+        // Platform updaters only run from a supported release layout (or
+        // when explicitly forced for development); everywhere else the
+        // menu item is omitted along with the updater itself.
+        let updater = crate::updater::Updater::init();
+        let updater_available = updater.is_some();
+        cx.set_global(crate::updater::UpdaterState(updater));
+        cx.on_action(|_: &CheckForUpdates, cx| {
+            if let Some(updater) = &cx.global::<crate::updater::UpdaterState>().0 {
+                updater.check_for_updates();
+            }
+        });
+        cx.on_action(|_: &About, _| crate::platform::show_about_panel());
+        // AppKit's default Hide items live on the application menu. Replacing
+        // that menu without these actions leaves ⌘H / ⌥⌘H unbound.
+        cx.on_action(|_: &Hide, cx| cx.hide());
+        cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+        cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
 
-            bind_keys(cx);
-            // Saved remaps layer over the catalog map before the first
-            // window opens, so customized chords work from launch.
-            keybindings::apply_saved_overrides(cx);
-            cx.on_action(|_: &Quit, cx| cx.quit());
+        bind_keys(cx);
+        // Saved remaps layer over the catalog map before the first
+        // window opens, so customized chords work from launch.
+        keybindings::apply_saved_overrides(cx);
+        cx.on_action(|_: &Quit, cx| cx.quit());
 
-            // Unlike AppKit, Linux has no Dock activation path that can
-            // restore a hidden last window. Follow Zed's GPUI precedent and
-            // terminate when the final window closes.
-            #[cfg(not(target_os = "macos"))]
-            cx.on_window_closed(|cx, _| {
-                if cx.windows().is_empty() {
-                    cx.quit();
-                }
-            })
-            .detach();
+        // Unlike AppKit, Linux has no Dock activation path that can
+        // restore a hidden last window. Follow Zed's GPUI precedent and
+        // terminate when the final window closes.
+        #[cfg(not(target_os = "macos"))]
+        cx.on_window_closed(|cx, _| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
 
-            let (window_bounds, display_id) = restored_window_placement(cx);
-            let window = cx
-                .open_window(
-                    WindowOptions {
-                        titlebar: Some(TitlebarOptions {
-                            title: Some(APP_NAME.into()),
-                            // Windows creates the window without `WS_CAPTION`
-                            // either way; asking for the transparent titlebar
-                            // is what extends the client area over the frame
-                            // so Goddard's own header can host the caption
-                            // buttons and drag region.
-                            appears_transparent: cfg!(any(
-                                target_os = "macos",
-                                target_os = "windows"
-                            )),
-                            traffic_light_position: cfg!(target_os = "macos")
-                                .then(|| point(px(16.0), px(17.0))),
-                        }),
-                        // Goddard moves its custom macOS titlebar explicitly. Keep
-                        // the NSWindow movable so native controls and Window-menu
-                        // tiling remain enabled.
-                        is_movable: true,
-                        app_owns_titlebar_drag: cfg!(target_os = "macos"),
-                        window_background: if cfg!(target_os = "macos") {
-                            WindowBackgroundAppearance::Blurred
-                        } else {
-                            WindowBackgroundAppearance::Opaque
-                        },
-                        app_id: Some(APP_ID.to_owned()),
-                        // GPUI defaults to compositor/server decorations. If a
-                        // Wayland compositor declines them, it reports the
-                        // client fallback and Goddard renders that frame itself.
-                        #[cfg(target_os = "linux")]
-                        icon: crate::platform::linux_app_icon(),
-                        window_bounds: Some(window_bounds),
-                        display_id,
-                        window_min_size: Some(size(px(MIN_WINDOW_WIDTH), px(MIN_WINDOW_HEIGHT))),
-                        ..Default::default()
+        let (window_bounds, display_id) = restored_window_placement(cx);
+        let window = cx
+            .open_window(
+                WindowOptions {
+                    titlebar: Some(TitlebarOptions {
+                        title: Some(APP_NAME.into()),
+                        // Windows creates the window without `WS_CAPTION`
+                        // either way; asking for the transparent titlebar
+                        // is what extends the client area over the frame
+                        // so Goddard's own header can host the caption
+                        // buttons and drag region.
+                        appears_transparent: cfg!(any(
+                            target_os = "macos",
+                            target_os = "windows"
+                        )),
+                        traffic_light_position: cfg!(target_os = "macos")
+                            .then(|| point(px(16.0), px(17.0))),
+                    }),
+                    // Goddard moves its custom macOS titlebar explicitly. Keep
+                    // the NSWindow movable so native controls and Window-menu
+                    // tiling remain enabled.
+                    is_movable: true,
+                    app_owns_titlebar_drag: cfg!(target_os = "macos"),
+                    window_background: if cfg!(target_os = "macos") {
+                        WindowBackgroundAppearance::Blurred
+                    } else {
+                        WindowBackgroundAppearance::Opaque
                     },
-                    move |window, cx| {
-                        let waku = Waku::new(window, cx, daemon);
-                        let composer_focus = waku.read(cx).composer_focus(cx);
-                        window.focus(&composer_focus, cx);
-                        waku
-                    },
-                )
-                .expect("failed to open Goddard window");
+                    app_id: Some(APP_ID.to_owned()),
+                    // GPUI defaults to compositor/server decorations. If a
+                    // Wayland compositor declines them, it reports the
+                    // client fallback and Goddard renders that frame itself.
+                    #[cfg(target_os = "linux")]
+                    icon: crate::platform::linux_app_icon(),
+                    window_bounds: Some(window_bounds),
+                    display_id,
+                    window_min_size: Some(size(px(MIN_WINDOW_WIDTH), px(MIN_WINDOW_HEIGHT))),
+                    ..Default::default()
+                },
+                move |window, cx| {
+                    let waku = Waku::new(window, cx, daemon);
+                    let composer_focus = waku.read(cx).composer_focus(cx);
+                    window.focus(&composer_focus, cx);
+                    waku
+                },
+            )
+            .expect("failed to open Goddard window");
 
-            cx.on_system_notification_response({
-                let window = window;
-                move |response, cx| {
-                    let Some(session_id) = crate::app::task_id_from_notification_tag(&response.tag)
-                    else {
+        cx.spawn(async move |cx| {
+            while let Ok(url) = deep_link_receiver.recv().await {
+                cx.update(|cx| {
+                    // Resolve the window per link: a closed one invalidates
+                    // any handle captured at launch.
+                    let Some(window) = cx.windows().into_iter().next() else {
                         return;
                     };
                     window
-                        .update(cx, |waku, window, cx| {
-                            waku.open_task_from_notification(session_id, cx);
-                            window.activate_window();
-                            cx.activate(true);
+                        .update(cx, |root, window, cx| {
+                            let handled = root
+                                .downcast::<Waku>()
+                                .ok()
+                                .map(|waku| {
+                                    waku.update(cx, |waku, cx| {
+                                        waku.handle_deep_link(&url, window, cx)
+                                    })
+                                })
+                                .unwrap_or(false);
+                            if handled {
+                                window.activate_window();
+                                cx.activate(true);
+                            }
                         })
                         .ok();
-                    cx.dismiss_system_notification(&response.tag);
-                }
-            });
+                });
+            }
+        })
+        .detach();
 
-            window
-                .update(cx, |waku, window, cx| {
-                    let theme = crate::theme::Theme::current(cx);
-                    crate::platform::configure_sidebar_material(
-                        window,
-                        theme.sidebar_drag_background,
-                        theme.is_dark,
-                        waku.sidebar_transparency(),
-                    );
-                    cx.activate(true);
-                })
-                .ok();
-
-            if migration.failed() {
-                let paths = migration
-                    .failures
-                    .iter()
-                    .map(|failure| {
-                        format!(
-                            "• {} → {}",
-                            failure.legacy.display(),
-                            failure.destination.display()
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+        cx.on_system_notification_response({
+            let window = window;
+            move |response, cx| {
+                let Some(session_id) = crate::app::task_id_from_notification_tag(&response.tag)
+                else {
+                    return;
+                };
                 window
-                    .update(cx, move |_, window, cx| {
-                        let _ = window.prompt(
-                            gpui::PromptLevel::Warning,
-                            "Some of your previous Goddard data could not be copied",
-                            Some(&format!(
-                                "Goddard moved its data to a new location and the copy did not finish:\n\n{paths}\n\nYour old data was left untouched and the app is running with fresh state. Restart Goddard to retry the copy."
-                            )),
-                            &["OK"],
-                            cx,
-                        );
+                    .update(cx, |waku, window, cx| {
+                        waku.open_task_from_notification(session_id, cx);
+                        window.activate_window();
+                        cx.activate(true);
                     })
                     .ok();
+                cx.dismiss_system_notification(&response.tag);
             }
-
-            set_app_menus(cx, updater_available);
-            // A Linux handoff retains the previous prefix until this freshly
-            // relaunched build has successfully opened its main window.
-            crate::updater::signal_relaunch_ready();
         });
+
+        window
+            .update(cx, |waku, window, cx| {
+                let theme = crate::theme::Theme::current(cx);
+                crate::platform::configure_sidebar_material(
+                    window,
+                    theme.sidebar_drag_background,
+                    theme.is_dark,
+                    waku.sidebar_transparency(),
+                );
+                cx.activate(true);
+            })
+            .ok();
+
+        if migration.failed() {
+            let paths = migration
+                .failures
+                .iter()
+                .map(|failure| {
+                    format!(
+                        "• {} → {}",
+                        failure.legacy.display(),
+                        failure.destination.display()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            window
+                .update(cx, move |_, window, cx| {
+                    let _ = window.prompt(
+                        gpui::PromptLevel::Warning,
+                        "Some of your previous Goddard data could not be copied",
+                        Some(&format!(
+                            "Goddard moved its data to a new location and the copy did not finish:\n\n{paths}\n\nYour old data was left untouched and the app is running with fresh state. Restart Goddard to retry the copy."
+                        )),
+                        &["OK"],
+                        cx,
+                    );
+                })
+                .ok();
+        }
+
+        set_app_menus(cx, updater_available);
+        // A Linux handoff retains the previous prefix until this freshly
+        // relaunched build has successfully opened its main window.
+        crate::updater::signal_relaunch_ready();
+    });
 }
 
 /// The window-level key bindings, registered once at startup. Kept callable

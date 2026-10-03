@@ -509,6 +509,9 @@ impl Waku {
             }
         }
         self.activate_session(session_id, cx);
+        // A deep link's prompt rides the activation so it also lands on a
+        // draft whose projectless workspace was still provisioning.
+        self.apply_deep_link_prompt(cx);
     }
 
     /// Loads a session's transcript if startup only fetched its list columns.
