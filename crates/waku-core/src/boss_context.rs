@@ -380,6 +380,7 @@ mod tests {
             session_id: Some(Uuid::new_v4()),
             personas: Vec::new(),
             employees: Vec::new(),
+            bundles: Vec::new(),
             revision: 0,
         }
     }
