@@ -6229,10 +6229,17 @@ impl WakuBackend {
         let removed = self.sessions.lock().remove(&session_id);
         if let Some(entry) = &removed {
             entry.driver.begin_shutdown();
-            self.event_source
+            let sink = self
+                .event_source
                 .lock()
-                .for_session(session_id, entry.runtime_id)
-                .end_session_runtime();
+                .for_session(session_id, entry.runtime_id);
+            // Attached clients keep their driver handle until the
+            // runtime-ended signal lands; `end_session_runtime` alone
+            // strands it — the same contract idle eviction follows — and
+            // a stale handle pins the sidebar's last-known status, so a
+            // dead employee keeps showing working forever.
+            sink.notify_runtime_ended();
+            sink.end_session_runtime();
         }
         drop_detached(removed);
         let index = {
@@ -12087,6 +12094,79 @@ mod tests {
         assert!(prompts[0].contains("Turn 1"));
         assert!(prompts[0].contains("Tests passed"));
         assert!(backend.boss.require_active(employee_id).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An expiring employee must tell attached clients its runtime ended —
+    /// `end_session_runtime` alone strands their driver handle, and a stale
+    /// handle pins the sidebar's last-known status: the dead employee keeps
+    /// showing working forever.
+    #[test]
+    fn an_expiring_employee_notifies_attached_clients() {
+        let root = std::env::temp_dir().join(format!("boss-expire-notify-{}", Uuid::new_v4()));
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(supervisor);
+                Ok(())
+            })
+            .unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let employee = backend
+            .boss
+            .prepare_employee(supervisor, persona, "Release checks".into())
+            .unwrap();
+        let employee_id = employee.session_id;
+        backend
+            .boss
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        {
+            let mut state = backend.task_state.lock();
+            let mut child = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
+            child.id = employee_id;
+            state.push_session(child);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let parent_capture = Arc::new(CaptureDriver::default());
+        let child_capture = Arc::new(CaptureDriver::default());
+        let employee_runtime = Uuid::new_v4();
+        for (id, capture, runtime_id) in [
+            (supervisor, parent_capture, Uuid::new_v4()),
+            (employee_id, child_capture, employee_runtime),
+        ] {
+            backend.sessions.lock().insert(
+                id,
+                RuntimeEntry {
+                    runtime_id,
+                    driver: DriverHandle::from_control(capture),
+                    last_active: std::time::Instant::now(),
+                    resumable: false,
+                    computer_use_available: false,
+                    provider: ProviderKind::Codex,
+                    cwd: root.clone(),
+                },
+            );
+        }
+        // The detached sink stands in for `serve`'s hub: the employee's
+        // runtime registers on it and the tap plays an attached client.
+        let source = EventSink::detached();
+        let tapped = source.tapped_events();
+        *backend.event_source.lock() =
+            source.begin_session_runtime(employee_id, employee_runtime);
+        backend.finish_boss_employee(employee_id).unwrap();
+        match tapped.try_recv() {
+            Ok(crate::ServerMessage::Event(event)) => {
+                assert_eq!(event.session_id, employee_id);
+                assert_eq!(event.runtime_id, employee_runtime);
+                assert_eq!(event.event.kind, "processExited");
+            }
+            other => panic!("expected the runtime-ended event, got {other:?}"),
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -562,6 +562,15 @@ impl EventSink {
         }
     }
 
+    /// Test hook: subscribe to this sink's hub the way a connected client
+    /// does, so a teardown path can assert what it broadcast.
+    #[cfg(test)]
+    pub(crate) fn tapped_events(&self) -> Receiver<ServerMessage> {
+        let (messages, events) = unbounded();
+        self.hub.subscribe(&[], Subscriber::new(messages).0);
+        events
+    }
+
     /// Replay depth retained for `session_id` — tests assert a dead
     /// runtime's backlog is gone, not just unreachable.
     #[cfg(test)]
