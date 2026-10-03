@@ -5,6 +5,7 @@ use waku_client::DaemonKey;
 use waku_client::boss::{
     BossFile, BossIdentity, BossOperation, BossPersona, BossResult, BossState, PersonaPermissions,
 };
+use waku_protocol::custom_commands::CustomCommandIcon;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum BossTab {
@@ -20,6 +21,7 @@ pub(super) struct BossUi {
     pub managed: HashSet<Uuid>,
     pub identities: HashMap<Uuid, BossIdentity>,
     pub(super) job_titles: HashMap<Uuid, String>,
+    pub(super) employee_icons: HashMap<Uuid, Option<CustomCommandIcon>>,
     pub active: HashMap<DaemonKey, Vec<Uuid>>,
     pub working: HashSet<Uuid>,
     pub expired: HashSet<Uuid>,
@@ -53,6 +55,7 @@ impl Default for BossUi {
             managed: HashSet::new(),
             identities: HashMap::new(),
             job_titles: HashMap::new(),
+            employee_icons: HashMap::new(),
             active: HashMap::new(),
             working: HashSet::new(),
             expired: HashSet::new(),
@@ -94,6 +97,8 @@ struct BossEditor {
     knowledge: Entity<TextInput>,
     memory: Entity<TextInput>,
     permissions: PersonaPermissions,
+    icon: Option<CustomCommandIcon>,
+    original_icon: Option<CustomCommandIcon>,
     original: Vec<String>,
     original_permissions: PersonaPermissions,
     integrations: Vec<String>,
@@ -134,6 +139,7 @@ impl Waku {
             self.boss_ui.managed.clear();
             self.boss_ui.identities.clear();
             self.boss_ui.job_titles.clear();
+            self.boss_ui.employee_icons.clear();
             self.boss_ui.working.clear();
             self.boss_ui.expired.clear();
             let timestamps: HashMap<Uuid, u64> = self
@@ -166,6 +172,16 @@ impl Waku {
                     self.boss_ui
                         .job_titles
                         .insert(employee.session_id, employee.job_title.clone());
+                    self.boss_ui.employee_icons.insert(
+                        employee.session_id,
+                        employee.icon.or_else(|| {
+                            state
+                                .personas
+                                .iter()
+                                .find(|persona| persona.id == employee.persona_id)
+                                .and_then(|persona| persona.icon)
+                        }),
+                    );
                     self.boss_ui.managed.insert(employee.session_id);
                     if employee.expired {
                         self.boss_ui.expired.insert(employee.session_id);
@@ -501,6 +517,7 @@ impl Waku {
         .map(|input| input.read(cx).content().to_owned())
         .collect::<Vec<_>>();
         values != editor.original
+            || editor.icon != editor.original_icon
             || serde_json::to_value(&editor.permissions).ok()
                 != serde_json::to_value(&editor.original_permissions).ok()
     }
@@ -541,7 +558,11 @@ impl Waku {
             .as_ref()
             .map(|entry| entry.knowledge_files.join("\n"))
             .unwrap_or_default();
-        let permissions = persona.map(|entry| entry.permissions).unwrap_or_default();
+        let permissions = persona
+            .as_ref()
+            .map(|entry| entry.permissions.clone())
+            .unwrap_or_default();
+        let icon = persona.as_ref().and_then(|entry| entry.icon);
         let memory = permissions.memory_folders.join("\n");
         let original = vec![
             name.clone(),
@@ -563,6 +584,8 @@ impl Waku {
             memory,
             original,
             original_permissions: permissions.clone(),
+            icon,
+            original_icon: icon,
             integrations: if matches!(kind, BossEditorKind::Persona(_)) {
                 self.daemons
                     .supervisor(key)
@@ -602,6 +625,7 @@ impl Waku {
                         markdown: content,
                         knowledge_files: lines(editor.knowledge.read(cx).content()),
                         permissions,
+                        icon: editor.icon,
                     },
                 }
             }
@@ -751,7 +775,7 @@ impl Waku {
             .child(boss_sidebar_label(
                 state.identity.name.clone(),
                 tr!("boss.group"),
-                false,
+                None,
                 &theme,
             ))
             .child(
@@ -809,7 +833,12 @@ impl Waku {
                     .get(&id)
                     .cloned()
                     .unwrap_or_default(),
-                true,
+                self.boss_ui
+                    .employee_icons
+                    .get(&id)
+                    .copied()
+                    .flatten()
+                    .map(crate::custom_commands::icon_path),
                 &theme,
             ))
             .child(
@@ -1368,6 +1397,36 @@ impl Waku {
                 .child(boss_input(editor.knowledge.clone(), &theme))
                 .child(tr!("boss.memory_grants"))
                 .child(boss_input(editor.memory.clone(), &theme))
+                .child("Persona icon (employees inherit this unless overridden)")
+                .child(
+                    div().flex().flex_wrap().gap(px(4.0)).children(
+                        std::iter::once(None)
+                            .chain(CustomCommandIcon::ALL.into_iter().map(Some))
+                            .map(|choice| {
+                                let selected = editor.icon == choice;
+                                let label = choice.map_or("None", CustomCommandIcon::label);
+                                let icon_path = choice.map(crate::custom_commands::icon_path);
+                                boss_button(format!("persona-icon-{label}"), label, &theme)
+                                    .child(if let Some(path) = icon_path {
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(4.0))
+                                            .child(icon(path, 14.0, theme.text_secondary))
+                                            .child(label)
+                                    } else {
+                                        div().child(label)
+                                    })
+                                    .when(selected, |button| button.bg(theme.overlay_strong))
+                                    .on_activation(cx, move |this, _, cx| {
+                                        if let Some(editor) = &mut this.boss_ui.editor {
+                                            editor.icon = choice;
+                                        }
+                                        cx.notify();
+                                    })
+                            }),
+                    ),
+                )
                 .child(tr!("boss.permissions_hint"));
             for (computer, label, enabled) in [
                 (false, "boss.delegate", editor.permissions.summon_employees),
@@ -1465,7 +1524,12 @@ fn lines(text: &str) -> Vec<String> {
 }
 
 #[track_caller]
-fn boss_sidebar_label(name: String, job_title: String, show_job_icon: bool, theme: &Theme) -> Div {
+fn boss_sidebar_label(
+    name: String,
+    job_title: String,
+    job_icon: Option<&'static str>,
+    theme: &Theme,
+) -> Div {
     div()
         .flex_1()
         .min_w_0()
@@ -1487,8 +1551,12 @@ fn boss_sidebar_label(name: String, job_title: String, show_job_icon: bool, them
                 .text_size(sp(13.0))
                 .line_height(sp(15.0))
                 .text_color(theme.text_tertiary)
-                .when(show_job_icon && !job_title.is_empty(), |row| {
-                    row.child(icon(job_title_icon(&job_title), 12.0, theme.text_tertiary))
+                .when(!job_title.is_empty(), |row| {
+                    row.child(icon(
+                        job_icon.unwrap_or_else(|| job_title_icon(&job_title)),
+                        12.0,
+                        theme.text_tertiary,
+                    ))
                 })
                 .child(div().min_w_0().truncate().child(job_title)),
         )

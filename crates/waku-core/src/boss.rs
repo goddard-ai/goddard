@@ -242,6 +242,7 @@ impl BossService {
             },
             job_title: job_title.trim().to_owned(),
             persona_id,
+            icon: None,
             permissions,
             knowledge_files,
             expired: false,
@@ -536,6 +537,21 @@ impl BossService {
                     } else {
                         state.personas.push(persona);
                     }
+                    Ok(())
+                })?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::SetEmployeeIcon { session_id, icon } => {
+                self.require_owner(caller)?;
+                self.update(|state| {
+                    let employee = state
+                        .employees
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session_id)
+                        .ok_or_else(|| anyhow!("unknown employee"))?;
+                    employee.icon = icon;
                     Ok(())
                 })?;
                 Ok(BossResult::State {
@@ -1015,8 +1031,8 @@ fn fresh_state() -> BossState {
         persona_id,
         session_id: None,
         personas: vec![
-            BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory and knowledge granted to your persona.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions::default() },
-            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Delegate execution promptly and keep your hands free for their next request. Never poll, watch, or wait yourself — hand recurring checks, watches, and waits to an employee and answer the human now; finished employees report back unprompted. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Prefer employees for internet access and work outside your own storage. You control all employees and personas.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } },
+            BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory and knowledge granted to your persona.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions::default() , icon: None },
+            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Delegate execution promptly and keep your hands free for their next request. Never poll, watch, or wait yourself — hand recurring checks, watches, and waits to an employee and answer the human now; finished employees report back unprompted. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Prefer employees for internet access and work outside your own storage. You control all employees and personas.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
         ],
         employees: Vec::new(),
         bundles: Vec::new(),
@@ -1028,6 +1044,58 @@ fn fresh_state() -> BossState {
 mod tests {
     use super::*;
     use waku_protocol::boss::BossEmployee;
+    use waku_protocol::custom_commands::CustomCommandIcon;
+
+    #[test]
+    fn boss_can_set_and_clear_employee_icon_override() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let session_id = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.employees.push(BossEmployee {
+                    session_id,
+                    supervisor_id: state.identity.id,
+                    identity: BossIdentity {
+                        id: session_id,
+                        name: "Nova".into(),
+                        avatar_seed: session_id.to_string(),
+                    },
+                    job_title: "Research".into(),
+                    persona_id: state.personas[1].id,
+                    icon: None,
+                    permissions: PersonaPermissions::default(),
+                    knowledge_files: Vec::new(),
+                    expired: false,
+                });
+                Ok(())
+            })
+            .unwrap();
+        service
+            .handle(
+                None,
+                BossOperation::SetEmployeeIcon {
+                    session_id,
+                    icon: Some(CustomCommandIcon::Star),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            service.document().employees[0].icon,
+            Some(CustomCommandIcon::Star)
+        );
+        service
+            .handle(
+                None,
+                BossOperation::SetEmployeeIcon {
+                    session_id,
+                    icon: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(service.document().employees[0].icon, None);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn identity_personas_and_files_survive_restart() {
@@ -1078,6 +1146,7 @@ mod tests {
                     },
                     job_title: "Release".into(),
                     persona_id: state.personas[1].id,
+                    icon: None,
                     permissions: PersonaPermissions {
                         memory_folders: vec!["work".into()],
                         ..Default::default()

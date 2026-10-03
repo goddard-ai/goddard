@@ -6343,7 +6343,16 @@ impl Waku {
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_secondary)
                                 .child(icon(
-                                    super::boss::job_title_icon(job_title),
+                                    session
+                                        .and_then(|session| {
+                                            self.boss_ui
+                                                .employee_icons
+                                                .get(&session.id)
+                                                .copied()
+                                                .flatten()
+                                        })
+                                        .map(crate::custom_commands::icon_path)
+                                        .unwrap_or_else(|| super::boss::job_title_icon(job_title)),
                                     11.0,
                                     theme.text_tertiary,
                                 ))

@@ -32,6 +32,9 @@ pub struct BossPersona {
     /// Paths relative to the Boss files root.
     pub knowledge_files: Vec<String>,
     pub permissions: PersonaPermissions,
+    /// Default icon shown for employees using this persona.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<crate::custom_commands::CustomCommandIcon>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -43,6 +46,9 @@ pub struct BossEmployee {
     #[serde(default)]
     pub job_title: String,
     pub persona_id: Uuid,
+    /// Optional per-employee override of the persona icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<crate::custom_commands::CustomCommandIcon>,
     /// The grants assigned when this employee was summoned.
     pub permissions: PersonaPermissions,
     #[serde(default)]
@@ -127,6 +133,11 @@ pub enum BossOperation {
     },
     UpsertPersona {
         persona: BossPersona,
+    },
+    SetEmployeeIcon {
+        session_id: Uuid,
+        #[serde(default)]
+        icon: Option<crate::custom_commands::CustomCommandIcon>,
     },
     ListFiles {
         path: String,

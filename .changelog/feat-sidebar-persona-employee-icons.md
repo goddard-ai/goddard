@@ -1,0 +1,1 @@
+- Assign an icon to each Boss persona to show beside its employees' job titles in the sidebar and top bar; a custom employee icon takes precedence.
