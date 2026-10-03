@@ -1,13 +1,10 @@
-import { Text, Column } from '@octane-xplat/ui';
-import { useTheme } from '../../lib/use-theme';
+/** @jsxImportSource @nativescript-community/octane */
+import { useRoute } from '@octane-xplat/ui';
 
-/** TODO(port): the session view — streaming transcript, composer,
- * task-surface sheet (~2.5k lines of reference components). */
-export default function SessionScreen(props: { id?: string }) {
-	const theme = useTheme();
-	return (
-		<Column style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background, padding: 32 }}>
-			<Text style={{ color: theme.textSecondary }}>Session {props.id} — port in progress</Text>
-		</Column>
-	);
+import { SessionView } from '@/components/session-view';
+
+export default function SessionScreen() {
+  const route = useRoute('root');
+  const params = (route?.params ?? {}) as { id?: string; devPrompt?: string };
+  return <SessionView devPrompt={params.devPrompt} sessionId={params.id} />;
 }

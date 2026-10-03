@@ -1,6 +1,7 @@
 import { layoutsForRoute, Screen, screenFor, Text, useRoute, useThemeScheme } from '@octane-xplat/ui';
+import { TaskDrawerHost } from '../components/task-drawer';
 import { useDaemonBootstrap } from '../lib/daemon-hooks';
-import { HomeScreen } from './index.tsrx';
+import HomeScreen from './index.tsrx';
 
 const resolveRoute = (name: string, params: Record<string, unknown>) => {
 	const C = screenFor(name);
@@ -22,12 +23,14 @@ export default function RootLayout(props: { children?: any }) @{
 	useDaemonBootstrap();
 	const scheme = useThemeScheme();
 	if (props.children != null) {
-		return <>{props.children}</>;
+		return <TaskDrawerHost>{props.children}</TaskDrawerHost>;
 	}
 
 	const route = useRoute('root');
 
 	<Screen className={['vx-app', 'flex-1', scheme === 'dark' ? 'dark ns-dark' : '']}>
-		{route ? resolveRoute(route.name, route.params) : <HomeScreen />}
+		<TaskDrawerHost>
+			{route ? resolveRoute(route.name, route.params) : <HomeScreen />}
+		</TaskDrawerHost>
 	</Screen>
 }
