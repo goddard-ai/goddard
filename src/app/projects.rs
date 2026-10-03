@@ -2299,34 +2299,46 @@ impl Waku {
             .flex_none()
             .h(px(PROJECTS_HEADER_HEIGHT))
             .w_full()
-            .px(px(14.0))
             .flex()
-            .items_center()
-            .gap(px(12.0))
+            .justify_center()
             .border_b(hairline())
             .border_color(theme.separator)
-            .child(selector)
             .child(
                 div()
-                    .flex_none()
+                    .h_full()
+                    .w_full()
+                    .max_w(px(
+                        PROJECTS_CONTENT_MAX_WIDTH + PROJECTS_CONTENT_MARGIN * 2.0
+                    ))
+                    .mx_auto()
+                    .px(px(PROJECTS_CONTENT_MARGIN + 12.0))
                     .flex()
                     .items_center()
-                    .rounded(px(6.0))
-                    .p(px(2.0))
-                    .bg(theme.inset)
-                    .children(
-                        ProjectsTab::ALL
-                            .into_iter()
-                            .filter(|candidate| candidate.available(review_queue_enabled))
-                            .map(|candidate| {
-                                let enabled = github_enabled || !candidate.requires_github();
-                                self.projects_tab_button(
-                                    project_id, candidate, tab, enabled, false, cx,
-                                )
-                            }),
-                    ),
+                    .gap(px(12.0))
+                    .child(selector)
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .rounded(px(6.0))
+                            .p(px(2.0))
+                            .bg(theme.inset)
+                            .children(
+                                ProjectsTab::ALL
+                                    .into_iter()
+                                    .filter(|candidate| candidate.available(review_queue_enabled))
+                                    .map(|candidate| {
+                                        let enabled =
+                                            github_enabled || !candidate.requires_github();
+                                        self.projects_tab_button(
+                                            project_id, candidate, tab, enabled, false, cx,
+                                        )
+                                    }),
+                            ),
+                    )
+                    .child(div().flex_1()),
             )
-            .child(div().flex_1())
             .into_any_element()
     }
 

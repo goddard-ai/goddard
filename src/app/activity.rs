@@ -252,29 +252,44 @@ impl Waku {
             .filter_text(projects::ProjectsTab::Activity, cx)
             .to_lowercase();
 
-        let mut content = div().flex().flex_col().gap(px(15.0)).p(px(14.0));
+        let mut content = div()
+            .flex()
+            .flex_col()
+            .gap(px(18.0))
+            .px(px(12.0))
+            .py(px(14.0));
         if selected.is_some() {
-            content = content.child(activity_heading(tr!("activity.details"), &theme));
-            content = match detail {
+            let details = match detail {
                 github::GitHubFetch::Loading => {
-                    content.child(activity_note(tr!("activity.loading"), &theme))
+                    activity_note(tr!("activity.loading"), &theme).into_any_element()
                 }
                 github::GitHubFetch::Loaded(None) => {
-                    content.child(activity_note(tr!("activity.unavailable"), &theme))
+                    activity_note(tr!("activity.unavailable"), &theme).into_any_element()
                 }
-                github::GitHubFetch::Loaded(Some(detail)) => {
-                    content.child(activity_detail(&detail, &theme))
-                }
+                github::GitHubFetch::Loaded(Some(detail)) => activity_detail(&detail, &theme),
             };
+            content = content.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(activity_heading(tr!("activity.details"), &theme))
+                    .child(details),
+            );
         }
-        content = content.child(activity_heading(tr!("activity.releases"), &theme));
-        content = match releases {
-            github::GitHubFetch::Loading => {
-                content.child(activity_note(tr!("activity.loading"), &theme))
-            }
-            github::GitHubFetch::Loaded(None) => {
-                content.child(activity_note(tr!("activity.unavailable"), &theme))
-            }
+        let release_section = match releases {
+            github::GitHubFetch::Loading => activity_section(
+                tr!("activity.releases"),
+                None,
+                activity_note(tr!("activity.loading"), &theme).into_any_element(),
+                &theme,
+            ),
+            github::GitHubFetch::Loaded(None) => activity_section(
+                tr!("activity.releases"),
+                None,
+                activity_note(tr!("activity.unavailable"), &theme).into_any_element(),
+                &theme,
+            ),
             github::GitHubFetch::Loaded(Some(entries)) => {
                 let visible = entries
                     .iter()
@@ -285,48 +300,75 @@ impl Waku {
                     })
                     .collect::<Vec<_>>();
                 if visible.is_empty() {
-                    content.child(activity_note(tr!("activity.no_releases"), &theme))
+                    activity_section(
+                        tr!("activity.releases"),
+                        Some(0),
+                        activity_note(tr!("activity.no_releases"), &theme).into_any_element(),
+                        &theme,
+                    )
                 } else {
-                    content.children(visible.into_iter().map(|entry| {
-                        let selection = ActivitySelection::Release(entry.tag_name.clone());
-                        let label = if entry.name.is_empty() {
-                            entry.tag_name.clone()
-                        } else {
-                            format!("{} · {}", entry.tag_name, entry.name)
-                        };
-                        let status = if entry.is_draft {
-                            tr!("activity.draft")
-                        } else if entry.is_prerelease {
-                            tr!("activity.prerelease")
-                        } else {
-                            entry
+                    let count = visible.len();
+                    let rows = div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(1.0))
+                        .children(visible.into_iter().map(|entry| {
+                            let selection = ActivitySelection::Release(entry.tag_name.clone());
+                            let name = entry.name.trim();
+                            let same_name =
+                                name.is_empty() || name.eq_ignore_ascii_case(&entry.tag_name);
+                            let title = if same_name {
+                                entry.tag_name.clone()
+                            } else {
+                                entry.name.clone()
+                            };
+                            let subtitle = (!same_name).then(|| entry.tag_name.clone());
+                            let badge = if entry.is_draft {
+                                Some((tr!("activity.draft"), None, theme.text_secondary))
+                            } else if entry.is_prerelease {
+                                Some((tr!("activity.prerelease"), None, theme.accent))
+                            } else {
+                                None
+                            };
+                            let date = entry
                                 .published_at
                                 .as_deref()
                                 .and_then(|date| date.get(..10))
-                                .unwrap_or("")
-                                .to_owned()
-                        };
-                        activity_row(
-                            project_id,
-                            selection.clone(),
-                            selected.as_ref() == Some(&selection),
-                            label,
-                            status,
-                            &theme,
-                            cx,
-                        )
-                    }))
+                                .map(str::to_owned);
+                            activity_row(
+                                project_id,
+                                selection.clone(),
+                                selected.as_ref() == Some(&selection),
+                                "icons/package.svg",
+                                theme.text_tertiary,
+                                title,
+                                subtitle,
+                                badge,
+                                date,
+                                &theme,
+                                cx,
+                            )
+                        }))
+                        .into_any_element();
+                    activity_section(tr!("activity.releases"), Some(count), rows, &theme)
                 }
             }
         };
-        content = content.child(activity_heading(tr!("activity.runs"), &theme));
-        content = match runs {
-            github::GitHubFetch::Loading => {
-                content.child(activity_note(tr!("activity.loading"), &theme))
-            }
-            github::GitHubFetch::Loaded(None) => {
-                content.child(activity_note(tr!("activity.unavailable"), &theme))
-            }
+        content = content.child(release_section);
+        let run_section = match runs {
+            github::GitHubFetch::Loading => activity_section(
+                tr!("activity.runs"),
+                None,
+                activity_note(tr!("activity.loading"), &theme).into_any_element(),
+                &theme,
+            ),
+            github::GitHubFetch::Loaded(None) => activity_section(
+                tr!("activity.runs"),
+                None,
+                activity_note(tr!("activity.unavailable"), &theme).into_any_element(),
+                &theme,
+            ),
             github::GitHubFetch::Loaded(Some(entries)) => {
                 let visible = entries
                     .iter()
@@ -343,34 +385,71 @@ impl Waku {
                     })
                     .collect::<Vec<_>>();
                 if visible.is_empty() {
-                    content.child(activity_note(tr!("activity.no_runs"), &theme))
+                    activity_section(
+                        tr!("activity.runs"),
+                        Some(0),
+                        activity_note(tr!("activity.no_runs"), &theme).into_any_element(),
+                        &theme,
+                    )
                 } else {
-                    content.children(visible.into_iter().map(|entry| {
-                        let selection = ActivitySelection::Run(entry.database_id);
-                        let label = format!("{} · {}", entry.name, entry.display_title);
-                        let status = format!(
-                            "{} · {} · {}",
-                            entry.head_branch.as_deref().unwrap_or("—"),
-                            run_status(entry),
-                            entry
+                    let count = visible.len();
+                    let rows = div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(1.0))
+                        .children(visible.into_iter().map(|entry| {
+                            let selection = ActivitySelection::Run(entry.database_id);
+                            let name = entry.name.trim();
+                            let title = if name.is_empty() {
+                                entry.display_title.clone()
+                            } else {
+                                entry.name.clone()
+                            };
+                            let mut metadata = Vec::with_capacity(2);
+                            if !entry.display_title.trim().is_empty()
+                                && !entry.display_title.eq_ignore_ascii_case(&title)
+                            {
+                                metadata.push(entry.display_title.clone());
+                            }
+                            if let Some(branch) = entry
+                                .head_branch
+                                .as_deref()
+                                .filter(|branch| !branch.trim().is_empty())
+                            {
+                                metadata.push(branch.to_owned());
+                            }
+                            let subtitle = (!metadata.is_empty()).then(|| metadata.join(" · "));
+                            let raw_status = run_status(entry);
+                            let status = raw_status.replace('_', " ");
+                            let (status_icon, status_color) =
+                                activity_run_status_appearance(raw_status, &theme);
+                            let badge = Some((status, Some(status_icon), status_color));
+                            let date = entry
                                 .created_at
                                 .as_deref()
                                 .and_then(|date| date.get(..10))
-                                .unwrap_or("")
-                        );
-                        activity_row(
-                            project_id,
-                            selection.clone(),
-                            selected.as_ref() == Some(&selection),
-                            label,
-                            status,
-                            &theme,
-                            cx,
-                        )
-                    }))
+                                .map(str::to_owned);
+                            activity_row(
+                                project_id,
+                                selection.clone(),
+                                selected.as_ref() == Some(&selection),
+                                "icons/play.svg",
+                                theme.text_tertiary,
+                                title,
+                                subtitle,
+                                badge,
+                                date,
+                                &theme,
+                                cx,
+                            )
+                        }))
+                        .into_any_element();
+                    activity_section(tr!("activity.runs"), Some(count), rows, &theme)
                 }
             }
         };
+        content = content.child(run_section);
         div()
             .id("projects-activity-scroll")
             .flex_1()
@@ -381,6 +460,33 @@ impl Waku {
             .child(content)
             .into_any_element()
     }
+}
+
+fn activity_section(label: String, count: Option<usize>, body: AnyElement, theme: &Theme) -> Div {
+    let mut heading = div()
+        .flex()
+        .items_center()
+        .gap(px(7.0))
+        .text_size(sp(13.5))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme.text)
+        .child(label);
+    if let Some(count) = count {
+        heading = heading.child(
+            div()
+                .text_size(sp(11.0))
+                .font_weight(FontWeight::NORMAL)
+                .text_color(theme.text_tertiary)
+                .child(count.to_string()),
+        );
+    }
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .child(heading)
+        .child(body)
 }
 
 fn activity_heading(label: String, theme: &Theme) -> Div {
@@ -402,26 +508,34 @@ fn activity_row(
     project_id: Uuid,
     selection: ActivitySelection,
     selected: bool,
+    leading_icon: &'static str,
+    leading_color: Hsla,
     label: String,
-    status: String,
+    subtitle: Option<String>,
+    badge: Option<(String, Option<&'static str>, Hsla)>,
+    date: Option<String>,
     theme: &Theme,
     cx: &mut Context<Waku>,
 ) -> Stateful<Div> {
-    div()
+    let mut row = div()
         .id(SharedString::from(format!(
             "activity-{project_id}-{selection:?}"
         )))
         .tab_index(0)
+        .w_full()
+        .h(px(34.0))
         .cursor_pointer()
         .rounded(px(6.0))
-        .px(px(9.0))
-        .py(px(7.0))
+        .px(px(8.0))
+        .border_b(hairline())
+        .border_color(theme.separator)
         .when(selected, |row| row.bg(theme.overlay_strong))
         .hover(|row| row.bg(theme.overlay))
         .focus_visible(|row| row.bg(theme.focus_highlight()))
         .flex()
         .items_center()
-        .gap(px(10.0))
+        .gap(px(9.0))
+        .child(icon(leading_icon, 13.0, leading_color))
         .child(
             div()
                 .flex_1()
@@ -430,17 +544,68 @@ fn activity_row(
                 .text_color(theme.text)
                 .truncate()
                 .child(label),
-        )
-        .child(
+        );
+    if let Some(subtitle) = subtitle {
+        row = row.child(
             div()
                 .flex_none()
+                .min_w_0()
+                .max_w(px(320.0))
+                .text_size(sp(11.5))
+                .text_color(theme.text_tertiary)
+                .truncate()
+                .child(subtitle),
+        );
+    }
+    if let Some((label, icon_path, color)) = badge {
+        row = row.child(activity_status_badge(label, icon_path, color, theme));
+    }
+    row.child(
+        div().w(px(82.0)).flex_none().flex().justify_end().child(
+            div()
                 .text_size(sp(11.0))
-                .text_color(theme.text_secondary)
-                .child(status),
-        )
-        .on_activation(cx, move |this, _, cx| {
-            this.activity_select(project_id, selection.clone(), cx)
-        })
+                .text_color(theme.text_tertiary)
+                .child(date.unwrap_or_default()),
+        ),
+    )
+    .on_activation(cx, move |this, _, cx| {
+        this.activity_select(project_id, selection.clone(), cx)
+    })
+}
+
+fn activity_status_badge(
+    label: String,
+    icon_path: Option<&'static str>,
+    color: Hsla,
+    theme: &Theme,
+) -> Div {
+    let mut badge = div()
+        .flex_none()
+        .h(px(22.0))
+        .px(px(7.0))
+        .rounded(px(5.0))
+        .bg(theme.inset)
+        .flex()
+        .items_center()
+        .gap(px(4.0));
+    if let Some(icon_path) = icon_path {
+        badge = badge.child(icon(icon_path, 11.0, color));
+    }
+    badge.child(div().text_size(sp(11.0)).text_color(color).child(label))
+}
+
+fn activity_run_status_appearance(status: &str, theme: &Theme) -> (&'static str, Hsla) {
+    match status {
+        "success" => ("icons/circle-check.svg", theme.success),
+        "failure" | "timed_out" | "action_required" => ("icons/x-bold.svg", theme.danger),
+        "in_progress" | "queued" | "requested" | "waiting" => {
+            ("icons/loader-circle.svg", theme.accent)
+        }
+        "cancelled" | "completed" | "skipped" | "neutral" => {
+            ("icons/circle-dot.svg", theme.text_tertiary)
+        }
+        _ => ("icons/circle-dot.svg", theme.text_secondary),
+    }
 }
 
 fn run_status(run: &GitHubWorkflowRun) -> &str {
