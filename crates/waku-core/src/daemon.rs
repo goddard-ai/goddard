@@ -6100,6 +6100,76 @@ impl WakuBackend {
             BossOperation::Control { session_id, action } => {
                 let _operation = self.boss.operation_lock.lock();
                 self.boss.require_control(caller, session_id)?;
+                if let EmployeeControl::SetModel {
+                    provider,
+                    model,
+                    reasoning_effort,
+                } = &action
+                {
+                    if self.agent.is_working(session_id) {
+                        bail!(
+                            "wait for the employee's current turn to finish before changing its model"
+                        );
+                    }
+                    let catalog = crate::model_catalog::cached_models(*provider)
+                        .unwrap_or_else(|| crate::model_catalog::fallback_models(*provider));
+                    let selected =
+                        waku_protocol::model_catalog::packed_catalog_model(&catalog, model, *provider)
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "model {model:?} is not listed for {}",
+                                    provider.display_name()
+                                )
+                            })?;
+                    let effort = reasoning_effort.clone().map(|effort| {
+                        if effort == "default" {
+                            Ok(None)
+                        } else if selected
+                            .model
+                            .reasoning_efforts
+                            .iter()
+                            .any(|option| option.id == effort)
+                        {
+                            Ok(Some(effort))
+                        } else {
+                            Err(anyhow!(
+                                "reasoning effort is not supported by model {model:?}"
+                            ))
+                        }
+                    }).transpose()?.flatten();
+                    {
+                        let mut state = self.task_state.lock();
+                        let session = state
+                            .sessions
+                            .iter_mut()
+                            .find(|session| session.id == session_id)
+                            .ok_or_else(|| anyhow!("employee session is missing"))?;
+                        session.provider = *provider;
+                        session.model = Some(selected.model.id.clone());
+                        session.reasoning_effort = effort;
+                        session.service_tier = None;
+                        session.context_window = None;
+                        session.provider_cursor = None;
+                        session.provider_session_id = None;
+                        session.auto_route = false;
+                        session.route_decision = None;
+                        session.pending_provider_context = Some(format!(
+                            "This employee was switched to {} / {}. Continue with the existing task context. Read the prior transcript with `goddard-agent read '{{}}'` and relevant turns with `goddard-agent read '{{\"turn\": N}}'` before relying on earlier details.",
+                            provider.display_name(),
+                            selected.model.name
+                        ));
+                        session.updated_at = crate::model::unix_time();
+                        state.mark_session_dirty(session_id);
+                        self.task_store.save(&mut state)?;
+                    }
+                    let removed = self.sessions.lock().remove(&session_id);
+                    if let Some(entry) = &removed {
+                        entry.driver.begin_shutdown();
+                    }
+                    drop_detached(removed);
+                    self.agent.revoke_session(session_id);
+                    return Ok(BossResult::Saved);
+                }
                 // A prompt to a finished employee resurrects it: the boss
                 // sends the same worker another job instead of summoning a
                 // replacement. Steer and Stop stay gated on `require_active`
@@ -6156,6 +6226,7 @@ impl WakuBackend {
                         )?;
                         self.finish_boss_employee(session_id)?;
                     }
+                    EmployeeControl::SetModel { .. } => unreachable!("handled above"),
                 }
                 Ok(BossResult::Saved)
             }
@@ -8354,8 +8425,19 @@ fn deliver_agent_prompt(
         hidden: entry.hidden,
     })?)?;
     send_agent_queue_changed(task_state, sink, session_id);
+    let handoff = {
+        let mut state = task_state.lock();
+        state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.pending_provider_context.take())
+    };
     let prompt = agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt)
         .unwrap_or(entry.prompt);
+    let prompt = handoff.map_or(prompt.clone(), |context| {
+        format!("{context}\n\nNext assignment: {prompt}")
+    });
     driver.prompt(wrap_boss_outbound_prompt(
         task_state,
         &automations.document(),

@@ -1,0 +1,1 @@
+- Let the boss switch an employee's provider, model, and reasoning effort for its next turn while keeping the same employee and transcript.

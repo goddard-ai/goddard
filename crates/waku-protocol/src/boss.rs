@@ -235,9 +235,39 @@ pub enum BossResult {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum EmployeeControl {
     Prompt { prompt: String },
     Steer { prompt: String },
+    /// Apply a catalog-listed provider/model selection to the next turn.
+    SetModel {
+        provider: crate::model::ProviderKind,
+        model: String,
+        #[serde(default)]
+        reasoning_effort: Option<String>,
+    },
     Stop,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EmployeeControl;
+
+    #[test]
+    fn set_model_control_decodes_provider_model_and_effort() {
+        let action: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setModel",
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "reasoningEffort": "high"
+        }))
+        .unwrap();
+        assert!(matches!(
+            action,
+            EmployeeControl::SetModel { provider, model, reasoning_effort }
+                if provider == crate::model::ProviderKind::Codex
+                    && model == "gpt-5.5"
+                    && reasoning_effort.as_deref() == Some("high")
+        ));
+    }
 }
