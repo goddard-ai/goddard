@@ -4994,6 +4994,7 @@ impl Waku {
         );
         crate::terminal::install_link_modifier(state.terminal_link_modifier, cx);
         crate::terminal::install_copy_on_select(state.terminal_copy_on_select, cx);
+        crate::input::install_composer_enter_swap(state.composer_enter_steers, cx);
         let analytics = crate::analytics::Analytics::new(
             state.language.locale(),
             state.analytics_id,

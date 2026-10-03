@@ -1235,6 +1235,9 @@ pub struct AppSettings {
     /// Show a task's unsent composer draft on its own line under the sidebar
     /// row's title.
     pub sidebar_composer_drafts: bool,
+    /// Swap the composer's Enter chords: Enter steers into the running turn
+    /// and ⌘⏎ submits the draft instead of the other way around.
+    pub composer_enter_steers: bool,
     #[serde(default)]
     pub sidebar_hide_phase_labels: bool,
     /// The color the sidebar's draft preview line wears.
@@ -1442,6 +1445,7 @@ impl Default for AppSettings {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             sidebar_composer_drafts: false,
+            composer_enter_steers: false,
             sidebar_hide_phase_labels: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
@@ -1916,6 +1920,10 @@ pub struct PersistedState {
     /// the sidebar row's title.
     #[serde(default)]
     pub sidebar_composer_drafts: bool,
+    /// Whether the composer's Enter chords are swapped: Enter steers into
+    /// the running turn and ⌘⏎ submits the draft.
+    #[serde(default)]
+    pub composer_enter_steers: bool,
     #[serde(default)]
     pub sidebar_hide_phase_labels: bool,
     /// The color the sidebar's draft preview line wears.
@@ -2392,6 +2400,7 @@ impl PersistedState {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             sidebar_composer_drafts: false,
+            composer_enter_steers: false,
             sidebar_hide_phase_labels: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
@@ -2822,6 +2831,7 @@ impl PersistedState {
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
+            composer_enter_steers: self.composer_enter_steers,
             sidebar_hide_phase_labels: self.sidebar_hide_phase_labels,
             sidebar_draft_preview_color: self.sidebar_draft_preview_color,
             dormant_after_days: self.dormant_after_days,
@@ -2972,6 +2982,7 @@ impl PersistedState {
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
+        self.composer_enter_steers = settings.composer_enter_steers;
         self.sidebar_hide_phase_labels = settings.sidebar_hide_phase_labels;
         self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
         self.dormant_after_days = settings.dormant_after_days;
@@ -4597,6 +4608,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.sidebar_composer_drafts);
+    }
+
+    #[test]
+    fn composer_enter_steers_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.composer_enter_steers);
+        let mut state = PersistedState::empty();
+        assert!(!state.composer_enter_steers);
+        state.composer_enter_steers = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["composer_enter_steers"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("composer_enter_steers")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.composer_enter_steers);
     }
 
     #[test]

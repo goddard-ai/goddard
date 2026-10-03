@@ -9,11 +9,11 @@ use crate::ui::scrollbar::{self, ScrollbarState};
 use gpui::{
     App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners, CursorStyle, DispatchPhase,
     Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, Font, FontWeight, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding,
-    LayoutId, Length, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
-    Point, ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
-    UTF16Selection, UnderlineStyle, Window, accesskit, actions, div, fill, font, point, prelude::*,
-    px, size,
+    Focusable, Font, FontWeight, Global, GlobalElementId, Hsla, InspectorElementId, IntoElement,
+    KeyBinding, LayoutId, Length, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    PaintQuad, Pixels, Point, ScrollHandle, SharedString, StyledText, Subscription, Task,
+    TextLayout, TextRun, UTF16Selection, UnderlineStyle, Window, accesskit, actions, div, fill,
+    font, point, prelude::*, px, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -219,6 +219,50 @@ pub fn init(cx: &mut App) {
         // The redo chord those platforms carry alongside ctrl-shift-z.
         KeyBinding::new("ctrl-y", Redo, Some("TextInput")),
     ]);
+}
+
+/// The composer Enter-mode preference, published by the app when settings
+/// load or change so a wholesale keymap rebuild can re-assert it. Off keeps
+/// Enter submitting and the platform modifier + Enter steering; on swaps
+/// them.
+struct ActiveComposerEnterSwap(bool);
+impl Global for ActiveComposerEnterSwap {}
+
+/// The context the swap binds under: only inside a [`ComposerInput`] (whose
+/// wrapper carries `Composer`), and never while the autocomplete menu owns
+/// Enter for its row confirmation. Other multi-line fields keep Enter's
+/// usual meaning — a bare `TextInput`-scope rebind would eat their
+/// newlines.
+const COMPOSER_ENTER_CONTEXT: &str = "Composer > TextInput && !ComposerAutocomplete";
+
+/// Publish the composer Enter mode and rebind the pair. Later registrations
+/// outrank earlier ones in the keymap, so each call appends whichever pair
+/// reflects `steer_on_enter` and shadows the last.
+pub fn install_composer_enter_swap(steer_on_enter: bool, cx: &mut App) {
+    cx.set_global(ActiveComposerEnterSwap(steer_on_enter));
+    cx.bind_keys(if steer_on_enter {
+        [
+            KeyBinding::new("enter", SubmitSteer, Some(COMPOSER_ENTER_CONTEXT)),
+            KeyBinding::new("secondary-enter", Enter, Some(COMPOSER_ENTER_CONTEXT)),
+        ]
+    } else {
+        [
+            KeyBinding::new("enter", Enter, Some(COMPOSER_ENTER_CONTEXT)),
+            KeyBinding::new("secondary-enter", SubmitSteer, Some(COMPOSER_ENTER_CONTEXT)),
+        ]
+    });
+}
+
+/// Re-assert the swap after a wholesale keymap rebuild — the keybinding
+/// editor's `clear_key_bindings` drops these with everything else, and
+/// nothing in its catalog snapshot brings them back.
+pub fn reapply_composer_enter_swap(cx: &mut App) {
+    if cx
+        .try_global::<ActiveComposerEnterSwap>()
+        .is_some_and(|mode| mode.0)
+    {
+        install_composer_enter_swap(true, cx);
+    }
 }
 
 struct BlinkCursor {
@@ -4222,8 +4266,9 @@ pub struct ComposerSplice(pub ContentSplice);
 
 /// The prompt composer, built on [`TextInput`]: a self-sizing multi-line
 /// field where Enter submits the trimmed prompt and clears, the primary
-/// modifier + Enter steers it into the running turn instead, and image or
-/// file pastes surface as attachments rather than text. Everything textual —
+/// modifier + Enter steers it into the running turn instead — or the other
+/// way around under the "Enter steers" app setting — and image or file
+/// pastes surface as attachments rather than text. Everything textual —
 /// editing, IME, undo, selection — is the embedded field's; this component
 /// owns only the prompt policy on top.
 pub struct ComposerInput {
@@ -4451,6 +4496,9 @@ impl Render for ComposerInput {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .w_full()
+            // The `Composer` context is where the "Enter steers" setting's
+            // swapped bindings scope to — the field itself stays `TextInput`.
+            .key_context("Composer")
             // The embedded field propagates SubmitSteer; this ancestor
             // handler is where steering becomes a composer event.
             .on_action(cx.listener(|composer, _: &SubmitSteer, _, cx| {
@@ -4760,6 +4808,58 @@ mod tests {
         cx.read_entity(&composer, |composer, cx| {
             assert_eq!(composer.content(cx), "")
         });
+    }
+
+    #[gpui::test]
+    fn enter_steers_under_the_composer_enter_swap(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        cx.update(|_, cx| super::install_composer_enter_swap(true, cx));
+        let events: Rc<RefCell<Vec<ComposerEvent>>> = Rc::default();
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&composer, move |_, event: &ComposerEvent, _| {
+                sink.borrow_mut().push(event.clone());
+            })
+            .detach();
+        });
+
+        composer.update(cx, |composer, cx| composer.set_content("hold on", cx));
+        cx.simulate_keystrokes("enter");
+        assert!(
+            events.borrow().iter().any(
+                |event| matches!(event, ComposerEvent::SubmitSteer(text) if text == "hold on")
+            )
+        );
+
+        composer.update(cx, |composer, cx| composer.set_content("queue me", cx));
+        events.borrow_mut().clear();
+        cx.simulate_keystrokes("secondary-enter");
+        assert!(
+            events
+                .borrow()
+                .iter()
+                .any(|event| matches!(event, ComposerEvent::Submit(text) if text == "queue me"))
+        );
+
+        // Toggling back off restores the default pair.
+        cx.update(|_, cx| super::install_composer_enter_swap(false, cx));
+        composer.update(cx, |composer, cx| composer.set_content("again", cx));
+        events.borrow_mut().clear();
+        cx.simulate_keystrokes("enter");
+        assert!(
+            events
+                .borrow()
+                .iter()
+                .any(|event| matches!(event, ComposerEvent::Submit(text) if text == "again"))
+        );
+        composer.update(cx, |composer, cx| composer.set_content("steer me", cx));
+        events.borrow_mut().clear();
+        cx.simulate_keystrokes("secondary-enter");
+        assert!(
+            events.borrow().iter().any(
+                |event| matches!(event, ComposerEvent::SubmitSteer(text) if text == "steer me")
+            )
+        );
     }
 
     #[gpui::test]

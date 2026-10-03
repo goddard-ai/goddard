@@ -656,6 +656,7 @@ impl super::Waku {
                 let bindings = snapshot_key_bindings(&ui.snapshot);
                 cx.clear_key_bindings();
                 cx.bind_keys(bindings);
+                crate::input::reapply_composer_enter_swap(cx);
                 ui.refilter(cx);
             }
             Err(error) => {
@@ -677,6 +678,7 @@ impl super::Waku {
             let bindings = snapshot_key_bindings(&ui.snapshot);
             cx.clear_key_bindings();
             cx.bind_keys(bindings);
+            crate::input::reapply_composer_enter_swap(cx);
             ui.refilter(cx);
         }
         cx.notify();

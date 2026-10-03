@@ -1969,6 +1969,27 @@ impl Waku {
                 theme,
                 search,
             ),
+            setting_card(
+                "icons/corner-down-right.svg",
+                tr!("settings.composer_enter_steers"),
+                tr!(
+                    "settings.composer_enter_steers_description",
+                    modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
+                ),
+                toggle_switch(
+                    "composer-enter-steers-toggle",
+                    self.state.composer_enter_steers,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.composer_enter_steers;
+                        move |this, _, cx| this.set_composer_enter_steers(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
             self.state
                 .phase_routing_enabled
                 .then(|| {
@@ -11667,6 +11688,16 @@ impl Waku {
             return;
         }
         self.state.sidebar_composer_drafts = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_composer_enter_steers(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.composer_enter_steers == enabled {
+            return;
+        }
+        self.state.composer_enter_steers = enabled;
+        crate::input::install_composer_enter_swap(enabled, cx);
         self.save();
         cx.notify();
     }
