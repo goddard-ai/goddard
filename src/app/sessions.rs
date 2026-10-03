@@ -689,6 +689,7 @@ impl Waku {
         self.projects_page = None;
         self.drafts_page = false;
         self.automations_page = false;
+        self.boss_ui.page = None;
         self.automations_detail = None;
         self.notifications.open = false;
         if let Some((
@@ -3204,7 +3205,10 @@ impl Waku {
         // the panel hidden; its value must not overwrite the user's real one.
         if !matches!(
             self.right_panel_live_owner,
-            RightPanelOwner::Drafts | RightPanelOwner::Automations | RightPanelOwner::Inbox
+            RightPanelOwner::Boss(_)
+                | RightPanelOwner::Drafts
+                | RightPanelOwner::Automations
+                | RightPanelOwner::Inbox
         ) {
             self.state.right_panel_visible = self.right_panel_visible;
         }
@@ -3394,7 +3398,9 @@ impl Waku {
     /// column, then the selected task's transcript, then the full-width
     /// terminal that parked it.
     pub(super) fn navigation_location(&self) -> Option<NavigationLocation> {
-        if self.automations_page {
+        if let Some((key, tab)) = self.boss_ui.page {
+            Some(NavigationLocation::BossPage(key, tab))
+        } else if self.automations_page {
             Some(NavigationLocation::AutomationsPage)
         } else if self.drafts_page {
             Some(NavigationLocation::DraftsPage)
@@ -3420,6 +3426,7 @@ impl Waku {
             && self.selected_terminal.is_none()
             && !self.drafts_page
             && !self.automations_page
+            && self.boss_ui.page.is_none()
             && self.projects_page.is_none()
             && !self.notifications.open
     }
@@ -3520,6 +3527,10 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_automations_page(window, cx);
             }
+            Some(NavigationLocation::BossPage(key, tab)) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_boss_page(key, tab, window, cx);
+            }
             Some(NavigationLocation::Inbox) => {
                 let _ = self.session_navigation.go_back(current);
                 self.show_inbox(window, cx);
@@ -3577,6 +3588,10 @@ impl Waku {
             Some(NavigationLocation::AutomationsPage) => {
                 let _ = self.session_navigation.go_forward(current);
                 self.show_automations_page(window, cx);
+            }
+            Some(NavigationLocation::BossPage(key, tab)) => {
+                let _ = self.session_navigation.go_forward(current);
+                self.show_boss_page(key, tab, window, cx);
             }
             Some(NavigationLocation::Inbox) => {
                 let _ = self.session_navigation.go_forward(current);
@@ -3945,6 +3960,8 @@ impl Waku {
             || self.settings_page.is_some()
             || self.selected_terminal.is_some()
             || self.projects_page.is_some()
+            || self.boss_ui.page.is_some()
+            || self.boss_employee_finished()
             // A started Antigravity session has no composer — keystrokes
             // belong to its TUI terminal or nowhere.
             || self.selected_session().is_some_and(|session| {
@@ -4032,6 +4049,8 @@ impl Waku {
             || self.notifications.open
             || self.drafts_page
             || self.automations_page
+            || self.boss_ui.page.is_some()
+            || self.boss_employee_finished()
             || self.selected_friend_watch().is_some()
             || self.selected_session().is_some_and(|session| {
                 session.provider == ProviderKind::Antigravity && session.has_started()
@@ -4227,6 +4246,10 @@ impl Waku {
         }
         if self.file_finder.is_open() {
             self.close_file_finder(window, cx);
+            return;
+        }
+        if self.boss_ui.page.is_some() {
+            self.navigate_back_action(&NavigateBack, window, cx);
             return;
         }
         // Bare Escape never reaches here — the overlay's Dismiss binding is

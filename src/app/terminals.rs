@@ -997,6 +997,7 @@ impl Waku {
         self.projects_page = None;
         self.drafts_page = false;
         self.automations_page = false;
+        self.boss_ui.page = None;
         self.automations_detail = None;
         self.notifications.open = false;
         self.selected_terminal = Some(terminal_id);
@@ -1096,6 +1097,10 @@ impl Waku {
             Some(NavigationLocation::AutomationsPage) => {
                 let _ = self.session_navigation.go_back(current);
                 self.show_automations_page(window, cx);
+            }
+            Some(NavigationLocation::BossPage(key, tab)) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_boss_page(key, tab, window, cx);
             }
             Some(NavigationLocation::Inbox) => {
                 let _ = self.session_navigation.go_back(current);
@@ -1371,6 +1376,9 @@ impl Waku {
                         NavigationLocation::DraftsPage => this.show_drafts_page(window, cx),
                         NavigationLocation::AutomationsPage => {
                             this.show_automations_page(window, cx);
+                        }
+                        NavigationLocation::BossPage(key, tab) => {
+                            this.show_boss_page(key, tab, window, cx)
                         }
                         NavigationLocation::Inbox => this.show_inbox(window, cx),
                         NavigationLocation::Settings => {}

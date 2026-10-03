@@ -831,10 +831,11 @@ impl Render for Waku {
                             ))
                     })
                     .when(
-                        !self.drafts_page
-                            || self
-                                .selected_terminal
-                                .is_some_and(|id| self.right_panel_terminals.contains_key(&id)),
+                        self.boss_ui.page.is_none()
+                            && (!self.drafts_page
+                                || self.selected_terminal.is_some_and(|id| {
+                                    self.right_panel_terminals.contains_key(&id)
+                                })),
                         |element| element.child(self.render_header(window, cx)),
                     )
                     .children(self.friend_watch_banner(cx))
@@ -851,6 +852,8 @@ impl Render for Waku {
                                 self.chat_viewport_width(window),
                                 cx,
                             )
+                        } else if self.boss_ui.page.is_some() {
+                            self.render_boss_page(cx)
                         } else if self.drafts_page {
                             self.render_drafts_page(cx)
                         } else if self.automations_page {
@@ -871,6 +874,7 @@ impl Render for Waku {
                         },
                     )
                     .children(permission)
+                    .children(self.render_boss_finished_footer(cx))
                     // Big Picture remounts the one composer entity inside its
                     // own layer; mounting it here too would collide. The
                     // pages own no composer at all. While the overlay is

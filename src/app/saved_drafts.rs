@@ -196,6 +196,7 @@ impl Waku {
         self.settings_page = None;
         self.projects_page = None;
         self.automations_page = false;
+        self.boss_ui.page = None;
         self.automations_detail = None;
         self.notifications.open = false;
         self.selected_terminal = None;

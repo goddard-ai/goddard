@@ -2257,6 +2257,10 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::LoadProviderSession { .. }
             | Command::ForkProviderSession { .. }
             | Command::Workspace { .. }
+            | Command::Boss {
+                operation: waku_protocol::boss::BossOperation::Summon { .. }
+                    | waku_protocol::boss::BossOperation::Control { .. }
+            }
             | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
             | Command::AgentAsk { .. }
@@ -2744,7 +2748,11 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
                 project_id: *project_id,
             }
         }
-        Command::RemoveSession
+        Command::Boss { operation: waku_protocol::boss::BossOperation::Open { .. }
+            | waku_protocol::boss::BossOperation::Summon { .. }
+            | waku_protocol::boss::BossOperation::Control { .. }
+            | waku_protocol::boss::BossOperation::Rename { .. } }
+        | Command::RemoveSession
         | Command::ForkSessionFromResponse { .. }
         | Command::RewindSessionToMessage { .. }
         // Agent commands mutate daemon-owned task state directly; attached

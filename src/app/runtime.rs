@@ -242,6 +242,26 @@ fn attach_driver(
     }))
 }
 
+fn load_remote_boss_state(
+    client: &waku_client::DaemonClient,
+) -> Option<waku_client::boss::BossState> {
+    match client
+        .request(
+            Uuid::nil(),
+            Uuid::nil(),
+            waku_client::Command::Boss {
+                operation: waku_client::boss::BossOperation::View,
+            },
+        )
+        .ok()?
+    {
+        waku_client::ResponsePayload::Boss {
+            result: waku_client::boss::BossResult::State { state },
+        } => Some(state),
+        _ => None,
+    }
+}
+
 fn load_remote_task_state(
     client: &waku_client::DaemonClient,
 ) -> anyhow::Result<RemoteTaskStateSnapshot> {
@@ -1414,6 +1434,7 @@ impl Waku {
         let friends_updates = self.friends_tx.clone();
         let pairing_updates = self.pairing_tx.clone();
         let automations_updates = self.automations_tx.clone();
+        let boss_updates = self.boss_tx.clone();
         let review_updates = self.review_tx.clone();
         let closed_updates = self.friend_session_closed_tx.clone();
         let event_wake = self.event_wake_tx.clone();
@@ -1497,6 +1518,11 @@ impl Waku {
                             return;
                         }
                     }
+                    if let Some(state) = load_remote_boss_state(&client) {
+                        if boss_updates.send((key, state)).is_err() {
+                            return;
+                        }
+                    }
                     let result = load_remote_task_state(&client).map_err(|error| error.to_string());
                     // Fresh connection: the daemon may have restarted and
                     // lost its in-memory incognito sessions.
@@ -1527,6 +1553,9 @@ impl Waku {
                                     break replacement;
                                 }
                                 while revisions.try_recv().is_ok() {}
+                                if let Some(state) = load_remote_boss_state(&client) {
+                                    if boss_updates.send((key, state)).is_err() { return; }
+                                }
                                 let result = load_remote_task_state(&client)
                                     .map_err(|error| error.to_string());
                                 if results.send((key, result, false)).is_err() {
@@ -7485,6 +7514,7 @@ impl Waku {
             | self.drain_pairing_events(cx)
             | self.drain_discovery_events(cx)
             | self.drain_automations_events(cx)
+            | self.drain_boss_events(cx)
             | self.drain_review_events(cx)
             | self.drain_friend_session_closed_events(cx)
             | self.drain_status_marker_events()

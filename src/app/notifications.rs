@@ -753,6 +753,7 @@ impl Waku {
         self.projects_page = None;
         self.drafts_page = false;
         self.automations_page = false;
+        self.boss_ui.page = None;
         self.automations_detail = None;
         self.selected_terminal = None;
         // An activation still in flight must not hand the area back once

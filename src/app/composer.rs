@@ -5320,6 +5320,8 @@ impl Waku {
             && !self.notifications.open
             && !self.drafts_page
             && !self.automations_page
+            && self.boss_ui.page.is_none()
+            && !self.boss_employee_finished()
             && !self.selected_session().is_some_and(|session| {
                 session.provider == ProviderKind::Antigravity && session.has_started()
             })

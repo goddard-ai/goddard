@@ -1258,6 +1258,7 @@ enum RightPanelOwner {
     Inbox,
     Drafts,
     Automations,
+    Boss(waku_client::DaemonKey),
     /// Nothing selected and no page open — the strip that was live keeps a
     /// home rather than being dropped.
     Bare,
@@ -1551,6 +1552,7 @@ enum NavigationLocation {
     ProjectsPage(Uuid),
     DraftsPage,
     AutomationsPage,
+    BossPage(waku_client::DaemonKey, boss::BossTab),
     Inbox,
     /// The settings overlay. It never enters `back` — the surface it
     /// opened over holds that slot — but leaving settings through back
@@ -1763,7 +1765,9 @@ fn persisted_location(location: NavigationLocation) -> Option<PersistedNavigatio
         NavigationLocation::DraftsPage => Some(PersistedNavigationLocation::DraftsPage),
         NavigationLocation::AutomationsPage => Some(PersistedNavigationLocation::AutomationsPage),
         NavigationLocation::Inbox => Some(PersistedNavigationLocation::Inbox),
-        NavigationLocation::Terminal(_) | NavigationLocation::Settings => None,
+        NavigationLocation::Terminal(_)
+        | NavigationLocation::Settings
+        | NavigationLocation::BossPage(..) => None,
     }
 }
 
@@ -3632,6 +3636,9 @@ pub struct Waku {
     drafts_editing: Option<Uuid>,
     drafts_edit_input: Entity<TextInput>,
     /// The Automations page claiming the main column, like `drafts_page`.
+    boss_ui: boss::BossUi,
+    boss_tx: Sender<(waku_client::DaemonKey, waku_client::boss::BossState)>,
+    boss_events: Receiver<(waku_client::DaemonKey, waku_client::boss::BossState)>,
     automations_page: bool,
     /// Schedules vs Runs — which list the page body shows.
     automations_tab: automations::AutomationsTab,
@@ -3931,6 +3938,7 @@ mod autocomplete;
 mod automations;
 mod background_work;
 mod big_picture;
+mod boss;
 mod branches;
 mod close_dialog;
 mod command_palette;
@@ -5457,6 +5465,7 @@ impl Waku {
         let (friends_tx, friends_events) = unbounded();
         let (pairing_tx, pairing_events) = unbounded();
         let (automations_tx, automations_events) = unbounded();
+        let (boss_tx, boss_events) = unbounded();
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
@@ -7048,6 +7057,9 @@ impl Waku {
                 drafts_rows: RefCell::new(Vec::new()),
                 drafts_editing: None,
                 drafts_edit_input,
+                boss_ui: boss::BossUi::default(),
+                boss_tx,
+                boss_events,
                 automations_page: false,
                 automations_tab: automations::AutomationsTab::default(),
                 automations_detail: None,

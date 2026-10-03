@@ -153,6 +153,7 @@ impl Waku {
         self.pending_session_activation = None;
         self.fold_terminals_group_for_navigation();
         self.automations_page = true;
+        self.boss_ui.page = None;
         // The page owns its own strip — whatever was mounted (a session's,
         // a terminal's) parks until it comes back.
         self.sync_right_panel_owner(cx);
@@ -166,6 +167,7 @@ impl Waku {
             return;
         }
         self.automations_page = false;
+        self.boss_ui.page = None;
         self.automations_detail = None;
         // Closing is a location change too: the surface underneath comes
         // back, and back returns to the page.

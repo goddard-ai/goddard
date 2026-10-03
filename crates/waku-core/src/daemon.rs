@@ -2480,7 +2480,13 @@ impl Backend for WakuBackend {
                             .cloned()
                     })
                     .collect::<Vec<_>>();
-                self.auto_prompts.consider(&sessions);
+                self.auto_prompts.consider(
+                    &sessions
+                        .iter()
+                        .filter(|session| !self.boss.is_managed(session.id))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                );
                 // The save above can adopt full transcripts for every session
                 // the client touched. Keep only the recent window resident;
                 // the echoed clones above still carry the saved detail.
@@ -4575,8 +4581,25 @@ impl WakuBackend {
         let mut options = options;
         self.boss.require_active(session_id)?;
         let managed = self.boss.is_managed(session_id);
+        let environment = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.environment())
+            .unwrap_or_default();
         if managed {
-            options.cwd = self.boss.workspace(session_id)?;
+            self.boss
+                .set_project_context(session_id, options.cwd.clone());
+            // OpenCode registers MCP servers by directory on its shared
+            // native service. Other employees retain the ordinary task cwd;
+            // sandbox guests already have an isolated provider service.
+            if self.boss.is_boss(session_id)
+                || (provider == ProviderKind::OpenCode && !environment.is_sandbox())
+            {
+                options.cwd = self.boss.workspace(session_id)?;
+            }
             self.boss.reset_context(session_id);
             options.read_own_transcript = true;
             options.computer_use_enabled &= self
@@ -4620,14 +4643,6 @@ impl WakuBackend {
             options.computer_use_enabled,
             daemon_settings.computer_use_experiment_enabled,
         );
-        let environment = self
-            .task_state
-            .lock()
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .map(|session| session.environment())
-            .unwrap_or_default();
         // A cloud task runs on the provider's hosted environment — nothing
         // local executes, so the launch injections below (agent surface,
         // subagents, workspace code-map index, integrations) would all point
@@ -4704,7 +4719,6 @@ impl WakuBackend {
                 .unwrap_or_default();
             if crate::integrations::deliver::uses_acp(provider)
                 && !self.integrations.http_mcp_supported(provider)
-                && daemon_settings.integrations_enabled
                 && !daemon_settings.integrations.is_empty()
             {
                 bail!(
@@ -5239,13 +5253,10 @@ impl WakuBackend {
                 }
             }
         };
-        if let Some(employee) = employee {
+        if let Some(employee) = &employee {
             session.id = employee.session_id;
             session.set_title(&employee.identity.name);
-            self.boss.update(|state| {
-                state.employees.push(employee);
-                Ok(())
-            })?;
+            session.agent_rename_allowed = false;
         }
         let session_id = session.id;
         let turn_id = Uuid::new_v4();
@@ -5255,6 +5266,14 @@ impl WakuBackend {
             let mut state = self.task_state.lock();
             state.push_session(session);
             self.task_store.save(&mut state)?;
+        }
+        if let Some(employee) = employee {
+            // Publish the role only after its task exists, so a revision
+            // subscriber can immediately open the new employee's transcript.
+            self.boss.update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })?;
         }
         // The adopted prompt above already persisted, so a launch failure
         // still leaves a normal task behind. Delivering it now starts the
@@ -5554,7 +5573,7 @@ impl WakuBackend {
                     context_window: None,
                 };
                 let prompt = format!(
-                    "Assigned project: {project}\nWork in that project, not your private agent harness directory.\n\n{prompt}"
+                    "Assigned project: {project}\nWork in that project and read its AGENTS.md before beginning. If a sandbox mounts the project at another path, use the guest working directory.\n\n{prompt}"
                 );
                 match self.create_agent_task_inner(
                     Some(supervisor),
@@ -5646,7 +5665,14 @@ impl WakuBackend {
             }
             operation => {
                 let rename = matches!(operation, BossOperation::Rename { .. });
+                let refresh_persona = matches!(&operation, BossOperation::UpsertPersona { persona }
+                    if persona.id == self.boss.document().persona_id);
                 let result = self.boss.handle(caller, operation)?;
+                if (rename || refresh_persona)
+                    && let Some(session) = self.boss.document().session_id
+                {
+                    self.boss.reset_context(session);
+                }
                 if rename {
                     let boss = self.boss.document();
                     let mut state = self.task_state.lock();
@@ -5818,11 +5844,10 @@ impl WakuBackend {
                 hidden: false,
             },
         );
-        if self.agent.is_working(target) {
-            // The runtime event forwarder delivers queued prompts in
-            // order once the provider finishes the turn. Mirror the wait
-            // into the session document so every client renders the parked
-            // prompt as a queued follow-up chip.
+        let managed = self.boss.is_managed(target);
+        if managed {
+            // Result indexes must survive a failed supervisor launch and a
+            // subsequent daemon restart, even when the supervisor was idle.
             mirror_agent_queued_prompt(
                 &self.task_state,
                 &self.task_store,
@@ -5831,6 +5856,22 @@ impl WakuBackend {
                 &prompt,
                 sender,
             )?;
+        }
+        if self.agent.is_working(target) {
+            // The runtime event forwarder delivers queued prompts in
+            // order once the provider finishes the turn. Mirror the wait
+            // into the session document so every client renders the parked
+            // prompt as a queued follow-up chip.
+            if !managed {
+                mirror_agent_queued_prompt(
+                    &self.task_state,
+                    &self.task_store,
+                    target,
+                    queued_id,
+                    &prompt,
+                    sender,
+                )?;
+            }
             if let Some(runtime_id) = self.runtime_id_for(target) {
                 send_agent_queue_changed(
                     &self.task_state,
@@ -6011,7 +6052,10 @@ impl WakuBackend {
                     .and_then(|session| session.side_chat_of)
                     == Some(target)
         });
-        if !in_scope && !agent.is_some_and(|id| self.boss.is_managed(id)) {
+        if !in_scope
+            && !self.boss.is_managed(target)
+            && !agent.is_some_and(|id| self.boss.is_managed(id))
+        {
             self.require_agent_tools()?;
         }
         let mut state = self.task_state.lock();
@@ -10888,6 +10932,78 @@ mod tests {
         );
         assert_eq!(session.turns[0].status, TurnStatus::Completed);
         assert!(!session.transcript_index().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+    #[test]
+    fn boss_completion_retires_runtime_revokes_token_and_delivers_one_index() {
+        let root = std::env::temp_dir().join(format!("boss-finish-{}", Uuid::new_v4()));
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(supervisor);
+                Ok(())
+            })
+            .unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let employee = backend
+            .boss
+            .prepare_employee(supervisor, persona, "Release checks".into())
+            .unwrap();
+        let employee_id = employee.session_id;
+        backend
+            .boss
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        let mut child = AgentSession::new(
+            backend.task_state.lock().sessions[0].project_id,
+            ProviderKind::Codex,
+        );
+        child.id = employee_id;
+        child.begin_turn("Run tests");
+        child.push_message(crate::model::MessageRole::Assistant, "Tests passed");
+        child.finish_active_turn(TurnStatus::Completed);
+        {
+            let mut state = backend.task_state.lock();
+            state.push_session(child);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let parent_capture = Arc::new(CaptureDriver::default());
+        let child_capture = Arc::new(CaptureDriver::default());
+        for (id, capture) in [
+            (supervisor, parent_capture.clone()),
+            (employee_id, child_capture.clone()),
+        ] {
+            backend.sessions.lock().insert(
+                id,
+                RuntimeEntry {
+                    runtime_id: Uuid::new_v4(),
+                    driver: DriverHandle::from_control(capture),
+                    last_active: std::time::Instant::now(),
+                    resumable: false,
+                    computer_use_available: false,
+                    provider: ProviderKind::Codex,
+                    cwd: root.clone(),
+                },
+            );
+        }
+        let token = backend.agent.mint(employee_id);
+        assert_eq!(backend.agent.resolve(&token), Some(employee_id));
+        backend.finish_boss_employee(employee_id).unwrap();
+        backend.finish_boss_employee(employee_id).unwrap();
+        assert!(backend.boss.employee(employee_id).unwrap().expired);
+        assert!(backend.agent.resolve(&token).is_none());
+        assert!(!backend.sessions.lock().contains_key(&employee_id));
+        assert_eq!(*child_capture.shutdowns.lock(), 1);
+        let prompts = parent_capture.prompts.lock();
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains(&employee_id.to_string()));
+        assert!(prompts[0].contains("Turn 1"));
+        assert!(prompts[0].contains("Tests passed"));
+        assert!(backend.boss.require_active(employee_id).is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 }

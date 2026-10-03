@@ -2265,7 +2265,9 @@ impl Waku {
     /// same flags `navigation_location` reads — a page beats the selection
     /// parked underneath it.
     pub(super) fn active_right_panel_owner(&self) -> RightPanelOwner {
-        if self.notifications.open {
+        if let Some((key, _)) = self.boss_ui.page {
+            RightPanelOwner::Boss(key)
+        } else if self.notifications.open {
             RightPanelOwner::Inbox
         } else if self.automations_page {
             RightPanelOwner::Automations
@@ -2316,7 +2318,9 @@ impl Waku {
                     | RightPanelSurface::FileAtRef { .. }
             ),
             RightPanelOwner::Inbox => matches!(surface, RightPanelSurface::GitHub(_)),
-            RightPanelOwner::Drafts | RightPanelOwner::Automations => false,
+            RightPanelOwner::Boss(_) | RightPanelOwner::Drafts | RightPanelOwner::Automations => {
+                false
+            }
         }
     }
 
@@ -2403,7 +2407,10 @@ impl Waku {
         // the hidden strip it mounts over the user's last real value.
         if !matches!(
             self.right_panel_live_owner,
-            RightPanelOwner::Drafts | RightPanelOwner::Automations | RightPanelOwner::Inbox
+            RightPanelOwner::Boss(_)
+                | RightPanelOwner::Drafts
+                | RightPanelOwner::Automations
+                | RightPanelOwner::Inbox
         ) {
             self.state.right_panel_visible = self.right_panel_visible;
         }
@@ -8047,6 +8054,7 @@ impl Waku {
                 .find(|project| project.id == project_id)
                 .map(|project| project.path.clone()),
             RightPanelOwner::Inbox
+            | RightPanelOwner::Boss(_)
             | RightPanelOwner::Drafts
             | RightPanelOwner::Automations
             | RightPanelOwner::Bare => None,

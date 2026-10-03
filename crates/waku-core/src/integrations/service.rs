@@ -165,15 +165,19 @@ impl IntegrationService {
 
     pub(crate) fn scoped_mcp_servers(&self, task: Uuid, grants: &[String]) -> Vec<McpServerSpec> {
         let settings = self.inner.settings.get();
-        if !settings.integrations_enabled {
-            return Vec::new();
-        }
         self.revoke_task(task);
         let token = format!("gms{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        self.inner
-            .scoped_tokens
-            .lock()
-            .insert(token.clone(), (task, grants.to_vec()));
+        self.inner.scoped_tokens.lock().insert(
+            token.clone(),
+            (
+                task,
+                if settings.integrations_enabled {
+                    grants.to_vec()
+                } else {
+                    Vec::new()
+                },
+            ),
+        );
         // Override every managed entry, including denied ones inherited from
         // provider files. The proxy denies endpoints outside this token's grants.
         settings
@@ -406,7 +410,7 @@ mod boss_tests {
         let mut document = settings.get();
         document.integrations_enabled = true;
         settings.replace(document).unwrap();
-        let service = IntegrationService::new(settings, root.clone()).unwrap();
+        let service = IntegrationService::new(settings.clone(), root.clone()).unwrap();
         let task = Uuid::new_v4();
         service.scoped_mcp_servers(task, &["linear".into()]);
         let token = service
@@ -423,6 +427,19 @@ mod boss_tests {
         assert!(service.inner.permits(service.proxy_token(), "github"));
         service.revoke_task(task);
         assert!(!service.inner.permits(&token, "linear"));
+        let mut document = settings.get();
+        document.integrations_enabled = false;
+        settings.replace(document).unwrap();
+        service.scoped_mcp_servers(task, &["linear".into()]);
+        let disabled_token = service
+            .inner
+            .scoped_tokens
+            .lock()
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        assert!(!service.inner.permits(&disabled_token, "linear"));
         let _ = std::fs::remove_dir_all(root);
     }
 }

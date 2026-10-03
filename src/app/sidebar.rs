@@ -984,6 +984,9 @@ pub(super) enum SidebarRow {
     Inbox,
     /// Opens the Automations page and scrolls with history.
     Automations,
+    BossHeader,
+    Boss(waku_client::DaemonKey),
+    Employee(Uuid),
     /// Group header; the first row also carries the sidebar actions.
     Header(SidebarGroup),
     /// A started session.
@@ -1083,8 +1086,11 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Header(SidebarGroup::Terminals) => {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
-        SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
+        SidebarRow::BossHeader | SidebarRow::Header(_) => {
+            SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
+        }
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
+        SidebarRow::Boss(_) | SidebarRow::Employee(_) => 42.0,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::ShowMore(_) | SidebarRow::ShowDormant(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
@@ -3273,6 +3279,7 @@ impl Waku {
                             && session.archived_at.is_none()
                             && !session.is_side_chat()
                             && !self.friend_sessions.contains_key(&session.id)
+                            && !self.boss_ui.managed.contains(&session.id)
                     })
                     .collect::<Vec<_>>();
                 sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
@@ -3484,6 +3491,7 @@ impl Waku {
     /// today's date, and each session's derived dormancy.
     pub(super) fn sidebar_rows_cached(&self, today: NaiveDate) -> Rc<Vec<SidebarRow>> {
         let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
+        fingerprint = mix(fingerprint, self.boss_ui.revision);
         fingerprint = mix(
             fingerprint,
             match self.state.sidebar_grouping {
@@ -3681,6 +3689,17 @@ impl Waku {
             }
         }
         rows.push(SidebarRow::GroupSpacer);
+
+        if !self.boss_ui.hosts.is_empty() {
+            rows.push(SidebarRow::BossHeader);
+            for key in &self.boss_ui.hosts {
+                rows.push(SidebarRow::Boss(*key));
+                if let Some(active) = self.boss_ui.active.get(key) {
+                    rows.extend(active.iter().copied().map(SidebarRow::Employee));
+                }
+            }
+            rows.push(SidebarRow::GroupSpacer);
+        }
 
         // Pinned tasks lead the sidebar in both groupings, ordered by the same
         // recency the row displays — newest first, independent of the ordering
@@ -3998,6 +4017,17 @@ impl Waku {
             SidebarRow::Automations => self
                 .render_sidebar_automations(window, cx)
                 .into_any_element(),
+            SidebarRow::BossHeader => div()
+                .px(px(12.0))
+                .h(px(
+                    SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
+                ))
+                .text_size(sp(11.0))
+                .text_color(Theme::current(cx).text_tertiary)
+                .child(tr!("boss.group"))
+                .into_any_element(),
+            SidebarRow::Boss(key) => self.render_boss_sidebar_row(key, cx),
+            SidebarRow::Employee(id) => self.render_boss_employee_row(id, cx),
             SidebarRow::Header(group) => {
                 // The header actions belong to the session history — the
                 // Terminals group sits above it but never carries them.
@@ -6067,6 +6097,7 @@ impl Waku {
         let session_surface = self.selected_terminal.is_none()
             && !self.drafts_page
             && !self.automations_page
+            && self.boss_ui.page.is_none()
             && self.projects_page.is_none()
             && !self.notifications.open;
         let header_phase = session_surface

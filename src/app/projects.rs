@@ -756,6 +756,7 @@ impl Waku {
         self.pending_session_activation = None;
         self.drafts_page = false;
         self.automations_page = false;
+        self.boss_ui.page = None;
         self.automations_detail = None;
         self.fold_terminals_group_for_navigation();
         self.projects_page = Some(project_id);

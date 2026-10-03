@@ -20,6 +20,7 @@ pub struct BossService {
     pub(crate) operation_lock: Mutex<()>,
     backend: Mutex<std::sync::Weak<crate::daemon::WakuBackend>>,
     interrupted: Mutex<Vec<Uuid>>,
+    projects: Mutex<std::collections::HashMap<Uuid, PathBuf>>,
     injected: Mutex<std::collections::HashSet<Uuid>>,
 }
 
@@ -48,6 +49,7 @@ impl BossService {
             notifier: Mutex::new(None),
             operation_lock: Mutex::new(()),
             backend: Mutex::new(std::sync::Weak::new()),
+            projects: Mutex::new(std::collections::HashMap::new()),
             injected: Mutex::new(std::collections::HashSet::new()),
         };
         service.save(&service.state.lock())?;
@@ -88,6 +90,9 @@ impl BossService {
     }
 
     pub fn require_active(&self, session: Uuid) -> anyhow::Result<()> {
+        if self.interrupted.lock().contains(&session) {
+            bail!("employee was interrupted by daemon restart; summon a new employee");
+        }
         if self.employee(session).is_some_and(|entry| entry.expired) {
             bail!("employee has expired; summon a new employee for another job");
         }
@@ -204,6 +209,10 @@ impl BossService {
         Ok(path)
     }
 
+    pub fn set_project_context(&self, session: Uuid, path: PathBuf) {
+        self.projects.lock().insert(session, path);
+    }
+
     pub fn reset_context(&self, session: Uuid) {
         self.injected.lock().remove(&session);
     }
@@ -239,9 +248,17 @@ impl BossService {
                 self.root.join("files").display()
             )
         };
+        let project_context = self.projects.lock().get(&session)
+            .map(|path| format!("Project context: {}. For a job in another project, supply its absolute path when summoning. If this path is unavailable inside a sandbox, the guest's current working directory is the assigned project.", path.display()))
+            .unwrap_or_default();
         format!(
-            "<boss-persona>\n{}\n\n{}\n</boss-persona>\n\n{prompt}",
-            persona.markdown, role
+            "<boss-persona>\n{}\n\n{}\nKnowledge files: {}. Read them selectively through the Boss readFile operation.\n{project_context}\n</boss-persona>\n\n{prompt}",
+            persona.markdown,
+            role,
+            employee
+                .map(|entry| entry.knowledge_files.as_slice())
+                .unwrap_or(&persona.knowledge_files)
+                .join(", ")
         )
     }
 
@@ -250,7 +267,7 @@ impl BossService {
     }
 
     pub fn recover_interrupted(&self) {
-        let ids = std::mem::take(&mut *self.interrupted.lock());
+        let ids = self.interrupted.lock().clone();
         if ids.is_empty() {
             return;
         }
@@ -297,6 +314,8 @@ impl BossService {
             Ok(())
         })?;
         self.reset_context(session);
+        self.projects.lock().remove(&session);
+        self.interrupted.lock().retain(|id| *id != session);
         Ok(employee)
     }
 
@@ -804,6 +823,12 @@ mod tests {
                 .authorize_transcript(Some(Uuid::new_v4()), child_id)
                 .is_err()
         );
+        let restarted = BossService::open(root.clone()).unwrap();
+        assert!(
+            restarted.require_active(child_id).is_err(),
+            "interrupted employees cannot resume before cleanup"
+        );
+        drop(restarted);
         assert!(service.expire(parent_id).unwrap().is_some());
         assert!(service.expire(parent_id).unwrap().is_none());
         assert!(

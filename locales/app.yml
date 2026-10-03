@@ -5898,3 +5898,38 @@ routing.feature_route_handoff_description:
   en: Uses settled context and the next request to judge whether a Hard-started Auto task can use Medium or needs Hard again; batches the effort check
 transcript.model_handoff:
   en: Auto routing switched from %{from} to %{to}.
+
+boss:
+  group: Boss
+  brain: Memory and personas
+  chat: Chat with boss
+  history: Employees
+  memory: Memory and files
+  personas: Personas
+  history_hint: Recent employees, including completed jobs.
+  persona_hint: The boss assigns these personas to employees.
+  new_persona: New persona
+  rename: Rename boss
+  new_file: New file
+  new_folder: New folder
+  parent: Up
+  name_path: Name or file path
+  markdown: Markdown content
+  knowledge: Knowledge files (one relative path per line)
+  memory_grants: Memory folders (one folder beneath memory/ per line)
+  permissions_hint: Grants apply when an employee is summoned. General task filesystem permissions still apply.
+  delegate: May summon employees
+  computer: Computer use
+  select_document: Select a file or persona to view and edit it.
+  save: Save
+  discard: Discard changes
+  saved: Saved
+  loading: Loading…
+  working: Working
+  finished: Finished
+  expired_hint: This employee has finished. Send another request to the boss.
+  save_first: Save or discard your changes before selecting another document.
+  unreachable: The boss's daemon is unavailable.
+  project_required: Add a project on this daemon before opening its boss chat.
+  unexpected_response: The daemon returned an unexpected Boss response.
+  failed: 'Boss operation failed: %{error}'

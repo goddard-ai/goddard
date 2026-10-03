@@ -1,0 +1,1 @@
+- Added Boss after Terminals: a persistent boss delegates work to temporary employees, with recent employee chats and a brain page for editing compartmentalized memory, personas, and their permissions.
