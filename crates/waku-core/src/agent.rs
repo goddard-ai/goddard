@@ -116,12 +116,13 @@ pub struct AgentState {
     /// The provider never sees these — the response commands the client
     /// sends resolve here instead of reaching the driver.
     pending_asks: Mutex<HashMap<Uuid, HashMap<String, Sender<AgentAskOutcome>>>>,
-    /// Daemon-owned `agentRenameSelf` requests parked on a session, by
-    /// request id. The parked sender takes the chosen permission option id —
-    /// or `None` when the request died unanswered. Unlike asks these are NOT
-    /// resolved by a finished turn: the request card must stay answerable
-    /// after the turn that raised it folds.
-    pending_renames: Mutex<HashMap<Uuid, HashMap<String, Sender<Option<String>>>>>,
+    /// Daemon-owned permission requests (`agentRenameSelf`,
+    /// `agentProposeArchive`) parked on a session, by request id. The parked
+    /// sender takes the chosen permission option id — or `None` when the
+    /// request died unanswered. Unlike asks these are NOT resolved by a
+    /// finished turn: the request card must stay answerable after the turn
+    /// that raised it folds.
+    pending_permissions: Mutex<HashMap<Uuid, HashMap<String, Sender<Option<String>>>>>,
 }
 
 impl AgentState {
@@ -178,7 +179,7 @@ impl AgentState {
         self.index_steers.lock().remove(&session_id);
         self.parent_indexes.lock().remove(&session_id);
         self.drain_asks(session_id);
-        self.drain_renames(session_id);
+        self.drain_permissions(session_id);
     }
 
     /// Whether the session's side-chat parent index is still undelivered.
@@ -270,8 +271,8 @@ impl AgentState {
                 let _ = sender.send(AgentAskOutcome::Cancelled);
             }
         }
-        for (_, renames) in std::mem::take(&mut *self.pending_renames.lock()) {
-            for (_, sender) in renames {
+        for (_, permissions) in std::mem::take(&mut *self.pending_permissions.lock()) {
+            for (_, sender) in permissions {
                 let _ = sender.send(None);
             }
         }
@@ -310,9 +311,9 @@ impl AgentState {
                 self.pending_steers.lock().remove(&session_id);
                 self.index_steers.lock().remove(&session_id);
                 self.drain_asks(session_id);
-                // The CLI call waiting on a rename answer died with the
+                // The CLI call waiting on a permission answer died with the
                 // process — the card is gone with it.
-                self.drain_renames(session_id);
+                self.drain_permissions(session_id);
             }
             DriverEvent::SteerRejected { message, .. } => {
                 // A refused steer settles without delivering: the parent
@@ -560,19 +561,19 @@ impl AgentState {
         true
     }
 
-    /// Park a daemon-owned `agentRenameSelf` request on the session. The
-    /// caller blocks on the receiver until a `Respond` command resolves it
-    /// or a drain resolves it `None`. Returns `false` without parking when
-    /// another rename is already waiting — the card shows one request at a
-    /// time, so a second would hide the first and park forever.
-    pub fn try_park_rename(
+    /// Park a daemon-owned permission request on the session. The caller
+    /// blocks on the receiver until a `Respond` command resolves it or a
+    /// drain resolves it `None`. Returns `false` without parking when
+    /// another request is already waiting — the pinned card holds one
+    /// request at a time, so a second would hide the first and park forever.
+    pub fn try_park_permission(
         &self,
         session_id: Uuid,
         request_id: String,
         settled: Sender<Option<String>>,
     ) -> bool {
-        let mut renames = self.pending_renames.lock();
-        let pending = renames.entry(session_id).or_default();
+        let mut permissions = self.pending_permissions.lock();
+        let pending = permissions.entry(session_id).or_default();
         if !pending.is_empty() {
             return false;
         }
@@ -580,35 +581,35 @@ impl AgentState {
         true
     }
 
-    /// Drop a parked rename without resolving it — the request that parked
-    /// it is gone, so there is no one left to answer.
-    pub fn remove_rename(&self, session_id: Uuid, request_id: &str) {
-        let mut renames = self.pending_renames.lock();
-        if let Some(pending) = renames.get_mut(&session_id) {
+    /// Drop a parked permission without resolving it — the request that
+    /// parked it is gone, so there is no one left to answer.
+    pub fn remove_permission(&self, session_id: Uuid, request_id: &str) {
+        let mut permissions = self.pending_permissions.lock();
+        if let Some(pending) = permissions.get_mut(&session_id) {
             pending.remove(request_id);
             if pending.is_empty() {
-                renames.remove(&session_id);
+                permissions.remove(&session_id);
             }
         }
     }
 
-    /// Settle every parked rename on the session unanswered — the runtime or
-    /// credential underneath them went away, so no answer can still reach
-    /// the callers. A finished turn is deliberately NOT a drain point: the
-    /// request card must stay answerable after the turn folds.
-    pub fn drain_renames(&self, session_id: Uuid) {
-        if let Some(renames) = self.pending_renames.lock().remove(&session_id) {
-            for (_, sender) in renames {
+    /// Settle every parked permission on the session unanswered — the
+    /// runtime or credential underneath them went away, so no answer can
+    /// still reach the callers. A finished turn is deliberately NOT a drain
+    /// point: the request card must stay answerable after the turn folds.
+    pub fn drain_permissions(&self, session_id: Uuid) {
+        if let Some(permissions) = self.pending_permissions.lock().remove(&session_id) {
+            for (_, sender) in permissions {
                 let _ = sender.send(None);
             }
         }
     }
 
-    /// Resolve a parked `agentRenameSelf` from a client `Respond` command.
-    /// Returns the settled request id when it names a daemon-owned rename —
+    /// Resolve a parked permission request from a client `Respond` command.
+    /// Returns the settled request id when it names a daemon-owned request —
     /// the command is consumed and must not reach the provider driver, which
     /// has nothing parked under that id.
-    pub fn resolve_rename(&self, session_id: Uuid, command: &Command) -> Option<String> {
+    pub fn resolve_permission(&self, session_id: Uuid, command: &Command) -> Option<String> {
         let Command::Respond {
             request_id,
             option_id,
@@ -617,10 +618,10 @@ impl AgentState {
             return None;
         };
         let sender = self
-            .pending_renames
+            .pending_permissions
             .lock()
             .get_mut(&session_id)
-            .and_then(|renames| renames.remove(request_id));
+            .and_then(|permissions| permissions.remove(request_id));
         let Some(sender) = sender else {
             return None;
         };
@@ -628,10 +629,10 @@ impl AgentState {
         Some(request_id.clone())
     }
 
-    /// Test hook: the parked rename's request id while one waits.
+    /// Test hook: the parked permission's request id while one waits.
     #[cfg(test)]
-    pub fn parked_rename_request(&self, session_id: Uuid) -> Option<String> {
-        self.pending_renames
+    pub fn parked_permission_request(&self, session_id: Uuid) -> Option<String> {
+        self.pending_permissions
             .lock()
             .get(&session_id)?
             .keys()
@@ -844,6 +845,11 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              blocks until they answer, clarify, or dismiss it — use it when \
              a human decision must come back before you can proceed, not \
              for questions a reply can carry.",
+        );
+        instruction.push_str(
+            " `archive` proposes archiving tasks in this project by task id \
+             — the user reviews the named tasks and your reason on a request \
+             card, and nothing is archived without their approval.",
         );
     }
     if let Some(parent) = scope.parent_task_id {

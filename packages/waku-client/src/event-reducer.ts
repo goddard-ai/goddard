@@ -63,17 +63,23 @@ export interface PendingUserInput {
  * `permission`. */
 export const AGENT_RENAME_REQUEST_PREFIX = 'agent-rename-'
 
+/** The request-id prefix the daemon mints for `agentProposeArchive`
+ * permission requests — same daemon-owned, session-parked contract as
+ * `agent-rename-`. */
+export const AGENT_ARCHIVE_REQUEST_PREFIX = 'agent-archive-'
+
 export interface RuntimeEventResult {
   session: AgentSession
   permission?: PendingPermission | null
-  /** Daemon-owned rename request: set on `permission` events carrying the
-   * `agent-rename-` prefix, cleared on `processExited` — deliberately not on
-   * `turnFinished`, since the request outlives the turn that raised it. */
-  renameRequest?: PendingPermission | null
+  /** Daemon-owned request — a rename or an archive proposal: set on
+   * `permission` events carrying the `agent-rename-`/`agent-archive-`
+   * prefix, cleared on `processExited` — deliberately not on `turnFinished`,
+   * since the request outlives the turn that raised it. */
+  daemonRequest?: PendingPermission | null
   userInput?: PendingUserInput | null
-  /** A daemon-owned request (`agent-ask-`/`agent-rename-` id) resolved —
-   * answered on any client or drained with its runtime. Callers drop the
-   * matching pending card whichever map holds it. */
+  /** A daemon-owned request (`agent-ask-`/`agent-rename-`/`agent-archive-`
+   * id) resolved — answered on any client or drained with its runtime.
+   * Callers drop the matching pending card whichever map holds it. */
   settledRequestId?: string
   settled: boolean
   removeRuntime: boolean
@@ -310,11 +316,14 @@ export function reduceRuntimeEvent(
           ? value.options.map(asPermissionOption).filter((o) => o !== null)
           : [],
       }
-      // A rename request parks on the session, not the turn — it can
+      // A daemon-owned request parks on the session, not the turn — it can
       // legitimately arrive as the turn ends, so the turn gate does not
       // apply, and it renders pinned rather than folding away with it.
-      if (parsed.requestId.startsWith(AGENT_RENAME_REQUEST_PREFIX)) {
-        result.renameRequest = parsed
+      if (
+        parsed.requestId.startsWith(AGENT_RENAME_REQUEST_PREFIX) ||
+        parsed.requestId.startsWith(AGENT_ARCHIVE_REQUEST_PREFIX)
+      ) {
+        result.daemonRequest = parsed
         session.status = 'waiting'
         break
       }
@@ -417,7 +426,7 @@ export function reduceRuntimeEvent(
         clock,
       )
       result.permission = null
-      result.renameRequest = null
+      result.daemonRequest = null
       result.userInput = null
       result.removeRuntime = true
       break

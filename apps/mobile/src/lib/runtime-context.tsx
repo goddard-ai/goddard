@@ -103,10 +103,10 @@ function deferrableEvent(event: SequencedEvent): boolean {
 interface RuntimeContextValue {
   runtimes: Record<string, MobileRuntime | undefined>;
   permissions: Record<string, PendingPermission | undefined>;
-  /** Daemon-owned `agentRenameSelf` requests: they outlive the turn that
-   * raised them, so they ride their own map — turn settles never clear
-   * them, `requestSettled` events and answers do. */
-  renameRequests: Record<string, PendingPermission | undefined>;
+  /** Daemon-owned `agentRenameSelf`/`agentProposeArchive` requests: they
+   * outlive the turn that raised them, so they ride their own map — turn
+   * settles never clear them, `requestSettled` events and answers do. */
+  daemonRequests: Record<string, PendingPermission | undefined>;
   userInputs: Record<string, PendingUserInput | undefined>;
   errors: Record<string, string | undefined>;
   attachSession: (session: AgentSession) => Promise<boolean>;
@@ -174,7 +174,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [runtimes, setRuntimes] = useState<Record<string, MobileRuntime | undefined>>({});
   const [permissions, setPermissions] = useState<Record<string, PendingPermission | undefined>>({});
-  const [renameRequests, setRenameRequests] = useState<Record<string, PendingPermission | undefined>>({});
+  const [daemonRequests, setDaemonRequests] = useState<Record<string, PendingPermission | undefined>>({});
   const [userInputs, setUserInputs] = useState<Record<string, PendingUserInput | undefined>>({});
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   const hasRecoveredDisconnectError = daemon.phase === 'connected'
@@ -451,15 +451,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       if (result.permission !== undefined) {
         setPermissions((values) => ({ ...values, [session.id]: result.permission ?? undefined }));
       }
-      if (result.renameRequest !== undefined) {
-        setRenameRequests((values) => ({ ...values, [session.id]: result.renameRequest ?? undefined }));
+      if (result.daemonRequest !== undefined) {
+        setDaemonRequests((values) => ({ ...values, [session.id]: result.daemonRequest ?? undefined }));
       }
       if (result.settledRequestId !== undefined) {
         const settled = result.settledRequestId;
         const drop = <T extends { requestId: string }>(values: Record<string, T | undefined>) =>
           values[session.id]?.requestId === settled ? { ...values, [session.id]: undefined } : values;
         setPermissions(drop);
-        setRenameRequests(drop);
+        setDaemonRequests(drop);
         setUserInputs(drop);
       }
       if (result.userInput !== undefined) {
@@ -998,7 +998,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (!client || !runtime) throw new Error('This task has no live agent runtime');
     await client.request({ type: 'respond', requestId, optionId }, sessionId, runtime.runtimeId);
     setPermissions((values) => ({ ...values, [sessionId]: undefined }));
-    setRenameRequests((values) => ({ ...values, [sessionId]: undefined }));
+    setDaemonRequests((values) => ({ ...values, [sessionId]: undefined }));
     markWorking(sessionId);
   }, [daemon.client, markWorking]);
 
@@ -1157,7 +1157,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await persistOrdered(next);
     if (archived) {
       setPermissions((values) => removeKey(values, sessionId));
-      setRenameRequests((values) => removeKey(values, sessionId));
+      setDaemonRequests((values) => removeKey(values, sessionId));
       setUserInputs((values) => removeKey(values, sessionId));
     }
   }, [cacheSession, daemon.client, loadFullSession, persistOrdered, removeRuntime]);
@@ -1185,7 +1185,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         : current
     ));
     setPermissions((values) => removeKey(values, sessionId));
-    setRenameRequests((values) => removeKey(values, sessionId));
+    setDaemonRequests((values) => removeKey(values, sessionId));
     setUserInputs((values) => removeKey(values, sessionId));
     setErrors((values) => removeKey(values, sessionId));
   }, [daemon.activeProfile?.id, daemon.client, daemon.phase, queryClient, removeRuntime]);
@@ -1286,7 +1286,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setRuntimes({});
     setPermissions({});
-    setRenameRequests({});
+    setDaemonRequests({});
     setUserInputs({});
     setErrors({});
     revalidatedConnections.current = 0;
@@ -1306,7 +1306,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     <RuntimeContext.Provider value={{
       runtimes,
       permissions,
-      renameRequests,
+      daemonRequests,
       userInputs,
       errors,
       attachSession,

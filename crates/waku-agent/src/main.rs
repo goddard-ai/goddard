@@ -43,6 +43,7 @@ USAGE
     goddard-agent create '<json>'            Create a task and start its first prompt
     goddard-agent prompt '<json>'            Send a prompt to an existing task
     goddard-agent rename '<json>'            Rename this task after the user approves the request
+    goddard-agent archive '<json>'           Propose archiving tasks after the user approves the request
     goddard-agent read '<json>'              Read a task's transcript
     goddard-agent search '<json>'            Search this project's task transcripts
     goddard-agent map '<json>'               Find relevant code in this workspace
@@ -96,6 +97,13 @@ USAGE CONTRACT
     recent steps or progress. Unless the task already granted standing
     permission, each call asks the user first — it blocks on the request card
     and fails when the user declines.
+    `archive` proposes archiving tasks by Goddard task id — siblings in this
+    task's project, found through `search`. It is a proposal, not an action:
+    each call renders a request card naming the tasks and your reason, blocks
+    until the user answers, and fails when they decline. Nothing is archived
+    without that approval. Use it when the human asked for cleanup or a
+    task's work is clearly finished — never for exploration or
+    self-orchestration.
     `ask` renders a question card in the user's Goddard client and blocks
     until they answer, clarify, or dismiss it. Use it when the human's
     decision — a choice between options or a confirmation — must come back
@@ -135,7 +143,7 @@ fn schema() -> serde_json::Value {
     json!({
         "boss": {"description": "Role-scoped Boss operations; payload uses a type tag", "operations": ["view", "summon", "control", "transcript", "context", "rename", "renameEmployee", "regenerateAvatar", "upsertPersona", "setEmployeeIcon", "listFiles", "readFile", "writeFile", "createFolder", "publishBundle", "dismissBundle", "speak"], "summon": {"personaId": "UUID assigned by boss", "jobTitle": "purpose-specific job title; Goddard assigns the human name", "prompt": "bounded job", "project": "absolute project path", "workspace": "optional; \"worktree\" runs the employee in a daemon-managed Git worktree instead of the primary checkout", "baseBranch": "required when workspace is \"worktree\"", "provider": "optional inherited provider", "model": "optional inherited model"}, "control": {"sessionId": "employee UUID", "action": {"type": "prompt | steer | stop", "prompt": "required except stop"}}, "transcript": {"sessionId": "employee UUID", "turn": "optional turn number; omit for index", "notes": "pull-only; a finished employee's index arrives unprompted — never poll it"}, "context": {"type": "context", "result": "snapshot of the human's projects, tasks, and automations"}, "files": "paths are relative to the boss's persistent files root; writeFile/createFolder are boss-only while employees may read granted folders — keep durable memory in memory/<topic-or-project>/, record facts and decisions as they surface, and reconcile stale notes instead of duplicating them", "speak": {"parts": ["ordered utterance fragments, 1-8; each becomes or reuses a canned voice clip", "several parts chain into a sentence — isolate proper nouns and reusable phrases as their own parts so generated audio is reused", "boss-only; returns {\"type\":\"speak\",\"delivered\":<client connections reached>} — 0 means nobody could hear it"], "example": {"type": "speak", "parts": ["Your build on ", "Goddard", " finished"]}},  "publishBundle": {"path": "absolute path of an employee-produced file or folder; shows it in the user's sidebar", "name": "optional display name; defaults to the file name"}, "dismissBundle": {"id": "bundle UUID from view"}, "setEmployeeIcon": {"sessionId": "employee UUID", "icon": format!("optional custom icon enum: {} (null clears override)", icons.join(", "))},  "examples": [{"type": "view"}, {"type": "readFile", "path": "memory/work/notes.md"}, {"type": "writeFile", "path": "memory/work/notes.md", "content": "A durable fact"}, {"type": "publishBundle", "path": "/abs/path/to/output", "name": "Q3 report"}], "persona": {"id": "UUID; nil creates a persona", "name": "string", "markdown": "Markdown personality", "knowledgeFiles": "relative paths", "permissions": {"memoryFolders": "relative folder names under memory/", "integrationIds": "connected integration ids", "summonEmployees": "boolean", "computerUse": "boolean"}}},
         "computer": {"js": {"code": "string (required)", "timeout_ms": "integer 1..300000 (default 300000)", "title": "string (optional)"}, "reset": "no payload; resets only this task", "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"},
-        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. There is no per-call approval gate for task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
+        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. `archive` proposes archiving tasks in this task's project — each call shows the user the named tasks and your reason on a request card and blocks on their answer; nothing is archived without approval. There is no per-call approval gate for other task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
         "resource": {
             "syntax": "resource acquire '<json>' | resource run '<json>' -- COMMAND [ARGS] | resource release/cancel '{\"id\":\"UUID\"}' | resource status",
             "acquire": {"resources": {"exclusive": ["ios:SIMULATOR-UDID"], "resident_devices": 1, "native_builds": 1, "desktop_input": 0}, "purpose": "iOS smoke test", "wait_seconds": 600},
@@ -178,6 +186,15 @@ fn schema() -> serde_json::Value {
             "description": "Set this task's title. The user approves each request unless the task already granted standing permission. Cannot rename another task.",
             "fields": { "title": {"type": "string", "required": true} },
             "example": "{\"title\":\"Investigate session startup\"}",
+            "returns": {"ok": true}
+        },
+        "archive": {
+            "description": "Propose archiving tasks in this task's project, by Goddard task id. The user sees the named tasks and your reason on a request card and approves or declines — the call blocks until then and fails on decline. Targets must be started, unarchived, and not side chats; archived tasks' side chats leave with them. Use `search` to find task ids.",
+            "fields": {
+                "task_ids": {"type": "array of strings", "required": true, "notes": "Goddard task UUIDs to archive"},
+                "reason": {"type": "string", "notes": "why these tasks should be archived; shown on the request card"}
+            },
+            "example": "{\"task_ids\":[\"<uuid>\",\"<uuid>\"],\"reason\":\"duplicates of the migration investigation\"}",
             "returns": {"ok": true}
         },
         "read": {
@@ -340,6 +357,13 @@ struct RenamePayload {
 }
 
 #[derive(Deserialize)]
+struct ArchivePayload {
+    task_ids: Vec<Uuid>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct CommandUpsertPayload {
     #[serde(default)]
     id: Option<Uuid>,
@@ -419,7 +443,7 @@ fn run() -> anyhow::Result<()> {
         #[cfg(unix)]
         "__resource_exec" => resources::exec_child(arguments),
         "command" => command(arguments.next().as_deref(), arguments.next()),
-        "create" | "prompt" | "read" | "search" | "map" | "rename" | "ask" | "boss" => {
+        "create" | "prompt" | "read" | "search" | "map" | "rename" | "archive" | "ask" | "boss" => {
             let payload = arguments
                 .next()
                 .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
@@ -428,10 +452,10 @@ fn run() -> anyhow::Result<()> {
             }
             let command = build_command(&subcommand, &payload)?;
             let client = connect()?;
-            // `ask` and an ungranted `rename` wait on a human — a clock
-            // can't bound that, so they park until the daemon resolves them
-            // or the connection drops.
-            let response = if matches!(subcommand.as_str(), "ask" | "rename") {
+            // `ask`, `archive`, and an ungranted `rename` wait on a human —
+            // a clock can't bound that, so they park until the daemon
+            // resolves them or the connection drops.
+            let response = if matches!(subcommand.as_str(), "ask" | "rename" | "archive") {
                 client.request_with_timeout(request_session_id(), Uuid::nil(), command, None)?
             } else {
                 client.request(request_session_id(), Uuid::nil(), command)?
@@ -630,6 +654,14 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
                 .context("`rename` takes a JSON object with a title")?;
             Ok(Command::AgentRenameSelf {
                 title: payload.title,
+            })
+        }
+        "archive" => {
+            let payload: ArchivePayload = serde_json::from_str(payload)
+                .context("`archive` takes a JSON object with task_ids")?;
+            Ok(Command::AgentProposeArchive {
+                task_ids: payload.task_ids,
+                reason: payload.reason,
             })
         }
         "read" => {
@@ -1000,6 +1032,28 @@ mod tests {
         let command = build_command("rename", r#"{"title":"My task"}"#).unwrap();
         assert!(matches!(command, Command::AgentRenameSelf { title } if title == "My task"));
         assert!(build_command("rename", "{}").is_err());
+    }
+
+    #[test]
+    fn an_archive_payload_carries_task_ids_and_an_optional_reason() {
+        let id = Uuid::new_v4();
+        let command = build_command(
+            "archive",
+            &format!(r#"{{"task_ids":["{id}"],"reason":"work landed"}}"#),
+        )
+        .unwrap();
+        assert!(matches!(
+            command,
+            Command::AgentProposeArchive { task_ids, reason }
+                if task_ids == [id] && reason.as_deref() == Some("work landed")
+        ));
+        let command = build_command("archive", &format!(r#"{{"task_ids":["{id}"]}}"#)).unwrap();
+        assert!(matches!(
+            command,
+            Command::AgentProposeArchive { task_ids, reason: None } if task_ids == [id]
+        ));
+        assert!(build_command("archive", "{}").is_err());
+        assert!(build_command("archive", r#"{"task_ids":"not-a-list"}"#).is_err());
     }
 
     #[test]

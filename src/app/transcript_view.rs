@@ -236,7 +236,7 @@ impl Waku {
         let annotation_tooltip = self.render_annotation_tooltip(cx);
         let annotation_ref_tooltip = self.render_annotation_ref_tooltip(cx);
         let commit_popover = self.render_transcript_commit_popover(cx);
-        let rename_request = self.render_rename_request(cx);
+        let daemon_request = self.render_daemon_request(cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
         // bar writes offsets straight into the list rather than through its
@@ -454,7 +454,7 @@ impl Waku {
                 theme.surface,
             ))
             .children(navigation_rail)
-            .children(rename_request)
+            .children(daemon_request)
             .children(scroll_to_bottom)
             .children(status_marker_float)
             .child(scrollbar::vertical(
@@ -476,12 +476,17 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The daemon-owned `agentRenameSelf` request, pinned to the top of the
-    /// transcript viewport. It is an overlay, not a row — scrolling and
-    /// turn folds can never hide it — and it stays until the user answers
-    /// or the daemon settles the request, whichever happens first.
-    fn render_rename_request(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let permission = self.selected_runtime()?.pending_rename.as_ref()?.clone();
+    /// The daemon-owned `agentRenameSelf`/`agentProposeArchive` request,
+    /// pinned to the top of the transcript viewport. It is an overlay, not a
+    /// row — scrolling and turn folds can never hide it — and it stays until
+    /// the user answers or the daemon settles the request, whichever happens
+    /// first.
+    fn render_daemon_request(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let permission = self
+            .selected_runtime()?
+            .pending_daemon_request
+            .as_ref()?
+            .clone();
         let theme = Theme::current(cx);
         let request_id = permission.request_id.clone();
         // Escape answers with the first deny option — a real response, not
@@ -498,13 +503,13 @@ impl Waku {
             let option_id = option.id.clone();
             let allow = option.allow;
             let focus = self.transcript_control_focus(
-                format!("rename-request-{}-{}", permission.request_id, option.id),
+                format!("daemon-request-{}-{}", permission.request_id, option.id),
                 cx,
             );
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
-                        "rename-request-{}-{}",
+                        "daemon-request-{}-{}",
                         permission.request_id, option.id
                     )))
                     .track_focus(&focus)
@@ -544,14 +549,14 @@ impl Waku {
                             .unwrap_or_else(|| option.label.clone()),
                     ))
                     .on_activation(cx, move |this, _, cx| {
-                        this.respond_rename_request(request_id.clone(), option_id.clone(), cx);
+                        this.respond_daemon_request(request_id.clone(), option_id.clone(), cx);
                     }),
             );
         }
         let deny_request_id = request_id.clone();
         Some(
             div()
-                .id("rename-request-layer")
+                .id("daemon-request-layer")
                 .absolute()
                 .top(px(8.0))
                 .left_0()
@@ -559,7 +564,7 @@ impl Waku {
                 .px(px(20.0))
                 .child(
                     div()
-                        .id("rename-request")
+                        .id("daemon-request")
                         .w_full()
                         .max_w(px(CONTENT_MAX_WIDTH))
                         .mx_auto()
@@ -574,7 +579,7 @@ impl Waku {
                             if event.keystroke.key == "escape"
                                 && let Some(option_id) = deny_option.clone()
                             {
-                                this.respond_rename_request(deny_request_id.clone(), option_id, cx);
+                                this.respond_daemon_request(deny_request_id.clone(), option_id, cx);
                                 cx.stop_propagation();
                             }
                         }))
@@ -600,7 +605,7 @@ impl Waku {
                         )
                         .child(
                             div()
-                                .id("rename-request-detail")
+                                .id("daemon-request-detail")
                                 .mt(px(8.0))
                                 .max_h(px(92.0))
                                 .overflow_y_scroll()

@@ -62,6 +62,10 @@ pub const AGENT_ASK_REQUEST_PREFIX: &str = "agent-ask-";
 /// were asked under, so clients render them pinned rather than folded away
 /// with it.
 pub const AGENT_RENAME_REQUEST_PREFIX: &str = "agent-rename-";
+/// The request-id prefix the daemon mints for `agentProposeArchive`
+/// permission requests. Same contract as the rename prefix: daemon-owned,
+/// parked on the session rather than the turn, rendered pinned.
+pub const AGENT_ARCHIVE_REQUEST_PREFIX: &str = "agent-archive-";
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -622,6 +626,18 @@ pub enum Command {
     /// Set the title of the calling agent's own task. Requires a per-task grant.
     AgentRenameSelf {
         title: String,
+    },
+    /// Scoped agent credential only: propose archiving daemon tasks. The
+    /// daemon parks a permission card on the calling session and archives
+    /// only what the user approves — never on the request alone.
+    AgentProposeArchive {
+        /// Waku task ids to archive. Each must name a started, unarchived
+        /// task in the caller's own project; side chats leave with their
+        /// parent instead.
+        task_ids: Vec<Uuid>,
+        /// The agent's stated reason, shown on the approval card.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     /// Cancel a daemon-owned queued agent prompt before it delivers. The
     /// session id rides the request envelope; `queued_message_id` names the

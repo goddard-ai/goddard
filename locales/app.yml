@@ -3284,6 +3284,12 @@ commands.rename_description:
   en: Rename this task with /rename followed by a title
 commands.rename_no_session:
   en: Select a task to rename
+session.agent_archive_request_many:
+  en: "Archive %{count} tasks?"
+session.agent_archive_request_detail:
+  en: "The agent wants to archive %{tasks}."
+session.agent_archive_request_detail_reason:
+  en: "The agent wants to archive %{tasks}.\nReason: %{reason}"
 session.agent_rename_request:
   en: Rename this task to “{title}”?
 session.agent_rename_request_from:

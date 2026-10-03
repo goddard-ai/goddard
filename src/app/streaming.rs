@@ -483,12 +483,15 @@ impl Waku {
                 detail_i18n,
                 options,
             } => {
-                // A daemon-owned rename request parks on the session, not
-                // the turn — it can legitimately arrive as the turn ends,
-                // so the turn gate does not apply, and it renders pinned
-                // atop the transcript rather than folding away with it.
-                if request_id.starts_with(waku_protocol::AGENT_RENAME_REQUEST_PREFIX) {
-                    runtime.pending_rename = Some(PendingPermission {
+                // A daemon-owned request — a rename or an archive proposal —
+                // parks on the session, not the turn: it can legitimately
+                // arrive as the turn ends, so the turn gate does not apply,
+                // and it renders pinned atop the transcript rather than
+                // folding away with it.
+                if request_id.starts_with(waku_protocol::AGENT_RENAME_REQUEST_PREFIX)
+                    || request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX)
+                {
+                    runtime.pending_daemon_request = Some(PendingPermission {
                         request_id,
                         title,
                         title_i18n,
@@ -553,7 +556,10 @@ impl Waku {
                 // matching card everywhere. Deliberately unconditional —
                 // these requests can outlive the turn that raised them.
                 let mut settled = false;
-                for pending in [&mut runtime.pending_rename, &mut runtime.pending_permission] {
+                for pending in [
+                    &mut runtime.pending_daemon_request,
+                    &mut runtime.pending_permission,
+                ] {
                     if pending
                         .as_ref()
                         .is_some_and(|pending| pending.request_id == request_id)
@@ -1114,7 +1120,7 @@ impl Waku {
                 self.complete_turn_blocks(session_id);
                 runtime.stream_phase = None;
                 runtime.pending_permission = None;
-                runtime.pending_rename = None;
+                runtime.pending_daemon_request = None;
                 runtime.pending_user_input = None;
                 runtime.pending_computer_approval = None;
                 runtime.driver.cancel_computer_use();

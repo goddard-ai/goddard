@@ -1193,6 +1193,9 @@ commands.land_description: 变基到基础分支并将此任务的提交合入�
 commands.side_description: 在此任务的面板中打开侧聊
 commands.rename_description: 在 /rename 后输入名称以重命名此任务
 commands.rename_no_session: 请选择要重命名的任务
+session.agent_archive_request_many: "归档 %{count} 个任务？"
+session.agent_archive_request_detail: "智能体想要归档 %{tasks}。"
+session.agent_archive_request_detail_reason: "智能体想要归档 %{tasks}。\n原因：%{reason}"
 session.agent_rename_request: 将此任务重命名为“{title}”？
 session.agent_rename_request_from: 智能体想要将此任务从“{current}”重命名。
 session.agent_rename_once: 重命名

@@ -465,7 +465,7 @@ export function SessionView({
   const subtitle = linkSubtitle ?? (subtitleParts.length ? subtitleParts.join(' · ') : null);
   const hasSession = Boolean(session);
   const unseenReplies = useHasUnseenReplies(sessionId);
-  const renameRequest = session ? runtime.renameRequests[session.id] : undefined;
+  const daemonRequest = session ? runtime.daemonRequests[session.id] : undefined;
   const transcriptMounted = Boolean(
     session && mountedTranscriptSessionId === session.id,
   );
@@ -639,15 +639,15 @@ export function SessionView({
             />
           </View>
         )}
-        {/* A daemon-owned rename request pins above the transcript — it's
-            not a row, so scrolling and turn folds can never hide it — until
-            the user answers or the daemon settles it. */}
-        {session && renameRequest ? (
-          <View style={[styles.renameRequestCard, { top: headerInset + 8 }]}>
+        {/* A daemon-owned request pins above the transcript — it's not a
+            row, so scrolling and turn folds can never hide it — until the
+            user answers or the daemon settles it. */}
+        {session && daemonRequest ? (
+          <View style={[styles.daemonRequestCard, { top: headerInset + 8 }]}>
             <PermissionPanel
-              permission={renameRequest}
+              permission={daemonRequest}
               onRespond={(optionId) =>
-                runtime.respond(session.id, renameRequest.requestId, optionId)
+                runtime.respond(session.id, daemonRequest.requestId, optionId)
               }
             />
           </View>
@@ -846,7 +846,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   body: { flex: 1 },
   placeholder: { alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 32 },
-  renameRequestCard: {
+  daemonRequestCard: {
     left: 12,
     position: 'absolute',
     right: 12,

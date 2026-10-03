@@ -1466,11 +1466,12 @@ struct SessionRuntime {
     pending_reasoning_newlines: usize,
     stream_remeasure_pending: bool,
     pending_permission: Option<PendingPermission>,
-    /// A daemon-owned `agentRenameSelf` request. Unlike the turn-scoped
-    /// requests above it survives `TurnFinished` — it renders pinned atop
-    /// the transcript so the fold can never hide it — and only an answer,
-    /// `RequestSettled`, or a lost runtime clears it.
-    pending_rename: Option<PendingPermission>,
+    /// A daemon-owned agent request — `agentRenameSelf` or
+    /// `agentProposeArchive`. Unlike the turn-scoped requests above it
+    /// survives `TurnFinished` — it renders pinned atop the transcript so
+    /// the fold can never hide it — and only an answer, `RequestSettled`,
+    /// or a lost runtime clears it.
+    pending_daemon_request: Option<PendingPermission>,
     pending_user_input: Option<PendingUserInput>,
     pending_computer_approval: Option<PendingComputerApproval>,
     /// Back-to-front stack of window previews captured during the active turn.

@@ -4321,13 +4321,13 @@ impl Waku {
             self.cancel_message_edit(window, cx);
             return;
         }
-        // A pinned rename request eats the first bare Escape — answering it
+        // A pinned daemon request eats the first bare Escape — answering it
         // with the deny option is a real response, not a hide, so the
         // parked CLI call settles instead of hanging on a card the user
         // can no longer see.
-        let rename_deny = self
+        let daemon_deny = self
             .selected_runtime()
-            .and_then(|runtime| runtime.pending_rename.as_ref())
+            .and_then(|runtime| runtime.pending_daemon_request.as_ref())
             .and_then(|pending| {
                 pending
                     .options
@@ -4336,9 +4336,9 @@ impl Waku {
                     .map(|option| (pending.request_id.clone(), option.id.clone()))
             });
         if !action.immediate
-            && let Some((request_id, option_id)) = rename_deny
+            && let Some((request_id, option_id)) = daemon_deny
         {
-            self.respond_rename_request(request_id, option_id, cx);
+            self.respond_daemon_request(request_id, option_id, cx);
             return;
         }
         // Bare Escape drops the sidebar's multi-selection before it arms the
@@ -6180,11 +6180,12 @@ impl Waku {
         cx.notify();
     }
 
-    /// Answer a daemon-owned `agentRenameSelf` request. The response rides
-    /// the ordinary `Respond` command — the daemon resolves its parked
-    /// waiter instead of forwarding to the driver — and the card drops
-    /// locally; other clients clear on the daemon's `RequestSettled`.
-    pub(super) fn respond_rename_request(
+    /// Answer a daemon-owned `agentRenameSelf`/`agentProposeArchive`
+    /// request. The response rides the ordinary `Respond` command — the
+    /// daemon resolves its parked waiter instead of forwarding to the
+    /// driver — and the card drops locally; other clients clear on the
+    /// daemon's `RequestSettled`.
+    pub(super) fn respond_daemon_request(
         &mut self,
         request_id: String,
         option_id: String,
@@ -6203,7 +6204,7 @@ impl Waku {
             return;
         };
         let decision = runtime
-            .pending_rename
+            .pending_daemon_request
             .as_ref()
             .filter(|pending| pending.request_id == request_id)
             .and_then(|pending| pending.options.iter().find(|option| option.id == option_id))
@@ -6213,13 +6214,18 @@ impl Waku {
                     if option.allow { "allow" } else { "deny" }
                 },
             );
+        let kind = if request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX) {
+            "agent_archive"
+        } else {
+            "agent_rename"
+        };
         runtime.driver.respond(request_id, option_id);
-        runtime.pending_rename = None;
+        runtime.pending_daemon_request = None;
         if let Some(provider) = provider {
             self.analytics
                 .track(crate::analytics::Event::PermissionResponded {
                     provider,
-                    kind: "agent_rename",
+                    kind,
                     decision,
                 });
         }

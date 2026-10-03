@@ -157,7 +157,17 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentRenameSelf", title: string, } | { "type": "cancelQueuedPrompt", queuedMessageId: string, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, title: string | null, note: string | null, } | { "type": "sendMessageToFriend", nodeId: string, text: string, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, } | { "type": "getAutomations" } | { "type": "upsertAutomation", input: AutomationInput, } | { "type": "removeAutomation", automationId: string, } | { "type": "runAutomationNow", automationId: string, } | { "type": "agentReadSession",
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentProposeArchive",
+/**
+ * Waku task ids to archive. Each must name a started, unarchived
+ * task in the caller's own project; side chats leave with their
+ * parent instead.
+ */
+taskIds: Array<string>,
+/**
+ * The agent's stated reason, shown on the approval card.
+ */
+reason?: string | null, } | { "type": "cancelQueuedPrompt", queuedMessageId: string, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, title: string | null, note: string | null, } | { "type": "sendMessageToFriend", nodeId: string, text: string, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, } | { "type": "getAutomations" } | { "type": "upsertAutomation", input: AutomationInput, } | { "type": "removeAutomation", automationId: string, } | { "type": "runAutomationNow", automationId: string, } | { "type": "agentReadSession",
 /**
  * Waku task id. Exactly one of `task_id` and `thread_id` is
  * required for a foreign read.

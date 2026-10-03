@@ -70,11 +70,12 @@ mod protocol;
 pub use driver_wire::{decode_enum, encode_enum, event_from_wire, event_to_wire};
 pub use exposure::{DaemonExposure, parse_allowed_origins};
 pub use protocol::{
-    AGENT_ASK_REQUEST_PREFIX, AGENT_PARENT_TASK_ENV, AGENT_RENAME_REQUEST_PREFIX, AGENT_TASK_ENV,
-    AGENT_TOKEN_ENV, APP_EXECUTABLE_ENV, AgentPromptDelivery, AgentWorkspace, ClientMessage,
-    Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady,
-    DaemonSessionSample, DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ReplayCursor,
-    Request, RequestCommandSample, RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError,
+    AGENT_ARCHIVE_REQUEST_PREFIX, AGENT_ASK_REQUEST_PREFIX, AGENT_PARENT_TASK_ENV,
+    AGENT_RENAME_REQUEST_PREFIX, AGENT_TASK_ENV, AGENT_TOKEN_ENV, APP_EXECUTABLE_ENV,
+    AgentPromptDelivery, AgentWorkspace, ClientMessage, Command, DAEMON_ADDRESS_ENV,
+    DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady, DaemonSessionSample,
+    DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ReplayCursor, Request,
+    RequestCommandSample, RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError,
     SequencedEvent, ServerMessage, SessionDetailTail, SubprocessLabelSample, TASK_LINK_PREFIX,
     WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
 };

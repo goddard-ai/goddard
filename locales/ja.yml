@@ -1219,6 +1219,9 @@ commands.land_description: ベースブランチにリベースしてこのタ�
 commands.side_description: このタスクのパネルでサイドチャットを開く
 commands.rename_description: /rename の後に名前を入力してこのタスクの名前を変更
 commands.rename_no_session: 名前を変更するタスクを選択してください
+session.agent_archive_request_many: "%{count} 件のタスクをアーカイブしますか？"
+session.agent_archive_request_detail: "エージェントが %{tasks} をアーカイブしようとしています。"
+session.agent_archive_request_detail_reason: "エージェントが %{tasks} をアーカイブしようとしています。\n理由：%{reason}"
 session.agent_rename_request: このタスクの名前を「{title}」に変更しますか？
 session.agent_rename_request_from: エージェントがこのタスクの名前を「{current}」から変更しようとしています。
 session.agent_rename_once: 名前を変更

@@ -2241,6 +2241,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
             | Command::AgentRenameSelf { .. }
+            | Command::AgentProposeArchive { .. }
             | Command::AgentReadSession { .. }
             | Command::AgentSearchSessions { .. }
             | Command::AgentProjectMap { .. }
@@ -2624,6 +2625,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AgentCreateSession { .. } => "agentCreateSession",
         Command::AgentPrompt { .. } => "agentPrompt",
         Command::AgentRenameSelf { .. } => "agentRenameSelf",
+        Command::AgentProposeArchive { .. } => "agentProposeArchive",
         Command::CancelQueuedPrompt { .. } => "cancelQueuedPrompt",
         Command::GetFriends => "getFriends",
         Command::SendFriendRequest { .. } => "sendFriendRequest",
@@ -2799,6 +2801,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
         | Command::AgentRenameSelf { .. }
+        | Command::AgentProposeArchive { .. }
         | Command::CancelQueuedPrompt { .. }
         // Renames the friend's delivery project, not just their card.
         | Command::SetFriendNickname { .. } => TaskCatalogAction::Changed,

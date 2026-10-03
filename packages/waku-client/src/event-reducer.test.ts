@@ -429,7 +429,7 @@ describe('agent rename requests', () => {
     // The request parks on the session, not the turn — it can legitimately
     // arrive after the turn that raised it already folded.
     const result = reduceRuntimeEvent(idleSession(), renameEvent(), clock)
-    expect(result.renameRequest).toMatchObject({ requestId: 'agent-rename-1' })
+    expect(result.daemonRequest).toMatchObject({ requestId: 'agent-rename-1' })
     expect(result.permission).toBeUndefined()
     expect(result.session.status).toBe('waiting')
   })
@@ -437,14 +437,14 @@ describe('agent rename requests', () => {
   test('a finished turn does not settle a rename request', () => {
     const session = runningSession()
     const requested = reduceRuntimeEvent(session, renameEvent(), clock)
-    expect(requested.renameRequest?.requestId).toBe('agent-rename-1')
+    expect(requested.daemonRequest?.requestId).toBe('agent-rename-1')
 
     const finished = reduceRuntimeEvent(
       requested.session,
       event('turnFinished', { success: true, summary: null }),
       clock,
     )
-    expect(finished.renameRequest).toBeUndefined()
+    expect(finished.daemonRequest).toBeUndefined()
     expect(finished.permission).toBeNull()
   })
 
@@ -464,7 +464,7 @@ describe('agent rename requests', () => {
     expect(requested.session.status).toBe('waiting')
     const settled = reduceRuntimeEvent(
       requested.session,
-      event('requestSettled', { requestId: requested.renameRequest!.requestId }),
+      event('requestSettled', { requestId: requested.daemonRequest!.requestId }),
       clock,
     )
     expect(settled.session.status).toBe('idle')
@@ -477,7 +477,28 @@ describe('agent rename requests', () => {
       event('processExited', null),
       clock,
     )
-    expect(exited.renameRequest).toBeNull()
+    expect(exited.daemonRequest).toBeNull()
+  })
+
+  test('an archive proposal shares the daemon-owned slot', () => {
+    // Same parked-request contract as rename: the `agent-archive-` prefix
+    // routes into `daemonRequest`, bypasses the turn gate, and waits.
+    const result = reduceRuntimeEvent(
+      idleSession(),
+      event('permission', {
+        requestId: 'agent-archive-1',
+        title: 'Archive 2 tasks?',
+        detail: 'The agent wants to archive "A", "B".',
+        options: [
+          { id: 'archive', label: 'Archive', allow: true },
+          { id: 'deny', label: 'Deny', allow: false },
+        ],
+      }),
+      clock,
+    )
+    expect(result.daemonRequest).toMatchObject({ requestId: 'agent-archive-1' })
+    expect(result.permission).toBeUndefined()
+    expect(result.session.status).toBe('waiting')
   })
 })
 

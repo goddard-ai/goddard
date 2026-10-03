@@ -177,6 +177,17 @@ const PRESSURE_SHED_COOLDOWN: std::time::Duration = std::time::Duration::from_se
 /// `limit:` token.
 const AGENT_SEARCH_DEFAULT_LIMIT: usize = 20;
 
+/// How many tasks one archive proposal may name. The card shows a handful of
+/// titles, and a request larger than this is almost certainly an agent bug,
+/// not a reviewed set.
+const AGENT_ARCHIVE_PROPOSAL_MAX_TASKS: usize = 32;
+
+/// Cap on the reason an archive proposal shows the user.
+const AGENT_ARCHIVE_PROPOSAL_MAX_REASON_CHARS: usize = 1_024;
+
+/// How many task titles the archive card enumerates before eliding the rest.
+const AGENT_ARCHIVE_CARD_TITLES: usize = 5;
+
 /// How long an archived task is kept, in seconds, before it is removed
 /// entirely. The sweep runs whenever task state loads rather than on a
 /// timer, so this bounds retention without scheduling exact deletions.
@@ -1237,6 +1248,100 @@ impl WakuBackend {
             runtime.driver.begin_shutdown();
         }
         drop_detached(removed_runtimes);
+        for id in removed_ids {
+            self.agent.clear_session(id);
+        }
+        Ok(())
+    }
+
+    /// Applies a user-approved archive proposal: flag the named tasks and
+    /// retire their runtimes, exactly what a client's own archive does to
+    /// daemon state. Side chats leave with their parent — deleted, as the
+    /// save path's cascade enforces — and every attached client learns the
+    /// change through the task-state bump the request returns under.
+    fn archive_sessions(&self, session_ids: &[Uuid]) -> anyhow::Result<()> {
+        let mut archived_ids = Vec::new();
+        let mut removed_ids;
+        let workspace_roots: Vec<PathBuf>;
+        {
+            let mut state = self.task_state.lock();
+            let now = crate::model::unix_time();
+            for id in session_ids {
+                let archivable = state.sessions.iter().any(|session| {
+                    session.id == *id
+                        && session.archived_at.is_none()
+                        && session.side_chat_of.is_none()
+                });
+                if !archivable {
+                    continue;
+                }
+                let session = state
+                    .session_mut(*id)
+                    .expect("archivable session is present");
+                session.archived_at = Some(now);
+                // Bumping `updated_at` keeps merge precedence honest — the
+                // same guard the client's archive applies so a stale save
+                // cannot resurrect or clobber the flag.
+                session.updated_at = now;
+                archived_ids.push(*id);
+            }
+            if archived_ids.is_empty() {
+                return Ok(());
+            }
+            // Archiving a task deletes its side chats. Roots are every
+            // archived row, not just this call's, so a side chat whose
+            // parent was already archived is swept too. The roots stay;
+            // only the descendants found walking them are removed.
+            let mut queue: Vec<Uuid> = state
+                .sessions
+                .iter()
+                .filter(|session| session.archived_at.is_some())
+                .map(|session| session.id)
+                .collect();
+            removed_ids = Vec::new();
+            while let Some(parent) = queue.pop() {
+                for session in state
+                    .sessions
+                    .iter()
+                    .filter(|session| session.side_chat_of == Some(parent))
+                {
+                    removed_ids.push(session.id);
+                    queue.push(session.id);
+                }
+            }
+            workspace_roots = state
+                .sessions
+                .iter()
+                .filter(|session| removed_ids.contains(&session.id))
+                .filter_map(|session| session.workspace.path().map(Path::to_path_buf))
+                .collect();
+            if !removed_ids.is_empty() {
+                state
+                    .sessions
+                    .retain(|session| !removed_ids.contains(&session.id));
+                let mut removed = self.removed_session_ids.lock();
+                for id in &removed_ids {
+                    removed.insert(*id);
+                }
+            }
+            self.task_store.save(&mut state)?;
+        }
+        let removed_terminals = self.sweep_orphaned_terminals(&removed_ids, &workspace_roots);
+        drop_detached(removed_terminals);
+        // An archived task keeps no live runtime — the same outcome as the
+        // client's archive evicting it — and a removed side chat's dies too.
+        let gone: Vec<Uuid> = archived_ids.iter().chain(&removed_ids).copied().collect();
+        let removed_runtimes = gone
+            .iter()
+            .filter_map(|id| self.sessions.lock().remove(id))
+            .collect::<Vec<_>>();
+        for runtime in &removed_runtimes {
+            runtime.driver.begin_shutdown();
+        }
+        drop_detached(removed_runtimes);
+        for id in &archived_ids {
+            self.agent.revoke_session(*id);
+        }
         for id in removed_ids {
             self.agent.clear_session(id);
         }
@@ -3177,6 +3282,9 @@ impl Backend for WakuBackend {
                 )
             }
             Command::AgentRenameSelf { title } => self.agent_rename_self(agent, &title, &events),
+            Command::AgentProposeArchive { task_ids, reason } => {
+                self.agent_propose_archive(agent, task_ids, reason, &events)
+            }
             Command::AgentReadSession {
                 task_id,
                 thread_id,
@@ -3285,7 +3393,7 @@ impl Backend for WakuBackend {
                         _ => None,
                     }
                 } else {
-                    self.agent.resolve_rename(session_id, &command)
+                    self.agent.resolve_permission(session_id, &command)
                 };
                 if let Some(request_id) = settled {
                     if let Ok(wire) = event_to_wire(DriverEvent::RequestSettled { request_id }) {
@@ -4521,20 +4629,20 @@ impl WakuBackend {
         // first behind it and park forever, so the second is refused.
         if !self
             .agent
-            .try_park_rename(caller, request_id.clone(), settled)
+            .try_park_permission(caller, request_id.clone(), settled)
         {
             bail!("task {caller} already has a rename request waiting on the user");
         }
         let events = events.for_session(caller, runtime_id);
         if let Err(error) = events.send(wire) {
-            self.agent.remove_rename(caller, &request_id);
+            self.agent.remove_permission(caller, &request_id);
             return Err(error);
         }
         // Parked like a provider request: the user's response resolves it —
         // from any client — and an exited process or torn-down session
         // resolves it unanswered. A finished turn does not.
         let option = settle_rx.recv().unwrap_or_default();
-        self.agent.remove_rename(caller, &request_id);
+        self.agent.remove_permission(caller, &request_id);
         // Clients that never saw the answer still drop the card.
         let _ = events.send(event_to_wire(DriverEvent::RequestSettled { request_id })?);
         match option.as_deref() {
@@ -4557,6 +4665,157 @@ impl WakuBackend {
             }
             Some(_) => bail!("the rename to {title:?} was declined"),
             None => bail!("the rename request went unanswered"),
+        }
+    }
+
+    /// A scoped `archive` is a proposal, never an action: the daemon parks a
+    /// permission card on the calling session and only archives what the
+    /// user approves. Targets must be started, unarchived tasks in the
+    /// caller's own project — the same reach the agent's `search` has —
+    /// because the card can only meaningfully list a set the caller could
+    /// have found. Side chats are refused by name; archiving their parent
+    /// already takes them.
+    fn agent_propose_archive(
+        &self,
+        agent: Option<Uuid>,
+        task_ids: Vec<Uuid>,
+        reason: Option<String>,
+        events: &EventSink,
+    ) -> anyhow::Result<ResponsePayload> {
+        let caller =
+            agent.ok_or_else(|| anyhow!("archive proposals require a scoped task credential"))?;
+        self.require_agent_tools()?;
+        if task_ids.is_empty() {
+            bail!("an archive proposal names at least one task");
+        }
+        if task_ids.len() > AGENT_ARCHIVE_PROPOSAL_MAX_TASKS {
+            bail!("an archive proposal names at most {AGENT_ARCHIVE_PROPOSAL_MAX_TASKS} tasks");
+        }
+        let reason = reason
+            .map(|reason| reason.trim().to_owned())
+            .filter(|reason| !reason.is_empty());
+        if reason
+            .as_ref()
+            .is_some_and(|reason| reason.chars().count() > AGENT_ARCHIVE_PROPOSAL_MAX_REASON_CHARS)
+        {
+            bail!(
+                "an archive reason is at most {AGENT_ARCHIVE_PROPOSAL_MAX_REASON_CHARS} characters"
+            );
+        }
+        let mut unique = Vec::with_capacity(task_ids.len());
+        for id in task_ids {
+            if !unique.contains(&id) {
+                unique.push(id);
+            }
+        }
+        let (target_ids, titles) = {
+            let state = self.task_state.lock();
+            let project_id = state
+                .sessions
+                .iter()
+                .find(|session| session.id == caller)
+                .map(|session| session.project_id)
+                .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
+            let mut ids = Vec::with_capacity(unique.len());
+            let mut titles = Vec::with_capacity(unique.len());
+            for id in &unique {
+                let session = state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *id)
+                    .ok_or_else(|| anyhow!("task {id} is unknown to the daemon"))?;
+                if session.project_id != project_id {
+                    bail!("task {id} is outside this task's project");
+                }
+                if session.is_side_chat() {
+                    bail!("task {id} is a side chat — propose its parent task instead");
+                }
+                if session.archived_at.is_some() {
+                    bail!("task {id} is already archived");
+                }
+                if !session.has_started() {
+                    bail!("task {id} has not started");
+                }
+                ids.push(*id);
+                titles.push(session.display_title().to_owned());
+            }
+            (ids, titles)
+        };
+        let runtime_id = self
+            .sessions
+            .lock()
+            .get(&caller)
+            .map(|entry| entry.runtime_id)
+            .ok_or_else(|| anyhow!("task {caller} has no running runtime to show the request"))?;
+        let request_id = format!(
+            "{}{}",
+            waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX,
+            Uuid::new_v4()
+        );
+        let count = titles.len();
+        let (title_text, title_i18n) = if count == 1 {
+            localized!("archive.confirm_title_named", name = &titles[0])
+        } else {
+            localized!("session.agent_archive_request_many", count = count)
+        };
+        let mut tasks_text = titles
+            .iter()
+            .take(AGENT_ARCHIVE_CARD_TITLES)
+            .map(|title| format!("“{title}”"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if titles.len() > AGENT_ARCHIVE_CARD_TITLES {
+            tasks_text.push_str(", …");
+        }
+        let (detail_text, detail_i18n) = match &reason {
+            Some(reason) => localized!(
+                "session.agent_archive_request_detail_reason",
+                tasks = &tasks_text,
+                reason = reason
+            ),
+            None => localized!("session.agent_archive_request_detail", tasks = &tasks_text),
+        };
+        let wire = event_to_wire(DriverEvent::Permission {
+            request_id: request_id.clone(),
+            title: title_text,
+            title_i18n: Some(title_i18n),
+            detail: detail_text,
+            detail_i18n: Some(detail_i18n),
+            options: vec![
+                PermissionOption::keyed("archive", localized!("session.archive"), true),
+                PermissionOption::keyed("deny", localized!("common.deny"), false),
+            ],
+        })?;
+        let (settled, settle_rx) = crossbeam_channel::bounded(1);
+        // The pinned card holds one daemon request per session — a parallel
+        // proposal would hide the first behind it and park forever.
+        if !self
+            .agent
+            .try_park_permission(caller, request_id.clone(), settled)
+        {
+            bail!("task {caller} already has a request waiting on the user");
+        }
+        let events = events.for_session(caller, runtime_id);
+        if let Err(error) = events.send(wire) {
+            self.agent.remove_permission(caller, &request_id);
+            return Err(error);
+        }
+        // Parked like a rename request: an answer from any client resolves
+        // it; a finished turn does not. Approval archives daemon-side, so
+        // every client — the answerer's included — resyncs through the
+        // task-state bump this request's response triggers.
+        let option = settle_rx.recv().unwrap_or_default();
+        self.agent.remove_permission(caller, &request_id);
+        let _ = events.send(event_to_wire(DriverEvent::RequestSettled { request_id })?);
+        match option.as_deref() {
+            Some("archive") => {
+                // Revalidate under the lock inside `archive_sessions`: a task
+                // the user archived while this card waited simply skips.
+                self.archive_sessions(&target_ids)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Some(_) => bail!("the archive proposal was declined"),
+            None => bail!("the archive request went unanswered"),
         }
     }
 
@@ -7295,6 +7554,7 @@ fn handle_driver_command(
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
         | Command::AgentRenameSelf { .. }
+        | Command::AgentProposeArchive { .. }
         | Command::AgentReadSession { .. }
         | Command::AgentSearchSessions { .. }
         | Command::AgentProjectMap { .. }
@@ -10253,7 +10513,7 @@ mod tests {
             let rename =
                 scope.spawn(|| backend.agent_rename_self(Some(session_id), "Fresh title", &events));
             let request_id = loop {
-                if let Some(request_id) = backend.agent.parked_rename_request(session_id) {
+                if let Some(request_id) = backend.agent.parked_permission_request(session_id) {
                     break request_id;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(5));
@@ -10269,9 +10529,14 @@ mod tests {
                     summary_i18n: None,
                 },
             );
-            assert!(backend.agent.parked_rename_request(session_id).is_some());
+            assert!(
+                backend
+                    .agent
+                    .parked_permission_request(session_id)
+                    .is_some()
+            );
             assert_eq!(
-                backend.agent.resolve_rename(
+                backend.agent.resolve_permission(
                     session_id,
                     &Command::Respond {
                         request_id: request_id.clone(),
@@ -10316,12 +10581,12 @@ mod tests {
             let rename =
                 scope.spawn(|| backend.agent_rename_self(Some(session_id), "Nope", &events));
             let request_id = loop {
-                if let Some(request_id) = backend.agent.parked_rename_request(session_id) {
+                if let Some(request_id) = backend.agent.parked_permission_request(session_id) {
                     break request_id;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(5));
             };
-            backend.agent.resolve_rename(
+            backend.agent.resolve_permission(
                 session_id,
                 &Command::Respond {
                     request_id,
@@ -10365,7 +10630,11 @@ mod tests {
             let rename =
                 scope.spawn(|| backend.agent_rename_self(Some(session_id), "Too late", &events));
             loop {
-                if backend.agent.parked_rename_request(session_id).is_some() {
+                if backend
+                    .agent
+                    .parked_permission_request(session_id)
+                    .is_some()
+                {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(5));
@@ -10383,6 +10652,256 @@ mod tests {
             .unwrap();
         assert_eq!(session.title, AgentSession::DEFAULT_TITLE);
         assert!(!session.agent_rename_allowed);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Seeds a started sibling task (and its own side chat) plus a task in a
+    /// second project, beside `read_scope_test_backend`'s caller and side
+    /// chat. Returns `(sibling, sibling's side chat, foreign, archived)`.
+    fn archive_proposal_targets(backend: &WakuBackend, root: &Path) -> (Uuid, Uuid, Uuid, Uuid) {
+        let mut state = backend.task_state.lock();
+        let project_id = state.sessions[0].project_id;
+        let started = |project_id| {
+            let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+            session.begin_turn("seed");
+            session.finish_active_turn(crate::model::TurnStatus::Completed);
+            session
+        };
+        let target = started(project_id);
+        let target_id = target.id;
+        let mut target_side = started(project_id);
+        target_side.side_chat_of = Some(target_id);
+        let target_side_id = target_side.id;
+        let foreign_project = Project::from_path(root.join("elsewhere"));
+        let foreign = started(foreign_project.id);
+        let foreign_id = foreign.id;
+        let mut archived = started(project_id);
+        archived.archived_at = Some(crate::model::unix_time());
+        let archived_id = archived.id;
+        state.projects.push(foreign_project);
+        state.push_session(target);
+        state.push_session(target_side);
+        state.push_session(foreign);
+        state.push_session(archived);
+        drop(state);
+        (target_id, target_side_id, foreign_id, archived_id)
+    }
+
+    /// Every refusal happens before a card parks: the gate, an empty or
+    /// unknown set, a foreign task, a side chat, an already-archived task,
+    /// and a caller with no runtime to host the request.
+    #[test]
+    fn an_archive_proposal_validates_before_parking() {
+        let root = std::env::temp_dir().join(format!("waku-agent-archive-val-{}", Uuid::new_v4()));
+        let (backend, session_id, side_id) = read_scope_test_backend(&root);
+        let (target_id, _target_side_id, foreign_id, archived_id) =
+            archive_proposal_targets(&backend, &root);
+        let events = EventSink::detached();
+        assert!(
+            backend
+                .agent_propose_archive(None, vec![target_id], None, &events)
+                .is_err()
+        );
+        // The agent surface is off by default — the proposal is refused
+        // before anything is even validated.
+        assert!(
+            backend
+                .agent_propose_archive(Some(session_id), vec![target_id], None, &events)
+                .is_err()
+        );
+        let mut settings = backend.settings.get();
+        settings.agent_tools_enabled = true;
+        backend.settings.replace(settings).unwrap();
+        for ids in [
+            vec![],
+            vec![Uuid::new_v4()],
+            vec![foreign_id],
+            vec![side_id],
+            vec![archived_id],
+        ] {
+            assert!(
+                backend
+                    .agent_propose_archive(Some(session_id), ids, None, &events)
+                    .is_err()
+            );
+        }
+        // A valid set still needs a running runtime to show the card on.
+        assert!(
+            backend
+                .agent_propose_archive(
+                    Some(session_id),
+                    vec![target_id],
+                    Some("done".into()),
+                    &events,
+                )
+                .is_err()
+        );
+        assert!(
+            backend
+                .agent
+                .parked_permission_request(session_id)
+                .is_none()
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An approved proposal archives the named tasks daemon-side — flag and
+    /// precedence bump — and deletes their side chats, the same shape a
+    /// client archive takes.
+    #[test]
+    fn an_approved_archive_proposal_archives_tasks_and_side_chats() {
+        let root = std::env::temp_dir().join(format!("waku-agent-archive-{}", Uuid::new_v4()));
+        let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+        let (target_id, target_side_id, _foreign_id, _archived_id) =
+            archive_proposal_targets(&backend, &root);
+        let mut settings = backend.settings.get();
+        settings.agent_tools_enabled = true;
+        backend.settings.replace(settings).unwrap();
+        backend.sessions.lock().insert(
+            session_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.join("repo"),
+            },
+        );
+        let events = EventSink::detached();
+        std::thread::scope(|scope| {
+            let proposal = scope.spawn(|| {
+                backend.agent_propose_archive(
+                    Some(session_id),
+                    vec![target_id],
+                    Some("finished investigation".into()),
+                    &events,
+                )
+            });
+            let request_id = loop {
+                if let Some(request_id) = backend.agent.parked_permission_request(session_id) {
+                    break request_id;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            assert!(request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX));
+            // A finished turn does not drain the request — the card stays
+            // answerable after the fold.
+            backend.agent.note_driver_event(
+                session_id,
+                &DriverEvent::TurnFinished {
+                    success: true,
+                    summary: None,
+                    summary_i18n: None,
+                },
+            );
+            assert!(
+                backend
+                    .agent
+                    .parked_permission_request(session_id)
+                    .is_some()
+            );
+            backend.agent.resolve_permission(
+                session_id,
+                &Command::Respond {
+                    request_id,
+                    option_id: "archive".into(),
+                },
+            );
+            assert!(matches!(proposal.join().unwrap(), Ok(ResponsePayload::Ack)));
+        });
+        let state = backend.task_state.lock();
+        let target = state
+            .sessions
+            .iter()
+            .find(|session| session.id == target_id)
+            .unwrap();
+        assert!(target.archived_at.is_some());
+        assert!(
+            state
+                .sessions
+                .iter()
+                .all(|session| session.id != target_side_id)
+        );
+        assert!(
+            state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .unwrap()
+                .archived_at
+                .is_none()
+        );
+        drop(state);
+        let restored = StateStore::daemon(root.join("app.db")).load().unwrap();
+        let stored = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == target_id)
+            .unwrap();
+        assert!(stored.archived_at.is_some());
+        assert!(
+            restored
+                .sessions
+                .iter()
+                .all(|session| session.id != target_side_id)
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A declined proposal fails the call and leaves every task untouched.
+    #[test]
+    fn a_declined_archive_proposal_archives_nothing() {
+        let root = std::env::temp_dir().join(format!("waku-agent-archive-deny-{}", Uuid::new_v4()));
+        let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+        let (target_id, _target_side_id, _foreign_id, _archived_id) =
+            archive_proposal_targets(&backend, &root);
+        let mut settings = backend.settings.get();
+        settings.agent_tools_enabled = true;
+        backend.settings.replace(settings).unwrap();
+        backend.sessions.lock().insert(
+            session_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.join("repo"),
+            },
+        );
+        let events = EventSink::detached();
+        std::thread::scope(|scope| {
+            let proposal = scope.spawn(|| {
+                backend.agent_propose_archive(Some(session_id), vec![target_id], None, &events)
+            });
+            let request_id = loop {
+                if let Some(request_id) = backend.agent.parked_permission_request(session_id) {
+                    break request_id;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            backend.agent.resolve_permission(
+                session_id,
+                &Command::Respond {
+                    request_id,
+                    option_id: "deny".into(),
+                },
+            );
+            assert!(proposal.join().unwrap().is_err());
+        });
+        let state = backend.task_state.lock();
+        assert!(
+            state
+                .sessions
+                .iter()
+                .find(|session| session.id == target_id)
+                .unwrap()
+                .archived_at
+                .is_none()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
