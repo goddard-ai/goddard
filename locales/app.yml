@@ -5903,37 +5903,70 @@ routing.feature_route_handoff_description:
 transcript.model_handoff:
   en: Auto routing switched from %{from} to %{to}.
 
-boss:
-  group: Boss
-  brain: Memory and personas
-  chat: Chat with boss
-  history: Employees
-  memory: Memory and files
-  personas: Personas
-  history_hint: Recent employees, including completed jobs.
-  persona_hint: The boss assigns these personas to employees.
-  new_persona: New persona
-  rename: Rename boss
-  new_file: New file
-  new_folder: New folder
-  parent: Up
-  name_path: Name or file path
-  markdown: Markdown content
-  knowledge: Knowledge files (one relative path per line)
-  memory_grants: Memory folders (one folder beneath memory/ per line)
-  permissions_hint: Grants apply when an employee is summoned. General task filesystem permissions still apply.
-  delegate: May summon employees
-  computer: Computer use
-  select_document: Select a file or persona to view and edit it.
-  save: Save
-  discard: Discard changes
-  saved: Saved
-  loading: Loading…
-  working: Working
-  finished: Finished
-  expired_hint: This employee has finished. Send another request to the boss.
-  save_first: Save or discard your changes before selecting another document.
-  unreachable: The boss's daemon is unavailable.
-  project_required: Add a project on this daemon before opening its boss chat.
-  unexpected_response: The daemon returned an unexpected Boss response.
-  failed: 'Boss operation failed: %{error}'
+
+boss.group:
+  en: Boss
+boss.brain:
+  en: Memory and personas
+boss.chat:
+  en: Chat with boss
+boss.history:
+  en: Employees
+boss.memory:
+  en: Memory and files
+boss.personas:
+  en: Personas
+boss.history_hint:
+  en: Recent employees, including completed jobs.
+boss.persona_hint:
+  en: The boss assigns these personas to employees.
+boss.new_persona:
+  en: New persona
+boss.rename:
+  en: Rename boss
+boss.new_file:
+  en: New file
+boss.new_folder:
+  en: New folder
+boss.parent:
+  en: Up
+boss.name_path:
+  en: Name or file path
+boss.markdown:
+  en: Markdown content
+boss.knowledge:
+  en: Knowledge files (one relative path per line)
+boss.memory_grants:
+  en: Memory folders (one folder beneath memory/ per line)
+boss.permissions_hint:
+  en: Grants apply when an employee is summoned. General task filesystem permissions still apply.
+boss.delegate:
+  en: May summon employees
+boss.computer:
+  en: Computer use
+boss.select_document:
+  en: Select a file or persona to view and edit it.
+boss.save:
+  en: Save
+boss.discard:
+  en: Discard changes
+boss.saved:
+  en: Saved
+boss.loading:
+  en: Loading…
+boss.working:
+  en: Working
+boss.finished:
+  en: Finished
+boss.expired_hint:
+  en: This employee has finished. Send another request to the boss.
+boss.save_first:
+  en: Save or discard your changes before selecting another document.
+boss.unreachable:
+  en: The boss's daemon is unavailable.
+boss.project_required:
+  en: Add a project on this daemon before opening its boss chat.
+boss.unexpected_response:
+  en: The daemon returned an unexpected Boss response.
+boss.failed:
+  en: 'Boss operation failed: %{error}'
