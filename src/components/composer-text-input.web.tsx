@@ -25,7 +25,8 @@ export function ComposerTextInput({
                 mimeType: file.type,
                 size: file.size,
               }));
-              if (files.length) onPasteFiles(files);
+
+              if (files.length) {onPasteFiles(files);}
             }
           : undefined,
       }}

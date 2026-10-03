@@ -50,12 +50,18 @@ importers:
       '@nativescript-community/ui-drawer':
         specifier: 0.1.32
         version: 0.1.32
+      '@nativescript/camera':
+        specifier: ^7.0.0
+        version: 7.0.0
       '@nativescript/core':
         specifier: 9.1.2
         version: 9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37)
       '@nativescript/haptics':
         specifier: ^3.1.0
         version: 3.1.0
+      '@nativescript/imagepicker':
+        specifier: 5.0.0
+        version: 5.0.0
       '@nativescript/secure-storage':
         specifier: ^4.0.2
         version: 4.0.2
@@ -791,6 +797,9 @@ packages:
       '@nativescript/core': '>=9.1.0'
       octane: '>=0.1.51'
 
+  '@nativescript-community/perms@2.3.6':
+    resolution: {integrity: sha512-KtAyY2fCjKL19HQ3AslQKH4h+Sao0u4G4AgoF+SkRcAMGxqQd8covjpJ2hN3AFm8TDkqbSm3o0NDMR1dYVr/3A==}
+
   '@nativescript-community/ui-drawer@0.1.32':
     resolution: {integrity: sha512-SxvprjOAdyuDSqynIiy2s4cWvamolaSZrh4rXqMihA8IeOQ5FHZ1T/92BhJG1sTj1pl5aZ380RNzD98n7TykWA==}
 
@@ -804,6 +813,9 @@ packages:
   '@nativescript/android@9.1.1':
     resolution: {integrity: sha512-oDWfVnQtgQ0ctbfFWSugqGEZnYVjls82FqlO5UbA9HNwTNqdP4gqWwqHR80WKQngrbxlRHYDIuYv5S9kQfKhcw==}
 
+  '@nativescript/camera@7.0.0':
+    resolution: {integrity: sha512-QyKvRqLnchWPV1T+s1Qx0rscnj03G7AK0kSLWW8dwDKXzFdc/EJUmp3nVaLuTxnphiaoUxqWp+o1FCV1TW64vQ==}
+
   '@nativescript/core@9.1.2':
     resolution: {integrity: sha512-zL/dgfuLmcVu9nR47UEFOaPHXoaRKuWMBnDwiaMAwXmf4WKd6yr1gIXcNHheKgBNGrls06LgbBpkB841fI+HcA==}
 
@@ -815,6 +827,9 @@ packages:
 
   '@nativescript/hook@3.0.5':
     resolution: {integrity: sha512-MzL7R/nPZU2qnvDWWuJ8RB7H3luEwANgFX/d/ILdg7bSYxl6uANCfzlueHnWgrQmBxu6dTkvPsFW2WNVUxlhUg==}
+
+  '@nativescript/imagepicker@5.0.0':
+    resolution: {integrity: sha512-/MxVxhuYTU3OMci0m8DzN6Z6FWypsHS4uH3r+F6lE1evMtQ/Hu5T0QH7TrwLFgltWF0PkZ+YAi2bAgrdU1YHdA==}
 
   '@nativescript/ios@9.1.0':
     resolution: {integrity: sha512-rdSmL+oOL+iyLYoSBM/cS0bOMAKzzOax6SpR4WmIHpmpa7TrFrrmzekuPSkwTZGeA7NTXnXD6K45rFvCHm6kOA==}
@@ -4430,6 +4445,8 @@ snapshots:
       '@nativescript/core': 9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37)
       octane: 0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
 
+  '@nativescript-community/perms@2.3.6': {}
+
   '@nativescript-community/ui-drawer@0.1.32':
     dependencies:
       '@nativescript-community/gesturehandler': 2.0.45
@@ -4445,6 +4462,10 @@ snapshots:
       - octane
 
   '@nativescript/android@9.1.1': {}
+
+  '@nativescript/camera@7.0.0':
+    dependencies:
+      '@nativescript-community/perms': 2.3.6
 
   '@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37)':
     dependencies:
@@ -4473,6 +4494,10 @@ snapshots:
   '@nativescript/haptics@3.1.0': {}
 
   '@nativescript/hook@3.0.5': {}
+
+  '@nativescript/imagepicker@5.0.0':
+    dependencies:
+      '@nativescript-community/perms': 2.3.6
 
   '@nativescript/ios@9.1.0': {}
 

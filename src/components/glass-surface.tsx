@@ -14,7 +14,7 @@ export const liquidGlass = false;
 export function GlassSurface({
   style,
   children,
-  interactive = false,
+  interactive: _interactive = false,
   fallbackColor,
 }: {
   style?: any;

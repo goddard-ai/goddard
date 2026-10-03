@@ -13,7 +13,6 @@ import { AppSymbol } from './app-symbol';
 import { ProviderIcon } from './provider-icon';
 import { Sheet, SheetRow } from './sheet';
 import { selectionHaptic } from '@/lib/haptics';
-import { useDaemon } from '@/lib/daemon-hooks';
 import { NativeTint } from '@/lib/theme-platform';
 import { Radius } from '@/lib/theme-colors';
 import { useAllProviderModels, useProviderModels } from '@/lib/daemon-queries';
@@ -24,6 +23,7 @@ import {
   resolveServiceTier,
   type ModelTraitSelection,
 } from '@/lib/model-traits';
+
 import { providerLabel, runtimeModeLabel } from '@/lib/session-presentation';
 
 export interface ModelSelection {
@@ -35,7 +35,7 @@ export function modelDisplayName(
   models: ProviderModel[] | undefined,
   model: string | null,
 ): string {
-  if (!model) return 'Default model';
+  if (!model) {return 'Default model';}
   return models?.find((item) => item.id === model)?.name ?? model;
 }
 
@@ -75,7 +75,7 @@ export function ModelSheet({
   );
 
   useEffect(() => {
-    if (visible) setSearch('');
+    if (visible) {setSearch('');}
   }, [provider, visible]);
 
   function pickModel(next: ProviderModel) {
@@ -84,6 +84,7 @@ export function ModelSheet({
       model: next.id,
       reasoningEffort: next.default_reasoning_effort ?? null,
     });
+
     onDismiss();
   }
 
@@ -210,7 +211,7 @@ function ServiceTierOptions({
   onApply: (tier: string) => void;
 }) {
   const theme = useTheme();
-  if (!model.service_tiers.length) return null;
+  if (!model.service_tiers.length) {return null;}
   const selected = resolveServiceTier(model, serviceTier);
 
   return (
@@ -278,7 +279,7 @@ export function ModelPickerSheet({
   const [page, setPage] = useState<0 | 1>(provider ? 1 : 0);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {return;}
     const initial = provider ?? providers[0] ?? null;
     setBrowsing(initial);
     setSearch('');
@@ -288,13 +289,14 @@ export function ModelPickerSheet({
   const entry = catalog.find((item) => item.id === browsing);
   const preferredModelId = entry?.models.find((item) => item.is_default)?.id
     ?? entry?.models[0]?.id;
+
   const items = useMemo(
     () => filterModels(entry?.models, search),
     [entry?.models, search],
   );
 
   function pickModel(next: ProviderModel) {
-    if (!browsing) return;
+    if (!browsing) {return;}
     selectionHaptic();
     onApply({
       provider: browsing,
@@ -303,6 +305,7 @@ export function ModelPickerSheet({
       serviceTier: next.default_service_tier ?? null,
       contextWindow: next.default_context_window ?? null,
     });
+
     onDismiss();
   }
 
@@ -391,9 +394,9 @@ export function ModelPickerSheet({
 }
 
 function filterModels(models: ProviderModel[] | undefined, search: string): ProviderModel[] {
-  if (!models) return [];
+  if (!models) {return [];}
   const query = search.trim().toLocaleLowerCase();
-  if (!query) return models;
+  if (!query) {return models;}
   return models.filter((item) => (
     item.name.toLocaleLowerCase().includes(query) ||
       item.id.toLocaleLowerCase().includes(query) ||
@@ -487,6 +490,6 @@ export function AccessSheet({
 }
 
 function optionDescription(description: string | null | undefined, isDefault: boolean) {
-  if (description && isDefault) return `Default · ${description}`;
+  if (description && isDefault) {return `Default · ${description}`;}
   return description ?? (isDefault ? 'Default' : undefined);
 }

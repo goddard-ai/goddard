@@ -23,6 +23,7 @@ import {
   persistProject,
   type TaskState,
 } from '@/lib/daemon-api';
+
 import { setDaemonQueryData } from '@/lib/daemon-data';
 import { useDaemon, useDaemonQuery } from '@/lib/daemon-hooks';
 import { randomUUID } from '@/lib/uuid';
@@ -47,7 +48,7 @@ export function RemoteProjectPicker({
   const directory = useDaemonQuery(
     daemonKeys.directory(profileId, path),
     () => {
-      if (!daemon.client) throw new Error('Goddard daemon is disconnected');
+      if (!daemon.client) {throw new Error('Goddard daemon is disconnected');}
       return browseDaemonDirectory(daemon.client, path);
     },
     {
@@ -55,6 +56,7 @@ export function RemoteProjectPicker({
       staleTime: 10_000,
     },
   );
+
   const folders = useMemo(
     () => (directory.data?.entries ?? []).filter((entry) => entry.isDir),
     [directory.data?.entries],
@@ -67,17 +69,17 @@ export function RemoteProjectPicker({
   }, [profileId]);
 
   useEffect(() => {
-    if (directory.data?.path) setPathDraft(directory.data.path);
+    if (directory.data?.path) {setPathDraft(directory.data.path);}
   }, [directory.data?.path]);
 
   function visit(next: string | null) {
-    if (submitting) return;
+    if (submitting) {return;}
     setError(null);
     setPath(next);
   }
 
   async function saveProject(project: Project) {
-    if (!daemon.client) throw new Error('Goddard daemon is disconnected');
+    if (!daemon.client) {throw new Error('Goddard daemon is disconnected');}
     const saved = await persistProject(daemon.client, project);
     setDaemonQueryData<TaskState>(daemonKeys.taskState(profileId), saved.taskState);
     onSelect(saved.project);
@@ -87,7 +89,7 @@ export function RemoteProjectPicker({
 
   async function addFolder() {
     const target = directory.data?.path;
-    if (!target || submitting) return;
+    if (!target || submitting) {return;}
     setSubmitting('folder');
     setError(null);
     try {
@@ -101,7 +103,7 @@ export function RemoteProjectPicker({
   }
 
   async function addEmptyWorkspace() {
-    if (!daemon.client || submitting) return;
+    if (!daemon.client || submitting) {return;}
     setSubmitting('empty');
     setError(null);
     try {
@@ -115,7 +117,7 @@ export function RemoteProjectPicker({
     }
   }
 
-  if (!visible) return null;
+  if (!visible) {return null;}
 
   return (
     <XSheet open onDismiss={onDismiss} detents={[1]}>

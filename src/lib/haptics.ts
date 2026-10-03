@@ -46,9 +46,11 @@ export const Haptics = {
 export function selectionHaptic() {
   NSHaptics.selection();
 }
+
 export function successHaptic() {
   NSHaptics.notification(HapticNotificationType.SUCCESS);
 }
+
 export function errorHaptic() {
   NSHaptics.notification(HapticNotificationType.ERROR);
 }

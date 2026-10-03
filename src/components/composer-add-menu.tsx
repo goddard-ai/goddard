@@ -42,7 +42,8 @@ export function ComposerAddMenu({
       />
     </View>
   );
-  if (disabled) return trigger;
+
+  if (disabled) {return trigger;}
 
   // Let the menu finish dismissing before presenting a picker.
   const choose = (kind: 'command' | 'file') => setTimeout(() => onChooseContext(kind), 160);

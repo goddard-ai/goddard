@@ -8,7 +8,6 @@ import {
 
 import { AppSymbol } from './app-symbol';
 import { Sheet, SheetRow } from './sheet';
-import { NativeTint } from '@/lib/theme-platform';
 import { Radius } from '@/lib/theme-colors';
 import type { useComposerPicker } from '@/lib/use-composer-picker';
 import { useModelSheetListHeight } from '@/lib/use-model-sheet-list-height';

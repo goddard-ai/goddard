@@ -22,12 +22,13 @@ export function providerBrandColor(provider: ProviderKind): string | undefined {
 
 const registered = new Set<ProviderKind>();
 
-function glyphFor(provider: ProviderKind, tint: string) {
+function glyphFor(provider: ProviderKind, _tint: string) {
   const key = `provider-${provider}`;
   if (!registered.has(provider)) {
     registered.add(provider);
     registerIcons({ [key]: { markup: stripSvgShell(PROVIDER_ICON_XML[provider]) } });
   }
+
   return key;
 }
 
@@ -51,7 +52,7 @@ export function ProviderIcon({
 }) {
   const theme = useTheme();
   const tint = color ?? PROVIDER_BRAND_COLORS[provider] ?? theme.text;
-  const name = useMemo(() => glyphFor(provider, tint), [provider, tint]);
+  const name = useMemo(() => glyphFor(provider, tint), [provider]);
   return (
     <View style={{ height: size, width: size }}>
       <Icon name={name} size={size} color={tint} />

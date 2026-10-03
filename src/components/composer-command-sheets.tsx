@@ -7,6 +7,7 @@ import type {
   SlashCommand,
   ThreadGoal,
 } from '@waku/client';
+
 import {
   isFastModeToggleSubmission,
   isLandSubmission,
@@ -15,6 +16,7 @@ import {
   parseRenameSubmission,
   toggledFastServiceTier,
 } from '@waku/client/composer-autocomplete';
+
 import { fuzzyScore } from '@waku/client/fuzzy-search';
 import { useEffect, useMemo, useState } from 'octane';
 import { useWindowSize } from '@octane-xplat/platform';
@@ -24,12 +26,10 @@ import {
   SearchInput,
   Text,
   TextArea,
-  View,
   VirtualList,
 } from '@octane-xplat/ui';
 
 import { Sheet, SheetRow } from './sheet';
-import { NativeTint } from '@/lib/theme-platform';
 import { Radius } from '@/lib/theme-colors';
 import { useTheme } from '@/lib/use-theme';
 import {
@@ -42,18 +42,17 @@ import {
   persistSession,
   providerSessionKey,
 } from '@/lib/daemon-api';
+
 import {
-  getDaemonQueryData,
   invalidateDaemonQueriesMatching,
   removeDaemonQuery,
 } from '@/lib/daemon-data';
+
 import { useDaemon, useDaemonQuery } from '@/lib/daemon-hooks';
 import { useDaemonSettings } from '@/lib/daemon-queries';
 import { createResumedSession } from '@/lib/mobile-runtime';
 import { randomUUID } from '@/lib/uuid';
 import { providerLabel } from '@/lib/session-presentation';
-import type { AgentSession } from '@waku/client';
-import type { ReactNode } from 'octane';
 
 /** Desktop's local commands must never leak through as provider prompts. */
 export function useComposerLocalCommands({
@@ -91,38 +90,41 @@ export function useComposerLocalCommands({
     setGoalDialog(null);
   }, [contextKey, daemon.activeProfile?.id, provider]);
 
-  async function execute(prompt: string, commands: SlashCommand[]): Promise<boolean> {
-    const rename = parseRenameSubmission(prompt);
+  async function execute(draft: string, commands: SlashCommand[]): Promise<boolean> {
+    const rename = parseRenameSubmission(draft);
     if (rename !== undefined) {
-      if (!onRename) throw new Error('Select a task to rename');
-      if (rename === null) return false;
+      if (!onRename) {throw new Error('Select a task to rename');}
+      if (rename === null) {return false;}
       await onRename(rename);
       onClear();
       return true;
     }
-    if (!provider) return false;
-    if (isResumeSubmission(prompt)) {
+
+    if (!provider) {return false;}
+    if (isResumeSubmission(draft)) {
       // Resume lists sessions the provider itself ran, so a disabled
       // provider has nothing to offer; say so instead of opening an
       // empty sheet.
       if (settings.data?.disabled_providers.includes(provider)) {
         throw new Error(`${providerLabel(provider)} is disabled`);
       }
+
       setResumeOpen(true);
-    } else if (isLandSubmission(prompt)) {
+    } else if (isLandSubmission(draft)) {
       // `/land` is always intercepted so it never leaks into a turn; a
       // composer without a session workspace reports instead.
-      if (!onLand) throw new Error('Select a task to land its workspace');
+      if (!onLand) {throw new Error('Select a task to land its workspace');}
       await onLand();
-    } else if (isFastModeToggleSubmission(provider, prompt, commands)) {
+    } else if (isFastModeToggleSubmission(provider, draft, commands)) {
       const tier = toggledFastServiceTier(serviceTier, model?.service_tiers ?? []);
-      if (!tier) throw new Error('Fast mode is unavailable for this model');
+      if (!tier) {throw new Error('Fast mode is unavailable for this model');}
       await onServiceTier(tier);
     } else {
-      const command = parseGoalSubmission(provider, prompt, commands);
-      if (!command) return false;
+      const command = parseGoalSubmission(provider, draft, commands);
+      if (!command) {return false;}
       const managed = provider !== 'codex' || Boolean(goal?.managedId)
         || !commands.some((item) => item.name === 'goal' && item.scope === 'Builtin');
+
       setGoalManaged(managed);
       switch (command.kind) {
         case 'show':
@@ -142,9 +144,11 @@ export function useComposerLocalCommands({
           } else {
             await onGoal({ kind: 'set', objective: command.objective, status: 'active', replace: Boolean(goal) }, managed);
           }
+
           break;
       }
     }
+
     onClear();
     return true;
   }
@@ -190,30 +194,34 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
       staleTime: 15_000,
     },
   );
+
   const catalog = sessions.data;
   const rows = useMemo(() => (catalog?.sessions ?? []).filter((item) =>
     fuzzyScore(search, `${item.title} ${item.cwd}`) !== null), [search, catalog]);
 
   async function resume(summary: ProviderSessionSummary) {
     const client = daemon.client;
-    if (!client || daemon.phase !== 'connected' || resuming) return;
+    if (!client || daemon.phase !== 'connected' || resuming) {return;}
     setResuming(providerSessionKey(summary.cursor));
     setError(null);
     try {
       const state = await loadTaskState(client);
       let session = state.sessions.find((item) => item.provider_cursor
         && providerSessionKey(item.provider_cursor) === providerSessionKey(summary.cursor));
+
       if (!session) {
         const loaded = await loadProviderSessionHistory(client, summary);
         const projectPath = loaded.resolvedCwd ?? summary.cwd;
         let project = state.projects.find((item) => item.path === projectPath);
-        if (!project) project = (await persistProject(client, createProject(projectPath, randomUUID()))).project;
+        if (!project) {project = (await persistProject(client, createProject(projectPath, randomUUID()))).project;}
         session = await persistSession(client, createResumedSession(
           project.id, summary, loaded.history, runtimeMode,
           { nowSeconds: () => Math.floor(Date.now() / 1_000), randomUUID },
         ));
+
         removeDaemonQuery(daemonKeys.session(profileId, session.id));
       }
+
       invalidateDaemonQueriesMatching(daemonKeys.taskState(profileId));
       onDismiss();
       pushRoute({ stack: 'root', name: 'session/:id', params: { id: session.id } });
@@ -291,7 +299,7 @@ function GoalCommandSheet({ goal, prefill, replace, onRun, onDismiss }: {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function run(operation: GoalOperation) {
-    if (pending) return;
+    if (pending) {return;}
     setPending(true);
     setError(null);
     try {
@@ -302,6 +310,7 @@ function GoalCommandSheet({ goal, prefill, replace, onRun, onDismiss }: {
       setPending(false);
     }
   }
+
   return (
     <Sheet visible onDismiss={onDismiss} title="Goal">
       {goal && (
